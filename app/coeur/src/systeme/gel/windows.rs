@@ -263,12 +263,24 @@ struct Photo {
 struct EtatImage {
     photo: Option<Photo>,
     dernier_numero: u64,
+    /// Numéro de la photo que l'écran figé a le droit de peindre. Posé par
+    /// `montrer_ecran_fige` sous ce verrou, au moment où il vérifie le numéro ; retiré dès
+    /// qu'on demande de cacher l'écran figé (tous les chemins : `cacher_ecran_fige`,
+    /// masquage automatique, peinture impossible, `liberer_image`, destruction).
+    /// Tant qu'il est posé, `figer_bureau` refuse : l'image affichée n'est jamais remplacée.
+    montre: Option<u64>,
 }
 
 static IMAGE: Mutex<EtatImage> = Mutex::new(EtatImage {
     photo: None,
     dernier_numero: 0,
+    montre: None,
 });
+
+/// Retire la marque « montrée » : l'écran figé ne peindra plus aucune photo.
+fn retirer_marque() {
+    verrouiller(&IMAGE).montre = None;
+}
 
 /// Ce que l'appelant garde d'une photo : sa place, son numéro et la durée de la copie.
 /// Les pixels restent dans `IMAGE`.
@@ -320,13 +332,20 @@ fn ecran_fige_visible() -> bool {
 }
 
 pub fn figer_bureau() -> Result<Image, String> {
-    // On ne remplace jamais l'image affichée par l'écran figé.
+    // Fenêtre encore visible (par exemple un masquage posté depuis un autre fil, pas
+    // encore traité) : la photo contiendrait l'écran figé lui-même. On refuse ; le refus
+    // dure tant que le fil de la fenêtre n'a pas traité le masquage. C'est le choix sûr :
+    // une photo fausse serait pire qu'un refus, et un fil bloqué est l'affaire de la garde.
     if ecran_fige_visible() {
         return Err("ecran fige deja montre".into());
     }
     let bureau = bureau_virtuel()?;
     let ecran = DcPrete::prendre(None)?;
     let mut etat = verrouiller(&IMAGE);
+    // Vérifié sous le verrou : aucune course avec `montrer_ecran_fige`.
+    if etat.montre.is_some() {
+        return Err("ecran fige deja montre".into());
+    }
     let a_refaire = etat
         .photo
         .as_ref()
@@ -358,12 +377,12 @@ pub fn figer_bureau() -> Result<Image, String> {
     })
 }
 
-/// Lit `zone` (coordonnées du bureau) dans `source`, qui couvre `origine`.
-fn lire_zone(source: &ImageGdi, origine: Rect, zone: Rect) -> Result<Pixels, String> {
+/// Copie brute de `zone` (coordonnées du bureau) depuis `source`, qui couvre `origine`,
+/// dans une petite image à part. Seule étape à faire sous le verrou `IMAGE`.
+fn copier_zone(source: &ImageGdi, origine: Rect, zone: Rect) -> Result<ImageGdi, String> {
     let coupee = zone
         .intersection(origine)
         .ok_or("zone vide ou hors du bureau")?;
-    // Copie de la zone seule dans une petite image, puis lecture de celle-ci.
     let tampon = ImageGdi::nouvelle(source.dc.0, coupee.largeur, coupee.hauteur)?;
     // SAFETY : DC valides ; la zone source est dans l'image (coupée à `origine`).
     unsafe {
@@ -380,11 +399,16 @@ fn lire_zone(source: &ImageGdi, origine: Rect, zone: Rect) -> Result<Pixels, Str
         )
     }
     .map_err(|e| format!("BitBlt de la zone: {e}"))?;
+    Ok(tampon)
+}
+
+/// Pixels d'une petite image : `GetDIBits`, puis BGRA -> RGBA (hors de tout verrou).
+fn pixels_de(tampon: &ImageGdi) -> Result<Pixels, String> {
     let mut rgba = tampon.lire_tout()?;
     bgra_en_rgba(&mut rgba);
     Ok(Pixels {
-        largeur: coupee.largeur as u32,
-        hauteur: coupee.hauteur as u32,
+        largeur: tampon.largeur as u32,
+        hauteur: tampon.hauteur as u32,
         rgba,
     })
 }
@@ -393,13 +417,16 @@ pub fn lire(image: &Image, zone: Rect) -> Result<Pixels, String> {
     if zone.intersection(image.rect).is_none() {
         return Err("zone vide ou hors du bureau".into());
     }
-    let etat = verrouiller(&IMAGE);
-    let photo = etat
-        .photo
-        .as_ref()
-        .filter(|p| p.numero == image.numero)
-        .ok_or("image remplacee par une photo plus recente, ou rendue")?;
-    lire_zone(&photo.gdi, image.rect, zone)
+    let tampon = {
+        let etat = verrouiller(&IMAGE);
+        let photo = etat
+            .photo
+            .as_ref()
+            .filter(|p| p.numero == image.numero)
+            .ok_or("image remplacee par une photo plus recente, ou rendue")?;
+        copier_zone(&photo.gdi, image.rect, zone)?
+    };
+    pixels_de(&tampon)
 }
 
 /// Pour les tests : une photo du bureau dans une image à part, qui ne touche ni l'image de
@@ -413,17 +440,28 @@ fn photo_a_part() -> Result<(ImageGdi, Rect), String> {
     Ok((gdi, bureau))
 }
 
+/// Pour les tests : lit une zone d'une image à part.
+#[cfg(test)]
+fn lire_zone(source: &ImageGdi, origine: Rect, zone: Rect) -> Result<Pixels, String> {
+    pixels_de(&copier_zone(source, origine, zone)?)
+}
+
 pub fn liberer_image() {
-    // L'écran figé ne doit jamais rester montré sans son image.
+    // L'écran figé ne doit jamais rester montré sans son image (retire aussi la marque).
     cacher_ecran_fige();
     let photo = verrouiller(&IMAGE).photo.take();
     drop(photo);
 }
 
-/// Peint la photo actuelle dans `dc`, à l'origine. Faux s'il n'y a rien à peindre.
+/// Peint dans `dc`, à l'origine, la photo marquée « montrée » et elle seule. Faux s'il
+/// n'y a rien à peindre (pas de marque, photo remplacée ou rendue) : l'appelant cache.
 fn peindre_image(dc: HDC) -> bool {
     let etat = verrouiller(&IMAGE);
-    let Some(photo) = etat.photo.as_ref() else {
+    let Some(photo) = etat
+        .photo
+        .as_ref()
+        .filter(|p| etat.montre == Some(p.numero))
+    else {
         return false;
     };
     // SAFETY : DC valides ; aucun message n'est envoyé pendant la copie.
@@ -699,7 +737,8 @@ unsafe extern "system" fn procedure_ecran_fige(
                 peinte
             };
             if !peinte {
-                // Plus d'image : jamais un écran figé vide ou faux.
+                // Plus d'image à montrer : jamais un écran figé vide ou faux.
+                retirer_marque();
                 // SAFETY : notre fenêtre, sur son fil.
                 unsafe {
                     let _ = ShowWindow(hwnd, SW_HIDE);
@@ -731,6 +770,7 @@ pub fn surveillance_session() -> bool {
 
 /// Cache l'écran figé et, s'il était montré, prévient l'Application (sans verrou tenu).
 fn cacher_et_prevenir(hwnd: HWND, changement: Changement) {
+    retirer_marque();
     // SAFETY : notre fenêtre, sur son fil.
     let etait_visible = unsafe {
         let visible = IsWindowVisible(hwnd).as_bool();
@@ -843,7 +883,9 @@ pub fn montrer_ecran_fige(image: &Image) -> Result<(), String> {
         return Err("montrer_ecran_fige appele hors du fil de la fenetre".into());
     }
     {
-        let etat = verrouiller(&IMAGE);
+        // Vérification et marque sous le même verrou : dès ici, `figer_bureau` refuse et
+        // la fenêtre ne peindra que ce numéro.
+        let mut etat = verrouiller(&IMAGE);
         if !etat
             .photo
             .as_ref()
@@ -851,7 +893,11 @@ pub fn montrer_ecran_fige(image: &Image) -> Result<(), String> {
         {
             return Err("image remplacee par une photo plus recente, ou rendue".into());
         }
+        etat.montre = Some(image.numero);
     }
+    // La garde surveille avant même l'affichage : un blocage pendant `SetWindowPos` ou
+    // la peinture ne passe pas inaperçu.
+    reveiller_garde();
     let r = image.rect;
     // SAFETY : notre fenêtre, sur son fil ; aucun verrou n'est gardé.
     let place = unsafe {
@@ -889,6 +935,9 @@ pub fn montrer_ecran_fige(image: &Image) -> Result<(), String> {
 }
 
 pub fn cacher_ecran_fige() {
+    // La marque est retirée dès la demande, même postée : la fenêtre ne peindra plus
+    // cette photo (une peinture sans marque cache la fenêtre).
+    retirer_marque();
     let Some((hwnd, fil)) = fenetre_figee() else {
         return;
     };
@@ -904,6 +953,7 @@ pub fn cacher_ecran_fige() {
 }
 
 pub fn detruire_ecran_fige() {
+    retirer_marque();
     let fenetre = verrouiller(&ECRAN).take();
     // Hors du verrou : `DestroyWindow` envoie des messages.
     drop(fenetre);
@@ -989,9 +1039,21 @@ fn boucle_garde(mut vus: u64) {
         {
             // Ordre des verrous : GARDE puis ECRAN (jamais l'inverse).
             let mut garde = verrouiller(&GARDE);
-            // Sans réglage, on dort (jamais de boucle à vide) ; `garder_ecran_fige` réveille.
-            while garde.reglage.is_none() || (garde.affichages == vus && !ecran_fige_visible()) {
-                garde = REVEIL_GARDE.wait(garde).unwrap_or_else(|e| e.into_inner());
+            // Sans réglage, on dort sans fin (`garder_ecran_fige` réveille). Avec un réglage,
+            // on revérifie aussi la visibilité deux fois par seconde : un affichage dont le
+            // réveil serait manqué (fil bloqué au mauvais moment) est quand même surveillé.
+            loop {
+                if garde.reglage.is_none() {
+                    garde = REVEIL_GARDE.wait(garde).unwrap_or_else(|e| e.into_inner());
+                    continue;
+                }
+                if garde.affichages != vus || ecran_fige_visible() {
+                    break;
+                }
+                garde = REVEIL_GARDE
+                    .wait_timeout(garde, CADENCE_GARDE)
+                    .unwrap_or_else(|e| e.into_inner())
+                    .0;
             }
             vus = garde.affichages;
         }
@@ -1522,6 +1584,10 @@ mod tests {
         let image = figer_bureau().unwrap();
         montrer_ecran_fige(&image).unwrap();
         std::thread::spawn(cacher_ecran_fige).join().unwrap();
+        // La marque est retirée dès la demande ; la fenêtre, pas encore cachée (ce fil
+        // n'a pas distribué le masquage), interdit encore la photo : elle y serait.
+        assert_eq!(verrouiller(&IMAGE).montre, None);
+        assert!(figer_bureau().is_err());
         // SAFETY : lecture sur notre fenêtre.
         assert!(attendre(|| !unsafe { IsWindowVisible(hwnd) }.as_bool()));
 
@@ -1587,12 +1653,16 @@ mod tests {
         (fenetre_figee().unwrap().0, image)
     }
 
-    /// Distribue les messages de ce fil pendant `duree`.
+    /// Distribue les messages de ce fil pendant `duree`, par courtes pauses bornées, sans
+    /// `DwmFlush` (qui pourrait attendre une composition sur une machine sans affichage
+    /// actif et faire croire la garde à un blocage).
     fn pomper_pendant(duree: Duration) {
         let debut = Instant::now();
         while debut.elapsed() < duree {
-            laisser_composer();
+            pomper();
+            std::thread::sleep(Duration::from_millis(10));
         }
+        pomper();
     }
 
     fn compteur_de_garde() -> Arc<AtomicUsize> {
