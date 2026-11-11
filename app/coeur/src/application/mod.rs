@@ -734,9 +734,9 @@ pub fn lancer_capture(app: &AppHandle, mode: Mode) {
         cote_min: capture::COTE_MIN,
     };
     // La capture est notée avant `montrer` : un signal de fin arrivé pendant `montrer`
-    // la trouve et la termine.
-    // Aucune autre capture ne peut être en cours (la table refuse un second appui).
-    let _ancienne = ranger_capture(
+    // la trouve et la termine. Aucune autre ne peut être rangée (la table refuse un
+    // second appui) ; si c'était le cas, sa garde cache tout ici, avant `montrer`.
+    let ancienne = ranger_capture(
         app,
         Some(CaptureEnCours {
             gel: gel_pris,
@@ -744,6 +744,10 @@ pub fn lancer_capture(app: &AppHandle, mode: Mode) {
             garde,
         }),
     );
+    if let Some(ancienne) = ancienne {
+        log::error!("capture precedente encore rangee: abandonnee");
+        drop(ancienne);
+    }
     let montree = match app.try_state::<Selection>() {
         Some(s) => s.montrer(demande),
         None => Err("selection absente".into()),
@@ -835,10 +839,13 @@ fn liberer_echap(app: &AppHandle) {
 }
 
 /// Retire la capture en cours, cache tout (garde), revient au Repos, montre l'erreur.
+/// Sans capture en cours (déjà terminée par un autre signal), ne fait rien.
 fn abandonner(app: &AppHandle, declencheur: Declencheur, probleme: Option<Probleme>) {
-    if let Some(mut capture) = ranger_capture(app, None) {
-        capture.garde.cacher_tout();
-    }
+    let Some(mut capture) = ranger_capture(app, None) else {
+        return;
+    };
+    capture.garde.cacher_tout();
+    drop(capture);
     appliquer(app, declencheur);
     if let Some(p) = probleme {
         afficher_probleme(app, p);
