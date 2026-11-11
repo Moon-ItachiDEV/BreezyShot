@@ -205,6 +205,25 @@ const LONG_OK = { id: 'long-ok', genre: 'reussite', titre: 'Enregistré dans Ima
   verifier(z.every(v => Math.abs(v) < 0.01), 'zone = rectangle réel de la pilule', JSON.stringify(z));
   await p.context().close();
 
+  // Info et erreur sans détail : une seule ligne, pastille et croix centrées, pas de ligne vide.
+  for (const [genre, theme] of [['info', 'light'], ['info', 'dark'], ['erreur', 'light']]) {
+    p = await tauriPage({ theme });
+    const titre = genre === 'info' ? 'Impr. écran est prise. Raccourci : Ctrl + Maj + 1' : 'Aucun raccourci disponible';
+    await p.evaluate(([g, t]) => __emettre({ id: 1, genre: g, titre: t, detail: '', actions: [] }), [genre, titre]);
+    await p.waitForTimeout(450);
+    const m = await p.evaluate(() => {
+      const c = (s) => { const r = bandeau.querySelector(s).getBoundingClientRect(); return r.y + r.height / 2; };
+      const b = bandeau.getBoundingClientRect();
+      return { h: b.height, milieu: b.y + b.height / 2, pastille: c('.pastille'), croix: c('.xb'), titre: c('.titre'),
+        lignesTitre: Math.round(bandeau.querySelector('.titre').getBoundingClientRect().height / 18), detail: getComputedStyle(bandeau.querySelector('.detail')).display };
+    });
+    const centre = (v) => Math.abs(v - m.milieu) < 1;
+    verifier(m.h <= 42 && m.lignesTitre === 1 && m.detail === 'none' && centre(m.pastille) && centre(m.croix) && centre(m.titre),
+      `${genre} sans détail (${theme}) : une ligne, pastille et croix centrées`, JSON.stringify(m));
+    if (genre === 'info') await capture(p, `info-une-ligne-${theme === 'light' ? 'clair' : 'sombre'}`, theme);
+    await p.context().close();
+  }
+
   // bandeau_pret : une seule fois, avant tout autre appel.
   p = await tauriPage();
   await p.waitForTimeout(100);

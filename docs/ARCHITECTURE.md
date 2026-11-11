@@ -283,12 +283,17 @@ Module pur : il reçoit le dossier où écrire, ne connaît ni Tauri ni les autr
   la dernière situation annoncée (action, candidat écarté, raison) dans `<local>/etat.json`
   et ne réaffiche le message que si elle change. Quand tout est normal, elle l'efface.
   La décision « annoncer ou non » est une fonction pure, testée.
-  - réservée : « Impr. écran est réservée à l'Outil Capture de Windows » / « BreezyShot
-    utilise Ctrl + Maj + 1. Pour la libérer : Paramètres › Accessibilité › Clavier. »
-  - prise : « Impr. écran est déjà utilisée par une autre application » / « BreezyShot utilise
-    Ctrl + Maj + 1. »
+  Textes (une ligne de titre, détail vide, aucune astuce ; `X` = affichage du premier
+  candidat, coupé à 40 caractères, `Y` = affichage du raccourci retenu). La raison précise
+  (réservée par Windows, prise par une autre application…) reste dans le journal et dans
+  `Situation.raison`, pas dans le message :
+  - Impr. écran réservée par Windows ou refusée par le système : « Impr. écran est prise.
+    Raccourci : Y » ;
+  - autre candidat refusé par le système ou déjà pris par une autre action : « X est pris.
+    Raccourci : Y » ;
+  - candidat invalide : « « X » n'est pas un raccourci valide. Raccourci : Y » ;
   - aucun candidat libre (genre « erreur », reste jusqu'à la croix) : « Aucun raccourci
-    disponible » / « Lance une capture depuis l'icône BreezyShot, près de l'horloge. »
+    disponible », sans détail.
 - **Signal** : `Signal::Presse(action)`. Étape 5 ajoutera `reserver_echap` et `Signal::Echap`.
 - **Réservation** (`raccourcis/reservation.rs`, seule partie qui touche au plugin
   `tauri-plugin-global-shortcut`) : `essayer` = `vers_systeme` puis `on_shortcut` ; un appui
@@ -310,6 +315,8 @@ Module pur : il reçoit le dossier où écrire, ne connaît ni Tauri ni les autr
   sans ombre système, toujours au-dessus, absente de la barre des tâches, **ne prend jamais le
   focus ni le clavier**, exclue des captures d'écran. Elle laisse passer tous les clics, sauf
   sur la pilule d'un message qui porte une croix (voir plus bas).
+- **Un message tient en une ligne de titre ; seule l'erreur peut porter une cause en seconde
+  ligne ; aucune astuce.** Le `detail` est vide pour une réussite et pour une info.
 - `fenetres::Bandeau::afficher(Message { genre, titre, detail, actions })`, genres `Reussite`,
   `Info`, `Erreur`. `actions` est une liste `{ id, libelle }` fournie par l'Application
   (souvent vide). Un nouveau message remplace l'ancien tout de suite.
@@ -332,10 +339,10 @@ Module pur : il reçoit le dossier où écrire, ne connaît ni Tauri ni les autr
   - **Réussite** : pilule sur une ligne (rayon `radius-pill`), coche sur `success`, titre seul,
     coupé par « … » s'il est trop long. Part seule après 2,5 s.
   - **Erreur** (variante A choisie le 11/11) : pilule élargie (rayon 16 px, 460 px au plus),
-    « ! » sur `danger`, titre, cause sur une seconde ligne, boutons d'action éventuels et une
+    « ! » sur `danger`, titre, cause en seconde ligne seulement si elle est utile, boutons d'action éventuels et une
     croix. Reste affichée jusqu'à un clic sur la croix ou sur une action.
   - **Info** (forme de l'erreur A, validée par le fil design le 11/11) : « i » sur `accent`,
-    pas de bouton d'action, reste affichée jusqu'à un clic sur la croix.
+    titre seul (sans détail), pas de bouton d'action, reste affichée jusqu'à un clic sur la croix.
   - Titre sur 2 lignes au plus, cause sur 3 lignes au plus : la pilule a une hauteur maximale
     connue, la croix reste toujours visible.
   - Les textes d'un message sont toujours posés comme du texte, jamais comme du HTML. La page

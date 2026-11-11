@@ -263,8 +263,7 @@ if (tauri?.event?.listen) {
     reussite: { genre: "reussite", titre: "Copié dans le presse-papiers" },
     info: {
       genre: "info",
-      titre: "Impr. écran est réservée à l'Outil Capture de Windows",
-      detail: "BreezyShot utilise Ctrl + Maj + 1. Pour la libérer : Paramètres › Accessibilité › Clavier.",
+      titre: "Impr. écran est prise. Raccourci : Ctrl + Maj + 1",
     },
     erreur: {
       genre: "erreur",

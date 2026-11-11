@@ -1,8 +1,8 @@
 # Étape 3, raccourci et bandeau (ARCHITECTURE.md §5, §6).
 # (a) Impr. écran libre : retenue, appui simulé, réussite affichée puis terminée ;
-# (b) Impr. écran réservée par Windows : Ctrl+Maj+1, annonce « réservée », appui ; relance :
+# (b) Impr. écran réservée par Windows : Ctrl+Maj+1, annonce (raison réservée), appui ; relance :
 #     annonce déjà faite ;
-# (c) Impr. écran tenue par une autre application : Ctrl+Maj+1, annonce « déjà utilisée » ;
+# (c) Impr. écran tenue par une autre application : Ctrl+Maj+1, annonce (raison refusée) ;
 # (d) clic sur la croix d'une info, sans changer la fenêtre au premier plan ; clic à côté
 #     de la pilule sans effet ;
 # (e) après --quitter, le raccourci est libéré.
@@ -189,7 +189,7 @@ public static void Clic(int x, int y) {
             $db = Dossier-Cas 'b'
             $p = Demarrer-Cas -Dossier $db -Quoi '(b)'
             Verifier '(b) raccourci zone: Ctrl+Maj+1' ((Compter-Lignes -Texte 'raccourci zone: Ctrl+Maj+1' -Dossier $db) -eq 1) | Out-Null
-            Verifier '(b) annonce « réservée »' ((Compter-Lignes -Texte 'annonce raccourci: reserve_par_le_systeme' -Dossier $db) -eq 1) | Out-Null
+            Verifier '(b) annonce (raison : réservée par Windows)' ((Compter-Lignes -Texte 'annonce raccourci: reserve_par_le_systeme' -Dossier $db) -eq 1) | Out-Null
             $info = Lire-Affiche (Attendre-Motif -Motif 'bandeau affiche \d+ info ' -Dossier $db -DelaiS 10 -Quoi '(b) info affichée')
             Verifier '(b) bandeau affiche … info' ($info.Genre -eq 'info') | Out-Null
             # (d) La zone de la pilule, une fois l'animation d'entrée finie.
@@ -233,7 +233,7 @@ public static void Clic(int x, int y) {
             $p = Demarrer-Cas -Dossier $dc -Quoi '(c)'
             Verifier '(c) raccourci zone: Ctrl+Maj+1' ((Compter-Lignes -Texte 'raccourci zone: Ctrl+Maj+1' -Dossier $dc) -eq 1) | Out-Null
             Verifier '(c) ImprEcran écarté : refusé par le système' ((Compter-Lignes -Texte 'raccourci zone ecarte: ImprEcran (refuse par le systeme)' -Dossier $dc) -eq 1) | Out-Null
-            Verifier '(c) annonce « déjà utilisée »' ((Compter-Lignes -Texte 'annonce raccourci: refuse_par_le_systeme' -Dossier $dc) -eq 1) | Out-Null
+            Verifier '(c) annonce (raison : refusée par le système)' ((Compter-Lignes -Texte 'annonce raccourci: refuse_par_le_systeme' -Dossier $dc) -eq 1) | Out-Null
             $null = Attendre-Motif -Motif 'bandeau affiche \d+ info ' -Dossier $dc -DelaiS 10 -Quoi '(c) info affichée'
             Fermer-Cas $p $dc '(c)'
         }

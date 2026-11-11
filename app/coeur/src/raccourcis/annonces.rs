@@ -1,4 +1,5 @@
-//! Message à montrer au démarrage, tiré du bilan du choix (textes du contrat, §5).
+//! Message à montrer au démarrage, tiré du bilan du choix (textes du contrat, §5) : une
+//! ligne de titre, sans détail ni astuce ; la raison précise reste dans `Situation.raison`.
 //!
 //! Le module ne montre rien : l'Application transforme l'`Annonce` en message du bandeau
 //! (genre « info », ou « erreur » si `erreur`). L'info et l'erreur restent affichées jusqu'au
@@ -76,39 +77,31 @@ fn annonce_action(choix: &ChoixAction) -> Option<(Annonce, Situation)> {
         let annonce = Annonce {
             erreur: true,
             titre: "Aucun raccourci disponible".into(),
-            detail: "Lance une capture depuis l'icône BreezyShot, près de l'horloge.".into(),
+            detail: String::new(),
         };
         return Some((annonce, situation));
     };
-    let utilise = format!("BreezyShot utilise {}.", retenu.affichage());
+    // Un message tient en une ligne de titre, sans astuce ; la raison précise reste dans
+    // la situation (et le journal).
+    let y = retenu.affichage();
     let lu = analyser(&premier.candidat).ok();
-    let nom = lu.map(|r| r.affichage()).unwrap_or_default();
     let impr_ecran = lu.is_some_and(|r| r.est_impr_ecran_seule());
-    let (titre, detail) = match &premier.raison {
-        Raison::ReserveParLeSysteme => (
-            "Impr. écran est réservée à l'Outil Capture de Windows".to_string(),
-            format!("{utilise} Pour la libérer : Paramètres › Accessibilité › Clavier."),
-        ),
-        Raison::RefuseParLeSysteme if impr_ecran => (
-            "Impr. écran est déjà utilisée par une autre application".to_string(),
-            utilise,
-        ),
-        // Textes hors contrat (§5 ne les donne pas) : mêmes tournures que ci-dessus.
-        Raison::RefuseParLeSysteme => (
-            format!("{nom} est déjà utilisé par une autre application"),
-            utilise,
-        ),
-        Raison::DejaPrisParUneAutreAction(_) => {
-            (format!("{nom} sert déjà à une autre capture"), utilise)
+    let titre = match &premier.raison {
+        Raison::ReserveParLeSysteme | Raison::RefuseParLeSysteme if impr_ecran => {
+            format!("Impr. écran est prise. Raccourci : {y}")
         }
-        Raison::Invalide(_) => (
-            format!(
-                "Le raccourci « {} » n'est pas compris",
-                couper(&premier.candidat)
-            ),
-            utilise,
+        Raison::Invalide(_) => format!(
+            "« {} » n'est pas un raccourci valide. Raccourci : {y}",
+            couper(&premier.candidat)
         ),
+        _ => {
+            let x = lu
+                .map(|r| couper(&r.affichage()))
+                .unwrap_or_else(|| couper(&premier.candidat));
+            format!("{x} est pris. Raccourci : {y}")
+        }
     };
+    let detail = String::new();
     let annonce = Annonce {
         erreur: false,
         titre,
@@ -194,8 +187,8 @@ mod tests {
             choisir(&defaut(), true, |_| true).annonce(),
             Some(Annonce {
                 erreur: false,
-                titre: "Impr. écran est réservée à l'Outil Capture de Windows".into(),
-                detail: "BreezyShot utilise Ctrl + Maj + 1. Pour la libérer : Paramètres › Accessibilité › Clavier.".into(),
+                titre: "Impr. écran est prise. Raccourci : Ctrl + Maj + 1".into(),
+                detail: String::new(),
             })
         );
     }
@@ -206,8 +199,8 @@ mod tests {
             choisir(&defaut(), false, |r| r.canonique() != "ImprEcran").annonce(),
             Some(Annonce {
                 erreur: false,
-                titre: "Impr. écran est déjà utilisée par une autre application".into(),
-                detail: "BreezyShot utilise Ctrl + Maj + 1.".into(),
+                titre: "Impr. écran est prise. Raccourci : Ctrl + Maj + 1".into(),
+                detail: String::new(),
             })
         );
     }
@@ -217,8 +210,8 @@ mod tests {
         let t = table(&[("zone", &["ImprEcran", "Ctrl+Maj+1", "alt+f9"])]);
         let a = choisir(&t, true, |r| r.canonique() != "Ctrl+Maj+1").annonce();
         assert_eq!(
-            a.unwrap().detail,
-            "BreezyShot utilise Alt + F9. Pour la libérer : Paramètres › Accessibilité › Clavier."
+            a.unwrap().titre,
+            "Impr. écran est prise. Raccourci : Alt + F9"
         );
     }
 
@@ -229,7 +222,7 @@ mod tests {
             Some(Annonce {
                 erreur: true,
                 titre: "Aucun raccourci disponible".into(),
-                detail: "Lance une capture depuis l'icône BreezyShot, près de l'horloge.".into(),
+                detail: String::new(),
             })
         );
     }
@@ -258,29 +251,35 @@ mod tests {
         ]);
         let b = choisir(&t, true, |r| r.canonique() != "Ctrl+Maj+3");
         let a = b.annonce().unwrap();
-        assert!(a.titre.starts_with("Impr. écran est réservée"));
+        assert_eq!(a.titre, "Impr. écran est prise. Raccourci : Ctrl + Maj + 1");
     }
 
     #[test]
     fn premier_invalide_ou_deja_pris() {
         let t = table(&[("zone", &["Ctrl+Truc", "Ctrl+Maj+1"])]);
         let a = choisir(&t, false, |_| true).annonce().unwrap();
-        assert_eq!(a.titre, "Le raccourci « Ctrl+Truc » n'est pas compris");
-        assert_eq!(a.detail, "BreezyShot utilise Ctrl + Maj + 1.");
+        assert_eq!(
+            a.titre,
+            "« Ctrl+Truc » n'est pas un raccourci valide. Raccourci : Ctrl + Maj + 1"
+        );
+        assert_eq!(a.detail, "");
 
         let t = table(&[
             ("zone", &["Ctrl+Maj+1"]),
             ("plein_ecran", &["Ctrl+Maj+1", "Ctrl+Maj+2"]),
         ]);
         let a = choisir(&t, false, |_| true).annonce().unwrap();
-        assert_eq!(a.titre, "Ctrl + Maj + 1 sert déjà à une autre capture");
-        assert_eq!(a.detail, "BreezyShot utilise Ctrl + Maj + 2.");
+        assert_eq!(
+            a.titre,
+            "Ctrl + Maj + 1 est pris. Raccourci : Ctrl + Maj + 2"
+        );
+        assert_eq!(a.detail, "");
 
         let t = table(&[("zone", &["Ctrl+Maj+5", "Ctrl+Maj+6"])]);
         let a = choisir(&t, false, |r| r.canonique() != "Ctrl+Maj+5").annonce();
         assert_eq!(
             a.unwrap().titre,
-            "Ctrl + Maj + 5 est déjà utilisé par une autre application"
+            "Ctrl + Maj + 5 est pris. Raccourci : Ctrl + Maj + 6"
         );
     }
 
@@ -293,7 +292,7 @@ mod tests {
         let attendu: String = long.chars().take(40).collect();
         assert_eq!(
             a.titre,
-            format!("Le raccourci « {attendu}… » n'est pas compris")
+            format!("« {attendu}… » n'est pas un raccourci valide. Raccourci : Ctrl + Maj + 1")
         );
         let d = decider_annonce(None, &b);
         assert_eq!(d.a_retenir.unwrap().candidat, format!("{attendu}…"));
@@ -337,7 +336,11 @@ mod tests {
         // La situation change (Impr. écran prise au lieu de réservée) : on annonce.
         let b3 = choisir(&zone(), false, |r| !r.est_impr_ecran_seule());
         let d3 = decider_annonce(Some(&situation), &b3);
-        assert!(d3.annonce.unwrap().titre.contains("déjà utilisée"));
+        // Même texte que « réservée », mais une autre situation : on annonce quand même.
+        assert_eq!(
+            d3.annonce.unwrap().titre,
+            "Impr. écran est prise. Raccourci : Ctrl + Maj + 1"
+        );
         assert_eq!(d3.a_retenir.unwrap().raison, "refuse_par_le_systeme");
         // Plus aucun raccourci : situation « aucun_raccourci », annonce d'erreur.
         let b4 = choisir(&zone(), true, |_| false);
