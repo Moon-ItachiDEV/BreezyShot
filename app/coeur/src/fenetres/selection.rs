@@ -85,6 +85,8 @@ pub enum Cause {
     Echap,
     ClicDroit,
     FocusPerdu,
+    /// Demande de fermeture de la fenêtre (Alt+F4) : refusée, l'affichage est annulé.
+    Fermeture,
 }
 
 impl Cause {
@@ -93,6 +95,7 @@ impl Cause {
             Cause::Echap => "echap",
             Cause::ClicDroit => "clic_droit",
             Cause::FocusPerdu => "focus_perdu",
+            Cause::Fermeture => "fermeture",
         }
     }
 }
@@ -105,7 +108,9 @@ pub enum Signal {
         id: u64,
         duree: Duration,
     },
-    /// Zone choisie : les deux coins du glisser, en pixels réels du bureau.
+    /// Zone choisie : les deux coins du glisser, en pixels réels du bureau, **tous deux
+    /// inclus** (le premier et le dernier pixel de la zone, dans le sens du glisser) :
+    /// `capture::rect_entre(depart, arrivee)` donne exactement la zone dessinée.
     Zone {
         id: u64,
         depart: (i32, i32),
@@ -236,7 +241,7 @@ pub fn cause_depuis_nom(nom: &str) -> Option<Cause> {
 /// Ce que vaut un `selection_terminee` pour l'affichage en cours.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Decision {
-    /// Une vraie zone : les deux coins en pixels réels.
+    /// Une vraie zone : les deux coins en pixels réels, inclus (voir `Signal::Zone`).
     Zone((i32, i32), (i32, i32)),
     /// Moins de `cote_min` de côté : pas une zone, la sélection continue.
     TropPetite,
@@ -245,6 +250,10 @@ pub enum Decision {
 }
 
 /// Décide d'un `selection_terminee` (fonction pure). `fenetre` : rectangle réel de la page.
+///
+/// La page envoie des **bords** : la zone dessinée couvre `[min, max)` sur chaque axe. Le
+/// seuil se compte sur ces bords (`|a − b| >= cote_min`) ; la zone rendue donne des coins
+/// de pixels inclus : sur chaque axe, le côté max perd 1, le sens du glisser est gardé.
 pub fn decider_zone(
     depart: (f64, f64),
     arrivee: (f64, f64),
@@ -262,10 +271,19 @@ pub fn decider_zone(
     let hauteur = (i64::from(a.1) - i64::from(b.1)).abs();
     let min = i64::from(cote_min.max(0));
     if largeur < min || hauteur < min {
-        Decision::TropPetite
-    } else {
-        Decision::Zone(a, b)
+        return Decision::TropPetite;
     }
+    // Bords → pixels inclus : celui des deux qui est le bord max recule d'un pixel.
+    let inclus = |u: i32, v: i32| -> (i32, i32) {
+        match u.cmp(&v) {
+            std::cmp::Ordering::Less => (u, v - 1),
+            std::cmp::Ordering::Greater => (u - 1, v),
+            std::cmp::Ordering::Equal => (u, v),
+        }
+    };
+    let (ax, bx) = inclus(a.0, b.0);
+    let (ay, by) = inclus(a.1, b.1);
+    Decision::Zone((ax, ay), (bx, by))
 }
 
 /// Ce que reçoit la page avec `selection:montrer`.
@@ -275,6 +293,11 @@ struct ChargeMontrer {
     ecrans: Vec<RectPage>,
     /// En pixels CSS.
     cote_min: f64,
+    /// Taille attendue de la page, en pixels CSS (rectangle réel / échelle).
+    largeur: f64,
+    hauteur: f64,
+    /// Échelle attendue (`devicePixelRatio` de la page).
+    echelle: f64,
 }
 
 /// Un affichage en cours, vu du cœur.
@@ -290,7 +313,8 @@ struct Affichage {
     avant: Option<isize>,
     prete: bool,
     a_eu_focus: bool,
-    /// Ce qui a été envoyé à la page, renvoyé si elle se recharge avant d'être prête.
+    /// Ce qui a été envoyé à la page, renvoyé si elle se recharge ou si une zone trop
+    /// petite lui est refusée (elle revient alors au repos).
     charge: Option<ChargeMontrer>,
 }
 
@@ -468,6 +492,14 @@ impl Selection {
                     .app
                     .run_on_main_thread(move || i.changer_focus(focus));
             }
+            tauri::WindowEvent::CloseRequested { api, .. } => {
+                // La fenêtre n'est détruite que par `fermer` : Alt+F4 annule l'affichage.
+                api.prevent_close();
+                let i = Arc::clone(&pour_evenements);
+                let _ = pour_evenements
+                    .app
+                    .run_on_main_thread(move || i.fermeture_demandee());
+            }
             tauri::WindowEvent::Destroyed => {
                 pour_evenements.vivante.store(false, Ordering::SeqCst);
                 let i = Arc::clone(&pour_evenements);
@@ -494,7 +526,7 @@ impl Selection {
 
     /// Vrai entre `montrer` et la fin de l'affichage.
     pub fn visible(&self) -> bool {
-        self.interne.etat().is_some_and(|e| e.en_cours.is_some())
+        self.interne.etat().en_cours.is_some()
     }
 
     /// À l'arrêt de l'app : cache puis détruit la fenêtre. Aucun signal.
@@ -507,19 +539,30 @@ impl Selection {
     }
 }
 
+/// Prend le verrou de l'état. Un verrou empoisonné (panique d'un autre fil pendant qu'il le
+/// tenait) est repris tel quel, comme dans `systeme::gel` : `finir`, `cacher` et le délai
+/// doivent toujours pouvoir cacher la fenêtre.
+fn prendre(etat: &Mutex<Etat>) -> MutexGuard<'_, Etat> {
+    match etat.lock() {
+        Ok(e) => e,
+        Err(empoisonne) => {
+            log::error!("selection: etat repris apres une panique");
+            etat.clear_poison();
+            empoisonne.into_inner()
+        }
+    }
+}
+
+/// Nombre de placements au plus quand le rectangle réel diffère du bureau voulu.
+const PLACEMENTS_MAX: usize = 3;
+
 impl Interne {
     fn fenetre(&self) -> Option<WebviewWindow> {
         tauri::Manager::get_webview_window(&self.app, ETIQUETTE_SELECTION)
     }
 
-    fn etat(&self) -> Option<MutexGuard<'_, Etat>> {
-        match self.etat.lock() {
-            Ok(e) => Some(e),
-            Err(_) => {
-                log::error!("selection: etat inaccessible");
-                None
-            }
-        }
+    fn etat(&self) -> MutexGuard<'_, Etat> {
+        prendre(&self.etat)
     }
 
     fn sur_fil_principal(&self) -> bool {
@@ -539,20 +582,16 @@ impl Interne {
         let fenetre = self.fenetre().ok_or("selection: fenetre absente")?;
         // 1. La fenêtre au premier plan, pour la lui rendre à la fin.
         let devant = systeme::fenetre_premier_plan();
-        let (id, oublie) = {
-            let mut etat = self.etat().ok_or("selection: etat inaccessible")?;
-            etat.commencer(&demande, devant, self.identifiant, Instant::now())
-        };
+        let (id, oublie) =
+            self.etat()
+                .commencer(&demande, devant, self.identifiant, Instant::now());
         if let Some(ancien) = oublie {
             log::warn!("selection {ancien} remplacee par {id} sans fin");
         }
         match self.montrer_etapes(&fenetre, id, &demande) {
             Ok(()) => Ok(id),
             Err(e) => {
-                let avant = self
-                    .etat()
-                    .and_then(|mut etat| etat.terminer(id))
-                    .and_then(|a| a.avant);
+                let avant = self.etat().terminer(id).and_then(|a| a.avant);
                 self.masquer(avant);
                 log::warn!("selection montree {id} impossible: {e}");
                 Err(e)
@@ -568,27 +607,32 @@ impl Interne {
         demande: &Demande,
     ) -> Result<(), String> {
         let voulu = demande.bureau;
-        // 2. Poser, montrer, donner le premier plan et le clavier.
+        // 2. Poser, montrer, donner le premier plan et le clavier. Un premier plan refusé
+        // n'arrête rien : un clic active la fenêtre, le clic droit annule, et l'Application
+        // réserve Échap en global.
         let par_systeme = systeme::poser_au_dessus(fenetre, voulu)?;
         if par_systeme {
             if !systeme::prendre_premier_plan(fenetre)? {
-                log::warn!("selection {id}: premier plan refuse par le systeme");
+                log::warn!("selection sans premier plan {id}");
             }
         } else {
             poser_par_tauri(fenetre, voulu)?;
             fenetre.show().map_err(|e| format!("show: {e}"))?;
             if let Err(e) = fenetre.set_focus() {
-                log::warn!("selection {id}: focus non pris: {e}");
+                log::warn!("selection sans premier plan {id}: {e}");
             }
         }
         // 3. L'écran figé juste en dessous.
         self.placer_dessous(demande.dessous)?;
-        // 4. Relire le rectangle réel ; le reposer une fois s'il diffère.
+        // 4. Relire le rectangle réel ; le reposer (3 fois au plus) s'il diffère. S'il
+        // diffère encore, on continue avec le rectangle réel, repère des conversions.
         let mut reel = self.identifiant.and_then(rect_reel);
-        if reel.is_some_and(|r| r != voulu) {
+        let mut placements = 1;
+        while placements < PLACEMENTS_MAX && reel.is_some_and(|r| r != voulu) {
             systeme::poser_au_dessus(fenetre, voulu)?;
             self.placer_dessous(demande.dessous)?;
             reel = self.identifiant.and_then(rect_reel);
+            placements += 1;
         }
         let echelle = fenetre
             .scale_factor()
@@ -598,11 +642,11 @@ impl Interne {
         }
         let repere = reel.unwrap_or(voulu);
         log::info!(
-            "selection montree {id} voulu {} reel {} echelle {echelle}",
+            "selection montree {id} voulu {} reel {} echelle {echelle} placements {placements}",
             texte_rect(voulu),
             reel.map(texte_rect).unwrap_or_else(|| "inconnu".into())
         );
-        // 5. Prévenir la page, avec les écrans dans son repère.
+        // 5. Prévenir la page, avec les écrans dans son repère et la taille attendue.
         let charge = ChargeMontrer {
             id,
             ecrans: demande
@@ -611,9 +655,12 @@ impl Interne {
                 .map(|r| vers_page(*r, echelle, repere))
                 .collect(),
             cote_min: f64::from(demande.cote_min.max(0)) / echelle,
+            largeur: f64::from(repere.largeur.max(0)) / echelle,
+            hauteur: f64::from(repere.hauteur.max(0)) / echelle,
+            echelle,
         };
         {
-            let mut etat = self.etat().ok_or("etat inaccessible")?;
+            let mut etat = self.etat();
             let a = etat.courant_mut(id).ok_or("affichage remplace")?;
             a.fenetre = repere;
             a.echelle = echelle;
@@ -641,7 +688,7 @@ impl Interne {
                 std::thread::sleep(DELAI_PRETE);
                 let pour = Arc::clone(&interne);
                 let poste = interne.app.run_on_main_thread(move || {
-                    let muette = pour.etat().is_some_and(|e| e.muette(id));
+                    let muette = pour.etat().muette(id);
                     if muette {
                         pour.finir(Signal::Muette { id });
                     }
@@ -702,7 +749,7 @@ impl Interne {
             return;
         }
         let id = signal.id();
-        let Some(affichage) = self.etat().and_then(|mut e| e.terminer(id)) else {
+        let Some(affichage) = self.etat().terminer(id) else {
             return;
         };
         self.masquer(affichage.avant);
@@ -712,32 +759,32 @@ impl Interne {
         (self.rappel)(signal);
     }
 
-    /// `cacher` public : sans signal. Hors du fil principal, la fenêtre est cachée tout de
-    /// suite sans attendre, et le reste (premier plan, page) suit sur le fil principal.
+    /// `cacher` public : sans signal. Hors du fil principal, tout part sur le fil principal
+    /// (un masquage posté directement à Windows pourrait cacher l'affichage suivant) ; la
+    /// fenêtre n'est cachée sans attendre que si cet envoi échoue (boucle arrêtée).
     fn cacher(self: &Arc<Self>) {
-        let avant = self
-            .etat()
-            .and_then(|mut e| e.en_cours.take())
-            .and_then(|a| a.avant);
+        let avant = self.etat().en_cours.take().and_then(|a| a.avant);
         if self.sur_fil_principal() {
             self.masquer(avant);
             return;
         }
-        if let Some(h) = self.identifiant {
-            systeme::cacher_fenetre_async(h);
-        }
         let i = Arc::clone(self);
-        let _ = self.app.run_on_main_thread(move || {
+        let poste = self.app.run_on_main_thread(move || {
             // Un nouvel affichage commencé entre-temps n'est pas touché.
-            let libre = i.etat().is_some_and(|e| e.en_cours.is_none());
+            let libre = i.etat().en_cours.is_none();
             if libre {
                 i.masquer(avant);
             }
         });
+        if poste.is_err() {
+            if let Some(h) = self.identifiant {
+                systeme::cacher_fenetre_async(h);
+            }
+        }
     }
 
     fn changer_focus(self: &Arc<Self>, focus: bool) {
-        let perdu = self.etat().and_then(|mut e| e.focus(focus));
+        let perdu = self.etat().focus(focus);
         if let Some(id) = perdu {
             self.finir(Signal::Annulee {
                 id,
@@ -746,8 +793,18 @@ impl Interne {
         }
     }
 
+    fn fermeture_demandee(self: &Arc<Self>) {
+        let id = self.etat().en_cours.as_ref().map(|a| a.id);
+        if let Some(id) = id {
+            self.finir(Signal::Annulee {
+                id,
+                cause: Cause::Fermeture,
+            });
+        }
+    }
+
     fn fenetre_detruite(self: &Arc<Self>) {
-        let id = self.etat().and_then(|e| e.en_cours.as_ref().map(|a| a.id));
+        let id = self.etat().en_cours.as_ref().map(|a| a.id);
         if let Some(id) = id {
             self.finir(Signal::Impossible {
                 id,
@@ -756,41 +813,47 @@ impl Interne {
         }
     }
 
-    fn page_chargee(&self) {
-        let renvoi = {
-            let Some(mut etat) = self.etat() else {
-                return;
-            };
-            etat.page_chargee = true;
-            etat.en_cours
-                .as_ref()
-                .filter(|a| !a.prete)
-                .and_then(|a| a.charge.clone())
-        };
-        log::info!("selection chargee");
-        // Page (re)chargée pendant un affichage pas encore prêt : elle reçoit sa demande.
-        if let Some(charge) = renvoi {
-            if let Err(e) = self
-                .app
-                .emit_to(ETIQUETTE_SELECTION, EVENEMENT_MONTRER, charge)
-            {
-                log::warn!("selection: demande non renvoyee: {e}");
-            }
+    /// Renvoie à la page la demande de l'affichage en cours : elle revient au repos (son
+    /// `selection_prete` suivant est ignoré s'il l'était déjà).
+    fn renvoyer(&self, charge: ChargeMontrer) {
+        if let Err(e) = self
+            .app
+            .emit_to(ETIQUETTE_SELECTION, EVENEMENT_MONTRER, charge)
+        {
+            log::warn!("selection: demande non renvoyee: {e}");
         }
     }
 
-    fn prete(&self, id: u64) {
-        let duree = self.etat().and_then(|mut e| e.prete(id, Instant::now()));
+    fn page_chargee(&self) {
+        let renvoi = {
+            let mut etat = self.etat();
+            etat.page_chargee = true;
+            etat.en_cours.as_ref().and_then(|a| a.charge.clone())
+        };
+        log::info!("selection chargee");
+        // Page (re)chargée pendant un affichage : elle reçoit de nouveau sa demande.
+        if let Some(charge) = renvoi {
+            self.renvoyer(charge);
+        }
+    }
+
+    fn prete(&self, id: u64, page: (f64, f64, f64)) {
+        let duree = self.etat().prete(id, Instant::now());
         if let Some(duree) = duree {
-            log::info!("chrono selection prete {}", duree.as_millis());
+            let (largeur, hauteur, echelle) = page;
+            log::info!(
+                "chrono selection prete {} page {largeur}x{hauteur} echelle {echelle}",
+                duree.as_millis()
+            );
             (self.rappel)(Signal::Prete { id, duree });
         }
     }
 
     fn terminee(self: &Arc<Self>, id: u64, depart: Point, arrivee: Point) {
-        let Some((fenetre, echelle, cote_min)) = self
+        let Some((fenetre, echelle, cote_min, charge)) = self
             .etat()
-            .and_then(|e| e.courant(id).map(|a| (a.fenetre, a.echelle, a.cote_min)))
+            .courant(id)
+            .map(|a| (a.fenetre, a.echelle, a.cote_min, a.charge.clone()))
         else {
             return;
         };
@@ -806,17 +869,19 @@ impl Interne {
                 depart,
                 arrivee,
             }),
-            Decision::TropPetite => log::info!("selection {id}: zone trop petite ignoree"),
+            Decision::TropPetite => {
+                // La page attend qu'on la cache : on la remet au repos, la sélection continue.
+                log::info!("selection {id}: zone trop petite ignoree");
+                if let Some(charge) = charge {
+                    self.renvoyer(charge);
+                }
+            }
             Decision::Invalide(cause) => self.finir(Signal::Impossible { id, cause }),
         }
     }
 
     fn annulee(self: &Arc<Self>, id: u64, nom: &str) {
-        if self
-            .etat()
-            .and_then(|e| e.courant(id).map(|_| ()))
-            .is_none()
-        {
+        if self.etat().courant(id).is_none() {
             return;
         }
         let signal = match cause_depuis_nom(nom) {
@@ -866,10 +931,18 @@ pub fn selection_chargee(selection: State<'_, Selection>) {
     selection.interne.page_chargee();
 }
 
-/// La page est visible et peinte (deux images après `selection:montrer`).
+/// La page est visible et peinte, à la taille et à l'échelle attendues (deux images de
+/// suite après `selection:montrer`). `largeur`, `hauteur` : `innerWidth`, `innerHeight` ;
+/// `echelle` : `devicePixelRatio`. Écrits au journal.
 #[tauri::command]
-pub fn selection_prete(selection: State<'_, Selection>, id: u64) {
-    selection.interne.prete(id);
+pub fn selection_prete(
+    selection: State<'_, Selection>,
+    id: u64,
+    largeur: f64,
+    hauteur: f64,
+    echelle: f64,
+) {
+    selection.interne.prete(id, (largeur, hauteur, echelle));
 }
 
 /// Zone choisie : les deux coins finals, en pixels CSS de la page.
@@ -1019,12 +1092,12 @@ mod tests {
         let f = r(0, 0, 1920, 1080);
         assert_eq!(
             decider_zone((10.0, 10.0), (110.0, 60.0), 1.0, f, 3),
-            Decision::Zone((10, 10), (110, 60))
+            Decision::Zone((10, 10), (109, 59))
         );
-        // Sens inverse : les coins sont rendus tels quels.
+        // Sens inverse : le sens est gardé, le bord max (ici le départ) recule d'un pixel.
         assert_eq!(
             decider_zone((110.0, 60.0), (10.0, 10.0), 1.25, f, 3),
-            Decision::Zone((138, 75), (13, 13))
+            Decision::Zone((137, 74), (13, 13))
         );
         // Moins de 3 pixels réels de côté.
         assert_eq!(
@@ -1169,10 +1242,16 @@ mod tests {
             id: 3,
             ecrans: vec![vers_page(r(0, 0, 1920, 1080), 1.5, r(0, 0, 1920, 1080))],
             cote_min: 2.0,
+            largeur: 1280.0,
+            hauteur: 720.0,
+            echelle: 1.5,
         };
         assert_eq!(
             serde_json::to_string(&c).unwrap(),
-            r#"{"id":3,"ecrans":[{"x":0.0,"y":0.0,"largeur":1280.0,"hauteur":720.0}],"cote_min":2.0}"#
+            concat!(
+                r#"{"id":3,"ecrans":[{"x":0.0,"y":0.0,"largeur":1280.0,"hauteur":720.0}],"#,
+                r#""cote_min":2.0,"largeur":1280.0,"hauteur":720.0,"echelle":1.5}"#
+            )
         );
     }
 
@@ -1181,6 +1260,142 @@ mod tests {
         assert!(ARGUMENTS_NAVIGATEUR.starts_with(
             "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection,CalculateNativeWinOcclusion"
         ));
+    }
+
+    /// Même règle que `capture::rect_entre` (coins inclus), recopiée ici : `fenetres`
+    /// n'importe pas `capture`, même dans ses tests.
+    fn rect_entre(a: (i32, i32), b: (i32, i32)) -> Rect {
+        Rect::depuis_bords(
+            a.0.min(b.0),
+            a.1.min(b.1),
+            a.0.max(b.0) + 1,
+            a.1.max(b.1) + 1,
+        )
+    }
+
+    /// Ce que la page a dessiné, en pixels réels : `[min, max)` des bords envoyés.
+    fn dessinee(depart: (f64, f64), arrivee: (f64, f64), e: f64) -> Rect {
+        let b = |v: f64| (v * e).round() as i32;
+        Rect::depuis_bords(
+            b(depart.0.min(arrivee.0)),
+            b(depart.1.min(arrivee.1)),
+            b(depart.0.max(arrivee.0)),
+            b(depart.1.max(arrivee.1)),
+        )
+    }
+
+    #[test]
+    fn zone_dessinee_egale_zone_decoupee() {
+        // Contre-essai de la relecture : un rectangle dessiné de 200 × 150 était découpé en
+        // 201 × 151.
+        let f = r(0, 0, 1920, 1080);
+        for e in [1.0, 1.25, 1.5] {
+            let (g, h, d, b) = (100.0, 100.0, 300.0, 250.0);
+            for (depart, arrivee) in [
+                ((g, h), (d, b)),
+                ((d, b), (g, h)),
+                ((d, h), (g, b)),
+                ((g, b), (d, h)),
+            ] {
+                let Decision::Zone(a, z) = decider_zone(depart, arrivee, e, f, 3) else {
+                    panic!("pas une zone a {e}");
+                };
+                assert_eq!(
+                    rect_entre(a, z),
+                    dessinee(depart, arrivee, e),
+                    "echelle {e}, {depart:?} -> {arrivee:?}"
+                );
+            }
+        }
+        assert_eq!(
+            match decider_zone((100.0, 100.0), (300.0, 250.0), 1.0, f, 3) {
+                Decision::Zone(a, b) => rect_entre(a, b),
+                _ => Rect::default(),
+            },
+            r(100, 100, 200, 150)
+        );
+    }
+
+    #[test]
+    fn coin_a_coin_d_un_ecran_donne_ses_pixels() {
+        // Bureau de deux écrans, celui de gauche à x négatif ; échelle 1,25.
+        let bureau = r(-1920, 0, 3840, 1080);
+        for ecran in [r(-1920, 0, 1920, 1080), r(0, 0, 1920, 1080)] {
+            let p = vers_page(ecran, 1.25, bureau);
+            for (depart, arrivee) in [
+                ((p.x, p.y), (p.x + p.largeur, p.y + p.hauteur)),
+                ((p.x + p.largeur, p.y + p.hauteur), (p.x, p.y)),
+            ] {
+                let Decision::Zone(a, b) = decider_zone(depart, arrivee, 1.25, bureau, 3) else {
+                    panic!("pas une zone");
+                };
+                assert_eq!(rect_entre(a, b), ecran);
+                assert!(ecran.contient(a) && ecran.contient(b), "coins sur l'ecran");
+            }
+        }
+    }
+
+    #[test]
+    fn espace_le_depart_reste_sur_son_ecran() {
+        // Contre-essai A : départ envoyé sur le bord droit de l'écran de gauche (640), qui
+        // est le premier pixel de l'écran voisin.
+        let ecran_gauche = r(0, 0, 640, 400);
+        let Decision::Zone(a, b) =
+            decider_zone((640.0, 100.0), (540.0, 200.0), 1.0, r(0, 0, 1280, 400), 3)
+        else {
+            panic!("pas une zone");
+        };
+        assert_eq!(a, (639, 100));
+        assert!(ecran_gauche.contient(a));
+        assert_eq!(rect_entre(a, b), r(540, 100, 100, 100));
+    }
+
+    #[test]
+    fn seuil_compte_sur_les_bords() {
+        let f = r(0, 0, 100, 100);
+        assert!(matches!(
+            decider_zone((10.0, 10.0), (13.0, 13.0), 1.0, f, 3),
+            Decision::Zone((10, 10), (12, 12))
+        ));
+        assert_eq!(
+            decider_zone((10.0, 10.0), (12.0, 13.0), 1.0, f, 3),
+            Decision::TropPetite
+        );
+    }
+
+    #[test]
+    fn verrou_empoisonne_repris() {
+        // Contre-essai de la relecture : un verrou empoisonné empêchait `finir`, `cacher` et
+        // le délai de cacher la fenêtre.
+        let m = Arc::new(Mutex::new(Etat::default()));
+        let (id, _) = prendre(&m).commencer(&demande(), None, None, Instant::now());
+        let m2 = Arc::clone(&m);
+        let _ = std::thread::spawn(move || {
+            let _g = m2.lock();
+            panic!("panique sous verrou (voulue par le test)");
+        })
+        .join();
+        assert!(m.is_poisoned());
+        assert!(prendre(&m).terminer(id).is_some(), "la fin passe encore");
+        assert!(!m.is_poisoned());
+    }
+
+    #[test]
+    fn fermeture_nommee() {
+        assert_eq!(Cause::Fermeture.nom(), "fermeture");
+        assert_eq!(
+            cause_depuis_nom("fermeture"),
+            None,
+            "jamais envoyee par la page"
+        );
+        assert_eq!(
+            decrire_fin(&Signal::Annulee {
+                id: 2,
+                cause: Cause::Fermeture
+            })
+            .as_deref(),
+            Some("annulee fermeture")
+        );
     }
 
     #[test]

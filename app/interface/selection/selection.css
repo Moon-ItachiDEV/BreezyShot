@@ -58,6 +58,13 @@ body {
   background: transparent;
 }
 
+/* Un panneau est un carré de 1 pixel réel, étiré et placé par `transform`. */
+.panneau {
+  width: 1px;
+  height: 1px;
+  transform-origin: 0 0;
+}
+
 .panneau,
 #zone {
   display: none;

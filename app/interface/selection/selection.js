@@ -3,10 +3,14 @@
 // ni taille, ni poignée, ni animation.
 //
 // Contrat avec le cœur (fenetres/selection.rs) :
-// - écoute `selection:montrer` { id, ecrans: [{ x, y, largeur, hauteur }], cote_min }
-//   (pixels CSS de la page) : retour au repos (voile plein), puis, deux images plus tard,
-//   `selection_prete` { id }. Une demande invalide est ignorée (console.warn) : le cœur
-//   cache la fenêtre au bout de son délai.
+// - écoute `selection:montrer` { id, ecrans: [{ x, y, largeur, hauteur }], cote_min,
+//   largeur, hauteur, echelle } (pixels CSS de la page ; `largeur`, `hauteur`, `echelle` :
+//   taille et échelle attendues de la page) : retour au repos (voile plein). Dès que
+//   innerWidth/innerHeight (à 1 px près) et devicePixelRatio correspondent pendant deux
+//   images de suite : `selection_prete` { id, largeur, hauteur, echelle } (valeurs lues).
+//   Avant cela, aucun glisser n'est accepté. Une demande invalide est ignorée
+//   (console.warn) : le cœur cache la fenêtre au bout de son délai. Une même demande
+//   reçue de nouveau (zone refusée, page rechargée) remet la page au repos.
 // - écoute `selection:cachee` : retour au repos, plus rien n'est envoyé.
 // - `selection_terminee` { id, depart: { x, y }, arrivee: { x, y } } au relâchement : les deux
 //   coins finals (après carré, déplacement et bornage), en pixels CSS. Rien n'est redessiné
@@ -16,6 +20,9 @@
 // Gestes : glisser du bouton gauche ; Maj tenue : carré ; Espace tenue : la zone se déplace ;
 // Échap ou clic droit : annuler. Une zone reste sur l'écran où le glisser a commencé.
 // Sous `cote_min` de côté, ce n'est pas une zone : le rectangle s'efface et on continue.
+// Toute touche est neutralisée (F5, Ctrl+R, Ctrl+P, F12… ne font rien).
+// Filet : si `selection:cachee` n'arrive pas dans FILET_MS après un envoi (ou si l'envoi
+// est refusé), la page redevient utilisable.
 
 const tauri = window.__TAURI__;
 const corps = document.body;
@@ -36,13 +43,21 @@ let glisser = null; // { pointeur, ecran, depart, courant, souris }
 let maj = false;
 let espace = false;
 let image = 0; // requestAnimationFrame en attente
+let prete = false; // la page a la taille et l'échelle attendues : on peut glisser
+let envoi = 0; // numéro de la dernière demande reçue
+let filet = 0; // minuterie du filet après un envoi
+const FILET_MS = 1500;
 
-function appeler(commande, args) {
+function appeler(commande, args, siEchec) {
   if (!tauri?.core?.invoke) return;
-  try {
-    Promise.resolve(tauri.core.invoke(commande, args)).catch((e) => console.warn(`${commande} :`, e));
-  } catch (e) {
+  const echec = (e) => {
     console.warn(`${commande} :`, e);
+    if (siEchec) siEchec();
+  };
+  try {
+    Promise.resolve(tauri.core.invoke(commande, args)).catch(echec);
+  } catch (e) {
+    echec(e);
   }
 }
 
@@ -79,7 +94,8 @@ function valider(m) {
     liste.push({ x: e.x, y: e.y, largeur: e.largeur, hauteur: e.hauteur });
   }
   if (!fini(m.cote_min) || m.cote_min < 0) return rejeter("cote_min invalide");
-  return { id: m.id, ecrans: liste, coteMin: m.cote_min };
+  if (![m.largeur, m.hauteur, m.echelle].every((v) => fini(v) && v > 0)) return rejeter("taille invalide");
+  return { id: m.id, ecrans: liste, coteMin: m.cote_min, largeur: m.largeur, hauteur: m.hauteur, echelle: m.echelle };
 }
 
 /** Voile plein, sans rectangle. */
@@ -90,30 +106,68 @@ function repos() {
   corps.classList.remove("glisse");
 }
 
+/** La page a-t-elle la taille et l'échelle que le cœur attend ? */
+const conforme = (m) =>
+  Math.abs(innerWidth - m.largeur) <= 1 &&
+  Math.abs(innerHeight - m.hauteur) <= 1 &&
+  Math.abs(echelle() - m.echelle) < 1e-3;
+
 export function montrer(brut) {
   const m = valider(brut);
   if (!m) return;
   repos();
+  clearTimeout(filet);
   id = m.id;
   ecrans = m.ecrans;
   coteMin = m.coteMin;
   attente = false;
+  prete = false;
   espace = false;
   maj = false;
   regler_scene();
-  const lui = id;
-  // Deux images : la fenêtre transparente est réellement peinte.
-  requestAnimationFrame(() =>
-    requestAnimationFrame(() => {
-      if (id === lui) appeler("selection_prete", { id: lui });
-    }),
-  );
+  const numero = ++envoi;
+  // Deux images de suite à la bonne taille : la fenêtre transparente est peinte, et le
+  // conteneur WebView2 a fini de se redimensionner. Sinon, le cœur cache au bout de 2 s.
+  let suite = 0;
+  const verifier = () => {
+    if (numero !== envoi || id === null) return;
+    suite = conforme(m) ? suite + 1 : 0;
+    if (suite < 2) {
+      requestAnimationFrame(verifier);
+      return;
+    }
+    regler_scene();
+    prete = true;
+    appeler("selection_prete", { id: m.id, largeur: innerWidth, hauteur: innerHeight, echelle: echelle() });
+  };
+  requestAnimationFrame(verifier);
 }
 
 export function cachee() {
   repos();
+  clearTimeout(filet);
+  envoi++;
   id = null;
   attente = false;
+  prete = false;
+}
+
+/** Envoie la fin au cœur et attend `selection:cachee`. Sans réponse dans FILET_MS, ou si
+ *  l'envoi est refusé, la page redevient utilisable (Échap, clic droit, glisser). */
+function envoyer(commande, args) {
+  attente = true;
+  if (image) cancelAnimationFrame(image);
+  image = 0;
+  const numero = envoi;
+  const liberer = () => {
+    if (numero !== envoi || !attente) return;
+    clearTimeout(filet);
+    attente = false;
+    repos();
+  };
+  clearTimeout(filet);
+  filet = setTimeout(liberer, FILET_MS);
+  appeler(commande, args, liberer);
 }
 
 const dansLaFenetre = () => ({ x: 0, y: 0, largeur: innerWidth, hauteur: innerHeight });
@@ -163,6 +217,14 @@ function poser(n, x, y, largeur, hauteur) {
   s.height = reel(hauteur);
 }
 
+/** Pose un panneau du voile (carré de 1 pixel réel) par une seule transformation : ni
+ *  mise en page ni changement de taille pendant le glisser. */
+function poserPanneau(n, x, y, largeur, hauteur) {
+  const e = echelle();
+  const reel = (v) => Math.max(0, Math.round(v * e));
+  n.style.transform = `translate(${reel(x)}px, ${reel(y)}px) scale(${reel(largeur)}, ${reel(hauteur)})`;
+}
+
 function dessiner() {
   image = 0;
   if (!glisser || attente) return;
@@ -177,10 +239,10 @@ function dessiner() {
   }
   const l = innerWidth;
   const h = innerHeight;
-  poser(morceaux.haut, 0, 0, l, y0);
-  poser(morceaux.bas, 0, y1, l, h - y1);
-  poser(morceaux.gauche, 0, y0, x0, y1 - y0);
-  poser(morceaux.droite, x1, y0, l - x1, y1 - y0);
+  poserPanneau(morceaux.haut, 0, 0, l, y0);
+  poserPanneau(morceaux.bas, 0, y1, l, h - y1);
+  poserPanneau(morceaux.gauche, 0, y0, x0, y1 - y0);
+  poserPanneau(morceaux.droite, x1, y0, l - x1, y1 - y0);
   poser(morceaux.zone, x0, y0, x1 - x0, y1 - y0);
   corps.classList.add("glisse");
 }
@@ -192,10 +254,7 @@ function planifier() {
 
 function annuler(cause) {
   if (id === null || attente) return;
-  attente = true;
-  if (image) cancelAnimationFrame(image);
-  image = 0;
-  appeler("selection_annulee", { id, cause });
+  envoyer("selection_annulee", { id, cause });
 }
 
 addEventListener(
@@ -207,7 +266,7 @@ addEventListener(
       annuler("clic_droit");
       return;
     }
-    if (e.button !== 0 || glisser) return;
+    if (e.button !== 0 || glisser || !prete) return;
     const p = point(e);
     const ecran = ecranSous(p);
     const depart = borner(p, ecran);
@@ -254,10 +313,7 @@ addEventListener(
       return;
     }
     // Rien n'est redessiné : le cœur cache la fenêtre.
-    attente = true;
-    if (image) cancelAnimationFrame(image);
-    image = 0;
-    appeler("selection_terminee", { id, depart: { x: a.x, y: a.y }, arrivee: { x: b.x, y: b.y } });
+    envoyer("selection_terminee", { id, depart: { x: a.x, y: a.y }, arrivee: { x: b.x, y: b.y } });
   },
   true,
 );
@@ -271,11 +327,11 @@ addEventListener("lostpointercapture", perdu, true);
 addEventListener(
   "keydown",
   (e) => {
+    // Aucune touche n'a son effet de navigateur (recharger, imprimer, chercher, outils…).
+    e.preventDefault();
     if (e.key === "Escape") {
-      e.preventDefault();
       annuler("echap");
     } else if (e.code === "Space" || e.key === " ") {
-      e.preventDefault();
       espace = true;
     } else if (e.key === "Shift") {
       maj = true;
@@ -317,7 +373,9 @@ if (tauri?.event?.listen) {
     (e) => console.warn("selection : écoute impossible :", e),
   );
 } else {
-  if (new URLSearchParams(location.search).has("demo")) montrer({ id: 1, ecrans: [], cote_min: 3 });
+  if (new URLSearchParams(location.search).has("demo")) {
+    montrer({ id: 1, ecrans: [], cote_min: 3, largeur: innerWidth, hauteur: innerHeight, echelle: echelle() });
+  }
   // Pour les essais dans un navigateur seulement.
   window.selectionApercu = { montrer, cachee };
 }

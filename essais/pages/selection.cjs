@@ -35,8 +35,8 @@ const L = 1280, H = 400;
     p.on('pageerror', e => erreurs.push(String(e)));
     p.on('console', m => { if (m.type() === 'error') erreurs.push(m.text()); });
     await p.addInitScript(() => {
-      window.__appels = []; const ecouteurs = {};
-      window.__TAURI__ = { core: { invoke: (c, a) => { window.__appels.push([c, JSON.parse(JSON.stringify(a))]); return Promise.resolve(); } },
+      window.__appels = []; const ecouteurs = {}; window.__rejeter = new Set();
+      window.__TAURI__ = { core: { invoke: (c, a) => { window.__appels.push([c, JSON.parse(JSON.stringify(a))]); return window.__rejeter.has(c) ? Promise.reject(new Error('refus voulu')) : Promise.resolve(); } },
         event: { listen: (n, f) => { ecouteurs[n] = f; return Promise.resolve(() => {}); } } };
       window.__emettre = (nom, payload) => ecouteurs[nom]({ payload });
       window.__pointeur = null;
@@ -46,6 +46,7 @@ const L = 1280, H = 400;
     await p.goto(base + (o.csp ? '?csp=1' : ''));
     if (!o.csp) await p.addStyleTag({ content: `html{background:rgb(${FOND.join(',')}) !important}` });
     await p.waitForTimeout(50);
+    p.echelle = o.echelle || 1;
     return p;
   }
   const appels = (p) => p.evaluate(() => __appels.filter(x => x[0] !== 'selection_chargee'));
@@ -53,7 +54,7 @@ const L = 1280, H = 400;
   let prochain = 1;
   async function montrer(p, ecrans = [{ x: 0, y: 0, largeur: L, hauteur: H }], coteMin = 3) {
     const id = prochain++;
-    await p.evaluate(([id, ecrans, c]) => __emettre('selection:montrer', { id, ecrans, cote_min: c }), [id, ecrans, coteMin]);
+    await p.evaluate(([id, ecrans, c, e]) => __emettre('selection:montrer', { id, ecrans, cote_min: c, largeur: innerWidth, hauteur: innerHeight, echelle: e }), [id, ecrans, coteMin, p.echelle]);
     await p.waitForTimeout(80);
     await vider(p);
     return id;
@@ -196,14 +197,14 @@ const L = 1280, H = 400;
 
   // 6. selection_prete : deux images après montrer, avec le bon id, une fois.
   const pr = await p.evaluate(async () => {
-    __appels.length = 0; __emettre('selection:montrer', { id: 77, ecrans: [], cote_min: 3 });
+    __appels.length = 0; __emettre('selection:montrer', { id: 77, ecrans: [], cote_min: 3, largeur: 1280, hauteur: 400, echelle: 1 });
     const tout_de_suite = __appels.length;
     await new Promise(r => requestAnimationFrame(() => r()));
     const une_image = __appels.length;
     await new Promise(r => setTimeout(r, 150));
     return { tout_de_suite, une_image, appels: __appels };
   });
-  verifier(pr.tout_de_suite === 0 && pr.une_image === 0 && JSON.stringify(pr.appels) === JSON.stringify([['selection_prete', { id: 77 }]]), '6 selection_prete { id } deux images après selection:montrer', JSON.stringify(pr));
+  verifier(pr.tout_de_suite === 0 && pr.une_image === 0 && JSON.stringify(pr.appels) === JSON.stringify([['selection_prete', { id: 77, largeur: 1280, hauteur: 400, echelle: 1 }]]), '6 selection_prete { id, largeur, hauteur, echelle } deux images après selection:montrer', JSON.stringify(pr));
   // Demandes invalides : ignorées, pas de selection_prete.
   await vider(p);
   for (const m of [null, {}, { id: -1, ecrans: [], cote_min: 3 }, { id: 1.5, ecrans: [], cote_min: 3 }, { id: 2, ecrans: [{ x: 0, y: 0, largeur: NaN, hauteur: 1 }], cote_min: 3 }, { id: 3, ecrans: 'x', cote_min: 3 }, { id: 4, ecrans: [], cote_min: -1 }]) {
@@ -271,6 +272,101 @@ const L = 1280, H = 400;
   id = await montrer(p);
   px = await ligne(p, 200);
   verifier(px.every(c => proche(c, VOILE)), '9 thème sombre : même voile');
+  await p.context().close();
+
+  // 11. Contre-essais de la relecture.
+  // A. Espace jusqu'au bord de l'écran de gauche : le départ envoyé est le bord 640 ; une
+  // fois rendu en pixels inclus (règle de decider_zone), il reste sur l'écran de gauche.
+  p = await page();
+  const DEUX_A = [{ x: 0, y: 0, largeur: 640, hauteur: H }, { x: 640, y: 0, largeur: 640, hauteur: H }];
+  id = await montrer(p, DEUX_A);
+  await p.mouse.move(600, 100); await p.mouse.down(); await p.mouse.move(500, 200, { steps: 3 });
+  await p.keyboard.down('Space'); await p.mouse.move(800, 200, { steps: 4 }); await p.mouse.up(); await p.keyboard.up('Space'); await p.waitForTimeout(40);
+  t = await termine(p);
+  const inclus = (u, v) => (u < v ? [u, v - 1] : u > v ? [u - 1, v] : [u, v]);
+  let zA = null;
+  if (t.length === 1) {
+    const { depart: d, arrivee: f } = t[0][1];
+    const [ax, bx] = inclus(d.x, f.x), [ay, by] = inclus(d.y, f.y);
+    zA = { depart: [ax, ay], l: Math.abs(ax - bx) + 1, h: Math.abs(ay - by) + 1 };
+  }
+  verifier(zA && zA.depart[0] < 640 && zA.l === 100 && zA.h === 100, 'A Espace au bord : départ découpé sur l\'écran de gauche, 100 × 100', JSON.stringify({ t, zA }));
+  await p.context().close();
+
+  // B. Envoi sans réponse : rien pendant 1,5 s, puis la page redevient utilisable.
+  p = await page();
+  id = await montrer(p);
+  await glisser(p, [100, 100], [200, 200]);
+  await vider(p);
+  await p.keyboard.press('Escape'); await p.mouse.click(300, 300, { button: 'right' }); await p.waitForTimeout(200);
+  const pendantAttente = (await appels(p)).length;
+  await p.waitForTimeout(1500);
+  z = await etatZone(p);
+  await p.keyboard.press('Escape'); await p.waitForTimeout(40);
+  a = await appels(p);
+  verifier(pendantAttente === 0 && !z.glisse && JSON.stringify(a) === JSON.stringify([['selection_annulee', { id, cause: 'echap' }]]), 'B sans selection:cachee : attente, puis utilisable après 1,5 s', JSON.stringify({ pendantAttente, z: z.glisse, a }));
+  await p.waitForTimeout(1600); await vider(p);
+  await glisser(p, [100, 100], [300, 300]);
+  t = await termine(p);
+  verifier(t.length === 1, 'B après le filet, un glisser marche', JSON.stringify(t));
+  // Envoi refusé par le cœur : utilisable tout de suite.
+  id = await montrer(p);
+  await p.evaluate(() => __rejeter.add('selection_terminee'));
+  await glisser(p, [100, 100], [200, 200]); await p.waitForTimeout(40);
+  await p.evaluate(() => __rejeter.clear()); await vider(p);
+  await p.keyboard.press('Escape'); await p.waitForTimeout(40);
+  a = await appels(p);
+  verifier(JSON.stringify(a) === JSON.stringify([['selection_annulee', { id, cause: 'echap' }]]), 'B invoke rejeté : utilisable aussitôt', JSON.stringify(a));
+  // Même demande renvoyée (zone refusée par le cœur) : repos, utilisable, prête renvoyé.
+  id = await montrer(p);
+  await glisser(p, [100, 100], [200, 200]);
+  await vider(p);
+  await p.evaluate(([id, e]) => __emettre('selection:montrer', { id, ecrans: [], cote_min: 3, largeur: innerWidth, hauteur: innerHeight, echelle: e }), [id, p.echelle]);
+  await p.waitForTimeout(80);
+  z = await etatZone(p);
+  await glisser(p, [100, 100], [250, 250]);
+  a = await appels(p);
+  verifier(!z.glisse && a.length === 2 && a[0][0] === 'selection_prete' && a[1][0] === 'selection_terminee' && a[1][1].id === id, 'B demande renvoyée : repos puis nouveau glisser', JSON.stringify(a));
+  await p.context().close();
+
+  // C. Touches du navigateur neutralisées.
+  p = await page();
+  id = await montrer(p);
+  const touches = await p.evaluate(() => [['F5', false], ['r', true], ['p', true], ['f', true], ['F12', false], ['Tab', false], ['a', false], ['Shift', false], [' ', false]].map(([k, ctrl]) => {
+    const ev = new KeyboardEvent('keydown', { key: k, code: k === ' ' ? 'Space' : k, ctrlKey: ctrl, bubbles: true, cancelable: true });
+    document.body.dispatchEvent(ev); return ev.defaultPrevented; }));
+  verifier(touches.every(Boolean), 'C toute touche neutralisée (F5, Ctrl+R, Ctrl+P, Ctrl+F, F12…)', JSON.stringify(touches));
+  // D. Bouton tenu avant montrer : pas de glisser fantôme.
+  await p.evaluate(() => __emettre('selection:cachee', null));
+  await p.mouse.move(100, 100); await p.mouse.down();
+  id = await montrer(p);
+  await p.mouse.move(300, 300, { steps: 3 }); await p.mouse.up(); await p.waitForTimeout(40);
+  verifier((await appels(p)).length === 0, 'D bouton tenu avant montrer : rien envoyé');
+  // Page pas encore à la bonne taille : ni prête ni glisser ; prête dès qu'elle l'est.
+  await vider(p);
+  await p.evaluate(() => __emettre('selection:montrer', { id: 500, ecrans: [], cote_min: 3, largeur: 1000, hauteur: 400, echelle: 1 }));
+  await p.waitForTimeout(150);
+  await glisser(p, [100, 100], [200, 200]);
+  const avantTaille = await appels(p);
+  await p.setViewportSize({ width: 1000, height: 400 }); await p.waitForTimeout(150);
+  await glisser(p, [100, 100], [200, 200]);
+  a = await appels(p);
+  verifier(avantTaille.length === 0 && a.length === 2 && JSON.stringify(a[0]) === JSON.stringify(['selection_prete', { id: 500, largeur: 1000, hauteur: 400, echelle: 1 }]) && a[1][0] === 'selection_terminee',
+    'taille différente : ni prête ni glisser ; prête une fois la taille juste', JSON.stringify({ avantTaille, a }));
+  await p.context().close();
+
+  // 10 (relecture). Espace relâchée avant la souris : pas de saut sans bornage.
+  p = await page();
+  id = await montrer(p);
+  await p.mouse.move(100, 100); await p.mouse.down(); await p.mouse.move(200, 200, { steps: 3 });
+  await p.keyboard.down('Space'); await p.mouse.move(250, 230, { steps: 3 }); await p.waitForTimeout(40);
+  const sousEspace = await etatZone(p);
+  await p.keyboard.up('Space'); await p.mouse.move(251, 231); await p.mouse.move(250, 230); await p.waitForTimeout(40);
+  const apresEspace = await etatZone(p);
+  await p.mouse.up(); await p.waitForTimeout(40);
+  t = await termine(p);
+  verifier(JSON.stringify(sousEspace) === JSON.stringify(apresEspace) && t.length === 1 && JSON.stringify(t[0][1]) === JSON.stringify({ id, depart: { x: 150, y: 130 }, arrivee: { x: 250, y: 230 } }),
+    'Espace relâchée avant la souris : aucun saut', JSON.stringify({ sousEspace, apresEspace, t }));
   await p.context().close();
 
   // 10. CSP de l'app : aucun refus, styles chargés, glisser complet.
