@@ -308,6 +308,8 @@ dependencies = [
  "chrono",
  "dirs",
  "log",
+ "proc-macro2",
+ "syn 2.0.119",
  "tauri",
  "tauri-build",
  "tauri-plugin-single-instance",

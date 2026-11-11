@@ -37,3 +37,7 @@ windows = { version = "0.62", features = [
 
 [profile.release]
 opt-level = 3
+
+[dev-dependencies]
+syn = { version = "2", features = ["full", "visit"] }
+proc-macro2 = "1"
