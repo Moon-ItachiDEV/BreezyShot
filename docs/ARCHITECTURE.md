@@ -32,6 +32,8 @@ app/
 design/                     jetons et icônes Moulinet, copiés du design system
 docs/                       ce fichier, TRAVAIL-VALIDE.md, notices d'essai
 essais/                     scénarios PowerShell joués sur la machine Windows de GitHub
+  pages/                    essais des pages dans Chromium (Playwright), sur Linux
+outils/                     petits scripts Node sans dépendance (generer-jetons.mjs)
 ```
 
 Écart assumé avec le document de workflow : les dossiers de modules sont sous `app/coeur/src/`
@@ -158,6 +160,12 @@ dans le dossier temporaire du système (`systeme::dossier_secours()`), sous le n
 - Au démarrage, après `icone installee`, l'app vérifie que l'icône est réellement dans la
   zone de notification (son rectangle est connu du système) et écrit `icone visible` ou
   `icone invisible` (toujours `invisible` sous Linux, où Tauri ne donne pas ce rectangle).
+- Lignes du journal sur lesquelles les essais s'appuient : `demarrage BreezyShot <version>`,
+  `systeme windows build <n>`, `echelle par ecran v2: oui|non|sans objet`, `icone installee`
+  (ou `icone non installee: …`), `icone visible|invisible`, `pret` (tout est en place), `seconde instance refusee`,
+  `--quitter recu: fermeture demandee`, `arret propre`, `--quitter: aucune instance en cours`.
+- `app/interface/index.html` est une page vide : elle n'existe que parce que Tauri veut un
+  dossier d'interface non vide.
 
 ### 3.5 Icône et menu
 
@@ -166,6 +174,8 @@ dans le dossier temporaire du système (`systeme::dossier_secours()`), sous le n
   et mise à jour quand il change. Jamais la version couleur dans la zone de notification.
 - Menu (clic droit) : seulement ce qui marche. Étape 1 : « Quitter BreezyShot ». Étape 3 :
   « Capturer une zone » avec le raccourci actif affiché, un séparateur, « Quitter BreezyShot ».
+  Le raccourci suit une tabulation dans le texte de l'entrée (aligné à droite par les menus
+  Windows) ; sans raccourci retenu, l'entrée reste, sans raccourci affiché.
   Les entrées « Captures récentes », « Vider les récentes », « Réglages » arrivent avec leurs
   étapes.
 - Info-bulle : « BreezyShot ».
@@ -227,6 +237,16 @@ Module pur : il reçoit le dossier où écrire, ne connaît ni Tauri ni les autr
   fichier présent mais illisible pour le système (droits, verrou) n'est ni renommé ni réécrit ;
   un fichier en lecture seule n'est pas réécrit ; `ecrire` refuse des réglages lus dans un
   fichier d'une version plus récente, pour ne jamais faire redescendre le numéro de version.
+- **On n'écrase jamais ce qu'on n'a pas pu lire ou mettre de côté.** Si le fichier est présent
+  mais illisible, ou abîmé sans pouvoir être renommé (verrou, lecture seule), l'app tourne
+  avec les valeurs par défaut et ces réglages sont « protégés » : `ecrire` les refuse
+  (`FichierProtege`), `Reglages::enregistrable()` le dit à l'avance. Un nouveau `charger`
+  réussi lève la protection.
+- Sauvegardes de fichiers abîmés : la sauvegarde qu'on vient de faire n'est jamais supprimée
+  par le nettoyage, et le nettoyage ne touche qu'aux fichiers dont le nom a exactement le
+  format produit par le module. Un fichier de plus de 1 Mio est traité comme abîmé.
+- Accepté : un très grand nombre dans un champ inconnu peut perdre en précision à la
+  réécriture (l'option qui l'éviterait s'applique à tout le programme, Tauri compris).
 
 ## 5. Raccourcis (`raccourcis/`, étape 3)
 
@@ -234,7 +254,11 @@ Module pur : il reçoit le dossier où écrire, ne connaît ni Tauri ni les autr
   pour le Mac) puis une touche, séparés par `+`, sans tenir compte de la casse ni des espaces.
   Touches : `A`–`Z`, `0`–`9`, `F1`–`F24`, `ImprEcran`, `Espace`, `Entree`, `Tab`, `Echap`,
   `Suppr`, `Inser`, `Debut`, `Fin`, `PagePrec`, `PageSuiv`, flèches `Haut` `Bas` `Gauche`
-  `Droite`. Une touche seule n'est acceptée que pour `ImprEcran` et `F1`–`F24`.
+  `Droite`. Une touche seule n'est acceptée que pour `ImprEcran` et `F1`–`F24`. Sont refusés
+  aussi : `Maj` comme seul modificateur (sauf avec `F1`–`F24` ou `ImprEcran`), parce que cela
+  bloquerait la frappe, et une courte liste fixe de raccourcis du système (`Ctrl+C`, `Ctrl+V`,
+  `Ctrl+X`, `Ctrl+Z`, `Ctrl+A`, `Ctrl+S`, `Alt+F4`, `Alt+Tab`, `Alt+Espace`, `Ctrl+Alt+Suppr`,
+  `Win+L`).
 - **Affichage** pour l'utilisateur : `Ctrl + Maj + 1`, `Impr. écran`.
 - **Choix** (fonction pure) : pour chaque action, on parcourt les candidats ; on écarte un
   candidat invalide, un candidat `ImprEcran` quand Windows le réserve à l'Outil Capture
@@ -251,8 +275,11 @@ Module pur : il reçoit le dossier où écrire, ne connaît ni Tauri ni les autr
 - **`systeme::impr_ecran_reserve()`** (Windows) : valeur `PrintScreenKeyForSnippingEnabled` de
   `HKCU\Control Panel\Keyboard`. Présente : réservée si différente de 0. Absente : réservée
   si la version de Windows est 22631 (23H2) ou plus, sinon libre. Hors Windows : libre.
-- **Messages au démarrage** (bandeau, genre « info »), seulement si le premier candidat
-  d'une action n'a pas été retenu, et **une seule fois par situation** : l'Application garde
+- **Message au démarrage** (bandeau, genre « info »), seulement si le premier candidat
+  d'une action n'a pas été retenu. **Un seul message par démarrage** (le bandeau n'en montre
+  qu'un à la fois) : d'abord une action restée sans raccourci, sinon la première action, dans
+  l'ordre zone, plein écran, fenêtre, dont le premier candidat n'a pas été retenu. Un candidat
+  recopié dans un message est coupé à 40 caractères. **Une seule fois par situation** : l'Application garde
   la dernière situation annoncée (action, candidat écarté, raison) dans `<local>/etat.json`
   et ne réaffiche le message que si elle change. Quand tout est normal, elle l'efface.
   La décision « annoncer ou non » est une fonction pure, testée.
@@ -263,6 +290,16 @@ Module pur : il reçoit le dossier où écrire, ne connaît ni Tauri ni les autr
   - aucun candidat libre (genre « erreur », reste jusqu'à la croix) : « Aucun raccourci
     disponible » / « Lance une capture depuis l'icône BreezyShot, près de l'horloge. »
 - **Signal** : `Signal::Presse(action)`. Étape 5 ajoutera `reserver_echap` et `Signal::Echap`.
+- **Réservation** (`raccourcis/reservation.rs`, seule partie qui touche au plugin
+  `tauri-plugin-global-shortcut`) : `essayer` = `vers_systeme` puis `on_shortcut` ; un appui
+  (état « pressé » seulement) est traduit par `Bilan::action_de`. Tout est libéré à l'arrêt
+  (`unregister_all`).
+- Lignes du journal (contrat des essais) : `raccourci zone: <forme canonique>` ou
+  `raccourci zone: aucun`, `raccourci zone ecarte: <candidat> (<raison>)` par candidat écarté,
+  `raccourci presse: zone`, `raccourcis liberes`, `annonce raccourci: <raison>` (code de la
+  situation : `reserve_par_le_systeme`, `refuse_par_le_systeme`…) ou
+  `annonce raccourci: deja faite`, rien si tout est normal. `etat.json` :
+  `{ "annonce_raccourci": { "action", "candidat", "raison" } }`, les autres champs gardés.
 - À l'appui, l'Application appelle `lancer_capture(mode)`. Aux étapes 1 à 3, comme la Capture
   n'existe pas : bandeau « réussite » « Raccourci reçu : capture de zone » (message provisoire,
   remplacé à l'étape 4).
@@ -278,17 +315,31 @@ Module pur : il reçoit le dossier où écrire, ne connaît ni Tauri ni les autr
   (souvent vide). Un nouveau message remplace l'ancien tout de suite.
 - Place : centré en haut de la zone utile de l'écran où se trouve la souris, à 64 px du haut
   (sous la future barre de capture). Position calculée en pixels réels avec l'échelle de cet
-  écran.
+  écran. La fenêtre mesure 560 × 220 pixels logiques (pilule de 460 × 108 au plus et place
+  de son ombre), collée en haut de la zone utile ; la page pose la pilule à 64 px.
+- **Sans focus, sous Windows** : la fenêtre est créée `focused(false)` et `focusable(false)`
+  (tao pose `WS_EX_NOACTIVATE`). Elle n'est jamais montrée par `show()` de Tauri, car tao y
+  appelle `ShowWindow(SW_SHOW)` qui active la fenêtre : `systeme::montrer_sans_activer`
+  (`SW_SHOWNOACTIVATE`). Pour la même raison, les clics traversants passent par
+  `systeme::traverser_clics` (mêmes styles que tao, posés sans lui faire réappliquer les
+  styles). L'exclusion des captures est relue auprès du système et écrite au journal.
+- **Page prête** : la page appelle `bandeau_pret {}` une fois son écoute de
+  `bandeau:afficher` en place ; un message demandé avant (annonce du démarrage) attend ce
+  moment.
 - Aspect, d'après la maquette complète (https://claude.ai/artifact/AeUuBXPRC8U1AMiqg8dhTe) :
   fond opaque `acrylic-solid`, bordure `acrylic-stroke`, ombre `shadow-28`, pastille ronde
   de 20 px. Suit le thème clair ou sombre de Windows.
-  - **Réussite** : pilule sur une ligne (rayon `radius-pill`), coche sur `success`, titre seul.
-    Part seule après 2,5 s.
+  - **Réussite** : pilule sur une ligne (rayon `radius-pill`), coche sur `success`, titre seul,
+    coupé par « … » s'il est trop long. Part seule après 2,5 s.
   - **Erreur** (variante A choisie le 11/11) : pilule élargie (rayon 16 px, 460 px au plus),
     « ! » sur `danger`, titre, cause sur une seconde ligne, boutons d'action éventuels et une
     croix. Reste affichée jusqu'à un clic sur la croix ou sur une action.
   - **Info** (forme de l'erreur A, validée par le fil design le 11/11) : « i » sur `accent`,
     pas de bouton d'action, reste affichée jusqu'à un clic sur la croix.
+  - Titre sur 2 lignes au plus, cause sur 3 lignes au plus : la pilule a une hauteur maximale
+    connue, la croix reste toujours visible.
+  - Les textes d'un message sont toujours posés comme du texte, jamais comme du HTML. La page
+    refuse un message sans `id`, sans genre connu ou sans titre.
 - Mouvement : entrée 300 ms `courbe-ressort` depuis 12 px plus haut, sortie fondu 167 ms.
   Avec « Réduire les animations » : fondus de 120 ms.
 - Clics : la page donne au cœur le rectangle de la pilule (`bandeau_zone`). Tant qu'un message
@@ -300,8 +351,16 @@ Module pur : il reçoit le dossier où écrire, ne connaît ni Tauri ni les autr
   message à croix, la fenêtre redevient entièrement traversée par les clics, sans attendre la
   page. Le cœur ignore un `bandeau_zone`, un `bandeau_action` ou un `bandeau_termine` dont
   l'`id` n'est pas celui du message en cours.
+- Lignes du journal (contrat des essais) : `bandeau pret`, `bandeau affiche <id> <genre>
+  ecran <x>,<y> <largeur>x<hauteur> echelle <e>`, `bandeau zone <id> <x>,<y>
+  <largeur>x<hauteur>` (pixels réels d'écran), `bandeau action <id> <action>`,
+  `bandeau termine <id>`, `bandeau exclu des captures: oui|non`.
+- Droits : `capabilities/bandeau.json` ne vise que la fenêtre `bandeau` et ne permet que
+  l'écoute d'événements et les quatre commandes du bandeau (déclarées dans `build.rs`).
 - La page prévient le cœur quand le message a fini de disparaître (`bandeau_termine { id }`) ;
-  le cœur cache alors la fenêtre et arrête de surveiller la souris.
+  le cœur cache alors la fenêtre et arrête de surveiller la souris. Un message remplacé par un
+  autre ne reçoit pas de `bandeau_termine` : pour le cœur, afficher un message termine le
+  précédent. Une action ne part qu'une fois par message.
 - Les pages n'utilisent ni bundler ni framework : HTML, CSS et modules JavaScript simples,
   `window.__TAURI__` exposé. Les couleurs, durées et courbes viennent de `commun/jetons.css`,
   généré à partir de `design/jetons.json` ; aucune valeur du design system n'est recopiée à
@@ -309,8 +368,11 @@ Module pur : il reçoit le dossier où écrire, ne connaît ni Tauri ni les autr
 
 ## 7. Vérification
 
-- `cargo fmt --check`, `cargo clippy -- -D warnings`, `cargo test` : sur Windows (machine
+- `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `cargo test` : sur Windows (machine
   GitHub), et un `cargo check` + `cargo test` sur macOS pour garder le Mac ouvert.
+- `node outils/generer-jetons.mjs --verifier` : `jetons.css` est à jour. `node
+  essais/pages/bandeau.cjs` : la page du bandeau dans Chromium, servie avec la CSP de l'app
+  (job `pages`, Linux).
 - `essais/` : un script par étape (`01-socle.ps1`, `02-reglages.ps1`, `03-raccourci.ps1`),
   lancés par `essais/lancer.ps1` sur le .exe de release. Chaque essai démarre l'app avec
   `BREEZYSHOT_DOSSIER_ESSAI`, agit (lancer une seconde instance, simuler une touche, abîmer un
