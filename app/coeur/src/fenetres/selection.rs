@@ -195,21 +195,24 @@ fn borner_i32(v: i64) -> i32 {
 
 /// Pixel réel relatif à la fenêtre (envoyé par la page) → pixel réel du bureau. `None` si
 /// la donnée n'est pas un nombre fini ou sort de la fenêtre (tolérance : 1 pixel réel).
-/// Le résultat est arrondi au pixel et borné à la fenêtre.
+/// Le résultat est arrondi au pixel et borné aux pixels de la fenêtre
+/// (`[0, largeur − 1] × [0, hauteur − 1]`).
 ///
-/// `fenetre` est le rectangle réel de la fenêtre. Un coin peut valoir le bord droit ou bas
-/// (exclus) : c'est un bord de zone.
+/// `fenetre` est le rectangle réel de la fenêtre.
 pub fn vers_bureau(point: (f64, f64), fenetre: Rect) -> Option<(i32, i32)> {
     let (x, y) = point;
     if fenetre.est_vide() || !x.is_finite() || !y.is_finite() {
         return None;
     }
-    let (l, h) = (f64::from(fenetre.largeur), f64::from(fenetre.hauteur));
-    if x < -TOLERANCE || y < -TOLERANCE || x > l + TOLERANCE || y > h + TOLERANCE {
+    let (dx, dy) = (
+        f64::from(fenetre.largeur) - 1.0,
+        f64::from(fenetre.hauteur) - 1.0,
+    );
+    if x < -TOLERANCE || y < -TOLERANCE || x > dx + TOLERANCE || y > dy + TOLERANCE {
         return None;
     }
-    let bx = x.round().clamp(0.0, l) as i64 + i64::from(fenetre.x);
-    let by = y.round().clamp(0.0, h) as i64 + i64::from(fenetre.y);
+    let bx = x.round().clamp(0.0, dx) as i64 + i64::from(fenetre.x);
+    let by = y.round().clamp(0.0, dy) as i64 + i64::from(fenetre.y);
     Some((i32::try_from(bx).ok()?, i32::try_from(by).ok()?))
 }
 
@@ -289,9 +292,10 @@ pub enum Decision {
 /// Décide d'un `selection_terminee` (fonction pure). `fenetre` : rectangle réel de la
 /// fenêtre ; `depart`, `arrivee` : pixels réels relatifs à la fenêtre.
 ///
-/// La page envoie des **bords** : la zone dessinée couvre `[min, max)` sur chaque axe. Le
-/// seuil se compte sur ces bords (`|a − b| >= cote_min`) ; la zone rendue donne des coins
-/// de pixels inclus : sur chaque axe, le côté max perd 1, le sens du glisser est gardé.
+/// La page envoie des **pixels**, inclus : celui sous le curseur à l'appui et celui sous le
+/// curseur au relâchement (la zone dessinée couvre `[min, max + 1[` sur chaque axe). Un
+/// côté vaut `|a − b| + 1`, comparé à `cote_min` ; les coins sont rendus tels quels, dans
+/// le sens du glisser.
 pub fn decider_zone(
     depart: (f64, f64),
     arrivee: (f64, f64),
@@ -301,23 +305,13 @@ pub fn decider_zone(
     let (Some(a), Some(b)) = (vers_bureau(depart, fenetre), vers_bureau(arrivee, fenetre)) else {
         return Decision::Invalide("point invalide".into());
     };
-    let largeur = (i64::from(a.0) - i64::from(b.0)).abs();
-    let hauteur = (i64::from(a.1) - i64::from(b.1)).abs();
+    let largeur = (i64::from(a.0) - i64::from(b.0)).abs() + 1;
+    let hauteur = (i64::from(a.1) - i64::from(b.1)).abs() + 1;
     let min = i64::from(cote_min.max(0));
     if largeur < min || hauteur < min {
         return Decision::TropPetite;
     }
-    // Bords → pixels inclus : celui des deux qui est le bord max recule d'un pixel.
-    let inclus = |u: i32, v: i32| -> (i32, i32) {
-        match u.cmp(&v) {
-            std::cmp::Ordering::Less => (u, v - 1),
-            std::cmp::Ordering::Greater => (u - 1, v),
-            std::cmp::Ordering::Equal => (u, v),
-        }
-    };
-    let (ax, bx) = inclus(a.0, b.0);
-    let (ay, by) = inclus(a.1, b.1);
-    Decision::Zone((ax, ay), (bx, by))
+    Decision::Zone(a, b)
 }
 
 /// Ce que reçoit la page avec `selection:montrer` : tout en pixels réels, relatifs au coin
@@ -1169,7 +1163,7 @@ pub fn selection_prete(
     );
 }
 
-/// Zone choisie : les deux bords finals, en pixels réels relatifs au coin de la fenêtre ;
+/// Zone choisie : les deux pixels finals (inclus), en pixels réels relatifs au coin de la fenêtre ;
 /// `numero` : celui de la charge sur laquelle ils sont comptés.
 #[tauri::command]
 pub fn selection_terminee(
@@ -1210,15 +1204,15 @@ mod tests {
         }
     }
 
-    /// Ce que la page a dessiné : `[min, max)` des bords envoyés (pixels réels relatifs),
+    /// Ce que la page a dessiné : `[min, max + 1[` des pixels envoyés (réels, relatifs),
     /// placé dans le bureau.
     fn dessinee(depart: (f64, f64), arrivee: (f64, f64), fenetre: Rect) -> Rect {
         let b = |v: f64| v.round() as i32;
         Rect::depuis_bords(
             fenetre.x + b(depart.0.min(arrivee.0)),
             fenetre.y + b(depart.1.min(arrivee.1)),
-            fenetre.x + b(depart.0.max(arrivee.0)),
-            fenetre.y + b(depart.1.max(arrivee.1)),
+            fenetre.x + b(depart.0.max(arrivee.0)) + 1,
+            fenetre.y + b(depart.1.max(arrivee.1)) + 1,
         )
     }
 
@@ -1234,21 +1228,21 @@ mod tests {
         let f = r(-1920, -200, 3840, 1280);
         assert_eq!(vers_bureau((0.0, 0.0), f), Some((-1920, -200)));
         assert_eq!(vers_bureau((1920.0, 200.0), f), Some((0, 0)));
-        assert_eq!(vers_bureau((3840.0, 1280.0), f), Some((1920, 1080)));
+        assert_eq!(vers_bureau((3839.0, 1279.0), f), Some((1919, 1079)));
         assert_eq!(vers_bureau((10.4, 10.6), f), Some((-1910, -189)));
     }
 
     #[test]
     fn vers_bureau_bornes_et_tolerance() {
         let f = r(10, 20, 100, 50);
-        // Les bords exclus sont des coins valides.
-        assert_eq!(vers_bureau((100.0, 50.0), f), Some((110, 70)));
-        // Jusqu'à 1 pixel réel dehors : ramené au bord.
+        // Le dernier pixel de la fenêtre est un coin valide.
+        assert_eq!(vers_bureau((99.0, 49.0), f), Some((109, 69)));
+        // Jusqu'à 1 pixel réel dehors : ramené au dernier pixel.
         assert_eq!(vers_bureau((-1.0, -0.5), f), Some((10, 20)));
-        assert_eq!(vers_bureau((101.0, 51.0), f), Some((110, 70)));
+        assert_eq!(vers_bureau((100.0, 50.0), f), Some((109, 69)));
         // Au-delà : refusé.
         assert_eq!(vers_bureau((-1.01, 0.0), f), None);
-        assert_eq!(vers_bureau((0.0, 51.01), f), None);
+        assert_eq!(vers_bureau((0.0, 50.01), f), None);
     }
 
     #[test]
@@ -1274,8 +1268,8 @@ mod tests {
             let (l, h) = (f64::from(p.largeur), f64::from(p.hauteur));
             assert_eq!(vers_bureau((x, y), f), Some((ecran.x, ecran.y)));
             assert_eq!(
-                vers_bureau((x + l, y + h), f),
-                Some((ecran.x + ecran.largeur, ecran.y + ecran.hauteur))
+                vers_bureau((x + l - 1.0, y + h - 1.0), f),
+                Some((ecran.x + ecran.largeur - 1, ecran.y + ecran.hauteur - 1))
             );
         }
         assert_eq!(
@@ -1291,18 +1285,18 @@ mod tests {
 
     #[test]
     fn echelle_mesuree_et_coins_exacts() {
-        // La page mesure k = taille réelle / taille CSS, arrondit au pixel réel et envoie des
-        // pixels réels : la zone découpée est celle dessinée, à tout k (même non rond).
+        // La page retient k, prend le pixel réel sous le curseur et envoie des pixels réels :
+        // la zone découpée est celle dessinée, à tout k (même non rond).
         for k in [1.0_f64, 1.25, 1.5, 2.0, 1.1] {
             let (lc, hc): (f64, f64) = (1280.0, 400.0);
             let f = r(-500, 30, (lc * k).round() as i32, (hc * k).round() as i32);
             let (kx, ky) = controler_page((lc, hc), (k, k), f).expect("page coherente");
             assert!((kx - k).abs() < 1e-9 && (ky - k).abs() < 1e-9, "k {k}");
-            let reel = |css: f64, k: f64| (css * k).round();
+            let reel = |css: f64, k: f64| (css * k + 1e-3).floor();
             for (d, a) in [
                 ((100.3, 50.6), (301.7, 250.2)),
                 ((301.7, 250.2), (100.3, 50.6)),
-                ((0.0, 0.0), (lc, hc)),
+                ((0.0, 0.0), (lc - 1.0 / k, hc - 1.0 / k)),
             ] {
                 let depart = (reel(d.0, kx), reel(d.1, ky));
                 let arrivee = (reel(a.0, kx), reel(a.1, ky));
@@ -1445,18 +1439,19 @@ mod tests {
     fn decision_d_une_zone() {
         let f = r(0, 0, 1920, 1080);
         assert_eq!(
-            decider_zone((10.0, 10.0), (110.0, 60.0), f, 3),
+            decider_zone((10.0, 10.0), (109.0, 59.0), f, 3),
             Decision::Zone((10, 10), (109, 59))
         );
-        // Sens inverse : le sens est gardé, le bord max (ici le départ) recule d'un pixel.
+        // Sens inverse : le sens est gardé, rien n'est retiré.
         assert_eq!(
-            decider_zone((110.0, 60.0), (10.0, 10.0), f, 3),
+            decider_zone((109.0, 59.0), (10.0, 10.0), f, 3),
             Decision::Zone((109, 59), (10, 10))
         );
         assert_eq!(
-            decider_zone((10.0, 10.0), (12.0, 200.0), f, 3),
+            decider_zone((10.0, 10.0), (11.0, 200.0), f, 3),
             Decision::TropPetite
         );
+        // Un clic sans bouger : 1 × 1, pas une zone, la sélection continue.
         assert_eq!(
             decider_zone((10.0, 10.0), (10.0, 10.0), f, 3),
             Decision::TropPetite
@@ -1472,11 +1467,24 @@ mod tests {
     }
 
     #[test]
+    fn glisser_de_412_a_611_donne_200() {
+        // Essai Windows (1024 × 768 à 100 %) : appui en (412, 40), relâché en (611, 239) ;
+        // les deux pixels sous le curseur sont inclus.
+        let f = r(0, 0, 1024, 768);
+        let z = zone(decider_zone((412.0, 40.0), (611.0, 239.0), f, 3));
+        assert_eq!(z, r(412, 40, 200, 200));
+        // Jusqu'au dernier pixel (le curseur ne va pas plus loin) : dernière colonne et
+        // dernière ligne comprises, dans les deux sens.
+        let z = zone(decider_zone((412.0, 40.0), (1023.0, 767.0), f, 3));
+        assert_eq!((z.droite(), z.bas()), (1024_i64, 768_i64));
+        let z = zone(decider_zone((1023.0, 767.0), (0.0, 0.0), f, 3));
+        assert_eq!(z, f);
+    }
+
+    #[test]
     fn zone_dessinee_egale_zone_decoupee() {
-        // Contre-essai de la relecture : un rectangle dessiné de 200 × 150 était découpé en
-        // 201 × 151.
         let f = r(-300, 40, 1920, 1080);
-        let (g, h, d, b) = (100.0, 100.0, 300.0, 250.0);
+        let (g, h, d, b) = (100.0, 100.0, 299.0, 249.0);
         for (depart, arrivee) in [
             ((g, h), (d, b)),
             ((d, b), (g, h)),
@@ -1500,7 +1508,10 @@ mod tests {
         for ecran in [r(-1920, 0, 1920, 1080), r(0, 0, 1920, 1080)] {
             let p = vers_page(ecran, f);
             let (x0, y0) = (f64::from(p.x), f64::from(p.y));
-            let (x1, y1) = (x0 + f64::from(p.largeur), y0 + f64::from(p.hauteur));
+            let (x1, y1) = (
+                x0 + f64::from(p.largeur) - 1.0,
+                y0 + f64::from(p.hauteur) - 1.0,
+            );
             for (depart, arrivee) in [((x0, y0), (x1, y1)), ((x1, y1), (x0, y0))] {
                 let Decision::Zone(a, b) = decider_zone(depart, arrivee, f, 3) else {
                     panic!("pas une zone");
@@ -1513,10 +1524,10 @@ mod tests {
 
     #[test]
     fn espace_le_depart_reste_sur_son_ecran() {
-        // Contre-essai A : départ envoyé sur le bord droit de l'écran de gauche (640), qui
-        // est le premier pixel de l'écran voisin.
+        // La page borne aux pixels de l'écran du départ : le dernier pixel de l'écran de
+        // gauche est 639.
         let Decision::Zone(a, b) =
-            decider_zone((640.0, 100.0), (540.0, 200.0), r(0, 0, 1280, 400), 3)
+            decider_zone((639.0, 100.0), (540.0, 199.0), r(0, 0, 1280, 400), 3)
         else {
             panic!("pas une zone");
         };
@@ -1526,14 +1537,14 @@ mod tests {
     }
 
     #[test]
-    fn seuil_compte_sur_les_bords() {
+    fn seuil_compte_en_pixels_inclus() {
         let f = r(0, 0, 100, 100);
         assert_eq!(
-            decider_zone((10.0, 10.0), (13.0, 13.0), f, 3),
+            decider_zone((10.0, 10.0), (12.0, 12.0), f, 3),
             Decision::Zone((10, 10), (12, 12))
         );
         assert_eq!(
-            decider_zone((10.0, 10.0), (12.0, 13.0), f, 3),
+            decider_zone((12.0, 12.0), (10.0, 11.0), f, 3),
             Decision::TropPetite
         );
     }

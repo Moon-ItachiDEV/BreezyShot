@@ -25,7 +25,7 @@
 //   charge (nouvelle si la fenêtre a changé, sinon la même, même numéro).
 // - écoute `selection:cachee` : retour au repos, plus rien n'est envoyé.
 // - `selection_terminee` { id, numero, depart: { x, y }, arrivee: { x, y } } au relâchement :
-//   les deux coins finals (bords, après carré, déplacement et bornage), en pixels réels entiers
+//   les deux pixels finals, inclus (après carré, déplacement et bornage), en pixels réels entiers
 //   relatifs à la fenêtre. Rien n'est redessiné ensuite : le cœur cache la fenêtre.
 // - `selection_annulee` { id, numero, cause: "echap" | "clic_droit" }, une seule fois par
 //   affichage.
@@ -221,11 +221,18 @@ const dedans = (p, e) => p.x >= e.x && p.x < e.x + e.largeur && p.y >= e.y && p.
 /** L'écran du point (bords droit et bas exclus) ; à défaut, la fenêtre. */
 const ecranSous = (p) => ecrans.find((e) => dedans(p, e)) || { x: 0, y: 0, largeur, hauteur };
 const borne = (v, min, max) => Math.min(Math.max(v, min), max);
-const borner = (p, e) => ({ x: borne(p.x, e.x, e.x + e.largeur), y: borne(p.y, e.y, e.y + e.hauteur) });
-/** Le pixel réel sous la souris, dans la fenêtre. */
+/** Ramène un pixel sur les pixels de l'écran `e` (`[e.x, e.x + e.largeur − 1]`). */
+const borner = (p, e) => ({ x: borne(p.x, e.x, e.x + e.largeur - 1), y: borne(p.y, e.y, e.y + e.hauteur - 1) });
+// Une position du pointeur désigne un pixel, inclus à l'appui comme au relâchement : le
+// pixel réel qui contient la pointe, floor(position × k). Windows donne au navigateur le
+// coin haut gauche du pixel du curseur (position = pixel / k) : × k redonne ce pixel, à
+// l'erreur d'arrondi près, d'où PRES (Math.round le donnerait aussi ici, mais prendrait le
+// pixel suivant pour une position au milieu du pixel).
+const PRES = 1e-3;
+/** Le pixel réel sous la pointe du curseur, dans la fenêtre. */
 const point = (ev) => ({
-  x: borne(Math.round(ev.clientX * kx), 0, largeur),
-  y: borne(Math.round(ev.clientY * ky), 0, hauteur),
+  x: borne(Math.floor(ev.clientX * kx + PRES), 0, largeur - 1),
+  y: borne(Math.floor(ev.clientY * ky + PRES), 0, hauteur - 1),
 });
 
 /** Les deux coins du rectangle : courant borné à l'écran du départ, puis carré si Maj. */
@@ -246,8 +253,8 @@ function avancer(g, p) {
   if (espace) {
     const [a, b] = coins(g);
     const e = g.ecran;
-    const dx = borne(p.x - g.souris.x, e.x - Math.min(a.x, b.x), e.x + e.largeur - Math.max(a.x, b.x));
-    const dy = borne(p.y - g.souris.y, e.y - Math.min(a.y, b.y), e.y + e.hauteur - Math.max(a.y, b.y));
+    const dx = borne(p.x - g.souris.x, e.x - Math.min(a.x, b.x), e.x + e.largeur - 1 - Math.max(a.x, b.x));
+    const dy = borne(p.y - g.souris.y, e.y - Math.min(a.y, b.y), e.y + e.hauteur - 1 - Math.max(a.y, b.y));
     g.depart = { x: a.x + dx, y: a.y + dy };
     g.courant = { x: b.x + dx, y: b.y + dy };
   } else {
@@ -275,14 +282,16 @@ function dessiner() {
   image = 0;
   if (!glisser || attente) return;
   const [a, b] = coins(glisser);
-  const x0 = Math.min(a.x, b.x);
-  const x1 = Math.max(a.x, b.x);
-  const y0 = Math.min(a.y, b.y);
-  const y1 = Math.max(a.y, b.y);
-  if (x1 <= x0 || y1 <= y0) {
+  // Un seul pixel (pas encore bougé) : rien. Sinon `[min, max + 1[` : les deux pixels des
+  // coins sont dans la zone.
+  if (a.x === b.x && a.y === b.y) {
     corps.classList.remove("glisse");
     return;
   }
+  const x0 = Math.min(a.x, b.x);
+  const x1 = Math.max(a.x, b.x) + 1;
+  const y0 = Math.min(a.y, b.y);
+  const y1 = Math.max(a.y, b.y) + 1;
   poserPanneau(morceaux.haut, 0, 0, largeur, y0);
   poserPanneau(morceaux.bas, 0, y1, largeur, hauteur - y1);
   poserPanneau(morceaux.gauche, 0, y0, x0, y1 - y0);
@@ -350,8 +359,8 @@ addEventListener(
     maj = e.shiftKey;
     avancer(g, point(e));
     const [a, b] = coins(g);
-    // Même règle que le cœur : un côté (écart des bords) sous cote_min, ce n'est pas une zone.
-    if (Math.abs(b.x - a.x) < coteMin || Math.abs(b.y - a.y) < coteMin) {
+    // Même règle que le cœur : un côté (pixels inclus) sous cote_min, ce n'est pas une zone.
+    if (Math.abs(b.x - a.x) + 1 < coteMin || Math.abs(b.y - a.y) + 1 < coteMin) {
       repos(); // on continue
       return;
     }
