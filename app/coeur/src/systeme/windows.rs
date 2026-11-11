@@ -1,13 +1,15 @@
 //! Gestes propres à Windows. Lecture seule du registre : l'app n'y écrit jamais.
 
 use ::windows::core::{w, PCWSTR};
-use ::windows::Win32::Foundation::ERROR_SUCCESS;
+use ::windows::Win32::Foundation::{CloseHandle, ERROR_SUCCESS, WAIT_OBJECT_0};
 use ::windows::Win32::System::Registry::{
     RegCloseKey, RegGetValueW, RegNotifyChangeKeyValue, RegOpenKeyExW, HKEY, HKEY_CURRENT_USER,
     HKEY_LOCAL_MACHINE, KEY_NOTIFY, KEY_READ, REG_NOTIFY_CHANGE_LAST_SET, RRF_RT_REG_DWORD,
     RRF_RT_REG_SZ,
 };
-use ::windows::Win32::System::Threading::GetCurrentProcess;
+use ::windows::Win32::System::Threading::{
+    CreateEventW, GetCurrentProcess, WaitForSingleObject, INFINITE,
+};
 use ::windows::Win32::UI::HiDpi::{
     AreDpiAwarenessContextsEqual, GetDpiAwarenessContextForProcess,
     DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2,
@@ -71,8 +73,9 @@ pub fn valeur_theme_barre() -> Option<u32> {
     )
 }
 
-/// Fil de surveillance : attend une modification de la clé Personalize, relit le thème,
-/// et prévient seulement s'il a changé.
+/// Fil de surveillance de la clé Personalize. À chaque tour : se réabonner d'abord, puis
+/// relire le thème, puis attendre. Un changement survenu pendant la relecture réveille
+/// donc le tour suivant : aucun n'est manqué. On ne prévient que si le thème a changé.
 pub fn surveiller_theme_barre(rappel: RappelTheme) -> Result<(), String> {
     std::thread::Builder::new()
         .name("theme-barre".into())
@@ -92,11 +95,30 @@ pub fn surveiller_theme_barre(rappel: RappelTheme) -> Result<(), String> {
                 log::warn!("surveillance du theme impossible: cle introuvable");
                 return;
             }
+            // SAFETY : événement à réinitialisation automatique, fermé en fin de fil.
+            let evenement = match unsafe { CreateEventW(None, false, false, PCWSTR::null()) } {
+                Ok(e) => e,
+                Err(e) => {
+                    log::warn!("surveillance du theme impossible: {e}");
+                    // SAFETY : clé ouverte plus haut.
+                    unsafe {
+                        let _ = RegCloseKey(cle);
+                    }
+                    return;
+                }
+            };
             let mut actuel = super::theme_barre();
             loop {
-                // SAFETY : appel synchrone sur une clé ouverte ; bloque jusqu'au changement.
+                // SAFETY : abonnement asynchrone sur une clé ouverte ; ce fil reste vivant
+                // tant que l'abonnement sert.
                 let r = unsafe {
-                    RegNotifyChangeKeyValue(cle, false, REG_NOTIFY_CHANGE_LAST_SET, None, false)
+                    RegNotifyChangeKeyValue(
+                        cle,
+                        false,
+                        REG_NOTIFY_CHANGE_LAST_SET,
+                        Some(evenement),
+                        true,
+                    )
                 };
                 if r != ERROR_SUCCESS {
                     log::warn!("surveillance du theme arretee: erreur {}", r.0);
@@ -107,10 +129,16 @@ pub fn surveiller_theme_barre(rappel: RappelTheme) -> Result<(), String> {
                     actuel = nouveau;
                     rappel(nouveau);
                 }
+                // SAFETY : attente sur un événement valide.
+                if unsafe { WaitForSingleObject(evenement, INFINITE) } != WAIT_OBJECT_0 {
+                    log::warn!("surveillance du theme arretee: attente interrompue");
+                    break;
+                }
             }
-            // SAFETY : clé ouverte plus haut.
+            // SAFETY : clé et événement ouverts plus haut.
             unsafe {
                 let _ = RegCloseKey(cle);
+                let _ = CloseHandle(evenement);
             }
         })
         .map(|_| ())
