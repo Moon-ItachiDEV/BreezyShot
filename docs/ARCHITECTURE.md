@@ -143,7 +143,9 @@ Si la variable d'environnement `BREEZYSHOT_DOSSIER_ESSAI` est définie, tout va 
 
 Le dossier Images est résolu mais optionnel (`Option`) jusqu'à l'étape 6. Le journal ne
 dépend que du dossier local (`systeme::dossier_journal()`) : un autre dossier introuvable
-ne l'empêche pas.
+ne l'empêche pas. Si le dossier local est introuvable ou non inscriptible, le journal va
+dans le dossier temporaire du système (`systeme::dossier_secours()`), sous le nom
+`breezyshot-secours.log`.
 
 ### 3.4 Ligne de commande et instance unique
 

@@ -7,11 +7,14 @@
 use std::fs::{self, File, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 
 use log::{Level, LevelFilter, Log, Metadata, Record};
 
 pub const NOM_FICHIER: &str = "breezyshot.log";
+/// Journal de secours, dans le dossier temporaire du système, si le dossier local manque.
+pub const NOM_SECOURS: &str = "breezyshot-secours.log";
 pub const TAILLE_MAX: u64 = 1024 * 1024;
 pub const NOMBRE_FICHIERS: usize = 5;
 
@@ -25,15 +28,33 @@ struct Sortie {
 
 struct Journal {
     dossier: PathBuf,
+    nom: &'static str,
     sortie: Mutex<Sortie>,
+}
+
+static INSTALLE: AtomicBool = AtomicBool::new(false);
+
+/// Vrai si un journal (normal ou de secours) est installé.
+pub fn installe() -> bool {
+    INSTALLE.load(Ordering::SeqCst)
 }
 
 /// Installe le journal dans `dossier` (créé au besoin). À n'appeler qu'une fois.
 pub fn installer(dossier: &Path) -> Result<PathBuf, String> {
+    installer_nomme(dossier, NOM_FICHIER)
+}
+
+/// Installe le journal de secours `breezyshot-secours.log` dans `dossier`.
+pub fn installer_secours(dossier: &Path) -> Result<PathBuf, String> {
+    installer_nomme(dossier, NOM_SECOURS)
+}
+
+fn installer_nomme(dossier: &Path, nom: &'static str) -> Result<PathBuf, String> {
     fs::create_dir_all(dossier).map_err(|e| format!("creation de {}: {e}", dossier.display()))?;
-    let (fichier, taille) = ouvrir(dossier)?;
+    let (fichier, taille) = ouvrir(dossier, nom)?;
     let journal = Journal {
         dossier: dossier.to_path_buf(),
+        nom,
         sortie: Mutex::new(Sortie {
             fichier: Some(fichier),
             taille,
@@ -41,12 +62,13 @@ pub fn installer(dossier: &Path) -> Result<PathBuf, String> {
     };
     log::set_boxed_logger(Box::new(journal)).map_err(|e| format!("journal deja installe: {e}"))?;
     log::set_max_level(LevelFilter::Info);
+    INSTALLE.store(true, Ordering::SeqCst);
     let precedent = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
         log::error!("plantage: {info}");
         precedent(info);
     }));
-    Ok(dossier.join(NOM_FICHIER))
+    Ok(dossier.join(nom))
 }
 
 /// Vide les tampons (appelé à l'arrêt).
@@ -54,8 +76,8 @@ pub fn vider() {
     log::logger().flush();
 }
 
-fn ouvrir(dossier: &Path) -> Result<(File, u64), String> {
-    let chemin = dossier.join(NOM_FICHIER);
+fn ouvrir(dossier: &Path, nom: &str) -> Result<(File, u64), String> {
+    let chemin = dossier.join(nom);
     let fichier = OpenOptions::new()
         .create(true)
         .append(true)
@@ -66,22 +88,22 @@ fn ouvrir(dossier: &Path) -> Result<(File, u64), String> {
 }
 
 /// Chemin du fichier numéro `n` (0 = fichier courant).
-pub fn chemin_numero(dossier: &Path, n: usize) -> PathBuf {
+pub fn chemin_numero(dossier: &Path, nom: &str, n: usize) -> PathBuf {
     if n == 0 {
-        dossier.join(NOM_FICHIER)
+        dossier.join(nom)
     } else {
-        dossier.join(format!("{NOM_FICHIER}.{n}"))
+        dossier.join(format!("{nom}.{n}"))
     }
 }
 
 /// Décale les fichiers : le plus ancien disparaît, le courant devient `.1`.
-pub fn tourner(dossier: &Path) {
+pub fn tourner(dossier: &Path, nom: &str) {
     let dernier = NOMBRE_FICHIERS - 1;
-    let _ = fs::remove_file(chemin_numero(dossier, dernier));
+    let _ = fs::remove_file(chemin_numero(dossier, nom, dernier));
     for n in (0..dernier).rev() {
-        let de = chemin_numero(dossier, n);
+        let de = chemin_numero(dossier, nom, n);
         if de.exists() {
-            let _ = fs::rename(&de, chemin_numero(dossier, n + 1));
+            let _ = fs::rename(&de, chemin_numero(dossier, nom, n + 1));
         }
     }
 }
@@ -142,8 +164,8 @@ impl Log for Journal {
         };
         if doit_tourner(sortie.taille, ligne.len() as u64) {
             sortie.fichier = None;
-            tourner(&self.dossier);
-            match ouvrir(&self.dossier) {
+            tourner(&self.dossier, self.nom);
+            match ouvrir(&self.dossier, self.nom) {
                 Ok((f, t)) => {
                     sortie.fichier = Some(f);
                     sortie.taille = t;
@@ -222,10 +244,10 @@ mod tests {
     fn rotation_garde_cinq_fichiers() {
         let d = dossier_vide("rotation");
         for tour in 0..7 {
-            fs::write(chemin_numero(&d, 0), format!("tour {tour}")).unwrap();
-            tourner(&d);
+            fs::write(chemin_numero(&d, NOM_FICHIER, 0), format!("tour {tour}")).unwrap();
+            tourner(&d, NOM_FICHIER);
         }
-        fs::write(chemin_numero(&d, 0), "courant").unwrap();
+        fs::write(chemin_numero(&d, NOM_FICHIER, 0), "courant").unwrap();
         let mut noms: Vec<String> = fs::read_dir(&d)
             .unwrap()
             .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
@@ -241,17 +263,24 @@ mod tests {
                 "breezyshot.log.4"
             ]
         );
-        assert_eq!(fs::read_to_string(chemin_numero(&d, 1)).unwrap(), "tour 6");
-        assert_eq!(fs::read_to_string(chemin_numero(&d, 4)).unwrap(), "tour 3");
+        assert_eq!(
+            fs::read_to_string(chemin_numero(&d, NOM_FICHIER, 1)).unwrap(),
+            "tour 6"
+        );
+        assert_eq!(
+            fs::read_to_string(chemin_numero(&d, NOM_FICHIER, 4)).unwrap(),
+            "tour 3"
+        );
         let _ = fs::remove_dir_all(&d);
     }
 
     #[test]
     fn ecriture_tourne_au_dela_d_un_mo() {
         let d = dossier_vide("ecriture");
-        let (f, t) = ouvrir(&d).unwrap();
+        let (f, t) = ouvrir(&d, NOM_FICHIER).unwrap();
         let journal = Journal {
             dossier: d.clone(),
+            nom: NOM_FICHIER,
             sortie: Mutex::new(Sortie {
                 fichier: Some(f),
                 taille: t,
@@ -267,9 +296,19 @@ mod tests {
                     .build(),
             );
         }
-        assert!(chemin_numero(&d, 1).exists());
-        assert!(fs::metadata(chemin_numero(&d, 1)).unwrap().len() <= TAILLE_MAX);
-        assert!(fs::metadata(chemin_numero(&d, 0)).unwrap().len() <= TAILLE_MAX);
+        assert!(chemin_numero(&d, NOM_FICHIER, 1).exists());
+        assert!(
+            fs::metadata(chemin_numero(&d, NOM_FICHIER, 1))
+                .unwrap()
+                .len()
+                <= TAILLE_MAX
+        );
+        assert!(
+            fs::metadata(chemin_numero(&d, NOM_FICHIER, 0))
+                .unwrap()
+                .len()
+                <= TAILLE_MAX
+        );
         // Les lignes des autres crates sous Warn sont écartées.
         assert!(!journal.enabled(
             &Metadata::builder()

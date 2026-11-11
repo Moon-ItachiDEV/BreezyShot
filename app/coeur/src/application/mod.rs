@@ -73,6 +73,9 @@ pub fn lancer() {
             _ => {}
         }),
         Err(e) => {
+            if !journal::installe() {
+                installer_journal_secours();
+            }
             log::error!("lancement impossible: {e}");
             eprintln!("BreezyShot : lancement impossible : {e}");
             journal::vider();
@@ -81,12 +84,22 @@ pub fn lancer() {
     }
 }
 
+/// Journal de secours dans le dossier temporaire du système.
+fn installer_journal_secours() {
+    match journal::installer_secours(&systeme::dossier_secours()) {
+        Ok(chemin) => eprintln!("BreezyShot : journal de secours : {}", chemin.display()),
+        Err(e) => eprintln!("BreezyShot : aucun journal : {e}"),
+    }
+}
+
 /// Démarrage de la première instance.
 fn demarrer(app: &AppHandle, commande: Commande, inconnus: &[String]) {
     // Le journal ne dépend que du dossier local.
-    match systeme::dossier_journal().and_then(|d| journal::installer(&d)) {
-        Ok(_) => {}
-        Err(e) => eprintln!("BreezyShot : journal indisponible : {e}"),
+    if let Err(e) = systeme::dossier_journal().and_then(|d| journal::installer(&d)) {
+        // Dossier local introuvable ou non inscriptible : journal de secours.
+        installer_journal_secours();
+        log::error!("journal indisponible: {e}");
+        eprintln!("BreezyShot : journal indisponible : {e}");
     }
     log::info!("demarrage BreezyShot {VERSION}");
     match systeme::dossiers() {
@@ -102,6 +115,7 @@ fn demarrer(app: &AppHandle, commande: Commande, inconnus: &[String]) {
             );
         }
         Err(e) => {
+            log::error!("dossiers introuvables: {e}");
             eprintln!("BreezyShot : dossiers introuvables : {e}");
         }
     }

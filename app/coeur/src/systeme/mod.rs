@@ -49,6 +49,11 @@ pub fn dossier_journal() -> Result<PathBuf, String> {
     resoudre_local(essai.as_deref(), dirs::data_local_dir()).map(|l| l.join("Journal"))
 }
 
+/// Dossier du journal de secours : le dossier temporaire du système.
+pub fn dossier_secours() -> PathBuf {
+    std::env::temp_dir()
+}
+
 /// Règle pure du dossier local (testée sans système).
 pub fn resoudre_local(essai: Option<&Path>, local: Option<PathBuf>) -> Result<PathBuf, String> {
     if let Some(racine) = essai.filter(|p| !p.as_os_str().is_empty()) {
