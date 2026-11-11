@@ -68,11 +68,14 @@ function Demarrer-App {
     }
 }
 
-# Lance l'app et attend qu'elle sorte. Rend Fini (sortie avant le délai), Code, DureeS.
+# Lance l'app et attend qu'elle sorte. Rend Fini (sortie avant le délai), Code, DureeS,
+# Processus. Au-delà du délai, le processus est tué, sauf avec -LaisserVivant (l'essai
+# compte alors les processus avant de nettoyer lui-même).
 function Lancer-Et-Attendre {
     param(
         [string[]]$Arguments = @(),
         [double]$DelaiS = 10,
+        [switch]$LaisserVivant,
         [string]$Exe = $script:Essai.Exe,
         [string]$Dossier = $script:Essai.Dossier
     )
@@ -85,10 +88,10 @@ function Lancer-Et-Attendre {
         $p.WaitForExit()
         $code = $p.ExitCode
     }
-    else {
+    elseif (-not $LaisserVivant) {
         try { $p.Kill() } catch { }
     }
-    return [pscustomobject]@{ Fini = $fini; Code = $code; DureeS = [math]::Round($chrono.Elapsed.TotalSeconds, 2) }
+    return [pscustomobject]@{ Fini = $fini; Code = $code; DureeS = [math]::Round($chrono.Elapsed.TotalSeconds, 2); Processus = $p }
 }
 
 # Demande à l'instance en cours de se fermer (--quitter).
@@ -119,11 +122,18 @@ function Lire-Journal {
 }
 
 # Nombre de lignes du journal qui contiennent $Texte (texte exact, pas une expression).
+# Avec -FinDeLigne, la ligne doit se terminer par $Texte.
 function Compter-Lignes {
-    param([Parameter(Mandatory)][string]$Texte, [string]$Dossier = $script:Essai.Dossier)
+    param(
+        [Parameter(Mandatory)][string]$Texte,
+        [switch]$FinDeLigne,
+        [string]$Dossier = $script:Essai.Dossier
+    )
     $n = 0
     foreach ($ligne in ((Lire-Journal -Dossier $Dossier) -split "`n")) {
-        if ($ligne.Contains($Texte)) { $n++ }
+        $ligne = $ligne.TrimEnd("`r")
+        $trouve = if ($FinDeLigne) { $ligne.EndsWith($Texte) } else { $ligne.Contains($Texte) }
+        if ($trouve) { $n++ }
     }
     return $n
 }
@@ -134,11 +144,12 @@ function Attendre-Ligne {
         [Parameter(Mandatory)][string]$Texte,
         [double]$DelaiS = 10,
         [int]$Fois = 1,
+        [switch]$FinDeLigne,
         [string]$Dossier = $script:Essai.Dossier
     )
     $limite = [DateTime]::UtcNow.AddSeconds($DelaiS)
     do {
-        if ((Compter-Lignes -Texte $Texte -Dossier $Dossier) -ge $Fois) { return $true }
+        if ((Compter-Lignes -Texte $Texte -FinDeLigne:$FinDeLigne -Dossier $Dossier) -ge $Fois) { return $true }
         Start-Sleep -Milliseconds 100
     } while ([DateTime]::UtcNow -lt $limite)
     return $false

@@ -37,20 +37,22 @@ try {
     else {
         Write-Host "[note]  icone visible : $visible (non exigé hors Windows)"
     }
-    Verifier 'démarrage complet (pret)' (Attendre-Ligne -Texte 'pret' -DelaiS 15) | Out-Null
+    Verifier 'démarrage complet (pret)' (Attendre-Ligne -Texte ' pret' -FinDeLigne -DelaiS 15) | Out-Null
 
     # 4. Mémoire privée au repos, après quelques secondes sans rien faire.
     Start-Sleep -Seconds 5
     Noter-Mesure -Nom 'mémoire privée au repos' -Valeur (Memoire-Privee-Mo -Processus $premiere) -Unite 'Mo'
 
     # 5. Une seconde instance sort avec 0 en moins de 10 s ; la première le note ; un seul processus.
-    $seconde = Lancer-Et-Attendre -DelaiS 10
+    $seconde = Lancer-Et-Attendre -DelaiS 10 -LaisserVivant
+    # Compter tout de suite, avant de tuer quoi que ce soit : une seconde instance restée
+    # en vie au-delà du délai compte comme un second processus.
+    $restants = @(Processus-App)
     Verifier 'seconde instance sortie en moins de 10 s' $seconde.Fini "$($seconde.DureeS) s" | Out-Null
     Verifier 'seconde instance : code de sortie 0' ($seconde.Code -eq 0) "code $($seconde.Code)" | Out-Null
     Verifier 'la première écrit « seconde instance refusee »' (Attendre-Ligne -Texte 'seconde instance refusee' -DelaiS 5) | Out-Null
-    Start-Sleep -Milliseconds 500
-    $restants = @(Processus-App)
     Verifier 'un seul processus BreezyShot' ($restants.Count -eq 1) "$($restants.Count) processus" | Out-Null
+    if (-not $seconde.Fini) { try { $seconde.Processus.Kill() } catch { } }
     Verifier 'la première instance tourne toujours' (-not $premiere.HasExited) | Out-Null
 
     # 6. --quitter ferme la première en moins de 10 s, avec « arret propre ».
