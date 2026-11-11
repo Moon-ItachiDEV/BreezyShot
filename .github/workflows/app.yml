@@ -59,7 +59,7 @@ jobs:
 
       - name: Tests
         working-directory: app/coeur
-        run: cargo test --locked
+        run: cargo test --locked -- --show-output
 
       - name: Construire breezyshot.exe (release)
         working-directory: app

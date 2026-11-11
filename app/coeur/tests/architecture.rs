@@ -4,7 +4,7 @@
 //!   `sortie`, `reglages` et `fenetres` ne s'importent pas entre eux ni `application` ;
 //!   tous peuvent utiliser `systeme`, qui ne connaît aucun module.
 //!   `crate as …` et `super::super` sont interdits partout (ils contourneraient le contrôle).
-//! - Règle 3 : hors de `systeme/` et `capture/`, aucun `cfg` (attribut, `cfg_attr` ou
+//! - Règle 3 : hors de `systeme/`, aucun `cfg` (attribut, `cfg_attr` ou
 //!   `cfg!`) qui parle du système, et aucune crate `windows`, sous quelque nom que ce soit.
 
 use std::fs;
@@ -24,7 +24,7 @@ const MODULES: &[&str] = &[
 ];
 
 /// Dossiers où le code propre à un système est permis.
-const DOSSIERS_SYSTEME: &[&str] = &["systeme", "capture"];
+const DOSSIERS_SYSTEME: &[&str] = &["systeme"];
 
 /// Crates propres à Windows.
 const CRATES_SYSTEME: &[&str] = &["windows", "windows_sys", "windows_core"];
@@ -76,7 +76,7 @@ impl Controle<'_> {
         if !self.systeme_permis {
             if let Some(premier) = segments.first() {
                 if CRATES_SYSTEME.contains(&premier.as_str()) {
-                    self.faute(format!("crate {premier} hors de systeme/ et capture/"));
+                    self.faute(format!("crate {premier} hors de systeme/"));
                 }
             }
         }
@@ -89,7 +89,7 @@ impl Controle<'_> {
         let mut mots = Vec::new();
         identifiants(condition, &mut mots);
         if let Some(m) = mots.iter().find(|m| CFG_SYSTEME.contains(&m.as_str())) {
-            self.faute(format!("{nom}(… {m} …) hors de systeme/ et capture/"));
+            self.faute(format!("{nom}(… {m} …) hors de systeme/"));
         }
     }
 
@@ -192,7 +192,7 @@ impl<'ast> Visit<'ast> for Controle<'_> {
             self.faute("extern crate self as … (alias de la crate)".into());
         }
         if !self.systeme_permis && CRATES_SYSTEME.contains(&nom.as_str()) {
-            self.faute(format!("extern crate {nom} hors de systeme/ et capture/"));
+            self.faute(format!("extern crate {nom} hors de systeme/"));
         }
         visit::visit_item_extern_crate(self, i);
     }
@@ -356,6 +356,9 @@ fn le_controle_repere_les_pieges() {
         (Some("application"), "extern crate windows as w;"),
         (Some("sortie"), "fn f(){ let _ = windows_sys::x; }"),
         (None, "#[cfg(target_arch = \"x86_64\")] fn f(){}"),
+        (Some("capture"), "#[cfg(target_os = \"macos\")] fn f(){}"),
+        (Some("capture"), "fn f(){ if cfg!(windows) {} }"),
+        (Some("capture"), "use ::windows::Win32::Foundation::HWND;"),
     ];
     for (module, source) in fautes {
         assert!(
@@ -374,7 +377,8 @@ fn le_controle_repere_les_pieges() {
         (Some("reglages"), "#[cfg(debug_assertions)] fn f(){}"),
         (Some("systeme"), "#[cfg(windows)] #[path = \"windows.rs\"] mod plateforme;"),
         (Some("systeme"), "use ::windows::Win32::Foundation::HWND;"),
-        (Some("capture"), "#[cfg(target_os = \"macos\")] fn f(){}"),
+        (Some("capture"), "#[cfg(test)] mod tests {}"),
+        (Some("capture"), "use crate::systeme::gel::Pixels;"),
         (
             None,
             "#![cfg_attr(not(debug_assertions), windows_subsystem = \"windows\")]\nfn main(){ breezyshot::lancer(); }",
