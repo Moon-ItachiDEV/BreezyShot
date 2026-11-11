@@ -100,6 +100,39 @@ struct EnCours {
     signale: bool,
 }
 
+impl EnCours {
+    /// Un message mis en attente : ni envoyé, ni montré.
+    fn nouveau(id: u64, message: Message) -> EnCours {
+        EnCours {
+            id,
+            message,
+            envoi: 0,
+            montre_a: None,
+            place: None,
+            zone: None,
+            signale: false,
+        }
+    }
+
+    /// (Re)part vers une page prête : nouvel envoi, et tout ce que la page avait dit du
+    /// précédent est oublié (zone, signal, moment de l'affichage). Rend le numéro d'envoi.
+    fn renvoyer(&mut self) -> u64 {
+        self.envoi += 1;
+        self.montre_a = None;
+        self.zone = None;
+        self.signale = false;
+        self.envoi
+    }
+
+    /// Temps écoulé depuis l'envoi à une page prête ; nul tant que le message attend
+    /// (premier lancement de WebView2 lent) : le filet de sécurité ne court pas encore.
+    fn depuis_affichage(&self, maintenant: Instant) -> std::time::Duration {
+        self.montre_a
+            .map(|t| maintenant.saturating_duration_since(t))
+            .unwrap_or_default()
+    }
+}
+
 #[derive(Default)]
 struct Etat {
     dernier_id: u64,
@@ -121,6 +154,9 @@ pub struct Bandeau {
     fil_principal: ThreadId,
     /// Faux après `fermer` ou la destruction de la fenêtre : toute surveillance s'arrête.
     vivante: Arc<AtomicBool>,
+    /// Identifiant système de la fenêtre (Windows : le HWND), gardé dès la création : la
+    /// surveillance le passe à `systeme` sans appeler la fenêtre Tauri.
+    identifiant: Option<isize>,
 }
 
 impl Bandeau {
@@ -154,7 +190,8 @@ impl Bandeau {
         if let Err(e) = systeme::preparer_fenetre_outil(&fenetre) {
             log::warn!("bandeau: style outil non pose: {e}");
         }
-        if let Some(h) = systeme::identifiant_fenetre(&fenetre) {
+        let identifiant = systeme::identifiant_fenetre(&fenetre);
+        if let Some(h) = identifiant {
             log::info!("bandeau fenetre {h}");
         }
         if capturable {
@@ -180,6 +217,7 @@ impl Bandeau {
             etat: Mutex::new(Etat::default()),
             fil_principal: std::thread::current().id(),
             vivante,
+            identifiant,
         })
     }
 
@@ -206,15 +244,7 @@ impl Bandeau {
             };
             etat.dernier_id += 1;
             let id = etat.dernier_id;
-            etat.en_cours = Some(EnCours {
-                id,
-                message,
-                envoi: 0,
-                montre_a: None,
-                place: None,
-                zone: None,
-                signale: false,
-            });
+            etat.en_cours = Some(EnCours::nouveau(id, message));
             (id, etat.page_prete)
         };
         if prete {
@@ -252,8 +282,8 @@ impl Bandeau {
             let Some(c) = etat.en_cours.as_mut().filter(|c| c.id == id) else {
                 return;
             };
-            c.envoi += 1;
-            (c.message.clone(), c.envoi)
+            let envoi = c.renvoyer();
+            (c.message.clone(), envoi)
         };
         let Some(fenetre) = self.fenetre() else {
             log::warn!("bandeau: fenetre absente");
@@ -320,6 +350,7 @@ impl Bandeau {
     fn surveiller(&self, id: u64, envoi: u64) {
         let app = self.app.clone();
         let vivante = Arc::clone(&self.vivante);
+        let identifiant = self.identifiant;
         let lancement = std::thread::Builder::new()
             .name("bandeau-souris".into())
             .spawn(move || {
@@ -329,10 +360,10 @@ impl Bandeau {
                     let Some(b) = app.try_state::<Bandeau>() else {
                         break;
                     };
-                    // Appels au système et à Tauri avant de prendre le verrou.
-                    let fenetre = b.fenetre();
+                    // Appels au système avant de prendre le verrou ; aucune méthode de la
+                    // fenêtre Tauri ici (chacune attend le fil principal).
                     let pos = souris(&app);
-                    let reelle = fenetre.as_ref().and_then(place_reelle);
+                    let reelle = identifiant.and_then(place_reelle);
                     let Some(mut etat) = b.etat() else {
                         break;
                     };
@@ -345,7 +376,7 @@ impl Bandeau {
                         break;
                     };
                     let a_croix = c.message.genre.a_croix();
-                    let depuis = c.montre_a.map(|t| t.elapsed()).unwrap_or_default();
+                    let depuis = c.depuis_affichage(Instant::now());
                     if cacher_d_office(a_croix, depuis, c.zone.is_some()) {
                         drop(etat);
                         let pour = app.clone();
@@ -522,28 +553,16 @@ fn souris(app: &AppHandle) -> Option<(f64, f64)> {
     systeme::position_souris().or_else(|| app.cursor_position().ok().map(|p| (p.x, p.y)))
 }
 
-/// Place réelle de la fenêtre et échelle de son écran, relues à chaque fois.
-fn place_reelle(fenetre: &WebviewWindow) -> Option<(Rect, f64)> {
-    if let Some((x, y, largeur, hauteur, e)) = systeme::rectangle_fenetre(fenetre) {
-        return Some((
-            Rect {
-                x,
-                y,
-                largeur,
-                hauteur,
-            },
-            e,
-        ));
-    }
-    let p = fenetre.outer_position().ok()?;
-    let t = fenetre.outer_size().ok()?;
-    let e = fenetre.scale_factor().ok()?;
+/// Place réelle de la fenêtre et échelle de son écran, relues auprès du système par son
+/// identifiant (`None` hors Windows : la place notée par `montrer` sert alors).
+fn place_reelle(identifiant: isize) -> Option<(Rect, f64)> {
+    let (x, y, largeur, hauteur, e) = systeme::rectangle_fenetre(identifiant)?;
     Some((
         Rect {
-            x: p.x,
-            y: p.y,
-            largeur: t.width,
-            hauteur: t.height,
+            x,
+            y,
+            largeur,
+            hauteur,
         },
         e,
     ))
@@ -636,5 +655,58 @@ pub fn bandeau_termine(bandeau: State<'_, Bandeau>, id: u64) {
             cacher(&f);
         }
         log::info!("bandeau termine {id}");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::Duration;
+
+    fn info() -> Message {
+        Message {
+            genre: Genre::Info,
+            titre: "t".into(),
+            detail: String::new(),
+            actions: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn le_delai_de_zone_ne_court_qu_apres_l_envoi() {
+        let c = EnCours::nouveau(1, info());
+        // En attente d'une page prête : même longtemps après, rien n'est caché d'office.
+        let tard = Instant::now() + Duration::from_secs(60);
+        assert_eq!(c.depuis_affichage(tard), Duration::ZERO);
+        assert!(!cacher_d_office(true, c.depuis_affichage(tard), false));
+        // Envoyé à une page prête : le délai part de là.
+        let mut c = c;
+        c.renvoyer();
+        let t0 = Instant::now();
+        c.montre_a = Some(t0);
+        assert!(!cacher_d_office(
+            true,
+            c.depuis_affichage(t0 + Duration::from_secs(2)),
+            false
+        ));
+        assert!(cacher_d_office(
+            true,
+            c.depuis_affichage(t0 + DELAI_ZONE_MAX),
+            false
+        ));
+    }
+
+    #[test]
+    fn un_renvoi_oublie_la_zone_et_le_signal() {
+        let mut c = EnCours::nouveau(1, info());
+        assert_eq!(c.renvoyer(), 1);
+        c.montre_a = Some(Instant::now());
+        c.zone = borner_zone(10.0, 10.0, 100.0, 40.0);
+        c.signale = true;
+        assert_eq!(c.renvoyer(), 2);
+        assert!(c.zone.is_none());
+        assert!(!c.signale);
+        assert!(c.montre_a.is_none());
+        assert_eq!(c.depuis_affichage(Instant::now()), Duration::ZERO);
     }
 }

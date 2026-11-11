@@ -112,6 +112,10 @@ static extern void keybd_event(byte vk, byte scan, uint flags, UIntPtr extra);
 static extern void mouse_event(uint flags, int dx, int dy, uint data, UIntPtr extra);
 [DllImport("user32.dll")]
 public static extern bool SetCursorPos(int x, int y);
+// Per Monitor v2 (-4) : SetCursorPos, WindowFromPoint et CopyFromScreen en pixels réels,
+// comme le journal de l'app, sur un écran à plus de 100 %.
+[DllImport("user32.dll", SetLastError = true)]
+public static extern bool SetProcessDpiAwarenessContext(IntPtr contexte);
 [DllImport("user32.dll")]
 public static extern IntPtr GetForegroundWindow();
 [DllImport("user32.dll")]
@@ -153,6 +157,12 @@ public static extern bool IsWindowVisible(IntPtr h);
 [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW")]
 public static extern IntPtr GetWindowLongPtr(IntPtr h, int index);
 '@
+        # Au début, avant toute fenêtre ou copie d'écran ; échec toléré (déjà réglé, ou
+        # Windows trop ancien) : l'essai continue et l'écrit.
+        try {
+            $dpiOk = [BreezyShotEssai.Entree]::SetProcessDpiAwarenessContext([IntPtr]::new(-4))
+            Write-Host "SetProcessDpiAwarenessContext(-4) : $(if ($dpiOk) { 'ok' } else { "refusé ($([System.Runtime.InteropServices.Marshal]::GetLastWin32Error()))" })"
+        } catch { Write-Host "SetProcessDpiAwarenessContext(-4) indisponible : $_" }
         Add-Type -AssemblyName System.Drawing
         $VK_SNAPSHOT = [byte]0x2C
         $CTRL_MAJ_1 = [byte[]]@(0x11, 0x10, 0x31)
@@ -224,12 +234,14 @@ public static extern IntPtr GetWindowLongPtr(IntPtr h, int index);
                 $pilule.Save((Join-Path $script:Essai.Sortie "$Nom.png"), [System.Drawing.Imaging.ImageFormat]::Png)
                 $pilule.Dispose()
             }
-            # Points du fond : haut et bas au milieu, bord gauche, entre le texte et la croix.
+            # Points du fond, jamais sous le texte : haut et bas au milieu, marge intérieure
+            # gauche (entre le bord et la pastille), marge intérieure droite (entre la croix,
+            # à 8 px du bord, et le bord).
             $points = @(
                 @([int]($zl / 2), [int](4 * $e)),
                 @([int]($zl / 2), [int]($zh - 4 * $e)),
                 @([int](5 * $e), [int]($zh / 2)),
-                @([int]($zl - 50 * $e), [int]($zh / 2)))
+                @([int]($zl - 5 * $e), [int]($zh / 2)))
             $bons = 0; $lus = @()
             foreach ($pt in $points) {
                 $c = $bmp.GetPixel($m + $pt[0], $m + $pt[1])

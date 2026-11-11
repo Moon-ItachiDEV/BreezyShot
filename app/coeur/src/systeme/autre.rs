@@ -69,6 +69,6 @@ pub fn position_souris() -> Option<(f64, f64)> {
     None
 }
 
-pub fn rectangle_fenetre(_fenetre: &tauri::WebviewWindow) -> Option<(i32, i32, u32, u32, f64)> {
+pub fn rectangle_fenetre(_identifiant: isize) -> Option<(i32, i32, u32, u32, f64)> {
     None
 }

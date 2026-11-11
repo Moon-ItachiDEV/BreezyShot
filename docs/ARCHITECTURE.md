@@ -343,14 +343,18 @@ Module pur : il reçoit le dossier où écrire, ne connaît ni Tauri ni les autr
   partent sur le fil principal. Un geste « cliquable » posté par la surveillance relit
   l'état : il ne s'applique qu'au message en cours, s'il porte une croix.
 - **Surveillance** : position de la souris par `systeme` (`GetCursorPos`), place et échelle
-  de la fenêtre relues à chaque tour ; toutes les 30 ms quand la souris est à moins de
-  200 px réels de la pilule, toutes les 150 ms sinon. Elle s'arrête quand le message n'est
+  de la fenêtre relues à chaque tour par `systeme::rectangle_fenetre`, avec le HWND gardé
+  dans `Bandeau` à la création (aucune méthode de fenêtre Tauri sur ce fil : chacune attend
+  le fil principal) ; toutes les 30 ms quand la souris est à moins de 300 px réels de la
+  pilule, toutes les 60 ms sinon. Elle s'arrête quand le message n'est
   plus en cours, à l'arrêt de l'app et à la destruction de la fenêtre.
 - **Filet de sécurité** (l'app ne gêne jamais l'écran si la page meurt), décision pure
   `cacher_d_office` : une réussite non terminée après 5 s (`DELAI_REUSSITE_MAX`) est
   cachée d'office ; un message à croix sans `bandeau_zone` valide 3 s après l'affichage
-  (`DELAI_ZONE_MAX`) aussi (`bandeau cache d'office <id>`). Un `bandeau_pret` répété
-  renvoie le message en cours. `bandeau_zone` refuse une valeur non finie et borne le
+  (`DELAI_ZONE_MAX`) aussi (`bandeau cache d'office <id>`). Les délais partent de l'envoi à
+  une page prête, pas de la mise en attente (premier lancement de WebView2 lent). Un
+  `bandeau_pret` répété renvoie le message en cours, en oubliant la zone et le signal du
+  précédent envoi (`EnCours::renvoyer`) : le délai de 3 s repart. `bandeau_zone` refuse une valeur non finie et borne le
   rectangle à la fenêtre (0..560 × 0..220 pixels CSS).
 - **Annonce retenue une fois montrée** : la situation n'est écrite dans `etat.json` qu'au
   premier `bandeau_zone` valide de ce message (`fenetres::Signal::MessageMontre`, ligne

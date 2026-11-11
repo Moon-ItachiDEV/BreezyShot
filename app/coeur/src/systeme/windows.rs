@@ -337,8 +337,12 @@ pub fn position_souris() -> Option<(f64, f64)> {
 }
 
 /// Rectangle réel de la fenêtre et échelle de son écran (DPI de la fenêtre / 96).
-pub fn rectangle_fenetre(fenetre: &tauri::WebviewWindow) -> Option<(i32, i32, u32, u32, f64)> {
-    let h = hwnd(fenetre).ok()?;
+/// `identifiant` : le HWND gardé à la création (sans aller-retour vers le fil principal).
+pub fn rectangle_fenetre(identifiant: isize) -> Option<(i32, i32, u32, u32, f64)> {
+    if identifiant == 0 {
+        return None;
+    }
+    let h = HWND(identifiant as *mut core::ffi::c_void);
     let mut r = RECT::default();
     // SAFETY : handle valide ; `r` reçoit le rectangle.
     unsafe { GetWindowRect(h, &mut r) }.ok()?;

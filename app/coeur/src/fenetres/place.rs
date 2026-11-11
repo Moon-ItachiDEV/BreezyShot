@@ -125,9 +125,9 @@ pub const DELAI_REUSSITE_MAX: Duration = Duration::from_secs(5);
 pub const DELAI_ZONE_MAX: Duration = Duration::from_secs(3);
 /// Surveillance de la souris : rythme près de la pilule, et loin d'elle.
 pub const INTERVALLE_PROCHE: Duration = Duration::from_millis(30);
-pub const INTERVALLE_LOIN: Duration = Duration::from_millis(150);
+pub const INTERVALLE_LOIN: Duration = Duration::from_millis(60);
 /// Distance (pixels réels) en deçà de laquelle la souris est « proche » de la pilule.
-pub const DISTANCE_PROCHE: f64 = 200.0;
+pub const DISTANCE_PROCHE: f64 = 300.0;
 
 /// Filet de sécurité : le cœur cache-t-il le message d'office (la page ne répond plus) ?
 pub fn cacher_d_office(a_croix: bool, depuis_affichage: Duration, zone_recue: bool) -> bool {
@@ -349,10 +349,10 @@ mod tests {
             INTERVALLE_PROCHE
         );
         assert_eq!(
-            intervalle(Some((100.0, 359.0)), Some(&p)),
+            intervalle(Some((100.0, 459.0)), Some(&p)),
             INTERVALLE_PROCHE
         );
-        assert_eq!(intervalle(Some((100.0, 361.0)), Some(&p)), INTERVALLE_LOIN);
+        assert_eq!(intervalle(Some((100.0, 461.0)), Some(&p)), INTERVALLE_LOIN);
         assert_eq!(
             intervalle(Some((-200.0, -200.0)), Some(&p)),
             INTERVALLE_LOIN

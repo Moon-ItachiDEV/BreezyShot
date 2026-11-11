@@ -236,8 +236,9 @@ pub fn position_souris() -> Option<(f64, f64)> {
 
 /// Rectangle réel `(x, y, largeur, hauteur, echelle)` de la fenêtre (`None` : demander à
 /// Tauri).
-pub fn rectangle_fenetre(fenetre: &tauri::WebviewWindow) -> Option<(i32, i32, u32, u32, f64)> {
-    plateforme::rectangle_fenetre(fenetre)
+/// Prend l'identifiant de `identifiant_fenetre` : aucun appel à la fenêtre Tauri.
+pub fn rectangle_fenetre(identifiant: isize) -> Option<(i32, i32, u32, u32, f64)> {
+    plateforme::rectangle_fenetre(identifiant)
 }
 
 /// Variable d'essai : le bandeau reste capturable (pour prouver qu'il est peint).
