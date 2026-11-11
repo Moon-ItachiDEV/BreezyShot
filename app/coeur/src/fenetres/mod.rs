@@ -471,6 +471,21 @@ impl Bandeau {
         }
     }
 
+    /// Cache tout de suite le message en cours, sans attendre la page (avant une capture :
+    /// le bandeau ne doit ni figurer sur la photo ni rester au-dessus de l'écran figé).
+    /// Rend vrai s'il y avait un message en cours, donc une fenêtre peut-être à l'écran.
+    /// Fil principal. La page garde son dernier message jusqu'au suivant, qui le remplace ;
+    /// un `bandeau_termine` de l'ancien est ignoré (id qui n'est plus en cours).
+    pub fn cacher(&self) -> bool {
+        if !self.retirer(None) {
+            return false;
+        }
+        if let Some(f) = self.fenetre() {
+            cacher(&f);
+        }
+        true
+    }
+
     /// À l'arrêt de l'app : la surveillance s'arrête, la fenêtre est cachée puis détruite.
     pub fn fermer(&self) {
         self.vivante.store(false, Ordering::SeqCst);

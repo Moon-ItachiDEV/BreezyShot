@@ -9,6 +9,9 @@
 //! L'Application lit la dernière situation dans `<local>/etat.json`, appelle
 //! `decider_annonce`, montre l'annonce éventuelle dans le bandeau, écrit ou efface la
 //! situation, et met `Bilan::libelle_menu("zone")` dans le menu.
+//!
+//! Échap global : pendant une sélection, l'Application réserve Échap (`reserver_echap`) et
+//! le libère à chaque fin (`liberer_echap`). Un appui arrive en `Signal::Echap`.
 
 mod annonces;
 mod choix;
@@ -22,11 +25,15 @@ pub use conversion::vers_systeme;
 pub use notation::{
     analyser, ErreurNotation, Modificateurs, Raccourci, Touche, RESERVES_AU_SYSTEME,
 };
-pub use reservation::{liberer, lignes_journal, reserver, texte_raison};
+pub use reservation::{
+    liberer, liberer_echap, lignes_journal, reserver, reserver_echap, texte_raison,
+};
 
 /// Ce que le module signale à l'Application.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Signal {
     /// Le raccourci de l'action nommée (`zone`, `plein_ecran`, `fenetre`…) a été pressé.
     Presse(String),
+    /// Échap a été pressé pendant qu'il était réservé (`reserver_echap`).
+    Echap,
 }

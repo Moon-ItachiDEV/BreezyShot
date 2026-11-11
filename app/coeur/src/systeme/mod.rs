@@ -9,7 +9,9 @@
 
 use std::path::{Path, PathBuf};
 
+mod composition;
 pub mod gel;
+pub use composition::attendre_composition;
 pub use gel::Rect;
 
 #[cfg(windows)]

@@ -62,6 +62,8 @@ pub enum Declencheur {
     SelectionMuette,
     /// Erreur pendant la sélection.
     SelectionImpossible,
+    /// Les pixels de la zone n'ont pas pu être lus.
+    DecoupeImpossible,
     /// Image découpée, vignette active : on joue le souffle.
     ImagePrete,
     /// Image découpée, vignette désactivée : retour au repos après confirmation.
@@ -110,7 +112,9 @@ pub const PASSAGES: &[(Etat, Declencheur, Etat)] = &[
     (E::Selection, D::BureauSecurise, E::Repos),
     (E::Selection, D::SelectionMuette, E::Repos),
     (E::Selection, D::SelectionImpossible, E::Repos),
-    // Découpe : une erreur de copie ou d'écriture n'arrête rien (pas de ligne ici).
+    // Découpe : une erreur de copie ou d'écriture n'arrête rien (pas de ligne ici) ; seule
+    // une lecture des pixels impossible ramène au repos sans image.
+    (E::Decoupe, D::DecoupeImpossible, E::Repos),
     (E::Decoupe, D::ImagePrete, E::Souffle),
     (E::Decoupe, D::ImagePreteSansVignette, E::Repos),
     // Souffle.
@@ -240,6 +244,28 @@ mod tests {
         ] {
             assert_eq!(suivant(E::Selection, d), Some(E::Repos));
         }
+    }
+
+    /// Contrat d'assemblage, point 1 : un appui pendant Gel, Sélection ou Découpe ne
+    /// relance rien (aucun second `figer`).
+    #[test]
+    fn appui_ignore_pendant_une_capture() {
+        let mut a = Automate::default();
+        a.traiter(D::DemandeCapture(Mode::Zone));
+        assert_eq!(a.traiter(D::DemandeCapture(Mode::Zone)), None);
+        a.traiter(D::PhotoPrise(Mode::Zone));
+        assert_eq!(a.etat(), E::Selection);
+        assert_eq!(a.traiter(D::DemandeCapture(Mode::Zone)), None);
+        a.traiter(D::ZoneChoisie);
+        assert_eq!(a.etat(), E::Decoupe);
+        assert_eq!(a.traiter(D::DemandeCapture(Mode::Zone)), None);
+        assert_eq!(a.traiter(D::ImagePreteSansVignette), Some(E::Repos));
+        assert_eq!(a.traiter(D::DemandeCapture(Mode::Zone)), Some(E::Gel));
+    }
+
+    #[test]
+    fn decoupe_impossible_revient_au_repos() {
+        assert_eq!(suivant(E::Decoupe, D::DecoupeImpossible), Some(E::Repos));
     }
 
     #[test]

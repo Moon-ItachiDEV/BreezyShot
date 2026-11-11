@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 
 use tauri::{AppHandle, Runtime};
-use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
+use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Shortcut, ShortcutState};
 
 use super::choix::{choisir, Bilan, Raison};
 use super::conversion::vers_systeme;
@@ -93,6 +93,35 @@ where
         *b = bilan.clone();
     }
     bilan
+}
+
+/// Échap seul, dans les types du système.
+fn echap() -> Shortcut {
+    Shortcut::new(None, Code::Escape)
+}
+
+/// Réserve Échap en global, le temps d'une sélection : `rappel` reçoit `Signal::Echap` à
+/// chaque appui. Rend l'erreur du système si une autre application le tient déjà.
+/// Le plugin fait la réservation sur le fil principal et attend qu'elle soit faite.
+pub fn reserver_echap<R, F>(app: &AppHandle<R>, rappel: F) -> Result<(), String>
+where
+    R: Runtime,
+    F: Fn(Signal) + Send + Sync + 'static,
+{
+    app.global_shortcut()
+        .on_shortcut(echap(), move |_app, _s, evenement| {
+            if evenement.state == ShortcutState::Pressed {
+                rappel(Signal::Echap);
+            }
+        })
+        .map_err(|e| e.to_string())
+}
+
+/// Libère Échap (réservé par `reserver_echap`).
+pub fn liberer_echap<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
+    app.global_shortcut()
+        .unregister(echap())
+        .map_err(|e| e.to_string())
 }
 
 /// Libère tous les raccourcis réservés.
