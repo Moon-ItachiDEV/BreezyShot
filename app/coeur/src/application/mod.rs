@@ -83,17 +83,22 @@ pub fn lancer() {
 
 /// Démarrage de la première instance.
 fn demarrer(app: &AppHandle, commande: Commande, inconnus: &[String]) {
+    // Le journal ne dépend que du dossier local.
+    match systeme::dossier_journal().and_then(|d| journal::installer(&d)) {
+        Ok(_) => {}
+        Err(e) => eprintln!("BreezyShot : journal indisponible : {e}"),
+    }
+    log::info!("demarrage BreezyShot {VERSION}");
     match systeme::dossiers() {
         Ok(dossiers) => {
-            if let Err(e) = journal::installer(&dossiers.journal()) {
-                eprintln!("BreezyShot : journal indisponible : {e}");
-            }
-            log::info!("demarrage BreezyShot {VERSION}");
+            let images = match &dossiers.images {
+                Some(i) => i.display().to_string(),
+                None => "introuvable".into(),
+            };
             log::info!(
-                "dossiers reglages={} local={} images={}",
+                "dossiers reglages={} local={} images={images}",
                 dossiers.reglages.display(),
                 dossiers.local.display(),
-                dossiers.images.display()
             );
         }
         Err(e) => {

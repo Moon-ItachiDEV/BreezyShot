@@ -31,7 +31,8 @@ pub struct Dossiers {
     /// Données locales : `Journal`, `Recents` (Windows : `%LOCALAPPDATA%\BreezyShot`).
     pub local: PathBuf,
     /// Captures enregistrées (Windows : dossier Images connu, puis `BreezyShot`).
-    pub images: PathBuf,
+    /// Résolu mais non exigé avant l'étape 6 : `None` si Windows ne le donne pas.
+    pub images: Option<PathBuf>,
 }
 
 impl Dossiers {
@@ -39,6 +40,23 @@ impl Dossiers {
     pub fn journal(&self) -> PathBuf {
         self.local.join("Journal")
     }
+}
+
+/// Dossier du journal. Ne dépend que du dossier local, pour que le journal marche même
+/// si les autres dossiers sont introuvables.
+pub fn dossier_journal() -> Result<PathBuf, String> {
+    let essai = std::env::var_os(VARIABLE_ESSAI).map(PathBuf::from);
+    resoudre_local(essai.as_deref(), dirs::data_local_dir()).map(|l| l.join("Journal"))
+}
+
+/// Règle pure du dossier local (testée sans système).
+pub fn resoudre_local(essai: Option<&Path>, local: Option<PathBuf>) -> Result<PathBuf, String> {
+    if let Some(racine) = essai.filter(|p| !p.as_os_str().is_empty()) {
+        return Ok(racine.join("local"));
+    }
+    local
+        .map(|l| l.join(NOM_DOSSIER))
+        .ok_or_else(|| "dossier de données locales introuvable".to_string())
 }
 
 /// Résout les dossiers de l'app. Les dossiers ne sont pas créés ici.
@@ -59,21 +77,20 @@ pub fn resoudre_dossiers(
     local: Option<PathBuf>,
     images: Option<PathBuf>,
 ) -> Result<Dossiers, String> {
+    let local = resoudre_local(essai, local)?;
     if let Some(racine) = essai.filter(|p| !p.as_os_str().is_empty()) {
         return Ok(Dossiers {
             reglages: racine.join("reglages"),
-            local: racine.join("local"),
-            images: racine.join("images"),
+            local,
+            images: Some(racine.join("images")),
         });
     }
     let configuration =
         configuration.ok_or("dossier de configuration de l'utilisateur introuvable")?;
-    let local = local.ok_or("dossier de données locales introuvable")?;
-    let images = images.ok_or("dossier Images introuvable")?;
     Ok(Dossiers {
         reglages: configuration.join(NOM_DOSSIER),
-        local: local.join(NOM_DOSSIER),
-        images: images.join(NOM_DOSSIER),
+        local,
+        images: images.map(|i| i.join(NOM_DOSSIER)),
     })
 }
 
@@ -174,7 +191,7 @@ mod tests {
         let d = resoudre_dossiers(Some(Path::new("/tmp/essai")), None, None, None).unwrap();
         assert_eq!(d.reglages, Path::new("/tmp/essai/reglages"));
         assert_eq!(d.local, Path::new("/tmp/essai/local"));
-        assert_eq!(d.images, Path::new("/tmp/essai/images"));
+        assert_eq!(d.images.as_deref(), Some(Path::new("/tmp/essai/images")));
         assert_eq!(d.journal(), Path::new("/tmp/essai/local/Journal"));
     }
 
@@ -189,12 +206,32 @@ mod tests {
         .unwrap();
         assert_eq!(d.reglages, Path::new("/c/BreezyShot"));
         assert_eq!(d.local, Path::new("/l/BreezyShot"));
-        assert_eq!(d.images, Path::new("/i/BreezyShot"));
+        assert_eq!(d.images.as_deref(), Some(Path::new("/i/BreezyShot")));
     }
 
     #[test]
     fn dossier_manquant_est_une_erreur() {
         assert!(resoudre_dossiers(None, None, Some("/l".into()), Some("/i".into())).is_err());
+        assert!(resoudre_dossiers(None, Some("/c".into()), None, Some("/i".into())).is_err());
+    }
+
+    #[test]
+    fn images_optionnel() {
+        let d = resoudre_dossiers(None, Some("/c".into()), Some("/l".into()), None).unwrap();
+        assert_eq!(d.images, None);
+    }
+
+    #[test]
+    fn journal_ne_depend_que_du_local() {
+        assert_eq!(
+            resoudre_local(None, Some("/l".into())).unwrap(),
+            Path::new("/l/BreezyShot")
+        );
+        assert_eq!(
+            resoudre_local(Some(Path::new("/e")), None).unwrap(),
+            Path::new("/e/local")
+        );
+        assert!(resoudre_local(None, None).is_err());
     }
 
     #[test]

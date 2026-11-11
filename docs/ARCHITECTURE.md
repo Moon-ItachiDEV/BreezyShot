@@ -141,6 +141,10 @@ Résolus à un seul endroit (`systeme::dossiers()`), jamais reconstruits ailleur
 Si la variable d'environnement `BREEZYSHOT_DOSSIER_ESSAI` est définie, tout va dessous
 (`reglages/`, `local/`, `images/`) : les essais ne touchent jamais aux vrais dossiers.
 
+Le dossier Images est résolu mais optionnel (`Option`) jusqu'à l'étape 6. Le journal ne
+dépend que du dossier local (`systeme::dossier_journal()`) : un autre dossier introuvable
+ne l'empêche pas.
+
 ### 3.4 Ligne de commande et instance unique
 
 - Une seule instance. Lancer `breezyshot.exe` une seconde fois ne fait rien de visible : la
