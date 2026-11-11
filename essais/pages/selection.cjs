@@ -355,6 +355,26 @@ const L = 1280, H = 400;
     'taille différente : ni prête ni glisser ; prête une fois la taille juste', JSON.stringify({ avantTaille, a }));
   await p.context().close();
 
+  // devicePixelRatio différent de l'échelle annoncée (taille bonne) : la page devient prête,
+  // et les coins suivent l'échelle annoncée.
+  for (const [reelle, annoncee] of [[1.25, 1.5], [1.5, 1.25], [1, 1.25]]) {
+    p = await page({ echelle: reelle });
+    p.echelle = annoncee;
+    await vider(p);
+    await p.evaluate(([e]) => __emettre('selection:montrer', { id: 900, ecrans: [{ x: 0, y: 0, largeur: innerWidth, hauteur: innerHeight }], cote_min: 3 / e, largeur: innerWidth, hauteur: innerHeight, echelle: e }), [annoncee]);
+    await p.waitForTimeout(100);
+    const A = [100.3, 100.7], B = [301.1, 250.2];
+    await glisser(p, A, B);
+    a = await appels(p);
+    const attendu = [...A, ...B].map(v => Math.round(v * annoncee));
+    const fin = a.find(x => x[0] === 'selection_terminee');
+    const obtenu = fin ? [fin[1].depart.x, fin[1].depart.y, fin[1].arrivee.x, fin[1].arrivee.y].map(v => v * annoncee) : [];
+    const pr = a.find(x => x[0] === 'selection_prete');
+    verifier(pr && pr[1].echelle === reelle && obtenu.length === 4 && obtenu.every((v, i) => Math.abs(v - attendu[i]) <= 1 && Math.abs(v - Math.round(v)) < 1e-6),
+      `devicePixelRatio ${reelle} annoncé ${annoncee} : prête, coins justes pour l'échelle annoncée`, JSON.stringify({ pr, attendu, obtenu }));
+    await p.context().close();
+  }
+
   // 10 (relecture). Espace relâchée avant la souris : pas de saut sans bornage.
   p = await page();
   id = await montrer(p);

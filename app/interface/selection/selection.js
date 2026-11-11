@@ -6,8 +6,10 @@
 // - écoute `selection:montrer` { id, ecrans: [{ x, y, largeur, hauteur }], cote_min,
 //   largeur, hauteur, echelle } (pixels CSS de la page ; `largeur`, `hauteur`, `echelle` :
 //   taille et échelle attendues de la page) : retour au repos (voile plein). Dès que
-//   innerWidth/innerHeight (à 1 px près) et devicePixelRatio correspondent pendant deux
-//   images de suite : `selection_prete` { id, largeur, hauteur, echelle } (valeurs lues).
+//   innerWidth/innerHeight correspondent (à 1 px près) pendant deux images de suite :
+//   `selection_prete` { id, largeur, hauteur, echelle } (valeurs lues ; `echelle` est
+//   devicePixelRatio, pour le journal). Le dessin et l'arrondi des coins suivent l'échelle
+//   annoncée par le cœur, pas devicePixelRatio.
 //   Avant cela, aucun glisser n'est accepté. Une demande invalide est ignorée
 //   (console.warn) : le cœur cache la fenêtre au bout de son délai. Une même demande
 //   reçue de nouveau (zone refusée, page rechargée) remet la page au repos.
@@ -61,7 +63,10 @@ function appeler(commande, args, siEchec) {
   }
 }
 
-const echelle = () => window.devicePixelRatio || 1;
+let echelleCoeur = null; // échelle annoncée par le cœur pour l'affichage en cours
+/** L'échelle des conversions du cœur : tout le dessin et l'arrondi des coins la suivent,
+ *  pour rester cohérents avec ce que le cœur convertit. À défaut, celle du navigateur. */
+const echelle = () => echelleCoeur || window.devicePixelRatio || 1;
 /** Arrondi au pixel réel : le trait reste net et les coins tombent sur des pixels entiers. */
 const net = (v) => Math.round(v * echelle()) / echelle();
 const fini = (v) => typeof v === "number" && Number.isFinite(v);
@@ -107,10 +112,9 @@ function repos() {
 }
 
 /** La page a-t-elle la taille et l'échelle que le cœur attend ? */
-const conforme = (m) =>
-  Math.abs(innerWidth - m.largeur) <= 1 &&
-  Math.abs(innerHeight - m.hauteur) <= 1 &&
-  Math.abs(echelle() - m.echelle) < 1e-3;
+// Seule la taille compte : innerWidth × échelle du cœur = rectangle réel de la fenêtre, à
+// 1 px CSS près, et les coins convertis sont justes quel que soit devicePixelRatio.
+const conforme = (m) => Math.abs(innerWidth - m.largeur) <= 1 && Math.abs(innerHeight - m.hauteur) <= 1;
 
 export function montrer(brut) {
   const m = valider(brut);
@@ -124,6 +128,7 @@ export function montrer(brut) {
   prete = false;
   espace = false;
   maj = false;
+  echelleCoeur = m.echelle;
   regler_scene();
   const numero = ++envoi;
   // Deux images de suite à la bonne taille : la fenêtre transparente est peinte, et le
@@ -138,7 +143,12 @@ export function montrer(brut) {
     }
     regler_scene();
     prete = true;
-    appeler("selection_prete", { id: m.id, largeur: innerWidth, hauteur: innerHeight, echelle: echelle() });
+    appeler("selection_prete", {
+      id: m.id,
+      largeur: innerWidth,
+      hauteur: innerHeight,
+      echelle: window.devicePixelRatio || 1,
+    });
   };
   requestAnimationFrame(verifier);
 }
@@ -374,7 +384,7 @@ if (tauri?.event?.listen) {
   );
 } else {
   if (new URLSearchParams(location.search).has("demo")) {
-    montrer({ id: 1, ecrans: [], cote_min: 3, largeur: innerWidth, hauteur: innerHeight, echelle: echelle() });
+    montrer({ id: 1, ecrans: [], cote_min: 3, largeur: innerWidth, hauteur: innerHeight, echelle: devicePixelRatio || 1 });
   }
   // Pour les essais dans un navigateur seulement.
   window.selectionApercu = { montrer, cachee };

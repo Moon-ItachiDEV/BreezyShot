@@ -238,6 +238,13 @@ pub fn cause_depuis_nom(nom: &str) -> Option<Cause> {
     }
 }
 
+/// Vrai si le `devicePixelRatio` de la page s'écarte de plus de 0,01 de l'échelle du cœur.
+/// Rien n'est refusé (les conversions ne dépendent que de la taille de la page) : c'est
+/// seulement écrit au journal.
+pub fn echelle_page_differente(page: f64, coeur: f64) -> bool {
+    !page.is_finite() || (page - coeur).abs() > 0.01
+}
+
 /// Ce que vaut un `selection_terminee` pour l'affichage en cours.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Decision {
@@ -838,12 +845,21 @@ impl Interne {
     }
 
     fn prete(&self, id: u64, page: (f64, f64, f64)) {
-        let duree = self.etat().prete(id, Instant::now());
-        if let Some(duree) = duree {
+        let prete = {
+            let mut etat = self.etat();
+            let echelle = etat.courant(id).map(|a| a.echelle);
+            etat.prete(id, Instant::now()).zip(echelle)
+        };
+        if let Some((duree, echelle_coeur)) = prete {
             let (largeur, hauteur, echelle) = page;
             log::info!(
-                "chrono selection prete {} page {largeur}x{hauteur} echelle {echelle}",
-                duree.as_millis()
+                "chrono selection prete {} page {largeur}x{hauteur} echelle {echelle}{}",
+                duree.as_millis(),
+                if echelle_page_differente(echelle, echelle_coeur) {
+                    " echelle-page-differente"
+                } else {
+                    ""
+                }
             );
             (self.rappel)(Signal::Prete { id, duree });
         }
@@ -931,9 +947,10 @@ pub fn selection_chargee(selection: State<'_, Selection>) {
     selection.interne.page_chargee();
 }
 
-/// La page est visible et peinte, à la taille et à l'échelle attendues (deux images de
-/// suite après `selection:montrer`). `largeur`, `hauteur` : `innerWidth`, `innerHeight` ;
-/// `echelle` : `devicePixelRatio`. Écrits au journal.
+/// La page est visible et peinte, à la taille attendue (deux images de suite après
+/// `selection:montrer`). `largeur`, `hauteur` : `innerWidth`, `innerHeight` ; `echelle` :
+/// `devicePixelRatio`, seulement écrit au journal (` echelle-page-differente` s'il s'écarte
+/// de plus de 0,01 de l'échelle du cœur).
 #[tauri::command]
 pub fn selection_prete(
     selection: State<'_, Selection>,
@@ -1378,6 +1395,14 @@ mod tests {
         assert!(m.is_poisoned());
         assert!(prendre(&m).terminer(id).is_some(), "la fin passe encore");
         assert!(!m.is_poisoned());
+    }
+
+    #[test]
+    fn echelle_de_la_page_seulement_notee() {
+        assert!(!echelle_page_differente(1.25, 1.25));
+        assert!(!echelle_page_differente(1.255, 1.25));
+        assert!(echelle_page_differente(1.5, 1.25));
+        assert!(echelle_page_differente(f64::NAN, 1.0));
     }
 
     #[test]
