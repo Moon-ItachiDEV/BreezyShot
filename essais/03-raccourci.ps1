@@ -42,29 +42,45 @@ function Derniere-Ligne([string]$Motif, [string]$Dossier) {
     return $trouvee
 }
 
-# Attend une ligne qui correspond à $Motif. Rend la ligne, ou lève une erreur claire.
-function Attendre-Motif([string]$Motif, [string]$Dossier, [double]$DelaiS, [string]$Quoi) {
-    $limite = [DateTime]::UtcNow.AddSeconds($DelaiS)
-    do {
-        $l = Derniere-Ligne -Motif $Motif -Dossier $Dossier
-        if ($null -ne $l) { return $l }
-        Start-Sleep -Milliseconds 100
-    } while ([DateTime]::UtcNow -lt $limite)
-    throw "$Quoi : rien dans le journal en $DelaiS s (motif « $Motif »)"
+# Nombre de lignes du journal qui correspondent à $Motif.
+function Compter-Motif([string]$Motif, [string]$Dossier) {
+    $n = 0
+    foreach ($brute in ((Lire-Journal -Dossier $Dossier) -split "`n")) {
+        if ($brute.TrimEnd("`r") -match $Motif) { $n++ }
+    }
+    return $n
 }
 
+# Attend qu'au moins $Fois lignes correspondent à $Motif. Rend la dernière, ou lève une
+# erreur claire. Dans un dossier déjà servi (relance), passer $Fois = déjà vues + 1 : sinon
+# la ligne du lancement précédent répond tout de suite.
+function Attendre-Motif([string]$Motif, [string]$Dossier, [double]$DelaiS, [string]$Quoi, [int]$Fois = 1) {
+    $limite = [DateTime]::UtcNow.AddSeconds($DelaiS)
+    do {
+        if ((Compter-Motif -Motif $Motif -Dossier $Dossier) -ge $Fois) {
+            return (Derniere-Ligne -Motif $Motif -Dossier $Dossier)
+        }
+        Start-Sleep -Milliseconds 100
+    } while ([DateTime]::UtcNow -lt $limite)
+    throw "$Quoi : rien dans le journal en $DelaiS s (motif « $Motif », $Fois fois)"
+}
+
+# Démarre l'app et attend CE démarrage-ci (lignes comptées avant le lancement).
 function Demarrer-Cas([string]$Dossier, [string]$Quoi) {
+    $prets = Compter-Motif -Motif 'application pret$' -Dossier $Dossier
+    $pages = Compter-Motif -Motif 'fenetres +bandeau pret$' -Dossier $Dossier
     $p = Demarrer-App -Dossier $Dossier
-    $null = Attendre-Motif -Motif 'application pret$' -Dossier $Dossier -DelaiS 30 -Quoi "$Quoi : démarrage"
-    $null = Attendre-Motif -Motif 'fenetres +bandeau pret$' -Dossier $Dossier -DelaiS 20 -Quoi "$Quoi : page du bandeau"
+    $null = Attendre-Motif -Motif 'application pret$' -Dossier $Dossier -DelaiS 30 -Quoi "$Quoi : démarrage" -Fois ($prets + 1)
+    $null = Attendre-Motif -Motif 'fenetres +bandeau pret$' -Dossier $Dossier -DelaiS 20 -Quoi "$Quoi : page du bandeau" -Fois ($pages + 1)
     return $p
 }
 
 function Fermer-Cas($Processus, [string]$Dossier, [string]$Quoi) {
+    $arrets = Compter-Motif -Motif 'arret propre$' -Dossier $Dossier
     $q = Quitter-App -DelaiS 10 -Dossier $Dossier
     if (-not $q.Fini) { throw "$Quoi : --quitter n'a pas répondu en 10 s" }
     if (-not $Processus.WaitForExit(10000)) { throw "$Quoi : l'app ne s'est pas fermée en 10 s" }
-    $null = Attendre-Motif -Motif 'arret propre$' -Dossier $Dossier -DelaiS 3 -Quoi "$Quoi : arrêt"
+    $null = Attendre-Motif -Motif 'arret propre$' -Dossier $Dossier -DelaiS 3 -Quoi "$Quoi : arrêt" -Fois ($arrets + 1)
 }
 
 # --- Partie commune (tous systèmes) -------------------------------------------------------
@@ -222,6 +238,7 @@ public static void Clic(int x, int y) {
             Fermer-Cas $p $db '(b)'
             # Relance : la même situation n'est pas annoncée deux fois.
             $p = Demarrer-Cas -Dossier $db -Quoi '(b) relance'
+            Verifier '(b) relance : deux démarrages complets dans ce dossier' ((Compter-Motif -Motif 'application pret$' -Dossier $db) -eq 2) | Out-Null
             Verifier '(b) relance : annonce raccourci: deja faite' ((Compter-Lignes -Texte 'annonce raccourci: deja faite' -Dossier $db) -eq 1) | Out-Null
             Verifier '(b) relance : une seule annonce affichée en tout' ((Compter-Lignes -Texte 'annonce raccourci: reserve_par_le_systeme' -Dossier $db) -eq 1) | Out-Null
             Fermer-Cas $p $db '(b) relance'
@@ -254,6 +271,15 @@ catch {
     Verifier "déroulement de l'essai" $false "$_" | Out-Null
 }
 finally {
+    # En cas d'échec, la fin du journal de chaque cas dans la sortie de l'essai : ce que
+    # l'app a réellement fait, lisible même sans télécharger les résultats.
+    if (@($script:Verifications | Where-Object { -not $_.Reussi }).Count -gt 0) {
+        foreach ($d in $script:Dossiers) {
+            Write-Host "--- fin du journal du cas $(Split-Path -Leaf $d) ---"
+            $lignes = @((Lire-Journal -Dossier $d) -split "`n" | Where-Object { $_.Trim() -ne '' })
+            $lignes | Select-Object -Last 25 | ForEach-Object { Write-Host $_.TrimEnd("`r") }
+        }
+    }
     # Journaux de chaque cas, puis bilan.
     foreach ($a in $script:Auxiliaires) { try { if (-not $a.HasExited) { $a.Kill() } } catch { } }
     foreach ($d in $script:Dossiers) {
