@@ -175,6 +175,44 @@ pub fn decider_impr_ecran(valeur: Option<u32>, build: Option<u32>) -> bool {
     }
 }
 
+/// Le système sur lequel tourne l'app. L'Application le traduit pour les modules qui en
+/// ont besoin (les réglages par défaut), sans qu'ils aient à connaître `systeme`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Systeme {
+    Windows,
+    Mac,
+    /// Linux et le reste (développement).
+    Autre,
+}
+
+/// Le système actuel.
+pub fn systeme() -> Systeme {
+    plateforme::systeme()
+}
+
+/// Gestes sur une fenêtre de l'interface que Tauri ne fait pas sans risque de focus.
+/// Chaque fonction rend `Ok(true)` si le geste a été fait ici, `Ok(false)` si l'appelant
+/// doit passer par Tauri (hors Windows).
+///
+/// Montre la fenêtre sans l'activer (Windows : `ShowWindow(SW_SHOWNOACTIVATE)`, puis
+/// remise au premier plan des fenêtres « toujours au-dessus », sans activation).
+pub fn montrer_sans_activer(fenetre: &tauri::WebviewWindow) -> Result<bool, String> {
+    plateforme::montrer_sans_activer(fenetre)
+}
+
+/// Laisse passer les clics à travers la fenêtre (`oui`) ou les reçoit (`non`).
+/// Windows : styles étendus `WS_EX_TRANSPARENT | WS_EX_LAYERED`, posés directement pour ne
+/// pas faire réappliquer à Tauri tous les styles de la fenêtre.
+pub fn traverser_clics(fenetre: &tauri::WebviewWindow, traverser: bool) -> Result<bool, String> {
+    plateforme::traverser_clics(fenetre, traverser)
+}
+
+/// Exclut la fenêtre des captures d'écran et dit si c'est effectif (relu auprès du
+/// système). Hors Windows : `false`.
+pub fn exclure_des_captures(fenetre: &tauri::WebviewWindow) -> bool {
+    plateforme::exclure_des_captures(fenetre)
+}
+
 /// Réglage Windows « Effets d'animation » éteint. Hors Windows : non.
 pub fn animations_reduites() -> bool {
     plateforme::animations_reduites().unwrap_or(false)

@@ -1,7 +1,7 @@
 //! Gestes propres à Windows. Lecture seule du registre : l'app n'y écrit jamais.
 
 use ::windows::core::{w, PCWSTR};
-use ::windows::Win32::Foundation::{CloseHandle, ERROR_SUCCESS, WAIT_OBJECT_0};
+use ::windows::Win32::Foundation::{CloseHandle, ERROR_SUCCESS, HWND, WAIT_OBJECT_0};
 use ::windows::Win32::System::Registry::{
     RegCloseKey, RegGetValueW, RegNotifyChangeKeyValue, RegOpenKeyExW, HKEY, HKEY_CURRENT_USER,
     HKEY_LOCAL_MACHINE, KEY_NOTIFY, KEY_READ, REG_NOTIFY_CHANGE_LAST_SET, RRF_RT_REG_DWORD,
@@ -15,7 +15,11 @@ use ::windows::Win32::UI::HiDpi::{
     DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2,
 };
 use ::windows::Win32::UI::WindowsAndMessaging::{
-    SystemParametersInfoW, SPI_GETCLIENTAREAANIMATION, SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS,
+    GetWindowDisplayAffinity, GetWindowLongW, SetWindowDisplayAffinity, SetWindowLongW,
+    SetWindowPos, ShowWindow, SystemParametersInfoW, GWL_EXSTYLE, HWND_TOPMOST,
+    SPI_GETCLIENTAREAANIMATION, SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE,
+    SWP_NOZORDER, SWP_SHOWWINDOW, SW_SHOWNOACTIVATE, SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS,
+    WDA_EXCLUDEFROMCAPTURE, WS_EX_LAYERED, WS_EX_TRANSPARENT,
 };
 
 pub type RappelTheme = Box<dyn Fn(super::Theme) + Send + 'static>;
@@ -194,4 +198,87 @@ pub fn valeur_transparence() -> Option<u32> {
         CLE_PERSONNALISER,
         w!("EnableTransparency"),
     )
+}
+
+pub fn systeme() -> super::Systeme {
+    super::Systeme::Windows
+}
+
+/// Le handle Win32 d'une fenêtre de l'interface.
+fn hwnd(fenetre: &tauri::WebviewWindow) -> Result<HWND, String> {
+    let h = fenetre
+        .hwnd()
+        .map_err(|e| format!("handle de fenetre: {e}"))?;
+    Ok(HWND(h.0))
+}
+
+/// Montre sans activer. On ne passe pas par `show()` de Tauri : tao y appelle
+/// `ShowWindow(SW_SHOW)`, qui active la fenêtre (window_state.rs, `set_window_flags`).
+/// Le drapeau « visible » de tao reste donc faux : son `hide()` appelle quand même
+/// `ShowWindow(SW_HIDE)` (même fonction), ce qui suffit pour cacher.
+pub fn montrer_sans_activer(fenetre: &tauri::WebviewWindow) -> Result<bool, String> {
+    let h = hwnd(fenetre)?;
+    // SAFETY : handle valide d'une fenêtre de ce processus ; aucun tampon.
+    unsafe {
+        let _ = ShowWindow(h, SW_SHOWNOACTIVATE);
+        SetWindowPos(
+            h,
+            Some(HWND_TOPMOST),
+            0,
+            0,
+            0,
+            0,
+            SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW,
+        )
+        .map_err(|e| format!("SetWindowPos: {e}"))?;
+    }
+    Ok(true)
+}
+
+/// Mêmes styles que `set_ignore_cursor_events` de tao (window_state.rs :
+/// `WS_EX_TRANSPARENT | WS_EX_LAYERED`), posés directement : passer par tao réappliquerait
+/// tous les styles et, comme tao croit la fenêtre cachée, la cacherait.
+pub fn traverser_clics(fenetre: &tauri::WebviewWindow, traverser: bool) -> Result<bool, String> {
+    let h = hwnd(fenetre)?;
+    let bits = (WS_EX_TRANSPARENT.0 | WS_EX_LAYERED.0) as i32;
+    // SAFETY : lecture et écriture du style étendu d'une fenêtre de ce processus.
+    unsafe {
+        let actuel = GetWindowLongW(h, GWL_EXSTYLE);
+        let voulu = if traverser {
+            actuel | bits
+        } else {
+            actuel & !bits
+        };
+        if voulu != actuel {
+            SetWindowLongW(h, GWL_EXSTYLE, voulu);
+            SetWindowPos(
+                h,
+                None,
+                0,
+                0,
+                0,
+                0,
+                SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED,
+            )
+            .map_err(|e| format!("SetWindowPos: {e}"))?;
+        }
+    }
+    Ok(true)
+}
+
+/// `SetWindowDisplayAffinity(WDA_EXCLUDEFROMCAPTURE)` (Windows 10 2004 et plus), relu par
+/// `GetWindowDisplayAffinity`.
+pub fn exclure_des_captures(fenetre: &tauri::WebviewWindow) -> bool {
+    let Ok(h) = hwnd(fenetre) else {
+        return false;
+    };
+    let mut affinite = 0u32;
+    // SAFETY : handle valide ; `affinite` reçoit un DWORD.
+    unsafe {
+        let _ = SetWindowDisplayAffinity(h, WDA_EXCLUDEFROMCAPTURE);
+        if GetWindowDisplayAffinity(h, &mut affinite).is_err() {
+            return false;
+        }
+    }
+    affinite == WDA_EXCLUDEFROMCAPTURE.0
 }

@@ -30,3 +30,24 @@ pub fn animations_reduites() -> Option<bool> {
 pub fn valeur_transparence() -> Option<u32> {
     None
 }
+
+pub fn systeme() -> super::Systeme {
+    if cfg!(target_os = "macos") {
+        super::Systeme::Mac
+    } else {
+        super::Systeme::Autre
+    }
+}
+
+/// Hors Windows : l'appelant passe par Tauri.
+pub fn montrer_sans_activer(_fenetre: &tauri::WebviewWindow) -> Result<bool, String> {
+    Ok(false)
+}
+
+pub fn traverser_clics(_fenetre: &tauri::WebviewWindow, _traverser: bool) -> Result<bool, String> {
+    Ok(false)
+}
+
+pub fn exclure_des_captures(_fenetre: &tauri::WebviewWindow) -> bool {
+    false
+}

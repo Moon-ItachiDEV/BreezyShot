@@ -1,7 +1,14 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
-  "identifier": "defaut",
-  "description": "Droits des pages de l'interface. Aucune fenêtre pour l'instant.",
-  "windows": ["*"],
-  "permissions": ["core:default"]
+  "identifier": "bandeau",
+  "description": "Droits de la page du bandeau : écouter ses messages et appeler ses quatre commandes, rien d'autre.",
+  "windows": ["bandeau"],
+  "permissions": [
+    "core:event:allow-listen",
+    "core:event:allow-unlisten",
+    "allow-bandeau-pret",
+    "allow-bandeau-zone",
+    "allow-bandeau-action",
+    "allow-bandeau-termine"
+  ]
 }
