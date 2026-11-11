@@ -142,6 +142,9 @@ Résolus à un seul endroit (`systeme::dossiers()`), jamais reconstruits ailleur
 
 Si la variable d'environnement `BREEZYSHOT_DOSSIER_ESSAI` est définie, tout va dessous
 (`reglages/`, `local/`, `images/`) : les essais ne touchent jamais aux vrais dossiers.
+Si `BREEZYSHOT_ESSAI_CAPTURABLE=1` (lu par `systeme::essai_capturable()`, essais seulement),
+le bandeau n'est pas exclu des captures (`bandeau exclu des captures: non (essai)`), pour
+qu'un essai prouve par une copie d'écran qu'il est réellement peint.
 
 Le dossier Images est résolu mais optionnel (`Option`) jusqu'à l'étape 6. Le journal ne
 dépend que du dossier local (`systeme::dossier_journal()`) : un autre dossier introuvable
@@ -327,9 +330,31 @@ Module pur : il reçoit le dossier où écrire, ne connaît ni Tauri ni les autr
 - **Sans focus, sous Windows** : la fenêtre est créée `focused(false)` et `focusable(false)`
   (tao pose `WS_EX_NOACTIVATE`). Elle n'est jamais montrée par `show()` de Tauri, car tao y
   appelle `ShowWindow(SW_SHOW)` qui active la fenêtre : `systeme::montrer_sans_activer`
-  (`SW_SHOWNOACTIVATE`). Pour la même raison, les clics traversants passent par
+  (`SW_SHOWNOACTIVATE`). tao croit donc la fenêtre cachée, et son `hide()` ne fait rien
+  (`apply_diff` sort quand aucun drapeau ne change) : on cache par `systeme::cacher_sans_tao`
+  (`SW_HIDE`). Pour la même raison, les clics traversants passent par
   `systeme::traverser_clics` (mêmes styles que tao, posés sans lui faire réappliquer les
-  styles). L'exclusion des captures est relue auprès du système et écrite au journal.
+  styles). À la création, `systeme::preparer_fenetre_outil` retire `WS_EX_APPWINDOW` (posé
+  par tao pour une fenêtre sans parent) et pose `WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE` : ni
+  barre des tâches ni Alt+Tab. Le HWND est écrit au journal (`bandeau fenetre <hwnd>`).
+  L'exclusion des captures est relue auprès du système et écrite au journal.
+- **Verrous et fils** : l'état du bandeau n'est jamais verrouillé pendant un appel à Tauri
+  ou un `emit` ; `afficher` peut venir de n'importe quel fil, les gestes sur la fenêtre
+  partent sur le fil principal. Un geste « cliquable » posté par la surveillance relit
+  l'état : il ne s'applique qu'au message en cours, s'il porte une croix.
+- **Surveillance** : position de la souris par `systeme` (`GetCursorPos`), place et échelle
+  de la fenêtre relues à chaque tour ; toutes les 30 ms quand la souris est à moins de
+  200 px réels de la pilule, toutes les 150 ms sinon. Elle s'arrête quand le message n'est
+  plus en cours, à l'arrêt de l'app et à la destruction de la fenêtre.
+- **Filet de sécurité** (l'app ne gêne jamais l'écran si la page meurt), décision pure
+  `cacher_d_office` : une réussite non terminée après 5 s (`DELAI_REUSSITE_MAX`) est
+  cachée d'office ; un message à croix sans `bandeau_zone` valide 3 s après l'affichage
+  (`DELAI_ZONE_MAX`) aussi (`bandeau cache d'office <id>`). Un `bandeau_pret` répété
+  renvoie le message en cours. `bandeau_zone` refuse une valeur non finie et borne le
+  rectangle à la fenêtre (0..560 × 0..220 pixels CSS).
+- **Annonce retenue une fois montrée** : la situation n'est écrite dans `etat.json` qu'au
+  premier `bandeau_zone` valide de ce message (`fenetres::Signal::MessageMontre`, ligne
+  `annonce montree <id>: situation retenue`), pas à l'envoi.
 - **Page prête** : la page appelle `bandeau_pret {}` une fois son écoute de
   `bandeau:afficher` en place ; un message demandé avant (annonce du démarrage) attend ce
   moment.
@@ -380,6 +405,12 @@ Module pur : il reçoit le dossier où écrire, ne connaît ni Tauri ni les autr
 - `node outils/generer-jetons.mjs --verifier` : `jetons.css` est à jour. `node
   essais/pages/bandeau.cjs` : la page du bandeau dans Chromium, servie avec la CSP de l'app
   (job `pages`, Linux).
+- Essai 03 sous Windows, en plus des raccourcis : style étendu du bandeau (outil, sans
+  `APPWINDOW`, sans activation), `IsWindowVisible` faux après `bandeau termine`,
+  `WindowFromPoint` à côté de la pilule (pas le bandeau) et sur la croix (le bandeau),
+  copie d'écran de la pilule exclue des captures (rien) et, avec
+  `BREEZYSHOT_ESSAI_CAPTURABLE=1`, peinte (fond `acrylic-solid` à ±6 par canal ;
+  `bandeau-windows.png` et `bandeau-windows-large.png` dans les résultats).
 - `essais/` : un script par étape (`01-socle.ps1`, `02-reglages.ps1`, `03-raccourci.ps1`),
   lancés par `essais/lancer.ps1` sur le .exe de release. Chaque essai démarre l'app avec
   `BREEZYSHOT_DOSSIER_ESSAI`, agit (lancer une seconde instance, simuler une touche, abîmer un

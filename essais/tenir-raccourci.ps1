@@ -22,7 +22,10 @@ public static extern bool UnregisterHotKey(IntPtr hWnd, int id);
 
 # MOD_NOREPEAT (0x4000) : comme global-hotkey.
 $tenu = [BreezyShotEssai.Raccourci]::RegisterHotKey([IntPtr]::Zero, 1, [uint32]($Mods -bor 0x4000), [uint32]$Vk)
-Set-Content -LiteralPath $Fichier -Value $(if ($tenu) { 'tenu' } else { 'refuse' }) -Encoding utf8
+# Écrit dans un fichier temporaire puis renomme : l'essai ne lit jamais un fichier à moitié écrit.
+$temporaire = "$Fichier.tmp"
+Set-Content -LiteralPath $temporaire -Value $(if ($tenu) { 'tenu' } else { 'refuse' }) -Encoding utf8
+Move-Item -LiteralPath $temporaire -Destination $Fichier -Force
 if ($tenu) {
     try { Start-Sleep -Seconds $DureeS }
     finally { [void][BreezyShotEssai.Raccourci]::UnregisterHotKey([IntPtr]::Zero, 1) }
