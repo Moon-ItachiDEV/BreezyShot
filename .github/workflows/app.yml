@@ -154,3 +154,38 @@ jobs:
       - name: Tests
         working-directory: app/coeur
         run: cargo test --locked
+
+  publier:
+    name: Version d'essai (pré-version GitHub)
+    # Seulement quand main avance et que tout le reste est vert : le .exe qui vient de
+    # passer les essais devient la pré-version « v<version>-essai », remplacée à chaque fois.
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    needs: [windows, pages, macos]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Reprendre le .exe essayé
+        uses: actions/download-artifact@v4
+        with:
+          name: breezyshot-exe
+          path: exe
+
+      - name: Publier la pré-version
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version=$(sed -n 's/^version = "\(.*\)"/\1/p' app/coeur/Cargo.toml | head -1)
+          test -n "$version"
+          etiquette="v${version}-essai"
+          fichier="exe/BreezyShot-${version}-essai.exe"
+          mv exe/breezyshot.exe "$fichier"
+          gh release delete "$etiquette" --yes --cleanup-tag || true
+          # La suppression de l'étiquette n'est pas immédiate : sans attente, la nouvelle
+          # pré-version pourrait pointer l'ancien commit.
+          sleep 10
+          gh release create "$etiquette" "$fichier" --prerelease \
+            --title "BreezyShot ${version} (essai)" --notes-file docs/ESSAI.md --target "$GITHUB_SHA"

@@ -13,7 +13,7 @@
 # perte de focus annule, trois captures sans fuite de fenêtres ni de fils ; un glisser qui
 # finit sur le dernier pixel du bureau garde la dernière colonne et la dernière ligne.
 # Cas B : (8) enregistrement après capture. Cas C : (10) dossier impossible.
-# (11) À chaque fin : --quitter → arret propre, aucune fenêtre BreezyShot ne reste.
+# (11) À chaque fin : --quitter → arret propre, aucune instance BreezyShot ne reste en vie.
 # Sur tout l'essai : aucune fin « muette » ni « impossible », et chaque « chrono selection
 # prete » a son échelle égale au page-dpr.
 #
@@ -150,11 +150,11 @@ function Fermer-Cas($Processus, [string]$Dossier, [string]$Quoi) {
     $null = Attendre-Motif -Motif 'arret propre$' -Dossier $Dossier -DelaiS 3 -Quoi "$Quoi : arrêt" -Fois ($arrets + 1)
     Verifier "(11) $Quoi : --quitter → arret propre" $true | Out-Null
     if ($IsWindows) {
-        # Énumération de TOUTES les fenêtres de haut niveau (EnumWindows) : aucune de classe
-        # BreezyShotEcranFige, aucune qui appartienne encore au PID de l'app.
+        # Windows détruit les fenêtres d'un processus qui sort : ceci prouve seulement
+        # qu'aucune autre instance n'est restée en vie avec un écran figé (EnumWindows).
         $figees = [BreezyShotEssai.Zone]::FenetresDeClasse('BreezyShotEcranFige')
         $restes = [BreezyShotEssai.Zone]::FenetresDe([int[]]@($Processus.Id), $false)
-        Verifier "(11) $Quoi : aucune fenêtre BreezyShot ne reste (toutes les fenêtres énumérées)" (($figees.Length -eq 0) -and ($restes.Length -eq 0)) "écrans figés $($figees.Length), fenêtres du PID $($Processus.Id) : $($restes.Length)" | Out-Null
+        Verifier "(11) $Quoi : aucune instance BreezyShot restée en vie (toutes les fenêtres énumérées)" (($figees.Length -eq 0) -and ($restes.Length -eq 0)) "écrans figés $($figees.Length), fenêtres du PID $($Processus.Id) : $($restes.Length)" | Out-Null
     }
 }
 
@@ -435,7 +435,7 @@ public static string[] Ecarts(byte[] o, int stride, int l, int h, int[] c, int m
             finally { $rs.Dispose() }
         }
 
-        # Une fonction rend ses éléments un à un : un seul devient un scalaire, aucun devient rien,
+# Une fonction rend ses éléments un à un : un seul devient un scalaire, aucun devient rien,
 # et sous StrictMode `.Count` lève sur les deux. Chaque appel est donc entouré de @().
 function Fichiers-Png([string]$Dossier) {
             if (-not (Test-Path -LiteralPath $Dossier)) { return @() }
