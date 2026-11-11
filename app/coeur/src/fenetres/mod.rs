@@ -4,6 +4,7 @@
 //! de la page remonte à l'Application par `Signal`.
 
 mod place;
+pub mod selection;
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -23,6 +24,14 @@ pub use place::{
 pub const ETIQUETTE_BANDEAU: &str = "bandeau";
 /// Événement écouté par la page.
 pub const EVENEMENT_AFFICHER: &str = "bandeau:afficher";
+
+/// Arguments de WebView2, les mêmes pour toutes les fenêtres : WebView2 refuse de créer
+/// une seconde fenêtre dont les arguments diffèrent de la première (même dossier de
+/// données). Ce sont ceux que wry passe par défaut (wry webview2/mod.rs, `default_args`,
+/// plus `--autoplay-policy` car `autoplay` vaut vrai par défaut, wry lib.rs), avec en plus
+/// `CalculateNativeWinOcclusion` coupé : une page cachée ou couverte reste vivante et se
+/// repeint, la sélection apparaît donc tout de suite.
+pub const ARGUMENTS_NAVIGATEUR: &str = "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection,CalculateNativeWinOcclusion --autoplay-policy=no-user-gesture-required";
 
 /// Genre d'un message.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -185,6 +194,7 @@ impl Bandeau {
         .skip_taskbar(true)
         .resizable(false)
         .content_protected(!capturable)
+        .additional_browser_args(ARGUMENTS_NAVIGATEUR)
         .build()
         .map_err(|e| format!("fenetre du bandeau: {e}"))?;
         if let Err(e) = systeme::preparer_fenetre_outil(&fenetre) {
@@ -459,6 +469,21 @@ impl Bandeau {
             }
             log::warn!("bandeau cache d'office {id}");
         }
+    }
+
+    /// Cache tout de suite le message en cours, sans attendre la page (avant une capture :
+    /// le bandeau ne doit ni figurer sur la photo ni rester au-dessus de l'écran figé).
+    /// Rend vrai s'il y avait un message en cours, donc une fenêtre peut-être à l'écran.
+    /// Fil principal. La page garde son dernier message jusqu'au suivant, qui le remplace ;
+    /// un `bandeau_termine` de l'ancien est ignoré (id qui n'est plus en cours).
+    pub fn cacher(&self) -> bool {
+        if !self.retirer(None) {
+            return false;
+        }
+        if let Some(f) = self.fenetre() {
+            cacher(&f);
+        }
+        true
     }
 
     /// À l'arrêt de l'app : la surveillance s'arrête, la fenêtre est cachée puis détruite.

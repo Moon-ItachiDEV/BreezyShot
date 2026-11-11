@@ -1,0 +1,14 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "selection",
+  "description": "Droits de la page de sélection : écouter ses événements et appeler ses quatre commandes, rien d'autre.",
+  "windows": ["selection"],
+  "permissions": [
+    "core:event:allow-listen",
+    "core:event:allow-unlisten",
+    "allow-selection-chargee",
+    "allow-selection-prete",
+    "allow-selection-terminee",
+    "allow-selection-annulee"
+  ]
+}

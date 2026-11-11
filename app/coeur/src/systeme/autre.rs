@@ -72,3 +72,36 @@ pub fn position_souris() -> Option<(f64, f64)> {
 pub fn rectangle_fenetre(_identifiant: isize) -> Option<(i32, i32, u32, u32, f64)> {
     None
 }
+
+// Sélection (étape 5) : hors Windows, l'appelant passe par Tauri.
+
+pub fn preparer_fenetre_outil_active(_fenetre: &tauri::WebviewWindow) -> Result<bool, String> {
+    Ok(false)
+}
+
+pub fn poser_au_dessus(
+    _fenetre: &tauri::WebviewWindow,
+    _rect: super::Rect,
+) -> Result<bool, String> {
+    Ok(false)
+}
+
+pub fn prendre_premier_plan(_fenetre: &tauri::WebviewWindow) -> Result<bool, String> {
+    Ok(false)
+}
+
+pub fn placer_sous(_dessous: isize, _dessus: isize) -> Result<bool, String> {
+    Ok(false)
+}
+
+pub fn fenetre_premier_plan() -> Option<isize> {
+    None
+}
+
+pub fn rendre_premier_plan(_identifiant: isize) -> bool {
+    false
+}
+
+pub fn cacher_fenetre_async(_identifiant: isize) -> bool {
+    false
+}

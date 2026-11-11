@@ -6,26 +6,39 @@
 //! 2. ajouter la variante `Evenement::X(module::Signal)` et son cas dans `traiter` ;
 //! 3. libérer ce qu'il tient dans `arreter` (raccourcis, fenêtres) ;
 //! 4. ajouter ses entrées de menu dans `entrees_menu`.
+//!
+//! Capture d'une zone (§3.6) : `lancer_capture` puis `traiter_zone` font les gestes,
+//! `zone.rs` dit lesquels (fonctions pures). Tout ce qui montre ou cache se fait sur le fil
+//! principal ; la sortie (disque, presse-papiers) part dans un fil à part.
 
 pub mod arguments;
 pub mod etat;
 pub mod etats;
 pub mod icone;
 pub mod journal;
+pub mod zone;
 
 use std::collections::BTreeMap;
-use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
-use std::sync::Mutex;
+use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
+use std::sync::{Arc, Mutex, OnceLock};
+use std::thread::ThreadId;
+use std::time::{Duration, Instant};
 
 use tauri::{AppHandle, Manager, RunEvent};
 
+use crate::capture;
+use crate::fenetres::selection::{self, Selection};
 use crate::fenetres::{self, Bandeau, Genre, Message};
 use crate::raccourcis::{self, Bilan, Decision};
 use crate::reglages::{self, Constat, Plateforme, Reglages};
-use crate::systeme::{self, Systeme, Theme};
+use crate::sortie;
+use crate::systeme::gel::{self, Changement};
+use crate::systeme::{self, Dossiers, Systeme, Theme};
 use arguments::Commande;
-use etats::{Automate, Declencheur, Mode};
+use etats::{Automate, Declencheur, Etat, Mode};
 use icone::EntreeMenu;
+use zone::{Arrivee, Geste, Probleme, Vue};
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -33,6 +46,13 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 pub const MENU_QUITTER: &str = "quitter";
 /// Identifiant de l'entrée « Capturer une zone ».
 pub const MENU_CAPTURER_ZONE: &str = "capturer_zone";
+
+/// Si le fil principal ne répond plus pendant ce délai alors que l'écran figé est montré,
+/// l'app s'arrête d'elle-même : l'écran ne doit jamais rester couvert.
+pub const DELAI_BLOCAGE: Duration = Duration::from_secs(5);
+
+/// Attente maximale du compositeur après avoir caché le bandeau, avant la photo.
+pub const ATTENTE_COMPOSITION: Duration = Duration::from_millis(100);
 
 /// Les actions dont la capture existe : seules celles-ci reçoivent un raccourci (§5).
 /// `plein_ecran` et `fenetre` s'ajouteront avec leur étape.
@@ -51,6 +71,76 @@ pub enum Evenement {
     Raccourci(raccourcis::Signal),
     /// Signal du module des fenêtres (clic dans le bandeau).
     Fenetres(fenetres::Signal),
+    /// Signal de la sélection de zone.
+    Selection(selection::Signal),
+    /// Le bureau a changé pendant que l'écran figé était montré (déjà caché par le Gel).
+    Bureau(Changement),
+    /// La sortie d'une capture est finie (rendue par son fil).
+    SortieFaite(Box<FinSortie>),
+    /// L'échéance de la sortie numéro `n` est tombée (ou son fil s'est arrêté).
+    SortieEchue(u64),
+    /// Annonce du démarrage, postée par `demarrer` pour un tour de la boucle déjà lancée.
+    AnnonceDemarrage { local: PathBuf, bilan: Bilan },
+}
+
+/// Ce que le fil de sortie rend au fil principal.
+#[derive(Debug, Clone, PartialEq)]
+pub struct FinSortie {
+    /// Numéro de la sortie : un bilan qui n'est pas celui attendu est ignoré.
+    pub numero: u64,
+    pub bilan: sortie::Bilan,
+    pub demande: sortie::Demande,
+    pub duree_decoupe: Duration,
+    pub duree_sortie: Duration,
+    /// Réception du signal `Zone`.
+    pub relache: Instant,
+}
+
+/// Une capture de zone en cours, de `montrer_ecran_fige` jusqu'au découpage ou à
+/// l'abandon. Elle tient la photo et la garde de l'écran.
+struct CaptureEnCours {
+    gel: capture::Gel,
+    /// L'affichage de sélection ; `None` pendant `Selection::montrer`.
+    selection: Option<u64>,
+    garde: GardeEcran,
+}
+
+/// Filet de sécurité : à sa destruction, l'écran figé et la sélection sont cachés et Échap
+/// libéré ; `cacher_tout` le fait plus tôt. Détruite à chaque fin et chaque erreur, et par
+/// `lancer_capture` tant qu'elle n'est pas rangée. Rangée dans le `Mutex` de l'état, une
+/// panique ne la détruit pas : c'est alors la mort du processus (abort dans une procédure
+/// `extern "system"`, panique relancée par tao ailleurs) qui libère l'écran.
+struct GardeEcran {
+    app: AppHandle,
+    fait: bool,
+}
+
+impl GardeEcran {
+    fn new(app: &AppHandle) -> GardeEcran {
+        GardeEcran {
+            app: app.clone(),
+            fait: false,
+        }
+    }
+
+    /// Cache l'écran figé et la sélection, libère Échap. Sûr de n'importe quel fil (les
+    /// deux masquages le sont ; Échap est libéré sur le fil principal).
+    fn cacher_tout(&mut self) {
+        self.fait = true;
+        gel::cacher_ecran_fige();
+        if let Some(s) = self.app.try_state::<Selection>() {
+            s.cacher();
+        }
+        liberer_echap(&self.app);
+    }
+}
+
+impl Drop for GardeEcran {
+    fn drop(&mut self) {
+        if !self.fait {
+            self.cacher_tout();
+        }
+    }
 }
 
 /// État partagé de l'Application, tenu par Tauri (`app.state::<Application>()`).
@@ -67,6 +157,20 @@ pub struct Application {
     /// Annonce affichée mais pas encore vue : `(id du message, dossier local, situation)`.
     /// La situation n'est retenue dans `etat.json` qu'une fois le message montré.
     annonce_en_attente: Mutex<Option<AnnonceEnAttente>>,
+    /// Le fil principal (celui de la boucle d'événements), noté au démarrage.
+    fil_principal: OnceLock<ThreadId>,
+    /// Dossiers résolus au démarrage.
+    dossiers: Mutex<Option<Dossiers>>,
+    /// La capture en cours. Touchée sur le fil principal seulement, verrou jamais tenu
+    /// pendant un appel à un module.
+    capture: Mutex<Option<CaptureEnCours>>,
+    /// Vrai pendant qu'Échap est réservé en global.
+    echap_reserve: AtomicBool,
+    /// Numéro de la dernière sortie lancée.
+    derniere_sortie: AtomicU64,
+    /// La sortie dont on attend le bilan ; `None` une fois le bilan reçu ou l'échéance
+    /// tombée.
+    sortie_attendue: Mutex<Option<u64>>,
 }
 
 /// Une annonce envoyée au bandeau, dont la situation attend d'être retenue.
@@ -92,7 +196,11 @@ pub fn lancer() {
             fenetres::bandeau_pret,
             fenetres::bandeau_zone,
             fenetres::bandeau_action,
-            fenetres::bandeau_termine
+            fenetres::bandeau_termine,
+            fenetres::selection::selection_chargee,
+            fenetres::selection::selection_prete,
+            fenetres::selection::selection_terminee,
+            fenetres::selection::selection_annulee
         ])
         .setup(move |app| {
             demarrer(app.handle(), commande, &inconnus);
@@ -131,6 +239,11 @@ fn installer_journal_secours() {
 
 /// Démarrage de la première instance.
 fn demarrer(app: &AppHandle, commande: Commande, inconnus: &[String]) {
+    // `setup` tourne sur le fil principal (celui de la boucle d'événements).
+    let _ = app
+        .state::<Application>()
+        .fil_principal
+        .set(std::thread::current().id());
     // Le journal ne dépend que du dossier local.
     if let Err(e) = systeme::dossier_journal().and_then(|d| journal::installer(&d)) {
         // Dossier local introuvable ou non inscriptible : journal de secours.
@@ -179,6 +292,9 @@ fn demarrer(app: &AppHandle, commande: Commande, inconnus: &[String]) {
     };
     log::info!("echelle par ecran v2: {echelle}");
     let dossiers = dossiers.ok();
+    if let Ok(mut d) = app.state::<Application>().dossiers.lock() {
+        d.clone_from(&dossiers);
+    }
 
     // Réglages.
     let plateforme = plateforme_reglages(systeme::systeme());
@@ -208,6 +324,9 @@ fn demarrer(app: &AppHandle, commande: Commande, inconnus: &[String]) {
         }
         Err(e) => log::warn!("bandeau indisponible: {e}"),
     }
+
+    // Écran figé et sélection (capture de zone).
+    preparer_capture(app);
 
     // Raccourcis.
     let pour_raccourcis = app.clone();
@@ -250,15 +369,95 @@ fn demarrer(app: &AppHandle, commande: Commande, inconnus: &[String]) {
         log::warn!("{e}");
     }
 
-    // Annonce du démarrage (une seule fois par situation).
+    // Annonce du démarrage (une seule fois par situation). Postée pour la boucle lancée,
+    // jamais envoyée depuis `setup` : la création de la sélection (WebView2) y fait
+    // tourner une boucle imbriquée, et un message montré là n'a jamais reçu sa zone.
     if let Some(d) = &dossiers {
-        annoncer_raccourcis(app, &d.local, &bilan);
+        poster_plus_tard(
+            app,
+            Evenement::AnnonceDemarrage {
+                local: d.local.clone(),
+                bilan: bilan.clone(),
+            },
+        );
     }
 
     app.state::<Application>()
         .demarree
         .store(true, Ordering::SeqCst);
     log::info!("pret");
+}
+
+/// Prépare l'écran figé, ses filets de sécurité et la sélection (fil principal). Un échec
+/// est écrit au journal ; une capture répondra alors « Impossible de capturer ».
+fn preparer_capture(app: &AppHandle) {
+    match gel::preparer_ecran_fige() {
+        Ok(()) => {
+            log::info!("ecran fige pret");
+            if let Some(h) = gel::poignee_ecran_fige() {
+                log::info!("ecran fige fenetre {h}");
+            }
+            log::info!(
+                "ecran fige: verrouillage de session suivi: {}",
+                if gel::surveillance_session() {
+                    "oui"
+                } else {
+                    "non"
+                }
+            );
+        }
+        Err(e) => log::warn!("ecran fige non prepare: {e}"),
+    }
+    // Fil principal bloqué avec l'écran figé montré : on arrête tout plutôt que de laisser
+    // l'écran couvert (rappel appelé depuis le fil de garde).
+    gel::garder_ecran_fige(DELAI_BLOCAGE, || {
+        log::error!("ecran fige: fil principal bloque, arret force");
+        journal::vider();
+        std::process::exit(1);
+    });
+    // Le rappel tourne dans la procédure de la fenêtre figée : il ne fait que poster.
+    let pour_bureau = app.clone();
+    gel::quand_bureau_change(move |c| poster_plus_tard(&pour_bureau, Evenement::Bureau(c)));
+    let pour_selection = app.clone();
+    match Selection::creer(app, move |s| {
+        traiter(&pour_selection, Evenement::Selection(s))
+    }) {
+        Ok(s) => {
+            app.manage(s);
+            log::info!("selection prete a servir");
+        }
+        Err(e) => log::warn!("selection indisponible: {e}"),
+    }
+}
+
+/// Vrai si l'appel vient d'un autre fil que le fil principal (faux tant que celui-ci
+/// n'est pas noté : `demarrer` le note en premier).
+fn hors_fil_principal(app: &AppHandle) -> bool {
+    app.state::<Application>()
+        .fil_principal
+        .get()
+        .is_some_and(|id| *id != std::thread::current().id())
+}
+
+/// Poste `evenement` vers le fil principal, pour un tour suivant de la boucle, même
+/// depuis le fil principal (`run_on_main_thread` y exécuterait tout de suite). Si aucun
+/// fil ne peut être lancé, l'événement est traité tout de suite.
+fn poster_plus_tard(app: &AppHandle, evenement: Evenement) {
+    let pour_fil = app.clone();
+    let copie = evenement.clone();
+    let lance = std::thread::Builder::new()
+        .name("poste".into())
+        .spawn(move || {
+            let pour_traiter = pour_fil.clone();
+            if let Err(e) = pour_fil.run_on_main_thread(move || traiter(&pour_traiter, evenement)) {
+                log::warn!("evenement non poste: {e}");
+                gel::cacher_ecran_fige();
+            }
+        });
+    if let Err(e) = lance {
+        log::warn!("evenement non poste ({e}): traite tout de suite");
+        traiter(app, copie);
+    }
 }
 
 /// Écrit `icone visible` ou `icone invisible` selon que la zone de notification donne
@@ -390,18 +589,25 @@ pub fn entrees_menu(raccourci_zone: Option<&str>) -> Vec<EntreeMenu> {
     ]
 }
 
-/// Message provisoire tant que la Capture n'existe pas (étapes 1 à 3).
-pub fn message_provisoire(mode: Mode) -> String {
-    let quoi = match mode {
-        Mode::Zone => "capture de zone",
-        Mode::PleinEcran => "capture plein écran",
-        Mode::Fenetre => "capture de fenêtre",
-    };
-    format!("Raccourci reçu : {quoi}")
-}
-
 /// Le seul endroit où l'Application réagit à ce qui lui arrive.
 pub fn traiter(app: &AppHandle, evenement: Evenement) {
+    // Ce qui touche à la capture se décide sur le fil principal.
+    let de_capture = matches!(
+        evenement,
+        Evenement::Selection(_)
+            | Evenement::Bureau(_)
+            | Evenement::SortieFaite(_)
+            | Evenement::SortieEchue(_)
+            | Evenement::Raccourci(raccourcis::Signal::Echap)
+    );
+    if de_capture && hors_fil_principal(app) {
+        let pour = app.clone();
+        if let Err(e) = app.run_on_main_thread(move || traiter(&pour, evenement)) {
+            log::warn!("evenement non poste: {e}");
+            gel::cacher_ecran_fige();
+        }
+        return;
+    }
     match evenement {
         Evenement::SecondeInstance(argv) => {
             let (commande, _) = arguments::lire(argv.iter().skip(1));
@@ -434,6 +640,30 @@ pub fn traiter(app: &AppHandle, evenement: Evenement) {
             }
             autre => log::warn!("menu: entree inconnue {autre}"),
         },
+        Evenement::Raccourci(raccourcis::Signal::Echap) => {
+            log::info!("echap global presse");
+            traiter_zone(app, Arrivee::Echap);
+        }
+        Evenement::Selection(signal) => traiter_zone(app, Arrivee::Selection(&signal)),
+        Evenement::Bureau(changement) => {
+            log::info!("bureau change pendant la capture: {changement:?}");
+            traiter_zone(app, Arrivee::Bureau(changement));
+        }
+        Evenement::SortieFaite(fin) => {
+            if prendre_sortie_attendue(app, fin.numero) {
+                finir_sortie(app, *fin);
+            } else {
+                log::warn!("sortie {}: bilan perime ignore", fin.numero);
+            }
+        }
+        Evenement::AnnonceDemarrage { local, bilan } => annoncer_raccourcis(app, &local, &bilan),
+        Evenement::SortieEchue(numero) => {
+            if prendre_sortie_attendue(app, numero) {
+                log::warn!("sortie sans bilan");
+                appliquer(app, Declencheur::SortieSansBilan);
+                afficher_probleme(app, Probleme::SortieSansBilan);
+            }
+        }
         Evenement::Raccourci(raccourcis::Signal::Presse(action)) => {
             log::info!("raccourci presse: {action}");
             match Mode::depuis_nom(&action) {
@@ -458,34 +688,421 @@ pub fn traiter(app: &AppHandle, evenement: Evenement) {
     }
 }
 
-/// Demande une capture (raccourci, menu). Tant que le module Capture n'existe pas
-/// (étapes 1 à 3), le gel échoue aussitôt et l'app redescend au Repos.
-pub fn lancer_capture(app: &AppHandle, mode: Mode) {
-    {
-        let etat = app.state::<Application>();
-        let Ok(mut automate) = etat.automate.lock() else {
+/// Applique un déclencheur à l'automate. Rend le nouvel état, `None` s'il est ignoré.
+fn appliquer(app: &AppHandle, declencheur: Declencheur) -> Option<Etat> {
+    match app.state::<Application>().automate.lock() {
+        Ok(mut a) => a.traiter(declencheur),
+        Err(_) => {
             log::error!("automate inaccessible");
-            return;
-        };
-        if automate
-            .traiter(Declencheur::DemandeCapture(mode))
-            .is_none()
-        {
+            None
+        }
+    }
+}
+
+/// Montre le bandeau d'erreur d'une capture qui n'a pas pu se faire.
+fn afficher_probleme(app: &AppHandle, probleme: Probleme) {
+    log::info!("capture impossible: {}", zone::nom(probleme));
+    afficher(app, zone::message_capture_impossible());
+}
+
+/// Demande une capture (raccourci, menu). Fil principal (sinon postée). Séquence du §3.6 :
+/// bandeau caché, photo, écran figé, sélection, Échap réservé. Toute erreur après
+/// `montrer_ecran_fige` cache tout (garde) et revient au Repos.
+pub fn lancer_capture(app: &AppHandle, mode: Mode) {
+    if hors_fil_principal(app) {
+        let pour = app.clone();
+        if let Err(e) = app.run_on_main_thread(move || lancer_capture(&pour, mode)) {
+            log::warn!("capture non postee: {e}");
+        }
+        return;
+    }
+    let recu_a = Instant::now();
+    // 1. Un appui pendant Gel, Sélection ou Découpe est ignoré par la table : aucun
+    // second `figer` tant qu'une capture est en cours.
+    if appliquer(app, Declencheur::DemandeCapture(mode)).is_none() {
+        log::info!("capture deja en cours: appui ignore");
+        return;
+    }
+    if mode != Mode::Zone {
+        // Seule la zone est construite : aucun raccourci ni menu ne mène ici.
+        log::warn!("capture {} pas encore construite", mode.nom());
+        appliquer(app, Declencheur::GelImpossible);
+        return;
+    }
+    // Avant toute photo : aucune capture ne doit rester rangée (sa garde, détruite plus
+    // tard, cacherait le nouvel écran figé), et la Sélection doit exister (sinon l'écran
+    // figé ne serait jamais montré pour rien).
+    if let Some(ancienne) = ranger_capture(app, None) {
+        log::error!("capture precedente encore rangee: abandonnee avant la photo");
+        drop(ancienne);
+    }
+    if app.try_state::<Selection>().is_none() {
+        log::warn!("selection absente: pas de photo");
+        appliquer(app, Declencheur::GelImpossible);
+        afficher_probleme(app, Probleme::Selection);
+        return;
+    }
+    // 2. Le bandeau ne doit ni figurer sur la photo ni rester au-dessus de l'écran figé.
+    let bandeau_cache = app.try_state::<Bandeau>().is_some_and(|b| b.cacher());
+    if bandeau_cache && !systeme::attendre_composition(ATTENTE_COMPOSITION) {
+        log::warn!(
+            "composition non attendue ({} ms): photo prise quand meme",
+            ATTENTE_COMPOSITION.as_millis()
+        );
+    }
+    // 3. La photo.
+    let gel_pris = match capture::figer() {
+        Ok(g) => g,
+        Err(e) => {
+            log::warn!("gel impossible: {e}");
+            appliquer(app, Declencheur::GelImpossible);
+            let probleme = match e {
+                capture::Erreur::NonDisponible => Probleme::NonDisponible,
+                _ => Probleme::Photo,
+            };
+            afficher_probleme(app, probleme);
             return;
         }
-        // Étape 4 : ici, la Capture fige les écrans. En attendant :
-        log::warn!("capture indisponible a cette etape");
-        automate.traiter(Declencheur::GelImpossible);
+    };
+    // 4. L'écran figé. La garde vit dès maintenant : toute sortie le cache.
+    let garde = GardeEcran::new(app);
+    if let Err(e) = gel::montrer_ecran_fige(&gel_pris.image) {
+        log::warn!("ecran fige non montre: {e}");
+        drop(garde);
+        appliquer(app, Declencheur::GelImpossible);
+        afficher_probleme(app, Probleme::EcranFige);
+        return;
     }
-    // Message provisoire, remplacé à l'étape 4.
-    afficher(
+    log::info!(
+        "{}",
+        zone::ligne_chrono_gel(
+            gel_pris.duree_photo,
+            gel_pris.duree_totale,
+            recu_a.elapsed()
+        )
+    );
+    appliquer(app, Declencheur::PhotoPrise(Mode::Zone));
+    // 5. La sélection, juste au-dessus de l'écran figé.
+    let demande = selection::Demande {
+        bureau: gel_pris.bureau,
+        ecrans: gel_pris.ecrans.iter().map(|e| e.rect).collect(),
+        dessous: gel::poignee_ecran_fige(),
+        cote_min: capture::COTE_MIN,
+    };
+    // La capture est notée avant `montrer` : un signal de fin arrivé pendant `montrer`
+    // la trouve et la termine. La place est vide : vidée avant la photo, sur ce même fil,
+    // et rien entre-temps ne range de capture.
+    let ancienne = ranger_capture(
         app,
-        Message {
-            genre: Genre::Reussite,
-            titre: message_provisoire(mode),
-            detail: String::new(),
-            actions: Vec::new(),
-        },
+        Some(CaptureEnCours {
+            gel: gel_pris,
+            selection: None,
+            garde,
+        }),
+    );
+    if ancienne.is_some() {
+        log::error!("capture rangee pendant la photo: impossible, ignoree");
+        // Jamais détruite ici : sa garde cacherait l'écran figé qu'on vient de montrer.
+        std::mem::forget(ancienne);
+    }
+    let montree = match app.try_state::<Selection>() {
+        Some(s) => s.montrer(demande),
+        None => Err("selection absente".into()),
+    };
+    match montree {
+        Ok(id) => {
+            if !noter_selection(app, id) {
+                // Terminée pendant `montrer` : rien à réserver.
+                return;
+            }
+        }
+        Err(e) => {
+            log::warn!("selection non montree: {e}");
+            abandonner(
+                app,
+                Declencheur::SelectionImpossible,
+                Some(Probleme::Selection),
+            );
+            return;
+        }
+    }
+    // 6. Échap global, le temps de la sélection.
+    reserver_echap(app);
+}
+
+/// La capture en cours, sous son verrou. Un verrou empoisonné (panique pendant qu'il
+/// était tenu) est repris : la garde qu'il contient doit rester joignable.
+fn capture_en_cours(app: &AppHandle) -> std::sync::MutexGuard<'_, Option<CaptureEnCours>> {
+    app.state::<Application>()
+        .inner()
+        .capture
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+}
+
+/// Range (ou retire avec `None`) la capture en cours. Rend l'ancienne, à détruire hors
+/// du verrou.
+fn ranger_capture(app: &AppHandle, nouvelle: Option<CaptureEnCours>) -> Option<CaptureEnCours> {
+    std::mem::replace(&mut *capture_en_cours(app), nouvelle)
+}
+
+/// Note l'affichage de sélection de la capture en cours. Faux s'il n'y en a plus.
+fn noter_selection(app: &AppHandle, id: u64) -> bool {
+    match capture_en_cours(app).as_mut() {
+        Some(capture) => {
+            capture.selection = Some(id);
+            true
+        }
+        None => false,
+    }
+}
+
+/// Réserve Échap en global ; s'il ne peut pas l'être, la page gère Échap quand elle a le
+/// focus.
+fn reserver_echap(app: &AppHandle) {
+    let pour_echap = app.clone();
+    match raccourcis::reserver_echap(app, move |s| traiter(&pour_echap, Evenement::Raccourci(s))) {
+        Ok(()) => {
+            app.state::<Application>()
+                .echap_reserve
+                .store(true, Ordering::SeqCst);
+            log::info!("echap global reserve");
+        }
+        Err(e) => log::warn!("echap global non reserve: {e}"),
+    }
+}
+
+/// Libère Échap s'il est réservé, sur le fil principal.
+fn liberer_echap(app: &AppHandle) {
+    if !app
+        .state::<Application>()
+        .echap_reserve
+        .swap(false, Ordering::SeqCst)
+    {
+        return;
+    }
+    let liberer = |app: &AppHandle| match raccourcis::liberer_echap(app) {
+        Ok(()) => log::info!("echap global libere"),
+        Err(e) => log::warn!("echap global non libere: {e}"),
+    };
+    if hors_fil_principal(app) {
+        let pour = app.clone();
+        if let Err(e) = app.run_on_main_thread(move || liberer(&pour)) {
+            log::warn!("echap global non libere: {e}");
+        }
+    } else {
+        liberer(app);
+    }
+}
+
+/// Retire la capture en cours, cache tout (garde), revient au Repos, montre l'erreur.
+/// Sans capture en cours (déjà terminée par un autre signal), ne fait rien.
+fn abandonner(app: &AppHandle, declencheur: Declencheur, probleme: Option<Probleme>) {
+    let Some(mut capture) = ranger_capture(app, None) else {
+        return;
+    };
+    capture.garde.cacher_tout();
+    drop(capture);
+    appliquer(app, declencheur);
+    if let Some(p) = probleme {
+        afficher_probleme(app, p);
+    }
+}
+
+/// Un signal pendant une capture de zone (fil principal) : décision pure, puis gestes.
+fn traiter_zone(app: &AppHandle, arrivee: Arrivee<'_>) {
+    let geste = {
+        let c = capture_en_cours(app);
+        zone::decider(
+            c.as_ref().map(|c| Vue {
+                selection: c.selection,
+                ecrans: &c.gel.ecrans,
+            }),
+            arrivee,
+        )
+    };
+    match geste {
+        Geste::Rien => {}
+        Geste::Abandonner {
+            declencheur,
+            probleme,
+        } => abandonner(app, declencheur, probleme),
+        Geste::Decouper(zone) => decouper(app, zone),
+    }
+}
+
+/// Zone choisie : l'écran figé disparaît dans le même tour que la sélection, puis la
+/// découpe (écran déjà libre, garde au repos) et la sortie dans son fil.
+fn decouper(app: &AppHandle, zone: systeme::Rect) {
+    let relache = Instant::now();
+    let Some(mut capture) = ranger_capture(app, None) else {
+        return;
+    };
+    capture.garde.cacher_tout();
+    appliquer(app, Declencheur::ZoneChoisie);
+    log::info!(
+        "zone choisie {},{} {}x{}",
+        zone.x,
+        zone.y,
+        zone.largeur,
+        zone.hauteur
+    );
+    let debut = Instant::now();
+    let pixels = capture::decouper(&capture.gel, zone);
+    let duree_decoupe = debut.elapsed();
+    drop(capture);
+    match pixels {
+        Ok(pixels) => lancer_sortie(app, pixels, duree_decoupe, relache),
+        Err(e) => {
+            log::warn!("decoupe impossible: {e}");
+            appliquer(app, Declencheur::DecoupeImpossible);
+            afficher_probleme(app, Probleme::Lecture);
+        }
+    }
+}
+
+/// Ce que la sortie doit faire, d'après les réglages lus au démarrage.
+fn demande_sortie(app: &AppHandle) -> sortie::Demande {
+    let etat = app.state::<Application>();
+    let reglages = etat
+        .reglages
+        .lock()
+        .ok()
+        .and_then(|r| r.clone())
+        .unwrap_or_else(|| Reglages::par_defaut(plateforme_reglages(systeme::systeme())));
+    let dossiers = etat.dossiers.lock().ok().and_then(|d| d.clone());
+    let images = dossiers.as_ref().and_then(|d| d.images.clone());
+    let (dossier_enregistrement, dossier_affiche) = zone::dossier_enregistrement(
+        reglages.dossier_enregistrement.as_deref(),
+        images.as_deref(),
+    );
+    let dossier_recents = dossiers
+        .map(|d| d.local.join(zone::SOUS_DOSSIER_RECENTS))
+        .unwrap_or_else(PathBuf::new);
+    sortie::Demande {
+        copier: reglages.copier_apres_capture,
+        enregistrer: reglages.enregistrer_apres_capture,
+        dossier_enregistrement,
+        dossier_affiche,
+        dossier_recents,
+        modele_nom: reglages.modele_nom,
+        maintenant: chrono::Local::now(),
+    }
+}
+
+/// Vrai (et plus rien d'attendu ensuite) si `numero` est la sortie dont on attend le
+/// bilan (`zone::bilan_attendu`).
+fn prendre_sortie_attendue(app: &AppHandle, numero: u64) -> bool {
+    let mut attendue = app
+        .state::<Application>()
+        .inner()
+        .sortie_attendue
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    if zone::bilan_attendu(*attendue, numero) {
+        *attendue = None;
+        true
+    } else {
+        false
+    }
+}
+
+/// Sort une capture et mesure la durée (fil de sortie). Une panique de `sortir` donne un
+/// bilan d'échec : le fil rend toujours un bilan.
+fn sortir_et_mesurer(
+    numero: u64,
+    pixels: &gel::Pixels,
+    demande: sortie::Demande,
+    duree_decoupe: Duration,
+    relache: Instant,
+) -> Box<FinSortie> {
+    let debut = Instant::now();
+    let bilan = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        sortie::sortir(pixels, &demande)
+    }))
+    .unwrap_or_else(|_| {
+        log::error!("sortie {numero}: fil interrompu (panique)");
+        zone::bilan_d_echec(&demande, zone::CAUSE_SORTIE_INTERROMPUE)
+    });
+    Box::new(FinSortie {
+        numero,
+        bilan,
+        demande,
+        duree_decoupe,
+        duree_sortie: debut.elapsed(),
+        relache,
+    })
+}
+
+/// La sortie dans un fil à part (le fil principal n'attend jamais le disque ni le
+/// presse-papiers), puis le bilan revient au fil principal (`SortieFaite`). Un second
+/// petit fil tient l'échéance (`zone::DELAI_SORTIE`) : sans nouvelles du fil de sortie à
+/// temps, il poste `SortieEchue`, et l'automate ne reste jamais en Découpe.
+fn lancer_sortie(app: &AppHandle, pixels: gel::Pixels, duree_decoupe: Duration, relache: Instant) {
+    let etat = app.state::<Application>();
+    let numero = etat.derniere_sortie.fetch_add(1, Ordering::SeqCst) + 1;
+    *etat
+        .inner()
+        .sortie_attendue
+        .lock()
+        .unwrap_or_else(|e| e.into_inner()) = Some(numero);
+    let demande = demande_sortie(app);
+    let pixels = Arc::new(pixels);
+    let (fini, attente) = std::sync::mpsc::channel::<()>();
+    let pour_fil = app.clone();
+    let (pixels_fil, demande_fil) = (Arc::clone(&pixels), demande.clone());
+    let lance = std::thread::Builder::new()
+        .name("sortie".into())
+        .spawn(move || {
+            let fin = sortir_et_mesurer(numero, &pixels_fil, demande_fil, duree_decoupe, relache);
+            let pour_traiter = pour_fil.clone();
+            let rendu = pour_fil
+                .run_on_main_thread(move || traiter(&pour_traiter, Evenement::SortieFaite(fin)));
+            if let Err(e) = rendu {
+                log::warn!("bilan de sortie non rendu: {e}");
+            }
+            let _ = fini.send(());
+        });
+    if let Err(e) = lance {
+        // Sans fil, la capture n'est pas perdue : la sortie se fait ici (l'écran est déjà
+        // libre, la garde ne surveille plus).
+        log::warn!("fil de sortie impossible ({e}): sortie sur le fil principal");
+        let fin = sortir_et_mesurer(numero, &pixels, demande, duree_decoupe, relache);
+        traiter(app, Evenement::SortieFaite(fin));
+        return;
+    }
+    // L'échéance : se termine dès que le fil de sortie a rendu son bilan. S'il s'arrête
+    // sans rien dire (canal fermé), l'échéance part tout de suite ; arrivée après le
+    // bilan, elle est ignorée.
+    let pour_echeance = app.clone();
+    let echeance = std::thread::Builder::new()
+        .name("sortie-echeance".into())
+        .spawn(move || {
+            if attente.recv_timeout(zone::DELAI_SORTIE).is_ok() {
+                return;
+            }
+            let pour_traiter = pour_echeance.clone();
+            let _ = pour_echeance
+                .run_on_main_thread(move || traiter(&pour_traiter, Evenement::SortieEchue(numero)));
+        });
+    if let Err(e) = echeance {
+        log::warn!("echeance de sortie non armee: {e}");
+    }
+}
+
+/// Bilan de la sortie (fil principal) : journal, retour au Repos, annonce.
+fn finir_sortie(app: &AppHandle, fin: FinSortie) {
+    log::info!("{}", zone::ligne_sortie(&fin.bilan));
+    if let Err(cause) = &fin.bilan.recent {
+        log::warn!("recents: echec ({cause})");
+    }
+    let annonce = sortie::annonce(&fin.bilan, &fin.demande);
+    log::info!("{}", zone::ligne_annonce(&annonce));
+    appliquer(app, Declencheur::ImagePreteSansVignette);
+    afficher(app, zone::message_annonce(&annonce));
+    log::info!(
+        "{}",
+        zone::ligne_chrono_sortie(fin.duree_decoupe, fin.duree_sortie, fin.relache.elapsed())
     );
 }
 
@@ -495,6 +1112,16 @@ fn arreter(app: &AppHandle) {
         journal::vider();
         return;
     }
+    // Capture en cours : la garde cache tout et libère Échap. Puis la sélection est
+    // fermée avant la destruction de l'écran figé, et l'image du bureau rendue.
+    let capture = ranger_capture(app, None);
+    drop(capture);
+    liberer_echap(app);
+    if let Some(s) = app.try_state::<Selection>() {
+        s.fermer();
+    }
+    gel::detruire_ecran_fige();
+    gel::liberer_image();
     // Modules : libérer les raccourcis, fermer les fenêtres.
     if app
         .state::<Application>()
@@ -577,14 +1204,6 @@ mod tests {
         assert_eq!(
             ligne_annonce(&decider_annonce(None, &rien)).as_deref(),
             Some("annonce raccourci: aucun_raccourci")
-        );
-    }
-
-    #[test]
-    fn message_provisoire_de_zone() {
-        assert_eq!(
-            message_provisoire(Mode::Zone),
-            "Raccourci reçu : capture de zone"
         );
     }
 }

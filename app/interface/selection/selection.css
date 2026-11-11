@@ -1,0 +1,80 @@
+/* Sélection d'une zone (étape 5). Toutes les couleurs viennent de ../commun/jetons.css ;
+   la page force le thème clair (le voile ne dépend pas du thème). */
+
+html,
+body {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+  background: transparent;
+  cursor: crosshair;
+  -webkit-user-select: none;
+  user-select: none;
+  touch-action: none;
+}
+
+/* La scène compte en pixels réels (taille et `scale(1 / kx, 1 / ky)` posées par la page) :
+   des bords en pixels CSS fractionnaires seraient adoucis par Chromium à 125 %. */
+#scene {
+  position: fixed;
+  left: 0;
+  top: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  transform-origin: 0 0;
+  pointer-events: none;
+}
+
+/* Chaque morceau est posé seul (position absolue, contain) : le déplacer ne remet pas la
+   page en page, même sur un bureau de 5760 × 1080. */
+.voile,
+#zone {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 0;
+  height: 0;
+  contain: strict;
+  pointer-events: none;
+}
+
+.voile {
+  background: var(--scrim);
+}
+
+#plein {
+  width: 100%;
+  height: 100%;
+}
+
+/* Le trait est dessiné à l'intérieur de la zone, sans flou ni coins arrondis : un
+   contour plein (ombre intérieure sans flou), car Chromium arrondit une bordure de moins
+   d'un pixel CSS à 1 px CSS, ce qui la rendrait floue à 125 %. Son épaisseur (`--trait`,
+   en pixels réels de la scène) vaut l'échelle mesurée arrondie, au moins un pixel. */
+#zone {
+  box-shadow: inset 0 0 0 var(--trait, 1px) var(--selection-stroke);
+  background: transparent;
+}
+
+/* Un panneau est un carré de 1 pixel réel, étiré et placé par `transform`. */
+.panneau {
+  width: 1px;
+  height: 1px;
+  transform-origin: 0 0;
+}
+
+.panneau,
+#zone {
+  display: none;
+}
+
+body.glisse .panneau,
+body.glisse #zone {
+  display: block;
+}
+
+body.glisse #plein {
+  display: none;
+}

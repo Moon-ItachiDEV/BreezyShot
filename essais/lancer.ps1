@@ -1,4 +1,5 @@
-# Joue tous les essais essais/NN-*.ps1 dans l'ordre, chacun dans son propre pwsh.
+# Joue tous les essais essais/NN-*.ps1 dans l'ordre (01-socle … 04-zone), chacun dans son
+# propre pwsh. Les aides (temoin.ps1, tenir-raccourci.ps1) ne sont pas des essais.
 # Sort avec 1 si un essai échoue. Écrit un résumé lisible, aussi dans $env:GITHUB_STEP_SUMMARY.
 #
 #   pwsh essais/lancer.ps1 -Exe app/coeur/target/release/breezyshot.exe [-Sortie essais-resultats]

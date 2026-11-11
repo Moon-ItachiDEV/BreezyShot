@@ -17,21 +17,29 @@ app/
       main.rs               point d'entrée, ne fait qu'appeler breezyshot::lancer()
       lib.rs                déclare les modules
       application/          chef d'orchestre : démarrage, table des états, icône et menu,
-                            journal, chrono, arguments de la ligne de commande
-      raccourcis/           raccourcis globaux (étape 3)
-      capture/              photo des écrans : windows.rs, puis macos.rs (étape 4)
-      sortie/               découpe, presse-papiers, fichiers, « Récents » (étape 6)
+                            journal, chrono, arguments de la ligne de commande ;
+                            zone.rs : décisions de la capture d'une zone (fonctions pures)
+      raccourcis/           raccourcis globaux (étape 3), Échap global de la sélection
+      capture/              figer (appelle systeme::gel), géométrie de la sélection, découpe
+                            (étape 4) ; aucun code propre à un système
+      sortie/               presse-papiers, PNG, « Récents », enregistrement (étape 6)
       reglages/             fichier de réglages (étape 2)
-      fenetres/             crée, place, montre et cache les fenêtres de l'interface
+      fenetres/             crée, place, montre et cache les fenêtres de l'interface :
+                            mod.rs (bandeau), place.rs, selection.rs (étape 5)
       systeme/              tous les gestes propres à un système : mod.rs (façade commune),
-                            windows.rs, autre.rs (Linux pour le développement, macos.rs ensuite)
+                            windows.rs, autre.rs (Linux pour le développement, macos.rs ensuite),
+                            composition.rs (attendre le compositeur),
+                            gel/ (photo du bureau et écran figé natif : mod.rs, windows.rs,
+                            autre.rs)
   interface/                ce qu'on voit (web), partagé entre Windows et Mac
     commun/                 jetons du design system (jetons.css), composants partagés
     vignette/               vignette, souffle et bandeau de messages (bandeau.* dès l'étape 3)
-    selection/  barre/  reglages/   (étapes 5, 10)
+    selection/              page de la sélection (étape 5)
+    barre/  reglages/       (étape 10)
 design/                     jetons et icônes Moulinet, copiés du design system
 docs/                       ce fichier, TRAVAIL-VALIDE.md, notices d'essai
 essais/                     scénarios PowerShell joués sur la machine Windows de GitHub
+                            (NN-*.ps1 ; aides : tenir-raccourci.ps1, temoin.ps1)
   pages/                    essais des pages dans Chromium (Playwright), sur Linux
 outils/                     petits scripts Node sans dépendance (generer-jetons.mjs)
 ```
@@ -48,9 +56,10 @@ outils/                     petits scripts Node sans dépendance (generer-jetons
 2. **L'Application appelle, les modules signalent.** Un module expose des fonctions et renvoie
    ses événements par un canal ou une fonction de rappel reçue à sa création, avec son propre
    type de signal (ex. `raccourcis::Signal`). Jamais de module à module.
-3. **Tout ce qui dépend du système vit dans `systeme/`** (et, à partir de l'étape 4, dans
-   `capture/`). Ailleurs : aucun `#[cfg(windows)]`, aucun appel à la crate `windows`, aucun
-   chemin écrit « à la Windows ». Le code doit compiler sur Windows, macOS et Linux ;
+3. **Tout ce qui dépend du système vit dans `systeme/`**, et seulement là (`systeme/gel/`
+   compris). Ailleurs, `capture/` et `sortie/` compris : aucun `cfg` qui parle du système
+   (`windows`, `unix`, `target_os`…), aucun appel à la crate `windows`, aucun chemin écrit
+   « à la Windows ». Le code doit compiler sur Windows, macOS et Linux ;
    `autre.rs` fournit des réponses neutres.
 4. **Tout se compte en pixels réels.** Le cœur ne manipule que des pixels physiques. Seules
    les fenêtres convertissent avec l'échelle de leur écran. L'app est déclarée consciente de
@@ -114,9 +123,12 @@ Ajouter un état, c'est ajouter des lignes. La table suit le tableau « États �
 un raccourci de capture ne lance une capture que depuis `Repos` (et depuis `Vignette`, où il
 ferme la vignette puis relance) ; il est ignoré ailleurs.
 
-Tant que la Capture n'existe pas (étapes 1 à 3) : `Repos --DemandeCapture(mode)--> Gel
---GelImpossible--> Repos`, avec un message dans le bandeau. Chaque changement d'état écrit une
-ligne de journal `etat Repos -> Gel (DemandeCapture zone)`.
+Chaque changement d'état écrit une ligne de journal `etat Repos -> Gel (DemandeCapture
+zone)`. La capture d'une zone suit `Repos -> Gel -> Selection -> Decoupe -> Repos` (§3.6).
+Ajouté à l'assemblage : `DecoupeImpossible` (`Decoupe -> Repos`), quand les pixels de la
+zone n'ont pas pu être lus, et `SortieSansBilan` (`Decoupe -> Repos`), quand la sortie ne
+rend aucun bilan dans son délai. Tant que la vignette (étape 9) n'existe pas, la découpe finit
+par `ImagePreteSansVignette`.
 
 Modes : `zone`, `plein_ecran`, `fenetre`. Ce sont aussi les **noms d'action** des raccourcis.
 
@@ -146,7 +158,8 @@ Si `BREEZYSHOT_ESSAI_CAPTURABLE=1` (lu par `systeme::essai_capturable()`, essais
 le bandeau n'est pas exclu des captures (`bandeau exclu des captures: non (essai)`), pour
 qu'un essai prouve par une copie d'écran qu'il est réellement peint.
 
-Le dossier Images est résolu mais optionnel (`Option`) jusqu'à l'étape 6. Le journal ne
+Le dossier Images est résolu mais optionnel (`Option`) : s'il est introuvable, un
+enregistrement demandé échoue avec sa cause, la copie se fait quand même. Le journal ne
 dépend que du dossier local (`systeme::dossier_journal()`) : un autre dossier introuvable
 ne l'empêche pas. Si le dossier local est introuvable ou non inscriptible, le journal va
 dans le dossier temporaire du système (`systeme::dossier_secours()`), sous le nom
@@ -175,6 +188,7 @@ dans le dossier temporaire du système (`systeme::dossier_secours()`), sous le n
 - Icône Moulinet monochrome : `notif-blanc` sur une barre des tâches sombre, `notif-sombre`
   sur une barre claire, choisie d'après le thème de la barre des tâches (pas celui des applis)
   et mise à jour quand il change. Jamais la version couleur dans la zone de notification.
+- Le menu « Capturer une zone » lance la même capture que le raccourci.
 - Menu (clic droit) : seulement ce qui marche. Étape 1 : « Quitter BreezyShot ». Étape 3 :
   « Capturer une zone » avec le raccourci actif affiché, un séparateur, « Quitter BreezyShot ».
   Le raccourci suit une tabulation dans le texte de l'entrée (aligné à droite par les menus
@@ -182,6 +196,100 @@ dans le dossier temporaire du système (`systeme::dossier_secours()`), sous le n
   Les entrées « Captures récentes », « Vider les récentes », « Réglages » arrivent avec leurs
   étapes.
 - Info-bulle : « BreezyShot ».
+
+### 3.6 Capture d'une zone (assemblage des étapes 4 à 6)
+
+Le câblage est dans `application/mod.rs` ; les décisions (que faire de chaque signal, quel
+message, quel dossier, quelles lignes de journal) sont des fonctions pures de
+`application/zone.rs`, testées. Les modules ne se connaissent toujours pas.
+
+**Fils.** Le raccourci arrive sur le fil principal (global-hotkey : `WM_HOTKEY` dans la
+procédure de sa fenêtre cachée, créée par le plugin dans `setup`). Le menu de l'icône aussi
+(événement de la boucle). Les commandes de la page (`#[tauri::command]` sans `async`)
+tournent sur le fil principal, comme les signaux de fin de la Sélection. `traiter` repose
+sur le fil principal tout ce qui touche à la capture et arriverait d'ailleurs. Attention :
+`run_on_main_thread` appelé depuis le fil principal exécute tout de suite, il ne poste pas.
+
+**Séquence** (fil principal, sauf la sortie) :
+
+1. `lancer_capture(Zone)` : `DemandeCapture` → Gel. Un appui pendant Gel, Sélection ou
+   Découpe est ignoré par la table (`capture deja en cours: appui ignore`) : aucun second
+   `figer` tant qu'une capture est en cours.
+2. Le bandeau est caché s'il montre un message (`Bandeau::cacher`), puis
+   `systeme::attendre_composition(100 ms)` (deux `DwmFlush` dans un petit fil ; le fil
+   principal n'attend jamais plus de 100 ms, sinon `composition non attendue (100 ms): photo
+   prise quand meme`) : il n'est ni sur la photo ni
+   au-dessus de l'écran figé.
+3. `capture::figer()`. Erreur → `GelImpossible`, bandeau d'erreur.
+4. `systeme::gel::montrer_ecran_fige`. La garde de l'écran existe dès avant. Erreur →
+   `GelImpossible`, bandeau d'erreur.
+5. `PhotoPrise(Zone)` → Selection. La capture en cours (photo, garde) est rangée, puis
+   `Selection::montrer(Demande { bureau, ecrans, dessous: poignee_ecran_fige(), cote_min:
+   capture::COTE_MIN })`. Un signal de fin arrivé pendant `montrer` la trouve donc.
+   Erreur → tout cacher, `SelectionImpossible`, bandeau d'erreur.
+6. Échap est réservé en global (`raccourcis::reserver_echap`) ; s'il ne peut pas l'être,
+   une ligne de journal, et la page gère Échap quand elle a le focus.
+7. Signaux : `Prete` → rien. `Zone` : la zone est décidée d'abord, encore en Sélection
+   (`zone::decider`) : `borner_a_un_ecran(rect_entre(depart, arrivee), depart, ecrans)`
+   puis `zone_valide`. Absente ou trop petite → tout caché, `SelectionAnnulee` depuis
+   Sélection, sans message. Valide → écran figé caché dans le même tour que la sélection,
+   Échap libéré, `ZoneChoisie`, `capture::decouper` (l'écran est déjà libre) puis la
+   sortie. `Annulee` (toute cause),
+   Échap global → `SelectionAnnulee`, sans message. `Muette`, `Impossible` →
+   `SelectionMuette`, `SelectionImpossible`, bandeau d'erreur. Écrans changés, session
+   verrouillée → `EcransChanges`, `SessionVerrouillee`, sans message. Un signal d'un autre
+   affichage que celui en cours est ignoré.
+8. Sortie dans un fil `sortie` : `sortie::sortir` avec les réglages lus au démarrage, puis
+   retour sur le fil principal : journal, `ImagePreteSansVignette` → Repos, annonce dans
+   le bandeau. Dossier affiché : « Images › BreezyShot » quand le réglage est absent ou
+   vide, sinon `sortie::nom_affiche(dossier)`. « Récents » : `<local>/Recents`.
+   Chaque sortie a un numéro. Le fil rend toujours un bilan : une panique de `sortir`
+   donne un bilan d'échec (`zone::bilan_d_echec`). Un petit fil tient une échéance de
+   10 s (`zone::DELAI_SORTIE`) et s'arrête dès que le bilan est rendu ; s'il tombe,
+   `sortie sans bilan`, `SortieSansBilan` → Repos, bandeau « Impossible de capturer ». Un
+   bilan qui n'est pas celui attendu (capture précédente, ou arrivé après l'échéance) est
+   ignoré (`sortie <n>: bilan perime ignore`).
+
+**Messages.** Erreur avant la sortie (gel, écran figé, sélection, découpe, sortie sans
+bilan) : « Impossible de capturer », titre seul, sans cause ; le cas va au journal
+(`capture impossible: <code>`). Après la sortie : l'annonce de `sortie::annonce`, telle quelle. Une
+annulation n'affiche rien.
+
+**Filets de sécurité** (l'écran ne doit jamais rester couvert) :
+
+- `GardeEcran`, tenue par la capture en cours : sa destruction cache l'écran figé et la
+  sélection et libère Échap. Elle est détruite à chaque fin et chaque erreur, par
+  `lancer_capture` tant qu'elle n'est pas rangée, et à l'arrêt. Une fois rangée dans le
+  `Mutex` de l'Application, une panique ne la détruit pas : ce qui libère alors l'écran,
+  c'est la mort du processus (une panique dans une procédure de fenêtre `extern "system"`
+  arrête le processus ; ailleurs sur le fil principal, tao la relance et l'app s'arrête),
+  et Windows détruit ses fenêtres.
+- `garder_ecran_fige(5 s)` au démarrage : fil principal bloqué avec l'écran figé montré →
+  `ecran fige: fil principal bloque, arret force`, journal vidé, `exit(1)`. Rien de long
+  sur le fil principal pendant que l'écran figé est montré : la découpe vient après.
+- `quand_bureau_change` au démarrage : son rappel (dans la procédure de la fenêtre figée)
+  ne fait que poster l'événement (par un petit fil, puisque `run_on_main_thread` exécuterait
+  sur place).
+- Toute décision montrer ou cacher se prend sur le fil principal. Aucun `figer` juste
+  après un masquage posté depuis un autre fil.
+- À l'arrêt : capture en cours détruite (garde), Échap libéré, `Selection::fermer`,
+  `detruire_ecran_fige`, `liberer_image`.
+
+**Démarrage**, après le bandeau : `preparer_ecran_fige`, la garde, `quand_bureau_change`,
+`Selection::creer` puis `app.manage`. Les quatre commandes de la sélection sont dans
+`invoke_handler`. Un échec est écrit au journal ; une capture répond alors « Impossible de
+capturer ».
+
+**Journal** (contrat des essais) : `ecran fige pret`, `ecran fige fenetre <hwnd>`,
+`ecran fige: verrouillage de session suivi: oui|non`, `selection prete a servir`,
+`chrono gel photo <ms> total <ms> visible <ms>` (`visible` : de la réception du raccourci
+à la fin de `montrer_ecran_fige`), `echap global reserve|libere|presse` (ou `echap global
+non reserve: …`), `zone choisie <x>,<y> <l>x<h>`, `sortie copie <faite|non demandee|echec>
+recent <ok|echec> fichier <fait|non demande|echec>`, `recents: echec (…)`, `sortie annonce
+reussite|erreur: <titre>`, `chrono decoupe <ms> sortie <ms> relache-annonce <ms>`,
+`capture impossible: <photo|ecran_fige|selection|muette|lecture|non_disponible|
+sortie_sans_bilan>`, `sortie sans bilan`, `sortie <n>: bilan perime ignore`. Aucun
+chemin de capture complet, aucun contenu.
 
 ## 4. Réglages (`reglages/`, étape 2)
 
@@ -297,7 +405,10 @@ Module pur : il reçoit le dossier où écrire, ne connaît ni Tauri ni les autr
   - candidat invalide : « « X » n'est pas un raccourci valide. Raccourci : Y » ;
   - aucun candidat libre (genre « erreur », reste jusqu'à la croix) : « Aucun raccourci
     disponible », sans détail.
-- **Signal** : `Signal::Presse(action)`. Étape 5 ajoutera `reserver_echap` et `Signal::Echap`.
+- **Signal** : `Signal::Presse(action)` et `Signal::Echap`.
+- **Échap global** : `reserver_echap(app, rappel)` le réserve le temps d'une sélection,
+  `liberer_echap(app)` le rend. Le plugin fait la réservation sur le fil principal et
+  l'attend.
 - **Réservation** (`raccourcis/reservation.rs`, seule partie qui touche au plugin
   `tauri-plugin-global-shortcut`) : `essayer` = `vers_systeme` puis `on_shortcut` ; un appui
   (état « pressé » seulement) est traduit par `Bilan::action_de`. Tout est libéré à l'arrêt
@@ -308,9 +419,7 @@ Module pur : il reçoit le dossier où écrire, ne connaît ni Tauri ni les autr
   situation : `reserve_par_le_systeme`, `refuse_par_le_systeme`…) ou
   `annonce raccourci: deja faite`, rien si tout est normal. `etat.json` :
   `{ "annonce_raccourci": { "action", "candidat", "raison" } }`, les autres champs gardés.
-- À l'appui, l'Application appelle `lancer_capture(mode)`. Aux étapes 1 à 3, comme la Capture
-  n'existe pas : bandeau « réussite » « Raccourci reçu : capture de zone » (message provisoire,
-  remplacé à l'étape 4).
+- À l'appui, l'Application appelle `lancer_capture(mode)` (§3.6).
 
 ## 6. Fenêtres et bandeau (`fenetres/`, `interface/vignette/bandeau.*`)
 
@@ -323,6 +432,13 @@ Module pur : il reçoit le dossier où écrire, ne connaît ni Tauri ni les autr
 - `fenetres::Bandeau::afficher(Message { genre, titre, detail, actions })`, genres `Reussite`,
   `Info`, `Erreur`. `actions` est une liste `{ id, libelle }` fournie par l'Application
   (souvent vide). Un nouveau message remplace l'ancien tout de suite.
+- `Bandeau::cacher()` (fil principal) retire tout de suite le message en cours et cache la
+  fenêtre ; il rend vrai s'il y avait un message. Sert avant une capture.
+- **Arguments WebView2** : toutes les fenêtres reçoivent la même constante
+  `fenetres::ARGUMENTS_NAVIGATEUR` (`additional_browser_args`), le bandeau comme la
+  sélection : WebView2 refuse une seconde fenêtre aux arguments différents. Ce sont ceux
+  de wry par défaut, plus `CalculateNativeWinOcclusion` coupé (une page cachée reste vivante
+  et se repeint).
 - Place : centré en haut de la zone utile de l'écran où se trouve la souris, à 64 px du haut
   (sous la future barre de capture). Position calculée en pixels réels avec l'échelle de cet
   écran. La fenêtre mesure 560 × 220 pixels logiques (pilule de 460 × 108 au plus et place
@@ -360,8 +476,12 @@ Module pur : il reçoit le dossier où écrire, ne connaît ni Tauri ni les autr
   premier `bandeau_zone` valide de ce message (`fenetres::Signal::MessageMontre`, ligne
   `annonce montree <id>: situation retenue`), pas à l'envoi.
 - **Page prête** : la page appelle `bandeau_pret {}` une fois son écoute de
-  `bandeau:afficher` en place ; un message demandé avant (annonce du démarrage) attend ce
-  moment.
+  `bandeau:afficher` en place ; un message demandé avant attend ce moment. L'annonce du
+  démarrage n'est jamais demandée depuis `setup` : `demarrer` la poste
+  (`Evenement::AnnonceDemarrage`) pour un tour de la boucle déjà lancée. Depuis `setup`,
+  la création de la sélection (WebView2) fait tourner une boucle imbriquée où
+  `bandeau_pret` arrive ; un message montré là n'a jamais reçu son `bandeau_zone`
+  (essai 03 (b), caché d'office au bout de 3 s).
 - Aspect, d'après la maquette complète (https://claude.ai/artifact/AeUuBXPRC8U1AMiqg8dhTe) :
   fond opaque `acrylic-solid`, bordure `acrylic-stroke`, ombre `shadow-28`, pastille ronde
   de 20 px. Suit le thème clair ou sombre de Windows.
@@ -415,10 +535,159 @@ Module pur : il reçoit le dossier où écrire, ne connaît ni Tauri ni les autr
   copie d'écran de la pilule exclue des captures (rien) et, avec
   `BREEZYSHOT_ESSAI_CAPTURABLE=1`, peinte (fond `acrylic-solid` à ±6 par canal ;
   `bandeau-windows.png` et `bandeau-windows-large.png` dans les résultats).
-- `essais/` : un script par étape (`01-socle.ps1`, `02-reglages.ps1`, `03-raccourci.ps1`),
+- Essai 04 sous Windows (`04-zone.ps1`), sur le .exe avec `BREEZYSHOT_ESSAI_CAPTURABLE=1`
+  et une fenêtre témoin (`temoin.ps1`, quatre carrés de couleurs connues) : chronos,
+  fenêtres pendant la sélection (couverture, ordre, premier plan, styles étendus), glisser
+  dans les quatre sens comparé pixel par pixel (presse-papiers lu dans un fil STA, PNG de
+  « Récents », fichier enregistré), Échap, clic droit, clic simple, F5, Ctrl+P, Alt+F4,
+  perte de focus, second appui ignoré, deux captures rapprochées sans le bandeau, dossier
+  impossible, fenêtres et fils stables, arrêt propre. Plusieurs écrans, échelles mêlées,
+  application figée et verrouillage réel ne se vérifient pas sur la machine GitHub.
+- `essais/` : un script par étape (`01-socle.ps1`, `02-reglages.ps1`, `03-raccourci.ps1`,
+  `04-zone.ps1`),
   lancés par `essais/lancer.ps1` sur le .exe de release. Chaque essai démarre l'app avec
   `BREEZYSHOT_DOSSIER_ESSAI`, agit (lancer une seconde instance, simuler une touche, abîmer un
   fichier), puis lit le journal et les fichiers. Un essai qui échoue fait échouer GitHub.
 - Chaque exécution note la mémoire privée au repos (l'app et ses processus de moteur web) dans
   le résumé GitHub. À partir de l'étape 5, elle note aussi le chrono de la sélection.
 - Une étape n'est finie que relue par un agent distinct et inscrite dans `TRAVAIL-VALIDE.md`.
+
+## 8. Gel (`systeme/gel/`, `capture/`, étape 4)
+
+Décision de vitesse (11/11, mesurée chez l'utilisateur sur 3 écrans) : l'écran figé
+affiché par une fenêtre native est visible en 87 ms de médiane, contre 634 ms par une page
+web. Donc l'écran figé ne passe jamais par le moteur web.
+
+- **Une photo, une fenêtre.** Un seul `BitBlt` de tout le bureau virtuel (`SRCCOPY |
+  CAPTUREBLT`) dans une image GDI en mémoire, réutilisée tant que la taille du bureau ne
+  change pas. Une seule fenêtre native couvre tout le bureau virtuel. Les pixels ne sont
+  lus qu'à la découpe, et seulement pour la zone (`ImageFigee::lire` : `GetDIBits` 32 bits,
+  BGRA → RGBA, alpha 255).
+- **Façade** (`systeme::gel`, aucun `cfg` hors du choix du fichier) : `Rect` (pixels réels,
+  bords droit et bas exclus), `EcranInfo`, `FenetreInfo`, `Pixels`, `ImageFigee` (opaque :
+  `rect`, `duree_photo`, `lire`), `figer_bureau`, `ecrans`, `fenetres_visibles`,
+  `preparer_ecran_fige`, `montrer_ecran_fige`, `cacher_ecran_fige`, `detruire_ecran_fige`,
+  `poignee_ecran_fige`, `liberer_image`, `garder_ecran_fige`, `quand_bureau_change`
+  (`Changement::Ecrans | SessionVerrouillee`), `surveillance_session`. Hors Windows :
+  réponses neutres (`figer_bureau` dit « non disponible »).
+- **Une seule image à la fois** : une `ImageFigee` dépassée par une photo plus récente
+  refuse de se lire ou de se montrer. `figer_bureau` refuse tant que l'écran figé est
+  montré (ou encore visible après un masquage posté) : on ne remplace jamais l'image
+  affichée.
+- **Fenêtre de l'écran figé** : classe `BreezyShotEcranFige`, `WS_POPUP`, `WS_EX_TOPMOST |
+  WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE`, sans fondu, fond jamais effacé,
+  `WM_MOUSEACTIVATE` → `MA_NOACTIVATE`. Créée une fois, cachée, sur le fil principal.
+  `montrer` (fil principal seulement) la pose sur le bureau et la peint tout de suite ; sans
+  image à peindre, elle se cache. `cacher_ecran_fige` est sûr de partout (posté hors du
+  fil principal). Elle se cache d'elle-même quand les écrans changent (`WM_DISPLAYCHANGE`)
+  ou que la session se verrouille, puis appelle le rappel de `quand_bureau_change`.
+- **Garde** : un fil vérifie toutes les 500 ms, tant que l'écran figé est montré, que son
+  fil répond (`SendMessageTimeoutW(WM_NULL)`, 1 s) ; après le délai donné sans réponse, il
+  appelle le rappel de `garder_ecran_fige`, une fois par blocage.
+- **Capture** (`capture/`, sans code système) : `figer() -> Gel { image, bureau, ecrans,
+  duree_photo, duree_totale }` (la liste des fenêtres se demande à part, `capture::fenetres`,
+  pour le mode fenêtre) ; `decouper(&gel, zone) -> Pixels` ; géométrie pure :
+  `rect_entre(a, b)` (les deux coins inclus : de (0, 0) à (1919, 1079), 1920 × 1080),
+  `ecran_sous`, `borner_a_un_ecran(zone, depart, ecrans)` (une zone reste sur l'écran du
+  départ), `COTE_MIN = 3`, `zone_valide`. Erreurs : `NonDisponible`, `Photo`, `ZoneVide`,
+  `ZoneHorsBureau`, `Lecture`.
+- Mémoire : l'image du bureau reste allouée entre deux captures (3 écrans 1080p = 24 Mo),
+  rendue à l'arrêt (`liberer_image`). Aucune écriture sur le disque, aucune image au journal.
+- Tests Windows (`cargo test` sur la machine GitHub, un par un) : photo au pixel près d'une
+  fenêtre de quatre carrés, écran figé montré sans prendre le premier plan puis caché,
+  200 photos sans fuite d'objets GDI.
+
+## 9. Sélection (`fenetres/selection.rs`, `interface/selection/`, étape 5)
+
+Ce que voit l'utilisateur : tous les écrans figés et assombris ; il glisse, la zone redevient
+claire, entourée d'un trait fin ; il relâche, tout disparaît d'un coup. Rien d'autre : ni
+viseur, ni taille, ni poignées, ni texte, ni animation d'entrée. Curseur en croix. Maj :
+carré. Espace tenue : la zone se déplace. Échap ou clic droit : annuler. Un clic, ou moins de
+3 pixels réels de côté, n'est pas une zone : la sélection continue. La loupe n'est pas
+construite (le réglage existe, sans effet).
+
+- **Une fenêtre Tauri transparente**, préparée au démarrage et cachée, posée juste au-dessus
+  de l'écran figé et couvrant tout le bureau virtuel. Elle ne dessine que le voile (jeton
+  `--scrim`) et le trait (1 px CSS `--selection-stroke`, à l'intérieur). Elle ne reçoit
+  jamais les pixels. Sans bordure, sans ombre, toujours au-dessus, absente de la barre des
+  tâches et d'Alt+Tab (`WS_EX_TOOLWINDOW`, sans `WS_EX_APPWINDOW`), exclue des captures
+  (sauf essai). Contrairement au bandeau, **elle prend le focus** : il faut le clavier pour
+  Maj et Espace. Journal : `selection fenetre <hwnd>`.
+- **Interface** : `Selection::creer(app, rappel)`, `montrer(Demande { bureau, ecrans,
+  dessous, cote_min }) -> Result<id>` (fil principal), `cacher()` (sûr de partout, sans
+  signal), `visible()`, `fermer()`. `Signal` : `Prete { id, duree }`, `Zone { id, depart,
+  arrivee }` (pixels réels du bureau), `Annulee { id, cause }`, `Muette { id }`,
+  `Impossible { id, cause }`. Quatre commandes, permises à la seule fenêtre `selection`
+  (`capabilities/selection.json`) : `selection_chargee`, `selection_prete`,
+  `selection_terminee`, `selection_annulee`.
+- **Montrer**, sans rien attendre de la page : noter la fenêtre au premier plan ; poser la
+  fenêtre sur le bureau, la montrer, lui donner le premier plan (par `systeme` sous Windows,
+  jamais par tao, qui réécrirait les styles) ; placer l'écran figé juste en dessous ;
+  relire le rectangle réel et le reposer tant qu'il diffère, deux fois au plus
+  (`PLACEMENTS_MAX = 3` poses en tout ; `selection montree <id>
+  voulu <x,y,l,h> reel <x,y,l,h> echelle <e>`) ; envoyer la charge `selection:montrer { id,
+  numero, largeur, hauteur, ecrans, cote_min }`, tout en pixels réels relatifs à la fenêtre ;
+  armer le délai de 2 s (`DELAI_PRETE`).
+- **Une seule échelle, celle de la page.** Rust ne parle à la page qu'en pixels réels. La
+  page retient `devicePixelRatio` s'il explique la taille réelle à 1 pixel CSS près, sinon
+  elle mesure (`visualViewport`, à défaut `innerWidth`), et répond `selection_prete { id,
+  numero, largeur, hauteur, echelle, kx, ky, attente }`. `controler_page` refuse une échelle
+  non finie, hors de [0,5 ; 5], différente de plus de 2 % entre les axes, ou qui n'explique
+  pas la taille réelle. Les coins de `selection_terminee` arrivent en pixels réels.
+- **Numéro de charge** : chaque nouvelle charge (premier envoi, fenêtre relue différente)
+  prend le numéro suivant, que la page renvoie partout. Ancien numéro : `prete` non
+  contrôlée, `terminee` ignorée, `annulee` gardée. Après un `resize`, la page n'est plus
+  prête et le dit (`attente`) : elle reçoit toujours une charge, de même numéro si le
+  rectangle réel n'a pas changé.
+- **Un seul signal de fin par affichage** (le premier gagne ; un `id` qui n'est pas celui
+  en cours est ignoré). Avant le rappel d'un signal de fin, le module rend le premier plan,
+  cache sa fenêtre et prévient la page (`selection:cachee`) ; le rappel est appelé sur le
+  fil principal, dans le même tour. Perte du focus après l'avoir eu : `Annulee`. Pas de
+  `selection_prete` en 2 s : `Muette`. Donnée invalide de la page : `Impossible`.
+- **Données de la page jamais crues** : `vers_bureau` (pixel de la fenêtre → pixel du
+  bureau, `None` si non fini ou hors de la fenêtre), `vers_page`, `controler_page`,
+  `decider_zone`, `cause_depuis_nom`, testées.
+- Journal : `selection chargee`, `selection montree …`, `chrono selection prete <ms> page
+  <l>x<h> echelle <kx> page-dpr <d> tao <s>`, `selection fin <id> zone|annulee
+  <cause>|muette|impossible <cause>`.
+- L'Application réserve Échap en global pendant la sélection (§3.6) : la page n'a pas
+  besoin du focus pour être annulable.
+
+## 10. Sortie (`sortie/`, étape 6)
+
+Tout ce qui quitte l'app passe par une seule fonction, `sortir(&Pixels, &Demande) -> Bilan`.
+« Récents » n'est lu et écrit que par `sortie`. Le module n'écrit jamais au journal : il rend
+son `Bilan`, et `annonce(&Bilan, &Demande)` dit quoi montrer.
+
+- `Demande { copier, enregistrer, dossier_enregistrement, dossier_affiche, dossier_recents,
+  modele_nom, maintenant }`, chemins absolus résolus par l'Application. `Bilan { copie:
+  Faite | NonDemandee | Echec, recent: Result<chemin>, enregistrement: Fait | NonDemande |
+  Echec { dossier, cause } }`.
+- **Ordre** : valider les pixels (sinon tout en échec, sans panique) ; la copie part dans
+  un fil à part ; pendant ce temps, encoder le PNG une fois, écrire « Récents », enregistrer
+  si demandé. Une étape qui échoue n'empêche pas les suivantes. `sortir` bloque : jamais sur
+  le fil principal.
+- **Presse-papiers** : crate `arboard` (Windows, macOS, Linux) ; occupé : on réessaie
+  pendant 250 ms au plus, puis échec avec sa cause.
+- **PNG** : crate `png`, RGBA 8 bits, alpha 255, sans métadonnées, compression rapide.
+- **Fichiers** : écrits dans un temporaire du même dossier, puis lien dur (jamais
+  d'écrasement ; repli sur réservation et renommage). Dossier créé s'il manque. Dossier
+  vide ou relatif : échec, rien d'écrit. Restes `.breezyshot-*.tmp` de plus d'une heure
+  supprimés.
+- **Nom** : `{date}` → `2026-11-11`, `{heure}` → `19.40.12` ; caractères interdits sous
+  Windows remplacés par `-` ; pas d'espace ni de point à la fin ; nom vide ou réservé
+  (`CON`, `NUL`, `COM1`…) → `BreezyShot <date> <heure>` ; 120 caractères et 200 octets au
+  plus ; collision : ` (2)`, ` (3)`…
+- **Récents** : `<local>/Recents/AAAAMMJJ-HHMMSS-mmm.png` (heure UTC, `_2` en cas de
+  collision) ; on garde les 50 plus récents (`RECENTS_GARDES`) ; le nettoyage ne touche
+  qu'aux noms de ce format exact, jamais au fichier qu'on vient d'écrire.
+- **Annonces** (une ligne de titre ; seule une erreur a une cause) : « Copié dans le
+  presse-papiers » ; « Enregistré dans <dossier affiché> » ; « Copié et enregistré » ;
+  enregistrement en échec : « Impossible d'enregistrer » / cause en clair ; copie en échec
+  seule : « Impossible de copier » / cause ; copie ratée mais fichier enregistré :
+  « Impossible de copier » / « La capture est enregistrée dans <dossier affiché>. » ; rien
+  demandé : « Capture prise ». Aujourd'hui, « Capture prise » n'arrive que si copie et
+  enregistrement sont éteints et la vignette (pas encore construite) allumée : les réglages
+  ne rallument la copie que si les trois sont éteints. Seul « Récents » en échec : la réussite est annoncée, l'échec
+  va au journal (par l'Application).
+- `sortie` n'importe que `crate::systeme` (`Pixels` vient de `systeme::gel`).

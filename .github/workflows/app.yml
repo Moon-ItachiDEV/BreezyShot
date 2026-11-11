@@ -59,13 +59,18 @@ jobs:
 
       - name: Tests
         working-directory: app/coeur
-        run: cargo test --locked
+        env:
+          # Sur cette machine le presse-papiers existe : son test ne doit pas pouvoir sauter.
+          BREEZYSHOT_PRESSE_PAPIERS_OBLIGATOIRE: "1"
+        run: cargo test --locked -- --show-output
 
       - name: Construire breezyshot.exe (release)
         working-directory: app
         run: npx tauri build --no-bundle -- --locked
 
       - name: Essais
+        # 01 à 04 ; une capture bloquée ne doit pas manger tout le temps du job.
+        timeout-minutes: 20
         run: ./essais/lancer.ps1 -Exe app/coeur/target/release/breezyshot.exe -Sortie essais-resultats
 
       - name: Envoyer le .exe
@@ -85,7 +90,7 @@ jobs:
           if-no-files-found: warn
 
   pages:
-    name: Pages (bandeau dans Chromium)
+    name: Pages (bandeau et sélection dans Chromium)
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -112,6 +117,12 @@ jobs:
           NODE_PATH: ${{ github.workspace }}/app/node_modules
           SORTIE: ${{ github.workspace }}/essais-resultats/pages
         run: node essais/pages/bandeau.cjs
+
+      - name: Essai de la page de sélection
+        env:
+          NODE_PATH: ${{ github.workspace }}/app/node_modules
+          SORTIE: ${{ github.workspace }}/essais-resultats/pages
+        run: node essais/pages/selection.cjs
 
       - name: Envoyer les captures de la page
         if: always()
@@ -143,3 +154,44 @@ jobs:
       - name: Tests
         working-directory: app/coeur
         run: cargo test --locked
+
+  publier:
+    name: Version d'essai (pré-version GitHub)
+    # Seulement quand main avance et que tout le reste est vert : le .exe qui vient de
+    # passer les essais devient la pré-version « v<version>-essai », remplacée à chaque fois.
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    needs: [windows, pages, macos]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Reprendre le .exe essayé
+        uses: actions/download-artifact@v4
+        with:
+          name: breezyshot-exe
+          path: exe
+
+      - name: Publier la pré-version
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version=$(sed -n 's/^version = "\(.*\)"/\1/p' app/coeur/Cargo.toml | head -1)
+          test -n "$version"
+          etiquette="v${version}-essai"
+          fichier="exe/BreezyShot-${version}-essai.exe"
+          mv exe/breezyshot.exe "$fichier"
+          gh release delete "$etiquette" --yes --cleanup-tag || true
+          # Tant que l'ancienne étiquette existe, gh ignore --target et la pré-version
+          # pointerait l'ancien commit : on attend sa disparition (30 s au plus).
+          for i in $(seq 1 15); do
+            gh api "repos/$GITHUB_REPOSITORY/git/refs/tags/$etiquette" >/dev/null 2>&1 || break
+            sleep 2
+          done
+          gh release create "$etiquette" "$fichier" --prerelease \
+            --title "BreezyShot ${version} (essai)" --notes-file docs/ESSAI.md --target "$GITHUB_SHA"
+          # Et on le prouve : l'étiquette doit pointer le commit qui vient d'être essayé.
+          pointe=$(gh api "repos/$GITHUB_REPOSITORY/git/refs/tags/$etiquette" --jq .object.sha)
+          test "$pointe" = "$GITHUB_SHA"

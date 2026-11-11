@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-selection-terminee"
+description = "Enables the selection_terminee command without any pre-configured scope."
+commands.allow = ["selection_terminee"]
+
+[[permission]]
+identifier = "deny-selection-terminee"
+description = "Denies the selection_terminee command without any pre-configured scope."
+commands.deny = ["selection_terminee"]

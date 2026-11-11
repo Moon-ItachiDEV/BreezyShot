@@ -357,3 +357,148 @@ pub fn rectangle_fenetre(identifiant: isize) -> Option<(i32, i32, u32, u32, f64)
         echelle,
     ))
 }
+
+// ---------------------------------------------------------------------------------------
+// Sélection (étape 5) : une fenêtre outil qui prend le focus, posée sur tout le bureau.
+// Montrée et cachée sans tao, comme le bandeau : `show()` de tao réécrit tous les styles
+// étendus (window_state.rs, `apply_diff`), ce qui remettrait `WS_EX_APPWINDOW` et
+// retirerait `WS_EX_TOOLWINDOW` (la fenêtre entrerait dans Alt+Tab).
+
+use ::windows::Win32::Graphics::Dwm::{DwmSetWindowAttribute, DWMWA_TRANSITIONS_FORCEDISABLED};
+use ::windows::Win32::UI::WindowsAndMessaging::{
+    GetForegroundWindow, IsWindow, SetForegroundWindow, ShowWindowAsync,
+};
+
+/// Une poignée gardée sous forme de nombre ; `None` pour 0.
+fn poignee(identifiant: isize) -> Option<HWND> {
+    (identifiant != 0).then_some(HWND(identifiant as *mut core::ffi::c_void))
+}
+
+/// Fenêtre outil qui peut être activée : `WS_EX_TOOLWINDOW`, sans `WS_EX_APPWINDOW` (posé
+/// par tao pour une fenêtre sans parent, window.rs `ON_TASKBAR`) ni `WS_EX_NOACTIVATE`.
+/// Les fondus d'apparition de Windows sont coupés (aucune animation d'entrée).
+pub fn preparer_fenetre_outil_active(fenetre: &tauri::WebviewWindow) -> Result<bool, String> {
+    let h = hwnd(fenetre)?;
+    // SAFETY : lecture et écriture du style étendu d'une fenêtre de ce processus.
+    unsafe {
+        let actuel = GetWindowLongW(h, GWL_EXSTYLE);
+        let voulu = (actuel & !(WS_EX_APPWINDOW.0 as i32) & !(WS_EX_NOACTIVATE.0 as i32))
+            | (WS_EX_TOOLWINDOW.0 as i32);
+        if voulu != actuel {
+            SetWindowLongW(h, GWL_EXSTYLE, voulu);
+            SetWindowPos(
+                h,
+                None,
+                0,
+                0,
+                0,
+                0,
+                SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED,
+            )
+            .map_err(|e| format!("SetWindowPos: {e}"))?;
+        }
+    }
+    let oui = ::windows::core::BOOL(1);
+    // SAFETY : un BOOL dont la taille est passée.
+    let fondu = unsafe {
+        DwmSetWindowAttribute(
+            h,
+            DWMWA_TRANSITIONS_FORCEDISABLED,
+            &oui as *const ::windows::core::BOOL as *const core::ffi::c_void,
+            std::mem::size_of::<::windows::core::BOOL>() as u32,
+        )
+    };
+    if let Err(e) = fondu {
+        log::warn!("selection: fondu de Windows non coupe: {e}");
+    }
+    Ok(true)
+}
+
+/// Pose la fenêtre sur `rect` (pixels réels), au-dessus de tout, et la montre, sans
+/// l'activer (l'activation est `prendre_premier_plan`). `SetWindowPos` synchrone : tao
+/// passe `SWP_ASYNCWINDOWPOS` (window.rs, `set_outer_position`), on ne pourrait pas relire.
+pub fn poser_au_dessus(fenetre: &tauri::WebviewWindow, rect: super::Rect) -> Result<bool, String> {
+    let h = hwnd(fenetre)?;
+    // SAFETY : handle valide d'une fenêtre de ce processus ; aucun tampon.
+    unsafe {
+        SetWindowPos(
+            h,
+            Some(HWND_TOPMOST),
+            rect.x,
+            rect.y,
+            rect.largeur,
+            rect.hauteur,
+            SWP_NOACTIVATE | SWP_SHOWWINDOW,
+        )
+    }
+    .map_err(|e| format!("SetWindowPos: {e}"))?;
+    Ok(true)
+}
+
+/// Donne le premier plan et le clavier à la fenêtre. Windows lui envoie alors
+/// `WM_SETFOCUS`, que wry fait suivre à la page (webview2/mod.rs, `parent_subclass_proc`,
+/// `MoveFocus`). `SetForegroundWindow` réussit après un raccourci global (le processus a
+/// reçu la dernière entrée). Aucun autre essai s'il est refusé : rattacher notre file
+/// d'entrée à celle d'une application figée (`AttachThreadInput`) pourrait bloquer le fil
+/// principal pendant que l'écran est couvert. Rend vrai si la fenêtre est au premier plan.
+pub fn prendre_premier_plan(fenetre: &tauri::WebviewWindow) -> Result<bool, String> {
+    let h = hwnd(fenetre)?;
+    // SAFETY : handle d'une fenêtre de ce processus ; aucun tampon.
+    unsafe {
+        if GetForegroundWindow() != h {
+            let _ = SetForegroundWindow(h);
+        }
+        Ok(GetForegroundWindow() == h)
+    }
+}
+
+/// Place `dessous` juste en dessous de `dessus` dans l'ordre des fenêtres, sans l'activer
+/// ni la déplacer. Les deux sont « toujours au-dessus » : `dessous` reste dans ce groupe.
+pub fn placer_sous(dessous: isize, dessus: isize) -> Result<bool, String> {
+    let (Some(bas), Some(haut)) = (poignee(dessous), poignee(dessus)) else {
+        return Err("poignee nulle".into());
+    };
+    // SAFETY : simples poignées ; `IsWindow` évite d'agir sur une fenêtre disparue.
+    unsafe {
+        if !IsWindow(Some(bas)).as_bool() {
+            return Err("fenetre du dessous disparue".into());
+        }
+        SetWindowPos(
+            bas,
+            Some(haut),
+            0,
+            0,
+            0,
+            0,
+            SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
+        )
+    }
+    .map_err(|e| format!("SetWindowPos: {e}"))?;
+    Ok(true)
+}
+
+/// La fenêtre au premier plan (`GetForegroundWindow`), `None` s'il n'y en a pas.
+pub fn fenetre_premier_plan() -> Option<isize> {
+    // SAFETY : sans paramètre.
+    let h = unsafe { GetForegroundWindow() };
+    (!h.0.is_null()).then_some(h.0 as isize)
+}
+
+/// Remet `identifiant` au premier plan s'il désigne encore une fenêtre (`IsWindow`).
+pub fn rendre_premier_plan(identifiant: isize) -> bool {
+    let Some(h) = poignee(identifiant) else {
+        return false;
+    };
+    // SAFETY : simple poignée, vérifiée par `IsWindow`.
+    unsafe { IsWindow(Some(h)).as_bool() && SetForegroundWindow(h).as_bool() }
+}
+
+/// Cache une fenêtre depuis n'importe quel fil sans attendre son fil
+/// (`ShowWindowAsync(SW_HIDE)`).
+pub fn cacher_fenetre_async(identifiant: isize) -> bool {
+    let Some(h) = poignee(identifiant) else {
+        return false;
+    };
+    // SAFETY : simple poignée, vérifiée par `IsWindow` ; l'appel ne fait que poster.
+    unsafe { IsWindow(Some(h)).as_bool() && ShowWindowAsync(h, SW_HIDE).as_bool() }
+}

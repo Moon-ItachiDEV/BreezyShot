@@ -1,5 +1,6 @@
 # Étape 3, raccourci et bandeau (ARCHITECTURE.md §5, §6).
-# (a) Impr. écran libre : retenue, appui simulé, réussite affichée puis terminée ;
+# (a) Impr. écran libre : retenue, appui simulé, sélection ouverte puis fermée par Échap
+#     (la capture elle-même et son bandeau de réussite sont dans l'essai 04) ;
 # (b) Impr. écran réservée par Windows : Ctrl+Maj+1, annonce (raison réservée), appui ; relance :
 #     annonce déjà faite ;
 # (c) Impr. écran tenue par une autre application : Ctrl+Maj+1, annonce (raison refusée) ;
@@ -290,17 +291,15 @@ public static extern IntPtr GetWindowLongPtr(IntPtr h, int index);
             [BreezyShotEssai.Entree]::Touches([byte[]]@($VK_SNAPSHOT))
             $null = Attendre-Motif -Motif 'raccourci presse: zone$' -Dossier $da -DelaiS 5 -Quoi '(a) appui sur Impr. écran'
             Verifier '(a) raccourci presse: zone' $true | Out-Null
-            $chrono = [System.Diagnostics.Stopwatch]::StartNew()
-            $aff = Lire-Affiche (Attendre-Motif -Motif 'bandeau affiche \d+ reussite ' -Dossier $da -DelaiS 5 -Quoi '(a) réussite')
-            Verifier '(a) bandeau affiche … reussite' ($aff.Genre -eq 'reussite') | Out-Null
-            Verifier '(a) passage Repos -> Gel -> Repos' ((Compter-Lignes -Texte 'etat Gel -> Repos' -Dossier $da) -eq 1) | Out-Null
-            Verifier '(a) bandeau visible pendant la réussite' ([BreezyShotEssai.Entree]::IsWindowVisible($hwnd)) | Out-Null
-            $null = Attendre-Motif -Motif "bandeau termine $($aff.Id)$" -Dossier $da -DelaiS 5 -Quoi '(a) fin de la réussite'
-            $chrono.Stop()
-            Verifier '(a) bandeau termine en moins de 5 s' ($chrono.Elapsed.TotalSeconds -lt 5) "$([math]::Round($chrono.Elapsed.TotalSeconds, 2)) s" | Out-Null
-            Start-Sleep -Milliseconds 200
-            Verifier '(a) après bandeau termine, la fenêtre est cachée (IsWindowVisible faux)' (-not [BreezyShotEssai.Entree]::IsWindowVisible($hwnd)) | Out-Null
-            Verifier '(a) pas de cache d''office' ((Compter-Lignes -Texte "bandeau cache d'office" -Dossier $da) -eq 0) | Out-Null
+            # Depuis l'étape 4, l'appui lance une vraie capture (essai 04) : la sélection
+            # s'ouvre, Échap la ferme, retour au Repos sans message.
+            $null = Attendre-Motif -Motif 'selection montree \d+ ' -Dossier $da -DelaiS 5 -Quoi '(a) sélection ouverte'
+            Verifier '(a) passage Repos -> Gel -> Selection' ((Compter-Lignes -Texte 'etat Gel -> Selection' -Dossier $da) -eq 1) | Out-Null
+            $null = Attendre-Motif -Motif 'chrono selection prete \d+' -Dossier $da -DelaiS 5 -Quoi '(a) sélection prête'
+            [BreezyShotEssai.Entree]::Touches([byte[]]@(0x1B))
+            $null = Attendre-Motif -Motif 'etat Selection -> Repos \(SelectionAnnulee\)' -Dossier $da -DelaiS 5 -Quoi '(a) Échap'
+            Verifier '(a) Échap : retour au Repos' $true | Out-Null
+            Verifier '(a) aucun message après une annulation' ((Compter-Motif -Motif 'bandeau affiche \d+ ' -Dossier $da) -eq 0) | Out-Null
             Fermer-Cas $p $da '(a)'
             # (e) Après --quitter, le raccourci est libéré.
             Verifier '(e) ligne « raccourcis liberes »' ((Compter-Lignes -Texte 'raccourcis liberes' -Dossier $da) -eq 1) | Out-Null
@@ -353,6 +352,9 @@ public static extern IntPtr GetWindowLongPtr(IntPtr h, int index);
             [BreezyShotEssai.Entree]::Touches($CTRL_MAJ_1)
             $null = Attendre-Motif -Motif 'raccourci presse: zone$' -Dossier $db -DelaiS 5 -Quoi '(b) appui sur Ctrl+Maj+1'
             Verifier '(b) raccourci presse: zone' $true | Out-Null
+            $null = Attendre-Motif -Motif 'chrono selection prete \d+' -Dossier $db -DelaiS 5 -Quoi '(b) sélection prête'
+            [BreezyShotEssai.Entree]::Touches([byte[]]@(0x1B))
+            $null = Attendre-Motif -Motif 'etat Selection -> Repos' -Dossier $db -DelaiS 5 -Quoi '(b) Échap'
             Fermer-Cas $p $db '(b)'
             # Relance : la même situation n'est pas annoncée deux fois.
             $p = Demarrer-Cas -Dossier $db -Quoi '(b) relance'

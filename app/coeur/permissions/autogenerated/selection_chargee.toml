@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-selection-chargee"
+description = "Enables the selection_chargee command without any pre-configured scope."
+commands.allow = ["selection_chargee"]
+
+[[permission]]
+identifier = "deny-selection-chargee"
+description = "Denies the selection_chargee command without any pre-configured scope."
+commands.deny = ["selection_chargee"]
