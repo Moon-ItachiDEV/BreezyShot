@@ -692,6 +692,19 @@ pub fn lancer_capture(app: &AppHandle, mode: Mode) {
         appliquer(app, Declencheur::GelImpossible);
         return;
     }
+    // Avant toute photo : aucune capture ne doit rester rangée (sa garde, détruite plus
+    // tard, cacherait le nouvel écran figé), et la Sélection doit exister (sinon l'écran
+    // figé ne serait jamais montré pour rien).
+    if let Some(ancienne) = ranger_capture(app, None) {
+        log::error!("capture precedente encore rangee: abandonnee avant la photo");
+        drop(ancienne);
+    }
+    if app.try_state::<Selection>().is_none() {
+        log::warn!("selection absente: pas de photo");
+        appliquer(app, Declencheur::GelImpossible);
+        afficher_probleme(app, Probleme::Selection);
+        return;
+    }
     // 2. Le bandeau ne doit ni figurer sur la photo ni rester au-dessus de l'écran figé.
     let bandeau_cache = app.try_state::<Bandeau>().is_some_and(|b| b.cacher());
     if bandeau_cache && !systeme::attendre_composition(ATTENTE_COMPOSITION) {
@@ -740,8 +753,8 @@ pub fn lancer_capture(app: &AppHandle, mode: Mode) {
         cote_min: capture::COTE_MIN,
     };
     // La capture est notée avant `montrer` : un signal de fin arrivé pendant `montrer`
-    // la trouve et la termine. Aucune autre ne peut être rangée (la table refuse un
-    // second appui) ; si c'était le cas, sa garde cache tout ici, avant `montrer`.
+    // la trouve et la termine. La place est vide : vidée avant la photo, sur ce même fil,
+    // et rien entre-temps ne range de capture.
     let ancienne = ranger_capture(
         app,
         Some(CaptureEnCours {
@@ -750,9 +763,10 @@ pub fn lancer_capture(app: &AppHandle, mode: Mode) {
             garde,
         }),
     );
-    if let Some(ancienne) = ancienne {
-        log::error!("capture precedente encore rangee: abandonnee");
-        drop(ancienne);
+    if ancienne.is_some() {
+        log::error!("capture rangee pendant la photo: impossible, ignoree");
+        // Jamais détruite ici : sa garde cacherait l'écran figé qu'on vient de montrer.
+        std::mem::forget(ancienne);
     }
     let montree = match app.try_state::<Selection>() {
         Some(s) => s.montrer(demande),
