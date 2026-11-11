@@ -7,6 +7,7 @@ pub mod capture;
 pub mod fenetres;
 pub mod raccourcis;
 pub mod reglages;
+pub mod sortie;
 pub mod systeme;
 
 pub use application::lancer;

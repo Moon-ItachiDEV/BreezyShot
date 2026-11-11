@@ -59,6 +59,9 @@ jobs:
 
       - name: Tests
         working-directory: app/coeur
+        env:
+          # Sur cette machine le presse-papiers existe : son test ne doit pas pouvoir sauter.
+          BREEZYSHOT_PRESSE_PAPIERS_OBLIGATOIRE: "1"
         run: cargo test --locked -- --show-output
 
       - name: Construire breezyshot.exe (release)
