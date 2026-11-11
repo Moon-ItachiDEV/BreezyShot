@@ -365,9 +365,8 @@ pub fn rectangle_fenetre(identifiant: isize) -> Option<(i32, i32, u32, u32, f64)
 // retirerait `WS_EX_TOOLWINDOW` (la fenêtre entrerait dans Alt+Tab).
 
 use ::windows::Win32::Graphics::Dwm::{DwmSetWindowAttribute, DWMWA_TRANSITIONS_FORCEDISABLED};
-use ::windows::Win32::System::Threading::{AttachThreadInput, GetCurrentThreadId};
 use ::windows::Win32::UI::WindowsAndMessaging::{
-    GetForegroundWindow, GetWindowThreadProcessId, IsWindow, SetForegroundWindow, ShowWindowAsync,
+    GetForegroundWindow, IsWindow, SetForegroundWindow, ShowWindowAsync,
 };
 
 /// Une poignée gardée sous forme de nombre ; `None` pour 0.
@@ -439,29 +438,15 @@ pub fn poser_au_dessus(fenetre: &tauri::WebviewWindow, rect: super::Rect) -> Res
 /// Donne le premier plan et le clavier à la fenêtre. Windows lui envoie alors
 /// `WM_SETFOCUS`, que wry fait suivre à la page (webview2/mod.rs, `parent_subclass_proc`,
 /// `MoveFocus`). `SetForegroundWindow` réussit après un raccourci global (le processus a
-/// reçu la dernière entrée) ; sinon, un second essai rattache un instant notre file
-/// d'entrée à celle de la fenêtre au premier plan. Rend vrai si la fenêtre est au premier
-/// plan à la fin.
+/// reçu la dernière entrée). Aucun autre essai s'il est refusé : rattacher notre file
+/// d'entrée à celle d'une application figée (`AttachThreadInput`) pourrait bloquer le fil
+/// principal pendant que l'écran est couvert. Rend vrai si la fenêtre est au premier plan.
 pub fn prendre_premier_plan(fenetre: &tauri::WebviewWindow) -> Result<bool, String> {
     let h = hwnd(fenetre)?;
-    // SAFETY : handles de fenêtres ; aucun tampon. Le rattachement est toujours défait.
+    // SAFETY : handle d'une fenêtre de ce processus ; aucun tampon.
     unsafe {
-        if GetForegroundWindow() == h || SetForegroundWindow(h).as_bool() {
-            return Ok(GetForegroundWindow() == h);
-        }
-        let devant = GetForegroundWindow();
-        let fil_devant = if devant.0.is_null() {
-            0
-        } else {
-            GetWindowThreadProcessId(devant, None)
-        };
-        let fil = GetCurrentThreadId();
-        if fil_devant != 0 && fil_devant != fil {
-            let attache = AttachThreadInput(fil, fil_devant, true).as_bool();
+        if GetForegroundWindow() != h {
             let _ = SetForegroundWindow(h);
-            if attache {
-                let _ = AttachThreadInput(fil, fil_devant, false);
-            }
         }
         Ok(GetForegroundWindow() == h)
     }
