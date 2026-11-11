@@ -6,7 +6,9 @@
 //! procédure de la fenêtre prend `IMAGE` pour peindre : un verrou gardé à ce moment-là
 //! bloquerait le fil. Un verrou empoisonné (fil qui a paniqué) est repris, jamais déballé.
 
-use std::sync::{Mutex, MutexGuard};
+use std::sync::atomic::{AtomicIsize, Ordering};
+use std::sync::{Arc, Condvar, Mutex, MutexGuard};
+use std::time::{Duration, Instant};
 
 use ::windows::core::{w, BOOL, PCWSTR};
 use ::windows::Win32::Foundation::{
@@ -23,21 +25,25 @@ use ::windows::Win32::Graphics::Gdi::{
     HBITMAP, HDC, HGDIOBJ, HMONITOR, MONITORINFO, PAINTSTRUCT, SRCCOPY,
 };
 use ::windows::Win32::System::LibraryLoader::GetModuleHandleW;
+use ::windows::Win32::System::RemoteDesktop::{
+    WTSRegisterSessionNotification, WTSUnRegisterSessionNotification, NOTIFY_FOR_THIS_SESSION,
+};
 use ::windows::Win32::System::Threading::{GetCurrentProcessId, GetCurrentThreadId};
 use ::windows::Win32::UI::HiDpi::{GetDpiForMonitor, MDT_EFFECTIVE_DPI};
 use ::windows::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DefWindowProcW, DestroyWindow, EnumWindows, GetSystemMetrics, GetWindowRect,
     GetWindowTextLengthW, GetWindowTextW, GetWindowThreadProcessId, IsIconic, IsWindow,
-    IsWindowVisible, LoadCursorW, PostMessageW, RegisterClassW, SetWindowPos, ShowWindow,
-    ShowWindowAsync, HWND_TOPMOST, IDC_CROSS, MA_NOACTIVATE, MONITORINFOF_PRIMARY,
-    SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN, SM_XVIRTUALSCREEN, SM_YVIRTUALSCREEN, SWP_NOACTIVATE,
-    SWP_SHOWWINDOW, SW_HIDE, WM_CLOSE, WM_ERASEBKGND, WM_MOUSEACTIVATE, WM_PAINT, WNDCLASSW,
-    WNDPROC, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP,
+    IsWindowVisible, LoadCursorW, PostMessageW, RegisterClassW, SendMessageTimeoutW, SetWindowPos,
+    ShowWindow, ShowWindowAsync, HWND_TOPMOST, IDC_CROSS, MA_NOACTIVATE, MONITORINFOF_PRIMARY,
+    SMTO_ABORTIFHUNG, SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN, SM_XVIRTUALSCREEN, SM_YVIRTUALSCREEN,
+    SWP_NOACTIVATE, SWP_SHOWWINDOW, SW_HIDE, WM_CLOSE, WM_DESTROY, WM_DISPLAYCHANGE, WM_DPICHANGED,
+    WM_ERASEBKGND, WM_MOUSEACTIVATE, WM_NULL, WM_PAINT, WM_WTSSESSION_CHANGE, WNDCLASSW, WNDPROC,
+    WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP, WTS_SESSION_LOCK,
 };
 
 use super::{
-    bgra_en_rgba, echelle_depuis_dpi, garder_fenetre, EcranInfo, EtatFenetre, FenetreInfo, Pixels,
-    Rect,
+    bgra_en_rgba, echelle_depuis_dpi, garder_fenetre, Changement, EcranInfo, EtatFenetre,
+    FenetreInfo, Pixels, Rect,
 };
 
 pub const DISPONIBLE: bool = true;
@@ -264,19 +270,60 @@ static IMAGE: Mutex<EtatImage> = Mutex::new(EtatImage {
     dernier_numero: 0,
 });
 
-/// Ce que l'appelant garde d'une photo : sa place et son numéro. Les pixels restent dans
-/// `IMAGE`.
+/// Ce que l'appelant garde d'une photo : sa place, son numéro et la durée de la copie.
+/// Les pixels restent dans `IMAGE`.
 #[derive(Debug)]
 pub struct Image {
     rect: Rect,
     numero: u64,
+    duree: Duration,
 }
 
 pub fn rect_image(image: &Image) -> Rect {
     image.rect
 }
 
+pub fn duree_image(image: &Image) -> Duration {
+    image.duree
+}
+
+/// Copie tout le bureau (`bureau`, lu depuis l'écran `ecran`) dans `dest`, qui a sa taille.
+/// Rend la durée du `BitBlt` seul.
+fn photographier(dest: &ImageGdi, ecran: HDC, bureau: Rect) -> Result<Duration, String> {
+    let debut = Instant::now();
+    // Si le bureau a changé de taille depuis la lecture des mesures, la copie reste dans
+    // l'image (au pire, une bande noire) ; la photo suivante réallouera.
+    // SAFETY : les deux DC sont valides ; la copie tient dans l'image (même taille).
+    unsafe {
+        BitBlt(
+            dest.dc.0,
+            0,
+            0,
+            bureau.largeur,
+            bureau.hauteur,
+            Some(ecran),
+            bureau.x,
+            bureau.y,
+            SRCCOPY | CAPTUREBLT,
+        )
+    }
+    .map_err(|e| format!("BitBlt du bureau: {e}"))?;
+    Ok(debut.elapsed())
+}
+
+/// Vrai si l'écran figé est à l'écran (lecture du style, aucun message envoyé).
+fn ecran_fige_visible() -> bool {
+    fenetre_figee().is_some_and(|(hwnd, _)| {
+        // SAFETY : simple lecture, possible depuis n'importe quel fil.
+        unsafe { IsWindowVisible(hwnd) }.as_bool()
+    })
+}
+
 pub fn figer_bureau() -> Result<Image, String> {
+    // On ne remplace jamais l'image affichée par l'écran figé.
+    if ecran_fige_visible() {
+        return Err("ecran fige deja montre".into());
+    }
     let bureau = bureau_virtuel()?;
     let ecran = DcPrete::prendre(None)?;
     let mut etat = verrouiller(&IMAGE);
@@ -303,42 +350,22 @@ pub fn figer_bureau() -> Result<Image, String> {
     };
     photo.numero = numero;
     photo.rect = bureau;
-    // Si le bureau a changé de taille depuis la lecture des mesures, la copie reste dans
-    // l'image (au pire, une bande noire) ; la photo suivante réallouera.
-    // SAFETY : les deux DC sont valides ; la copie tient dans l'image (même taille).
-    unsafe {
-        BitBlt(
-            photo.gdi.dc.0,
-            0,
-            0,
-            bureau.largeur,
-            bureau.hauteur,
-            Some(ecran.dc),
-            bureau.x,
-            bureau.y,
-            SRCCOPY | CAPTUREBLT,
-        )
-    }
-    .map_err(|e| format!("BitBlt du bureau: {e}"))?;
+    let duree = photographier(&photo.gdi, ecran.dc, bureau)?;
     Ok(Image {
         rect: bureau,
         numero,
+        duree,
     })
 }
 
-pub fn lire(image: &Image, zone: Rect) -> Result<Pixels, String> {
+/// Lit `zone` (coordonnées du bureau) dans `source`, qui couvre `origine`.
+fn lire_zone(source: &ImageGdi, origine: Rect, zone: Rect) -> Result<Pixels, String> {
     let coupee = zone
-        .intersection(image.rect)
+        .intersection(origine)
         .ok_or("zone vide ou hors du bureau")?;
-    let etat = verrouiller(&IMAGE);
-    let photo = etat
-        .photo
-        .as_ref()
-        .filter(|p| p.numero == image.numero)
-        .ok_or("image remplacee par une photo plus recente, ou rendue")?;
     // Copie de la zone seule dans une petite image, puis lecture de celle-ci.
-    let tampon = ImageGdi::nouvelle(photo.gdi.dc.0, coupee.largeur, coupee.hauteur)?;
-    // SAFETY : DC valides ; la zone source est dans la photo (coupée au bureau photographié).
+    let tampon = ImageGdi::nouvelle(source.dc.0, coupee.largeur, coupee.hauteur)?;
+    // SAFETY : DC valides ; la zone source est dans l'image (coupée à `origine`).
     unsafe {
         BitBlt(
             tampon.dc.0,
@@ -346,14 +373,13 @@ pub fn lire(image: &Image, zone: Rect) -> Result<Pixels, String> {
             0,
             coupee.largeur,
             coupee.hauteur,
-            Some(photo.gdi.dc.0),
-            coupee.x - image.rect.x,
-            coupee.y - image.rect.y,
+            Some(source.dc.0),
+            coupee.x - origine.x,
+            coupee.y - origine.y,
             SRCCOPY,
         )
     }
     .map_err(|e| format!("BitBlt de la zone: {e}"))?;
-    drop(etat);
     let mut rgba = tampon.lire_tout()?;
     bgra_en_rgba(&mut rgba);
     Ok(Pixels {
@@ -363,7 +389,33 @@ pub fn lire(image: &Image, zone: Rect) -> Result<Pixels, String> {
     })
 }
 
+pub fn lire(image: &Image, zone: Rect) -> Result<Pixels, String> {
+    if zone.intersection(image.rect).is_none() {
+        return Err("zone vide ou hors du bureau".into());
+    }
+    let etat = verrouiller(&IMAGE);
+    let photo = etat
+        .photo
+        .as_ref()
+        .filter(|p| p.numero == image.numero)
+        .ok_or("image remplacee par une photo plus recente, ou rendue")?;
+    lire_zone(&photo.gdi, image.rect, zone)
+}
+
+/// Pour les tests : une photo du bureau dans une image à part, qui ne touche ni l'image de
+/// l'écran figé ni son numéro. Rendue quand l'appelant la lâche.
+#[cfg(test)]
+fn photo_a_part() -> Result<(ImageGdi, Rect), String> {
+    let bureau = bureau_virtuel()?;
+    let ecran = DcPrete::prendre(None)?;
+    let gdi = ImageGdi::nouvelle(ecran.dc, bureau.largeur, bureau.hauteur)?;
+    photographier(&gdi, ecran.dc, bureau)?;
+    Ok((gdi, bureau))
+}
+
 pub fn liberer_image() {
+    // L'écran figé ne doit jamais rester montré sans son image.
+    cacher_ecran_fige();
     let photo = verrouiller(&IMAGE).photo.take();
     drop(photo);
 }
@@ -611,20 +663,86 @@ unsafe extern "system" fn procedure_ecran_fige(
         // Le fond n'est jamais effacé : l'image couvre tout.
         WM_ERASEBKGND => LRESULT(1),
         WM_MOUSEACTIVATE => LRESULT(MA_NOACTIVATE as isize),
+        // Les écrans ont changé : l'image ne correspond plus, l'écran figé se cache.
+        WM_DISPLAYCHANGE => {
+            cacher_et_prevenir(hwnd, Changement::Ecrans);
+            LRESULT(0)
+        }
+        WM_WTSSESSION_CHANGE => {
+            if wparam.0 == WTS_SESSION_LOCK as usize {
+                cacher_et_prevenir(hwnd, Changement::SessionVerrouillee);
+            }
+            LRESULT(0)
+        }
+        WM_DESTROY => {
+            // SAFETY : notre fenêtre, sur son fil ; sans effet si elle n'était pas inscrite.
+            unsafe {
+                let _ = WTSUnRegisterSessionNotification(hwnd);
+            }
+            let _ = SESSION_SURVEILLEE.compare_exchange(
+                hwnd.0 as isize,
+                0,
+                Ordering::SeqCst,
+                Ordering::SeqCst,
+            );
+            LRESULT(0)
+        }
+        // La fenêtre garde sa taille en pixels réels : Windows ne la redimensionne jamais.
+        WM_DPICHANGED => LRESULT(0),
         WM_PAINT => {
             let mut ps = PAINTSTRUCT::default();
             // SAFETY : peinture de cette fenêtre, sur son fil, entre BeginPaint et EndPaint.
-            unsafe {
+            let peinte = unsafe {
                 let dc = BeginPaint(hwnd, &mut ps);
-                if !dc.is_invalid() {
-                    peindre_image(dc);
-                }
+                let peinte = !dc.is_invalid() && peindre_image(dc);
                 let _ = EndPaint(hwnd, &ps);
+                peinte
+            };
+            if !peinte {
+                // Plus d'image : jamais un écran figé vide ou faux.
+                // SAFETY : notre fenêtre, sur son fil.
+                unsafe {
+                    let _ = ShowWindow(hwnd, SW_HIDE);
+                }
             }
             LRESULT(0)
         }
         // SAFETY : traitement par défaut de Windows.
         _ => unsafe { DefWindowProcW(hwnd, message, wparam, lparam) },
+    }
+}
+
+pub type RappelChangement = Arc<dyn Fn(Changement) + Send + Sync + 'static>;
+
+static RAPPEL_CHANGEMENT: Mutex<Option<RappelChangement>> = Mutex::new(None);
+
+/// Poignée de la fenêtre inscrite au verrouillage de session (0 : aucune).
+static SESSION_SURVEILLEE: AtomicIsize = AtomicIsize::new(0);
+
+pub fn quand_bureau_change(rappel: RappelChangement) {
+    let ancien = verrouiller(&RAPPEL_CHANGEMENT).replace(rappel);
+    drop(ancien);
+}
+
+pub fn surveillance_session() -> bool {
+    let inscrite = SESSION_SURVEILLEE.load(Ordering::SeqCst);
+    inscrite != 0 && fenetre_figee().is_some_and(|(hwnd, _)| hwnd.0 as isize == inscrite)
+}
+
+/// Cache l'écran figé et, s'il était montré, prévient l'Application (sans verrou tenu).
+fn cacher_et_prevenir(hwnd: HWND, changement: Changement) {
+    // SAFETY : notre fenêtre, sur son fil.
+    let etait_visible = unsafe {
+        let visible = IsWindowVisible(hwnd).as_bool();
+        let _ = ShowWindow(hwnd, SW_HIDE);
+        visible
+    };
+    if !etait_visible {
+        return;
+    }
+    let rappel = verrouiller(&RAPPEL_CHANGEMENT).clone();
+    if let Some(rappel) = rappel {
+        rappel(changement);
     }
 }
 
@@ -701,6 +819,12 @@ pub fn preparer_ecran_fige() -> Result<(), String> {
     }
     .map_err(|e| format!("CreateWindowExW de l'ecran fige: {e}"))?;
     let nouvelle = FenetreNative { hwnd, fil };
+    // SAFETY : notre fenêtre ; désinscrite à sa destruction (WM_DESTROY).
+    match unsafe { WTSRegisterSessionNotification(hwnd, NOTIFY_FOR_THIS_SESSION) } {
+        Ok(()) => SESSION_SURVEILLEE.store(hwnd.0 as isize, Ordering::SeqCst),
+        // On continue sans : `surveillance_session()` le dit.
+        Err(e) => log::warn!("ecran fige: verrouillage de session non suivi: {e}"),
+    }
     if let Err(e) = sans_fondu(hwnd) {
         // Sans gravité : l'écran figé apparaîtrait avec le fondu de Windows.
         log::warn!("ecran fige: {e}");
@@ -760,6 +884,7 @@ pub fn montrer_ecran_fige(image: &Image) -> Result<(), String> {
         let _ = ValidateRect(Some(hwnd), None);
         let _ = GdiFlush();
     }
+    reveiller_garde();
     Ok(())
 }
 
@@ -789,11 +914,148 @@ pub fn poignee_ecran_fige() -> Option<isize> {
 }
 
 // ---------------------------------------------------------------------------------------
+// Fil de garde : si le fil de l'écran figé ne répond plus, prévenir l'Application.
+
+/// Cadence des vérifications pendant que l'écran figé est montré.
+const CADENCE_GARDE: Duration = Duration::from_millis(500);
+/// Attente maximale d'une réponse à `WM_NULL`, en millisecondes.
+const ATTENTE_REPONSE_MS: u32 = 1000;
+
+pub type RappelBlocage = Box<dyn Fn() + Send + 'static>;
+
+struct Reglage {
+    delai: Duration,
+    au_blocage: Arc<Mutex<RappelBlocage>>,
+}
+
+struct EtatGarde {
+    reglage: Option<Reglage>,
+    /// Compte les affichages de l'écran figé : le fil de garde se réveille quand il change.
+    affichages: u64,
+    lance: bool,
+}
+
+static GARDE: Mutex<EtatGarde> = Mutex::new(EtatGarde {
+    reglage: None,
+    affichages: 0,
+    lance: false,
+});
+static REVEIL_GARDE: Condvar = Condvar::new();
+
+/// Le réglage actuel, copié hors du verrou.
+fn reglage_garde() -> Option<(Duration, Arc<Mutex<RappelBlocage>>)> {
+    verrouiller(&GARDE)
+        .reglage
+        .as_ref()
+        .map(|r| (r.delai, Arc::clone(&r.au_blocage)))
+}
+
+/// Prévient le fil de garde que l'écran figé vient d'être montré.
+fn reveiller_garde() {
+    let mut garde = verrouiller(&GARDE);
+    garde.affichages = garde.affichages.wrapping_add(1);
+    drop(garde);
+    REVEIL_GARDE.notify_all();
+}
+
+pub fn garder_ecran_fige(delai: Duration, au_blocage: RappelBlocage) {
+    let (lancer, vus) = {
+        let mut garde = verrouiller(&GARDE);
+        garde.reglage = Some(Reglage {
+            delai,
+            au_blocage: Arc::new(Mutex::new(au_blocage)),
+        });
+        (!std::mem::replace(&mut garde.lance, true), garde.affichages)
+    };
+    if !lancer {
+        REVEIL_GARDE.notify_all();
+        return;
+    }
+    let lance = std::thread::Builder::new()
+        .name("garde-ecran-fige".into())
+        .spawn(move || boucle_garde(vus));
+    if let Err(e) = lance {
+        verrouiller(&GARDE).lance = false;
+        log::warn!("fil de garde de l'ecran fige impossible: {e}");
+    }
+}
+
+/// Dort tant que l'écran figé n'est pas montré ; le surveille pendant qu'il l'est.
+/// `vus` : le nombre d'affichages déjà connus au lancement (pris sous le même verrou que
+/// le réglage, pour ne pas manquer un affichage pendant le démarrage du fil). Un écran
+/// figé déjà montré au lancement est aussi surveillé.
+fn boucle_garde(mut vus: u64) {
+    loop {
+        {
+            // Ordre des verrous : GARDE puis ECRAN (jamais l'inverse).
+            let mut garde = verrouiller(&GARDE);
+            // Sans réglage, on dort (jamais de boucle à vide) ; `garder_ecran_fige` réveille.
+            while garde.reglage.is_none() || (garde.affichages == vus && !ecran_fige_visible()) {
+                garde = REVEIL_GARDE.wait(garde).unwrap_or_else(|e| e.into_inner());
+            }
+            vus = garde.affichages;
+        }
+        surveiller_ecran_fige();
+    }
+}
+
+/// Vérifie toutes les 500 ms que le fil de l'écran figé répond, jusqu'à ce que l'écran
+/// figé soit caché. Après `delai` sans réponse, appelle le rappel, une fois par blocage.
+fn surveiller_ecran_fige() {
+    let mut derniere_reponse = Instant::now();
+    let mut signale = false;
+    loop {
+        let Some((hwnd, _)) = fenetre_figee() else {
+            return;
+        };
+        if !ecran_fige_visible() {
+            return;
+        }
+        let Some((delai, au_blocage)) = reglage_garde() else {
+            return;
+        };
+        let mut resultat = 0usize;
+        // SAFETY : `WM_NULL` ne fait rien ; l'appel rend la main après 1 s au plus, ou
+        // tout de suite si Windows juge déjà le fil bloqué.
+        let repondu = unsafe {
+            SendMessageTimeoutW(
+                hwnd,
+                WM_NULL,
+                WPARAM(0),
+                LPARAM(0),
+                SMTO_ABORTIFHUNG,
+                ATTENTE_REPONSE_MS,
+                Some(&mut resultat),
+            )
+        }
+        .0 != 0;
+        if repondu {
+            derniere_reponse = Instant::now();
+            signale = false;
+        } else if !signale && derniere_reponse.elapsed() >= delai && ecran_fige_visible() {
+            signale = true;
+            let rappel = au_blocage.lock().unwrap_or_else(|e| e.into_inner());
+            rappel();
+        }
+        std::thread::sleep(CADENCE_GARDE);
+    }
+}
+
+/// Pour les tests : retire le rappel de garde (le fil de garde ne prévient plus personne).
+#[cfg(test)]
+fn oublier_garde() {
+    verrouiller(&GARDE).reglage = None;
+    let ancien = verrouiller(&RAPPEL_CHANGEMENT).take();
+    drop(ancien);
+}
+
+// ---------------------------------------------------------------------------------------
 // Tests sur l'écran réel (machine Windows de GitHub). Ils se suivent un par un.
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Once;
     use std::time::{Duration, Instant};
 
@@ -808,8 +1070,8 @@ mod tests {
         SetProcessDpiAwarenessContext, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2,
     };
     use ::windows::Win32::UI::WindowsAndMessaging::{
-        DispatchMessageW, GetForegroundWindow, GetWindowLongW, PeekMessageW, TranslateMessage,
-        GWL_EXSTYLE, MSG, PM_REMOVE, WINDOW_EX_STYLE,
+        DispatchMessageW, GetForegroundWindow, GetWindowLongW, PeekMessageW, SendMessageW,
+        TranslateMessage, GWL_EXSTYLE, MSG, PM_REMOVE, WINDOW_EX_STYLE, WTS_SESSION_UNLOCK,
     };
 
     use crate::systeme::gel as facade;
@@ -845,6 +1107,7 @@ mod tests {
 
     impl Drop for Seance {
         fn drop(&mut self) {
+            oublier_garde();
             cacher_ecran_fige();
             detruire_ecran_fige();
             liberer_image();
@@ -1035,12 +1298,18 @@ mod tests {
     }
 
     /// Photographie jusqu'à voir les quatre carrés dans `zone` (au plus 2 s).
-    fn attendre_carres(zone: Rect) -> Result<Duration, String> {
+    /// `a_part` : photo dans une image à part (permis pendant que l'écran figé est montré),
+    /// sinon par `figer_bureau`.
+    fn attendre_carres(zone: Rect, a_part: bool) -> Result<Duration, String> {
         let debut = Instant::now();
         let mut dernier = String::new();
         while debut.elapsed() < Duration::from_secs(2) {
-            let image = figer_bureau()?;
-            match lire(&image, zone).and_then(|px| comparer_carres(&px, zone)) {
+            let lu = if a_part {
+                photo_a_part().and_then(|(gdi, bureau)| lire_zone(&gdi, bureau, zone))
+            } else {
+                figer_bureau().and_then(|image| lire(&image, zone))
+            };
+            match lu.and_then(|px| comparer_carres(&px, zone)) {
                 Ok(()) => return Ok(debut.elapsed()),
                 Err(e) => dernier = e,
             }
@@ -1146,7 +1415,7 @@ mod tests {
     fn photo_au_pixel_pres() {
         let _s = Seance::ouvrir();
         let essai = FenetreEssai::creer(w!("BreezyShot essai pixels"));
-        let attente = attendre_carres(essai.rect).unwrap();
+        let attente = attendre_carres(essai.rect, false).unwrap();
         println!(
             "fenetre d'essai vue apres {:.0} ms",
             attente.as_secs_f64() * 1000.0
@@ -1198,7 +1467,7 @@ mod tests {
         let _s = Seance::ouvrir();
         let essai = FenetreEssai::creer(w!("BreezyShot essai ecran fige"));
         let zone = essai.rect;
-        attendre_carres(zone).unwrap();
+        attendre_carres(zone, false).unwrap();
 
         preparer_ecran_fige().unwrap();
         preparer_ecran_fige().unwrap();
@@ -1235,9 +1504,13 @@ mod tests {
             assert_eq!(GetForegroundWindow(), premier_plan, "focus pris");
         }
 
+        // On ne remplace jamais l'image affichée.
+        assert!(figer_bureau().is_err(), "photo acceptee ecran fige montre");
+        comparer_carres(&lire(&image, zone).unwrap(), zone).unwrap();
+
         // Preuve que l'image figée est peinte : les carrés reviennent à l'écran, alors que
-        // la fenêtre d'essai est cachée.
-        attendre_carres(zone).unwrap();
+        // la fenêtre d'essai est cachée (photo dans une image à part).
+        attendre_carres(zone, true).unwrap();
         // SAFETY : sans paramètre.
         assert_eq!(unsafe { GetForegroundWindow() }, premier_plan, "focus pris");
 
@@ -1251,6 +1524,13 @@ mod tests {
         std::thread::spawn(cacher_ecran_fige).join().unwrap();
         // SAFETY : lecture sur notre fenêtre.
         assert!(attendre(|| !unsafe { IsWindowVisible(hwnd) }.as_bool()));
+
+        // Rendre l'image cache d'abord l'écran figé.
+        let image = figer_bureau().unwrap();
+        montrer_ecran_fige(&image).unwrap();
+        liberer_image();
+        // SAFETY : lecture sur notre fenêtre.
+        assert!(!unsafe { IsWindowVisible(hwnd) }.as_bool());
 
         detruire_ecran_fige();
         assert_eq!(poignee_ecran_fige(), None);
@@ -1293,5 +1573,108 @@ mod tests {
         // Une fuite par photo donnerait au moins 200 objets de plus ; la marge couvre un
         // objet créé ailleurs dans le processus pendant ce temps.
         assert!(apres <= avant + 4, "fuite GDI : {avant} -> {apres}");
+    }
+
+    /// Délai court de la garde dans les tests.
+    const DELAI_GARDE: Duration = Duration::from_millis(1500);
+
+    /// Prépare l'écran figé, le montre et rend sa poignée et son image.
+    fn montrer_un_ecran_fige() -> (HWND, Image) {
+        preparer_ecran_fige().unwrap();
+        let image = figer_bureau().unwrap();
+        montrer_ecran_fige(&image).unwrap();
+        pomper();
+        (fenetre_figee().unwrap().0, image)
+    }
+
+    /// Distribue les messages de ce fil pendant `duree`.
+    fn pomper_pendant(duree: Duration) {
+        let debut = Instant::now();
+        while debut.elapsed() < duree {
+            laisser_composer();
+        }
+    }
+
+    fn compteur_de_garde() -> Arc<AtomicUsize> {
+        let appels = Arc::new(AtomicUsize::new(0));
+        let a = Arc::clone(&appels);
+        garder_ecran_fige(
+            DELAI_GARDE,
+            Box::new(move || {
+                a.fetch_add(1, Ordering::SeqCst);
+            }),
+        );
+        appels
+    }
+
+    #[test]
+    fn garde_previent_quand_le_fil_ne_repond_plus() {
+        let _s = Seance::ouvrir();
+        let appels = compteur_de_garde();
+        let (hwnd, _image) = montrer_un_ecran_fige();
+        // Le fil du test ne distribue plus ses messages : il est « bloqué ». Avec une
+        // vérification toutes les 500 ms et 1 s d'attente chacune, l'alerte tombe vers
+        // 2,5 s ; on attend le délai et 2,5 s de marge.
+        std::thread::sleep(DELAI_GARDE + Duration::from_millis(2500));
+        assert_eq!(appels.load(Ordering::SeqCst), 1, "une alerte, une seule");
+        // Il répond de nouveau : pas de nouvelle alerte.
+        pomper_pendant(Duration::from_millis(1500));
+        assert_eq!(appels.load(Ordering::SeqCst), 1);
+        cacher_ecran_fige();
+        // SAFETY : lecture sur notre fenêtre.
+        assert!(!unsafe { IsWindowVisible(hwnd) }.as_bool());
+    }
+
+    #[test]
+    fn garde_silencieuse_si_le_fil_repond_ou_si_l_ecran_est_cache() {
+        let _s = Seance::ouvrir();
+        let appels = compteur_de_garde();
+        let (_hwnd, _image) = montrer_un_ecran_fige();
+        pomper_pendant(DELAI_GARDE + Duration::from_millis(2000));
+        assert_eq!(
+            appels.load(Ordering::SeqCst),
+            0,
+            "alerte alors que le fil repond"
+        );
+        cacher_ecran_fige();
+        std::thread::sleep(DELAI_GARDE + Duration::from_millis(2000));
+        assert_eq!(appels.load(Ordering::SeqCst), 0, "alerte ecran cache");
+    }
+
+    #[test]
+    fn ecran_fige_se_cache_et_previent_quand_le_bureau_change() {
+        let _s = Seance::ouvrir();
+        let recus: Arc<Mutex<Vec<Changement>>> = Arc::new(Mutex::new(Vec::new()));
+        let r = Arc::clone(&recus);
+        quand_bureau_change(Arc::new(move |c| verrouiller(&r).push(c)));
+        let (hwnd, image) = montrer_un_ecran_fige();
+        println!("verrouillage de session suivi : {}", surveillance_session());
+        let envoyer = |message: u32, wparam: usize| {
+            // SAFETY : message envoyé à notre fenêtre, sur son fil.
+            unsafe {
+                SendMessageW(hwnd, message, Some(WPARAM(wparam)), Some(LPARAM(0)));
+            }
+        };
+        // SAFETY : lecture sur notre fenêtre.
+        let visible = || unsafe { IsWindowVisible(hwnd) }.as_bool();
+
+        envoyer(WM_DISPLAYCHANGE, 32);
+        assert!(!visible());
+        assert_eq!(*verrouiller(&recus), vec![Changement::Ecrans]);
+
+        montrer_ecran_fige(&image).unwrap();
+        envoyer(WM_WTSSESSION_CHANGE, WTS_SESSION_UNLOCK as usize);
+        assert!(visible(), "deverrouillage : rien a faire");
+        envoyer(WM_WTSSESSION_CHANGE, WTS_SESSION_LOCK as usize);
+        assert!(!visible());
+        assert_eq!(
+            *verrouiller(&recus),
+            vec![Changement::Ecrans, Changement::SessionVerrouillee]
+        );
+
+        // Écran figé caché : aucun rappel.
+        envoyer(WM_DISPLAYCHANGE, 32);
+        envoyer(WM_WTSSESSION_CHANGE, WTS_SESSION_LOCK as usize);
+        assert_eq!(verrouiller(&recus).len(), 2);
     }
 }

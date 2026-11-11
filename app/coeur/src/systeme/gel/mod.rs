@@ -8,6 +8,9 @@
 //! Tout se compte en pixels réels, dans le repère du bureau virtuel de Windows (l'écran
 //! principal commence en (0, 0) ; un écran à sa gauche a des `x` négatifs).
 
+use std::sync::Arc;
+use std::time::Duration;
+
 #[cfg(windows)]
 #[path = "windows.rs"]
 mod plateforme;
@@ -145,6 +148,11 @@ impl ImageFigee {
         plateforme::rect_image(&self.interne)
     }
 
+    /// Durée de la copie du bureau (le `BitBlt` seul).
+    pub fn duree_photo(&self) -> Duration {
+        plateforme::duree_image(&self.interne)
+    }
+
     /// Lit une zone (en coordonnées du bureau). La zone est d'abord coupée au bureau ;
     /// une zone vide ou entièrement dehors est une erreur. Utilisable depuis n'importe
     /// quel fil.
@@ -159,13 +167,14 @@ pub fn disponible() -> bool {
 }
 
 /// Photographie tout le bureau virtuel (tous les écrans d'un coup). Utilisable depuis
-/// n'importe quel fil. Hors Windows : erreur « non disponible sur ce système ».
+/// n'importe quel fil. Erreur tant que l'écran figé est montré : on ne remplace jamais
+/// l'image affichée. Hors Windows : erreur « non disponible sur ce système ».
 pub fn figer_bureau() -> Result<ImageFigee, String> {
     plateforme::figer_bureau().map(|interne| ImageFigee { interne })
 }
 
 /// Rend la mémoire de l'image du bureau (elle reste allouée entre deux captures pour la
-/// vitesse). À appeler écran figé caché. Utilisable depuis n'importe quel fil.
+/// vitesse). Cache d'abord l'écran figé. Utilisable depuis n'importe quel fil.
 pub fn liberer_image() {
     plateforme::liberer_image()
 }
@@ -205,6 +214,40 @@ pub fn cacher_ecran_fige() {
 /// principal, la fermeture est postée.
 pub fn detruire_ecran_fige() {
     plateforme::detruire_ecran_fige()
+}
+
+/// À appeler une fois par l'Application, depuis n'importe quel fil. Tant que l'écran figé
+/// est montré, un fil à part vérifie toutes les 500 ms que le fil de la fenêtre répond
+/// (`SendMessageTimeoutW`, `WM_NULL`, `SMTO_ABORTIFHUNG`, 1 s). Après `delai` sans
+/// réponse, il appelle `au_blocage` (une seule fois par blocage), depuis ce fil à part.
+/// Au repos, le fil de garde dort jusqu'au prochain affichage. Un second appel remplace
+/// le délai et le rappel. Hors Windows : ne fait rien.
+pub fn garder_ecran_fige(delai: Duration, au_blocage: impl Fn() + Send + 'static) {
+    plateforme::garder_ecran_fige(delai, Box::new(au_blocage))
+}
+
+/// Ce qui a changé sur le bureau pendant que l'écran figé était montré.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Changement {
+    /// Écrans branchés, débranchés, déplacés ou changés de résolution.
+    Ecrans,
+    /// La session a été verrouillée.
+    SessionVerrouillee,
+}
+
+/// À appeler une fois par l'Application, depuis n'importe quel fil. Quand les écrans
+/// changent ou que la session se verrouille pendant que l'écran figé est montré, celui-ci
+/// se cache, puis `rappel` est appelé sur le fil de la fenêtre figée (le fil principal),
+/// sans aucun verrou tenu. Rien n'est appelé si l'écran figé était caché. Un second appel
+/// remplace le rappel. Hors Windows : ne fait rien.
+pub fn quand_bureau_change(rappel: impl Fn(Changement) + Send + Sync + 'static) {
+    plateforme::quand_bureau_change(Arc::new(rappel))
+}
+
+/// Vrai si la fenêtre de l'écran figé reçoit le verrouillage de session
+/// (`WTSRegisterSessionNotification` a réussi à sa création). Hors Windows : faux.
+pub fn surveillance_session() -> bool {
+    plateforme::surveillance_session()
 }
 
 /// Poignée système de la fenêtre de l'écran figé, pour poser la page de sélection juste
