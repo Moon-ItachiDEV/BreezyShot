@@ -1,0 +1,4 @@
+# Version de Rust figée pour la fabrication (même version en local et sur GitHub).
+[toolchain]
+channel = "1.97.0"
+components = ["rustfmt", "clippy"]
