@@ -25,12 +25,9 @@ pub struct Gel {
     pub bureau: Rect,
     /// Triés de gauche à droite puis de haut en bas.
     pub ecrans: Vec<EcranInfo>,
-    /// Du premier plan vers le fond, sans celles de BreezyShot.
-    pub fenetres: Vec<FenetreInfo>,
-    /// La photo (`systeme::gel::figer_bureau` : la copie du bureau, plus l'allocation de
-    /// l'image quand la taille du bureau a changé).
+    /// La copie du bureau seule (le `BitBlt`).
     pub duree_photo: Duration,
-    /// Photo, écrans et fenêtres.
+    /// Photo (allocation de l'image comprise) et liste des écrans.
     pub duree_totale: Duration,
 }
 
@@ -62,27 +59,32 @@ impl fmt::Display for Erreur {
 
 impl std::error::Error for Erreur {}
 
-/// Fige le bureau : photo de tous les écrans, puis la liste des écrans et des fenêtres.
-/// Depuis n'importe quel fil (l'affichage de l'écran figé, lui, se fait sur le fil
-/// principal, par `systeme::gel::montrer_ecran_fige`).
+/// Fige le bureau : photo de tous les écrans, puis la liste des écrans (nécessaire au
+/// bornage, coût négligeable). Rien de plus : la liste des fenêtres se demande à part
+/// (`fenetres`), après avoir montré l'écran figé. Depuis n'importe quel fil
+/// (l'affichage de l'écran figé, lui, se fait sur le fil principal, par
+/// `systeme::gel::montrer_ecran_fige`).
 pub fn figer() -> Result<Gel, Erreur> {
     if !gel::disponible() {
         return Err(Erreur::NonDisponible);
     }
     let debut = Instant::now();
     let image = gel::figer_bureau().map_err(Erreur::Photo)?;
-    let duree_photo = debut.elapsed();
     let ecrans = gel::ecrans();
-    let fenetres = gel::fenetres_visibles();
     let duree_totale = debut.elapsed();
     Ok(Gel {
         bureau: image.rect(),
+        duree_photo: image.duree_photo(),
         image,
         ecrans,
-        fenetres,
-        duree_photo,
         duree_totale,
     })
+}
+
+/// Les fenêtres visibles des autres apps, du premier plan vers le fond (mode « fenêtre »).
+/// À demander après avoir montré l'écran figé : leur liste coûte plus que la photo.
+pub fn fenetres() -> Vec<FenetreInfo> {
+    gel::fenetres_visibles()
 }
 
 /// Les pixels d'une zone du bureau figé (coordonnées du bureau virtuel).
