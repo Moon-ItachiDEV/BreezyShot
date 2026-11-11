@@ -761,7 +761,9 @@ fn recents_nettoyage_a_50() {
         let nom = format!("20250101-0000{:02}-000.png", i);
         fs::write(d.dossier_recents.join(nom), b"ancien").expect("ecriture");
     }
-    let etrangers = ["notes.txt", "20250101-000000-000.PNG", "photo.png"];
+    // Le « .PNG » porte une autre date que les 60 : sur un disque qui ne distingue pas les
+    // majuscules (Windows, macOS), il serait sinon le meme fichier que le premier recent.
+    let etrangers = ["notes.txt", "20240101-000000-000.PNG", "photo.png"];
     for nom in etrangers {
         fs::write(d.dossier_recents.join(nom), b"autre").expect("ecriture");
     }
