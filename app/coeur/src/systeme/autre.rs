@@ -51,3 +51,24 @@ pub fn traverser_clics(_fenetre: &tauri::WebviewWindow, _traverser: bool) -> Res
 pub fn exclure_des_captures(_fenetre: &tauri::WebviewWindow) -> bool {
     false
 }
+
+pub fn cacher_sans_tao(_fenetre: &tauri::WebviewWindow) -> Result<bool, String> {
+    Ok(false)
+}
+
+pub fn preparer_fenetre_outil(_fenetre: &tauri::WebviewWindow) -> Result<bool, String> {
+    Ok(false)
+}
+
+pub fn identifiant_fenetre(_fenetre: &tauri::WebviewWindow) -> Option<isize> {
+    None
+}
+
+/// Hors Windows : l'appelant demande à Tauri.
+pub fn position_souris() -> Option<(f64, f64)> {
+    None
+}
+
+pub fn rectangle_fenetre(_fenetre: &tauri::WebviewWindow) -> Option<(i32, i32, u32, u32, f64)> {
+    None
+}

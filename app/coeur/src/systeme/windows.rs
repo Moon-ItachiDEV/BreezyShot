@@ -1,7 +1,7 @@
 //! Gestes propres à Windows. Lecture seule du registre : l'app n'y écrit jamais.
 
 use ::windows::core::{w, PCWSTR};
-use ::windows::Win32::Foundation::{CloseHandle, ERROR_SUCCESS, HWND, WAIT_OBJECT_0};
+use ::windows::Win32::Foundation::{CloseHandle, ERROR_SUCCESS, HWND, POINT, RECT, WAIT_OBJECT_0};
 use ::windows::Win32::System::Registry::{
     RegCloseKey, RegGetValueW, RegNotifyChangeKeyValue, RegOpenKeyExW, HKEY, HKEY_CURRENT_USER,
     HKEY_LOCAL_MACHINE, KEY_NOTIFY, KEY_READ, REG_NOTIFY_CHANGE_LAST_SET, RRF_RT_REG_DWORD,
@@ -11,15 +11,16 @@ use ::windows::Win32::System::Threading::{
     CreateEventW, GetCurrentProcess, WaitForSingleObject, INFINITE,
 };
 use ::windows::Win32::UI::HiDpi::{
-    AreDpiAwarenessContextsEqual, GetDpiAwarenessContextForProcess,
+    AreDpiAwarenessContextsEqual, GetDpiAwarenessContextForProcess, GetDpiForWindow,
     DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2,
 };
 use ::windows::Win32::UI::WindowsAndMessaging::{
-    GetWindowDisplayAffinity, GetWindowLongW, SetWindowDisplayAffinity, SetWindowLongW,
-    SetWindowPos, ShowWindow, SystemParametersInfoW, GWL_EXSTYLE, HWND_TOPMOST,
-    SPI_GETCLIENTAREAANIMATION, SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE,
-    SWP_NOZORDER, SWP_SHOWWINDOW, SW_SHOWNOACTIVATE, SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS,
-    WDA_EXCLUDEFROMCAPTURE, WS_EX_LAYERED, WS_EX_TRANSPARENT,
+    GetCursorPos, GetWindowDisplayAffinity, GetWindowLongW, GetWindowRect,
+    SetWindowDisplayAffinity, SetWindowLongW, SetWindowPos, ShowWindow, SystemParametersInfoW,
+    GWL_EXSTYLE, HWND_TOPMOST, SPI_GETCLIENTAREAANIMATION, SWP_FRAMECHANGED, SWP_NOACTIVATE,
+    SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SWP_SHOWWINDOW, SW_HIDE, SW_SHOWNOACTIVATE,
+    SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS, WDA_EXCLUDEFROMCAPTURE, WS_EX_APPWINDOW, WS_EX_LAYERED,
+    WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TRANSPARENT,
 };
 
 pub type RappelTheme = Box<dyn Fn(super::Theme) + Send + 'static>;
@@ -213,9 +214,10 @@ fn hwnd(fenetre: &tauri::WebviewWindow) -> Result<HWND, String> {
 }
 
 /// Montre sans activer. On ne passe pas par `show()` de Tauri : tao y appelle
-/// `ShowWindow(SW_SHOW)`, qui active la fenêtre (window_state.rs, `set_window_flags`).
-/// Le drapeau « visible » de tao reste donc faux : son `hide()` appelle quand même
-/// `ShowWindow(SW_HIDE)` (même fonction), ce qui suffit pour cacher.
+/// `ShowWindow(SW_SHOW)`, qui active la fenêtre (window_state.rs, `apply_diff`). Le
+/// drapeau « visible » de tao reste donc faux, et son `hide()` ne fait plus rien
+/// (`apply_diff` sort tout de suite quand rien ne change) : on cache par
+/// `cacher_sans_tao`.
 pub fn montrer_sans_activer(fenetre: &tauri::WebviewWindow) -> Result<bool, String> {
     let h = hwnd(fenetre)?;
     // SAFETY : handle valide d'une fenêtre de ce processus ; aucun tampon.
@@ -281,4 +283,73 @@ pub fn exclure_des_captures(fenetre: &tauri::WebviewWindow) -> bool {
         }
     }
     affinite == WDA_EXCLUDEFROMCAPTURE.0
+}
+
+/// Cache par `ShowWindow(SW_HIDE)`, symétrique de `montrer_sans_activer`.
+pub fn cacher_sans_tao(fenetre: &tauri::WebviewWindow) -> Result<bool, String> {
+    let h = hwnd(fenetre)?;
+    // SAFETY : handle valide d'une fenêtre de ce processus.
+    unsafe {
+        let _ = ShowWindow(h, SW_HIDE);
+    }
+    Ok(true)
+}
+
+/// Fenêtre « outil » : ni barre des tâches ni Alt+Tab, jamais activée. tao pose
+/// `WS_EX_APPWINDOW` pour une fenêtre sans parent (window.rs, `ON_TASKBAR`) et ne le
+/// réapplique qu'en changeant ses drapeaux, ce qu'on ne fait plus sous Windows.
+pub fn preparer_fenetre_outil(fenetre: &tauri::WebviewWindow) -> Result<bool, String> {
+    let h = hwnd(fenetre)?;
+    // SAFETY : lecture et écriture du style étendu d'une fenêtre de ce processus.
+    unsafe {
+        let actuel = GetWindowLongW(h, GWL_EXSTYLE);
+        let voulu = (actuel & !(WS_EX_APPWINDOW.0 as i32))
+            | (WS_EX_TOOLWINDOW.0 as i32)
+            | (WS_EX_NOACTIVATE.0 as i32);
+        if voulu != actuel {
+            SetWindowLongW(h, GWL_EXSTYLE, voulu);
+            SetWindowPos(
+                h,
+                None,
+                0,
+                0,
+                0,
+                0,
+                SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED,
+            )
+            .map_err(|e| format!("SetWindowPos: {e}"))?;
+        }
+    }
+    Ok(true)
+}
+
+/// Le handle de la fenêtre, pour le journal (les essais le relisent).
+pub fn identifiant_fenetre(fenetre: &tauri::WebviewWindow) -> Option<isize> {
+    hwnd(fenetre).ok().map(|h| h.0 as isize)
+}
+
+/// Position de la souris en pixels réels (`GetCursorPos`), sans passer par le fil principal.
+pub fn position_souris() -> Option<(f64, f64)> {
+    let mut p = POINT::default();
+    // SAFETY : `p` reçoit la position.
+    unsafe { GetCursorPos(&mut p) }.ok()?;
+    Some((f64::from(p.x), f64::from(p.y)))
+}
+
+/// Rectangle réel de la fenêtre et échelle de son écran (DPI de la fenêtre / 96).
+pub fn rectangle_fenetre(fenetre: &tauri::WebviewWindow) -> Option<(i32, i32, u32, u32, f64)> {
+    let h = hwnd(fenetre).ok()?;
+    let mut r = RECT::default();
+    // SAFETY : handle valide ; `r` reçoit le rectangle.
+    unsafe { GetWindowRect(h, &mut r) }.ok()?;
+    // SAFETY : handle valide.
+    let dpi = unsafe { GetDpiForWindow(h) };
+    let echelle = if dpi == 0 { 1.0 } else { f64::from(dpi) / 96.0 };
+    Some((
+        r.left,
+        r.top,
+        (r.right - r.left).max(0) as u32,
+        (r.bottom - r.top).max(0) as u32,
+        echelle,
+    ))
 }

@@ -64,6 +64,17 @@ pub struct Application {
     reglages: Mutex<Option<Reglages>>,
     /// Vrai si des raccourcis ont été réservés (à libérer à l'arrêt).
     raccourcis_reserves: AtomicBool,
+    /// Annonce affichée mais pas encore vue : `(id du message, dossier local, situation)`.
+    /// La situation n'est retenue dans `etat.json` qu'une fois le message montré.
+    annonce_en_attente: Mutex<Option<AnnonceEnAttente>>,
+}
+
+/// Une annonce envoyée au bandeau, dont la situation attend d'être retenue.
+#[derive(Debug, Clone)]
+struct AnnonceEnAttente {
+    id: u64,
+    local: std::path::PathBuf,
+    situation: Option<raccourcis::Situation>,
 }
 
 /// Point d'entrée de l'app (appelé par `main.rs`).
@@ -309,7 +320,7 @@ fn annoncer_raccourcis(app: &AppHandle, local: &std::path::Path, bilan: &Bilan) 
         log::info!("{ligne}");
     }
     if let Some(annonce) = &decision.annonce {
-        afficher(
+        let id = afficher(
             app,
             Message {
                 genre: if annonce.erreur {
@@ -322,19 +333,36 @@ fn annoncer_raccourcis(app: &AppHandle, local: &std::path::Path, bilan: &Bilan) 
                 actions: Vec::new(),
             },
         );
+        // Retenue au premier `bandeau_zone` de ce message (Signal::MessageMontre).
+        if let (Some(id), Ok(mut attente)) =
+            (id, app.state::<Application>().annonce_en_attente.lock())
+        {
+            *attente = Some(AnnonceEnAttente {
+                id,
+                local: local.to_path_buf(),
+                situation: decision.a_retenir.clone(),
+            });
+            return;
+        }
     }
-    if let Err(e) = etat::ecrire_situation(local, decision.a_retenir.as_ref()) {
+    retenir_situation(local, decision.a_retenir.as_ref());
+}
+
+/// Écrit (ou efface) la situation dans `etat.json`.
+fn retenir_situation(local: &std::path::Path, situation: Option<&raccourcis::Situation>) {
+    if let Err(e) = etat::ecrire_situation(local, situation) {
         log::warn!("etat non ecrit: {e}");
     }
 }
 
-/// Montre un message dans le bandeau, s'il existe.
-fn afficher(app: &AppHandle, message: Message) {
+/// Montre un message dans le bandeau, s'il existe. Rend son `id`.
+fn afficher(app: &AppHandle, message: Message) -> Option<u64> {
     match app.try_state::<Bandeau>() {
-        Some(bandeau) => {
-            bandeau.afficher(message);
+        Some(bandeau) => Some(bandeau.afficher(message)),
+        None => {
+            log::warn!("message non affiche (pas de bandeau): {}", message.titre);
+            None
         }
-        None => log::warn!("message non affiche (pas de bandeau): {}", message.titre),
     }
 }
 
@@ -411,6 +439,16 @@ pub fn traiter(app: &AppHandle, evenement: Evenement) {
             match Mode::depuis_nom(&action) {
                 Some(mode) => lancer_capture(app, mode),
                 None => log::warn!("raccourci: action inconnue {action}"),
+            }
+        }
+        Evenement::Fenetres(fenetres::Signal::MessageMontre { id }) => {
+            let attente = match app.state::<Application>().annonce_en_attente.lock() {
+                Ok(mut a) => a.take_if(|a| a.id == id),
+                Err(_) => None,
+            };
+            if let Some(a) = attente {
+                log::info!("annonce montree {id}: situation retenue");
+                retenir_situation(&a.local, a.situation.as_ref());
             }
         }
         Evenement::Fenetres(fenetres::Signal::ActionBandeau { id, action }) => {

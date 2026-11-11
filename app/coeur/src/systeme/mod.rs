@@ -213,6 +213,41 @@ pub fn exclure_des_captures(fenetre: &tauri::WebviewWindow) -> bool {
     plateforme::exclure_des_captures(fenetre)
 }
 
+/// Cache la fenêtre sans passer par tao (Windows : `ShowWindow(SW_HIDE)`).
+pub fn cacher_sans_tao(fenetre: &tauri::WebviewWindow) -> Result<bool, String> {
+    plateforme::cacher_sans_tao(fenetre)
+}
+
+/// Fenêtre « outil » : hors barre des tâches et hors Alt+Tab, jamais activée
+/// (Windows : `WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE`, sans `WS_EX_APPWINDOW`).
+pub fn preparer_fenetre_outil(fenetre: &tauri::WebviewWindow) -> Result<bool, String> {
+    plateforme::preparer_fenetre_outil(fenetre)
+}
+
+/// Identifiant système de la fenêtre (Windows : le HWND), pour le journal.
+pub fn identifiant_fenetre(fenetre: &tauri::WebviewWindow) -> Option<isize> {
+    plateforme::identifiant_fenetre(fenetre)
+}
+
+/// Position de la souris en pixels réels, lue directement (`None` : demander à Tauri).
+pub fn position_souris() -> Option<(f64, f64)> {
+    plateforme::position_souris()
+}
+
+/// Rectangle réel `(x, y, largeur, hauteur, echelle)` de la fenêtre (`None` : demander à
+/// Tauri).
+pub fn rectangle_fenetre(fenetre: &tauri::WebviewWindow) -> Option<(i32, i32, u32, u32, f64)> {
+    plateforme::rectangle_fenetre(fenetre)
+}
+
+/// Variable d'essai : le bandeau reste capturable (pour prouver qu'il est peint).
+pub const VARIABLE_CAPTURABLE: &str = "BREEZYSHOT_ESSAI_CAPTURABLE";
+
+/// Vrai si `BREEZYSHOT_ESSAI_CAPTURABLE=1` (essais seulement).
+pub fn essai_capturable() -> bool {
+    std::env::var_os(VARIABLE_CAPTURABLE).is_some_and(|v| v == "1")
+}
+
 /// Réglage Windows « Effets d'animation » éteint. Hors Windows : non.
 pub fn animations_reduites() -> bool {
     plateforme::animations_reduites().unwrap_or(false)

@@ -7,20 +7,22 @@ mod place;
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::thread::ThreadId;
+use std::time::Instant;
 
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, State, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
 
 use crate::systeme;
-pub use place::{cliquable, ecran_sous, placer, zone_ecran, Ecran, Rect, ZoneCss, TAILLE_LOGIQUE};
+pub use place::{
+    borner_zone, cacher_d_office, cliquable, ecran_sous, geste_cliquable, intervalle, placer,
+    zone_ecran, Ecran, Rect, ZoneCss, DELAI_REUSSITE_MAX, DELAI_ZONE_MAX, TAILLE_LOGIQUE,
+};
 
 /// Étiquette de la fenêtre du bandeau (aussi dans `capabilities/`).
 pub const ETIQUETTE_BANDEAU: &str = "bandeau";
 /// Événement écouté par la page.
 pub const EVENEMENT_AFFICHER: &str = "bandeau:afficher";
-/// Intervalle de surveillance de la souris pendant un message à croix.
-const INTERVALLE_SOURIS: Duration = Duration::from_millis(30);
 
 /// Genre d'un message.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -77,6 +79,8 @@ struct Charge<'a> {
 pub enum Signal {
     /// Clic sur une action ou sur la croix (`fermer`) du message `id`.
     ActionBandeau { id: u64, action: String },
+    /// Le message `id` est réellement à l'écran (premier `bandeau_zone` valide).
+    MessageMontre { id: u64 },
 }
 
 type Rappel = Box<dyn Fn(Signal) + Send + Sync + 'static>;
@@ -86,9 +90,14 @@ type Rappel = Box<dyn Fn(Signal) + Send + Sync + 'static>;
 struct EnCours {
     id: u64,
     message: Message,
-    /// Place de la fenêtre et échelle de son écran (connues une fois affiché).
-    fenetre: Option<(Rect, f64)>,
+    /// Numéro d'envoi à la page (un `bandeau_pret` répété renvoie le message).
+    envoi: u64,
+    /// Moment de l'affichage, place de la fenêtre et échelle de son écran.
+    montre_a: Option<Instant>,
+    place: Option<(Rect, f64)>,
     zone: Option<ZoneCss>,
+    /// `MessageMontre` déjà signalé.
+    signale: bool,
 }
 
 #[derive(Default)]
@@ -97,26 +106,31 @@ struct Etat {
     en_cours: Option<EnCours>,
     /// La page écoute `bandeau:afficher` (sinon le message attend).
     page_prete: bool,
-    /// La fenêtre reçoit les clics en ce moment.
+    /// La fenêtre reçoit les clics (ou un geste en ce sens est parti).
     recoit_clics: bool,
 }
 
 /// Le bandeau : une fenêtre préparée au démarrage et cachée.
+///
+/// Règle des verrous : `etat` n'est jamais tenu pendant un appel à Tauri ni un `emit`.
+/// Les gestes sur la fenêtre se font sur le fil principal.
 pub struct Bandeau {
     app: AppHandle,
     rappel: Rappel,
-    etat: Arc<Mutex<Etat>>,
-    /// Drapeau de la surveillance de souris en cours (une seule à la fois) : passé à faux,
-    /// le fil s'arrête au tour suivant.
-    surveillance: Mutex<Arc<AtomicBool>>,
+    etat: Mutex<Etat>,
+    fil_principal: ThreadId,
+    /// Faux après `fermer` ou la destruction de la fenêtre : toute surveillance s'arrête.
+    vivante: Arc<AtomicBool>,
 }
 
 impl Bandeau {
-    /// Crée la fenêtre cachée. Rend le bandeau, à confier à Tauri (`app.manage`).
+    /// Crée la fenêtre cachée (à appeler sur le fil principal). Rend le bandeau, à confier
+    /// à Tauri (`app.manage`).
     pub fn creer<F>(app: &AppHandle, rappel: F) -> Result<Bandeau, String>
     where
         F: Fn(Signal) + Send + Sync + 'static,
     {
+        let capturable = systeme::essai_capturable();
         let (largeur, hauteur) = TAILLE_LOGIQUE;
         let fenetre = WebviewWindowBuilder::new(
             app,
@@ -134,20 +148,38 @@ impl Bandeau {
         .always_on_top(true)
         .skip_taskbar(true)
         .resizable(false)
-        .content_protected(true)
+        .content_protected(!capturable)
         .build()
         .map_err(|e| format!("fenetre du bandeau: {e}"))?;
-        let exclue = systeme::exclure_des_captures(&fenetre);
-        log::info!(
-            "bandeau exclu des captures: {}",
-            if exclue { "oui" } else { "non" }
-        );
+        if let Err(e) = systeme::preparer_fenetre_outil(&fenetre) {
+            log::warn!("bandeau: style outil non pose: {e}");
+        }
+        if let Some(h) = systeme::identifiant_fenetre(&fenetre) {
+            log::info!("bandeau fenetre {h}");
+        }
+        if capturable {
+            log::info!("bandeau exclu des captures: non (essai)");
+        } else {
+            let exclue = systeme::exclure_des_captures(&fenetre);
+            log::info!(
+                "bandeau exclu des captures: {}",
+                if exclue { "oui" } else { "non" }
+            );
+        }
         traverser(&fenetre, true);
+        let vivante = Arc::new(AtomicBool::new(true));
+        let pour_destruction = Arc::clone(&vivante);
+        fenetre.on_window_event(move |e| {
+            if matches!(e, tauri::WindowEvent::Destroyed) {
+                pour_destruction.store(false, Ordering::SeqCst);
+            }
+        });
         Ok(Bandeau {
             app: app.clone(),
             rappel: Box::new(rappel),
-            etat: Arc::new(Mutex::new(Etat::default())),
-            surveillance: Mutex::new(Arc::new(AtomicBool::new(false))),
+            etat: Mutex::new(Etat::default()),
+            fil_principal: std::thread::current().id(),
+            vivante,
         })
     }
 
@@ -155,60 +187,93 @@ impl Bandeau {
         self.app.get_webview_window(ETIQUETTE_BANDEAU)
     }
 
-    /// Montre un message ; il remplace aussitôt le précédent. Rend son `id`.
+    fn etat(&self) -> Option<std::sync::MutexGuard<'_, Etat>> {
+        match self.etat.lock() {
+            Ok(e) => Some(e),
+            Err(_) => {
+                log::error!("bandeau: etat inaccessible");
+                None
+            }
+        }
+    }
+
+    /// Montre un message ; il remplace aussitôt le précédent. Rend son `id`. Peut être
+    /// appelé de n'importe quel fil : les gestes partent sur le fil principal.
     pub fn afficher(&self, message: Message) -> u64 {
-        let Ok(mut etat) = self.etat.lock() else {
-            log::error!("bandeau: etat inaccessible");
-            return 0;
+        let (id, prete) = {
+            let Some(mut etat) = self.etat() else {
+                return 0;
+            };
+            etat.dernier_id += 1;
+            let id = etat.dernier_id;
+            etat.en_cours = Some(EnCours {
+                id,
+                message,
+                envoi: 0,
+                montre_a: None,
+                place: None,
+                zone: None,
+                signale: false,
+            });
+            (id, etat.page_prete)
         };
-        etat.dernier_id += 1;
-        let id = etat.dernier_id;
-        etat.en_cours = Some(EnCours {
-            id,
-            message,
-            fenetre: None,
-            zone: None,
-        });
-        if etat.page_prete {
-            self.montrer(&mut etat);
+        if prete {
+            self.demander_montrer(id);
         }
         id
     }
 
-    /// Place, montre sans activer, et envoie le message en cours à la page.
-    fn montrer(&self, etat: &mut Etat) {
+    /// `montrer(id)` sur le fil principal.
+    fn demander_montrer(&self, id: u64) {
+        if std::thread::current().id() == self.fil_principal {
+            self.montrer(id);
+            return;
+        }
+        let app = self.app.clone();
+        let poste = self.app.run_on_main_thread(move || {
+            if let Some(b) = app.try_state::<Bandeau>() {
+                b.montrer(id);
+            }
+        });
+        if let Err(e) = poste {
+            log::warn!("bandeau: affichage non poste: {e}");
+        }
+    }
+
+    /// Place, montre sans activer, et envoie le message `id` à la page (fil principal).
+    fn montrer(&self, id: u64) {
+        if !self.vivante.load(Ordering::SeqCst) {
+            return;
+        }
+        let (message, envoi) = {
+            let Some(mut etat) = self.etat() else {
+                return;
+            };
+            let Some(c) = etat.en_cours.as_mut().filter(|c| c.id == id) else {
+                return;
+            };
+            c.envoi += 1;
+            (c.message.clone(), c.envoi)
+        };
         let Some(fenetre) = self.fenetre() else {
             log::warn!("bandeau: fenetre absente");
             return;
         };
-        let Some(en_cours) = etat.en_cours.as_mut() else {
-            return;
-        };
-        // Toute surveillance en cours s'arrête : la nouvelle partira si besoin.
-        self.arreter_surveillance();
-        let ecrans = ecrans(&self.app);
-        let souris = self.app.cursor_position().ok().map(|p| (p.x, p.y));
-        let ecran = ecran_sous(souris, &ecrans);
-        if let Some(ecran) = ecran {
-            let place = placer(&ecran, TAILLE_LOGIQUE);
-            poser(&fenetre, place);
-            en_cours.fenetre = Some((place, ecran.echelle));
-            log::info!(
-                "bandeau affiche {} {} ecran {},{} {}x{} echelle {}",
-                en_cours.id,
-                en_cours.message.genre.nom(),
-                place.x,
-                place.y,
-                place.largeur,
-                place.hauteur,
-                ecran.echelle
-            );
-        } else {
-            log::info!(
-                "bandeau affiche {} {} ecran inconnu",
-                en_cours.id,
-                en_cours.message.genre.nom()
-            );
+        let ecran = ecran_sous(souris(&self.app), &ecrans(&self.app));
+        let place = ecran.map(|e| (placer(&e, TAILLE_LOGIQUE), e.echelle));
+        match place {
+            Some((p, echelle)) => {
+                poser(&fenetre, p);
+                log::info!(
+                    "bandeau affiche {id} {} ecran {},{} {}x{} echelle {echelle}",
+                    message.genre.nom(),
+                    p.x,
+                    p.y,
+                    p.largeur,
+                    p.hauteur
+                );
+            }
+            None => log::info!("bandeau affiche {id} {} ecran inconnu", message.genre.nom()),
         }
         match systeme::montrer_sans_activer(&fenetre) {
             Ok(true) => {}
@@ -219,17 +284,26 @@ impl Bandeau {
             }
             Err(e) => log::warn!("bandeau: affichage impossible: {e}"),
         }
-        // Un nouveau message part toujours avec des clics traversants ; la surveillance
-        // (message à croix) les rend sur la pilule seulement.
+        // Un message part toujours avec des clics traversants ; la surveillance (message à
+        // croix) les rend sur la pilule seulement.
         traverser(&fenetre, true);
-        etat.recoit_clics = false;
-        let m = &en_cours.message;
+        {
+            let Some(mut etat) = self.etat() else {
+                return;
+            };
+            etat.recoit_clics = false;
+            let Some(c) = etat.en_cours.as_mut().filter(|c| c.id == id) else {
+                return;
+            };
+            c.montre_a = Some(Instant::now());
+            c.place = place;
+        }
         let charge = Charge {
-            id: en_cours.id,
-            genre: m.genre,
-            titre: &m.titre,
-            detail: &m.detail,
-            actions: &m.actions,
+            id,
+            genre: message.genre,
+            titre: &message.titre,
+            detail: &message.detail,
+            actions: &message.actions,
         };
         if let Err(e) = self
             .app
@@ -237,107 +311,149 @@ impl Bandeau {
         {
             log::warn!("bandeau: message non envoye: {e}");
         }
-        if m.genre.a_croix() {
-            self.surveiller(en_cours.id);
-        }
+        self.surveiller(id, envoi);
     }
 
-    /// Lance la surveillance de la souris pour le message `id` (message à croix).
-    fn surveiller(&self, id: u64) {
-        let drapeau = Arc::new(AtomicBool::new(true));
-        // Un drapeau par surveillance : l'ancien fil voit le sien passer à faux et s'arrête.
-        let ancien = match self.surveillance.lock() {
-            Ok(mut courante) => std::mem::replace(&mut *courante, Arc::clone(&drapeau)),
-            Err(_) => return,
-        };
-        ancien.store(false, Ordering::SeqCst);
+    /// Fil de surveillance du message `id` (envoi `envoi`) : filet de sécurité pour tous
+    /// les genres, et clics sur la pilule pour un message à croix. S'arrête dès que le
+    /// message n'est plus en cours, qu'il a été renvoyé, ou que le bandeau est fermé.
+    fn surveiller(&self, id: u64, envoi: u64) {
         let app = self.app.clone();
-        let etat = Arc::clone(&self.etat);
+        let vivante = Arc::clone(&self.vivante);
         let lancement = std::thread::Builder::new()
             .name("bandeau-souris".into())
             .spawn(move || {
-                while drapeau.load(Ordering::SeqCst) {
-                    let souris = app.cursor_position().ok().map(|p| (p.x, p.y));
-                    let Ok(mut e) = etat.lock() else {
+                let mut attente = place::INTERVALLE_PROCHE;
+                while vivante.load(Ordering::SeqCst) {
+                    std::thread::sleep(attente);
+                    let Some(b) = app.try_state::<Bandeau>() else {
                         break;
                     };
-                    let Some(en_cours) = e.en_cours.as_ref().filter(|c| c.id == id) else {
+                    // Appels au système et à Tauri avant de prendre le verrou.
+                    let fenetre = b.fenetre();
+                    let pos = souris(&app);
+                    let reelle = fenetre.as_ref().and_then(place_reelle);
+                    let Some(mut etat) = b.etat() else {
                         break;
                     };
-                    let voulu = match en_cours.fenetre {
-                        Some((place, echelle)) => cliquable(
-                            en_cours.message.genre.a_croix(),
-                            en_cours.zone.as_ref(),
-                            echelle,
-                            (place.x, place.y),
-                            souris,
-                        ),
-                        None => false,
+                    let recoit = etat.recoit_clics;
+                    let Some(c) = etat
+                        .en_cours
+                        .as_ref()
+                        .filter(|c| c.id == id && c.envoi == envoi)
+                    else {
+                        break;
                     };
-                    if voulu != e.recoit_clics {
-                        e.recoit_clics = voulu;
-                        let app2 = app.clone();
+                    let a_croix = c.message.genre.a_croix();
+                    let depuis = c.montre_a.map(|t| t.elapsed()).unwrap_or_default();
+                    if cacher_d_office(a_croix, depuis, c.zone.is_some()) {
+                        drop(etat);
+                        let pour = app.clone();
                         let _ = app.run_on_main_thread(move || {
-                            if let Some(f) = app2.get_webview_window(ETIQUETTE_BANDEAU) {
-                                traverser(&f, !voulu);
+                            if let Some(b) = pour.try_state::<Bandeau>() {
+                                b.cacher_d_office(id);
+                            }
+                        });
+                        break;
+                    }
+                    if !a_croix {
+                        attente = place::INTERVALLE_LOIN;
+                        continue;
+                    }
+                    let (fen, echelle) = match reelle.or(c.place) {
+                        Some((r, e)) => ((r.x, r.y), e),
+                        None => continue,
+                    };
+                    let pilule = c.zone.as_ref().map(|z| zone_ecran(z, echelle, fen));
+                    let voulu = cliquable(a_croix, c.zone.as_ref(), echelle, fen, pos);
+                    attente = intervalle(pos, pilule.as_ref());
+                    if voulu != recoit {
+                        etat.recoit_clics = voulu;
+                        drop(etat);
+                        let pour = app.clone();
+                        let _ = app.run_on_main_thread(move || {
+                            if let Some(b) = pour.try_state::<Bandeau>() {
+                                b.geste_clics(id, voulu);
                             }
                         });
                     }
-                    drop(e);
-                    std::thread::sleep(INTERVALLE_SOURIS);
                 }
             });
         if let Err(e) = lancement {
-            log::warn!("bandeau: surveillance de la souris impossible: {e}");
+            log::warn!("bandeau: surveillance impossible: {e}");
         }
     }
 
-    fn arreter_surveillance(&self) {
-        if let Ok(courante) = self.surveillance.lock() {
-            courante.store(false, Ordering::SeqCst);
-        }
-    }
-
-    /// Arrête la surveillance, rend les clics traversants et cache la fenêtre.
-    fn terminer(&self, etat: &mut Etat) {
-        self.arreter_surveillance();
-        etat.en_cours = None;
-        etat.recoit_clics = false;
+    /// Geste posté par la surveillance (fil principal) : l'état est relu sous le verrou ;
+    /// « cliquable » ne s'applique qu'au message en cours, s'il porte une croix.
+    fn geste_clics(&self, id: u64, voulu: bool) {
+        let cliquable = {
+            let Some(mut etat) = self.etat() else {
+                return;
+            };
+            let en_cours = etat
+                .en_cours
+                .as_ref()
+                .map(|c| (c.id, c.message.genre.a_croix()));
+            let ok = geste_cliquable(en_cours, id, voulu);
+            etat.recoit_clics = ok;
+            ok
+        };
         if let Some(f) = self.fenetre() {
-            traverser(&f, true);
-            if let Err(e) = f.hide() {
-                log::warn!("bandeau: fenetre non cachee: {e}");
+            traverser(&f, !cliquable);
+        }
+    }
+
+    /// Retire le message `id` s'il est en cours. Rend vrai s'il l'était.
+    fn retirer(&self, id: Option<u64>) -> bool {
+        let Some(mut etat) = self.etat() else {
+            return false;
+        };
+        let present = match id {
+            Some(id) => etat.en_cours.as_ref().is_some_and(|c| c.id == id),
+            None => etat.en_cours.is_some(),
+        };
+        if present || id.is_none() {
+            etat.en_cours = None;
+            etat.recoit_clics = false;
+        }
+        present
+    }
+
+    /// Filet de sécurité : la page n'a pas fait sa part à temps.
+    fn cacher_d_office(&self, id: u64) {
+        if self.retirer(Some(id)) {
+            if let Some(f) = self.fenetre() {
+                cacher(&f);
             }
+            log::warn!("bandeau cache d'office {id}");
         }
     }
 
-    /// À l'arrêt de l'app.
+    /// À l'arrêt de l'app : la surveillance s'arrête, la fenêtre est cachée puis détruite.
     pub fn fermer(&self) {
-        if let Ok(mut etat) = self.etat.lock() {
-            self.terminer(&mut etat);
-        }
+        self.vivante.store(false, Ordering::SeqCst);
+        self.retirer(None);
         if let Some(f) = self.fenetre() {
+            cacher(&f);
             let _ = f.destroy();
         }
     }
 
+    /// La page écoute : le message en attente part ; un `bandeau_pret` répété (page
+    /// rechargée) renvoie le message en cours.
     fn page_prete(&self) {
-        let Ok(mut etat) = self.etat.lock() else {
-            return;
+        let en_cours = {
+            let Some(mut etat) = self.etat() else {
+                return;
+            };
+            etat.page_prete = true;
+            etat.en_cours.as_ref().map(|c| c.id)
         };
-        if etat.page_prete {
-            return;
-        }
-        etat.page_prete = true;
         log::info!("bandeau pret");
-        if etat.en_cours.is_some() {
-            self.montrer(&mut etat);
+        if let Some(id) = en_cours {
+            self.demander_montrer(id);
         }
-    }
-
-    /// Vrai si `id` est le message en cours.
-    fn est_en_cours(etat: &Etat, id: u64) -> bool {
-        etat.en_cours.as_ref().is_some_and(|c| c.id == id)
     }
 }
 
@@ -387,6 +503,52 @@ fn poser(fenetre: &WebviewWindow, place: Rect) {
     }
 }
 
+/// Cache la fenêtre et rend les clics traversants. Sous Windows par `systeme` : tao croit
+/// la fenêtre cachée et son `hide()` ne ferait rien.
+fn cacher(fenetre: &WebviewWindow) {
+    traverser(fenetre, true);
+    let fait = match systeme::cacher_sans_tao(fenetre) {
+        Ok(true) => Ok(()),
+        Ok(false) => fenetre.hide().map_err(|e| e.to_string()),
+        Err(e) => Err(e),
+    };
+    if let Err(e) = fait {
+        log::warn!("bandeau: fenetre non cachee: {e}");
+    }
+}
+
+/// Souris en pixels réels : directement par `systeme`, sinon par Tauri.
+fn souris(app: &AppHandle) -> Option<(f64, f64)> {
+    systeme::position_souris().or_else(|| app.cursor_position().ok().map(|p| (p.x, p.y)))
+}
+
+/// Place réelle de la fenêtre et échelle de son écran, relues à chaque fois.
+fn place_reelle(fenetre: &WebviewWindow) -> Option<(Rect, f64)> {
+    if let Some((x, y, largeur, hauteur, e)) = systeme::rectangle_fenetre(fenetre) {
+        return Some((
+            Rect {
+                x,
+                y,
+                largeur,
+                hauteur,
+            },
+            e,
+        ));
+    }
+    let p = fenetre.outer_position().ok()?;
+    let t = fenetre.outer_size().ok()?;
+    let e = fenetre.scale_factor().ok()?;
+    Some((
+        Rect {
+            x: p.x,
+            y: p.y,
+            largeur: t.width,
+            hauteur: t.height,
+        },
+        e,
+    ))
+}
+
 /// Clics traversants (`true`) ou reçus (`false`).
 fn traverser(fenetre: &WebviewWindow, oui: bool) {
     let fait = match systeme::traverser_clics(fenetre, oui) {
@@ -413,7 +575,8 @@ pub fn bandeau_pret(bandeau: State<'_, Bandeau>) {
     bandeau.page_prete();
 }
 
-/// Rectangle de la pilule (pixels CSS, relatif à la page).
+/// Rectangle de la pilule (pixels CSS, relatif à la page). Refusé s'il n'est pas fini,
+/// borné à la fenêtre sinon.
 #[tauri::command]
 pub fn bandeau_zone(
     bandeau: State<'_, Bandeau>,
@@ -423,24 +586,24 @@ pub fn bandeau_zone(
     largeur: f64,
     hauteur: f64,
 ) {
-    let Ok(mut etat) = bandeau.etat.lock() else {
+    let Some(zone) = borner_zone(x, y, largeur, hauteur) else {
+        log::warn!("bandeau zone {id} refusee (valeur non finie)");
         return;
     };
-    let Some(en_cours) = etat.en_cours.as_mut().filter(|c| c.id == id) else {
-        return;
+    let (place, premiere) = {
+        let Some(mut etat) = bandeau.etat() else {
+            return;
+        };
+        let Some(c) = etat.en_cours.as_mut().filter(|c| c.id == id) else {
+            return;
+        };
+        c.zone = Some(zone);
+        let premiere = !c.signale;
+        c.signale = true;
+        (c.place, premiere)
     };
-    let zone = ZoneCss {
-        x,
-        y,
-        largeur,
-        hauteur,
-    };
-    if ![x, y, largeur, hauteur].iter().all(|v| v.is_finite()) {
-        return;
-    }
-    en_cours.zone = Some(zone);
-    if let Some((place, echelle)) = en_cours.fenetre {
-        let r = zone_ecran(&zone, echelle, (place.x, place.y));
+    if let Some((p, echelle)) = place {
+        let r = zone_ecran(&zone, echelle, (p.x, p.y));
         log::info!(
             "bandeau zone {id} {},{} {}x{}",
             r.x,
@@ -449,15 +612,17 @@ pub fn bandeau_zone(
             r.hauteur
         );
     }
+    if premiere {
+        (bandeau.rappel)(Signal::MessageMontre { id });
+    }
 }
 
 /// Clic sur une action ou sur la croix (`fermer`).
 #[tauri::command]
 pub fn bandeau_action(bandeau: State<'_, Bandeau>, id: u64, action: String) {
-    let valide = match bandeau.etat.lock() {
-        Ok(etat) => Bandeau::est_en_cours(&etat, id),
-        Err(_) => false,
-    };
+    let valide = bandeau
+        .etat()
+        .is_some_and(|e| e.en_cours.as_ref().is_some_and(|c| c.id == id));
     if valide {
         (bandeau.rappel)(Signal::ActionBandeau { id, action });
     }
@@ -466,12 +631,10 @@ pub fn bandeau_action(bandeau: State<'_, Bandeau>, id: u64, action: String) {
 /// Le message a fini de disparaître : on cache la fenêtre.
 #[tauri::command]
 pub fn bandeau_termine(bandeau: State<'_, Bandeau>, id: u64) {
-    let Ok(mut etat) = bandeau.etat.lock() else {
-        return;
-    };
-    if !Bandeau::est_en_cours(&etat, id) {
-        return;
+    if bandeau.retirer(Some(id)) {
+        if let Some(f) = bandeau.fenetre() {
+            cacher(&f);
+        }
+        log::info!("bandeau termine {id}");
     }
-    bandeau.terminer(&mut etat);
-    log::info!("bandeau termine {id}");
 }
