@@ -9,6 +9,14 @@ param(
 Initialiser-Essai -Nom '01-socle' -Exe $Exe -Sortie $Sortie | Out-Null
 
 try {
+    # 0. Sous Windows : le manifeste (Per-Monitor V2) est bien intégré au .exe.
+    if ($IsWindows) {
+        $octets = [System.IO.File]::ReadAllBytes($script:Essai.Exe)
+        $integre = [System.Text.Encoding]::ASCII.GetString($octets).Contains('PerMonitorV2') -or
+            [System.Text.Encoding]::Unicode.GetString($octets).Contains('PerMonitorV2')
+        Verifier 'manifeste PerMonitorV2 intégré au .exe' $integre | Out-Null
+    }
+
     # 1. L'app démarre et écrit son journal.
     $premiere = Demarrer-App
     $demarree = Verifier "l'app démarre" (Attendre-Ligne -Texte 'demarrage BreezyShot ' -DelaiS 30)
