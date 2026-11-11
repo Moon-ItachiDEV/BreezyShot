@@ -155,6 +155,9 @@ dans le dossier temporaire du système (`systeme::dossier_secours()`), sous le n
   les raccourcis, retire l'icône, écrit `arret propre`), puis sort. Sans instance en cours,
   sort tout de suite avec le code 0. C'est le moyen qu'utilisent les essais pour fermer l'app.
 - Aucune autre option pour l'instant.
+- Au démarrage, après `icone installee`, l'app vérifie que l'icône est réellement dans la
+  zone de notification (son rectangle est connu du système) et écrit `icone visible` ou
+  `icone invisible` (toujours `invisible` sous Linux, où Tauri ne donne pas ce rectangle).
 
 ### 3.5 Icône et menu
 

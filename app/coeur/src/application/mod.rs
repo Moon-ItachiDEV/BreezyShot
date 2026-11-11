@@ -157,6 +157,7 @@ fn demarrer(app: &AppHandle, commande: Commande, inconnus: &[String]) {
         ),
         Err(e) => log::warn!("icone non installee: {e}"),
     }
+    verifier_icone_visible(app);
     let pour_theme = app.clone();
     if let Err(e) = systeme::surveiller_theme_barre(move |t| {
         traiter(&pour_theme, Evenement::ThemeBarre(t));
@@ -170,6 +171,27 @@ fn demarrer(app: &AppHandle, commande: Commande, inconnus: &[String]) {
         .demarree
         .store(true, Ordering::SeqCst);
     log::info!("pret");
+}
+
+/// Écrit `icone visible` ou `icone invisible` selon que la zone de notification donne
+/// le rectangle de l'icône (jusqu'à 3 s d'attente, sans bloquer le démarrage).
+fn verifier_icone_visible(app: &AppHandle) {
+    let app = app.clone();
+    let lance = std::thread::Builder::new()
+        .name("icone-visible".into())
+        .spawn(move || {
+            for _ in 0..15 {
+                if icone::visible(&app) {
+                    log::info!("icone visible");
+                    return;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(200));
+            }
+            log::warn!("icone invisible");
+        });
+    if let Err(e) = lance {
+        log::warn!("icone invisible: verification impossible ({e})");
+    }
 }
 
 /// Les entrées du menu de l'icône, dans l'ordre. Seulement ce qui marche.

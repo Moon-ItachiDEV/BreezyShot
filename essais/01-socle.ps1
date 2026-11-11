@@ -20,6 +20,15 @@ try {
 
     # 3. Icône dans la zone de notification.
     Verifier 'icone installee' (Attendre-Ligne -Texte 'icone installee' -DelaiS 15) | Out-Null
+    # « visible » se trouve dans « icone visible » comme dans « icone invisible ».
+    $null = Attendre-Ligne -Texte 'visible' -DelaiS 10
+    $visible = (Compter-Lignes -Texte 'icone visible') -ge 1
+    if ($IsWindows) {
+        Verifier "icone visible (dans la zone de notification)" $visible | Out-Null
+    }
+    else {
+        Write-Host "[note]  icone visible : $visible (non exigé hors Windows)"
+    }
     Verifier 'démarrage complet (pret)' (Attendre-Ligne -Texte 'pret' -DelaiS 15) | Out-Null
 
     # 4. Mémoire privée au repos, après quelques secondes sans rien faire.

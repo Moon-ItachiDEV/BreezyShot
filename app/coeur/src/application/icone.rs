@@ -101,6 +101,21 @@ where
     }
 }
 
+/// L'icône est-elle réellement dans la zone de notification ? Vrai si le système donne
+/// son rectangle, de taille non nulle. Sous Linux, Tauri ne le donne jamais : faux.
+pub fn visible(app: &AppHandle) -> bool {
+    let Some(icone) = app.tray_by_id(ID_ICONE) else {
+        return false;
+    };
+    match icone.rect() {
+        Ok(Some(rect)) => {
+            let taille = rect.size.to_physical::<u32>(1.0);
+            taille.width > 0 && taille.height > 0
+        }
+        _ => false,
+    }
+}
+
 /// Change l'image de l'icône (thème de la barre changé).
 pub fn changer_image(app: &AppHandle, theme: Theme, taille: u32) -> Result<(), String> {
     let Some(icone) = app.tray_by_id(ID_ICONE) else {
