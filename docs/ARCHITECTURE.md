@@ -215,7 +215,9 @@ sur le fil principal tout ce qui touche à la capture et arriverait d'ailleurs. 
    Découpe est ignoré par la table (`capture deja en cours: appui ignore`) : aucun second
    `figer` tant qu'une capture est en cours.
 2. Le bandeau est caché s'il montre un message (`Bandeau::cacher`), puis
-   `systeme::attendre_composition()` (deux `DwmFlush`) : il n'est ni sur la photo ni
+   `systeme::attendre_composition(100 ms)` (deux `DwmFlush` dans un petit fil ; le fil
+   principal n'attend jamais plus de 100 ms, sinon `composition non attendue (100 ms): photo
+   prise quand meme`) : il n'est ni sur la photo ni
    au-dessus de l'écran figé.
 3. `capture::figer()`. Erreur → `GelImpossible`, bandeau d'erreur.
 4. `systeme::gel::montrer_ecran_fige`. La garde de l'écran existe dès avant. Erreur →

@@ -51,6 +51,9 @@ pub const MENU_CAPTURER_ZONE: &str = "capturer_zone";
 /// l'app s'arrête d'elle-même : l'écran ne doit jamais rester couvert.
 pub const DELAI_BLOCAGE: Duration = Duration::from_secs(5);
 
+/// Attente maximale du compositeur après avoir caché le bandeau, avant la photo.
+pub const ATTENTE_COMPOSITION: Duration = Duration::from_millis(100);
+
 /// Les actions dont la capture existe : seules celles-ci reçoivent un raccourci (§5).
 /// `plein_ecran` et `fenetre` s'ajouteront avec leur étape.
 pub const ACTIONS_CONSTRUITES: [&str; 1] = ["zone"];
@@ -691,8 +694,11 @@ pub fn lancer_capture(app: &AppHandle, mode: Mode) {
     }
     // 2. Le bandeau ne doit ni figurer sur la photo ni rester au-dessus de l'écran figé.
     let bandeau_cache = app.try_state::<Bandeau>().is_some_and(|b| b.cacher());
-    if bandeau_cache {
-        systeme::attendre_composition();
+    if bandeau_cache && !systeme::attendre_composition(ATTENTE_COMPOSITION) {
+        log::warn!(
+            "composition non attendue ({} ms): photo prise quand meme",
+            ATTENTE_COMPOSITION.as_millis()
+        );
     }
     // 3. La photo.
     let gel_pris = match capture::figer() {
