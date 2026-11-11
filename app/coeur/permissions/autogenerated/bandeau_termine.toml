@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-bandeau-termine"
+description = "Enables the bandeau_termine command without any pre-configured scope."
+commands.allow = ["bandeau_termine"]
+
+[[permission]]
+identifier = "deny-bandeau-termine"
+description = "Denies the bandeau_termine command without any pre-configured scope."
+commands.deny = ["bandeau_termine"]

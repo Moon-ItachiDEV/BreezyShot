@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bandeau BreezyShot</title>
+<link rel="stylesheet" href="../commun/jetons.css">
+<link rel="stylesheet" href="bandeau.css">
+<script type="module" src="bandeau.js"></script>
+</head>
+<body>
+  <!-- La fenêtre est transparente et laisse passer les clics : seule la pilule se voit. -->
+  <div class="scene">
+    <div class="bandeau" id="bandeau" role="status" aria-live="polite" hidden>
+      <span class="pastille" aria-hidden="true"></span>
+      <span class="texte"><b class="titre"></b><span class="detail"></span></span>
+      <span class="boutons"></span>
+    </div>
+  </div>
+</body>
+</html>

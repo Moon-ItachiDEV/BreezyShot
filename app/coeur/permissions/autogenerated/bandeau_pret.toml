@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-bandeau-pret"
+description = "Enables the bandeau_pret command without any pre-configured scope."
+commands.allow = ["bandeau_pret"]
+
+[[permission]]
+identifier = "deny-bandeau-pret"
+description = "Denies the bandeau_pret command without any pre-configured scope."
+commands.deny = ["bandeau_pret"]

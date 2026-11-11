@@ -1,0 +1,188 @@
+/* Bandeau de messages (ARCHITECTURE.md §6, maquette complète, erreur variante A).
+   Toutes les valeurs viennent de ../commun/jetons.css. */
+
+html,
+body {
+  height: 100%;
+  margin: 0;
+  background: transparent;
+  overflow: hidden;
+}
+
+body {
+  font-family: var(--police-ui);
+  -webkit-user-select: none;
+  user-select: none;
+  /* La fenêtre laisse passer les clics ; seule la pilule les reçoit (voir bandeau_zone). */
+  pointer-events: none;
+}
+
+/* Centre la pilule sans transformation : son rectangle (offsetLeft…) reste juste pendant
+   l'animation et sert tel quel à bandeau_zone. */
+.scene {
+  display: flex;
+  justify-content: center;
+  padding-top: var(--bandeau-haut);
+}
+
+.bandeau {
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  gap: var(--bandeau-ecart);
+  max-width: calc(100% - var(--bandeau-marge-page));
+  padding: var(--bandeau-marge-courte);
+  border-radius: var(--radius-pill);
+  background: var(--acrylic-solid);
+  border: 1px solid var(--acrylic-stroke);
+  box-shadow: var(--shadow-28);
+  color: var(--text);
+  font-size: var(--bandeau-texte-taille);
+  line-height: var(--bandeau-texte-interligne);
+  pointer-events: auto;
+}
+
+.bandeau[hidden] {
+  display: none;
+}
+
+.pastille {
+  width: var(--bandeau-pastille);
+  height: var(--bandeau-pastille);
+  flex: none;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+}
+
+.bandeau svg {
+  width: var(--bandeau-picto);
+  height: var(--bandeau-picto);
+  fill: none;
+  stroke: currentColor;
+  stroke-width: var(--bandeau-picto-trait);
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.reussite .pastille {
+  background: var(--success);
+  color: var(--page);
+}
+.info .pastille {
+  background: var(--accent);
+  color: var(--on-accent);
+}
+.erreur .pastille {
+  background: var(--danger);
+  color: var(--page);
+}
+
+.texte {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.titre {
+  font-weight: var(--texte-body-strong-graisse);
+}
+
+.detail {
+  color: var(--text-2);
+  font-size: var(--texte-caption-taille);
+  line-height: var(--bandeau-detail-interligne);
+}
+
+/* Réussite : une ligne, titre seul, coupé par « … » s'il est trop long (maquette). */
+.reussite .detail,
+.reussite .boutons {
+  display: none;
+}
+.reussite .titre {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Erreur et info : pilule élargie, texte à gauche, actions et croix à droite.
+   Hauteur maximale connue : titre 2 lignes, détail 3 lignes, jamais de passage des
+   boutons à la ligne (la croix reste toujours visible). */
+.large {
+  width: min(var(--bandeau-largeur-large), calc(100% - var(--bandeau-marge-page)));
+  padding: var(--bandeau-marge-large);
+  border-radius: var(--bandeau-rayon-large);
+}
+.large .texte {
+  flex: 1 1 var(--bandeau-texte-base);
+}
+.large .titre,
+.large .detail {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.large .titre {
+  -webkit-line-clamp: var(--bandeau-titre-lignes);
+  line-clamp: var(--bandeau-titre-lignes);
+}
+.large .detail {
+  -webkit-line-clamp: var(--bandeau-detail-lignes);
+  line-clamp: var(--bandeau-detail-lignes);
+}
+.detail:empty {
+  display: none;
+}
+
+.boutons {
+  display: flex;
+  align-items: center;
+  flex: 0 1 auto;
+  min-width: 0;
+  margin-left: auto;
+}
+
+/* Pendant la sortie, plus aucun clic. */
+.sortie {
+  pointer-events: none;
+}
+
+.act,
+.xb {
+  all: unset;
+  box-sizing: border-box;
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+  transition: background-color var(--duree-couleur) linear;
+}
+.act {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: var(--bandeau-action-largeur-max);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-weight: var(--texte-body-strong-graisse);
+  color: var(--accent-text);
+  white-space: nowrap;
+  padding: var(--bandeau-action-marge);
+}
+.xb {
+  flex: none;
+  width: var(--bandeau-bouton);
+  height: var(--bandeau-bouton);
+  display: grid;
+  place-items: center;
+  color: var(--text-2);
+}
+.xb svg {
+  stroke-width: var(--bandeau-croix-trait);
+}
+.act:hover,
+.xb:hover {
+  background: var(--subtle-hover);
+}
+.act:active,
+.xb:active {
+  background: var(--subtle-press);
+}

@@ -1,0 +1,555 @@
+{
+ "name": "BreezyShot",
+ "version": 1,
+ "color": {
+  "themes": [
+   {
+    "id": "light",
+    "name": "Clair"
+   },
+   {
+    "id": "dark",
+    "name": "Sombre"
+   }
+  ],
+  "tokens": [
+   {
+    "name": "accent",
+    "value": {
+     "light": "#0067C0",
+     "dark": "#4CC2FF"
+    },
+    "usage": "Couleur d'accent (bleu système Windows). Fond du bouton principal, interrupteurs activés, barre de progression de la vignette, indicateur de navigation."
+   },
+   {
+    "name": "accent-hover",
+    "value": {
+     "light": "#1975C5",
+     "dark": "#47B1E8"
+    },
+    "usage": "Fond du bouton principal au survol."
+   },
+   {
+    "name": "accent-press",
+    "value": {
+     "light": "#3183CA",
+     "dark": "#42A1D2"
+    },
+    "usage": "Fond du bouton principal à l'appui."
+   },
+   {
+    "name": "on-accent",
+    "value": {
+     "light": "#FFFFFF",
+     "dark": "#000000"
+    },
+    "usage": "Texte et icônes posés sur accent."
+   },
+   {
+    "name": "accent-text",
+    "value": {
+     "light": "#005FB8",
+     "dark": "#99EBFF"
+    },
+    "usage": "Accent utilisé comme texte ou icône (liens, mode actif de la barre) sur page, mica ou card-solid."
+   },
+   {
+    "name": "page",
+    "value": {
+     "light": "#F3F3F3",
+     "dark": "#202020"
+    },
+    "usage": "Fond des fenêtres (Mica sans teinte). Fond de base de l'appli."
+   },
+   {
+    "name": "card",
+    "value": {
+     "light": "rgba(255,255,255,0.70)",
+     "dark": "rgba(255,255,255,0.0512)"
+    },
+    "usage": "Cartes et groupes de réglages posés sur page."
+   },
+   {
+    "name": "card-solid",
+    "value": {
+     "light": "#FBFBFB",
+     "dark": "#2B2B2B"
+    },
+    "usage": "Version opaque de card : segment sélectionné, menus, toasts."
+   },
+   {
+    "name": "layer",
+    "value": {
+     "light": "rgba(255,255,255,0.50)",
+     "dark": "rgba(58,58,58,0.30)"
+    },
+    "usage": "Zone de contenu d'une fenêtre, sous la barre de titre."
+   },
+   {
+    "name": "ctrl",
+    "value": {
+     "light": "rgba(255,255,255,0.70)",
+     "dark": "rgba(255,255,255,0.0605)"
+    },
+    "usage": "Fond des contrôles au repos (bouton standard, champ, touche kbd)."
+   },
+   {
+    "name": "ctrl-hover",
+    "value": {
+     "light": "rgba(249,249,249,0.50)",
+     "dark": "rgba(255,255,255,0.0837)"
+    },
+    "usage": "Fond des contrôles au survol."
+   },
+   {
+    "name": "ctrl-press",
+    "value": {
+     "light": "rgba(249,249,249,0.30)",
+     "dark": "rgba(255,255,255,0.0326)"
+    },
+    "usage": "Fond des contrôles à l'appui."
+   },
+   {
+    "name": "ctrl-alt",
+    "value": {
+     "light": "rgba(0,0,0,0.024)",
+     "dark": "rgba(0,0,0,0.10)"
+    },
+    "usage": "Fond en creux : piste du sélecteur segmenté, cadre d'aperçu de la vignette."
+   },
+   {
+    "name": "subtle-hover",
+    "value": {
+     "light": "rgba(0,0,0,0.037)",
+     "dark": "rgba(255,255,255,0.0605)"
+    },
+    "usage": "Survol des boutons discrets (modes de la barre, navigation des réglages)."
+   },
+   {
+    "name": "subtle-press",
+    "value": {
+     "light": "rgba(0,0,0,0.024)",
+     "dark": "rgba(255,255,255,0.0419)"
+    },
+    "usage": "Appui des boutons discrets."
+   },
+   {
+    "name": "stroke",
+    "value": {
+     "light": "rgba(0,0,0,0.0578)",
+     "dark": "rgba(255,255,255,0.0698)"
+    },
+    "usage": "Bordure fine des contrôles, cartes et fenêtres."
+   },
+   {
+    "name": "stroke-strong",
+    "value": {
+     "light": "rgba(0,0,0,0.1622)",
+     "dark": "rgba(255,255,255,0.093)"
+    },
+    "usage": "Bord inférieur des contrôles (le petit relief Fluent)."
+   },
+   {
+    "name": "stroke-ctrl-strong",
+    "value": {
+     "light": "rgba(0,0,0,0.6067)",
+     "dark": "rgba(255,255,255,0.6047)"
+    },
+    "usage": "Bord inférieur des champs de saisie, contour de l'interrupteur éteint (contraste ≥ 3:1 sur page)."
+   },
+   {
+    "name": "divider",
+    "value": {
+     "light": "rgba(0,0,0,0.0803)",
+     "dark": "rgba(255,255,255,0.0837)"
+    },
+    "usage": "Séparateurs entre lignes de réglages et dans la barre de capture."
+   },
+   {
+    "name": "text",
+    "value": {
+     "light": "#1A1A1A",
+     "dark": "#FFFFFF"
+    },
+    "usage": "Texte principal sur page, card, acrylic."
+   },
+   {
+    "name": "text-2",
+    "value": {
+     "light": "#5D5D5D",
+     "dark": "#C5C5C5"
+    },
+    "usage": "Texte secondaire : descriptions des réglages, textes d'aide (contraste ≥ 4,5:1 sur page)."
+   },
+   {
+    "name": "text-3",
+    "value": {
+     "light": "#767676",
+     "dark": "#9D9D9D"
+    },
+    "usage": "Texte tertiaire, uniquement sur card-solid ou blanc (4,5:1). Sur page claire il descend à environ 4,1:1 : réservé aux textes de 18 px et plus ou aux icônes."
+   },
+   {
+    "name": "text-dis",
+    "value": {
+     "light": "rgba(0,0,0,0.36)",
+     "dark": "rgba(255,255,255,0.36)"
+    },
+    "usage": "Texte des contrôles désactivés (exempté de contraste)."
+   },
+   {
+    "name": "acrylic",
+    "value": {
+     "light": "rgba(252,252,252,0.80)",
+     "dark": "rgba(44,44,44,0.80)"
+    },
+    "usage": "Matériau Acrylic : barre de capture, vignette flottante, barre des tâches. Toujours avec un flou d'arrière-plan de 30 px."
+   },
+   {
+    "name": "acrylic-stroke",
+    "value": {
+     "light": "rgba(0,0,0,0.08)",
+     "dark": "rgba(255,255,255,0.08)"
+    },
+    "usage": "Bordure des surfaces Acrylic."
+   },
+   {
+    "name": "success",
+    "value": {
+     "light": "#0F7B0F",
+     "dark": "#6CCB5F"
+    },
+    "usage": "Confirmation (« Copié », « Enregistré »), icône de coche."
+   },
+   {
+    "name": "success-bg",
+    "value": {
+     "light": "#DFF6DD",
+     "dark": "#393D1B"
+    },
+    "usage": "Fond d'un message de réussite."
+   },
+   {
+    "name": "scrim",
+    "value": {
+     "light": "rgba(0,0,0,0.45)",
+     "dark": "rgba(0,0,0,0.45)"
+    },
+    "usage": "Voile de l'overlay de sélection, posé sur la copie figée de l'écran, hors de la zone choisie. Identique dans les deux thèmes."
+   },
+   {
+    "name": "selection-stroke",
+    "value": {
+     "light": "#FFFFFF",
+     "dark": "#FFFFFF"
+    },
+    "usage": "Bord 1 px du rectangle de sélection et des poignées rondes. Identique dans les deux thèmes, car il est posé sur l'écran assombri."
+   },
+   {
+    "name": "hud",
+    "value": {
+     "light": "rgba(32,32,32,0.70)",
+     "dark": "rgba(32,32,32,0.70)"
+    },
+    "usage": "Pilule du badge de dimensions et des astuces dans l'overlay (texte #FFFFFF, flou 20 px). Fixe, ne suit pas le thème."
+   },
+   {
+    "name": "hud-text",
+    "value": {
+     "light": "#FFFFFF",
+     "dark": "#FFFFFF"
+    },
+    "usage": "Texte sur hud."
+   },
+   {
+    "name": "window-highlight",
+    "value": {
+     "light": "#4CC2FF",
+     "dark": "#4CC2FF"
+    },
+    "usage": "Cadre 2 px autour de la fenêtre survolée en mode Fenêtre."
+   },
+   {
+    "name": "aurore-1",
+    "value": {
+     "light": "#FFC06B",
+     "dark": "#FFC06B"
+    },
+    "usage": "Début du dégradé Aurore du logo. Réservé à l'icône et à la couverture, jamais dans l'interface."
+   },
+   {
+    "name": "aurore-2",
+    "value": {
+     "light": "#FF7E6B",
+     "dark": "#FF7E6B"
+    },
+    "usage": "Milieu du dégradé Aurore du logo. Réservé à l'icône et à la couverture."
+   },
+   {
+    "name": "aurore-3",
+    "value": {
+     "light": "#F0509A",
+     "dark": "#F0509A"
+    },
+    "usage": "Fin du dégradé Aurore du logo. Réservé à l'icône et à la couverture."
+   },
+   {
+    "name": "notif-ink",
+    "value": {
+     "light": "#1B2227",
+     "dark": "#FFFFFF"
+    },
+    "usage": "Encre du logo monochrome dans la zone de notification en thème clair (en sombre : #FFFFFF)."
+   }
+  ]
+ },
+ "type": {
+  "fonts": [],
+  "families": {
+   "ui": "\"Segoe UI Variable Text\", \"Segoe UI Variable\", \"Segoe UI\", \"Noto Sans\", system-ui, sans-serif",
+   "display": "\"Segoe UI Variable Display\", \"Segoe UI Variable\", \"Segoe UI\", \"Noto Sans\", system-ui, sans-serif"
+  },
+  "groups": [
+   {
+    "name": "Interface",
+    "family": "ui",
+    "styles": [
+     {
+      "name": "caption",
+      "fontSize": "12px",
+      "lineHeight": "16px",
+      "fontWeight": 400,
+      "sample": "BreezyShot 2026-11-11 à 16.42.08.png",
+      "usage": "Métadonnées, raccourcis, astuces de l'overlay, badge (en 600, chiffres tabulaires)."
+     },
+     {
+      "name": "body",
+      "fontSize": "14px",
+      "lineHeight": "20px",
+      "fontWeight": 400,
+      "sample": "Copier automatiquement après la capture",
+      "usage": "Texte courant, libellés des réglages, boutons."
+     },
+     {
+      "name": "body-strong",
+      "fontSize": "14px",
+      "lineHeight": "20px",
+      "fontWeight": 600,
+      "sample": "Enregistrer",
+      "usage": "Titres de groupes de réglages, texte mis en avant."
+     }
+    ]
+   },
+   {
+    "name": "Titres",
+    "family": "display",
+    "styles": [
+     {
+      "name": "subtitle",
+      "fontSize": "20px",
+      "lineHeight": "28px",
+      "fontWeight": 600,
+      "sample": "Raccourcis clavier",
+      "usage": "Titre de section dans les réglages."
+     },
+     {
+      "name": "title",
+      "fontSize": "28px",
+      "lineHeight": "36px",
+      "fontWeight": 600,
+      "sample": "Réglages",
+      "usage": "Titre de page dans la fenêtre de réglages."
+     },
+     {
+      "name": "title-large",
+      "fontSize": "40px",
+      "lineHeight": "52px",
+      "fontWeight": 600,
+      "sample": "BreezyShot",
+      "usage": "Écran d'accueil, premier lancement."
+     }
+    ]
+   }
+  ]
+ },
+ "spacing": {
+  "tokens": [
+   {
+    "name": "space-1",
+    "value": "4px",
+    "usage": "Écart entre une icône et un petit libellé, marge intérieure de la barre de capture."
+   },
+   {
+    "name": "space-2",
+    "value": "8px",
+    "usage": "Écart entre boutons, marge intérieure des contrôles."
+   },
+   {
+    "name": "space-3",
+    "value": "12px",
+    "usage": "Marge intérieure horizontale des boutons, distance de la vignette au bord de l'écran."
+   },
+   {
+    "name": "space-4",
+    "value": "16px",
+    "usage": "Marge intérieure des cartes de réglages."
+   },
+   {
+    "name": "space-6",
+    "value": "24px",
+    "usage": "Écart entre groupes de réglages."
+   },
+   {
+    "name": "space-8",
+    "value": "32px",
+    "usage": "Hauteur standard d'un bouton ; marges de page des réglages."
+   }
+  ]
+ },
+ "radius": {
+  "tokens": [
+   {
+    "name": "radius-sm",
+    "value": "4px",
+    "usage": "Contrôles : boutons, champs, touches, modes de la barre."
+   },
+   {
+    "name": "radius-md",
+    "value": "8px",
+    "usage": "Fenêtres, vignette, barre de capture, cartes, menus (Windows 11 impose 8 px aux fenêtres)."
+   },
+   {
+    "name": "radius-pill",
+    "value": "999px",
+    "usage": "Badge de dimensions, astuces de l'overlay, interrupteurs."
+   }
+  ]
+ },
+ "shadow": {
+  "note": "Niveaux d'élévation Fluent : plus un élément flotte, plus l'ombre est grande.",
+  "tokens": [
+   {
+    "name": "shadow-2",
+    "value": {
+     "light": "0 0 2px rgba(0,0,0,0.12), 0 1px 2px rgba(0,0,0,0.14)",
+     "dark": "0 0 2px rgba(0,0,0,0.24), 0 1px 2px rgba(0,0,0,0.28)"
+    },
+    "usage": "Segment sélectionné, aperçu dans la vignette."
+   },
+   {
+    "name": "shadow-8",
+    "value": {
+     "light": "0 0 2px rgba(0,0,0,0.12), 0 4px 8px rgba(0,0,0,0.14)",
+     "dark": "0 0 2px rgba(0,0,0,0.24), 0 4px 8px rgba(0,0,0,0.28)"
+    },
+    "usage": "Info-bulles, menus contextuels."
+   },
+   {
+    "name": "shadow-16",
+    "value": {
+     "light": "0 0 2px rgba(0,0,0,0.12), 0 8px 16px rgba(0,0,0,0.14)",
+     "dark": "0 0 2px rgba(0,0,0,0.24), 0 8px 16px rgba(0,0,0,0.28)"
+    },
+    "usage": "Barre de capture, fenêtre inactive."
+   },
+   {
+    "name": "shadow-28",
+    "value": {
+     "light": "0 0 8px rgba(0,0,0,0.12), 0 14px 28px rgba(0,0,0,0.14)",
+     "dark": "0 0 8px rgba(0,0,0,0.24), 0 14px 28px rgba(0,0,0,0.28)"
+    },
+    "usage": "Vignette flottante, fenêtre de réglages active."
+   }
+  ]
+ },
+ "duree": {
+  "note": "Animations reprises de la direction Brise, sur le look Natif. Rien ne dure plus de 420 ms.",
+  "tokens": [
+   {
+    "name": "duree-instant",
+    "value": "0ms",
+    "usage": "Apparition de l'overlay et de son voile, suivi du rectangle, du badge et de la loupe, masquage de la barre de capture au lancement d'une capture : jamais animés (objectif 100 ms)."
+   },
+   {
+    "name": "duree-couleur",
+    "value": "83ms",
+    "usage": "Changement de couleur des boutons au survol et à l'appui (linéaire)."
+   },
+   {
+    "name": "duree-appui",
+    "value": "90ms",
+    "usage": "Enfoncement d'un bouton à l'appui (échelle 0,97), courbe-douce."
+   },
+   {
+    "name": "duree-survol",
+    "value": "150ms",
+    "usage": "Bouton qui monte de 1 px au survol, ombre shadow-2, courbe-douce."
+   },
+   {
+    "name": "duree-sortie",
+    "value": "167ms",
+    "usage": "Fondu de sortie de la barre de capture quand on la ferme sans capturer. Jamais pendant une capture : la barre est masquée instantanément (0 ms) avant le gel de l'écran, pour ne pas apparaître dans l'image."
+   },
+   {
+    "name": "duree-flash",
+    "value": "240ms",
+    "usage": "Flash doux sur la zone capturée."
+   },
+   {
+    "name": "duree-ressort",
+    "value": "260ms",
+    "usage": "Retour élastique d'un bouton, interrupteurs, indicateurs, avec courbe-ressort."
+   },
+   {
+    "name": "duree-vent",
+    "value": "280ms",
+    "usage": "Sortie « coup de vent » de la vignette : petit recul, glisse hors du coin, rotation 6°, flou 6 px, courbe-vent."
+   },
+   {
+    "name": "duree-vignette",
+    "value": "300ms",
+    "usage": "Entrée de la vignette : monte de 14 px, échelle 0,92 vers 1, courbe-ressort."
+   },
+   {
+    "name": "duree-envol",
+    "value": "420ms",
+    "usage": "Envol de la capture : la zone se rétracte à 0,95 puis vole en arc vers la vignette, courbe-envol."
+   },
+   {
+    "name": "duree-glissiere",
+    "value": "340ms",
+    "usage": "Trajet du rond de l'interrupteur Glissière à icônes, avec courbe-ressort ; la coche se dessine en 220 ms, 120 ms après le départ."
+   },
+   {
+    "name": "duree-onde",
+    "value": "420ms",
+    "usage": "Onde qui part du point de clic sur les boutons de la vignette."
+   }
+  ]
+ },
+ "courbe": {
+  "note": "Courbes d'accélération (reprises de Brise).",
+  "tokens": [
+   {
+    "name": "courbe-ressort",
+    "value": "cubic-bezier(0.34, 1.4, 0.64, 1)",
+    "usage": "Léger dépassement puis retour : entrée de la vignette, retour des boutons, interrupteurs."
+   },
+   {
+    "name": "courbe-douce",
+    "value": "cubic-bezier(0.2, 0.8, 0.2, 1)",
+    "usage": "Survol et appui des boutons, fondus d'entrée."
+   },
+   {
+    "name": "courbe-vent",
+    "value": "cubic-bezier(0.5, 0, 0.75, 0)",
+    "usage": "Sorties : accélère jusqu'au bout (coup de vent)."
+   },
+   {
+    "name": "courbe-envol",
+    "value": "cubic-bezier(0.5, 0, 0.2, 1)",
+    "usage": "Trajet de la capture vers la vignette."
+   }
+  ]
+ }
+}
