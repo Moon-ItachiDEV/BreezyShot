@@ -2,21 +2,26 @@
 // (ARCHITECTURE.md §2.5). Elle ne dessine que le voile et le rectangle : ni texte, ni viseur,
 // ni taille, ni poignée, ni animation.
 //
+// Une seule échelle, celle qu'on mesure : k = taille réelle de la fenêtre (envoyée par le
+// cœur) / taille de la page en pixels CSS. devicePixelRatio ne sert qu'au journal.
+//
 // Contrat avec le cœur (fenetres/selection.rs) :
-// - écoute `selection:montrer` { id, ecrans: [{ x, y, largeur, hauteur }], cote_min,
-//   largeur, hauteur, echelle } (pixels CSS de la page ; `largeur`, `hauteur`, `echelle` :
-//   taille et échelle attendues de la page) : retour au repos (voile plein). Dès que
-//   innerWidth/innerHeight correspondent (à 1 px près) pendant deux images de suite :
-//   `selection_prete` { id, largeur, hauteur, echelle } (valeurs lues ; `echelle` est
-//   devicePixelRatio, pour le journal). Le dessin et l'arrondi des coins suivent l'échelle
-//   annoncée par le cœur, pas devicePixelRatio.
-//   Avant cela, aucun glisser n'est accepté. Une demande invalide est ignorée
-//   (console.warn) : le cœur cache la fenêtre au bout de son délai. Une même demande
-//   reçue de nouveau (zone refusée, page rechargée) remet la page au repos.
+// - écoute `selection:montrer` { id, largeur, hauteur, ecrans: [{ x, y, largeur, hauteur }],
+//   cote_min } : tout en pixels réels entiers, relatifs au coin haut gauche de la fenêtre
+//   (`largeur`, `hauteur` : rectangle réel de la fenêtre). Retour au repos (voile plein).
+//   Dès que innerWidth/innerHeight sont non nuls et identiques deux images de suite, la page
+//   mesure kx = largeur / innerWidth, ky = hauteur / innerHeight, règle son dessin, puis
+//   envoie `selection_prete` { id, largeur: innerWidth, hauteur: innerHeight,
+//   echelle: devicePixelRatio }. Avant cela, aucun glisser n'est accepté. Une demande
+//   invalide est ignorée (console.warn) : le cœur cache la fenêtre au bout de son délai. Une
+//   même demande reçue de nouveau (zone refusée, fenêtre changée, page rechargée) remet la
+//   page au repos et la fait mesurer de nouveau.
+// - `resize` pendant un affichage : le glisser en cours est abandonné, la page redevient
+//   « pas prête », attend la stabilité et renvoie `selection_prete`.
 // - écoute `selection:cachee` : retour au repos, plus rien n'est envoyé.
 // - `selection_terminee` { id, depart: { x, y }, arrivee: { x, y } } au relâchement : les deux
-//   coins finals (après carré, déplacement et bornage), en pixels CSS. Rien n'est redessiné
-//   ensuite : le cœur cache la fenêtre.
+//   coins finals (bords, après carré, déplacement et bornage), en pixels réels entiers
+//   relatifs à la fenêtre. Rien n'est redessiné ensuite : le cœur cache la fenêtre.
 // - `selection_annulee` { id, cause: "echap" | "clic_droit" }, une seule fois par affichage.
 // - `selection_chargee` {} une fois, quand les deux écoutes sont en place.
 // Gestes : glisser du bouton gauche ; Maj tenue : carré ; Espace tenue : la zone se déplace ;
@@ -37,16 +42,22 @@ const morceaux = {
   zone: document.getElementById("zone"),
 };
 
+// Toute la géométrie est en pixels réels entiers, relatifs au coin de la fenêtre.
 let id = null; // affichage en cours ; null : fenêtre cachée
-let ecrans = []; // rectangles des écrans, pixels CSS
-let coteMin = 0; // pixels CSS
+let largeur = 0; // taille réelle de la fenêtre
+let hauteur = 0;
+let ecrans = [];
+let coteMin = 0;
+let kx = 1; // échelle mesurée : pixels réels par pixel CSS
+let ky = 1;
 let attente = false; // relâché ou annulé : on attend le cœur, plus rien ne bouge
 let glisser = null; // { pointeur, ecran, depart, courant, souris }
 let maj = false;
 let espace = false;
 let image = 0; // requestAnimationFrame en attente
-let prete = false; // la page a la taille et l'échelle attendues : on peut glisser
+let prete = false; // l'échelle est mesurée : on peut glisser
 let envoi = 0; // numéro de la dernière demande reçue
+let mesure = 0; // numéro de la dernière mesure lancée
 let filet = 0; // minuterie du filet après un envoi
 const FILET_MS = 1500;
 
@@ -63,23 +74,24 @@ function appeler(commande, args, siEchec) {
   }
 }
 
-let echelleCoeur = null; // échelle annoncée par le cœur pour l'affichage en cours
-/** L'échelle des conversions du cœur : tout le dessin et l'arrondi des coins la suivent,
- *  pour rester cohérents avec ce que le cœur convertit. À défaut, celle du navigateur. */
-const echelle = () => echelleCoeur || window.devicePixelRatio || 1;
-/** Arrondi au pixel réel : le trait reste net et les coins tombent sur des pixels entiers. */
-const net = (v) => Math.round(v * echelle()) / echelle();
-const fini = (v) => typeof v === "number" && Number.isFinite(v);
+const entier = (v) => Number.isSafeInteger(v);
 
-/** La scène en pixels réels, réduite à la taille de la fenêtre ; trait de 1 px CSS arrondi
- *  au pixel réel (au moins un). */
-function regler_scene() {
-  const e = echelle();
+/** Avant la mesure : la scène couvre la page en pixels CSS (seul le voile plein se voit). */
+function scene_css() {
   const s = scene.style;
-  s.width = `${Math.round(innerWidth * e)}px`;
-  s.height = `${Math.round(innerHeight * e)}px`;
-  s.transform = `scale(${1 / e})`;
-  document.documentElement.style.setProperty("--trait", `${Math.max(1, Math.round(e))}px`);
+  s.width = "100%";
+  s.height = "100%";
+  s.transform = "none";
+}
+
+/** Après la mesure : la scène compte en pixels réels (largeur × hauteur), réduite à la page
+ *  par scale(1/kx, 1/ky) ; trait de max(1, round(k)) pixels réels. */
+function scene_reelle() {
+  const s = scene.style;
+  s.width = `${largeur}px`;
+  s.height = `${hauteur}px`;
+  s.transform = `scale(${1 / kx}, ${1 / ky})`;
+  document.documentElement.style.setProperty("--trait", `${Math.max(1, Math.round((kx + ky) / 2))}px`);
 }
 
 /** Vérifie une demande `selection:montrer` ; null si elle doit être ignorée. */
@@ -89,18 +101,20 @@ function valider(m) {
     return null;
   };
   if (!m || typeof m !== "object") return rejeter("pas un objet");
-  if (!Number.isSafeInteger(m.id) || m.id < 0) return rejeter("id invalide");
+  if (!entier(m.id) || m.id < 0) return rejeter("id invalide");
+  if (!entier(m.largeur) || !entier(m.hauteur) || m.largeur <= 0 || m.hauteur <= 0) {
+    return rejeter("taille invalide");
+  }
   if (!Array.isArray(m.ecrans)) return rejeter("ecrans absents");
   const liste = [];
   for (const e of m.ecrans) {
-    if (!e || ![e.x, e.y, e.largeur, e.hauteur].every(fini) || e.largeur <= 0 || e.hauteur <= 0) {
+    if (!e || ![e.x, e.y, e.largeur, e.hauteur].every(entier) || e.largeur <= 0 || e.hauteur <= 0) {
       return rejeter("ecran invalide");
     }
     liste.push({ x: e.x, y: e.y, largeur: e.largeur, hauteur: e.hauteur });
   }
-  if (!fini(m.cote_min) || m.cote_min < 0) return rejeter("cote_min invalide");
-  if (![m.largeur, m.hauteur, m.echelle].every((v) => fini(v) && v > 0)) return rejeter("taille invalide");
-  return { id: m.id, ecrans: liste, coteMin: m.cote_min, largeur: m.largeur, hauteur: m.hauteur, echelle: m.echelle };
+  if (!entier(m.cote_min) || m.cote_min < 0) return rejeter("cote_min invalide");
+  return { id: m.id, largeur: m.largeur, hauteur: m.hauteur, ecrans: liste, coteMin: m.cote_min };
 }
 
 /** Voile plein, sans rectangle. */
@@ -111,52 +125,56 @@ function repos() {
   corps.classList.remove("glisse");
 }
 
-/** La page a-t-elle la taille et l'échelle que le cœur attend ? */
-// Seule la taille compte : innerWidth × échelle du cœur = rectangle réel de la fenêtre, à
-// 1 px CSS près, et les coins convertis sont justes quel que soit devicePixelRatio.
-const conforme = (m) => Math.abs(innerWidth - m.largeur) <= 1 && Math.abs(innerHeight - m.hauteur) <= 1;
+/** Attend que la page ait une taille stable (non nulle, identique deux images de suite),
+ *  mesure l'échelle, règle le dessin et prévient le cœur. Sinon, le cœur cache au bout de
+ *  son délai. */
+function mesurer() {
+  prete = false;
+  // En attente du cœur, la zone dessinée reste telle quelle jusqu'à la fin.
+  if (!attente) scene_css();
+  const numero = ++mesure;
+  let avant = null;
+  const verifier = () => {
+    if (numero !== mesure || id === null) return;
+    const l = innerWidth;
+    const h = innerHeight;
+    const stable = l > 0 && h > 0 && avant !== null && avant.l === l && avant.h === h;
+    avant = { l, h };
+    if (!stable) {
+      requestAnimationFrame(verifier);
+      return;
+    }
+    kx = largeur / l;
+    ky = hauteur / h;
+    scene_reelle();
+    prete = true;
+    appeler("selection_prete", { id, largeur: l, hauteur: h, echelle: window.devicePixelRatio || 1 });
+  };
+  requestAnimationFrame(verifier);
+}
 
 export function montrer(brut) {
   const m = valider(brut);
   if (!m) return;
   repos();
   clearTimeout(filet);
+  envoi++;
   id = m.id;
+  largeur = m.largeur;
+  hauteur = m.hauteur;
   ecrans = m.ecrans;
   coteMin = m.coteMin;
   attente = false;
-  prete = false;
   espace = false;
   maj = false;
-  echelleCoeur = m.echelle;
-  regler_scene();
-  const numero = ++envoi;
-  // Deux images de suite à la bonne taille : la fenêtre transparente est peinte, et le
-  // conteneur WebView2 a fini de se redimensionner. Sinon, le cœur cache au bout de 2 s.
-  let suite = 0;
-  const verifier = () => {
-    if (numero !== envoi || id === null) return;
-    suite = conforme(m) ? suite + 1 : 0;
-    if (suite < 2) {
-      requestAnimationFrame(verifier);
-      return;
-    }
-    regler_scene();
-    prete = true;
-    appeler("selection_prete", {
-      id: m.id,
-      largeur: innerWidth,
-      hauteur: innerHeight,
-      echelle: window.devicePixelRatio || 1,
-    });
-  };
-  requestAnimationFrame(verifier);
+  mesurer();
 }
 
 export function cachee() {
   repos();
   clearTimeout(filet);
   envoi++;
+  mesure++;
   id = null;
   attente = false;
   prete = false;
@@ -180,13 +198,16 @@ function envoyer(commande, args) {
   appeler(commande, args, liberer);
 }
 
-const dansLaFenetre = () => ({ x: 0, y: 0, largeur: innerWidth, hauteur: innerHeight });
 const dedans = (p, e) => p.x >= e.x && p.x < e.x + e.largeur && p.y >= e.y && p.y < e.y + e.hauteur;
 /** L'écran du point (bords droit et bas exclus) ; à défaut, la fenêtre. */
-const ecranSous = (p) => ecrans.find((e) => dedans(p, e)) || dansLaFenetre();
+const ecranSous = (p) => ecrans.find((e) => dedans(p, e)) || { x: 0, y: 0, largeur, hauteur };
 const borne = (v, min, max) => Math.min(Math.max(v, min), max);
 const borner = (p, e) => ({ x: borne(p.x, e.x, e.x + e.largeur), y: borne(p.y, e.y, e.y + e.hauteur) });
-const point = (ev) => ({ x: net(ev.clientX), y: net(ev.clientY) });
+/** Le pixel réel sous la souris, dans la fenêtre. */
+const point = (ev) => ({
+  x: borne(Math.round(ev.clientX * kx), 0, largeur),
+  y: borne(Math.round(ev.clientY * ky), 0, hauteur),
+});
 
 /** Les deux coins du rectangle : courant borné à l'écran du départ, puis carré si Maj. */
 function coins(g) {
@@ -196,7 +217,7 @@ function coins(g) {
     const dx = b.x - a.x;
     const dy = b.y - a.y;
     const cote = Math.min(Math.abs(dx), Math.abs(dy));
-    b = { x: net(a.x + Math.sign(dx) * cote), y: net(a.y + Math.sign(dy) * cote) };
+    b = { x: a.x + Math.sign(dx) * cote, y: a.y + Math.sign(dy) * cote };
   }
   return [a, b];
 }
@@ -208,31 +229,27 @@ function avancer(g, p) {
     const e = g.ecran;
     const dx = borne(p.x - g.souris.x, e.x - Math.min(a.x, b.x), e.x + e.largeur - Math.max(a.x, b.x));
     const dy = borne(p.y - g.souris.y, e.y - Math.min(a.y, b.y), e.y + e.hauteur - Math.max(a.y, b.y));
-    g.depart = { x: net(a.x + dx), y: net(a.y + dy) };
-    g.courant = { x: net(b.x + dx), y: net(b.y + dy) };
+    g.depart = { x: a.x + dx, y: a.y + dy };
+    g.courant = { x: b.x + dx, y: b.y + dy };
   } else {
     g.courant = p;
   }
   g.souris = p;
 }
 
-/** Pose un morceau de la scène ; reçoit des pixels CSS, écrit des pixels réels entiers. */
-function poser(n, x, y, largeur, hauteur) {
-  const e = echelle();
-  const reel = (v) => `${Math.max(0, Math.round(v * e))}px`;
+/** Pose la zone (pixels réels de la scène). */
+function poser(n, x, y, l, h) {
   const s = n.style;
-  s.left = reel(x);
-  s.top = reel(y);
-  s.width = reel(largeur);
-  s.height = reel(hauteur);
+  s.left = `${x}px`;
+  s.top = `${y}px`;
+  s.width = `${Math.max(0, l)}px`;
+  s.height = `${Math.max(0, h)}px`;
 }
 
 /** Pose un panneau du voile (carré de 1 pixel réel) par une seule transformation : ni
  *  mise en page ni changement de taille pendant le glisser. */
-function poserPanneau(n, x, y, largeur, hauteur) {
-  const e = echelle();
-  const reel = (v) => Math.max(0, Math.round(v * e));
-  n.style.transform = `translate(${reel(x)}px, ${reel(y)}px) scale(${reel(largeur)}, ${reel(hauteur)})`;
+function poserPanneau(n, x, y, l, h) {
+  n.style.transform = `translate(${x}px, ${y}px) scale(${Math.max(0, l)}, ${Math.max(0, h)})`;
 }
 
 function dessiner() {
@@ -247,12 +264,10 @@ function dessiner() {
     corps.classList.remove("glisse");
     return;
   }
-  const l = innerWidth;
-  const h = innerHeight;
-  poserPanneau(morceaux.haut, 0, 0, l, y0);
-  poserPanneau(morceaux.bas, 0, y1, l, h - y1);
+  poserPanneau(morceaux.haut, 0, 0, largeur, y0);
+  poserPanneau(morceaux.bas, 0, y1, largeur, hauteur - y1);
   poserPanneau(morceaux.gauche, 0, y0, x0, y1 - y0);
-  poserPanneau(morceaux.droite, x1, y0, l - x1, y1 - y0);
+  poserPanneau(morceaux.droite, x1, y0, largeur - x1, y1 - y0);
   poser(morceaux.zone, x0, y0, x1 - x0, y1 - y0);
   corps.classList.add("glisse");
 }
@@ -316,10 +331,9 @@ addEventListener(
     maj = e.shiftKey;
     avancer(g, point(e));
     const [a, b] = coins(g);
-    const e2 = echelle();
-    const petit = (v) => Math.round(Math.abs(v) * e2) < Math.round(coteMin * e2);
-    if (petit(b.x - a.x) || petit(b.y - a.y)) {
-      repos(); // pas une zone : on continue
+    // Même règle que le cœur : un côté (écart des bords) sous cote_min, ce n'est pas une zone.
+    if (Math.abs(b.x - a.x) < coteMin || Math.abs(b.y - a.y) < coteMin) {
+      repos(); // on continue
       return;
     }
     // Rien n'est redessiné : le cœur cache la fenêtre.
@@ -368,8 +382,14 @@ addEventListener(
 addEventListener("blur", () => {
   espace = false;
 });
-addEventListener("resize", regler_scene);
-regler_scene();
+// La taille change : l'échelle n'est plus sûre. Le glisser en cours est abandonné et la
+// page mesure de nouveau (puis renvoie `selection_prete`).
+addEventListener("resize", () => {
+  if (id === null) return;
+  if (!attente) repos();
+  mesurer();
+});
+scene_css();
 // Pas de menu contextuel : le clic droit annule.
 addEventListener("contextmenu", (e) => e.preventDefault(), true);
 
@@ -384,7 +404,14 @@ if (tauri?.event?.listen) {
   );
 } else {
   if (new URLSearchParams(location.search).has("demo")) {
-    montrer({ id: 1, ecrans: [], cote_min: 3, largeur: innerWidth, hauteur: innerHeight, echelle: devicePixelRatio || 1 });
+    const d = window.devicePixelRatio || 1;
+    montrer({
+      id: 1,
+      largeur: Math.round(innerWidth * d),
+      hauteur: Math.round(innerHeight * d),
+      ecrans: [],
+      cote_min: 3,
+    });
   }
   // Pour les essais dans un navigateur seulement.
   window.selectionApercu = { montrer, cachee };

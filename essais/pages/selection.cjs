@@ -52,9 +52,16 @@ const L = 1280, H = 400;
   const appels = (p) => p.evaluate(() => __appels.filter(x => x[0] !== 'selection_chargee'));
   const vider = (p) => p.evaluate(() => { __appels.length = 0; });
   let prochain = 1;
-  async function montrer(p, ecrans = [{ x: 0, y: 0, largeur: L, hauteur: H }], coteMin = 3) {
+  // La charge du cœur : tout en pixels réels relatifs à la fenêtre. Les écrans sont donnés
+  // ici en pixels CSS et convertis à l'échelle k (par défaut, celle du navigateur) ;
+  // cote_min est en pixels réels.
+  const charge = (id, ecrans, coteMin, k) => p => p.evaluate(([id, ecrans, c, k]) => __emettre('selection:montrer', {
+    id, largeur: Math.round(innerWidth * k), hauteur: Math.round(innerHeight * k),
+    ecrans: ecrans.map(e => ({ x: Math.round(e.x * k), y: Math.round(e.y * k), largeur: Math.round(e.largeur * k), hauteur: Math.round(e.hauteur * k) })), cote_min: c,
+  }), [id, ecrans, coteMin, k]);
+  async function montrer(p, ecrans = [{ x: 0, y: 0, largeur: L, hauteur: H }], coteMin = 3, k = p.echelle) {
     const id = prochain++;
-    await p.evaluate(([id, ecrans, c, e]) => __emettre('selection:montrer', { id, ecrans, cote_min: c, largeur: innerWidth, hauteur: innerHeight, echelle: e }), [id, ecrans, coteMin, p.echelle]);
+    await charge(id, ecrans, coteMin, k)(p);
     await p.waitForTimeout(80);
     await vider(p);
     return id;
@@ -197,7 +204,7 @@ const L = 1280, H = 400;
 
   // 6. selection_prete : deux images après montrer, avec le bon id, une fois.
   const pr = await p.evaluate(async () => {
-    __appels.length = 0; __emettre('selection:montrer', { id: 77, ecrans: [], cote_min: 3, largeur: 1280, hauteur: 400, echelle: 1 });
+    __appels.length = 0; __emettre('selection:montrer', { id: 77, largeur: 1280, hauteur: 400, ecrans: [], cote_min: 3 });
     const tout_de_suite = __appels.length;
     await new Promise(r => requestAnimationFrame(() => r()));
     const une_image = __appels.length;
@@ -207,7 +214,10 @@ const L = 1280, H = 400;
   verifier(pr.tout_de_suite === 0 && pr.une_image === 0 && JSON.stringify(pr.appels) === JSON.stringify([['selection_prete', { id: 77, largeur: 1280, hauteur: 400, echelle: 1 }]]), '6 selection_prete { id, largeur, hauteur, echelle } deux images après selection:montrer', JSON.stringify(pr));
   // Demandes invalides : ignorées, pas de selection_prete.
   await vider(p);
-  for (const m of [null, {}, { id: -1, ecrans: [], cote_min: 3 }, { id: 1.5, ecrans: [], cote_min: 3 }, { id: 2, ecrans: [{ x: 0, y: 0, largeur: NaN, hauteur: 1 }], cote_min: 3 }, { id: 3, ecrans: 'x', cote_min: 3 }, { id: 4, ecrans: [], cote_min: -1 }]) {
+  const T = { largeur: 1280, hauteur: 400 };
+  for (const m of [null, {}, { ...T, id: -1, ecrans: [], cote_min: 3 }, { ...T, id: 1.5, ecrans: [], cote_min: 3 }, { ...T, id: 2, ecrans: [{ x: 0, y: 0, largeur: NaN, hauteur: 1 }], cote_min: 3 },
+    { ...T, id: 3, ecrans: 'x', cote_min: 3 }, { ...T, id: 4, ecrans: [], cote_min: -1 }, { id: 5, ecrans: [], cote_min: 3 }, { id: 6, largeur: 1280.5, hauteur: 400, ecrans: [], cote_min: 3 },
+    { id: 7, largeur: 0, hauteur: 400, ecrans: [], cote_min: 3 }, { ...T, id: 8, ecrans: [{ x: 0.5, y: 0, largeur: 10, hauteur: 10 }], cote_min: 3 }, { ...T, id: 9, ecrans: [], cote_min: 2.5 }]) {
     await p.evaluate(m => __emettre('selection:montrer', m), m);
   }
   await p.waitForTimeout(100);
@@ -243,28 +253,86 @@ const L = 1280, H = 400;
   verifier(!z.glisse, '7 puis selection:cachee : repos');
   await p.context().close();
 
-  // 8. Échelles : trait net, coins justes au pixel réel près.
-  for (const e of [1, 1.25, 1.5]) {
+  // 8. Échelles mesurées k = 1, 1,25, 1,5, 2 et 1,1 : trait net, coins exacts en pixels réels.
+  for (const e of [1, 1.25, 1.5, 2, 1.1]) {
     p = await page({ echelle: e });
-    // Écrans réels (1600 × 500 à 125 % par exemple) convertis par le cœur en pixels CSS.
-    id = await montrer(p, [{ x: 0, y: 0, largeur: L, hauteur: H }], 3 / e);
-    const A = [100.3, 100.7], B = [301.1, 250.2];
+    id = await montrer(p);
+    const A = [100, 100], B = [300, 250];
     await p.mouse.move(...A); await p.mouse.down(); await p.mouse.move(...B, { steps: 4 }); await p.waitForTimeout(60);
     z = await etatZone(p);
     const trait = parseFloat(z.trait);
-    const x0 = Math.round(parseFloat(z.x)), x1 = x0 + Math.round(parseFloat(z.l)), ym = Math.round(200 * e);
+    const x0 = parseInt(z.x), x1 = x0 + parseInt(z.l), ym = Math.round(200 * e);
     px = await ligne(p, ym);
     const blanc = (i) => proche(px[i], [255, 255, 255], 0);
-    const netOk = Math.abs(trait - Math.round(trait)) < 1e-6 && trait >= 1 && blanc(x0) && !blanc(x0 - 1) && proche(px[x0 - 1], VOILE)
-      && blanc(x1 - 1) && proche(px[x1], VOILE) && proche(px[x0 + Math.round(trait)], FOND);
-    verifier(netOk, `8 à ${e * 100} % : trait net de ${trait} pixel(s) réel(s)`, JSON.stringify({ trait, x0, x1, bord: [px[x0 - 1], px[x0], px[x0 + 1], px[x1 - 1], px[x1]] }));
-    await p.screenshot({ path: `${SORTIE}/selection-glisser-${e * 100}.png` });
+    const netOk = trait === Math.max(1, Math.round(e)) && blanc(x0) && proche(px[x0 - 1], VOILE)
+      && blanc(x0 + trait - 1) && proche(px[x0 + trait], FOND) && blanc(x1 - 1) && proche(px[x1], VOILE);
+    verifier(netOk, `8 k = ${e} : trait net de ${trait} pixel(s) réel(s)`, JSON.stringify({ trait, x0, x1, bord: [px[x0 - 1], px[x0], px[x0 + 1], px[x1 - 1], px[x1]] }));
+    await p.screenshot({ path: `${SORTIE}/selection-glisser-${Math.round(e * 100)}.png` });
     await p.mouse.up(); await p.waitForTimeout(40);
     t = await termine(p);
     const attendu = [...A, ...B].map(v => Math.round(v * e));
-    const obtenu = t.length === 1 ? [t[0][1].depart.x, t[0][1].depart.y, t[0][1].arrivee.x, t[0][1].arrivee.y].map(v => v * e) : [];
-    verifier(obtenu.length === 4 && obtenu.every((v, i) => Math.abs(v - attendu[i]) <= 1 && Math.abs(v - Math.round(v)) < 1e-6), `8 à ${e * 100} % : coins × échelle = pixels attendus`, JSON.stringify({ attendu, obtenu }));
+    const obtenu = t.length === 1 ? [t[0][1].depart.x, t[0][1].depart.y, t[0][1].arrivee.x, t[0][1].arrivee.y] : [];
+    verifier(JSON.stringify(obtenu) === JSON.stringify(attendu), `8 k = ${e} : coins exacts en pixels réels`, JSON.stringify({ attendu, obtenu }));
+    // Coordonnées fractionnaires : au pixel réel le plus proche, entiers.
+    id = await montrer(p);
+    const Af = [100.3, 100.7], Bf = [301.1, 250.2];
+    await glisser(p, Af, Bf);
+    t = await termine(p);
+    const attenduF = [...Af, ...Bf].map(v => v * e);
+    const obtenuF = t.length === 1 ? [t[0][1].depart.x, t[0][1].depart.y, t[0][1].arrivee.x, t[0][1].arrivee.y] : [];
+    verifier(obtenuF.length === 4 && obtenuF.every((v, i) => Number.isInteger(v) && Math.abs(v - attenduF[i]) <= 1), `8 k = ${e} : coins fractionnaires arrondis au pixel réel`, JSON.stringify({ attenduF, obtenuF }));
     await p.context().close();
+  }
+
+  // 8 bis (contre-essai de la relecture, repris). À chaque échelle, la zone vue sur l'image
+  // est exactement celle que le cœur découpe (decider_zone : coins envoyés, pixels inclus),
+  // sans pixel adouci (ni voile ni clair) ; écrans séparés au pixel réel 1003.
+  const coupe = (t) => {
+    const inc = (u, v) => (u < v ? [u, v - 1] : u > v ? [u - 1, v] : [u, v]);
+    const { depart: d, arrivee: f } = t;
+    const [ax, bx] = inc(d.x, f.x), [ay, by] = inc(d.y, f.y);
+    return { x: Math.min(ax, bx), y: Math.min(ay, by), l: Math.abs(ax - bx) + 1, h: Math.abs(ay - by) + 1, xs: [ax, bx] };
+  };
+  const vue = (p) => p.screenshot().then(png => p.evaluate(async ([b64, fond, voile]) => {
+    const bm = await createImageBitmap(await (await fetch('data:image/png;base64,' + b64)).blob());
+    const c = new OffscreenCanvas(bm.width, bm.height), x = c.getContext('2d'); x.drawImage(bm, 0, 0);
+    const d = x.getImageData(0, 0, bm.width, bm.height).data;
+    let x0 = 1e9, y0 = 1e9, x1 = -1, y1 = -1, autres = 0;
+    for (let i = 0, n = 0; i < d.length; i += 4, n++) {
+      const c = [d[i], d[i + 1], d[i + 2]];
+      const v = c.every((u, k) => Math.abs(u - voile[k]) <= 3);
+      const clair = c.every((u, k) => Math.abs(u - fond[k]) <= 3) || c.every(u => u === 255);
+      if (!v && !clair) autres++;
+      if (!v) { const px = n % bm.width, py = (n - px) / bm.width; x0 = Math.min(x0, px); y0 = Math.min(y0, py); x1 = Math.max(x1, px); y1 = Math.max(y1, py); }
+    }
+    return { x: x0, y: y0, l: x1 - x0 + 1, h: y1 - y0 + 1, autres };
+  }, [png.toString('base64'), FOND, VOILE]));
+  for (const e of [1, 1.25, 1.5, 2, 1.1]) {
+    const R = Math.round(L * e), RH = Math.round(H * e);
+    const ecr = [{ x: 0, y: 0, largeur: 1003, hauteur: RH }, { x: 1003, y: 0, largeur: R - 1003, hauteur: RH }];
+    const cas = [
+      ['simple', async p => { await p.mouse.move(100.3, 50.6); await p.mouse.down(); await p.mouse.move(301.7, 250.2, { steps: 4 }); }],
+      ['maj', async p => { await p.keyboard.down('Shift'); await p.mouse.move(700.4, 300.3); await p.mouse.down(); await p.mouse.move(500.1, 41.9, { steps: 4 }); }],
+      ['borne', async p => { await p.mouse.move(600.2, 100.6); await p.mouse.down(); await p.mouse.move(1200, 390, { steps: 4 }); }],
+      ['espace', async p => { await p.mouse.move(700, 100); await p.mouse.down(); await p.mouse.move(600, 200, { steps: 3 }); await p.keyboard.down('Space'); await p.mouse.move(1000, 260, { steps: 5 }); }],
+    ];
+    for (const [nom, geste] of cas) {
+      p = await page({ echelle: e });
+      id = prochain++;
+      await p.evaluate(([id, R, RH, ecr]) => __emettre('selection:montrer', { id, largeur: R, hauteur: RH, ecrans: ecr, cote_min: 3 }), [id, R, RH, ecr]);
+      await p.waitForTimeout(100);
+      await geste(p); await p.waitForTimeout(80);
+      const vu = await vue(p);
+      if (nom === 'borne') await p.screenshot({ path: `${SORTIE}/selection-borne-${Math.round(e * 100)}.png` });
+      await p.mouse.up(); await p.keyboard.up('Shift'); await p.keyboard.up('Space'); await p.waitForTimeout(50);
+      t = await termine(p);
+      const c = t.length === 1 ? coupe(t[0][1]) : null;
+      const ecranDepart = c && (t[0][1].depart.x < 1003 || (t[0][1].depart.x === 1003 && t[0][1].arrivee.x < 1003)) ? 0 : 1;
+      const surEcran = c && c.xs.every(x => (ecranDepart === 0 ? x < 1003 : x >= 1003));
+      verifier(c && vu.x === c.x && vu.y === c.y && vu.l === c.l && vu.h === c.h && vu.autres === 0 && surEcran,
+        `8 bis k = ${e} ${nom} : zone vue = zone découpée, aucun pixel adouci, sur l'écran du départ`, JSON.stringify({ vu, c, t: t[0] && t[0][1] }));
+      await p.context().close();
+    }
   }
 
   // 9. Thème sombre du système : même voile (la page force le thème clair).
@@ -321,7 +389,7 @@ const L = 1280, H = 400;
   id = await montrer(p);
   await glisser(p, [100, 100], [200, 200]);
   await vider(p);
-  await p.evaluate(([id, e]) => __emettre('selection:montrer', { id, ecrans: [], cote_min: 3, largeur: innerWidth, hauteur: innerHeight, echelle: e }), [id, p.echelle]);
+  await charge(id, [], 3, p.echelle)(p);
   await p.waitForTimeout(80);
   z = await etatZone(p);
   await glisser(p, [100, 100], [250, 250]);
@@ -332,46 +400,74 @@ const L = 1280, H = 400;
   // C. Touches du navigateur neutralisées.
   p = await page();
   id = await montrer(p);
-  const touches = await p.evaluate(() => [['F5', false], ['r', true], ['p', true], ['f', true], ['F12', false], ['Tab', false], ['a', false], ['Shift', false], [' ', false]].map(([k, ctrl]) => {
-    const ev = new KeyboardEvent('keydown', { key: k, code: k === ' ' ? 'Space' : k, ctrlKey: ctrl, bubbles: true, cancelable: true });
+  const touches = await p.evaluate(() => [['F5', {}], ['r', { ctrlKey: true }], ['p', { ctrlKey: true }], ['f', { ctrlKey: true }], ['F12', {}], ['Tab', {}], ['a', {}], ['Shift', {}], [' ', {}],
+    ['ArrowLeft', { altKey: true }], ['F11', {}], ['ContextMenu', {}], ['I', { ctrlKey: true, shiftKey: true }], ['=', { ctrlKey: true }]].map(([k, o]) => {
+    const ev = new KeyboardEvent('keydown', { key: k, code: k === ' ' ? 'Space' : k, bubbles: true, cancelable: true, ...o });
     document.body.dispatchEvent(ev); return ev.defaultPrevented; }));
-  verifier(touches.every(Boolean), 'C toute touche neutralisée (F5, Ctrl+R, Ctrl+P, Ctrl+F, F12…)', JSON.stringify(touches));
+  verifier(touches.every(Boolean), 'C toute touche neutralisée (F5, Ctrl+R, Ctrl+P, Ctrl+F, F12, Alt+←, F11, Ctrl+Maj+I, Ctrl+=…)', JSON.stringify(touches));
   // D. Bouton tenu avant montrer : pas de glisser fantôme.
   await p.evaluate(() => __emettre('selection:cachee', null));
   await p.mouse.move(100, 100); await p.mouse.down();
   id = await montrer(p);
   await p.mouse.move(300, 300, { steps: 3 }); await p.mouse.up(); await p.waitForTimeout(40);
   verifier((await appels(p)).length === 0, 'D bouton tenu avant montrer : rien envoyé');
-  // Page pas encore à la bonne taille : ni prête ni glisser ; prête dès qu'elle l'est.
+  // Aucun glisser avant selection_prete : gestes dans la même tâche que montrer, ignorés.
   await vider(p);
-  await p.evaluate(() => __emettre('selection:montrer', { id: 500, ecrans: [], cote_min: 3, largeur: 1000, hauteur: 400, echelle: 1 }));
-  await p.waitForTimeout(150);
-  await glisser(p, [100, 100], [200, 200]);
-  const avantTaille = await appels(p);
-  await p.setViewportSize({ width: 1000, height: 400 }); await p.waitForTimeout(150);
-  await glisser(p, [100, 100], [200, 200]);
+  const avantPrete = await p.evaluate(() => {
+    __emettre('selection:montrer', { id: 500, largeur: 1280, hauteur: 400, ecrans: [], cote_min: 3 });
+    const o = { bubbles: true, cancelable: true, pointerId: 1, pointerType: 'mouse', isPrimary: true };
+    document.documentElement.dispatchEvent(new PointerEvent('pointerdown', { ...o, clientX: 100, clientY: 100, button: 0, buttons: 1 }));
+    document.documentElement.dispatchEvent(new PointerEvent('pointermove', { ...o, clientX: 300, clientY: 300, button: -1, buttons: 1 }));
+    document.documentElement.dispatchEvent(new PointerEvent('pointerup', { ...o, clientX: 300, clientY: 300, button: 0, buttons: 0 }));
+    return __appels.length;
+  });
+  await p.waitForTimeout(100);
   a = await appels(p);
-  verifier(avantTaille.length === 0 && a.length === 2 && JSON.stringify(a[0]) === JSON.stringify(['selection_prete', { id: 500, largeur: 1000, hauteur: 400, echelle: 1 }]) && a[1][0] === 'selection_terminee',
-    'taille différente : ni prête ni glisser ; prête une fois la taille juste', JSON.stringify({ avantTaille, a }));
+  verifier(avantPrete === 0 && JSON.stringify(a) === JSON.stringify([['selection_prete', { id: 500, largeur: 1280, hauteur: 400, echelle: 1 }]]), 'D avant selection_prete : aucun glisser', JSON.stringify({ avantPrete, a }));
   await p.context().close();
 
-  // devicePixelRatio différent de l'échelle annoncée (taille bonne) : la page devient prête,
-  // et les coins suivent l'échelle annoncée.
-  for (const [reelle, annoncee] of [[1.25, 1.5], [1.5, 1.25], [1, 1.25]]) {
-    p = await page({ echelle: reelle });
-    p.echelle = annoncee;
+  // Taille qui change pendant un glisser : glisser abandonné, page de nouveau « pas prête »,
+  // nouvelle selection_prete ; le cœur renvoie la charge (fenêtre relue) ; coins justes ensuite.
+  for (const e of [1, 1.25]) {
+    p = await page({ echelle: e });
+    id = await montrer(p);
+    await p.mouse.move(100, 100); await p.mouse.down(); await p.mouse.move(300, 300, { steps: 3 }); await p.waitForTimeout(40);
+    const pendantG = await etatZone(p);
+    await p.setViewportSize({ width: 1000, height: 380 }); await p.waitForTimeout(40);
+    const apresTaille = await etatZone(p);
+    await p.mouse.move(350, 320, { steps: 2 }); await p.mouse.up(); await p.waitForTimeout(150);
+    const apresResize = await appels(p);
+    // Le cœur relit la fenêtre (1000 × 380 CSS) et renvoie la charge du même affichage.
     await vider(p);
-    await p.evaluate(([e]) => __emettre('selection:montrer', { id: 900, ecrans: [{ x: 0, y: 0, largeur: innerWidth, hauteur: innerHeight }], cote_min: 3 / e, largeur: innerWidth, hauteur: innerHeight, echelle: e }), [annoncee]);
+    await charge(id, [{ x: 0, y: 0, largeur: 1000, hauteur: 380 }], 3, e)(p); await p.waitForTimeout(100);
+    const pretes = await appels(p);
+    await vider(p);
+    await glisser(p, [100, 100], [900, 370]);
+    t = await termine(p);
+    const attendu = { id, depart: { x: Math.round(100 * e), y: Math.round(100 * e) }, arrivee: { x: Math.round(900 * e), y: Math.round(370 * e) } };
+    const pr = { id, largeur: 1000, hauteur: 380, echelle: e };
+    verifier(pendantG.glisse && !apresTaille.glisse && JSON.stringify(apresResize) === JSON.stringify([['selection_prete', pr]]) && JSON.stringify(pretes) === JSON.stringify([['selection_prete', pr]])
+      && t.length === 1 && JSON.stringify(t[0][1]) === JSON.stringify(attendu),
+      `taille changée pendant un glisser (k = ${e}) : abandonné, selection_prete renvoyée, coins justes ensuite`, JSON.stringify({ apresTaille: apresTaille.glisse, apresResize, pretes, t }));
+    await p.context().close();
+  }
+
+  // devicePixelRatio différent de ce qu'annoncerait tao : rien de tao n'est envoyé à la page ;
+  // la page mesure k = taille réelle / taille CSS, devient prête et les coins suivent k.
+  for (const [dpr, k] of [[1.25, 1.25], [1.25, 1.5], [1.5, 1.25], [1, 1.1]]) {
+    p = await page({ echelle: dpr });
+    await vider(p);
+    id = prochain++;
+    await charge(id, [{ x: 0, y: 0, largeur: L, hauteur: H }], 3, k)(p);
     await p.waitForTimeout(100);
-    const A = [100.3, 100.7], B = [301.1, 250.2];
-    await glisser(p, A, B);
+    await glisser(p, [100, 100], [300, 250]);
     a = await appels(p);
-    const attendu = [...A, ...B].map(v => Math.round(v * annoncee));
+    const attendu = [100, 100, 300, 250].map(v => Math.round(v * k));
     const fin = a.find(x => x[0] === 'selection_terminee');
-    const obtenu = fin ? [fin[1].depart.x, fin[1].depart.y, fin[1].arrivee.x, fin[1].arrivee.y].map(v => v * annoncee) : [];
+    const obtenu = fin ? [fin[1].depart.x, fin[1].depart.y, fin[1].arrivee.x, fin[1].arrivee.y] : [];
     const pr = a.find(x => x[0] === 'selection_prete');
-    verifier(pr && pr[1].echelle === reelle && obtenu.length === 4 && obtenu.every((v, i) => Math.abs(v - attendu[i]) <= 1 && Math.abs(v - Math.round(v)) < 1e-6),
-      `devicePixelRatio ${reelle} annoncé ${annoncee} : prête, coins justes pour l'échelle annoncée`, JSON.stringify({ pr, attendu, obtenu }));
+    verifier(pr && JSON.stringify(pr[1]) === JSON.stringify({ id, largeur: L, hauteur: H, echelle: dpr }) && JSON.stringify(obtenu) === JSON.stringify(attendu),
+      `devicePixelRatio ${dpr}, fenêtre réelle ${Math.round(L * k)} × ${Math.round(H * k)} : prête, coins justes à k = ${k}`, JSON.stringify({ pr, attendu, obtenu }));
     await p.context().close();
   }
 

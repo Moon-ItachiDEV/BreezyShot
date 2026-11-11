@@ -57,7 +57,8 @@ use crate::systeme::{self, Rect};
 
 /// Étiquette de la fenêtre (aussi dans `capabilities/selection.json`).
 pub const ETIQUETTE_SELECTION: &str = "selection";
-/// Événement écouté par la page : `{ id, ecrans: [RectPage], cote_min }`.
+/// Événement écouté par la page : `{ id, largeur, hauteur, ecrans: [RectFenetre], cote_min }`,
+/// tout en pixels réels relatifs au coin de la fenêtre.
 pub const EVENEMENT_MONTRER: &str = "selection:montrer";
 /// Événement écouté par la page : la fenêtre est cachée, retour au repos.
 pub const EVENEMENT_CACHEE: &str = "selection:cachee";
@@ -156,18 +157,20 @@ pub fn decrire_fin(signal: &Signal) -> Option<String> {
     }
 }
 
-/// Rectangle en pixels CSS de la page.
-#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
-pub struct RectPage {
-    pub x: f64,
-    pub y: f64,
-    pub largeur: f64,
-    pub hauteur: f64,
+/// Rectangle en pixels réels, relatif au coin haut gauche de la fenêtre (ce que reçoit la
+/// page).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub struct RectFenetre {
+    pub x: i32,
+    pub y: i32,
+    pub largeur: i32,
+    pub hauteur: i32,
 }
 
-/// Point envoyé par la page, en pixels CSS. Une coordonnée absente ou qui n'est pas un
-/// nombre (`null` pour un `NaN` passé par JSON) devient `NaN` : la commande arrive quand
-/// même, et `vers_bureau` la refuse (signal `Impossible`).
+/// Point envoyé par la page, en pixels réels relatifs au coin haut gauche de la fenêtre.
+/// Une coordonnée absente ou qui n'est pas un nombre (`null` pour un `NaN` passé par JSON)
+/// devient `NaN` : la commande arrive quand même, et `vers_bureau` la refuse (signal
+/// `Impossible`).
 #[derive(Debug, Clone, Copy, PartialEq, Deserialize)]
 pub struct Point {
     #[serde(default = "pas_un_nombre", deserialize_with = "nombre_ou_nan")]
@@ -185,51 +188,44 @@ fn nombre_ou_nan<'de, D: Deserializer<'de>>(d: D) -> Result<f64, D::Error> {
     Ok(v.as_f64().unwrap_or(f64::NAN))
 }
 
-/// Échelle utilisable : un nombre fini strictement positif.
-fn echelle_valide(echelle: f64) -> bool {
-    echelle.is_finite() && echelle > 0.0
+/// Borne un calcul fait en `i64` dans les `i32`.
+fn borner_i32(v: i64) -> i32 {
+    v.clamp(i64::from(i32::MIN), i64::from(i32::MAX)) as i32
 }
 
-/// Pixel CSS de la page → pixel réel du bureau. `None` si la donnée n'est pas un nombre fini
-/// ou sort de la fenêtre (tolérance : 1 pixel réel). Le résultat est borné au bureau.
+/// Pixel réel relatif à la fenêtre (envoyé par la page) → pixel réel du bureau. `None` si
+/// la donnée n'est pas un nombre fini ou sort de la fenêtre (tolérance : 1 pixel réel).
+/// Le résultat est arrondi au pixel et borné à la fenêtre.
 ///
-/// `bureau` est le rectangle réel de la fenêtre (le coin (0, 0) de la page est son coin
-/// haut gauche). Un coin peut valoir le bord droit ou bas (exclus) : c'est un bord de zone.
-pub fn vers_bureau(point: (f64, f64), echelle: f64, bureau: Rect) -> Option<(i32, i32)> {
+/// `fenetre` est le rectangle réel de la fenêtre. Un coin peut valoir le bord droit ou bas
+/// (exclus) : c'est un bord de zone.
+pub fn vers_bureau(point: (f64, f64), fenetre: Rect) -> Option<(i32, i32)> {
     let (x, y) = point;
-    if !echelle_valide(echelle) || bureau.est_vide() || !x.is_finite() || !y.is_finite() {
+    if fenetre.est_vide() || !x.is_finite() || !y.is_finite() {
         return None;
     }
-    let (rx, ry) = (x * echelle, y * echelle);
-    let (l, h) = (f64::from(bureau.largeur), f64::from(bureau.hauteur));
-    if rx < -TOLERANCE || ry < -TOLERANCE || rx > l + TOLERANCE || ry > h + TOLERANCE {
+    let (l, h) = (f64::from(fenetre.largeur), f64::from(fenetre.hauteur));
+    if x < -TOLERANCE || y < -TOLERANCE || x > l + TOLERANCE || y > h + TOLERANCE {
         return None;
     }
-    let bx = (rx.round().clamp(0.0, l) + f64::from(bureau.x)) as i64;
-    let by = (ry.round().clamp(0.0, h) + f64::from(bureau.y)) as i64;
-    let bx = bx.clamp(i64::from(bureau.x), bureau.droite());
-    let by = by.clamp(i64::from(bureau.y), bureau.bas());
+    let bx = x.round().clamp(0.0, l) as i64 + i64::from(fenetre.x);
+    let by = y.round().clamp(0.0, h) as i64 + i64::from(fenetre.y);
     Some((i32::try_from(bx).ok()?, i32::try_from(by).ok()?))
 }
 
-/// Rectangle réel du bureau → rectangle en pixels CSS de la page (pour envoyer les écrans).
-/// Une échelle invalide compte pour 1.
-pub fn vers_page(rect: Rect, echelle: f64, bureau: Rect) -> RectPage {
-    let e = if echelle_valide(echelle) {
-        echelle
-    } else {
-        1.0
-    };
-    RectPage {
-        x: (f64::from(rect.x) - f64::from(bureau.x)) / e,
-        y: (f64::from(rect.y) - f64::from(bureau.y)) / e,
-        largeur: f64::from(rect.largeur.max(0)) / e,
-        hauteur: f64::from(rect.hauteur.max(0)) / e,
+/// Rectangle réel du bureau → le même, relatif au coin de la fenêtre (simple changement
+/// d'origine, pour envoyer les écrans à la page).
+pub fn vers_page(rect: Rect, fenetre: Rect) -> RectFenetre {
+    RectFenetre {
+        x: borner_i32(i64::from(rect.x) - i64::from(fenetre.x)),
+        y: borner_i32(i64::from(rect.y) - i64::from(fenetre.y)),
+        largeur: rect.largeur.max(0),
+        hauteur: rect.hauteur.max(0),
     }
 }
 
-/// Cause d'annulation envoyée par la page (`echap`, `clic_droit`). `focus_perdu` ne vient
-/// jamais de la page.
+/// Cause d'annulation envoyée par la page (`echap`, `clic_droit`). `focus_perdu` et
+/// `fermeture` ne viennent jamais de la page.
 pub fn cause_depuis_nom(nom: &str) -> Option<Cause> {
     match nom {
         "echap" => Some(Cause::Echap),
@@ -238,11 +234,35 @@ pub fn cause_depuis_nom(nom: &str) -> Option<Cause> {
     }
 }
 
-/// Vrai si le `devicePixelRatio` de la page s'écarte de plus de 0,01 de l'échelle du cœur.
-/// Rien n'est refusé (les conversions ne dépendent que de la taille de la page) : c'est
-/// seulement écrit au journal.
-pub fn echelle_page_differente(page: f64, coeur: f64) -> bool {
-    !page.is_finite() || (page - coeur).abs() > 0.01
+/// Échelle mesurée la plus petite et la plus grande admises.
+const ECHELLE_MIN: f64 = 0.5;
+const ECHELLE_MAX: f64 = 5.0;
+/// Écart relatif admis entre l'échelle horizontale et la verticale.
+const ECART_ECHELLES: f64 = 0.02;
+
+/// Contrôle de cohérence de `selection_prete` (fonction pure) : l'échelle mesurée
+/// `k = taille réelle de la fenêtre / taille de la page en pixels CSS`, sur chaque axe.
+/// Rend `(kx, ky)`, ou la cause « page <l>x<h> pour fenetre <L>x<H> » si une valeur n'est
+/// pas finie ou est nulle, si `k` sort de [0,5 ; 5], ou si `kx` et `ky` diffèrent de plus
+/// de 2 %.
+pub fn controler_page(page: (f64, f64), fenetre: Rect) -> Result<(f64, f64), String> {
+    let (l, h) = page;
+    let cause = || {
+        format!(
+            "page {l}x{h} pour fenetre {}x{}",
+            fenetre.largeur, fenetre.hauteur
+        )
+    };
+    if !(l.is_finite() && h.is_finite() && l > 0.0 && h > 0.0) || fenetre.est_vide() {
+        return Err(cause());
+    }
+    let kx = f64::from(fenetre.largeur) / l;
+    let ky = f64::from(fenetre.hauteur) / h;
+    let dans = |k: f64| (ECHELLE_MIN..=ECHELLE_MAX).contains(&k);
+    if !dans(kx) || !dans(ky) || (kx - ky).abs() > ECART_ECHELLES * kx.max(ky) {
+        return Err(cause());
+    }
+    Ok((kx, ky))
 }
 
 /// Ce que vaut un `selection_terminee` pour l'affichage en cours.
@@ -256,7 +276,8 @@ pub enum Decision {
     Invalide(String),
 }
 
-/// Décide d'un `selection_terminee` (fonction pure). `fenetre` : rectangle réel de la page.
+/// Décide d'un `selection_terminee` (fonction pure). `fenetre` : rectangle réel de la
+/// fenêtre ; `depart`, `arrivee` : pixels réels relatifs à la fenêtre.
 ///
 /// La page envoie des **bords** : la zone dessinée couvre `[min, max)` sur chaque axe. Le
 /// seuil se compte sur ces bords (`|a − b| >= cote_min`) ; la zone rendue donne des coins
@@ -264,14 +285,10 @@ pub enum Decision {
 pub fn decider_zone(
     depart: (f64, f64),
     arrivee: (f64, f64),
-    echelle: f64,
     fenetre: Rect,
     cote_min: i32,
 ) -> Decision {
-    let (Some(a), Some(b)) = (
-        vers_bureau(depart, echelle, fenetre),
-        vers_bureau(arrivee, echelle, fenetre),
-    ) else {
+    let (Some(a), Some(b)) = (vers_bureau(depart, fenetre), vers_bureau(arrivee, fenetre)) else {
         return Decision::Invalide("point invalide".into());
     };
     let largeur = (i64::from(a.0) - i64::from(b.0)).abs();
@@ -293,35 +310,47 @@ pub fn decider_zone(
     Decision::Zone((ax, ay), (bx, by))
 }
 
-/// Ce que reçoit la page avec `selection:montrer`.
+/// Ce que reçoit la page avec `selection:montrer` : tout en pixels réels, relatifs au coin
+/// haut gauche de la fenêtre. Aucune échelle : la page la mesure.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 struct ChargeMontrer {
     id: u64,
-    ecrans: Vec<RectPage>,
-    /// En pixels CSS.
-    cote_min: f64,
-    /// Taille attendue de la page, en pixels CSS (rectangle réel / échelle).
-    largeur: f64,
-    hauteur: f64,
-    /// Échelle attendue (`devicePixelRatio` de la page).
-    echelle: f64,
+    /// Taille réelle de la fenêtre (rectangle relu auprès du système).
+    largeur: i32,
+    hauteur: i32,
+    ecrans: Vec<RectFenetre>,
+    cote_min: i32,
+}
+
+/// La charge d'un affichage pour la fenêtre `fenetre` (fonction pure).
+fn charge_pour(id: u64, fenetre: Rect, ecrans: &[Rect], cote_min: i32) -> ChargeMontrer {
+    ChargeMontrer {
+        id,
+        largeur: fenetre.largeur.max(0),
+        hauteur: fenetre.hauteur.max(0),
+        ecrans: ecrans.iter().map(|r| vers_page(*r, fenetre)).collect(),
+        cote_min: cote_min.max(0),
+    }
 }
 
 /// Un affichage en cours, vu du cœur.
 #[derive(Debug, Clone)]
 struct Affichage {
     id: u64,
-    /// Rectangle réel de la fenêtre (repère des conversions de cet affichage).
+    /// Rectangle réel de la fenêtre (repère des coins de cet affichage).
     fenetre: Rect,
-    echelle: f64,
+    /// Écrans demandés, en pixels réels du bureau (pour refaire la charge).
+    ecrans: Vec<Rect>,
+    /// Échelle annoncée par tao, seulement pour le journal.
+    echelle_tao: f64,
     cote_min: i32,
     montre_a: Instant,
     /// La fenêtre au premier plan avant l'affichage, à qui le rendre.
     avant: Option<isize>,
     prete: bool,
     a_eu_focus: bool,
-    /// Ce qui a été envoyé à la page, renvoyé si elle se recharge ou si une zone trop
-    /// petite lui est refusée (elle revient alors au repos).
+    /// Ce qui a été envoyé à la page, renvoyé si elle se recharge, si une zone trop petite
+    /// lui est refusée ou si la fenêtre a changé de taille (elle revient alors au repos).
     charge: Option<ChargeMontrer>,
 }
 
@@ -330,7 +359,8 @@ impl Affichage {
         Affichage {
             id,
             fenetre: demande.bureau,
-            echelle: 1.0,
+            ecrans: demande.ecrans.clone(),
+            echelle_tao: f64::NAN,
             cote_min: demande.cote_min,
             montre_a: maintenant,
             avant,
@@ -641,36 +671,21 @@ impl Interne {
             reel = self.identifiant.and_then(rect_reel);
             placements += 1;
         }
-        let echelle = fenetre
-            .scale_factor()
-            .map_err(|e| format!("echelle: {e}"))?;
-        if !echelle_valide(echelle) {
-            return Err(format!("echelle invalide {echelle}"));
-        }
-        let repere = reel.unwrap_or(voulu);
+        // L'échelle de tao n'est que notée : celle qui sert est mesurée par la page.
+        let echelle_tao = fenetre.scale_factor().unwrap_or(f64::NAN);
+        let repere = reel.filter(|r| !r.est_vide()).unwrap_or(voulu);
         log::info!(
-            "selection montree {id} voulu {} reel {} echelle {echelle} placements {placements}",
+            "selection montree {id} voulu {} reel {} echelle {echelle_tao} placements {placements}",
             texte_rect(voulu),
             reel.map(texte_rect).unwrap_or_else(|| "inconnu".into())
         );
-        // 5. Prévenir la page, avec les écrans dans son repère et la taille attendue.
-        let charge = ChargeMontrer {
-            id,
-            ecrans: demande
-                .ecrans
-                .iter()
-                .map(|r| vers_page(*r, echelle, repere))
-                .collect(),
-            cote_min: f64::from(demande.cote_min.max(0)) / echelle,
-            largeur: f64::from(repere.largeur.max(0)) / echelle,
-            hauteur: f64::from(repere.hauteur.max(0)) / echelle,
-            echelle,
-        };
+        // 5. Prévenir la page : tout en pixels réels relatifs au coin de la fenêtre.
+        let charge = charge_pour(id, repere, &demande.ecrans, demande.cote_min);
         {
             let mut etat = self.etat();
             let a = etat.courant_mut(id).ok_or("affichage remplace")?;
             a.fenetre = repere;
-            a.echelle = echelle;
+            a.echelle_tao = echelle_tao;
             a.charge = Some(charge.clone());
         }
         self.app
@@ -844,39 +859,71 @@ impl Interne {
         }
     }
 
-    fn prete(&self, id: u64, page: (f64, f64, f64)) {
-        let prete = {
-            let mut etat = self.etat();
-            let echelle = etat.courant(id).map(|a| a.echelle);
-            etat.prete(id, Instant::now()).zip(echelle)
+    /// `selection_prete` de l'affichage en cours, même répété (la page le renvoie après un
+    /// changement de taille). La fenêtre est relue : si elle a changé, elle est retenue et
+    /// la page reçoit la nouvelle charge. Puis le contrôle de cohérence : un échec termine
+    /// l'affichage (`Impossible`), sauf juste après un changement de la fenêtre (la page,
+    /// remise au repos, renverra `selection_prete`). `Prete` n'est signalé qu'une fois.
+    fn prete(self: &Arc<Self>, id: u64, page: (f64, f64, f64)) {
+        let Some((avant, ecrans, cote_min, tao)) = self
+            .etat()
+            .courant(id)
+            .map(|a| (a.fenetre, a.ecrans.clone(), a.cote_min, a.echelle_tao))
+        else {
+            return;
         };
-        if let Some((duree, echelle_coeur)) = prete {
-            let (largeur, hauteur, echelle) = page;
+        let nouvelle = self
+            .identifiant
+            .and_then(rect_reel)
+            .filter(|r| !r.est_vide() && *r != avant);
+        let fenetre = nouvelle.unwrap_or(avant);
+        if let Some(r) = nouvelle {
+            let charge = charge_pour(id, r, &ecrans, cote_min);
+            {
+                let mut etat = self.etat();
+                let Some(a) = etat.courant_mut(id) else {
+                    return;
+                };
+                a.fenetre = r;
+                a.charge = Some(charge.clone());
+            }
             log::info!(
-                "chrono selection prete {} page {largeur}x{hauteur} echelle {echelle}{}",
-                duree.as_millis(),
-                if echelle_page_differente(echelle, echelle_coeur) {
-                    " echelle-page-differente"
-                } else {
-                    ""
-                }
+                "selection {id}: fenetre changee {} -> {}",
+                texte_rect(avant),
+                texte_rect(r)
             );
-            (self.rappel)(Signal::Prete { id, duree });
+            self.renvoyer(charge);
+        }
+        let (largeur, hauteur, dpr) = page;
+        match controler_page((largeur, hauteur), fenetre) {
+            Ok((kx, _)) => {
+                let duree = self.etat().prete(id, Instant::now());
+                if let Some(duree) = duree {
+                    log::info!(
+                        "chrono selection prete {} page {largeur}x{hauteur} echelle {kx} page-dpr {dpr} tao {tao}",
+                        duree.as_millis()
+                    );
+                    (self.rappel)(Signal::Prete { id, duree });
+                }
+            }
+            Err(cause) if nouvelle.is_some() => {
+                log::info!("selection {id}: page a recontroler ({cause})");
+            }
+            Err(cause) => self.finir(Signal::Impossible { id, cause }),
         }
     }
 
     fn terminee(self: &Arc<Self>, id: u64, depart: Point, arrivee: Point) {
-        let Some((fenetre, echelle, cote_min, charge)) = self
+        let Some((fenetre, cote_min, charge)) = self
             .etat()
             .courant(id)
-            .map(|a| (a.fenetre, a.echelle, a.cote_min, a.charge.clone()))
+            .map(|a| (a.fenetre, a.cote_min, a.charge.clone()))
         else {
             return;
         };
         match decider_zone(
             (depart.x, depart.y),
             (arrivee.x, arrivee.y),
-            echelle,
             fenetre,
             cote_min,
         ) {
@@ -947,10 +994,9 @@ pub fn selection_chargee(selection: State<'_, Selection>) {
     selection.interne.page_chargee();
 }
 
-/// La page est visible et peinte, à la taille attendue (deux images de suite après
-/// `selection:montrer`). `largeur`, `hauteur` : `innerWidth`, `innerHeight` ; `echelle` :
-/// `devicePixelRatio`, seulement écrit au journal (` echelle-page-differente` s'il s'écarte
-/// de plus de 0,01 de l'échelle du cœur).
+/// La page est visible et peinte, et sa taille est stable depuis deux images. `largeur`,
+/// `hauteur` : `innerWidth`, `innerHeight` (pixels CSS), d'où l'échelle mesurée
+/// (`controler_page`) ; `echelle` : `devicePixelRatio`, seulement écrit au journal.
 #[tauri::command]
 pub fn selection_prete(
     selection: State<'_, Selection>,
@@ -962,7 +1008,7 @@ pub fn selection_prete(
     selection.interne.prete(id, (largeur, hauteur, echelle));
 }
 
-/// Zone choisie : les deux coins finals, en pixels CSS de la page.
+/// Zone choisie : les deux bords finals, en pixels réels relatifs au coin de la fenêtre.
 #[tauri::command]
 pub fn selection_terminee(selection: State<'_, Selection>, id: u64, depart: Point, arrivee: Point) {
     selection.interne.terminee(id, depart, arrivee);
@@ -996,102 +1042,246 @@ mod tests {
         }
     }
 
-    #[test]
-    fn vers_bureau_aux_echelles_courantes() {
-        let bureau = r(0, 0, 3840, 3840);
-        for e in [1.0, 1.25, 1.5, 2.0] {
-            // Un pixel réel entier, exprimé en CSS, revient exactement.
-            for reel in [0, 1, 7, 333, 1919, 3840] {
-                let css = f64::from(reel) / e;
-                assert_eq!(
-                    vers_bureau((css, css), e, bureau),
-                    Some((reel, reel)),
-                    "echelle {e}, pixel {reel}"
-                );
-            }
+    /// Ce que la page a dessiné : `[min, max)` des bords envoyés (pixels réels relatifs),
+    /// placé dans le bureau.
+    fn dessinee(depart: (f64, f64), arrivee: (f64, f64), fenetre: Rect) -> Rect {
+        let b = |v: f64| v.round() as i32;
+        Rect::depuis_bords(
+            fenetre.x + b(depart.0.min(arrivee.0)),
+            fenetre.y + b(depart.1.min(arrivee.1)),
+            fenetre.x + b(depart.0.max(arrivee.0)),
+            fenetre.y + b(depart.1.max(arrivee.1)),
+        )
+    }
+
+    fn zone(d: Decision) -> Rect {
+        match d {
+            Decision::Zone(a, b) => rect_entre(a, b),
+            autre => panic!("pas une zone : {autre:?}"),
         }
-        assert_eq!(vers_bureau((100.0, 40.0), 1.25, bureau), Some((125, 50)));
-        assert_eq!(vers_bureau((100.0, 40.0), 1.5, bureau), Some((150, 60)));
-        assert_eq!(vers_bureau((100.0, 40.0), 2.0, bureau), Some((200, 80)));
     }
 
     #[test]
-    fn vers_bureau_avec_origine_negative() {
-        // Un écran à gauche de l'écran principal : le bureau commence à x = -1920.
-        let bureau = r(-1920, -200, 3840, 1280);
-        assert_eq!(vers_bureau((0.0, 0.0), 1.0, bureau), Some((-1920, -200)));
-        assert_eq!(vers_bureau((1920.0, 200.0), 1.0, bureau), Some((0, 0)));
-        assert_eq!(vers_bureau((1536.0, 160.0), 1.25, bureau), Some((0, 0)));
-        assert_eq!(
-            vers_bureau((2560.0, 800.0), 1.5, bureau),
-            Some((1920, 1000))
-        );
+    fn vers_bureau_change_l_origine() {
+        let f = r(-1920, -200, 3840, 1280);
+        assert_eq!(vers_bureau((0.0, 0.0), f), Some((-1920, -200)));
+        assert_eq!(vers_bureau((1920.0, 200.0), f), Some((0, 0)));
+        assert_eq!(vers_bureau((3840.0, 1280.0), f), Some((1920, 1080)));
+        assert_eq!(vers_bureau((10.4, 10.6), f), Some((-1910, -189)));
     }
 
     #[test]
     fn vers_bureau_bornes_et_tolerance() {
-        let bureau = r(10, 20, 100, 50);
+        let f = r(10, 20, 100, 50);
         // Les bords exclus sont des coins valides.
-        assert_eq!(vers_bureau((100.0, 50.0), 1.0, bureau), Some((110, 70)));
+        assert_eq!(vers_bureau((100.0, 50.0), f), Some((110, 70)));
         // Jusqu'à 1 pixel réel dehors : ramené au bord.
-        assert_eq!(vers_bureau((-1.0, -0.5), 1.0, bureau), Some((10, 20)));
-        assert_eq!(vers_bureau((101.0, 51.0), 1.0, bureau), Some((110, 70)));
-        assert_eq!(vers_bureau((-0.8, 0.0), 1.25, bureau), Some((10, 20)));
+        assert_eq!(vers_bureau((-1.0, -0.5), f), Some((10, 20)));
+        assert_eq!(vers_bureau((101.0, 51.0), f), Some((110, 70)));
         // Au-delà : refusé.
-        assert_eq!(vers_bureau((-1.01, 0.0), 1.0, bureau), None);
-        assert_eq!(vers_bureau((0.0, 51.01), 1.0, bureau), None);
-        assert_eq!(vers_bureau((81.0, 0.0), 1.25, bureau), None);
+        assert_eq!(vers_bureau((-1.01, 0.0), f), None);
+        assert_eq!(vers_bureau((0.0, 51.01), f), None);
     }
 
     #[test]
     fn vers_bureau_refuse_ce_qui_n_est_pas_un_nombre() {
-        let bureau = r(0, 0, 100, 100);
-        assert_eq!(vers_bureau((f64::NAN, 1.0), 1.0, bureau), None);
-        assert_eq!(vers_bureau((1.0, f64::INFINITY), 1.0, bureau), None);
-        assert_eq!(vers_bureau((f64::NEG_INFINITY, 1.0), 1.0, bureau), None);
-        assert_eq!(vers_bureau((1.0, 1.0), f64::NAN, bureau), None);
-        assert_eq!(vers_bureau((1.0, 1.0), 0.0, bureau), None);
-        assert_eq!(vers_bureau((1.0, 1.0), -1.0, bureau), None);
-        assert_eq!(vers_bureau((1.0, 1.0), 1.0, r(0, 0, 0, 10)), None);
-        assert_eq!(vers_bureau((1e300, 1.0), 1.0, bureau), None);
+        let f = r(0, 0, 100, 100);
+        assert_eq!(vers_bureau((f64::NAN, 1.0), f), None);
+        assert_eq!(vers_bureau((1.0, f64::INFINITY), f), None);
+        assert_eq!(vers_bureau((f64::NEG_INFINITY, 1.0), f), None);
+        assert_eq!(vers_bureau((1.0, 1.0), r(0, 0, 0, 10)), None);
+        assert_eq!(vers_bureau((1e300, 1.0), f), None);
     }
 
     #[test]
     fn vers_page_et_aller_retour() {
-        let bureau = r(-1920, 0, 5760, 1080);
-        let ecrans = [
+        let f = r(-1920, 0, 5760, 1080);
+        for ecran in [
             r(-1920, 0, 1920, 1080),
             r(0, 0, 1920, 1080),
             r(1920, 0, 1920, 1080),
-        ];
-        for e in [1.0, 1.25, 1.5, 2.0] {
-            for ecran in ecrans {
-                let p = vers_page(ecran, e, bureau);
+        ] {
+            let p = vers_page(ecran, f);
+            let (x, y) = (f64::from(p.x), f64::from(p.y));
+            let (l, h) = (f64::from(p.largeur), f64::from(p.hauteur));
+            assert_eq!(vers_bureau((x, y), f), Some((ecran.x, ecran.y)));
+            assert_eq!(
+                vers_bureau((x + l, y + h), f),
+                Some((ecran.x + ecran.largeur, ecran.y + ecran.hauteur))
+            );
+        }
+        assert_eq!(
+            vers_page(r(0, 0, 1920, 1080), f),
+            RectFenetre {
+                x: 1920,
+                y: 0,
+                largeur: 1920,
+                hauteur: 1080
+            }
+        );
+    }
+
+    #[test]
+    fn echelle_mesuree_et_coins_exacts() {
+        // La page mesure k = taille réelle / taille CSS, arrondit au pixel réel et envoie des
+        // pixels réels : la zone découpée est celle dessinée, à tout k (même non rond).
+        for k in [1.0_f64, 1.25, 1.5, 2.0, 1.1] {
+            let (lc, hc): (f64, f64) = (1280.0, 400.0);
+            let f = r(-500, 30, (lc * k).round() as i32, (hc * k).round() as i32);
+            let (kx, ky) = controler_page((lc, hc), f).expect("page coherente");
+            assert!((kx - k).abs() < 1e-9 && (ky - k).abs() < 1e-9, "k {k}");
+            let reel = |css: f64, k: f64| (css * k).round();
+            for (d, a) in [
+                ((100.3, 50.6), (301.7, 250.2)),
+                ((301.7, 250.2), (100.3, 50.6)),
+                ((0.0, 0.0), (lc, hc)),
+            ] {
+                let depart = (reel(d.0, kx), reel(d.1, ky));
+                let arrivee = (reel(a.0, kx), reel(a.1, ky));
                 assert_eq!(
-                    vers_bureau((p.x, p.y), e, bureau),
-                    Some((ecran.x, ecran.y)),
-                    "echelle {e}"
-                );
-                assert_eq!(
-                    vers_bureau((p.x + p.largeur, p.y + p.hauteur), e, bureau),
-                    Some((ecran.x + ecran.largeur, ecran.y + ecran.hauteur)),
-                    "echelle {e}"
+                    zone(decider_zone(depart, arrivee, f, 3)),
+                    dessinee(depart, arrivee, f),
+                    "k {k}"
                 );
             }
         }
+    }
+
+    #[test]
+    fn controle_de_coherence_de_la_page() {
+        let f = r(0, 0, 1600, 500);
+        assert!(controler_page((1280.0, 400.0), f).is_ok());
+        // Une page de taille CSS quelconque donne son échelle, quel que soit le DPR.
+        assert!(controler_page((1066.0, 333.0), f).is_ok());
+        // kx et ky à moins de 2 % : accepté ; au-delà : refusé.
+        assert!(controler_page((1280.0, 395.0), f).is_ok());
         assert_eq!(
-            vers_page(r(0, 0, 1920, 1080), 1.25, bureau),
-            RectPage {
-                x: 1536.0,
-                y: 0.0,
-                largeur: 1536.0,
-                hauteur: 864.0
-            }
+            controler_page((1280.0, 380.0), f),
+            Err("page 1280x380 pour fenetre 1600x500".into())
         );
-        // Échelle invalide : comptée pour 1.
+        for page in [
+            (0.0, 400.0),
+            (1280.0, 0.0),
+            (-1280.0, 400.0),
+            (f64::NAN, 400.0),
+            (1280.0, f64::INFINITY),
+            (100.0, 31.25),   // k = 16
+            (6400.0, 2000.0), // k = 0,25
+        ] {
+            assert!(controler_page(page, f).is_err(), "{page:?}");
+        }
+        assert!(controler_page((1280.0, 400.0), r(0, 0, 0, 500)).is_err());
+        // Bornes de k incluses.
+        assert!(controler_page((3200.0, 1000.0), f).is_ok());
+        assert!(controler_page((320.0, 100.0), f).is_ok());
+    }
+
+    #[test]
+    fn decision_d_une_zone() {
+        let f = r(0, 0, 1920, 1080);
         assert_eq!(
-            vers_page(r(10, 0, 5, 5), f64::NAN, r(0, 0, 100, 100)).x,
-            10.0
+            decider_zone((10.0, 10.0), (110.0, 60.0), f, 3),
+            Decision::Zone((10, 10), (109, 59))
+        );
+        // Sens inverse : le sens est gardé, le bord max (ici le départ) recule d'un pixel.
+        assert_eq!(
+            decider_zone((110.0, 60.0), (10.0, 10.0), f, 3),
+            Decision::Zone((109, 59), (10, 10))
+        );
+        assert_eq!(
+            decider_zone((10.0, 10.0), (12.0, 200.0), f, 3),
+            Decision::TropPetite
+        );
+        assert_eq!(
+            decider_zone((10.0, 10.0), (10.0, 10.0), f, 3),
+            Decision::TropPetite
+        );
+        assert!(matches!(
+            decider_zone((f64::NAN, 10.0), (100.0, 100.0), f, 3),
+            Decision::Invalide(_)
+        ));
+        assert!(matches!(
+            decider_zone((10.0, 10.0), (5000.0, 100.0), f, 3),
+            Decision::Invalide(_)
+        ));
+    }
+
+    #[test]
+    fn zone_dessinee_egale_zone_decoupee() {
+        // Contre-essai de la relecture : un rectangle dessiné de 200 × 150 était découpé en
+        // 201 × 151.
+        let f = r(-300, 40, 1920, 1080);
+        let (g, h, d, b) = (100.0, 100.0, 300.0, 250.0);
+        for (depart, arrivee) in [
+            ((g, h), (d, b)),
+            ((d, b), (g, h)),
+            ((d, h), (g, b)),
+            ((g, b), (d, h)),
+        ] {
+            assert_eq!(
+                zone(decider_zone(depart, arrivee, f, 3)),
+                dessinee(depart, arrivee, f)
+            );
+        }
+        assert_eq!(
+            zone(decider_zone((g, h), (d, b), r(0, 0, 1920, 1080), 3)),
+            r(100, 100, 200, 150)
+        );
+    }
+
+    #[test]
+    fn coin_a_coin_d_un_ecran_donne_ses_pixels() {
+        let f = r(-1920, 0, 3840, 1080);
+        for ecran in [r(-1920, 0, 1920, 1080), r(0, 0, 1920, 1080)] {
+            let p = vers_page(ecran, f);
+            let (x0, y0) = (f64::from(p.x), f64::from(p.y));
+            let (x1, y1) = (x0 + f64::from(p.largeur), y0 + f64::from(p.hauteur));
+            for (depart, arrivee) in [((x0, y0), (x1, y1)), ((x1, y1), (x0, y0))] {
+                let Decision::Zone(a, b) = decider_zone(depart, arrivee, f, 3) else {
+                    panic!("pas une zone");
+                };
+                assert_eq!(rect_entre(a, b), ecran);
+                assert!(ecran.contient(a) && ecran.contient(b), "coins sur l'ecran");
+            }
+        }
+    }
+
+    #[test]
+    fn espace_le_depart_reste_sur_son_ecran() {
+        // Contre-essai A : départ envoyé sur le bord droit de l'écran de gauche (640), qui
+        // est le premier pixel de l'écran voisin.
+        let Decision::Zone(a, b) =
+            decider_zone((640.0, 100.0), (540.0, 200.0), r(0, 0, 1280, 400), 3)
+        else {
+            panic!("pas une zone");
+        };
+        assert_eq!(a, (639, 100));
+        assert!(r(0, 0, 640, 400).contient(a));
+        assert_eq!(rect_entre(a, b), r(540, 100, 100, 100));
+    }
+
+    #[test]
+    fn seuil_compte_sur_les_bords() {
+        let f = r(0, 0, 100, 100);
+        assert_eq!(
+            decider_zone((10.0, 10.0), (13.0, 13.0), f, 3),
+            Decision::Zone((10, 10), (12, 12))
+        );
+        assert_eq!(
+            decider_zone((10.0, 10.0), (12.0, 13.0), f, 3),
+            Decision::TropPetite
+        );
+    }
+
+    #[test]
+    fn charge_envoyee_a_la_page() {
+        let c = charge_pour(3, r(-1920, 0, 3520, 1080), &[r(0, 0, 1600, 900)], 3);
+        assert_eq!(
+            serde_json::to_string(&c).unwrap(),
+            concat!(
+                r#"{"id":3,"largeur":3520,"hauteur":1080,"#,
+                r#""ecrans":[{"x":1920,"y":0,"largeur":1600,"hauteur":900}],"cote_min":3}"#
+            )
         );
     }
 
@@ -1102,42 +1292,6 @@ mod tests {
         assert_eq!(cause_depuis_nom("focus_perdu"), None);
         assert_eq!(cause_depuis_nom("Echap"), None);
         assert_eq!(cause_depuis_nom(""), None);
-    }
-
-    #[test]
-    fn decision_d_une_zone() {
-        let f = r(0, 0, 1920, 1080);
-        assert_eq!(
-            decider_zone((10.0, 10.0), (110.0, 60.0), 1.0, f, 3),
-            Decision::Zone((10, 10), (109, 59))
-        );
-        // Sens inverse : le sens est gardé, le bord max (ici le départ) recule d'un pixel.
-        assert_eq!(
-            decider_zone((110.0, 60.0), (10.0, 10.0), 1.25, f, 3),
-            Decision::Zone((137, 74), (13, 13))
-        );
-        // Moins de 3 pixels réels de côté.
-        assert_eq!(
-            decider_zone((10.0, 10.0), (12.0, 200.0), 1.0, f, 3),
-            Decision::TropPetite
-        );
-        assert_eq!(
-            decider_zone((10.0, 10.0), (10.0, 10.0), 1.0, f, 3),
-            Decision::TropPetite
-        );
-        // 2,4 pixels CSS à 125 % = 3 pixels réels : une zone.
-        assert!(matches!(
-            decider_zone((10.0, 10.0), (12.4, 12.4), 1.25, f, 3),
-            Decision::Zone(..)
-        ));
-        assert!(matches!(
-            decider_zone((f64::NAN, 10.0), (100.0, 100.0), 1.0, f, 3),
-            Decision::Invalide(_)
-        ));
-        assert!(matches!(
-            decider_zone((10.0, 10.0), (5000.0, 100.0), 1.0, f, 3),
-            Decision::Invalide(_)
-        ));
     }
 
     #[test]
@@ -1254,25 +1408,6 @@ mod tests {
     }
 
     #[test]
-    fn charge_envoyee_a_la_page() {
-        let c = ChargeMontrer {
-            id: 3,
-            ecrans: vec![vers_page(r(0, 0, 1920, 1080), 1.5, r(0, 0, 1920, 1080))],
-            cote_min: 2.0,
-            largeur: 1280.0,
-            hauteur: 720.0,
-            echelle: 1.5,
-        };
-        assert_eq!(
-            serde_json::to_string(&c).unwrap(),
-            concat!(
-                r#"{"id":3,"ecrans":[{"x":0.0,"y":0.0,"largeur":1280.0,"hauteur":720.0}],"#,
-                r#""cote_min":2.0,"largeur":1280.0,"hauteur":720.0,"echelle":1.5}"#
-            )
-        );
-    }
-
-    #[test]
     fn arguments_identiques_et_complets() {
         assert!(ARGUMENTS_NAVIGATEUR.starts_with(
             "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection,CalculateNativeWinOcclusion"
@@ -1290,96 +1425,6 @@ mod tests {
         )
     }
 
-    /// Ce que la page a dessiné, en pixels réels : `[min, max)` des bords envoyés.
-    fn dessinee(depart: (f64, f64), arrivee: (f64, f64), e: f64) -> Rect {
-        let b = |v: f64| (v * e).round() as i32;
-        Rect::depuis_bords(
-            b(depart.0.min(arrivee.0)),
-            b(depart.1.min(arrivee.1)),
-            b(depart.0.max(arrivee.0)),
-            b(depart.1.max(arrivee.1)),
-        )
-    }
-
-    #[test]
-    fn zone_dessinee_egale_zone_decoupee() {
-        // Contre-essai de la relecture : un rectangle dessiné de 200 × 150 était découpé en
-        // 201 × 151.
-        let f = r(0, 0, 1920, 1080);
-        for e in [1.0, 1.25, 1.5] {
-            let (g, h, d, b) = (100.0, 100.0, 300.0, 250.0);
-            for (depart, arrivee) in [
-                ((g, h), (d, b)),
-                ((d, b), (g, h)),
-                ((d, h), (g, b)),
-                ((g, b), (d, h)),
-            ] {
-                let Decision::Zone(a, z) = decider_zone(depart, arrivee, e, f, 3) else {
-                    panic!("pas une zone a {e}");
-                };
-                assert_eq!(
-                    rect_entre(a, z),
-                    dessinee(depart, arrivee, e),
-                    "echelle {e}, {depart:?} -> {arrivee:?}"
-                );
-            }
-        }
-        assert_eq!(
-            match decider_zone((100.0, 100.0), (300.0, 250.0), 1.0, f, 3) {
-                Decision::Zone(a, b) => rect_entre(a, b),
-                _ => Rect::default(),
-            },
-            r(100, 100, 200, 150)
-        );
-    }
-
-    #[test]
-    fn coin_a_coin_d_un_ecran_donne_ses_pixels() {
-        // Bureau de deux écrans, celui de gauche à x négatif ; échelle 1,25.
-        let bureau = r(-1920, 0, 3840, 1080);
-        for ecran in [r(-1920, 0, 1920, 1080), r(0, 0, 1920, 1080)] {
-            let p = vers_page(ecran, 1.25, bureau);
-            for (depart, arrivee) in [
-                ((p.x, p.y), (p.x + p.largeur, p.y + p.hauteur)),
-                ((p.x + p.largeur, p.y + p.hauteur), (p.x, p.y)),
-            ] {
-                let Decision::Zone(a, b) = decider_zone(depart, arrivee, 1.25, bureau, 3) else {
-                    panic!("pas une zone");
-                };
-                assert_eq!(rect_entre(a, b), ecran);
-                assert!(ecran.contient(a) && ecran.contient(b), "coins sur l'ecran");
-            }
-        }
-    }
-
-    #[test]
-    fn espace_le_depart_reste_sur_son_ecran() {
-        // Contre-essai A : départ envoyé sur le bord droit de l'écran de gauche (640), qui
-        // est le premier pixel de l'écran voisin.
-        let ecran_gauche = r(0, 0, 640, 400);
-        let Decision::Zone(a, b) =
-            decider_zone((640.0, 100.0), (540.0, 200.0), 1.0, r(0, 0, 1280, 400), 3)
-        else {
-            panic!("pas une zone");
-        };
-        assert_eq!(a, (639, 100));
-        assert!(ecran_gauche.contient(a));
-        assert_eq!(rect_entre(a, b), r(540, 100, 100, 100));
-    }
-
-    #[test]
-    fn seuil_compte_sur_les_bords() {
-        let f = r(0, 0, 100, 100);
-        assert!(matches!(
-            decider_zone((10.0, 10.0), (13.0, 13.0), 1.0, f, 3),
-            Decision::Zone((10, 10), (12, 12))
-        ));
-        assert_eq!(
-            decider_zone((10.0, 10.0), (12.0, 13.0), 1.0, f, 3),
-            Decision::TropPetite
-        );
-    }
-
     #[test]
     fn verrou_empoisonne_repris() {
         // Contre-essai de la relecture : un verrou empoisonné empêchait `finir`, `cacher` et
@@ -1395,14 +1440,6 @@ mod tests {
         assert!(m.is_poisoned());
         assert!(prendre(&m).terminer(id).is_some(), "la fin passe encore");
         assert!(!m.is_poisoned());
-    }
-
-    #[test]
-    fn echelle_de_la_page_seulement_notee() {
-        assert!(!echelle_page_differente(1.25, 1.25));
-        assert!(!echelle_page_differente(1.255, 1.25));
-        assert!(echelle_page_differente(1.5, 1.25));
-        assert!(echelle_page_differente(f64::NAN, 1.0));
     }
 
     #[test]
