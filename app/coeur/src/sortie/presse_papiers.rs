@@ -64,6 +64,12 @@ pub(super) fn avec_echeance<T>(
                     return Err(e);
                 }
                 dormir(PAS);
+                // Une attente peut durer plus que prevu sur une machine
+                // chargee : on verifie encore avant de relancer.
+                let ecoule = horloge().saturating_duration_since(debut);
+                if ecoule + COUT_ESSAI_INTERNE > echeance {
+                    return Err(e);
+                }
             }
             autre => return autre,
         }

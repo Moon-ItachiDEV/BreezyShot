@@ -620,17 +620,37 @@ fn presse_papiers_reussite_apres_occupation_et_erreur_definitive() {
 
 #[test]
 fn presse_papiers_echeance_avec_la_vraie_horloge() {
-    let debut = Instant::now();
+    // Aucune borne sur la duree totale : une machine chargee allonge les
+    // pauses. On verifie ce que le code garantit : aucun essai ne demarre
+    // apres l'echeance moins le cout reserve, d'apres l'horloge que lit le
+    // code juste avant de decider. La borne stricte est prouvee par les
+    // tests a horloge injectee.
+    let lectures = std::cell::RefCell::new(Vec::<Instant>::new());
+    let horloge = || {
+        let t = Instant::now();
+        lectures.borrow_mut().push(t);
+        t
+    };
+    let departs = std::cell::RefCell::new(Vec::<Instant>::new());
     let r: Result<(), _> = presse_papiers::avec_echeance(
         presse_papiers::ECHEANCE,
-        Instant::now,
+        horloge,
         std::thread::sleep,
-        || Err(arboard::Error::ClipboardOccupied),
+        || {
+            let derniere = *lectures.borrow().last().expect("lecture de l'horloge");
+            departs.borrow_mut().push(derniere);
+            Err(arboard::Error::ClipboardOccupied)
+        },
     );
-    assert!(r.is_err());
-    let duree = debut.elapsed();
-    assert!(duree <= presse_papiers::ECHEANCE, "{duree:?}");
-    assert!(duree >= presse_papiers::PAS, "{duree:?}");
+    assert!(matches!(r, Err(arboard::Error::ClipboardOccupied)));
+    let debut = lectures.borrow()[0];
+    let departs = departs.into_inner();
+    assert!(departs.len() >= 2, "{} essais", departs.len());
+    let limite = presse_papiers::ECHEANCE - presse_papiers::COUT_ESSAI_INTERNE;
+    for depart in &departs {
+        let ecart = depart.saturating_duration_since(debut);
+        assert!(ecart <= limite, "essai lance a {ecart:?}");
+    }
 }
 
 #[test]
@@ -654,28 +674,98 @@ fn suite_apres_echec_du_lien_dur() {
     use super::fichier::{est_tenu, suite_lien, SuiteLien};
     use std::io::ErrorKind;
     assert_eq!(
-        suite_lien(ErrorKind::AlreadyExists, Some(183), true),
+        suite_lien(ErrorKind::AlreadyExists, Some(183)),
         SuiteLien::NomSuivant
     );
     assert_eq!(
-        suite_lien(ErrorKind::PermissionDenied, None, false),
+        suite_lien(ErrorKind::PermissionDenied, None),
         SuiteLien::Reessayer
     );
     // Erreur 32 de Windows : fichier tenu par un autre programme.
+    assert_eq!(suite_lien(ErrorKind::Other, Some(32)), SuiteLien::Reessayer);
+    // Le meme test vaut partout (sous Unix, 32 est EPIPE, jamais rendu ici).
+    assert!(est_tenu(ErrorKind::Other, Some(32)));
+    assert!(!est_tenu(ErrorKind::Other, Some(5)));
     assert_eq!(
-        suite_lien(ErrorKind::Other, Some(32), true),
-        SuiteLien::Reessayer
-    );
-    // Sous Linux, 32 est une autre erreur.
-    assert!(!est_tenu(ErrorKind::Other, Some(32), false));
-    assert_eq!(
-        suite_lien(ErrorKind::Unsupported, Some(50), true),
+        suite_lien(ErrorKind::Unsupported, Some(50)),
         SuiteLien::Repli
     );
-    assert_eq!(
-        suite_lien(ErrorKind::Other, Some(1), true),
-        SuiteLien::Repli
+    assert_eq!(suite_lien(ErrorKind::Other, Some(1)), SuiteLien::Repli);
+}
+
+/// Compte les liens tentes et les attentes d'un appel a `placer_avec`.
+fn essayer_placer(
+    erreur: impl Fn(usize) -> Option<std::io::Error>,
+) -> (std::io::Result<PathBuf>, Vec<PathBuf>, Vec<Duration>, bool) {
+    use super::fichier::placer_avec;
+    let liens = std::cell::RefCell::new(Vec::new());
+    let mut attentes = Vec::new();
+    let repli_fait = Cell::new(false);
+    let pris = Cell::new(0);
+    let choisir = |d: &Path| d.join(format!("x{}.png", pris.get()));
+    let r = placer_avec(
+        Path::new("d"),
+        &choisir,
+        |cible| {
+            liens.borrow_mut().push(cible.to_path_buf());
+            match erreur(liens.borrow().len()) {
+                Some(e) => {
+                    if e.kind() == std::io::ErrorKind::AlreadyExists {
+                        pris.set(pris.get() + 1);
+                    }
+                    Err(e)
+                }
+                None => Ok(()),
+            }
+        },
+        || {
+            repli_fait.set(true);
+            Ok(PathBuf::from("repli.png"))
+        },
+        &mut |d| attentes.push(d),
     );
+    (r, liens.into_inner(), attentes, repli_fait.get())
+}
+
+#[test]
+fn placer_trois_essais_a_50_ms_puis_repli() {
+    use std::io::{Error, ErrorKind};
+    let ms50 = Duration::from_millis(50);
+    // Refus repete : 3 liens, 2 attentes de 50 ms, puis le repli.
+    let (r, liens, attentes, repli) =
+        essayer_placer(|_| Some(Error::from(ErrorKind::PermissionDenied)));
+    assert_eq!(r.expect("repli"), PathBuf::from("repli.png"));
+    assert_eq!(liens.len(), 3);
+    assert_eq!(attentes, vec![ms50, ms50]);
+    assert!(repli);
+
+    // Fichier tenu (code 32) : meme traitement.
+    let (_, liens, attentes, repli) = essayer_placer(|_| Some(Error::from_raw_os_error(32)));
+    assert_eq!((liens.len(), attentes.len(), repli), (3, 2, true));
+
+    // Refus puis reussite au 2e essai : une attente, pas de repli.
+    let (r, liens, attentes, repli) =
+        essayer_placer(|n| (n == 1).then(|| Error::from(ErrorKind::PermissionDenied)));
+    assert_eq!(r.expect("lien"), Path::new("d").join("x0.png"));
+    assert_eq!((liens.len(), attentes, repli), (2, vec![ms50], false));
+
+    // Disque sans lien dur : repli tout de suite, sans attente.
+    let (_, liens, attentes, repli) = essayer_placer(|_| Some(Error::from(ErrorKind::Unsupported)));
+    assert_eq!((liens.len(), attentes.len(), repli), (1, 0, true));
+
+    // Nom pris : nom suivant, sans attente ni repli.
+    let (r, liens, attentes, repli) =
+        essayer_placer(|n| (n <= 2).then(|| Error::from(ErrorKind::AlreadyExists)));
+    assert_eq!(r.expect("lien"), Path::new("d").join("x2.png"));
+    assert_eq!(
+        liens,
+        vec![
+            Path::new("d").join("x0.png"),
+            Path::new("d").join("x1.png"),
+            Path::new("d").join("x2.png")
+        ]
+    );
+    assert_eq!((attentes.len(), repli), (0, false));
 }
 
 #[test]
@@ -683,10 +773,35 @@ fn temporaires_perimes_format_exact() {
     use super::fichier::{est_nom_temporaire, temporaire_perime, AGE_TEMPORAIRE_PERIME};
     let vieux = Some(AGE_TEMPORAIRE_PERIME + Duration::from_secs(1));
     let jeune = Some(Duration::from_secs(10));
+    let autre_pid = 999_999_999;
     assert!(est_nom_temporaire(".breezyshot-123-456789-0.tmp"));
-    assert!(temporaire_perime(".breezyshot-123-456789-0.tmp", vieux));
-    assert!(!temporaire_perime(".breezyshot-123-456789-0.tmp", jeune));
-    assert!(!temporaire_perime(".breezyshot-123-456789-0.tmp", None));
+    assert!(temporaire_perime(
+        ".breezyshot-123-456789-0.tmp",
+        vieux,
+        autre_pid
+    ));
+    assert!(!temporaire_perime(
+        ".breezyshot-123-456789-0.tmp",
+        jeune,
+        autre_pid
+    ));
+    assert!(!temporaire_perime(
+        ".breezyshot-123-456789-0.tmp",
+        None,
+        autre_pid
+    ));
+    // Jamais un temporaire du processus courant, meme tres vieux.
+    assert!(!temporaire_perime(
+        ".breezyshot-123-456789-0.tmp",
+        vieux,
+        123
+    ));
+    // Le pid doit correspondre en entier, pas seulement par le debut.
+    assert!(temporaire_perime(
+        ".breezyshot-1234-456789-0.tmp",
+        vieux,
+        123
+    ));
     for autre in [
         ".breezyshot-123-456.tmp",
         ".breezyshot-1-2-3-4.tmp",
@@ -697,7 +812,7 @@ fn temporaires_perimes_format_exact() {
         ".breezyshot-1-2-3.tmp.png",
         "notes.tmp",
     ] {
-        assert!(!temporaire_perime(autre, vieux), "{autre}");
+        assert!(!temporaire_perime(autre, vieux, autre_pid), "{autre}");
     }
 }
 
@@ -1002,6 +1117,9 @@ fn nettoyage_de_nos_temporaires_oublies() {
     };
     creer(".breezyshot-1-2-3.tmp", Some(ancien));
     creer(".breezyshot-4-5-6.tmp", None);
+    // Temporaire de notre propre processus, date de deux heures : garde.
+    let le_notre = format!(".breezyshot-{}-5-6.tmp", std::process::id());
+    creer(&le_notre, Some(ancien));
     creer(".breezyshot-x.tmp", Some(ancien));
     creer("vacances.tmp", Some(ancien));
 
@@ -1009,7 +1127,12 @@ fn nettoyage_de_nos_temporaires_oublies() {
     assert!(matches!(bilan.enregistrement, EtapeFichier::Fait(_)));
     let restants = noms_du_dossier(&d.dossier_enregistrement);
     assert!(!restants.iter().any(|n| n == ".breezyshot-1-2-3.tmp"));
-    for garde in [".breezyshot-4-5-6.tmp", ".breezyshot-x.tmp", "vacances.tmp"] {
+    for garde in [
+        ".breezyshot-4-5-6.tmp",
+        le_notre.as_str(),
+        ".breezyshot-x.tmp",
+        "vacances.tmp",
+    ] {
         assert!(restants.iter().any(|n| n == garde), "{garde} supprime");
     }
 }
@@ -1110,6 +1233,7 @@ fn image_ecran(l: u32, h: u32) -> Pixels {
 }
 
 #[test]
+#[ignore = "mesure : en debug les chiffres trompent et le presse-papiers est ecrase"]
 fn mesure_sortir_avec_copie() {
     // Sans seuil : la duree est affichee pour comparer les machines.
     let _seul = PRESSE_PAPIERS_TESTS

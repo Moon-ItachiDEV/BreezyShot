@@ -97,10 +97,10 @@ pub(super) enum SuiteLien {
 }
 
 /// Decision apres un echec de `fs::hard_link`.
-pub(super) fn suite_lien(genre: ErrorKind, code: Option<i32>, sous_windows: bool) -> SuiteLien {
+pub(super) fn suite_lien(genre: ErrorKind, code: Option<i32>) -> SuiteLien {
     if genre == ErrorKind::AlreadyExists {
         SuiteLien::NomSuivant
-    } else if est_tenu(genre, code, sous_windows) {
+    } else if est_tenu(genre, code) {
         SuiteLien::Reessayer
     } else {
         SuiteLien::Repli
@@ -108,27 +108,28 @@ pub(super) fn suite_lien(genre: ErrorKind, code: Option<i32>, sous_windows: bool
 }
 
 /// Vrai pour un refus d'acces ou un fichier tenu par un autre programme.
-pub(super) fn est_tenu(genre: ErrorKind, code: Option<i32>, sous_windows: bool) -> bool {
-    genre == ErrorKind::PermissionDenied || (sous_windows && code == Some(ERREUR_PARTAGE_WINDOWS))
-}
-
-fn sous_windows() -> bool {
-    std::env::consts::OS == "windows"
+/// Le code 32 est l'erreur de partage de Windows ; sous Unix, 32 est EPIPE,
+/// que ni `link` ni `rename` ne rendent : le meme test vaut partout.
+pub(super) fn est_tenu(genre: ErrorKind, code: Option<i32>) -> bool {
+    genre == ErrorKind::PermissionDenied || code == Some(ERREUR_PARTAGE_WINDOWS)
 }
 
 fn tenu(e: &io::Error) -> bool {
-    est_tenu(e.kind(), e.raw_os_error(), sous_windows())
+    est_tenu(e.kind(), e.raw_os_error())
 }
 
 /// Lance `operation`, et la relance jusqu'a 3 fois en tout, a 50 ms
-/// d'intervalle, tant que le fichier est tenu.
-fn avec_essais_si_tenu(mut operation: impl FnMut() -> io::Result<()>) -> io::Result<()> {
+/// d'intervalle (par `dormir`), tant que le fichier est tenu.
+pub(super) fn avec_essais_si_tenu<T>(
+    mut operation: impl FnMut() -> io::Result<T>,
+    dormir: &mut impl FnMut(Duration),
+) -> io::Result<T> {
     let mut essai = 1;
     loop {
         match operation() {
             Err(e) if tenu(&e) && essai < ESSAIS_SI_TENU => {
                 essai += 1;
-                thread::sleep(ATTENTE_SI_TENU);
+                dormir(ATTENTE_SI_TENU);
             }
             autre => return autre,
         }
@@ -140,20 +141,36 @@ fn placer(
     temporaire: &Path,
     choisir: &impl Fn(&Path) -> PathBuf,
 ) -> io::Result<PathBuf> {
+    placer_avec(
+        dossier,
+        choisir,
+        |cible| fs::hard_link(temporaire, cible),
+        || placer_par_reservation(dossier, temporaire, choisir),
+        &mut thread::sleep,
+    )
+}
+
+/// Le coeur de `placer`, avec ses operations en parametres pour les tests :
+/// `lier` cree le lien dur vers une cible, `repli` est la methode de repli.
+pub(super) fn placer_avec(
+    dossier: &Path,
+    choisir: &impl Fn(&Path) -> PathBuf,
+    mut lier: impl FnMut(&Path) -> io::Result<()>,
+    repli: impl FnOnce() -> io::Result<PathBuf>,
+    dormir: &mut impl FnMut(Duration),
+) -> io::Result<PathBuf> {
     for _ in 0..TENTATIVES {
         let cible = choisir(dossier);
-        let Err(e) = avec_essais_si_tenu(|| fs::hard_link(temporaire, &cible)) else {
+        let Err(e) = avec_essais_si_tenu(|| lier(&cible), dormir) else {
             return Ok(cible);
         };
-        match suite_lien(e.kind(), e.raw_os_error(), sous_windows()) {
+        match suite_lien(e.kind(), e.raw_os_error()) {
             SuiteLien::NomSuivant => continue,
             // Encore refuse apres 3 essais. Sous Linux et macOS, un disque FAT
             // ou exFAT repond aussi « refuse » pour un lien dur : on tente
             // donc une fois le repli, qui echouera de meme si l'acces est
             // vraiment refuse.
-            SuiteLien::Reessayer | SuiteLien::Repli => {
-                return placer_par_reservation(dossier, temporaire, choisir)
-            }
+            SuiteLien::Reessayer | SuiteLien::Repli => return repli(),
         }
     }
     Err(io::Error::from(ErrorKind::Other))
@@ -169,7 +186,10 @@ fn placer_par_reservation(
         match OpenOptions::new().write(true).create_new(true).open(&cible) {
             Ok(reservation) => {
                 drop(reservation);
-                return match avec_essais_si_tenu(|| fs::rename(temporaire, &cible)) {
+                return match avec_essais_si_tenu(
+                    || fs::rename(temporaire, &cible),
+                    &mut thread::sleep,
+                ) {
                     Ok(()) => Ok(cible),
                     Err(e) => {
                         let _ = fs::remove_file(&cible);
@@ -226,9 +246,20 @@ pub(super) fn est_nom_temporaire(nom: &str) -> bool {
 }
 
 /// Vrai si l'entree est un de nos temporaires oublie depuis plus d'une heure.
-/// Un age inconnu (date dans le futur, illisible) ne fait rien supprimer.
-pub(super) fn temporaire_perime(nom: &str, age: Option<Duration>) -> bool {
-    est_nom_temporaire(nom) && age.is_some_and(|a| a >= AGE_TEMPORAIRE_PERIME)
+/// Un age inconnu (date dans le futur, illisible) ne fait rien supprimer, ni
+/// un temporaire du processus courant (`pid`) : il peut etre en cours
+/// d'ecriture, meme si l'horloge d'un disque reseau le fait paraitre vieux.
+pub(super) fn temporaire_perime(nom: &str, age: Option<Duration>, pid: u32) -> bool {
+    est_nom_temporaire(nom)
+        && !est_temporaire_du_processus(nom, pid)
+        && age.is_some_and(|a| a >= AGE_TEMPORAIRE_PERIME)
+}
+
+/// Vrai si le temporaire porte le numero de processus `pid`.
+fn est_temporaire_du_processus(nom: &str, pid: u32) -> bool {
+    nom.strip_prefix(".breezyshot-")
+        .and_then(|r| r.split('-').next())
+        .is_some_and(|p| p == pid.to_string())
 }
 
 /// Supprime nos propres temporaires perimes du dossier. Les erreurs sont
@@ -238,22 +269,27 @@ fn nettoyer_temporaires(dossier: &Path) {
         return;
     };
     let maintenant = SystemTime::now();
+    let pid = std::process::id();
     for entree in entrees.filter_map(|e| e.ok()) {
+        // Le nom d'abord : rien d'autre n'est lu pour un fichier etranger.
+        let Ok(nom) = entree.file_name().into_string() else {
+            continue;
+        };
+        if !est_nom_temporaire(&nom) || est_temporaire_du_processus(&nom, pid) {
+            continue;
+        }
         let Ok(genre) = entree.file_type() else {
             continue;
         };
         if !genre.is_file() {
             continue;
         }
-        let Ok(nom) = entree.file_name().into_string() else {
-            continue;
-        };
         let age = entree
             .metadata()
             .and_then(|m| m.modified())
             .ok()
             .and_then(|t| maintenant.duration_since(t).ok());
-        if temporaire_perime(&nom, age) {
+        if temporaire_perime(&nom, age, pid) {
             let _ = fs::remove_file(entree.path());
         }
     }

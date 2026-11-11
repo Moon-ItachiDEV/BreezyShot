@@ -92,9 +92,12 @@ pub fn sortir(pixels: &Pixels, demande: &Demande) -> Bilan {
 
     thread::scope(|fils| {
         // 2. Copie dans un fil a part, si demandee.
+        // Si le systeme refuse de creer un fil, la copie se fera dans
+        // celui-ci, apres les ecritures.
+        let copier = || presse_papiers::copier(largeur, hauteur, &opaques);
         let copie = demande
             .copier
-            .then(|| fils.spawn(|| presse_papiers::copier(largeur, hauteur, &opaques)));
+            .then(|| thread::Builder::new().spawn_scoped(fils, copier));
 
         // 3. Pendant ce temps : encoder une fois, Recents, enregistrement.
         let encodage = png::encoder_opaques(largeur, hauteur, &opaques);
@@ -119,11 +122,11 @@ pub fn sortir(pixels: &Pixels, demande: &Demande) -> Bilan {
         // 4. Attendre la copie.
         let copie = match copie {
             None => Etape::NonDemandee,
-            Some(fil) => match fil.join() {
-                Ok(Ok(())) => Etape::Faite,
-                Ok(Err(cause)) => Etape::Echec(cause),
+            Some(Ok(fil)) => match fil.join() {
+                Ok(resultat) => etape_copie(resultat),
                 Err(_) => Etape::Echec(CAUSE_COPIE_INTERROMPUE.to_string()),
             },
+            Some(Err(_)) => etape_copie(copier()),
         };
 
         Bilan {
@@ -132,6 +135,13 @@ pub fn sortir(pixels: &Pixels, demande: &Demande) -> Bilan {
             enregistrement,
         }
     })
+}
+
+fn etape_copie(resultat: Result<(), String>) -> Etape {
+    match resultat {
+        Ok(()) => Etape::Faite,
+        Err(cause) => Etape::Echec(cause),
+    }
 }
 
 /// Cause si le fil de copie s'est arrete de facon inattendue.
