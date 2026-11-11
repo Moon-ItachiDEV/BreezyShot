@@ -621,17 +621,31 @@ construite (le réglage existe, sans effet).
   jamais par tao, qui réécrirait les styles) ; placer l'écran figé juste en dessous ;
   relire le rectangle réel et le reposer tant qu'il diffère, deux fois au plus
   (`PLACEMENTS_MAX = 3` poses en tout ; `selection montree <id>
-  voulu <x,y,l,h> reel <x,y,l,h> echelle <e>`) ; envoyer `selection:montrer { id, ecrans,
-  cote_min }` en pixels CSS ; armer le délai de 2 s (`DELAI_PRETE`).
+  voulu <x,y,l,h> reel <x,y,l,h> echelle <e>`) ; envoyer la charge `selection:montrer { id,
+  numero, largeur, hauteur, ecrans, cote_min }`, tout en pixels réels relatifs à la fenêtre ;
+  armer le délai de 2 s (`DELAI_PRETE`).
+- **Une seule échelle, celle de la page.** Rust ne parle à la page qu'en pixels réels. La
+  page retient `devicePixelRatio` s'il explique la taille réelle à 1 pixel CSS près, sinon
+  elle mesure (`visualViewport`, à défaut `innerWidth`), et répond `selection_prete { id,
+  numero, largeur, hauteur, echelle, kx, ky, attente }`. `controler_page` refuse une échelle
+  non finie, hors de [0,5 ; 5], différente de plus de 2 % entre les axes, ou qui n'explique
+  pas la taille réelle. Les coins de `selection_terminee` arrivent en pixels réels.
+- **Numéro de charge** : chaque nouvelle charge (premier envoi, fenêtre relue différente)
+  prend le numéro suivant, que la page renvoie partout. Ancien numéro : `prete` non
+  contrôlée, `terminee` ignorée, `annulee` gardée. Après un `resize`, la page n'est plus
+  prête et le dit (`attente`) : elle reçoit toujours une charge, de même numéro si le
+  rectangle réel n'a pas changé.
 - **Un seul signal de fin par affichage** (le premier gagne ; un `id` qui n'est pas celui
   en cours est ignoré). Avant le rappel d'un signal de fin, le module rend le premier plan,
   cache sa fenêtre et prévient la page (`selection:cachee`) ; le rappel est appelé sur le
   fil principal, dans le même tour. Perte du focus après l'avoir eu : `Annulee`. Pas de
   `selection_prete` en 2 s : `Muette`. Donnée invalide de la page : `Impossible`.
-- **Données de la page jamais crues** : `vers_bureau` (pixel CSS → pixel réel, `None` si
-  non fini ou hors de la fenêtre), `vers_page`, `decider_zone`, `cause_depuis_nom`, testées.
-- Journal : `selection chargee`, `selection montree …`, `chrono selection prete <ms>`,
-  `selection fin <id> zone|annulee <cause>|muette|impossible <cause>`.
+- **Données de la page jamais crues** : `vers_bureau` (pixel de la fenêtre → pixel du
+  bureau, `None` si non fini ou hors de la fenêtre), `vers_page`, `controler_page`,
+  `decider_zone`, `cause_depuis_nom`, testées.
+- Journal : `selection chargee`, `selection montree …`, `chrono selection prete <ms> page
+  <l>x<h> echelle <kx> page-dpr <d> tao <s>`, `selection fin <id> zone|annulee
+  <cause>|muette|impossible <cause>`.
 - L'Application réserve Échap en global pendant la sélection (§3.6) : la page n'a pas
   besoin du focus pour être annulable.
 
