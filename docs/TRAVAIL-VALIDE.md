@@ -85,8 +85,8 @@ Vérifications GitHub sur `6982c83` (exécution n° 6), toutes vertes :
 
 ## MVP, version 0.1 « Zone », suite : capturer une zone de bout en bout
 
-Les étapes 4, 5 et 6 et leur assemblage entrent ensemble dans `main` par la demande
-d'intégration n° 2 (le commit d'entrée sera noté ici par la demande suivante).
+Les étapes 4, 5 et 6 et leur assemblage sont entrés ensemble dans `main` le 2026-11-11 par
+le commit `860806e` (demande d'intégration n° 2, tête `981e262`, verte elle aussi).
 
 Vérifications GitHub sur `442da12` (exécution n° 18, 2026-11-11), toutes vertes :
 
