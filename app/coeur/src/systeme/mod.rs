@@ -244,6 +244,51 @@ pub fn rectangle_fenetre(identifiant: isize) -> Option<(i32, i32, u32, u32, f64)
     plateforme::rectangle_fenetre(identifiant)
 }
 
+// Sélection (étape 5) : une fenêtre qui, elle, prend le focus. Montrée et cachée sans tao
+// sous Windows (voir `windows.rs`) ; chaque geste rend `Ok(false)` hors Windows, où
+// l'appelant passe par Tauri.
+
+/// Fenêtre « outil » qui peut prendre le focus : hors barre des tâches et hors Alt+Tab
+/// (Windows : `WS_EX_TOOLWINDOW`, sans `WS_EX_APPWINDOW` ni `WS_EX_NOACTIVATE`), sans fondu
+/// d'apparition.
+pub fn preparer_fenetre_outil_active(fenetre: &tauri::WebviewWindow) -> Result<bool, String> {
+    plateforme::preparer_fenetre_outil_active(fenetre)
+}
+
+/// Pose la fenêtre sur `rect` (pixels réels du bureau), au-dessus de tout, et la montre
+/// sans l'activer. Synchrone : le rectangle peut être relu juste après.
+pub fn poser_au_dessus(fenetre: &tauri::WebviewWindow, rect: Rect) -> Result<bool, String> {
+    plateforme::poser_au_dessus(fenetre, rect)
+}
+
+/// Donne le premier plan et le clavier à la fenêtre. `Ok(true)` : elle est au premier
+/// plan ; `Ok(false)` : refusé par le système, ou hors Windows (passer par Tauri).
+pub fn prendre_premier_plan(fenetre: &tauri::WebviewWindow) -> Result<bool, String> {
+    plateforme::prendre_premier_plan(fenetre)
+}
+
+/// Place la fenêtre `dessous` juste en dessous de `dessus` dans l'ordre des fenêtres,
+/// sans l'activer (poignées de `identifiant_fenetre` ou de `gel::poignee_ecran_fige`).
+pub fn placer_sous(dessous: isize, dessus: isize) -> Result<bool, String> {
+    plateforme::placer_sous(dessous, dessus)
+}
+
+/// Poignée de la fenêtre au premier plan, pour la lui rendre ensuite. `None` hors Windows.
+pub fn fenetre_premier_plan() -> Option<isize> {
+    plateforme::fenetre_premier_plan()
+}
+
+/// Remet une fenêtre au premier plan si elle existe encore. Rend vrai si c'est fait.
+pub fn rendre_premier_plan(identifiant: isize) -> bool {
+    plateforme::rendre_premier_plan(identifiant)
+}
+
+/// Cache une fenêtre depuis n'importe quel fil, sans attendre le sien. Rend vrai si la
+/// demande est partie ; faux hors Windows.
+pub fn cacher_fenetre_async(identifiant: isize) -> bool {
+    plateforme::cacher_fenetre_async(identifiant)
+}
+
 /// Variable d'essai : le bandeau reste capturable (pour prouver qu'il est peint).
 pub const VARIABLE_CAPTURABLE: &str = "BREEZYSHOT_ESSAI_CAPTURABLE";
 
