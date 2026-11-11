@@ -79,6 +79,8 @@ pub enum Evenement {
     SortieFaite(Box<FinSortie>),
     /// L'échéance de la sortie numéro `n` est tombée (ou son fil s'est arrêté).
     SortieEchue(u64),
+    /// Annonce du démarrage, postée par `demarrer` pour un tour de la boucle déjà lancée.
+    AnnonceDemarrage { local: PathBuf, bilan: Bilan },
 }
 
 /// Ce que le fil de sortie rend au fil principal.
@@ -367,9 +369,17 @@ fn demarrer(app: &AppHandle, commande: Commande, inconnus: &[String]) {
         log::warn!("{e}");
     }
 
-    // Annonce du démarrage (une seule fois par situation).
+    // Annonce du démarrage (une seule fois par situation). Postée pour la boucle lancée,
+    // jamais envoyée depuis `setup` : la création de la sélection (WebView2) y fait
+    // tourner une boucle imbriquée, et un message montré là n'a jamais reçu sa zone.
     if let Some(d) = &dossiers {
-        annoncer_raccourcis(app, &d.local, &bilan);
+        poster_plus_tard(
+            app,
+            Evenement::AnnonceDemarrage {
+                local: d.local.clone(),
+                bilan: bilan.clone(),
+            },
+        );
     }
 
     app.state::<Application>()
@@ -646,6 +656,7 @@ pub fn traiter(app: &AppHandle, evenement: Evenement) {
                 log::warn!("sortie {}: bilan perime ignore", fin.numero);
             }
         }
+        Evenement::AnnonceDemarrage { local, bilan } => annoncer_raccourcis(app, &local, &bilan),
         Evenement::SortieEchue(numero) => {
             if prendre_sortie_attendue(app, numero) {
                 log::warn!("sortie sans bilan");

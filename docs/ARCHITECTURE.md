@@ -476,8 +476,12 @@ Module pur : il reçoit le dossier où écrire, ne connaît ni Tauri ni les autr
   premier `bandeau_zone` valide de ce message (`fenetres::Signal::MessageMontre`, ligne
   `annonce montree <id>: situation retenue`), pas à l'envoi.
 - **Page prête** : la page appelle `bandeau_pret {}` une fois son écoute de
-  `bandeau:afficher` en place ; un message demandé avant (annonce du démarrage) attend ce
-  moment.
+  `bandeau:afficher` en place ; un message demandé avant attend ce moment. L'annonce du
+  démarrage n'est jamais demandée depuis `setup` : `demarrer` la poste
+  (`Evenement::AnnonceDemarrage`) pour un tour de la boucle déjà lancée. Depuis `setup`,
+  la création de la sélection (WebView2) fait tourner une boucle imbriquée où
+  `bandeau_pret` arrive ; un message montré là n'a jamais reçu son `bandeau_zone`
+  (essai 03 (b), caché d'office au bout de 3 s).
 - Aspect, d'après la maquette complète (https://claude.ai/artifact/AeUuBXPRC8U1AMiqg8dhTe) :
   fond opaque `acrylic-solid`, bordure `acrylic-stroke`, ombre `shadow-28`, pastille ronde
   de 20 px. Suit le thème clair ou sombre de Windows.
