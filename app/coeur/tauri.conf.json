@@ -3,7 +3,7 @@
   "productName": "BreezyShot",
   "mainBinaryName": "breezyshot",
   "version": "0.1.0",
-  "identifier": "dev.breezyshot.app",
+  "identifier": "dev.breezyshot.desktop",
   "build": {
     "frontendDist": "../interface"
   },
