@@ -125,7 +125,7 @@ Vérifications GitHub sur `442da12` (exécution n° 18, 2026-11-11), toutes vert
   la dernière sans constat.
 - Corrigé après relecture : la page ne peut plus rester bloquée (charge renvoyée, filet de
   1,5 s, toutes les touches neutralisées) ; plus aucun vol de focus par le système ; Alt+F4
-  ne ferme rien ; une seule échelle, celle de la page, contrôlée par Rust ; trait net quand
+  ne détruit pas la fenêtre ; une seule échelle, celle de la page, contrôlée par Rust ; trait net quand
   la largeur divisée par l'échelle n'est pas entière (2560 px à 150 %, 1366 px à 125 %) ;
   numéro de charge contre les réponses en retard après un redimensionnement.
 - Trouvé par le premier essai sur Windows et corrigé : le pixel sous le curseur est inclus à
@@ -136,7 +136,8 @@ Vérifications GitHub sur `442da12` (exécution n° 18, 2026-11-11), toutes vert
   Prouvé sur la machine Windows de GitHub : la sélection couvre le bureau, est juste
   au-dessus de l'écran figé, a le premier plan, n'est pas dans la barre des tâches ; Échap,
   clic droit et perte du focus annulent ; un clic ou un glisser de 1 pixel ne ferme rien ;
-  F5, Ctrl+P et Alt+F4 sont sans effet ; l'échelle retenue est celle de la page.
+  Ctrl+P n'ouvre aucune fenêtre ; après F5, Échap ferme encore ; Alt+F4 reste sans effet
+  (l'essai accepterait aussi une annulation propre) ; l'échelle retenue est celle de la page.
 - Changement de plan : la loupe n'est pas construite dans la 0.1 (le réglage existe, sans
   effet).
 - Reste ouvert : ce que le moteur web de Windows donne exactement comme position du curseur
@@ -161,22 +162,25 @@ Vérifications GitHub sur `442da12` (exécution n° 18, 2026-11-11), toutes vert
 
 ### Assemblage des étapes 4 à 6
 
-- Écrit par un agent, effort élevé. Relu par un agent distinct, effort élevé : aucun chemin
-  ne laisse l'écran couvert ; 14 constats, 11 corrigés, puis deux contre-vérifications
+- Écrit par un agent, effort élevé. Relu par un agent distinct, effort élevé : la relecture
+  n'a trouvé aucun chemin qui laisse l'écran couvert ; 14 constats, 11 corrigés, puis deux contre-vérifications
   sans constat bloquant.
-- Corrigé après relecture : la sortie rend toujours un bilan (panique rattrapée, échéance de
-  10 s), l'automate ne peut plus rester en Découpe ; attente du compositeur bornée à
+- Corrigé après relecture : une panique de la sortie donne un bilan d'échec et, sans bilan
+  en 10 s, l'automate revient au Repos (il ne peut plus rester en Découpe) ; attente du compositeur bornée à
   100 ms ; une erreur de capture n'affiche que son titre, la cause va au journal ; rien
   n'est montré si la sélection n'existe pas.
-- Trouvé par l'essai sur Windows et corrigé : le message du démarrage partait pendant la
-  mise en place et n'était jamais cliquable ; il part maintenant de la boucle lancée.
+- Trouvé par l'essai sur Windows et corrigé : pour le message du démarrage, la page ne
+  renvoyait jamais sa zone et le message était caché d'office après 3 s (cause supposée : la
+  boucle imbriquée de la création du moteur web de la sélection) ; il part maintenant de la
+  boucle lancée, et l'essai le confirme.
 - Prouvé sur la machine Windows de GitHub (`04-zone`, 92 points) : la séquence complète,
-  dans les quatre sens du glisser ; second appui ignoré pendant une capture ; deux captures
+  dans trois sens du glisser (les quatre dans les tests unitaires) ; second appui ignoré pendant une capture ; deux captures
   de suite sans le bandeau de la première sur la seconde ; fenêtre au premier plan rendue ;
   pas de fuite de fenêtres ni de fils sur trois captures ; arrêt propre.
 - Notés, non corrigés : un message de démarrage peut se montrer par-dessus une sélection
   lancée dans la première seconde ; un bilan arrivé après l'échéance de 10 s est ignoré
   (l'app annonce une erreur alors que la copie a pu réussir) ; un changement d'écran arrivé
-  en retard peut annuler la capture suivante.
+  en retard peut annuler la capture suivante ; la page de la sélection pourrait se dire
+  chargée avant que l'app soit prête à l'entendre (supposé ; l'essai `04-zone` le verrait).
 - Ajouté à la fabrication : quand `main` est verte, le `.exe` essayé est publié en
   pré-version « v0.1.0-essai ».
