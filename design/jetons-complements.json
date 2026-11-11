@@ -1,0 +1,178 @@
+{
+ "note": "Valeurs absentes de jetons.json (copie du design system) mais fixées par une maquette validée ou par le contrat. Fusionnées par outils/generer-jetons.mjs : un jeton de même nom remplace celui de jetons.json. Chaque jeton note son origine.",
+ "color": {
+  "tokens": [
+   {
+    "name": "acrylic-solid",
+    "value": {
+     "light": "#F9F9F9",
+     "dark": "#2C2C2C"
+    },
+    "usage": "Version opaque d'acrylic : fond de la pilule du bandeau.",
+    "origine": "Maquette complète (claude.ai/artifact/AeUuBXPRC8U1AMiqg8dhTe), variables --acrylic-solid ; mêmes valeurs dans « Choix 2 » de design/choix/index.html."
+   },
+   {
+    "name": "danger",
+    "value": {
+     "light": "#C42B1C",
+     "dark": "#FF99A4"
+    },
+    "usage": "Pastille d'erreur du bandeau.",
+    "origine": "Maquette complète, variable --danger (le #C42B1C clair est aussi celui de ARCHITECTURE.md §6 et de « Choix 2 »)."
+   }
+  ]
+ },
+ "duree": {
+  "tokens": [
+   {
+    "name": "duree-reduite",
+    "value": "120ms",
+    "usage": "Fondus qui remplacent toutes les animations avec « Réduire les animations ».",
+    "origine": "README du design system, section Animations ; ARCHITECTURE.md §6."
+   },
+   {
+    "name": "duree-bandeau-reussite",
+    "value": "2500ms",
+    "usage": "Temps d'affichage d'un message de réussite avant son fondu de sortie.",
+    "origine": "ARCHITECTURE.md §6 ; maquette complète (setTimeout 2500)."
+   },
+   {
+    "name": "duree-bandeau-entree",
+    "value": "300ms",
+    "usage": "Entrée en ressort de la pilule du bandeau (courbe-ressort).",
+    "origine": "ARCHITECTURE.md §6 ; maquette complète (duration:300). Même valeur que duree-vignette, mais jeton propre au bandeau (relecture de l'étape 3)."
+   }
+  ]
+ },
+ "dimension": {
+  "note": "Mesures du bandeau reprises de la maquette complète (styles .msg, .m-pill, .m-pill.v-a, .xb).",
+  "tokens": [
+   {
+    "name": "bandeau-haut",
+    "value": "64px",
+    "usage": "Distance du haut de la page à la pilule.",
+    "origine": "Maquette complète, .m-pill top:64px."
+   },
+   {
+    "name": "bandeau-marge-page",
+    "value": "16px",
+    "usage": "La pilule laisse toujours 2 × 8 px avec les bords de la page.",
+    "origine": "Maquette complète, max-width:calc(100% - 16px)."
+   },
+   {
+    "name": "bandeau-entree-decalage",
+    "value": "-12px",
+    "usage": "Départ vertical de l'entrée en ressort.",
+    "origine": "Maquette complète, translate(-50%,-12px)."
+   },
+   {
+    "name": "bandeau-texte-taille",
+    "value": "13px",
+    "usage": "Taille du titre.",
+    "origine": "Maquette complète, .msg font-size:13px."
+   },
+   {
+    "name": "bandeau-texte-interligne",
+    "value": "18px",
+    "usage": "Interligne du titre.",
+    "origine": "Maquette complète, .msg line-height:18px."
+   },
+   {
+    "name": "bandeau-ecart",
+    "value": "10px",
+    "usage": "Écart entre pastille, texte et boutons.",
+    "origine": "Maquette complète, .msg gap:10px."
+   },
+   {
+    "name": "bandeau-pastille",
+    "value": "20px",
+    "usage": "Diamètre de la pastille.",
+    "origine": "Maquette complète, .msg .ic."
+   },
+   {
+    "name": "bandeau-picto",
+    "value": "12px",
+    "usage": "Taille du pictogramme dans la pastille et de la croix.",
+    "origine": "Maquette complète, .msg .ic svg et .xb."
+   },
+   {
+    "name": "bandeau-picto-trait",
+    "value": "2.4",
+    "usage": "Épaisseur du trait des pictogrammes (unités du viewBox 12).",
+    "origine": "Maquette complète, stroke-width:2.4."
+   },
+   {
+    "name": "bandeau-croix-trait",
+    "value": "1.6",
+    "usage": "Épaisseur du trait de la croix « Fermer le message » (unités du viewBox 12).",
+    "origine": "À valider par le fil design : le pictogramme #i-x de la maquette complète n'est pas dans les extraits ; 2.4 (celui des pastilles) rendait la croix trop grasse."
+   },
+   {
+    "name": "bandeau-marge-courte",
+    "value": "6px 10px 6px 8px",
+    "usage": "Marge intérieure de la pilule d'une ligne (réussite).",
+    "origine": "Maquette complète, .m-pill padding."
+   },
+   {
+    "name": "bandeau-marge-large",
+    "value": "8px 8px 8px 12px",
+    "usage": "Marge intérieure de la pilule élargie (erreur, info).",
+    "origine": "Maquette complète, .m-pill.v-a padding."
+   },
+   {
+    "name": "bandeau-rayon-large",
+    "value": "16px",
+    "usage": "Rayon de la pilule élargie.",
+    "origine": "Maquette complète, .m-pill.v-a border-radius."
+   },
+   {
+    "name": "bandeau-largeur-large",
+    "value": "460px",
+    "usage": "Largeur de la pilule élargie (limitée par la page).",
+    "origine": "Maquette complète, width:min(460px,calc(100% - 16px))."
+   },
+   {
+    "name": "bandeau-texte-base",
+    "value": "220px",
+    "usage": "Largeur de base du texte avant que les boutons passent dessous.",
+    "origine": "Maquette complète, .m-pill.v-a .tx flex:1 1 220px."
+   },
+   {
+    "name": "bandeau-bouton",
+    "value": "24px",
+    "usage": "Côté de la croix « Fermer le message ».",
+    "origine": "Maquette complète, .xb width/height."
+   },
+   {
+    "name": "bandeau-action-marge",
+    "value": "4px 6px",
+    "usage": "Marge intérieure d'un bouton d'action en texte.",
+    "origine": "Maquette complète, .msg .act padding."
+   },
+   {
+    "name": "bandeau-detail-interligne",
+    "value": "18px",
+    "usage": "Interligne du détail (12 px) sous le titre.",
+    "origine": "Maquette complète : .msg line-height:18px, hérité par .tx span (font-size:12px)."
+   },
+   {
+    "name": "bandeau-titre-lignes",
+    "value": "2",
+    "usage": "Nombre maximal de lignes du titre (erreur, info), au-delà : « … ».",
+    "origine": "Relecture de l'étape 3 (décision du coordinateur) : hauteur maximale connue de la pilule."
+   },
+   {
+    "name": "bandeau-detail-lignes",
+    "value": "3",
+    "usage": "Nombre maximal de lignes du détail, au-delà : « … ».",
+    "origine": "Relecture de l'étape 3 (décision du coordinateur)."
+   },
+   {
+    "name": "bandeau-action-largeur-max",
+    "value": "160px",
+    "usage": "Largeur maximale d'un bouton d'action en texte, au-delà : « … ». Garde la place du texte et de la croix.",
+    "origine": "À valider par le fil design : choix de l'agent pour que les boutons restent à droite sans passer à la ligne."
+   }
+  ]
+ }
+}

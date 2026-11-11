@@ -46,6 +46,9 @@ jobs:
         working-directory: app
         run: npm ci
 
+      - name: Jetons à jour (jetons.css généré)
+        run: node outils/generer-jetons.mjs --verifier
+
       - name: Format
         working-directory: app/coeur
         run: cargo fmt --check
@@ -79,6 +82,43 @@ jobs:
         with:
           name: essais-resultats
           path: essais-resultats/
+          if-no-files-found: warn
+
+  pages:
+    name: Pages (bandeau dans Chromium)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+
+      - name: Playwright (version figée)
+        working-directory: app
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+
+      - name: Jetons à jour
+        run: node outils/generer-jetons.mjs --verifier
+
+      - name: Essai de la page du bandeau
+        env:
+          NODE_PATH: ${{ github.workspace }}/app/node_modules
+          SORTIE: ${{ github.workspace }}/essais-resultats/pages
+        run: node essais/pages/bandeau.cjs
+
+      - name: Envoyer les captures de la page
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pages-resultats
+          path: essais-resultats/pages/
           if-no-files-found: warn
 
   macos:
