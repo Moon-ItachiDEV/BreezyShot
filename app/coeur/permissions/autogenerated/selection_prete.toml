@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-selection-prete"
+description = "Enables the selection_prete command without any pre-configured scope."
+commands.allow = ["selection_prete"]
+
+[[permission]]
+identifier = "deny-selection-prete"
+description = "Denies the selection_prete command without any pre-configured scope."
+commands.deny = ["selection_prete"]

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-selection-annulee"
+description = "Enables the selection_annulee command without any pre-configured scope."
+commands.allow = ["selection_annulee"]
+
+[[permission]]
+identifier = "deny-selection-annulee"
+description = "Denies the selection_annulee command without any pre-configured scope."
+commands.deny = ["selection_annulee"]

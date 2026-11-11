@@ -10,6 +10,10 @@ fn main() {
         "bandeau_zone",
         "bandeau_action",
         "bandeau_termine",
+        "selection_chargee",
+        "selection_prete",
+        "selection_terminee",
+        "selection_annulee",
     ]);
     tauri_build::try_build(
         tauri_build::Attributes::new()
