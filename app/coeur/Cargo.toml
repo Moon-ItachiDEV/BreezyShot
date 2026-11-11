@@ -21,6 +21,7 @@ tauri-build = { version = "2.7.4", features = [] }
 tauri = { version = "2.12.5", features = ["tray-icon", "image-png"] }
 tauri-plugin-single-instance = "2.5.5"
 log = { version = "0.4", features = ["std"] }
+tracing = { version = "0.1", features = ["log"] }
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 dirs = "7"
 
