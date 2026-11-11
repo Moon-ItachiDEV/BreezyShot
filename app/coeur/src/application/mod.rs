@@ -20,7 +20,7 @@ pub mod zone;
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::thread::ThreadId;
 use std::time::{Duration, Instant};
@@ -77,11 +77,15 @@ pub enum Evenement {
     Bureau(Changement),
     /// La sortie d'une capture est finie (rendue par son fil).
     SortieFaite(Box<FinSortie>),
+    /// L'échéance de la sortie numéro `n` est tombée (ou son fil s'est arrêté).
+    SortieEchue(u64),
 }
 
 /// Ce que le fil de sortie rend au fil principal.
 #[derive(Debug, Clone, PartialEq)]
 pub struct FinSortie {
+    /// Numéro de la sortie : un bilan qui n'est pas celui attendu est ignoré.
+    pub numero: u64,
     pub bilan: sortie::Bilan,
     pub demande: sortie::Demande,
     pub duree_decoupe: Duration,
@@ -157,6 +161,11 @@ pub struct Application {
     capture: Mutex<Option<CaptureEnCours>>,
     /// Vrai pendant qu'Échap est réservé en global.
     echap_reserve: AtomicBool,
+    /// Numéro de la dernière sortie lancée.
+    derniere_sortie: AtomicU64,
+    /// La sortie dont on attend le bilan ; `None` une fois le bilan reçu ou l'échéance
+    /// tombée.
+    sortie_attendue: Mutex<Option<u64>>,
 }
 
 /// Une annonce envoyée au bandeau, dont la situation attend d'être retenue.
@@ -575,6 +584,7 @@ pub fn traiter(app: &AppHandle, evenement: Evenement) {
         Evenement::Selection(_)
             | Evenement::Bureau(_)
             | Evenement::SortieFaite(_)
+            | Evenement::SortieEchue(_)
             | Evenement::Raccourci(raccourcis::Signal::Echap)
     );
     if de_capture && hors_fil_principal(app) {
@@ -626,7 +636,20 @@ pub fn traiter(app: &AppHandle, evenement: Evenement) {
             log::info!("bureau change pendant la capture: {changement:?}");
             traiter_zone(app, Arrivee::Bureau(changement));
         }
-        Evenement::SortieFaite(fin) => finir_sortie(app, *fin),
+        Evenement::SortieFaite(fin) => {
+            if prendre_sortie_attendue(app, fin.numero) {
+                finir_sortie(app, *fin);
+            } else {
+                log::warn!("sortie {}: bilan perime ignore", fin.numero);
+            }
+        }
+        Evenement::SortieEchue(numero) => {
+            if prendre_sortie_attendue(app, numero) {
+                log::warn!("sortie sans bilan");
+                appliquer(app, Declencheur::SortieSansBilan);
+                afficher_probleme(app, Probleme::SortieSansBilan);
+            }
+        }
         Evenement::Raccourci(raccourcis::Signal::Presse(action)) => {
             log::info!("raccourci presse: {action}");
             match Mode::depuis_nom(&action) {
@@ -953,16 +976,42 @@ fn demande_sortie(app: &AppHandle) -> sortie::Demande {
     }
 }
 
-/// Sort une capture et mesure la durée (fil de sortie).
+/// Vrai (et plus rien d'attendu ensuite) si `numero` est la sortie dont on attend le
+/// bilan (`zone::bilan_attendu`).
+fn prendre_sortie_attendue(app: &AppHandle, numero: u64) -> bool {
+    let mut attendue = app
+        .state::<Application>()
+        .inner()
+        .sortie_attendue
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    if zone::bilan_attendu(*attendue, numero) {
+        *attendue = None;
+        true
+    } else {
+        false
+    }
+}
+
+/// Sort une capture et mesure la durée (fil de sortie). Une panique de `sortir` donne un
+/// bilan d'échec : le fil rend toujours un bilan.
 fn sortir_et_mesurer(
+    numero: u64,
     pixels: &gel::Pixels,
     demande: sortie::Demande,
     duree_decoupe: Duration,
     relache: Instant,
 ) -> Box<FinSortie> {
     let debut = Instant::now();
-    let bilan = sortie::sortir(pixels, &demande);
+    let bilan = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        sortie::sortir(pixels, &demande)
+    }))
+    .unwrap_or_else(|_| {
+        log::error!("sortie {numero}: fil interrompu (panique)");
+        zone::bilan_d_echec(&demande, zone::CAUSE_SORTIE_INTERROMPUE)
+    });
     Box::new(FinSortie {
+        numero,
         bilan,
         demande,
         duree_decoupe,
@@ -972,29 +1021,58 @@ fn sortir_et_mesurer(
 }
 
 /// La sortie dans un fil à part (le fil principal n'attend jamais le disque ni le
-/// presse-papiers), puis le bilan revient au fil principal (`SortieFaite`).
+/// presse-papiers), puis le bilan revient au fil principal (`SortieFaite`). Un second
+/// petit fil tient l'échéance (`zone::DELAI_SORTIE`) : sans nouvelles du fil de sortie à
+/// temps, il poste `SortieEchue`, et l'automate ne reste jamais en Découpe.
 fn lancer_sortie(app: &AppHandle, pixels: gel::Pixels, duree_decoupe: Duration, relache: Instant) {
+    let etat = app.state::<Application>();
+    let numero = etat.derniere_sortie.fetch_add(1, Ordering::SeqCst) + 1;
+    *etat
+        .inner()
+        .sortie_attendue
+        .lock()
+        .unwrap_or_else(|e| e.into_inner()) = Some(numero);
     let demande = demande_sortie(app);
     let pixels = Arc::new(pixels);
+    let (fini, attente) = std::sync::mpsc::channel::<()>();
     let pour_fil = app.clone();
     let (pixels_fil, demande_fil) = (Arc::clone(&pixels), demande.clone());
     let lance = std::thread::Builder::new()
         .name("sortie".into())
         .spawn(move || {
-            let fin = sortir_et_mesurer(&pixels_fil, demande_fil, duree_decoupe, relache);
+            let fin = sortir_et_mesurer(numero, &pixels_fil, demande_fil, duree_decoupe, relache);
             let pour_traiter = pour_fil.clone();
             let rendu = pour_fil
                 .run_on_main_thread(move || traiter(&pour_traiter, Evenement::SortieFaite(fin)));
             if let Err(e) = rendu {
                 log::warn!("bilan de sortie non rendu: {e}");
             }
+            let _ = fini.send(());
         });
     if let Err(e) = lance {
         // Sans fil, la capture n'est pas perdue : la sortie se fait ici (l'écran est déjà
         // libre, la garde ne surveille plus).
         log::warn!("fil de sortie impossible ({e}): sortie sur le fil principal");
-        let fin = sortir_et_mesurer(&pixels, demande, duree_decoupe, relache);
-        finir_sortie(app, *fin);
+        let fin = sortir_et_mesurer(numero, &pixels, demande, duree_decoupe, relache);
+        traiter(app, Evenement::SortieFaite(fin));
+        return;
+    }
+    // L'échéance : se termine dès que le fil de sortie a rendu son bilan. S'il s'arrête
+    // sans rien dire (canal fermé), l'échéance part tout de suite ; arrivée après le
+    // bilan, elle est ignorée.
+    let pour_echeance = app.clone();
+    let echeance = std::thread::Builder::new()
+        .name("sortie-echeance".into())
+        .spawn(move || {
+            if attente.recv_timeout(zone::DELAI_SORTIE).is_ok() {
+                return;
+            }
+            let pour_traiter = pour_echeance.clone();
+            let _ = pour_echeance
+                .run_on_main_thread(move || traiter(&pour_traiter, Evenement::SortieEchue(numero)));
+        });
+    if let Err(e) = echeance {
+        log::warn!("echeance de sortie non armee: {e}");
     }
 }
 

@@ -126,7 +126,8 @@ ferme la vignette puis relance) ; il est ignoré ailleurs.
 Chaque changement d'état écrit une ligne de journal `etat Repos -> Gel (DemandeCapture
 zone)`. La capture d'une zone suit `Repos -> Gel -> Selection -> Decoupe -> Repos` (§3.6).
 Ajouté à l'assemblage : `DecoupeImpossible` (`Decoupe -> Repos`), quand les pixels de la
-zone n'ont pas pu être lus. Tant que la vignette (étape 9) n'existe pas, la découpe finit
+zone n'ont pas pu être lus, et `SortieSansBilan` (`Decoupe -> Repos`), quand la sortie ne
+rend aucun bilan dans son délai. Tant que la vignette (étape 9) n'existe pas, la découpe finit
 par `ImagePreteSansVignette`.
 
 Modes : `zone`, `plein_ecran`, `fenetre`. Ce sont aussi les **noms d'action** des raccourcis.
@@ -240,6 +241,12 @@ sur le fil principal tout ce qui touche à la capture et arriverait d'ailleurs. 
    retour sur le fil principal : journal, `ImagePreteSansVignette` → Repos, annonce dans
    le bandeau. Dossier affiché : « Images › BreezyShot » quand le réglage est absent ou
    vide, sinon `sortie::nom_affiche(dossier)`. « Récents » : `<local>/Recents`.
+   Chaque sortie a un numéro. Le fil rend toujours un bilan : une panique de `sortir`
+   donne un bilan d'échec (`zone::bilan_d_echec`). Un petit fil tient une échéance de
+   10 s (`zone::DELAI_SORTIE`) et s'arrête dès que le bilan est rendu ; s'il tombe,
+   `sortie sans bilan`, `SortieSansBilan` → Repos, bandeau « Impossible de capturer ». Un
+   bilan qui n'est pas celui attendu (capture précédente, ou arrivé après l'échéance) est
+   ignoré (`sortie <n>: bilan perime ignore`).
 
 **Messages.** Erreur avant la sortie (gel, écran figé, sélection, découpe, sortie sans
 bilan) : « Impossible de capturer », titre seul, sans cause ; le cas va au journal
@@ -273,7 +280,8 @@ capturer ».
 non reserve: …`), `zone choisie <x>,<y> <l>x<h>`, `sortie copie <faite|non demandee|echec>
 recent <ok|echec> fichier <fait|non demande|echec>`, `recents: echec (…)`, `sortie annonce
 reussite|erreur: <titre>`, `chrono decoupe <ms> sortie <ms> relache-annonce <ms>`,
-`capture impossible: <photo|ecran_fige|selection|muette|lecture|non_disponible>`. Aucun
+`capture impossible: <photo|ecran_fige|selection|muette|lecture|non_disponible|
+sortie_sans_bilan>`, `sortie sans bilan`, `sortie <n>: bilan perime ignore`. Aucun
 chemin de capture complet, aucun contenu.
 
 ## 4. Réglages (`reglages/`, étape 2)

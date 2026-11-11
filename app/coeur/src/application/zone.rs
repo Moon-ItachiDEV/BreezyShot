@@ -11,7 +11,7 @@ use super::etats::Declencheur;
 use crate::capture;
 use crate::fenetres::selection::Signal as SignalSelection;
 use crate::fenetres::{Genre, Message};
-use crate::sortie::{self, Annonce, Bilan, Etape, EtapeFichier};
+use crate::sortie::{self, Annonce, Bilan, Demande, Etape, EtapeFichier};
 use crate::systeme::gel::{Changement, EcranInfo};
 use crate::systeme::Rect;
 
@@ -19,6 +19,11 @@ use crate::systeme::Rect;
 pub const TITRE_CAPTURE_IMPOSSIBLE: &str = "Impossible de capturer";
 /// Nom affiché du dossier d'enregistrement par défaut.
 pub const DOSSIER_PAR_DEFAUT_AFFICHE: &str = "Images › BreezyShot";
+/// Sans bilan de la sortie dans ce délai, l'Application revient au Repos.
+pub const DELAI_SORTIE: Duration = Duration::from_secs(10);
+/// Cause des étapes d'une sortie interrompue par une panique de son fil.
+pub const CAUSE_SORTIE_INTERROMPUE: &str = "La capture a été interrompue.";
+
 /// Sous-dossier du dossier local qui garde les captures récentes.
 pub const SOUS_DOSSIER_RECENTS: &str = "Recents";
 
@@ -49,6 +54,8 @@ pub enum Probleme {
     Muette,
     /// Les pixels de la zone n'ont pas pu être lus.
     Lecture,
+    /// La sortie n'a rendu aucun bilan dans son délai (`DELAI_SORTIE`).
+    SortieSansBilan,
 }
 
 /// Ce que l'Application doit faire d'une arrivée.
@@ -132,6 +139,7 @@ pub fn nom(probleme: Probleme) -> &'static str {
         Probleme::Selection => "selection",
         Probleme::Muette => "muette",
         Probleme::Lecture => "lecture",
+        Probleme::SortieSansBilan => "sortie_sans_bilan",
     }
 }
 
@@ -201,6 +209,34 @@ pub fn dossier_enregistrement(reglage: Option<&Path>, images: Option<&Path>) -> 
             images.map(Path::to_path_buf).unwrap_or_default(),
             DOSSIER_PAR_DEFAUT_AFFICHE.into(),
         ),
+    }
+}
+
+/// Vrai si le bilan de la sortie numéro `recu` est celui qu'on attend. Faux pour un
+/// bilan d'une capture précédente, ou arrivé après l'échéance (plus rien d'attendu) ;
+/// vaut aussi pour l'échéance elle-même.
+pub fn bilan_attendu(attendu: Option<u64>, recu: u64) -> bool {
+    attendu == Some(recu)
+}
+
+/// Le bilan d'une sortie dont le fil s'est arrêté (panique) : chaque étape demandée est
+/// en échec avec `cause`, « Récents » aussi.
+pub fn bilan_d_echec(demande: &Demande, cause: &str) -> Bilan {
+    Bilan {
+        copie: if demande.copier {
+            Etape::Echec(cause.into())
+        } else {
+            Etape::NonDemandee
+        },
+        recent: Err(cause.into()),
+        enregistrement: if demande.enregistrer {
+            EtapeFichier::Echec {
+                dossier: demande.dossier_enregistrement.clone(),
+                cause: cause.into(),
+            }
+        } else {
+            EtapeFichier::NonDemande
+        },
     }
 }
 
@@ -420,6 +456,7 @@ mod tests {
             Probleme::Selection,
             Probleme::Muette,
             Probleme::Lecture,
+            Probleme::SortieSansBilan,
         ] {
             assert!(!nom(p).contains(' '), "{p:?}");
         }
@@ -500,6 +537,49 @@ mod tests {
         assert_eq!(
             dossier_enregistrement(Some(&choisi), Some(&images)),
             (choisi.clone(), "Documents › Captures".to_string())
+        );
+    }
+
+    #[test]
+    fn bilan_attendu_ou_perime() {
+        assert!(bilan_attendu(Some(4), 4));
+        // Capture précédente.
+        assert!(!bilan_attendu(Some(4), 3));
+        // Après l'échéance (ou après le bilan, pour l'échéance) : plus rien d'attendu.
+        assert!(!bilan_attendu(None, 4));
+    }
+
+    #[test]
+    fn bilan_d_une_sortie_interrompue() {
+        let demande = Demande {
+            copier: true,
+            enregistrer: true,
+            dossier_enregistrement: PathBuf::from("/u/Images/BreezyShot"),
+            dossier_affiche: "Images › BreezyShot".into(),
+            dossier_recents: PathBuf::from("/u/Recents"),
+            modele_nom: "BreezyShot {date} à {heure}".into(),
+            maintenant: chrono::Local::now(),
+        };
+        let b = bilan_d_echec(&demande, CAUSE_SORTIE_INTERROMPUE);
+        assert_eq!(b.copie, Etape::Echec(CAUSE_SORTIE_INTERROMPUE.into()));
+        assert!(b.recent.is_err());
+        assert!(matches!(b.enregistrement, EtapeFichier::Echec { .. }));
+        assert!(matches!(
+            sortie::annonce(&b, &demande),
+            Annonce::Erreur { .. }
+        ));
+        let seule = Demande {
+            enregistrer: false,
+            ..demande
+        };
+        let b = bilan_d_echec(&seule, "x");
+        assert_eq!(b.enregistrement, EtapeFichier::NonDemande);
+        assert_eq!(
+            sortie::annonce(&b, &seule),
+            Annonce::Erreur {
+                titre: "Impossible de copier".into(),
+                cause: "x".into()
+            }
         );
     }
 

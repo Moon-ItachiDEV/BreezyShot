@@ -64,6 +64,8 @@ pub enum Declencheur {
     SelectionImpossible,
     /// Les pixels de la zone n'ont pas pu être lus.
     DecoupeImpossible,
+    /// La sortie n'a rendu aucun bilan dans son délai.
+    SortieSansBilan,
     /// Image découpée, vignette active : on joue le souffle.
     ImagePrete,
     /// Image découpée, vignette désactivée : retour au repos après confirmation.
@@ -115,6 +117,7 @@ pub const PASSAGES: &[(Etat, Declencheur, Etat)] = &[
     // Découpe : une erreur de copie ou d'écriture n'arrête rien (pas de ligne ici) ; seule
     // une lecture des pixels impossible ramène au repos sans image.
     (E::Decoupe, D::DecoupeImpossible, E::Repos),
+    (E::Decoupe, D::SortieSansBilan, E::Repos),
     (E::Decoupe, D::ImagePrete, E::Souffle),
     (E::Decoupe, D::ImagePreteSansVignette, E::Repos),
     // Souffle.
@@ -266,6 +269,7 @@ mod tests {
     #[test]
     fn decoupe_impossible_revient_au_repos() {
         assert_eq!(suivant(E::Decoupe, D::DecoupeImpossible), Some(E::Repos));
+        assert_eq!(suivant(E::Decoupe, D::SortieSansBilan), Some(E::Repos));
     }
 
     #[test]
