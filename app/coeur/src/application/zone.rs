@@ -33,7 +33,8 @@ pub enum Arrivee<'a> {
     Bureau(Changement),
 }
 
-/// Pourquoi une capture n'a pas pu se faire. Chaque cas a sa cause dans le bandeau.
+/// Pourquoi une capture n'a pas pu se faire. Le bandeau dit seulement « Impossible de
+/// capturer » ; le cas va au journal (`capture impossible: <nom>`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Probleme {
     /// Le Gel n'existe pas sur ce système.
@@ -122,18 +123,6 @@ pub fn zone_choisie(depart: (i32, i32), arrivee: (i32, i32), ecrans: &[EcranInfo
     capture::borner_a_un_ecran(zone, depart, ecrans).filter(|z| capture::zone_valide(*z))
 }
 
-/// La cause, en seconde ligne du bandeau d'erreur.
-pub fn cause(probleme: Probleme) -> &'static str {
-    match probleme {
-        Probleme::NonDisponible => "La capture n'existe pas encore sur ce système.",
-        Probleme::Photo => "Windows n'a pas donné l'image de l'écran.",
-        Probleme::EcranFige => "L'écran n'a pas pu être figé.",
-        Probleme::Selection => "La sélection n'a pas pu se faire.",
-        Probleme::Muette => "La sélection n'a pas répondu à temps.",
-        Probleme::Lecture => "L'image de la zone n'a pas pu être lue.",
-    }
-}
-
 /// Nom court d'un problème pour le journal.
 pub fn nom(probleme: Probleme) -> &'static str {
     match probleme {
@@ -146,12 +135,13 @@ pub fn nom(probleme: Probleme) -> &'static str {
     }
 }
 
-/// Le bandeau d'erreur d'une capture qui n'a pas pu se faire.
-pub fn message_probleme(probleme: Probleme) -> Message {
+/// Le bandeau d'erreur d'une capture qui n'a pas pu se faire : le titre seul, sans
+/// cause (règle de sobriété ; la cause est au journal).
+pub fn message_capture_impossible() -> Message {
     Message {
         genre: Genre::Erreur,
         titre: TITRE_CAPTURE_IMPOSSIBLE.into(),
-        detail: cause(probleme).into(),
+        detail: String::new(),
         actions: Vec::new(),
     }
 }
@@ -321,7 +311,12 @@ mod tests {
             }),
             Geste::Decouper(r(10, 20, 101, 101))
         );
-        for cause in [Cause::Echap, Cause::ClicDroit, Cause::FocusPerdu] {
+        for cause in [
+            Cause::Echap,
+            Cause::ClicDroit,
+            Cause::FocusPerdu,
+            Cause::Fermeture,
+        ] {
             assert_eq!(
                 s(SignalSelection::Annulee { id: 7, cause }),
                 abandon(Declencheur::SelectionAnnulee, None)
@@ -413,10 +408,10 @@ mod tests {
 
     #[test]
     fn messages_du_bandeau() {
-        let m = message_probleme(Probleme::Photo);
+        let m = message_capture_impossible();
         assert_eq!(m.genre, Genre::Erreur);
         assert_eq!(m.titre, "Impossible de capturer");
-        assert!(!m.detail.is_empty());
+        assert!(m.detail.is_empty(), "titre seul, la cause va au journal");
         assert!(m.actions.is_empty());
         for p in [
             Probleme::NonDisponible,
@@ -426,8 +421,7 @@ mod tests {
             Probleme::Muette,
             Probleme::Lecture,
         ] {
-            assert!(cause(p).ends_with('.'), "{p:?}");
-            assert!(!nom(p).contains(' '));
+            assert!(!nom(p).contains(' '), "{p:?}");
         }
         let reussite = message_annonce(&Annonce::Reussite {
             titre: "Copié dans le presse-papiers".into(),

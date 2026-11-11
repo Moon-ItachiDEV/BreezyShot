@@ -665,7 +665,7 @@ fn appliquer(app: &AppHandle, declencheur: Declencheur) -> Option<Etat> {
 /// Montre le bandeau d'erreur d'une capture qui n'a pas pu se faire.
 fn afficher_probleme(app: &AppHandle, probleme: Probleme) {
     log::info!("capture impossible: {}", zone::nom(probleme));
-    afficher(app, zone::message_probleme(probleme));
+    afficher(app, zone::message_capture_impossible());
 }
 
 /// Demande une capture (raccourci, menu). Fil principal (sinon postée). Séquence du §3.6 :

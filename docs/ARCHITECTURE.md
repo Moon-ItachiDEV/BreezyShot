@@ -241,8 +241,9 @@ sur le fil principal tout ce qui touche à la capture et arriverait d'ailleurs. 
    le bandeau. Dossier affiché : « Images › BreezyShot » quand le réglage est absent ou
    vide, sinon `sortie::nom_affiche(dossier)`. « Récents » : `<local>/Recents`.
 
-**Messages.** Erreur avant la sortie : « Impossible de capturer », avec une cause courte
-(`zone::cause`). Après la sortie : l'annonce de `sortie::annonce`, telle quelle. Une
+**Messages.** Erreur avant la sortie (gel, écran figé, sélection, découpe, sortie sans
+bilan) : « Impossible de capturer », titre seul, sans cause ; le cas va au journal
+(`capture impossible: <code>`). Après la sortie : l'annonce de `sortie::annonce`, telle quelle. Une
 annulation n'affiche rien.
 
 **Filets de sécurité** (l'écran ne doit jamais rester couvert) :
