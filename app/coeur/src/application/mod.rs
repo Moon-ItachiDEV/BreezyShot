@@ -103,8 +103,11 @@ struct CaptureEnCours {
     garde: GardeEcran,
 }
 
-/// Filet de sécurité : à sa destruction (fin, erreur, panique qui déroule la pile), l'écran
-/// figé et la sélection sont cachés et Échap libéré. `cacher_tout` le fait plus tôt.
+/// Filet de sécurité : à sa destruction, l'écran figé et la sélection sont cachés et Échap
+/// libéré ; `cacher_tout` le fait plus tôt. Détruite à chaque fin et chaque erreur, et par
+/// `lancer_capture` tant qu'elle n'est pas rangée. Rangée dans le `Mutex` de l'état, une
+/// panique ne la détruit pas : c'est alors la mort du processus (abort dans une procédure
+/// `extern "system"`, panique relancée par tao ailleurs) qui libère l'écran.
 struct GardeEcran {
     app: AppHandle,
     fait: bool,

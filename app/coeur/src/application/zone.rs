@@ -100,6 +100,7 @@ pub fn decider(capture: Option<Vue<'_>>, arrivee: Arrivee<'_>) -> Geste {
             abandon(Declencheur::SessionVerrouillee, None)
         }
         Arrivee::Selection(signal) => {
+            // `None` (pendant `montrer`) : tout `id` passe ; la Sélection filtre déjà les `id`.
             if vue.selection.is_some_and(|id| id != signal.id()) {
                 return Geste::Rien;
             }

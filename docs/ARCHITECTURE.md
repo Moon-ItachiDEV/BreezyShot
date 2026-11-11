@@ -229,10 +229,12 @@ sur le fil principal tout ce qui touche à la capture et arriverait d'ailleurs. 
    Erreur → tout cacher, `SelectionImpossible`, bandeau d'erreur.
 6. Échap est réservé en global (`raccourcis::reserver_echap`) ; s'il ne peut pas l'être,
    une ligne de journal, et la page gère Échap quand elle a le focus.
-7. Signaux : `Prete` → rien. `Zone` → écran figé caché dans le même tour que la sélection,
-   Échap libéré, `ZoneChoisie`, zone = `borner_a_un_ecran(rect_entre(depart, arrivee),
-   depart, ecrans)` ; absente ou trop petite → `SelectionAnnulee` sans message ; sinon
-   `capture::decouper` (l'écran est déjà libre) puis la sortie. `Annulee` (toute cause),
+7. Signaux : `Prete` → rien. `Zone` : la zone est décidée d'abord, encore en Sélection
+   (`zone::decider`) : `borner_a_un_ecran(rect_entre(depart, arrivee), depart, ecrans)`
+   puis `zone_valide`. Absente ou trop petite → tout caché, `SelectionAnnulee` depuis
+   Sélection, sans message. Valide → écran figé caché dans le même tour que la sélection,
+   Échap libéré, `ZoneChoisie`, `capture::decouper` (l'écran est déjà libre) puis la
+   sortie. `Annulee` (toute cause),
    Échap global → `SelectionAnnulee`, sans message. `Muette`, `Impossible` →
    `SelectionMuette`, `SelectionImpossible`, bandeau d'erreur. Écrans changés, session
    verrouillée → `EcransChanges`, `SessionVerrouillee`, sans message. Un signal d'un autre
@@ -255,8 +257,13 @@ annulation n'affiche rien.
 
 **Filets de sécurité** (l'écran ne doit jamais rester couvert) :
 
-- `GardeEcran`, tenue par la capture en cours : sa destruction (fin, erreur, panique qui
-  déroule la pile) cache l'écran figé et la sélection et libère Échap.
+- `GardeEcran`, tenue par la capture en cours : sa destruction cache l'écran figé et la
+  sélection et libère Échap. Elle est détruite à chaque fin et chaque erreur, par
+  `lancer_capture` tant qu'elle n'est pas rangée, et à l'arrêt. Une fois rangée dans le
+  `Mutex` de l'Application, une panique ne la détruit pas : ce qui libère alors l'écran,
+  c'est la mort du processus (une panique dans une procédure de fenêtre `extern "system"`
+  arrête le processus ; ailleurs sur le fil principal, tao la relance et l'app s'arrête),
+  et Windows détruit ses fenêtres.
 - `garder_ecran_fige(5 s)` au démarrage : fil principal bloqué avec l'écran figé montré →
   `ecran fige: fil principal bloque, arret force`, journal vidé, `exit(1)`. Rien de long
   sur le fil principal pendant que l'écran figé est montré : la découpe vient après.
@@ -612,7 +619,8 @@ construite (le réglage existe, sans effet).
 - **Montrer**, sans rien attendre de la page : noter la fenêtre au premier plan ; poser la
   fenêtre sur le bureau, la montrer, lui donner le premier plan (par `systeme` sous Windows,
   jamais par tao, qui réécrirait les styles) ; placer l'écran figé juste en dessous ;
-  relire le rectangle réel et le reposer une fois s'il diffère (`selection montree <id>
+  relire le rectangle réel et le reposer tant qu'il diffère, deux fois au plus
+  (`PLACEMENTS_MAX = 3` poses en tout ; `selection montree <id>
   voulu <x,y,l,h> reel <x,y,l,h> echelle <e>`) ; envoyer `selection:montrer { id, ecrans,
   cote_min }` en pixels CSS ; armer le délai de 2 s (`DELAI_PRETE`).
 - **Un seul signal de fin par affichage** (le premier gagne ; un `id` qui n'est pas celui
@@ -660,6 +668,8 @@ son `Bilan`, et `annonce(&Bilan, &Demande)` dit quoi montrer.
   enregistrement en échec : « Impossible d'enregistrer » / cause en clair ; copie en échec
   seule : « Impossible de copier » / cause ; copie ratée mais fichier enregistré :
   « Impossible de copier » / « La capture est enregistrée dans <dossier affiché>. » ; rien
-  demandé : « Capture prise ». Seul « Récents » en échec : la réussite est annoncée, l'échec
+  demandé : « Capture prise ». Aujourd'hui, « Capture prise » n'arrive que si copie et
+  enregistrement sont éteints et la vignette (pas encore construite) allumée : les réglages
+  ne rallument la copie que si les trois sont éteints. Seul « Récents » en échec : la réussite est annoncée, l'échec
   va au journal (par l'Application).
 - `sortie` n'importe que `crate::systeme` (`Pixels` vient de `systeme::gel`).
