@@ -212,7 +212,7 @@ const L = 1280, H = 400;
     await new Promise(r => setTimeout(r, 150));
     return { tout_de_suite, une_image, appels: __appels };
   });
-  verifier(pr.tout_de_suite === 0 && pr.une_image === 0 && JSON.stringify(pr.appels) === JSON.stringify([['selection_prete', { id: 77, numero: 4, largeur: 1280, hauteur: 400, echelle: 1, kx: 1, ky: 1 }]]), '6 selection_prete { id, numero, largeur, hauteur, echelle, kx, ky } deux images après selection:montrer', JSON.stringify(pr));
+  verifier(pr.tout_de_suite === 0 && pr.une_image === 0 && JSON.stringify(pr.appels) === JSON.stringify([['selection_prete', { id: 77, numero: 4, largeur: 1280, hauteur: 400, echelle: 1, kx: 1, ky: 1, attente: false }]]), '6 selection_prete { id, numero, largeur, hauteur, echelle, kx, ky } deux images après selection:montrer', JSON.stringify(pr));
   // Demandes invalides : ignorées, pas de selection_prete.
   await vider(p);
   const T = { numero: 1, largeur: 1280, hauteur: 400 };
@@ -462,7 +462,7 @@ const L = 1280, H = 400;
   });
   await p.waitForTimeout(100);
   a = await appels(p);
-  verifier(avantPrete === 0 && JSON.stringify(a) === JSON.stringify([['selection_prete', { id: 500, numero: 500, largeur: 1280, hauteur: 400, echelle: 1, kx: 1, ky: 1 }]]), 'D avant selection_prete : aucun glisser', JSON.stringify({ avantPrete, a }));
+  verifier(avantPrete === 0 && JSON.stringify(a) === JSON.stringify([['selection_prete', { id: 500, numero: 500, largeur: 1280, hauteur: 400, echelle: 1, kx: 1, ky: 1, attente: false }]]), 'D avant selection_prete : aucun glisser', JSON.stringify({ avantPrete, a }));
   await p.context().close();
 
   // Taille qui change pendant un glisser : glisser abandonné, page « pas prête » jusqu'à la
@@ -490,11 +490,38 @@ const L = 1280, H = 400;
     await glisser(p, [100, 100], [900, 370]);
     t = await termine(p);
     const attendu = { id, numero: n2, depart: { x: Math.round(100 * e), y: Math.round(100 * e) }, arrivee: { x: Math.round(900 * e), y: Math.round(370 * e) } };
-    const pr = { id, numero: n2, largeur: 1000, hauteur: 380, echelle: e, kx: e, ky: e };
+    const pr = { id, numero: n2, largeur: 1000, hauteur: 380, echelle: e, kx: e, ky: e, attente: false };
     const r0 = apresResize.length === 1 && apresResize[0][0] === 'selection_prete' ? apresResize[0][1] : null;
-    verifier(pendantG.glisse && !apresTaille.glisse && r0 && r0.numero === id && r0.largeur === 1000 && avantCharge.length === 0
+    verifier(pendantG.glisse && !apresTaille.glisse && r0 && r0.numero === id && r0.largeur === 1000 && r0.attente === true && avantCharge.length === 0
       && JSON.stringify(pretes) === JSON.stringify([['selection_prete', pr]]) && t.length === 1 && JSON.stringify(t[0][1]) === JSON.stringify(attendu),
       `taille changée pendant un glisser (k = ${e}) : abandonné, pas prête avant la charge suivante, coins justes ensuite`, JSON.stringify({ apresTaille: apresTaille.glisse, apresResize, avantCharge, pretes, t }));
+    await p.context().close();
+  }
+
+  // Facteur seul changé (125 % → 100 %), rectangle réel inchangé (1600 × 500) : la page,
+  // en attente, reçoit la même charge (même numéro, comme le cœur la renvoie), redevient
+  // prête à k = 1 et les coins sont justes.
+  {
+    p = await page({ echelle: 1.25 });
+    id = await montrer(p);
+    const cdp = await p.context().newCDPSession(p);
+    await cdp.send('Emulation.setDeviceMetricsOverride', { width: 1600, height: 500, deviceScaleFactor: 1, mobile: false });
+    await p.waitForTimeout(150);
+    const enAttente = await appels(p);
+    await glisser(p, [100, 100], [300, 250]);
+    const avantCharge = (await appels(p)).filter(x => x[0] !== 'selection_prete');
+    await vider(p);
+    await p.evaluate(([id]) => __emettre('selection:montrer', { id, numero: id, largeur: 1600, hauteur: 500, ecrans: [{ x: 0, y: 0, largeur: 1600, hauteur: 500 }], cote_min: 3 }), [id]);
+    await p.waitForTimeout(100);
+    const pretes = await appels(p);
+    await vider(p);
+    await glisser(p, [100, 100], [300, 250]);
+    t = await termine(p);
+    const e0 = enAttente.length === 1 ? enAttente[0][1] : null;
+    verifier(e0 && enAttente[0][0] === 'selection_prete' && e0.attente === true && e0.numero === id && avantCharge.length === 0
+      && JSON.stringify(pretes) === JSON.stringify([['selection_prete', { id, numero: id, largeur: 1600, hauteur: 500, echelle: 1, kx: 1, ky: 1, attente: false }]])
+      && t.length === 1 && JSON.stringify(t[0][1]) === JSON.stringify({ id, numero: id, depart: { x: 100, y: 100 }, arrivee: { x: 300, y: 250 } }),
+      'facteur seul changé, fenêtre inchangée : même charge renvoyée, prête de nouveau, coins justes', JSON.stringify({ enAttente, avantCharge, pretes, t }));
     await p.context().close();
   }
 
@@ -515,7 +542,7 @@ const L = 1280, H = 400;
     const pr = a.find(x => x[0] === 'selection_prete');
     const regle = Math.abs(Math.round(L * k) / dpr - L) <= 1 && Math.abs(Math.round(H * k) / dpr - H) <= 1;
     const ke = regle ? [dpr, dpr] : [Math.round(L * k) / L, Math.round(H * k) / H];
-    verifier(pr && JSON.stringify(pr[1]) === JSON.stringify({ id, numero: id, largeur: L, hauteur: H, echelle: dpr, kx: ke[0], ky: ke[1] }) && JSON.stringify(obtenu) === JSON.stringify(attendu),
+    verifier(pr && JSON.stringify(pr[1]) === JSON.stringify({ id, numero: id, largeur: L, hauteur: H, echelle: dpr, kx: ke[0], ky: ke[1], attente: false }) && JSON.stringify(obtenu) === JSON.stringify(attendu),
       `devicePixelRatio ${dpr}, fenêtre réelle ${Math.round(L * k)} × ${Math.round(H * k)} : prête, coins justes à k = ${k}`, JSON.stringify({ pr, attendu, obtenu }));
     await p.context().close();
   }

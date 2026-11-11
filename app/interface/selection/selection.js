@@ -15,13 +15,14 @@
 //   innerWidth/innerHeight sont non nuls et identiques deux images de suite, la page retient
 //   son échelle (kx, ky), règle son dessin, puis envoie `selection_prete` { id, numero,
 //   largeur, hauteur (taille CSS sur laquelle l'échelle est retenue), echelle:
-//   devicePixelRatio, kx, ky }. Avant cela, aucun glisser n'est accepté. Une demande
+//   devicePixelRatio, kx, ky, attente }. Avant cela, aucun glisser n'est accepté. Une demande
 //   invalide est ignorée (console.warn) : le cœur cache la fenêtre au bout de son délai. Une
 //   même demande reçue de nouveau (zone refusée, fenêtre changée, page rechargée) remet la
 //   page au repos et la fait mesurer de nouveau.
 // - `resize` pendant un affichage : le glisser en cours est abandonné, la page redevient
 //   « pas prête » jusqu'à la charge suivante ; elle attend la stabilité et renvoie
-//   `selection_prete` (le cœur relit alors la fenêtre et renvoie la charge).
+//   `selection_prete` avec `attente: true` : le cœur relit la fenêtre et renvoie toujours une
+//   charge (nouvelle si la fenêtre a changé, sinon la même, même numéro).
 // - écoute `selection:cachee` : retour au repos, plus rien n'est envoyé.
 // - `selection_terminee` { id, numero, depart: { x, y }, arrivee: { x, y } } au relâchement :
 //   les deux coins finals (bords, après carré, déplacement et bornage), en pixels réels entiers
@@ -164,7 +165,7 @@ function mesurer() {
     }
     scene_reelle();
     prete = !redimensionnee;
-    appeler("selection_prete", { id, numero, largeur: css.l, hauteur: css.h, echelle: dpr, kx, ky });
+    appeler("selection_prete", { id, numero, largeur: css.l, hauteur: css.h, echelle: dpr, kx, ky, attente: redimensionnee });
   };
   requestAnimationFrame(verifier);
 }

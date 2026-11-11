@@ -57,8 +57,8 @@ use crate::systeme::{self, Rect};
 
 /// Étiquette de la fenêtre (aussi dans `capabilities/selection.json`).
 pub const ETIQUETTE_SELECTION: &str = "selection";
-/// Événement écouté par la page : `{ id, numero, largeur, hauteur, ecrans: [RectFenetre], cote_min }`,
-/// tout en pixels réels relatifs au coin de la fenêtre.
+/// Événement écouté par la page : `{ id, numero, largeur, hauteur, ecrans: [RectFenetre],
+/// cote_min }`, tout en pixels réels relatifs au coin de la fenêtre.
 pub const EVENEMENT_MONTRER: &str = "selection:montrer";
 /// Événement écouté par la page : la fenêtre est cachée, retour au repos.
 pub const EVENEMENT_CACHEE: &str = "selection:cachee";
@@ -365,6 +365,26 @@ struct PagePrete {
     /// Échelle retenue par la page (pixels réels par pixel CSS).
     kx: f64,
     ky: f64,
+    /// Envoyé après un `resize` : la page n'est plus prête et attend une charge.
+    attente: bool,
+}
+
+/// Ce que le cœur fait d'un `selection_prete` (décision pure, `Etat::repondre_prete`).
+#[derive(Debug, Clone, PartialEq)]
+enum ReponsePrete {
+    /// Numéro d'une ancienne charge : rien (la page recevra la suivante).
+    Ancienne,
+    Suite {
+        /// Rectangle réel retenu pour le contrôle.
+        fenetre: Rect,
+        /// Charge à envoyer à la page : nouvelle (fenêtre changée, numéro suivant) ou, pour
+        /// une page en attente, la charge courante avec le même numéro.
+        renvoi: Option<ChargeMontrer>,
+        /// L'ancien rectangle, si la fenêtre a changé.
+        changee: Option<Rect>,
+        /// Faux pour une page en attente : elle renverra `selection_prete` après la charge.
+        controler: bool,
+    },
 }
 
 /// Un affichage en cours, vu du cœur.
@@ -455,6 +475,33 @@ impl Etat {
         self.courant(id)
             .and_then(|a| a.charge.as_ref())
             .is_some_and(|c| c.numero == numero)
+    }
+
+    /// Réponse à un `selection_prete` de `id` portant `numero`, le rectangle réel relu
+    /// étant `relu`. Une page en attente (après un `resize`) reçoit toujours une charge.
+    fn repondre_prete(
+        &mut self,
+        id: u64,
+        numero: u64,
+        attente: bool,
+        relu: Option<Rect>,
+    ) -> Option<ReponsePrete> {
+        let avant = self.courant(id)?.fenetre;
+        if !self.charge_courante(id, numero) {
+            return Some(ReponsePrete::Ancienne);
+        }
+        let nouvelle = relu.filter(|r| !r.est_vide() && *r != avant);
+        let renvoi = match nouvelle {
+            Some(r) => Some(self.nouvelle_charge(id, r)?),
+            None if attente => self.courant(id)?.charge.clone(),
+            None => None,
+        };
+        Some(ReponsePrete::Suite {
+            fenetre: nouvelle.unwrap_or(avant),
+            renvoi,
+            changee: nouvelle.map(|_| avant),
+            controler: !attente,
+        })
     }
 
     fn courant(&self, id: u64) -> Option<&Affichage> {
@@ -926,41 +973,42 @@ impl Interne {
     /// fenêtre (la page, remise au repos, renverra `selection_prete`). `Prete` n'est signalé
     /// qu'une fois.
     fn prete(self: &Arc<Self>, id: u64, page: PagePrete) {
-        let Some((avant, tao, courante)) = ({
-            let etat = self.etat();
-            etat.courant(id).map(|a| {
-                (
-                    a.fenetre,
-                    a.echelle_tao,
-                    etat.charge_courante(id, page.numero),
-                )
-            })
-        }) else {
+        let relu = self.identifiant.and_then(rect_reel);
+        let reponse = self
+            .etat()
+            .repondre_prete(id, page.numero, page.attente, relu);
+        let Some(reponse) = reponse else {
             return;
         };
-        if !courante {
-            log::info!(
-                "selection {id}: prete d'une ancienne charge {} ignoree",
-                page.numero
-            );
-            return;
-        }
-        let nouvelle = self
-            .identifiant
-            .and_then(rect_reel)
-            .filter(|r| !r.est_vide() && *r != avant);
-        let fenetre = nouvelle.unwrap_or(avant);
-        if let Some(r) = nouvelle {
-            let Some(charge) = self.etat().nouvelle_charge(id, r) else {
+        let (fenetre, renvoi, changee, controler) = match reponse {
+            ReponsePrete::Ancienne => {
+                log::info!(
+                    "selection {id}: prete d'une ancienne charge {} ignoree",
+                    page.numero
+                );
                 return;
-            };
+            }
+            ReponsePrete::Suite {
+                fenetre,
+                renvoi,
+                changee,
+                controler,
+            } => (fenetre, renvoi, changee, controler),
+        };
+        if let Some(avant) = changee {
             log::info!(
                 "selection {id}: fenetre changee {} -> {}",
                 texte_rect(avant),
-                texte_rect(r)
+                texte_rect(fenetre)
             );
+        }
+        if let Some(charge) = renvoi {
             self.renvoyer(charge);
         }
+        if !controler {
+            return;
+        }
+        let tao = self.etat().courant(id).map_or(f64::NAN, |a| a.echelle_tao);
         let PagePrete {
             largeur,
             hauteur,
@@ -980,7 +1028,7 @@ impl Interne {
                     (self.rappel)(Signal::Prete { id, duree });
                 }
             }
-            Err(cause) if nouvelle.is_some() => {
+            Err(cause) if changee.is_some() => {
                 log::info!("selection {id}: page a recontroler ({cause})");
             }
             Err(cause) => self.finir(Signal::Impossible { id, cause }),
@@ -1092,7 +1140,8 @@ pub fn selection_chargee(selection: State<'_, Selection>) {
 /// La page est visible et peinte, et sa taille est stable depuis deux images. `numero` :
 /// celui de la charge reçue. `largeur`, `hauteur` : la taille CSS sur laquelle l'échelle a
 /// été retenue ; `kx`, `ky` : l'échelle retenue (`controler_page`) ; `echelle` :
-/// `devicePixelRatio`, seulement écrit au journal.
+/// `devicePixelRatio`, seulement écrit au journal ; `attente` : envoyé après un `resize`, la
+/// page attend une charge (toujours renvoyée, même numéro si la fenêtre n'a pas changé).
 #[tauri::command]
 #[allow(clippy::too_many_arguments)]
 pub fn selection_prete(
@@ -1104,6 +1153,7 @@ pub fn selection_prete(
     echelle: f64,
     kx: f64,
     ky: f64,
+    attente: bool,
 ) {
     selection.interne.prete(
         id,
@@ -1114,6 +1164,7 @@ pub fn selection_prete(
             dpr: echelle,
             kx,
             ky,
+            attente,
         },
     );
 }
@@ -1306,6 +1357,57 @@ mod tests {
         // Bornes de k incluses.
         assert!(controler_page((3200.0, 1000.0), (0.5, 0.5), f).is_ok());
         assert!(controler_page((320.0, 100.0), (5.0, 5.0), f).is_ok());
+    }
+
+    #[test]
+    fn page_en_attente_recoit_toujours_une_charge() {
+        let mut e = Etat::default();
+        let (id, _) = e.commencer(&demande(), None, None, Instant::now());
+        let f = r(0, 0, 1600, 500);
+        let c = e.nouvelle_charge(id, f).expect("charge");
+        // Rectangle inchangé, page en attente : même charge, même numéro ; pas de contrôle.
+        assert_eq!(
+            e.repondre_prete(id, c.numero, true, Some(f)),
+            Some(ReponsePrete::Suite {
+                fenetre: f,
+                renvoi: Some(c.clone()),
+                changee: None,
+                controler: false,
+            })
+        );
+        assert!(e.charge_courante(id, c.numero), "numero inchange");
+        // Rectangle inchangé, page prête : rien à renvoyer, contrôle.
+        assert_eq!(
+            e.repondre_prete(id, c.numero, false, Some(f)),
+            Some(ReponsePrete::Suite {
+                fenetre: f,
+                renvoi: None,
+                changee: None,
+                controler: true,
+            })
+        );
+        // Rectangle illisible : traité comme inchangé.
+        let rep = e.repondre_prete(id, c.numero, true, None);
+        assert!(matches!(rep, Some(ReponsePrete::Suite { renvoi: Some(ref x), .. }) if *x == c));
+        // Rectangle changé : nouvelle charge, numéro suivant, en attente ou non.
+        let g = r(0, 0, 1250, 475);
+        let Some(ReponsePrete::Suite {
+            fenetre,
+            renvoi: Some(c2),
+            changee,
+            controler,
+        }) = e.repondre_prete(id, c.numero, true, Some(g))
+        else {
+            panic!("suite attendue");
+        };
+        assert_eq!((fenetre, changee, controler), (g, Some(f), false));
+        assert!(c2.numero > c.numero && c2.largeur == 1250);
+        // L'ancien numéro est ignoré ; un autre affichage aussi.
+        assert_eq!(
+            e.repondre_prete(id, c.numero, true, Some(g)),
+            Some(ReponsePrete::Ancienne)
+        );
+        assert_eq!(e.repondre_prete(id + 1, c2.numero, true, Some(g)), None);
     }
 
     #[test]
