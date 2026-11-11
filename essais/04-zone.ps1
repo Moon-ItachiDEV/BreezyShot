@@ -5,8 +5,8 @@
 # pendant la sélection (couverture, ordre, premier plan, styles étendus, bandeau caché,
 # pas de focus_perdu parasite en 3 s) ; (3) glisser exact sur les quatre carrés du témoin
 # → presse-papiers et « Récents » identiques pixel par pixel, Repos, premier plan rendu ;
-# (4) Échap puis clic droit annulent ; (5) clic sans glisser et glisser de 2 px : la
-# sélection reste, puis Échap ; (6) second raccourci pendant la sélection ignoré ;
+# (4) Échap puis clic droit annulent ; (5) clic sans glisser et glisser de 1 px (zone 2×2) :
+# la sélection reste, puis Échap ; glisser de 2 px (3×3, COTE_MIN) : zone acceptée ; (6) second raccourci pendant la sélection ignoré ;
 # (7) glisser dans les autres sens : même image ; (9) deux captures rapprochées : le
 # bandeau de la première n'est ni dans l'image ni au-dessus de la sélection ; et, demandé
 # par la relecture de l'étape 5 : F5 et Ctrl+P sans effet, Alt+F4 annule proprement,
@@ -76,6 +76,16 @@ function Echelles-Ecartees([string[]]$Lignes) {
         if (-not $lus -or [math]::Abs($kx - $dpr) -gt 1e-6) { $ecarts.Add($l) }
     }
     return [pscustomobject]@{ Vues = $vues; Ecarts = $ecarts.ToArray() }
+}
+
+# Issue d'Alt+F4 sur la sélection : « fermeture » (retour au Repos), « sans_effet » (la page
+# a avalé la touche : sélection et écran figé toujours là, dans l'ordre), sinon « faux: … ».
+function Issue-AltF4([bool]$Repos, [bool]$SelVisible, [bool]$FigeVisible, [bool]$FigeDessous, [bool]$Vivant) {
+    if (-not $Vivant) { return 'faux: processus mort' }
+    if ($Repos) { return 'fermeture' }
+    if ($SelVisible -and $FigeVisible -and $FigeDessous) { return 'sans_effet' }
+    if ((-not $SelVisible) -and $FigeVisible) { return 'faux: sélection partie, écran figé resté' }
+    return "faux: sélection $SelVisible, écran figé $FigeVisible, figé dessous $FigeDessous"
 }
 
 function Derniere-Ligne([string]$Motif, [string]$Dossier) {
@@ -597,17 +607,26 @@ function Fichiers-Png([string]$Dossier) {
                 }
                 Verifier '(4) Échap passe par l''Échap global' ((Compter-Lignes -Texte 'echap global presse' -Dossier $da) -ge 1) | Out-Null
 
-                # (5) Clic sans glisser, puis glisser de 2 px : la sélection reste ; puis Échap.
+                # (5) Le pixel sous le curseur est inclus aux deux bouts : un clic donne 1×1, un
+                # glisser de 1 px 2×2, tous deux sous COTE_MIN (3) : la sélection reste ; Échap.
                 $reposAvant = Repos-Vus $da
                 $null = Ouvrir-Selection -Dossier $da -Quoi '(5)'
                 [BreezyShotEssai.Zone]::Cliquer($TX + 30, $TY + 30, $false)
                 Start-Sleep -Milliseconds 600
                 Verifier '(5) clic sans glisser : la sélection reste ouverte' ((Visible $sel) -and ((Repos-Vus $da) -eq $reposAvant)) | Out-Null
-                [BreezyShotEssai.Zone]::Glisser($TX + 30, $TY + 30, $TX + 32, $TY + 32)
+                [BreezyShotEssai.Zone]::Glisser($TX + 30, $TY + 30, $TX + 31, $TY + 31)
                 Start-Sleep -Milliseconds 600
-                Verifier '(5) glisser de 2 px : la sélection reste ouverte' ((Visible $sel) -and ((Repos-Vus $da) -eq $reposAvant)) | Out-Null
+                Verifier '(5) glisser de 1 px (2×2) : la sélection reste ouverte' ((Visible $sel) -and ((Repos-Vus $da) -eq $reposAvant)) | Out-Null
                 [BreezyShotEssai.Zone]::Touches($ECHAP)
                 Attendre-Repos -Dossier $da -Quoi '(5) puis Échap' -Fois ($reposAvant + 1) -Sel $sel -Fige $fige
+                # Glisser de 2 px : 3×3 = COTE_MIN, une vraie zone, copiée.
+                $seq5 = [BreezyShotEssai.Zone]::GetClipboardSequenceNumber()
+                $copies5 = Compter-Motif -Motif 'sortie copie faite ' -Dossier $da
+                $null = Capturer -Dossier $da -Quoi '(5) glisser de 2 px' -De @(($TX + 30), ($TY + 30)) -A @(($TX + 32), ($TY + 32))
+                $z5 = Derniere-Ligne -Motif 'zone choisie ' -Dossier $da
+                Verifier '(5) glisser de 2 px : zone 3×3 acceptée' ($z5 -match "zone choisie $($TX + 30),$($TY + 30) 3x3$") $z5 | Out-Null
+                $n5 = Compter-Motif -Motif 'sortie copie faite ' -Dossier $da
+                Verifier '(5) glisser de 2 px : presse-papiers changé, une copie de plus' (([BreezyShotEssai.Zone]::GetClipboardSequenceNumber() -ne $seq5) -and ($n5 -eq $copies5 + 1)) "copies $copies5 → $n5" | Out-Null
 
                 # (6) Second raccourci pendant la sélection : ignoré (une seule ligne Gel).
                 $reposAvant = Repos-Vus $da
@@ -697,16 +716,40 @@ function Fichiers-Png([string]$Dossier) {
                 [BreezyShotEssai.Zone]::Touches($ECHAP)
                 Attendre-Repos -Dossier $da -Quoi '(Ctrl+P) puis Échap' -Fois ($reposAvant + 1) -Sel $sel -Fige $fige
 
-                # Alt+F4 : annulation propre, puis une capture marche.
+                # Alt+F4 : deux issues acceptées. Soit la fenêtre reçoit la fermeture (fin
+                # « annulee fermeture », Repos) ; soit la page avale la touche (son keydown
+                # appelle preventDefault, WebView2 ne la rend pas à la fenêtre) : rien ne se
+                # passe, la sélection reste devant l'écran figé, et Échap ramène au Repos.
+                # Refusé : sélection partie avec l'écran figé resté, processus mort,
+                # « capture impossible », pas de Repos après Échap. Puis une capture marche.
                 $reposAvant = Repos-Vus $da
                 $null = Ouvrir-Selection -Dossier $da -Quoi '(Alt+F4)'
                 # Alt+F4 ne vise que la fenêtre au premier plan : sans la sélection devant,
                 # le geste fermerait autre chose. On ne l'envoie pas, et c'est un échec.
                 $devantAltF4 = [BreezyShotEssai.Zone]::GetForegroundWindow()
                 if (Verifier '(Alt+F4) la sélection a le premier plan avant le geste' ($devantAltF4 -eq $sel) "premier plan $devantAltF4, sélection $sel ; Alt+F4 non envoyé si faux") {
+                    $finsAvant = Compter-Motif -Motif 'selection fin \d+ ' -Dossier $da
                     [BreezyShotEssai.Zone]::Touches([byte[]]@(0x12, 0x73))
-                    Attendre-Repos -Dossier $da -Quoi '(Alt+F4)' -Fois ($reposAvant + 1) -Sel $sel -Fige $fige
-                    Verifier '(Alt+F4) fin « annulee fermeture », aucune erreur affichée' (((Derniere-Ligne -Motif 'selection fin \d+ ' -Dossier $da) -match 'annulee fermeture$') -and ((Compter-Lignes -Texte 'capture impossible' -Dossier $da) -eq 0)) (Derniere-Ligne -Motif 'selection fin \d+ ' -Dossier $da) | Out-Null
+                    $limite = [DateTime]::UtcNow.AddSeconds(3)
+                    while (((Repos-Vus $da) -le $reposAvant) -and ([DateTime]::UtcNow -lt $limite)) { Start-Sleep -Milliseconds 100 }
+                    Start-Sleep -Milliseconds 150
+                    $issue = Issue-AltF4 -Repos ((Repos-Vus $da) -gt $reposAvant) -SelVisible (Visible $sel) -FigeVisible (Visible $fige) `
+                        -FigeDessous ([BreezyShotEssai.Zone]::GetWindow($sel, $GW_HWNDNEXT) -eq $fige) -Vivant (-not $p.HasExited)
+                    $finAltF4 = Derniere-Ligne -Motif 'selection fin \d+ ' -Dossier $da
+                    Write-Host "(Alt+F4) issue : $issue"
+                    if ($issue -eq 'fermeture') {
+                        Verifier '(Alt+F4) fermeture : fin « annulee fermeture », écran figé et sélection cachés' (($finAltF4 -match 'annulee fermeture$') -and (-not (Visible $sel)) -and (-not (Visible $fige))) $finAltF4 | Out-Null
+                    }
+                    else {
+                        Verifier '(Alt+F4) sans effet : sélection visible, écran figé visible juste dessous, processus vivant, aucune fin' (($issue -eq 'sans_effet') -and ((Compter-Motif -Motif 'selection fin \d+ ' -Dossier $da) -eq $finsAvant)) "issue $issue ; dernière fin : $finAltF4" | Out-Null
+                        $echaps = Compter-Lignes -Texte 'echap global presse' -Dossier $da
+                        [BreezyShotEssai.Zone]::Touches($ECHAP)
+                        Attendre-Repos -Dossier $da -Quoi '(Alt+F4) puis Échap' -Fois ($reposAvant + 1) -Sel $sel -Fige $fige
+                        # L'Échap global annule sans ligne « selection fin » (vu en (4)).
+                        $retour = Derniere-Ligne -Motif 'etat \w+ -> Repos' -Dossier $da
+                        Verifier '(Alt+F4) puis Échap : Échap global, Selection -> Repos (SelectionAnnulee)' (((Compter-Lignes -Texte 'echap global presse' -Dossier $da) -eq $echaps + 1) -and ($retour -match 'etat Selection -> Repos \(SelectionAnnulee\)')) $retour | Out-Null
+                    }
+                    Verifier '(Alt+F4) aucune « capture impossible », dernier état Repos' (((Compter-Lignes -Texte 'capture impossible' -Dossier $da) -eq 0) -and ((Derniere-Ligne -Motif 'etat \w+ -> ' -Dossier $da) -match '-> Repos')) (Derniere-Ligne -Motif 'etat \w+ -> ' -Dossier $da) | Out-Null
                     Capturer-Et-Verifier -Dossier $da -Quoi '(Alt+F4) capture suivante' -De $HG -A $BD
                 }
                 else {
