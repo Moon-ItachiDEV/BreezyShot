@@ -110,9 +110,11 @@ function Fermer-Cas($Processus, [string]$Dossier, [string]$Quoi) {
     $null = Attendre-Motif -Motif 'arret propre$' -Dossier $Dossier -DelaiS 3 -Quoi "$Quoi : arrêt" -Fois ($arrets + 1)
     Verifier "(11) $Quoi : --quitter → arret propre" $true | Out-Null
     if ($IsWindows) {
+        # Énumération de TOUTES les fenêtres de haut niveau (EnumWindows) : aucune de classe
+        # BreezyShotEcranFige, aucune qui appartienne encore au PID de l'app.
+        $figees = [BreezyShotEssai.Zone]::FenetresDeClasse('BreezyShotEcranFige')
         $restes = [BreezyShotEssai.Zone]::FenetresDe([int[]]@($Processus.Id), $false)
-        $figee = [BreezyShotEssai.Zone]::FindWindow('BreezyShotEcranFige', $null)
-        Verifier "(11) $Quoi : aucune fenêtre BreezyShot ne reste" (($restes.Length -eq 0) -and ($figee -eq [IntPtr]::Zero)) "fenêtres du processus $($restes.Length), écran figé $figee" | Out-Null
+        Verifier "(11) $Quoi : aucune fenêtre BreezyShot ne reste (toutes les fenêtres énumérées)" (($figees.Length -eq 0) -and ($restes.Length -eq 0)) "écrans figés $($figees.Length), fenêtres du PID $($Processus.Id) : $($restes.Length)" | Out-Null
     }
 }
 
@@ -214,6 +216,18 @@ public static IntPtr[] FenetresDe(int[] pids, bool visibles) {
     }, IntPtr.Zero);
     return liste.ToArray();
 }
+[DllImport("user32.dll", CharSet = CharSet.Unicode)]
+static extern int GetClassName(IntPtr h, System.Text.StringBuilder nom, int taille);
+// Toutes les fenêtres de haut niveau (de tous les processus) de cette classe.
+public static IntPtr[] FenetresDeClasse(string classe) {
+    var liste = new System.Collections.Generic.List<IntPtr>();
+    EnumWindows((h, p) => {
+        var nom = new System.Text.StringBuilder(256);
+        if (GetClassName(h, nom, nom.Capacity) > 0 && nom.ToString() == classe) liste.Add(h);
+        return true;
+    }, IntPtr.Zero);
+    return liste.ToArray();
+}
 // Compare une image (octets BGRA de LockBits, Format32bppArgb) aux quatre carrés
 // attendus (couleurs r,v,b : haut gauche, haut droite, bas gauche, bas droite). Rend
 // « total N » puis les $max premiers écarts « x,y attendu r,v,b obtenu r,v,b ».
@@ -271,6 +285,7 @@ public static string[] Ecarts(byte[] o, int stride, int l, int h, int[] c, int m
                 '-NoProfile', '-File', (Join-Path $PSScriptRoot 'temoin.ps1'),
                 '-X', $TX, '-Y', $TY, '-Cote', $COTE, '-Couleurs', $texteCouleurs, '-Fichier', $f)
             $script:Auxiliaires.Add($aide)
+            $script:ProcTemoin = $aide
             $limite = [DateTime]::UtcNow.AddSeconds(30)
             while (-not (Test-Path -LiteralPath $f)) {
                 if ([DateTime]::UtcNow -ge $limite) { throw "fenêtre témoin : aucun HWND en 30 s" }
@@ -278,6 +293,14 @@ public static string[] Ecarts(byte[] o, int stride, int l, int h, int[] c, int m
             }
             Start-Sleep -Milliseconds 500   # composée à l'écran
             return [IntPtr][long](Get-Content -LiteralPath $f -Raw).Trim()
+        }
+
+        # Au début de chaque cas : le témoin est relancé s'il s'est fermé.
+        function Assurer-Temoin([string]$Quoi) {
+            if ($null -eq $script:ProcTemoin -or $script:ProcTemoin.HasExited) {
+                Write-Host "$Quoi : fenêtre témoin absente, relancée"
+                $script:Temoin = Lancer-Temoin
+            }
         }
 
         function Fermer-Auxiliaires {
@@ -359,7 +382,8 @@ public static string[] Ecarts(byte[] o, int stride, int l, int h, int[] c, int m
                         }
                         return $null
                     })
-                $r = $ps.Invoke()
+                try { $r = $ps.Invoke() }
+                finally { $ps.Dispose() }
                 foreach ($x in $r) {
                     if ($null -ne $x) {
                         $b = if ($x -is [System.Management.Automation.PSObject]) { $x.BaseObject } else { $x }
@@ -414,17 +438,35 @@ public static string[] Ecarts(byte[] o, int stride, int l, int h, int[] c, int m
             return (Attendre-Motif -Motif 'sortie annonce ' -Dossier $Dossier -DelaiS 10 -Quoi "$Quoi : annonce de la sortie" -Fois ($annonces + 1))
         }
 
+        # Une capture qui doit copier : le presse-papiers a changé (numéro de séquence), une
+        # ligne « sortie copie faite » de plus, puis chaque pixel de l'image copiée.
+        function Capturer-Et-Verifier([string]$Dossier, [string]$Quoi, [int[]]$De, [int[]]$A) {
+            $seq = [BreezyShotEssai.Zone]::GetClipboardSequenceNumber()
+            $copies = Compter-Motif -Motif 'sortie copie faite ' -Dossier $Dossier
+            $null = Capturer -Dossier $Dossier -Quoi $Quoi -De $De -A $A
+            Verifier-Copie -Dossier $Dossier -Quoi $Quoi -Seq $seq -Copies $copies
+        }
+
+        function Verifier-Copie([string]$Dossier, [string]$Quoi, [uint32]$Seq, [int]$Copies) {
+            $apres = [BreezyShotEssai.Zone]::GetClipboardSequenceNumber()
+            $n = Compter-Motif -Motif 'sortie copie faite ' -Dossier $Dossier
+            Verifier "$Quoi : presse-papiers changé, une copie de plus" (($apres -ne $Seq) -and ($n -eq $Copies + 1)) "séquence $Seq → $apres, copies $Copies → $n" | Out-Null
+            Verifier-Image "$Quoi : presse-papiers" (Lire-PressePapiers)
+        }
+
         $HG = @($TX, $TY); $BD = @(($TX + $COTE - 1), ($TY + $COTE - 1))
         $BG = @($TX, ($TY + $COTE - 1)); $HD = @(($TX + $COTE - 1), $TY)
 
         try {
-            $temoin = Lancer-Temoin
-            Write-Host "témoin $temoin"
+            $script:ProcTemoin = $null
+            $script:Temoin = Lancer-Temoin
+            Write-Host "témoin $($script:Temoin)"
 
             # ===== Cas A : copie seule ==========================================================
             # Chaque cas est isolé : un échec est noté, l'app est arrêtée, le cas suivant
             # part d'un démarrage neuf.
             try {
+                Assurer-Temoin '(A)'
                 $da = Dossier-Cas 'a'
                 Ecrire-Reglages -Dossier $da -Enregistrer $false -DossierEnregistrement $null
                 $p = Demarrer-Cas -Dossier $da -Quoi '(A)'
@@ -541,8 +583,7 @@ public static string[] Ecarts(byte[] o, int stride, int l, int h, int[] c, int m
 
                 # (7) Glisser de droite à gauche et de bas en haut (et en diagonale inverse).
                 foreach ($sens in @(@('bas droite → haut gauche', $BD, $HG), @('bas gauche → haut droite', $BG, $HD))) {
-                    $null = Capturer -Dossier $da -Quoi "(7) $($sens[0])" -De $sens[1] -A $sens[2]
-                    Verifier-Image "(7) $($sens[0]) : presse-papiers" (Lire-PressePapiers)
+                    Capturer-Et-Verifier -Dossier $da -Quoi "(7) $($sens[0])" -De $sens[1] -A $sens[2]
                 }
 
                 # (9) Deux captures rapprochées : la seconde part pendant le bandeau de la
@@ -553,17 +594,19 @@ public static string[] Ecarts(byte[] o, int stride, int l, int h, int[] c, int m
                 Start-Sleep -Milliseconds 400   # pilule entrée (300 ms), encore là (2,5 s)
                 Verifier '(9) le bandeau de la première est à l''écran' (Visible $bandeau) | Out-Null
                 $annonces = Compter-Motif -Motif 'sortie annonce ' -Dossier $da
+                $seq9 = [BreezyShotEssai.Zone]::GetClipboardSequenceNumber()
+                $copies9 = Compter-Motif -Motif 'sortie copie faite ' -Dossier $da
                 $null = Ouvrir-Selection -Dossier $da -Quoi '(9) seconde'
                 Verifier '(9) pendant la seconde sélection, le bandeau est caché' (-not (Visible $bandeau)) | Out-Null
                 [BreezyShotEssai.Zone]::Glisser($HG[0], $HG[1], $BD[0], $BD[1])
                 $null = Attendre-Motif -Motif 'sortie annonce ' -Dossier $da -DelaiS 10 -Quoi '(9) annonce de la seconde' -Fois ($annonces + 1)
-                Verifier-Image '(9) seconde image, sans le bandeau' (Lire-PressePapiers)
+                Verifier-Copie -Dossier $da -Quoi '(9) seconde image, sans le bandeau' -Seq $seq9 -Copies $copies9
 
                 # Perte de focus : le témoin prend le premier plan.
                 $reposAvant = Repos-Vus $da
                 $null = Ouvrir-Selection -Dossier $da -Quoi '(focus)'
                 [BreezyShotEssai.Zone]::Touches([byte[]]@(0x12))   # Alt : lève le verrou du premier plan
-                $donne = [BreezyShotEssai.Zone]::SetForegroundWindow($temoin)
+                $donne = [BreezyShotEssai.Zone]::SetForegroundWindow($script:Temoin)
                 $null = Attendre-Motif -Motif 'selection fin \d+ annulee focus_perdu$' -Dossier $da -DelaiS 5 -Quoi "(focus) perte de focus (SetForegroundWindow : $donne)"
                 Attendre-Repos -Dossier $da -Quoi '(focus) perdu' -Fois ($reposAvant + 1) -Sel $sel -Fige $fige
 
@@ -602,11 +645,19 @@ public static string[] Ecarts(byte[] o, int stride, int l, int h, int[] c, int m
                 # Alt+F4 : annulation propre, puis une capture marche.
                 $reposAvant = Repos-Vus $da
                 $null = Ouvrir-Selection -Dossier $da -Quoi '(Alt+F4)'
-                [BreezyShotEssai.Zone]::Touches([byte[]]@(0x12, 0x73))
-                Attendre-Repos -Dossier $da -Quoi '(Alt+F4)' -Fois ($reposAvant + 1) -Sel $sel -Fige $fige
-                Verifier '(Alt+F4) fin « annulee », aucune erreur affichée' (((Derniere-Ligne -Motif 'selection fin \d+ ' -Dossier $da) -match 'annulee') -and ((Compter-Lignes -Texte 'capture impossible' -Dossier $da) -eq 0)) (Derniere-Ligne -Motif 'selection fin \d+ ' -Dossier $da) | Out-Null
-                $null = Capturer -Dossier $da -Quoi '(Alt+F4) capture suivante' -De $HG -A $BD
-                Verifier-Image '(Alt+F4) capture suivante : presse-papiers' (Lire-PressePapiers)
+                # Alt+F4 ne vise que la fenêtre au premier plan : sans la sélection devant,
+                # le geste fermerait autre chose. On ne l'envoie pas, et c'est un échec.
+                $devantAltF4 = [BreezyShotEssai.Zone]::GetForegroundWindow()
+                if (Verifier '(Alt+F4) la sélection a le premier plan avant le geste' ($devantAltF4 -eq $sel) "premier plan $devantAltF4, sélection $sel ; Alt+F4 non envoyé si faux") {
+                    [BreezyShotEssai.Zone]::Touches([byte[]]@(0x12, 0x73))
+                    Attendre-Repos -Dossier $da -Quoi '(Alt+F4)' -Fois ($reposAvant + 1) -Sel $sel -Fige $fige
+                    Verifier '(Alt+F4) fin « annulee fermeture », aucune erreur affichée' (((Derniere-Ligne -Motif 'selection fin \d+ ' -Dossier $da) -match 'annulee') -and ((Compter-Lignes -Texte 'capture impossible' -Dossier $da) -eq 0)) (Derniere-Ligne -Motif 'selection fin \d+ ' -Dossier $da) | Out-Null
+                    Capturer-Et-Verifier -Dossier $da -Quoi '(Alt+F4) capture suivante' -De $HG -A $BD
+                }
+                else {
+                    [BreezyShotEssai.Zone]::Touches($ECHAP)
+                    Attendre-Repos -Dossier $da -Quoi '(Alt+F4) annulé par Échap' -Fois ($reposAvant + 1) -Sel $sel -Fige $fige
+                }
 
                 Verifier '(A) aucune garde déclenchée, aucune erreur de capture' (((Compter-Lignes -Texte 'arret force' -Dossier $da) -eq 0) -and ((Compter-Lignes -Texte 'capture impossible' -Dossier $da) -eq 0)) | Out-Null
                 Fermer-Cas $p $da '(A)'
@@ -615,6 +666,7 @@ public static string[] Ecarts(byte[] o, int stride, int l, int h, int[] c, int m
 
             # ===== Cas B : (8) enregistrement après capture =====================================
             try {
+                Assurer-Temoin '(8)'
                 $dbb = Dossier-Cas 'b'
                 Ecrire-Reglages -Dossier $dbb -Enregistrer $true -DossierEnregistrement $null
                 $p = Demarrer-Cas -Dossier $dbb -Quoi '(8)'
@@ -631,6 +683,7 @@ public static string[] Ecarts(byte[] o, int stride, int l, int h, int[] c, int m
 
             # ===== Cas C : (10) dossier impossible (un fichier porte son nom) ===================
             try {
+                Assurer-Temoin '(10)'
                 $dc = Dossier-Cas 'c'
                 $bloque = Join-Path $dc 'bloque'
                 Set-Content -LiteralPath $bloque -Value 'pas un dossier' -Encoding utf8
