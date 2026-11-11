@@ -1,0 +1,388 @@
+//! Le Gel : photographier tout le bureau et l'afficher figé dans une fenêtre native.
+//!
+//! Façade commune : `windows.rs` la réalise (GDI, écrans, fenêtres visibles, fenêtre native
+//! de l'écran figé), `autre.rs` donne des réponses neutres ailleurs.
+//! Les pixels restent dans une image du système ; ils ne sortent d'ici que par
+//! `ImageFigee::lire`, au format `Pixels`, et seulement pour la zone demandée.
+//!
+//! Tout se compte en pixels réels, dans le repère du bureau virtuel de Windows (l'écran
+//! principal commence en (0, 0) ; un écran à sa gauche a des `x` négatifs).
+
+#[cfg(windows)]
+#[path = "windows.rs"]
+mod plateforme;
+
+#[cfg(not(windows))]
+#[path = "autre.rs"]
+mod plateforme;
+
+/// Rectangle en pixels réels. `x`, `y` : coin haut gauche ; le bord droit et le bord bas
+/// sont exclus (`x + largeur` est le premier pixel dehors).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct Rect {
+    pub x: i32,
+    pub y: i32,
+    pub largeur: i32,
+    pub hauteur: i32,
+}
+
+/// Borne un calcul fait en `i64` dans les `i32`.
+fn borner(v: i64) -> i32 {
+    v.clamp(i32::MIN as i64, i32::MAX as i64) as i32
+}
+
+impl Rect {
+    /// Rectangle à partir de ses bords gauche, haut, droit (exclu) et bas (exclu).
+    /// Des bords inversés donnent un rectangle vide.
+    pub fn depuis_bords(gauche: i32, haut: i32, droite: i32, bas: i32) -> Rect {
+        Rect {
+            x: gauche,
+            y: haut,
+            largeur: borner((droite as i64 - gauche as i64).max(0)),
+            hauteur: borner((bas as i64 - haut as i64).max(0)),
+        }
+    }
+
+    /// Bord droit (exclu), calculé sans débordement.
+    pub fn droite(&self) -> i64 {
+        self.x as i64 + self.largeur as i64
+    }
+
+    /// Bord bas (exclu), calculé sans débordement.
+    pub fn bas(&self) -> i64 {
+        self.y as i64 + self.hauteur as i64
+    }
+
+    /// Vrai si le rectangle ne contient aucun pixel.
+    pub fn est_vide(&self) -> bool {
+        self.largeur <= 0 || self.hauteur <= 0
+    }
+
+    /// Vrai si le pixel `(x, y)` est dans le rectangle.
+    pub fn contient(&self, point: (i32, i32)) -> bool {
+        let (px, py) = (point.0 as i64, point.1 as i64);
+        !self.est_vide()
+            && px >= self.x as i64
+            && px < self.droite()
+            && py >= self.y as i64
+            && py < self.bas()
+    }
+
+    /// Vrai si `autre` est entièrement dans ce rectangle (un rectangle vide n'est dans rien).
+    pub fn englobe(&self, autre: Rect) -> bool {
+        !autre.est_vide()
+            && autre.x >= self.x
+            && autre.y >= self.y
+            && autre.droite() <= self.droite()
+            && autre.bas() <= self.bas()
+    }
+
+    /// Partie commune des deux rectangles ; `None` si elle est vide.
+    pub fn intersection(&self, autre: Rect) -> Option<Rect> {
+        if self.est_vide() || autre.est_vide() {
+            return None;
+        }
+        let gauche = self.x.max(autre.x);
+        let haut = self.y.max(autre.y);
+        let droite = self.droite().min(autre.droite());
+        let bas = self.bas().min(autre.bas());
+        if droite <= gauche as i64 || bas <= haut as i64 {
+            return None;
+        }
+        Some(Rect {
+            x: gauche,
+            y: haut,
+            largeur: borner(droite - gauche as i64),
+            hauteur: borner(bas - haut as i64),
+        })
+    }
+}
+
+/// Un écran, tel que le système le décrit.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct EcranInfo {
+    /// Tout l'écran, en pixels réels du bureau virtuel.
+    pub rect: Rect,
+    /// L'écran sans la barre des tâches.
+    pub zone_utile: Rect,
+    /// Échelle d'affichage (1.0 = 100 %, 1.5 = 150 %).
+    pub echelle: f64,
+    /// L'écran principal.
+    pub principal: bool,
+}
+
+/// Une fenêtre visible d'une autre app. La liste va du premier plan vers le fond.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FenetreInfo {
+    /// Le vrai bord de la fenêtre, sans l'ombre, en pixels réels.
+    pub rect: Rect,
+    pub titre: String,
+}
+
+/// Pixels lus dans l'image figée : 4 octets par pixel (rouge, vert, bleu, alpha = 255),
+/// ligne par ligne de haut en bas.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Pixels {
+    pub largeur: u32,
+    pub hauteur: u32,
+    pub rgba: Vec<u8>,
+}
+
+/// La photo du bureau, gardée en mémoire par le système (opaque).
+///
+/// Une seule image existe à la fois : une nouvelle photo remplace la précédente (l'image
+/// est réutilisée tant que la taille du bureau ne change pas). Une `ImageFigee` dépassée
+/// par une photo plus récente refuse de se lire ou de se montrer, plutôt que de rendre
+/// les pixels d'une autre photo.
+#[derive(Debug)]
+pub struct ImageFigee {
+    interne: plateforme::Image,
+}
+
+impl ImageFigee {
+    /// Le bureau virtuel photographié.
+    pub fn rect(&self) -> Rect {
+        plateforme::rect_image(&self.interne)
+    }
+
+    /// Lit une zone (en coordonnées du bureau). La zone est d'abord coupée au bureau ;
+    /// une zone vide ou entièrement dehors est une erreur. Utilisable depuis n'importe
+    /// quel fil.
+    pub fn lire(&self, zone: Rect) -> Result<Pixels, String> {
+        plateforme::lire(&self.interne, zone)
+    }
+}
+
+/// Vrai si le Gel existe sur ce système.
+pub fn disponible() -> bool {
+    plateforme::DISPONIBLE
+}
+
+/// Photographie tout le bureau virtuel (tous les écrans d'un coup). Utilisable depuis
+/// n'importe quel fil. Hors Windows : erreur « non disponible sur ce système ».
+pub fn figer_bureau() -> Result<ImageFigee, String> {
+    plateforme::figer_bureau().map(|interne| ImageFigee { interne })
+}
+
+/// Rend la mémoire de l'image du bureau (elle reste allouée entre deux captures pour la
+/// vitesse). À appeler écran figé caché. Utilisable depuis n'importe quel fil.
+pub fn liberer_image() {
+    plateforme::liberer_image()
+}
+
+/// Les écrans, triés de gauche à droite puis de haut en bas. N'importe quel fil.
+pub fn ecrans() -> Vec<EcranInfo> {
+    let mut liste = plateforme::ecrans();
+    trier_ecrans(&mut liste);
+    liste
+}
+
+/// Les fenêtres visibles des autres apps, du premier plan vers le fond. N'importe quel fil.
+pub fn fenetres_visibles() -> Vec<FenetreInfo> {
+    plateforme::fenetres_visibles()
+}
+
+/// Crée la fenêtre native de l'écran figé, cachée. À appeler une fois, sur le fil
+/// principal (celui de la boucle d'événements, qui distribuera ses messages). Un second
+/// appel sur le même fil ne fait rien.
+pub fn preparer_ecran_fige() -> Result<(), String> {
+    plateforme::preparer_ecran_fige()
+}
+
+/// Montre l'écran figé par-dessus tout le bureau, peint tout de suite, sans prendre le
+/// focus. Fil principal seulement (celui de `preparer_ecran_fige`), sinon erreur.
+pub fn montrer_ecran_fige(image: &ImageFigee) -> Result<(), String> {
+    plateforme::montrer_ecran_fige(&image.interne)
+}
+
+/// Cache l'écran figé. Sûr à tout moment et depuis n'importe quel fil : hors du fil
+/// principal, la demande est postée sans attendre.
+pub fn cacher_ecran_fige() {
+    plateforme::cacher_ecran_fige()
+}
+
+/// Détruit la fenêtre de l'écran figé (arrêt de l'app). N'importe quel fil : hors du fil
+/// principal, la fermeture est postée.
+pub fn detruire_ecran_fige() {
+    plateforme::detruire_ecran_fige()
+}
+
+/// Poignée système de la fenêtre de l'écran figé, pour poser la page de sélection juste
+/// au-dessus. `None` tant qu'elle n'est pas créée. N'importe quel fil.
+pub fn poignee_ecran_fige() -> Option<isize> {
+    plateforme::poignee_ecran_fige()
+}
+
+/// Ordre des écrans : de gauche à droite, puis de haut en bas.
+pub fn trier_ecrans(ecrans: &mut [EcranInfo]) {
+    ecrans.sort_by_key(|e| (e.rect.x, e.rect.y));
+}
+
+/// Échelle d'un écran à partir de son nombre de points par pouce (96 = 100 %).
+/// Une valeur nulle (inconnue) donne 1.0.
+pub fn echelle_depuis_dpi(dpi: u32) -> f64 {
+    if dpi == 0 {
+        1.0
+    } else {
+        dpi as f64 / 96.0
+    }
+}
+
+/// Ce que le système dit d'une fenêtre, pour décider si on la garde.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct EtatFenetre {
+    pub visible: bool,
+    pub reduite: bool,
+    /// Masquée par Windows (`DWMWA_CLOAKED`) : autre bureau, app suspendue…
+    pub masquee: bool,
+    pub a_un_titre: bool,
+    pub de_breezyshot: bool,
+}
+
+/// Règle du mode « fenêtre » : visible, non réduite, non masquée, avec un titre ou une
+/// taille non nulle, et pas à BreezyShot.
+pub fn garder_fenetre(etat: EtatFenetre, rect: Rect) -> bool {
+    etat.visible
+        && !etat.reduite
+        && !etat.masquee
+        && !etat.de_breezyshot
+        && (etat.a_un_titre || !rect.est_vide())
+}
+
+/// Convertit sur place des pixels BGRA (ordre de Windows) en RGBA, alpha forcé à 255
+/// (GDI le laisse à 0). Les octets qui ne forment pas un pixel entier restent tels quels.
+pub fn bgra_en_rgba(tampon: &mut [u8]) {
+    for px in tampon.chunks_exact_mut(4) {
+        px.swap(0, 2);
+        px[3] = 255;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn r(x: i32, y: i32, largeur: i32, hauteur: i32) -> Rect {
+        Rect {
+            x,
+            y,
+            largeur,
+            hauteur,
+        }
+    }
+
+    #[test]
+    fn intersection_et_bords() {
+        let a = r(-1920, 0, 1920, 1080);
+        let b = r(-100, 500, 300, 300);
+        assert_eq!(a.intersection(b), Some(r(-100, 500, 100, 300)));
+        assert_eq!(
+            a.intersection(r(0, 0, 10, 10)),
+            None,
+            "bords qui se touchent"
+        );
+        assert_eq!(a.intersection(r(0, 0, 0, 0)), None);
+        assert!(a.contient((-1920, 0)));
+        assert!(!a.contient((0, 0)));
+        assert!(a.englobe(r(-1920, 0, 1920, 1080)));
+        assert!(!a.englobe(r(-1920, 0, 1921, 1080)));
+        assert_eq!(Rect::depuis_bords(10, 10, 5, 20), r(10, 10, 0, 10));
+    }
+
+    #[test]
+    fn pas_de_debordement() {
+        let grand = r(i32::MAX - 1, i32::MAX - 1, i32::MAX, i32::MAX);
+        assert!(grand.contient((i32::MAX, i32::MAX)));
+        let i = grand.intersection(r(0, 0, i32::MAX, i32::MAX));
+        assert_eq!(i, Some(r(i32::MAX - 1, i32::MAX - 1, 1, 1)));
+        assert_eq!(
+            Rect::depuis_bords(i32::MIN, 0, i32::MAX, 1).largeur,
+            i32::MAX
+        );
+    }
+
+    #[test]
+    fn conversion_bgra_rgba() {
+        // Deux pixels : bleu pur puis (b=1, v=2, r=3), alpha à 0 comme le laisse GDI,
+        // et deux octets en trop.
+        let mut t = vec![255, 0, 0, 0, 1, 2, 3, 0, 9, 9];
+        bgra_en_rgba(&mut t);
+        assert_eq!(t, vec![0, 0, 255, 255, 3, 2, 1, 255, 9, 9]);
+    }
+
+    #[test]
+    fn ecrans_tries() {
+        let e = |x, y| EcranInfo {
+            rect: r(x, y, 100, 100),
+            zone_utile: r(x, y, 100, 90),
+            echelle: 1.0,
+            principal: x == 0 && y == 0,
+        };
+        let mut liste = vec![e(1920, 0), e(0, 0), e(-1280, 200), e(0, -1080)];
+        trier_ecrans(&mut liste);
+        let ordre: Vec<(i32, i32)> = liste.iter().map(|e| (e.rect.x, e.rect.y)).collect();
+        assert_eq!(ordre, vec![(-1280, 200), (0, -1080), (0, 0), (1920, 0)]);
+    }
+
+    #[test]
+    fn echelle() {
+        assert_eq!(echelle_depuis_dpi(96), 1.0);
+        assert_eq!(echelle_depuis_dpi(144), 1.5);
+        assert_eq!(echelle_depuis_dpi(0), 1.0);
+    }
+
+    #[test]
+    fn regle_des_fenetres() {
+        let ok = EtatFenetre {
+            visible: true,
+            reduite: false,
+            masquee: false,
+            a_un_titre: true,
+            de_breezyshot: false,
+        };
+        let taille = r(0, 0, 10, 10);
+        assert!(garder_fenetre(ok, taille));
+        assert!(garder_fenetre(
+            EtatFenetre {
+                a_un_titre: false,
+                ..ok
+            },
+            taille
+        ));
+        assert!(!garder_fenetre(
+            EtatFenetre {
+                a_un_titre: false,
+                ..ok
+            },
+            r(0, 0, 0, 10)
+        ));
+        assert!(!garder_fenetre(
+            EtatFenetre {
+                visible: false,
+                ..ok
+            },
+            taille
+        ));
+        assert!(!garder_fenetre(
+            EtatFenetre {
+                reduite: true,
+                ..ok
+            },
+            taille
+        ));
+        assert!(!garder_fenetre(
+            EtatFenetre {
+                masquee: true,
+                ..ok
+            },
+            taille
+        ));
+        assert!(!garder_fenetre(
+            EtatFenetre {
+                de_breezyshot: true,
+                ..ok
+            },
+            taille
+        ));
+    }
+}

@@ -9,6 +9,9 @@
 
 use std::path::{Path, PathBuf};
 
+pub mod gel;
+pub use gel::Rect;
+
 #[cfg(windows)]
 #[path = "windows.rs"]
 mod plateforme;
