@@ -9,6 +9,7 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
+use std::time::{Duration, Instant};
 
 use log::{Level, LevelFilter, Log, Metadata, Record};
 
@@ -17,6 +18,9 @@ pub const NOM_FICHIER: &str = "breezyshot.log";
 pub const NOM_SECOURS: &str = "breezyshot-secours.log";
 pub const TAILLE_MAX: u64 = 1024 * 1024;
 pub const NOMBRE_FICHIERS: usize = 5;
+/// Après une rotation impossible (fichier tenu par un autre programme), on attend avant de
+/// retenter, pour ne pas essayer à chaque ligne.
+pub const ATTENTE_ROTATION: Duration = Duration::from_secs(30);
 
 /// Nom de la crate : ses lignes jusqu'au niveau Info ; les autres crates, Warn seulement.
 const CRATE: &str = "breezyshot";
@@ -24,6 +28,8 @@ const CRATE: &str = "breezyshot";
 struct Sortie {
     fichier: Option<File>,
     taille: u64,
+    /// Pas de nouvelle tentative de rotation avant cet instant.
+    prochaine_rotation: Option<Instant>,
 }
 
 struct Journal {
@@ -58,6 +64,7 @@ fn installer_nomme(dossier: &Path, nom: &'static str) -> Result<PathBuf, String>
         sortie: Mutex::new(Sortie {
             fichier: Some(fichier),
             taille,
+            prochaine_rotation: None,
         }),
     };
     log::set_boxed_logger(Box::new(journal)).map_err(|e| format!("journal deja installe: {e}"))?;
@@ -97,15 +104,29 @@ pub fn chemin_numero(dossier: &Path, nom: &str, n: usize) -> PathBuf {
 }
 
 /// Décale les fichiers : le plus ancien disparaît, le courant devient `.1`.
-pub fn tourner(dossier: &Path, nom: &str) {
+/// Le courant est d'abord renommé vers un nom d'attente : si ce renommage échoue (fichier
+/// tenu par un autre programme), rien n'est décalé et la fonction rend `false`.
+pub fn tourner(dossier: &Path, nom: &str) -> bool {
+    let courant = chemin_numero(dossier, nom, 0);
+    let attente = dossier.join(format!("{nom}.attente"));
+    if fs::rename(&courant, &attente).is_err() {
+        return false;
+    }
     let dernier = NOMBRE_FICHIERS - 1;
     let _ = fs::remove_file(chemin_numero(dossier, nom, dernier));
-    for n in (0..dernier).rev() {
+    for n in (1..dernier).rev() {
         let de = chemin_numero(dossier, nom, n);
         if de.exists() {
             let _ = fs::rename(&de, chemin_numero(dossier, nom, n + 1));
         }
     }
+    let _ = fs::rename(&attente, chemin_numero(dossier, nom, 1));
+    true
+}
+
+/// Peut-on tenter une rotation maintenant ?
+pub fn peut_tenter(maintenant: Instant, prochaine: Option<Instant>) -> bool {
+    prochaine.is_none_or(|p| maintenant >= p)
 }
 
 /// Faut-il tourner avant d'écrire `ajout` octets dans un fichier de `taille` octets ?
@@ -162,9 +183,13 @@ impl Log for Journal {
         let Ok(mut sortie) = self.sortie.lock() else {
             return;
         };
-        if doit_tourner(sortie.taille, ligne.len() as u64) {
+        let maintenant = Instant::now();
+        if doit_tourner(sortie.taille, ligne.len() as u64)
+            && peut_tenter(maintenant, sortie.prochaine_rotation)
+        {
             sortie.fichier = None;
-            tourner(&self.dossier, self.nom);
+            let tourne = tourner(&self.dossier, self.nom);
+            sortie.prochaine_rotation = (!tourne).then(|| maintenant + ATTENTE_ROTATION);
             match ouvrir(&self.dossier, self.nom) {
                 Ok((f, t)) => {
                     sortie.fichier = Some(f);
@@ -245,7 +270,7 @@ mod tests {
         let d = dossier_vide("rotation");
         for tour in 0..7 {
             fs::write(chemin_numero(&d, NOM_FICHIER, 0), format!("tour {tour}")).unwrap();
-            tourner(&d, NOM_FICHIER);
+            assert!(tourner(&d, NOM_FICHIER));
         }
         fs::write(chemin_numero(&d, NOM_FICHIER, 0), "courant").unwrap();
         let mut noms: Vec<String> = fs::read_dir(&d)
@@ -275,6 +300,38 @@ mod tests {
     }
 
     #[test]
+    fn rotation_impossible_ne_decale_rien() {
+        let d = dossier_vide("rotation-impossible");
+        fs::write(chemin_numero(&d, NOM_FICHIER, 0), "courant").unwrap();
+        fs::write(chemin_numero(&d, NOM_FICHIER, 1), "ancien").unwrap();
+        // Un dossier non vide au nom d'attente empêche le renommage du courant.
+        let attente = d.join(format!("{NOM_FICHIER}.attente"));
+        fs::create_dir_all(attente.join("bloque")).unwrap();
+        assert!(!tourner(&d, NOM_FICHIER));
+        assert_eq!(
+            fs::read_to_string(chemin_numero(&d, NOM_FICHIER, 0)).unwrap(),
+            "courant"
+        );
+        assert_eq!(
+            fs::read_to_string(chemin_numero(&d, NOM_FICHIER, 1)).unwrap(),
+            "ancien"
+        );
+        assert!(!chemin_numero(&d, NOM_FICHIER, 2).exists());
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn nouvelle_tentative_au_plus_toutes_les_30_s() {
+        let t = Instant::now();
+        assert!(peut_tenter(t, None));
+        assert!(!peut_tenter(t, Some(t + ATTENTE_ROTATION)));
+        assert!(peut_tenter(
+            t + ATTENTE_ROTATION,
+            Some(t + ATTENTE_ROTATION)
+        ));
+    }
+
+    #[test]
     fn ecriture_tourne_au_dela_d_un_mo() {
         let d = dossier_vide("ecriture");
         let (f, t) = ouvrir(&d, NOM_FICHIER).unwrap();
@@ -284,6 +341,7 @@ mod tests {
             sortie: Mutex::new(Sortie {
                 fichier: Some(f),
                 taille: t,
+                prochaine_rotation: None,
             }),
         };
         let long = "x".repeat(1000);
