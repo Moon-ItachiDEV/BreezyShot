@@ -158,8 +158,8 @@ pub fn decider_annonce(derniere: Option<&Situation>, bilan: &Bilan) -> Decision 
 
 #[cfg(test)]
 mod tests {
-    use super::super::choix::choisir;
     use super::*;
+    use crate::raccourcis::choisir;
     use std::collections::BTreeMap;
 
     fn table(lignes: &[(&str, &[&str])]) -> BTreeMap<String, Vec<String>> {

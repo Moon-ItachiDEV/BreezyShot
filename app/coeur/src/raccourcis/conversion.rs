@@ -124,8 +124,8 @@ pub fn vers_systeme(raccourci: &Raccourci) -> Option<Shortcut> {
 
 #[cfg(test)]
 mod tests {
-    use super::super::notation::{analyser, Modificateurs};
     use super::*;
+    use crate::raccourcis::{analyser, Modificateurs};
 
     fn conv(t: &str) -> Shortcut {
         vers_systeme(&analyser(t).unwrap()).unwrap()
