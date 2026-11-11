@@ -10,9 +10,12 @@
 # (7) glisser dans les autres sens : même image ; (9) deux captures rapprochées : le
 # bandeau de la première n'est ni dans l'image ni au-dessus de la sélection ; et, demandé
 # par la relecture de l'étape 5 : F5 et Ctrl+P sans effet, Alt+F4 annule proprement,
-# perte de focus annule, trois captures sans fuite de fenêtres ni de fils.
+# perte de focus annule, trois captures sans fuite de fenêtres ni de fils ; un glisser qui
+# finit sur le dernier pixel du bureau garde la dernière colonne et la dernière ligne.
 # Cas B : (8) enregistrement après capture. Cas C : (10) dossier impossible.
 # (11) À chaque fin : --quitter → arret propre, aucune fenêtre BreezyShot ne reste.
+# Sur tout l'essai : aucune fin « muette » ni « impossible », et chaque « chrono selection
+# prete » a son échelle égale au page-dpr.
 #
 # Ce que la machine GitHub ne peut pas vérifier : plusieurs écrans, et des écrans
 # d'échelles différentes (un seul écran virtuel à 100 %) ; une application tierce figée
@@ -46,6 +49,33 @@ function Dossier-Cas([string]$Nom) {
 
 function Lignes-Journal([string]$Dossier) {
     return @((Lire-Journal -Dossier $Dossier) -split "`n" | ForEach-Object { $_.TrimEnd("`r") } | Where-Object { $_ -ne '' })
+}
+
+# « zone choisie x,y LxH » → { X, Y, L, H } ; $null si la ligne est illisible.
+function Lire-Zone([string]$Ligne) {
+    if ($Ligne -notmatch 'zone choisie (-?\d+),(-?\d+) (\d+)x(\d+)') { return $null }
+    return [pscustomobject]@{ X = [int]$Matches[1]; Y = [int]$Matches[2]; L = [int]$Matches[3]; H = [int]$Matches[4] }
+}
+
+# Fins de sélection « muette » ou « impossible … » parmi des lignes de journal.
+function Fins-Fautives([string[]]$Lignes) {
+    return @($Lignes | Where-Object { $_ -match 'selection fin \d+ (muette|impossible)' })
+}
+
+# Lignes « chrono selection prete … echelle kx page-dpr d » où kx ≠ d (ou illisibles).
+function Echelles-Ecartees([string[]]$Lignes) {
+    $ecarts = [System.Collections.Generic.List[string]]::new()
+    $vues = 0
+    foreach ($l in $Lignes) {
+        if ($l -notmatch 'chrono selection prete ') { continue }
+        $vues++
+        if ($l -notmatch ' echelle (\S+) page-dpr (\S+)') { $ecarts.Add($l); continue }
+        $kx = 0.0; $dpr = 0.0
+        $lus = [double]::TryParse($Matches[1], [System.Globalization.NumberStyles]::Float, [cultureinfo]::InvariantCulture, [ref]$kx) -and
+            [double]::TryParse($Matches[2], [System.Globalization.NumberStyles]::Float, [cultureinfo]::InvariantCulture, [ref]$dpr)
+        if (-not $lus -or [math]::Abs($kx - $dpr) -gt 1e-6) { $ecarts.Add($l) }
+    }
+    return [pscustomobject]@{ Vues = $vues; Ecarts = $ecarts.ToArray() }
 }
 
 function Derniere-Ligne([string]$Motif, [string]$Dossier) {
@@ -153,8 +183,6 @@ public static extern bool IsWindowVisible(IntPtr h);
 public static extern IntPtr GetWindowLongPtr(IntPtr h, int index);
 [DllImport("user32.dll")]
 public static extern IntPtr GetWindow(IntPtr h, uint cmd);
-[DllImport("user32.dll", CharSet = CharSet.Unicode)]
-public static extern IntPtr FindWindow(string classe, string titre);
 [DllImport("user32.dll")]
 public static extern int GetSystemMetrics(int index);
 [DllImport("user32.dll")]
@@ -386,7 +414,9 @@ public static string[] Ecarts(byte[] o, int stride, int l, int h, int[] c, int m
                 finally { $ps.Dispose() }
                 foreach ($x in $r) {
                     if ($null -ne $x) {
-                        $b = if ($x -is [System.Management.Automation.PSObject]) { $x.BaseObject } else { $x }
+                        # `$x.BaseObject` chercherait une propriété de l'objet enveloppé (et
+                        # lève sous StrictMode) : l'objet de base est `$x.psobject.BaseObject`.
+                        $b = $x.psobject.BaseObject
                         if ($b -is [System.Drawing.Bitmap]) { return $b }
                     }
                 }
@@ -395,7 +425,9 @@ public static string[] Ecarts(byte[] o, int stride, int l, int h, int[] c, int m
             finally { $rs.Dispose() }
         }
 
-        function Fichiers-Png([string]$Dossier) {
+        # Une fonction rend ses éléments un à un : un seul devient un scalaire, aucun devient rien,
+# et sous StrictMode `.Count` lève sur les deux. Chaque appel est donc entouré de @().
+function Fichiers-Png([string]$Dossier) {
             if (-not (Test-Path -LiteralPath $Dossier)) { return @() }
             return @(Get-ChildItem -LiteralPath $Dossier -File -Filter '*.png' | Sort-Object LastWriteTimeUtc)
         }
@@ -403,8 +435,12 @@ public static string[] Ecarts(byte[] o, int stride, int l, int h, int[] c, int m
         function Lire-Png([string]$Chemin) {
             $octets = [System.IO.File]::ReadAllBytes($Chemin)
             $flux = [System.IO.MemoryStream]::new($octets)
-            $img = [System.Drawing.Bitmap]::new($flux)
-            return [System.Drawing.Bitmap]::new($img)
+            try {
+                $img = [System.Drawing.Bitmap]::new($flux)
+                try { return [System.Drawing.Bitmap]::new($img) }
+                finally { $img.Dispose() }
+            }
+            finally { $flux.Dispose() }
         }
 
         # Lance une capture et attend la sélection prête. Rend { Id, Sel, Fige }.
@@ -474,8 +510,11 @@ public static string[] Ecarts(byte[] o, int stride, int l, int h, int[] c, int m
                 $sel = Hwnd-Journal 'selection fenetre' $da 'HWND de la sélection'
                 $fige = Hwnd-Journal 'ecran fige fenetre' $da 'HWND de l''écran figé'
                 $bandeau = Hwnd-Journal 'bandeau fenetre' $da 'HWND du bandeau'
-                $parClasse = [BreezyShotEssai.Zone]::FindWindow('BreezyShotEcranFige', $null)
-                Verifier '(2) écran figé : classe BreezyShotEcranFige, même HWND que le journal' ($parClasse -eq $fige) "classe $parClasse, journal $fige" | Out-Null
+                # Par énumération : `FindWindow(classe, $null)` reçoit "" pour le titre (un
+                # $null passé à un paramètre string devient une chaîne vide) et cherche alors
+                # une fenêtre sans titre.
+                $parClasse = @([BreezyShotEssai.Zone]::FenetresDeClasse('BreezyShotEcranFige'))
+                Verifier '(2) écran figé : classe BreezyShotEcranFige, même HWND que le journal' (($parClasse.Count -eq 1) -and ($parClasse[0] -eq $fige)) "classe $($parClasse -join ', '), journal $fige" | Out-Null
                 Verifier '(2) au repos : écran figé et sélection cachés' ((-not (Visible $sel)) -and (-not (Visible $fige))) | Out-Null
                 $recents = Join-Path $da 'local/Recents'
                 $avantPremierPlan = [BreezyShotEssai.Zone]::GetForegroundWindow()
@@ -531,7 +570,7 @@ public static string[] Ecarts(byte[] o, int stride, int l, int h, int[] c, int m
                 Verifier '(3) echap global libere' ((Compter-Lignes -Texte 'echap global libere' -Dossier $da) -ge 1) | Out-Null
                 Verifier '(3) le presse-papiers a changé' ([BreezyShotEssai.Zone]::GetClipboardSequenceNumber() -ne $seqAvant) | Out-Null
                 Verifier-Image '(3) presse-papiers' (Lire-PressePapiers)
-                $pngs = Fichiers-Png $recents
+                $pngs = @(Fichiers-Png $recents)
                 Verifier '(3) « Récents » contient un PNG' ($pngs.Count -eq 1) "$($pngs.Count) fichier(s)" | Out-Null
                 if ($pngs.Count -ge 1) { Verifier-Image '(3) PNG de « Récents »' (Lire-Png $pngs[-1].FullName) }
                 $apresPremierPlan = [BreezyShotEssai.Zone]::GetForegroundWindow()
@@ -547,14 +586,14 @@ public static string[] Ecarts(byte[] o, int stride, int l, int h, int[] c, int m
                 # (4) Échap, puis clic droit : annulation, rien de plus.
                 foreach ($geste in 'Échap', 'clic droit') {
                     $seq = [BreezyShotEssai.Zone]::GetClipboardSequenceNumber()
-                    $n = (Fichiers-Png $recents).Count
+                    $n = @(Fichiers-Png $recents).Count
                     $reposAvant = Repos-Vus $da
                     $null = Ouvrir-Selection -Dossier $da -Quoi "(4) $geste"
                     if ($geste -eq 'Échap') { [BreezyShotEssai.Zone]::Touches($ECHAP) }
                     else { [BreezyShotEssai.Zone]::Cliquer($TX + 50, $TY + 50, $true) }
                     Attendre-Repos -Dossier $da -Quoi "(4) $geste" -Fois ($reposAvant + 1) -Sel $sel -Fige $fige
                     Verifier "(4) $geste : Selection -> Repos (SelectionAnnulee)" ((Derniere-Ligne -Motif 'etat \w+ -> Repos' -Dossier $da) -match 'etat Selection -> Repos \(SelectionAnnulee\)') | Out-Null
-                    Verifier "(4) $geste : aucun fichier de plus, presse-papiers inchangé" (((Fichiers-Png $recents).Count -eq $n) -and ([BreezyShotEssai.Zone]::GetClipboardSequenceNumber() -eq $seq)) | Out-Null
+                    Verifier "(4) $geste : aucun fichier de plus, presse-papiers inchangé" ((@(Fichiers-Png $recents).Count -eq $n) -and ([BreezyShotEssai.Zone]::GetClipboardSequenceNumber() -eq $seq)) | Out-Null
                 }
                 Verifier '(4) Échap passe par l''Échap global' ((Compter-Lignes -Texte 'echap global presse' -Dossier $da) -ge 1) | Out-Null
 
@@ -620,6 +659,22 @@ public static string[] Ecarts(byte[] o, int stride, int l, int h, int[] c, int m
                 Noter-Mesure -Nom 'fils du processus avant / après' -Valeur "$filsAvant / $filsApres"
                 Verifier '(fuite) fenêtres du processus stables (±2)' ([math]::Abs($fenetresApres - $fenetresAvant) -le 2) "$fenetresAvant → $fenetresApres" | Out-Null
                 Verifier '(fuite) fils du processus stables (±6)' ([math]::Abs($filsApres - $filsAvant) -le 6) "$filsAvant → $filsApres" | Out-Null
+                # Coin bas droit : un glisser qui finit sur le dernier pixel du bureau donne une
+                # zone qui contient la dernière colonne et la dernière ligne.
+                $finX = $bureau.X + $bureau.L - 1; $finY = $bureau.Y + $bureau.H - 1
+                $seqCoin = [BreezyShotEssai.Zone]::GetClipboardSequenceNumber()
+                $copiesCoin = Compter-Motif -Motif 'sortie copie faite ' -Dossier $da
+                $null = Capturer -Dossier $da -Quoi '(coin)' -De @(($finX - 99), ($finY - 79)) -A @($finX, $finY)
+                $zoneCoin = Derniere-Ligne -Motif 'zone choisie ' -Dossier $da
+                $zc = Lire-Zone $zoneCoin
+                Verifier '(coin) zone choisie : x + largeur = bord droit, y + hauteur = bord bas du bureau' (($null -ne $zc) -and (($zc.X + $zc.L) -eq ($bureau.X + $bureau.L)) -and (($zc.Y + $zc.H) -eq ($bureau.Y + $bureau.H))) "$zoneCoin ; bureau $($bureau.X),$($bureau.Y) $($bureau.L)x$($bureau.H)" | Out-Null
+                $nCoin = Compter-Motif -Motif 'sortie copie faite ' -Dossier $da
+                Verifier '(coin) presse-papiers changé, une copie de plus' (([BreezyShotEssai.Zone]::GetClipboardSequenceNumber() -ne $seqCoin) -and ($nCoin -eq $copiesCoin + 1)) "copies $copiesCoin → $nCoin" | Out-Null
+                $imgCoin = Lire-PressePapiers
+                $tailleCoin = if ($null -ne $imgCoin) { "$($imgCoin.Width)x$($imgCoin.Height)" } else { 'aucune image' }
+                Verifier '(coin) image du presse-papiers à la taille de la zone' (($null -ne $zc) -and ($tailleCoin -eq "$($zc.L)x$($zc.H)")) "image $tailleCoin, zone $($zc.L)x$($zc.H)" | Out-Null
+                if ($null -ne $imgCoin) { $imgCoin.Dispose() }
+
                 # En dernier dans le cas A : un échec ici (page rechargée, fenêtre fermée,
                 # boîte d'impression) ne masque pas les vérifications précédentes.
                 # F5 puis Échap ; Ctrl+P sans fenêtre d'impression.
@@ -651,7 +706,7 @@ public static string[] Ecarts(byte[] o, int stride, int l, int h, int[] c, int m
                 if (Verifier '(Alt+F4) la sélection a le premier plan avant le geste' ($devantAltF4 -eq $sel) "premier plan $devantAltF4, sélection $sel ; Alt+F4 non envoyé si faux") {
                     [BreezyShotEssai.Zone]::Touches([byte[]]@(0x12, 0x73))
                     Attendre-Repos -Dossier $da -Quoi '(Alt+F4)' -Fois ($reposAvant + 1) -Sel $sel -Fige $fige
-                    Verifier '(Alt+F4) fin « annulee fermeture », aucune erreur affichée' (((Derniere-Ligne -Motif 'selection fin \d+ ' -Dossier $da) -match 'annulee') -and ((Compter-Lignes -Texte 'capture impossible' -Dossier $da) -eq 0)) (Derniere-Ligne -Motif 'selection fin \d+ ' -Dossier $da) | Out-Null
+                    Verifier '(Alt+F4) fin « annulee fermeture », aucune erreur affichée' (((Derniere-Ligne -Motif 'selection fin \d+ ' -Dossier $da) -match 'annulee fermeture$') -and ((Compter-Lignes -Texte 'capture impossible' -Dossier $da) -eq 0)) (Derniere-Ligne -Motif 'selection fin \d+ ' -Dossier $da) | Out-Null
                     Capturer-Et-Verifier -Dossier $da -Quoi '(Alt+F4) capture suivante' -De $HG -A $BD
                 }
                 else {
@@ -698,6 +753,13 @@ public static string[] Ecarts(byte[] o, int stride, int l, int h, int[] c, int m
                 Fermer-Cas $p $dc '(10)'
             }
             catch { Verifier '(10) déroulement du cas' $false "$_" | Out-Null; Arreter-Tout }
+
+            # ===== Sur tout l'essai =============================================================
+            $toutes = @(foreach ($d in $script:Dossiers) { Lignes-Journal $d })
+            $fautives = @(Fins-Fautives $toutes)
+            Verifier 'tout l''essai : aucune fin « muette » ni « impossible »' ($fautives.Count -eq 0) ($fautives -join ' ; ') | Out-Null
+            $echelles = Echelles-Ecartees $toutes
+            Verifier 'tout l''essai : chrono selection prete, échelle = page-dpr' (($echelles.Vues -gt 0) -and ($echelles.Ecarts.Length -eq 0)) "$($echelles.Vues) ligne(s) ; écarts : $($echelles.Ecarts -join ' ; ')" | Out-Null
         }
         finally {
             Fermer-Auxiliaires
