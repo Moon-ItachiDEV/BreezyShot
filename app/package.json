@@ -1,0 +1,13 @@
+{
+  "name": "breezyshot",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Fige la version de l'outil Tauri. Aucun bundler.",
+  "license": "FSL-1.1-MIT",
+  "scripts": {
+    "tauri": "tauri"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "2.12.4"
+  }
+}
