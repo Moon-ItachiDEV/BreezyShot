@@ -100,11 +100,30 @@ pub(super) fn copier(largeur: u32, hauteur: u32, rgba: &[u8]) -> Result<(), Stri
 }
 
 fn poser(garde: &mut Option<Clipboard>, image: ImageData<'_>) -> Result<(), Error> {
-    if garde.is_none() {
-        *garde = Some(Clipboard::new()?);
+    ouvrir(garde)?.set_image(image)
+}
+
+/// Le presse-papiers garde, ouvert s'il ne l'est pas encore.
+fn ouvrir(garde: &mut Option<Clipboard>) -> Result<&mut Clipboard, Error> {
+    match garde {
+        Some(presse) => Ok(presse),
+        None => Ok(garde.insert(Clipboard::new()?)),
     }
-    match garde.as_mut() {
-        Some(presse) => presse.set_image(image),
-        None => Err(Error::ClipboardNotSupported),
-    }
+}
+
+/// Pour les tests : ouvre l'objet garde, sans jamais en creer un a part.
+/// Sous X11, detruire le dernier objet ferme la derniere connexion, et un
+/// serveur comme Xvfb se reinitialise alors : une connexion ouverte juste
+/// apres est coupee (« Connection reset by peer »).
+#[cfg(test)]
+pub(super) fn sonder() -> Result<(), Error> {
+    let mut garde = OUVERT.lock().unwrap_or_else(|e| e.into_inner());
+    ouvrir(&mut garde).map(|_| ())
+}
+
+/// Pour les tests : relit l'image par l'objet garde.
+#[cfg(test)]
+pub(super) fn relire() -> Result<ImageData<'static>, Error> {
+    let mut garde = OUVERT.lock().unwrap_or_else(|e| e.into_inner());
+    ouvrir(&mut garde)?.get_image()
 }

@@ -1145,8 +1145,8 @@ static PRESSE_PAPIERS_TESTS: Mutex<()> = Mutex::new(());
 /// Vrai si un presse-papiers existe. Sans lui : saute, ou echec si
 /// `BREEZYSHOT_PRESSE_PAPIERS_OBLIGATOIRE=1`.
 fn presse_papiers_present(test: &str) -> bool {
-    match arboard::Clipboard::new() {
-        Ok(_) => true,
+    match presse_papiers::sonder() {
+        Ok(()) => true,
         Err(e) => {
             let obligatoire =
                 std::env::var("BREEZYSHOT_PRESSE_PAPIERS_OBLIGATOIRE").as_deref() == Ok("1");
@@ -1199,11 +1199,12 @@ fn presse_papiers_pose_et_relit_quatre_carres() {
     let bilan = sortir(&pixels, &d);
     assert_eq!(bilan.copie, Etape::Faite);
 
-    // Relu dans le meme processus (sous X11, c'est lui qui sert l'image),
+    // Relu par le meme objet garde, dans le meme processus (sous X11, c'est
+    // lui qui sert l'image ; aucun objet n'est detruit en route),
     // en reessayant pendant 1 s.
     let debut = Instant::now();
     let relu = loop {
-        let essai = arboard::Clipboard::new().and_then(|mut c| c.get_image());
+        let essai = presse_papiers::relire();
         match essai {
             Ok(image) => break image,
             Err(e) if debut.elapsed() >= Duration::from_secs(1) => {
