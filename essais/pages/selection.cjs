@@ -30,7 +30,7 @@ const L = 1280, H = 400;
   const verifier = (ok, quoi, info = '') => { console.log(ok ? 'OK   ' : 'ECHEC', quoi, info); if (!ok) echecs++; };
 
   async function page(o = {}) {
-    const ctx = await nav.newContext({ viewport: { width: L, height: H }, deviceScaleFactor: o.echelle || 1, colorScheme: o.theme || 'light' });
+    const ctx = await nav.newContext({ viewport: { width: o.l || L, height: o.h || H }, deviceScaleFactor: o.echelle || 1, colorScheme: o.theme || 'light' });
     const p = await ctx.newPage();
     p.on('pageerror', e => erreurs.push(String(e)));
     p.on('console', m => { if (m.type() === 'error') erreurs.push(m.text()); });
@@ -55,10 +55,11 @@ const L = 1280, H = 400;
   // La charge du cœur : tout en pixels réels relatifs à la fenêtre. Les écrans sont donnés
   // ici en pixels CSS et convertis à l'échelle k (par défaut, celle du navigateur) ;
   // cote_min est en pixels réels.
-  const charge = (id, ecrans, coteMin, k) => p => p.evaluate(([id, ecrans, c, k]) => __emettre('selection:montrer', {
-    id, largeur: Math.round(innerWidth * k), hauteur: Math.round(innerHeight * k),
+  // `numero` (numéro de charge) vaut l'id, sauf mention.
+  const charge = (id, ecrans, coteMin, k, numero = id) => p => p.evaluate(([id, ecrans, c, k, numero]) => __emettre('selection:montrer', {
+    id, numero, largeur: Math.round(innerWidth * k), hauteur: Math.round(innerHeight * k),
     ecrans: ecrans.map(e => ({ x: Math.round(e.x * k), y: Math.round(e.y * k), largeur: Math.round(e.largeur * k), hauteur: Math.round(e.hauteur * k) })), cote_min: c,
-  }), [id, ecrans, coteMin, k]);
+  }), [id, ecrans, coteMin, k, numero]);
   async function montrer(p, ecrans = [{ x: 0, y: 0, largeur: L, hauteur: H }], coteMin = 3, k = p.echelle) {
     const id = prochain++;
     await charge(id, ecrans, coteMin, k)(p);
@@ -108,7 +109,7 @@ const L = 1280, H = 400;
     id = await montrer(p);
     await glisser(p, a, b);
     const t = await termine(p);
-    verifier(t.length === 1 && JSON.stringify(t[0][1]) === JSON.stringify({ id, depart: { x: a[0], y: a[1] }, arrivee: { x: b[0], y: b[1] } }), `2 glisser ${a} → ${b}`, JSON.stringify(t));
+    verifier(t.length === 1 && JSON.stringify(t[0][1]) === JSON.stringify({ id, numero: id, depart: { x: a[0], y: a[1] }, arrivee: { x: b[0], y: b[1] } }), `2 glisser ${a} → ${b}`, JSON.stringify(t));
   }
   // Rectangle dessiné pendant le glisser : voile autour, clair dedans, trait blanc.
   id = await montrer(p);
@@ -138,7 +139,7 @@ const L = 1280, H = 400;
   await p.keyboard.down('Space'); await p.mouse.move(250, 230, { steps: 3 }); await p.keyboard.up('Space');
   await p.mouse.up(); await p.waitForTimeout(40);
   t = await termine(p);
-  verifier(t.length === 1 && JSON.stringify(t[0][1]) === JSON.stringify({ id, depart: { x: 150, y: 130 }, arrivee: { x: 250, y: 230 } }), '3 Espace : la zone se déplace sans changer de taille', JSON.stringify(t));
+  verifier(t.length === 1 && JSON.stringify(t[0][1]) === JSON.stringify({ id, numero: id, depart: { x: 150, y: 130 }, arrivee: { x: 250, y: 230 } }), '3 Espace : la zone se déplace sans changer de taille', JSON.stringify(t));
   // Deux écrans côte à côte (le premier est l'écran de gauche, d'origine négative dans le bureau).
   const DEUX = [{ x: 0, y: 0, largeur: 640, hauteur: H }, { x: 640, y: 0, largeur: 640, hauteur: H }];
   id = await montrer(p, DEUX);
@@ -154,7 +155,7 @@ const L = 1280, H = 400;
   await p.keyboard.down('Space'); await p.mouse.move(800, 200, { steps: 4 });
   await p.mouse.up(); await p.keyboard.up('Space'); await p.waitForTimeout(40);
   t = await termine(p);
-  verifier(t.length === 1 && JSON.stringify(t[0][1]) === JSON.stringify({ id, depart: { x: 540, y: 100 }, arrivee: { x: 640, y: 200 } }), '3 Espace : déplacement borné à l\'écran', JSON.stringify(t));
+  verifier(t.length === 1 && JSON.stringify(t[0][1]) === JSON.stringify({ id, numero: id, depart: { x: 540, y: 100 }, arrivee: { x: 640, y: 200 } }), '3 Espace : déplacement borné à l\'écran', JSON.stringify(t));
   // Écrans de hauteurs différentes : écran de gauche plus court.
   const INEGAUX = [{ x: 0, y: 100, largeur: 500, hauteur: 300 }, { x: 500, y: 0, largeur: 780, hauteur: H }];
   id = await montrer(p, INEGAUX);
@@ -189,35 +190,35 @@ const L = 1280, H = 400;
   id = await montrer(p);
   await p.keyboard.press('Escape'); await p.keyboard.press('Escape'); await p.mouse.click(10, 10, { button: 'right' }); await glisser(p, [100, 100], [300, 300]);
   let a = await appels(p);
-  verifier(JSON.stringify(a) === JSON.stringify([['selection_annulee', { id, cause: 'echap' }]]), '5 Échap : une seule annulation, plus rien ensuite', JSON.stringify(a));
+  verifier(JSON.stringify(a) === JSON.stringify([['selection_annulee', { id, numero: id, cause: 'echap' }]]), '5 Échap : une seule annulation, plus rien ensuite', JSON.stringify(a));
   id = await montrer(p);
   await p.mouse.click(10, 10, { button: 'right' }); await p.mouse.click(10, 10, { button: 'right' }); await p.keyboard.press('Escape');
   a = await appels(p);
-  verifier(JSON.stringify(a) === JSON.stringify([['selection_annulee', { id, cause: 'clic_droit' }]]), '5 clic droit : une seule annulation', JSON.stringify(a));
+  verifier(JSON.stringify(a) === JSON.stringify([['selection_annulee', { id, numero: id, cause: 'clic_droit' }]]), '5 clic droit : une seule annulation', JSON.stringify(a));
   id = await montrer(p);
   await p.mouse.move(100, 100); await p.mouse.down(); await p.mouse.move(200, 200, { steps: 2 });
   await p.mouse.down({ button: 'right' }); await p.mouse.up({ button: 'right' }); await p.mouse.up(); await p.waitForTimeout(40);
   a = await appels(p);
-  verifier(JSON.stringify(a) === JSON.stringify([['selection_annulee', { id, cause: 'clic_droit' }]]), '5 clic droit pendant un glisser : annulation, pas de zone', JSON.stringify(a));
+  verifier(JSON.stringify(a) === JSON.stringify([['selection_annulee', { id, numero: id, cause: 'clic_droit' }]]), '5 clic droit pendant un glisser : annulation, pas de zone', JSON.stringify(a));
   const menu = await p.evaluate(() => { const e = new MouseEvent('contextmenu', { bubbles: true, cancelable: true }); document.body.dispatchEvent(e); return e.defaultPrevented; });
   verifier(menu, '5 menu contextuel neutralisé');
 
   // 6. selection_prete : deux images après montrer, avec le bon id, une fois.
   const pr = await p.evaluate(async () => {
-    __appels.length = 0; __emettre('selection:montrer', { id: 77, largeur: 1280, hauteur: 400, ecrans: [], cote_min: 3 });
+    __appels.length = 0; __emettre('selection:montrer', { id: 77, numero: 4, largeur: 1280, hauteur: 400, ecrans: [], cote_min: 3 });
     const tout_de_suite = __appels.length;
     await new Promise(r => requestAnimationFrame(() => r()));
     const une_image = __appels.length;
     await new Promise(r => setTimeout(r, 150));
     return { tout_de_suite, une_image, appels: __appels };
   });
-  verifier(pr.tout_de_suite === 0 && pr.une_image === 0 && JSON.stringify(pr.appels) === JSON.stringify([['selection_prete', { id: 77, largeur: 1280, hauteur: 400, echelle: 1 }]]), '6 selection_prete { id, largeur, hauteur, echelle } deux images après selection:montrer', JSON.stringify(pr));
+  verifier(pr.tout_de_suite === 0 && pr.une_image === 0 && JSON.stringify(pr.appels) === JSON.stringify([['selection_prete', { id: 77, numero: 4, largeur: 1280, hauteur: 400, echelle: 1, kx: 1, ky: 1 }]]), '6 selection_prete { id, numero, largeur, hauteur, echelle, kx, ky } deux images après selection:montrer', JSON.stringify(pr));
   // Demandes invalides : ignorées, pas de selection_prete.
   await vider(p);
-  const T = { largeur: 1280, hauteur: 400 };
+  const T = { numero: 1, largeur: 1280, hauteur: 400 };
   for (const m of [null, {}, { ...T, id: -1, ecrans: [], cote_min: 3 }, { ...T, id: 1.5, ecrans: [], cote_min: 3 }, { ...T, id: 2, ecrans: [{ x: 0, y: 0, largeur: NaN, hauteur: 1 }], cote_min: 3 },
-    { ...T, id: 3, ecrans: 'x', cote_min: 3 }, { ...T, id: 4, ecrans: [], cote_min: -1 }, { id: 5, ecrans: [], cote_min: 3 }, { id: 6, largeur: 1280.5, hauteur: 400, ecrans: [], cote_min: 3 },
-    { id: 7, largeur: 0, hauteur: 400, ecrans: [], cote_min: 3 }, { ...T, id: 8, ecrans: [{ x: 0.5, y: 0, largeur: 10, hauteur: 10 }], cote_min: 3 }, { ...T, id: 9, ecrans: [], cote_min: 2.5 }]) {
+    { ...T, id: 3, ecrans: 'x', cote_min: 3 }, { ...T, id: 4, ecrans: [], cote_min: -1 }, { id: 5, numero: 1, ecrans: [], cote_min: 3 }, { id: 6, numero: 1, largeur: 1280.5, hauteur: 400, ecrans: [], cote_min: 3 },
+    { id: 7, numero: 1, largeur: 0, hauteur: 400, ecrans: [], cote_min: 3 }, { ...T, id: 8, ecrans: [{ x: 0.5, y: 0, largeur: 10, hauteur: 10 }], cote_min: 3 }, { ...T, id: 9, ecrans: [], cote_min: 2.5 }, { id: 10, largeur: 1280, hauteur: 400, ecrans: [], cote_min: 3 }, { ...T, id: 11, numero: -1, ecrans: [], cote_min: 3 }]) {
     await p.evaluate(m => __emettre('selection:montrer', m), m);
   }
   await p.waitForTimeout(100);
@@ -319,7 +320,7 @@ const L = 1280, H = 400;
     for (const [nom, geste] of cas) {
       p = await page({ echelle: e });
       id = prochain++;
-      await p.evaluate(([id, R, RH, ecr]) => __emettre('selection:montrer', { id, largeur: R, hauteur: RH, ecrans: ecr, cote_min: 3 }), [id, R, RH, ecr]);
+      await p.evaluate(([id, R, RH, ecr]) => __emettre('selection:montrer', { id, numero: id, largeur: R, hauteur: RH, ecrans: ecr, cote_min: 3 }), [id, R, RH, ecr]);
       await p.waitForTimeout(100);
       await geste(p); await p.waitForTimeout(80);
       const vu = await vue(p);
@@ -331,6 +332,44 @@ const L = 1280, H = 400;
       const surEcran = c && c.xs.every(x => (ecranDepart === 0 ? x < 1003 : x >= 1003));
       verifier(c && vu.x === c.x && vu.y === c.y && vu.l === c.l && vu.h === c.h && vu.autres === 0 && surEcran,
         `8 bis k = ${e} ${nom} : zone vue = zone découpée, aucun pixel adouci, sur l'écran du départ`, JSON.stringify({ vu, c, t: t[0] && t[0][1] }));
+      await p.context().close();
+    }
+  }
+
+  // 8 ter. Tailles CSS non entières (innerWidth arrondi) : 1366 × 501 à 125 % (viewport
+  // 1093 × 401), 2560 × 1440 à 150 % (viewport 1707 × 960, 1706,67 px CSS), 1,3333 et
+  // 1,7499. La taille réelle est celle de la capture. Zone vue = zone découpée au pixel près,
+  // zéro pixel intermédiaire.
+  for (const [e, l, h] of [[1.25, 1093, 401], [1.25, 1092, 400], [1.5, 1707, 960], [1.5, 1093, 401], [1.3333, 1093, 401], [1.7499, 1093, 401]]) {
+    const p0 = await page({ echelle: e, l, h });
+    const dims = await p0.evaluate(async (b64) => { const bm = await createImageBitmap(await (await fetch('data:image/png;base64,' + b64)).blob()); return [bm.width, bm.height]; }, (await p0.screenshot()).toString('base64'));
+    await p0.context().close();
+    const [R, RH] = dims;
+    const frontiere = Math.round(R * 0.47) | 1;
+    const ecr = [{ x: 0, y: 0, largeur: frontiere, hauteur: RH }, { x: frontiere, y: 0, largeur: R - frontiere, hauteur: RH }];
+    const fx = frontiere / e;
+    const cas = [
+      ['bas-droite', async p => { await p.mouse.move(100.3, 50.6); await p.mouse.down(); await p.mouse.move(301.7, 250.2, { steps: 4 }); }],
+      ['haut-gauche', async p => { await p.mouse.move(301.7, 250.2); await p.mouse.down(); await p.mouse.move(100.3, 50.6, { steps: 4 }); }],
+      ['maj', async p => { await p.keyboard.down('Shift'); await p.mouse.move(fx - 30.4, 300.3); await p.mouse.down(); await p.mouse.move(fx - 230.1, 41.9, { steps: 4 }); }],
+      ['borne', async p => { await p.mouse.move(fx - 100.2, 100.6); await p.mouse.down(); await p.mouse.move(l - 3, h + 50, { steps: 4 }); }],
+      ['espace', async p => { await p.mouse.move(fx - 100, 100); await p.mouse.down(); await p.mouse.move(fx - 200, 200, { steps: 3 }); await p.keyboard.down('Space'); await p.mouse.move(fx + 300, 260, { steps: 5 }); }],
+    ];
+    for (const [nom, geste] of cas) {
+      p = await page({ echelle: e, l, h });
+      id = prochain++;
+      await p.evaluate(([id, R, RH, ecr]) => __emettre('selection:montrer', { id, numero: id, largeur: R, hauteur: RH, ecrans: ecr, cote_min: 3 }), [id, R, RH, ecr]);
+      await p.waitForTimeout(120);
+      await geste(p); await p.waitForTimeout(80);
+      const vu = await vue(p);
+      if (nom === 'borne') await p.screenshot({ path: `${SORTIE}/selection-sale-${Math.round(e * 10000)}-${l}.png` });
+      await p.mouse.up(); await p.keyboard.up('Shift'); await p.keyboard.up('Space'); await p.waitForTimeout(50);
+      const tout = await appels(p);
+      t = tout.filter(x => x[0] === 'selection_terminee');
+      const pr = tout.find(x => x[0] === 'selection_prete');
+      const c = t.length === 1 ? coupe(t[0][1]) : null;
+      verifier(c && vu.x === c.x && vu.y === c.y && vu.l === c.l && vu.h === c.h && vu.autres === 0,
+        `8 ter ${R} × ${RH} à ${e} (viewport ${l}) ${nom} : zone vue = zone découpée, zéro pixel intermédiaire`, JSON.stringify({ vu, c, prete: pr && pr[1], t: t[0] && t[0][1] }));
       await p.context().close();
     }
   }
@@ -372,7 +411,7 @@ const L = 1280, H = 400;
   z = await etatZone(p);
   await p.keyboard.press('Escape'); await p.waitForTimeout(40);
   a = await appels(p);
-  verifier(pendantAttente === 0 && !z.glisse && JSON.stringify(a) === JSON.stringify([['selection_annulee', { id, cause: 'echap' }]]), 'B sans selection:cachee : attente, puis utilisable après 1,5 s', JSON.stringify({ pendantAttente, z: z.glisse, a }));
+  verifier(pendantAttente === 0 && !z.glisse && JSON.stringify(a) === JSON.stringify([['selection_annulee', { id, numero: id, cause: 'echap' }]]), 'B sans selection:cachee : attente, puis utilisable après 1,5 s', JSON.stringify({ pendantAttente, z: z.glisse, a }));
   await p.waitForTimeout(1600); await vider(p);
   await glisser(p, [100, 100], [300, 300]);
   t = await termine(p);
@@ -384,7 +423,7 @@ const L = 1280, H = 400;
   await p.evaluate(() => __rejeter.clear()); await vider(p);
   await p.keyboard.press('Escape'); await p.waitForTimeout(40);
   a = await appels(p);
-  verifier(JSON.stringify(a) === JSON.stringify([['selection_annulee', { id, cause: 'echap' }]]), 'B invoke rejeté : utilisable aussitôt', JSON.stringify(a));
+  verifier(JSON.stringify(a) === JSON.stringify([['selection_annulee', { id, numero: id, cause: 'echap' }]]), 'B invoke rejeté : utilisable aussitôt', JSON.stringify(a));
   // Même demande renvoyée (zone refusée par le cœur) : repos, utilisable, prête renvoyé.
   id = await montrer(p);
   await glisser(p, [100, 100], [200, 200]);
@@ -414,7 +453,7 @@ const L = 1280, H = 400;
   // Aucun glisser avant selection_prete : gestes dans la même tâche que montrer, ignorés.
   await vider(p);
   const avantPrete = await p.evaluate(() => {
-    __emettre('selection:montrer', { id: 500, largeur: 1280, hauteur: 400, ecrans: [], cote_min: 3 });
+    __emettre('selection:montrer', { id: 500, numero: 500, largeur: 1280, hauteur: 400, ecrans: [], cote_min: 3 });
     const o = { bubbles: true, cancelable: true, pointerId: 1, pointerType: 'mouse', isPrimary: true };
     document.documentElement.dispatchEvent(new PointerEvent('pointerdown', { ...o, clientX: 100, clientY: 100, button: 0, buttons: 1 }));
     document.documentElement.dispatchEvent(new PointerEvent('pointermove', { ...o, clientX: 300, clientY: 300, button: -1, buttons: 1 }));
@@ -423,11 +462,13 @@ const L = 1280, H = 400;
   });
   await p.waitForTimeout(100);
   a = await appels(p);
-  verifier(avantPrete === 0 && JSON.stringify(a) === JSON.stringify([['selection_prete', { id: 500, largeur: 1280, hauteur: 400, echelle: 1 }]]), 'D avant selection_prete : aucun glisser', JSON.stringify({ avantPrete, a }));
+  verifier(avantPrete === 0 && JSON.stringify(a) === JSON.stringify([['selection_prete', { id: 500, numero: 500, largeur: 1280, hauteur: 400, echelle: 1, kx: 1, ky: 1 }]]), 'D avant selection_prete : aucun glisser', JSON.stringify({ avantPrete, a }));
   await p.context().close();
 
-  // Taille qui change pendant un glisser : glisser abandonné, page de nouveau « pas prête »,
-  // nouvelle selection_prete ; le cœur renvoie la charge (fenêtre relue) ; coins justes ensuite.
+  // Taille qui change pendant un glisser : glisser abandonné, page « pas prête » jusqu'à la
+  // charge suivante (un glisser complet fait avant elle n'envoie rien), selection_prete
+  // renvoyée avec l'ancien numéro ; le cœur renvoie la charge (fenêtre relue, numéro
+  // suivant) ; prête de nouveau, coins justes ensuite, avec le nouveau numéro.
   for (const e of [1, 1.25]) {
     p = await page({ echelle: e });
     id = await montrer(p);
@@ -437,23 +478,29 @@ const L = 1280, H = 400;
     const apresTaille = await etatZone(p);
     await p.mouse.move(350, 320, { steps: 2 }); await p.mouse.up(); await p.waitForTimeout(150);
     const apresResize = await appels(p);
-    // Le cœur relit la fenêtre (1000 × 380 CSS) et renvoie la charge du même affichage.
+    // Course : glisser complet avant la charge suivante.
     await vider(p);
-    await charge(id, [{ x: 0, y: 0, largeur: 1000, hauteur: 380 }], 3, e)(p); await p.waitForTimeout(100);
+    await glisser(p, [100, 100], [400, 300]); await p.waitForTimeout(40);
+    const avantCharge = await appels(p);
+    // Le cœur relit la fenêtre (1000 × 380 CSS) et renvoie la charge, numéro suivant.
+    const n2 = id + 1000;
+    await charge(id, [{ x: 0, y: 0, largeur: 1000, hauteur: 380 }], 3, e, n2)(p); await p.waitForTimeout(100);
     const pretes = await appels(p);
     await vider(p);
     await glisser(p, [100, 100], [900, 370]);
     t = await termine(p);
-    const attendu = { id, depart: { x: Math.round(100 * e), y: Math.round(100 * e) }, arrivee: { x: Math.round(900 * e), y: Math.round(370 * e) } };
-    const pr = { id, largeur: 1000, hauteur: 380, echelle: e };
-    verifier(pendantG.glisse && !apresTaille.glisse && JSON.stringify(apresResize) === JSON.stringify([['selection_prete', pr]]) && JSON.stringify(pretes) === JSON.stringify([['selection_prete', pr]])
-      && t.length === 1 && JSON.stringify(t[0][1]) === JSON.stringify(attendu),
-      `taille changée pendant un glisser (k = ${e}) : abandonné, selection_prete renvoyée, coins justes ensuite`, JSON.stringify({ apresTaille: apresTaille.glisse, apresResize, pretes, t }));
+    const attendu = { id, numero: n2, depart: { x: Math.round(100 * e), y: Math.round(100 * e) }, arrivee: { x: Math.round(900 * e), y: Math.round(370 * e) } };
+    const pr = { id, numero: n2, largeur: 1000, hauteur: 380, echelle: e, kx: e, ky: e };
+    const r0 = apresResize.length === 1 && apresResize[0][0] === 'selection_prete' ? apresResize[0][1] : null;
+    verifier(pendantG.glisse && !apresTaille.glisse && r0 && r0.numero === id && r0.largeur === 1000 && avantCharge.length === 0
+      && JSON.stringify(pretes) === JSON.stringify([['selection_prete', pr]]) && t.length === 1 && JSON.stringify(t[0][1]) === JSON.stringify(attendu),
+      `taille changée pendant un glisser (k = ${e}) : abandonné, pas prête avant la charge suivante, coins justes ensuite`, JSON.stringify({ apresTaille: apresTaille.glisse, apresResize, avantCharge, pretes, t }));
     await p.context().close();
   }
 
   // devicePixelRatio différent de ce qu'annoncerait tao : rien de tao n'est envoyé à la page ;
-  // la page mesure k = taille réelle / taille CSS, devient prête et les coins suivent k.
+  // la page retient devicePixelRatio s'il explique la taille réelle, sinon k = taille réelle /
+  // taille CSS ; elle devient prête et les coins suivent k.
   for (const [dpr, k] of [[1.25, 1.25], [1.25, 1.5], [1.5, 1.25], [1, 1.1]]) {
     p = await page({ echelle: dpr });
     await vider(p);
@@ -466,7 +513,9 @@ const L = 1280, H = 400;
     const fin = a.find(x => x[0] === 'selection_terminee');
     const obtenu = fin ? [fin[1].depart.x, fin[1].depart.y, fin[1].arrivee.x, fin[1].arrivee.y] : [];
     const pr = a.find(x => x[0] === 'selection_prete');
-    verifier(pr && JSON.stringify(pr[1]) === JSON.stringify({ id, largeur: L, hauteur: H, echelle: dpr }) && JSON.stringify(obtenu) === JSON.stringify(attendu),
+    const regle = Math.abs(Math.round(L * k) / dpr - L) <= 1 && Math.abs(Math.round(H * k) / dpr - H) <= 1;
+    const ke = regle ? [dpr, dpr] : [Math.round(L * k) / L, Math.round(H * k) / H];
+    verifier(pr && JSON.stringify(pr[1]) === JSON.stringify({ id, numero: id, largeur: L, hauteur: H, echelle: dpr, kx: ke[0], ky: ke[1] }) && JSON.stringify(obtenu) === JSON.stringify(attendu),
       `devicePixelRatio ${dpr}, fenêtre réelle ${Math.round(L * k)} × ${Math.round(H * k)} : prête, coins justes à k = ${k}`, JSON.stringify({ pr, attendu, obtenu }));
     await p.context().close();
   }
@@ -481,7 +530,7 @@ const L = 1280, H = 400;
   const apresEspace = await etatZone(p);
   await p.mouse.up(); await p.waitForTimeout(40);
   t = await termine(p);
-  verifier(JSON.stringify(sousEspace) === JSON.stringify(apresEspace) && t.length === 1 && JSON.stringify(t[0][1]) === JSON.stringify({ id, depart: { x: 150, y: 130 }, arrivee: { x: 250, y: 230 } }),
+  verifier(JSON.stringify(sousEspace) === JSON.stringify(apresEspace) && t.length === 1 && JSON.stringify(t[0][1]) === JSON.stringify({ id, numero: id, depart: { x: 150, y: 130 }, arrivee: { x: 250, y: 230 } }),
     'Espace relâchée avant la souris : aucun saut', JSON.stringify({ sousEspace, apresEspace, t }));
   await p.context().close();
 

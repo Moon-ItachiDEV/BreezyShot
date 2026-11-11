@@ -57,7 +57,7 @@ use crate::systeme::{self, Rect};
 
 /// Étiquette de la fenêtre (aussi dans `capabilities/selection.json`).
 pub const ETIQUETTE_SELECTION: &str = "selection";
-/// Événement écouté par la page : `{ id, largeur, hauteur, ecrans: [RectFenetre], cote_min }`,
+/// Événement écouté par la page : `{ id, numero, largeur, hauteur, ecrans: [RectFenetre], cote_min }`,
 /// tout en pixels réels relatifs au coin de la fenêtre.
 pub const EVENEMENT_MONTRER: &str = "selection:montrer";
 /// Événement écouté par la page : la fenêtre est cachée, retour au repos.
@@ -240,26 +240,36 @@ const ECHELLE_MAX: f64 = 5.0;
 /// Écart relatif admis entre l'échelle horizontale et la verticale.
 const ECART_ECHELLES: f64 = 0.02;
 
-/// Contrôle de cohérence de `selection_prete` (fonction pure) : l'échelle mesurée
-/// `k = taille réelle de la fenêtre / taille de la page en pixels CSS`, sur chaque axe.
-/// Rend `(kx, ky)`, ou la cause « page <l>x<h> pour fenetre <L>x<H> » si une valeur n'est
-/// pas finie ou est nulle, si `k` sort de [0,5 ; 5], ou si `kx` et `ky` diffèrent de plus
-/// de 2 %.
-pub fn controler_page(page: (f64, f64), fenetre: Rect) -> Result<(f64, f64), String> {
+/// Contrôle de cohérence de `selection_prete` (fonction pure). La page envoie sa taille CSS
+/// `page` et l'échelle `echelle = (kx, ky)` qu'elle a retenue (pixels réels par pixel CSS :
+/// `devicePixelRatio` dans le cas normal, sinon la taille réelle divisée par sa taille CSS
+/// non arrondie). Accepté si tout est fini et non nul, si `k` est dans [0,5 ; 5], si `kx`
+/// et `ky` diffèrent de 2 % au plus, et si l'échelle retenue explique la taille réelle de la
+/// fenêtre à 1 pixel CSS près sur chaque axe. Rend `(kx, ky)`, ou la cause
+/// « page <l>x<h> pour fenetre <L>x<H> ».
+pub fn controler_page(
+    page: (f64, f64),
+    echelle: (f64, f64),
+    fenetre: Rect,
+) -> Result<(f64, f64), String> {
     let (l, h) = page;
+    let (kx, ky) = echelle;
     let cause = || {
         format!(
             "page {l}x{h} pour fenetre {}x{}",
             fenetre.largeur, fenetre.hauteur
         )
     };
-    if !(l.is_finite() && h.is_finite() && l > 0.0 && h > 0.0) || fenetre.est_vide() {
+    let positif = |v: f64| v.is_finite() && v > 0.0;
+    if ![l, h, kx, ky].into_iter().all(positif) || fenetre.est_vide() {
         return Err(cause());
     }
-    let kx = f64::from(fenetre.largeur) / l;
-    let ky = f64::from(fenetre.hauteur) / h;
     let dans = |k: f64| (ECHELLE_MIN..=ECHELLE_MAX).contains(&k);
     if !dans(kx) || !dans(ky) || (kx - ky).abs() > ECART_ECHELLES * kx.max(ky) {
+        return Err(cause());
+    }
+    let explique = |reel: i32, css: f64, k: f64| (f64::from(reel) / k - css).abs() <= TOLERANCE;
+    if !explique(fenetre.largeur, l, kx) || !explique(fenetre.hauteur, h, ky) {
         return Err(cause());
     }
     Ok((kx, ky))
@@ -315,6 +325,9 @@ pub fn decider_zone(
 #[derive(Debug, Clone, PartialEq, Serialize)]
 struct ChargeMontrer {
     id: u64,
+    /// Numéro de la charge, croissant à chaque charge (fenêtre relue). La page le renvoie
+    /// avec `selection_prete`, `selection_terminee` et `selection_annulee`.
+    numero: u64,
     /// Taille réelle de la fenêtre (rectangle relu auprès du système).
     largeur: i32,
     hauteur: i32,
@@ -323,14 +336,35 @@ struct ChargeMontrer {
 }
 
 /// La charge d'un affichage pour la fenêtre `fenetre` (fonction pure).
-fn charge_pour(id: u64, fenetre: Rect, ecrans: &[Rect], cote_min: i32) -> ChargeMontrer {
+fn charge_pour(
+    id: u64,
+    numero: u64,
+    fenetre: Rect,
+    ecrans: &[Rect],
+    cote_min: i32,
+) -> ChargeMontrer {
     ChargeMontrer {
         id,
+        numero,
         largeur: fenetre.largeur.max(0),
         hauteur: fenetre.hauteur.max(0),
         ecrans: ecrans.iter().map(|r| vers_page(*r, fenetre)).collect(),
         cote_min: cote_min.max(0),
     }
+}
+
+/// Ce que la page envoie avec `selection_prete`.
+#[derive(Debug, Clone, Copy)]
+struct PagePrete {
+    numero: u64,
+    /// Taille CSS sur laquelle l'échelle a été retenue.
+    largeur: f64,
+    hauteur: f64,
+    /// `devicePixelRatio`, pour le journal.
+    dpr: f64,
+    /// Échelle retenue par la page (pixels réels par pixel CSS).
+    kx: f64,
+    ky: f64,
 }
 
 /// Un affichage en cours, vu du cœur.
@@ -375,6 +409,7 @@ impl Affichage {
 #[derive(Debug, Default)]
 struct Etat {
     dernier_id: u64,
+    dernier_numero: u64,
     en_cours: Option<Affichage>,
     page_chargee: bool,
 }
@@ -400,6 +435,26 @@ impl Etat {
         };
         self.en_cours = Some(Affichage::nouveau(id, demande, avant, maintenant));
         (id, ancien.map(|a| a.id))
+    }
+
+    /// Nouvelle charge de l'affichage `id` pour la fenêtre `fenetre` (relue) : numéro
+    /// suivant ; la fenêtre et la charge sont retenues. `None` si `id` n'est plus en cours.
+    fn nouvelle_charge(&mut self, id: u64, fenetre: Rect) -> Option<ChargeMontrer> {
+        self.dernier_numero += 1;
+        let numero = self.dernier_numero;
+        let a = self.en_cours.as_mut().filter(|a| a.id == id)?;
+        let charge = charge_pour(id, numero, fenetre, &a.ecrans, a.cote_min);
+        a.fenetre = fenetre;
+        a.charge = Some(charge.clone());
+        Some(charge)
+    }
+
+    /// Le message de la page porte-t-il le numéro de la dernière charge de `id` ? Un ancien
+    /// numéro vient d'une page qui n'a pas encore reçu la charge suivante.
+    fn charge_courante(&self, id: u64, numero: u64) -> bool {
+        self.courant(id)
+            .and_then(|a| a.charge.as_ref())
+            .is_some_and(|c| c.numero == numero)
     }
 
     fn courant(&self, id: u64) -> Option<&Affichage> {
@@ -522,7 +577,11 @@ impl Selection {
         let pour_evenements = Arc::clone(&interne);
         fenetre.on_window_event(move |e| match e {
             tauri::WindowEvent::Focused(focus) => {
-                // Traité au tour suivant de la boucle, hors du rappel de Tauri.
+                // `run_on_main_thread` depuis le fil principal s'exécute tout de suite
+                // (tauri-runtime-wry 2.12.3, lib.rs:263-273) : ce n'est pas un report. Les
+                // événements de focus arrivent déjà par la file de la boucle (WebView2
+                // GotFocus/LostFocus → `proxy.send_event`, lib.rs:5364, 5398) ; aucun verrou
+                // n'est tenu pendant un appel au système ou à Tauri.
                 let i = Arc::clone(&pour_evenements);
                 let focus = *focus;
                 let _ = pour_evenements
@@ -680,14 +739,13 @@ impl Interne {
             reel.map(texte_rect).unwrap_or_else(|| "inconnu".into())
         );
         // 5. Prévenir la page : tout en pixels réels relatifs au coin de la fenêtre.
-        let charge = charge_pour(id, repere, &demande.ecrans, demande.cote_min);
-        {
+        let charge = {
             let mut etat = self.etat();
             let a = etat.courant_mut(id).ok_or("affichage remplace")?;
-            a.fenetre = repere;
             a.echelle_tao = echelle_tao;
-            a.charge = Some(charge.clone());
-        }
+            etat.nouvelle_charge(id, repere)
+                .ok_or("affichage remplace")?
+        };
         self.app
             .emit_to(ETIQUETTE_SELECTION, EVENEMENT_MONTRER, charge)
             .map_err(|e| format!("evenement non envoye: {e}"))?;
@@ -860,33 +918,42 @@ impl Interne {
     }
 
     /// `selection_prete` de l'affichage en cours, même répété (la page le renvoie après un
-    /// changement de taille). La fenêtre est relue : si elle a changé, elle est retenue et
-    /// la page reçoit la nouvelle charge. Puis le contrôle de cohérence : un échec termine
-    /// l'affichage (`Impossible`), sauf juste après un changement de la fenêtre (la page,
-    /// remise au repos, renverra `selection_prete`). `Prete` n'est signalé qu'une fois.
-    fn prete(self: &Arc<Self>, id: u64, page: (f64, f64, f64)) {
-        let Some((avant, ecrans, cote_min, tao)) = self
-            .etat()
-            .courant(id)
-            .map(|a| (a.fenetre, a.ecrans.clone(), a.cote_min, a.echelle_tao))
-        else {
+    /// changement de taille). Un ancien numéro de charge est ignoré : la page n'a pas encore
+    /// reçu la charge suivante et renverra `selection_prete` (le délai `Muette` reste armé si
+    /// l'affichage n'était pas prêt). Sinon, la fenêtre est relue : si elle a changé, elle
+    /// est retenue et la page reçoit une nouvelle charge. Puis le contrôle de cohérence : un
+    /// échec termine l'affichage (`Impossible`), sauf juste après un changement de la
+    /// fenêtre (la page, remise au repos, renverra `selection_prete`). `Prete` n'est signalé
+    /// qu'une fois.
+    fn prete(self: &Arc<Self>, id: u64, page: PagePrete) {
+        let Some((avant, tao, courante)) = ({
+            let etat = self.etat();
+            etat.courant(id).map(|a| {
+                (
+                    a.fenetre,
+                    a.echelle_tao,
+                    etat.charge_courante(id, page.numero),
+                )
+            })
+        }) else {
             return;
         };
+        if !courante {
+            log::info!(
+                "selection {id}: prete d'une ancienne charge {} ignoree",
+                page.numero
+            );
+            return;
+        }
         let nouvelle = self
             .identifiant
             .and_then(rect_reel)
             .filter(|r| !r.est_vide() && *r != avant);
         let fenetre = nouvelle.unwrap_or(avant);
         if let Some(r) = nouvelle {
-            let charge = charge_pour(id, r, &ecrans, cote_min);
-            {
-                let mut etat = self.etat();
-                let Some(a) = etat.courant_mut(id) else {
-                    return;
-                };
-                a.fenetre = r;
-                a.charge = Some(charge.clone());
-            }
+            let Some(charge) = self.etat().nouvelle_charge(id, r) else {
+                return;
+            };
             log::info!(
                 "selection {id}: fenetre changee {} -> {}",
                 texte_rect(avant),
@@ -894,8 +961,15 @@ impl Interne {
             );
             self.renvoyer(charge);
         }
-        let (largeur, hauteur, dpr) = page;
-        match controler_page((largeur, hauteur), fenetre) {
+        let PagePrete {
+            largeur,
+            hauteur,
+            dpr,
+            kx,
+            ky,
+            ..
+        } = page;
+        match controler_page((largeur, hauteur), (kx, ky), fenetre) {
             Ok((kx, _)) => {
                 let duree = self.etat().prete(id, Instant::now());
                 if let Some(duree) = duree {
@@ -913,14 +987,27 @@ impl Interne {
         }
     }
 
-    fn terminee(self: &Arc<Self>, id: u64, depart: Point, arrivee: Point) {
-        let Some((fenetre, cote_min, charge)) = self
-            .etat()
-            .courant(id)
-            .map(|a| (a.fenetre, a.cote_min, a.charge.clone()))
-        else {
+    /// Une zone d'un ancien numéro de charge est ignorée, sans fin : ses coins sont comptés
+    /// dans une fenêtre qui a changé, et la charge suivante, déjà envoyée, remet la page au
+    /// repos.
+    fn terminee(self: &Arc<Self>, id: u64, numero: u64, depart: Point, arrivee: Point) {
+        let Some((fenetre, cote_min, charge, courante)) = ({
+            let etat = self.etat();
+            etat.courant(id).map(|a| {
+                (
+                    a.fenetre,
+                    a.cote_min,
+                    a.charge.clone(),
+                    etat.charge_courante(id, numero),
+                )
+            })
+        }) else {
             return;
         };
+        if !courante {
+            log::info!("selection {id}: zone d'une ancienne charge {numero} ignoree");
+            return;
+        }
         match decider_zone(
             (depart.x, depart.y),
             (arrivee.x, arrivee.y),
@@ -943,9 +1030,17 @@ impl Interne {
         }
     }
 
-    fn annulee(self: &Arc<Self>, id: u64, nom: &str) {
-        if self.etat().courant(id).is_none() {
+    /// Une annulation d'un ancien numéro de charge reste une annulation : l'utilisateur veut
+    /// sortir.
+    fn annulee(self: &Arc<Self>, id: u64, numero: u64, nom: &str) {
+        let Some(courante) = ({
+            let etat = self.etat();
+            etat.courant(id).map(|_| etat.charge_courante(id, numero))
+        }) else {
             return;
+        };
+        if !courante {
+            log::info!("selection {id}: annulation d'une ancienne charge {numero}");
         }
         let signal = match cause_depuis_nom(nom) {
             Some(cause) => Signal::Annulee { id, cause },
@@ -994,30 +1089,52 @@ pub fn selection_chargee(selection: State<'_, Selection>) {
     selection.interne.page_chargee();
 }
 
-/// La page est visible et peinte, et sa taille est stable depuis deux images. `largeur`,
-/// `hauteur` : `innerWidth`, `innerHeight` (pixels CSS), d'où l'échelle mesurée
-/// (`controler_page`) ; `echelle` : `devicePixelRatio`, seulement écrit au journal.
+/// La page est visible et peinte, et sa taille est stable depuis deux images. `numero` :
+/// celui de la charge reçue. `largeur`, `hauteur` : la taille CSS sur laquelle l'échelle a
+/// été retenue ; `kx`, `ky` : l'échelle retenue (`controler_page`) ; `echelle` :
+/// `devicePixelRatio`, seulement écrit au journal.
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub fn selection_prete(
     selection: State<'_, Selection>,
     id: u64,
+    numero: u64,
     largeur: f64,
     hauteur: f64,
     echelle: f64,
+    kx: f64,
+    ky: f64,
 ) {
-    selection.interne.prete(id, (largeur, hauteur, echelle));
+    selection.interne.prete(
+        id,
+        PagePrete {
+            numero,
+            largeur,
+            hauteur,
+            dpr: echelle,
+            kx,
+            ky,
+        },
+    );
 }
 
-/// Zone choisie : les deux bords finals, en pixels réels relatifs au coin de la fenêtre.
+/// Zone choisie : les deux bords finals, en pixels réels relatifs au coin de la fenêtre ;
+/// `numero` : celui de la charge sur laquelle ils sont comptés.
 #[tauri::command]
-pub fn selection_terminee(selection: State<'_, Selection>, id: u64, depart: Point, arrivee: Point) {
-    selection.interne.terminee(id, depart, arrivee);
+pub fn selection_terminee(
+    selection: State<'_, Selection>,
+    id: u64,
+    numero: u64,
+    depart: Point,
+    arrivee: Point,
+) {
+    selection.interne.terminee(id, numero, depart, arrivee);
 }
 
 /// Annulation par la page : `cause` vaut `"echap"` ou `"clic_droit"`.
 #[tauri::command]
-pub fn selection_annulee(selection: State<'_, Selection>, id: u64, cause: String) {
-    selection.interne.annulee(id, &cause);
+pub fn selection_annulee(selection: State<'_, Selection>, id: u64, numero: u64, cause: String) {
+    selection.interne.annulee(id, numero, &cause);
 }
 
 #[cfg(test)]
@@ -1128,7 +1245,7 @@ mod tests {
         for k in [1.0_f64, 1.25, 1.5, 2.0, 1.1] {
             let (lc, hc): (f64, f64) = (1280.0, 400.0);
             let f = r(-500, 30, (lc * k).round() as i32, (hc * k).round() as i32);
-            let (kx, ky) = controler_page((lc, hc), f).expect("page coherente");
+            let (kx, ky) = controler_page((lc, hc), (k, k), f).expect("page coherente");
             assert!((kx - k).abs() < 1e-9 && (ky - k).abs() < 1e-9, "k {k}");
             let reel = |css: f64, k: f64| (css * k).round();
             for (d, a) in [
@@ -1150,30 +1267,76 @@ mod tests {
     #[test]
     fn controle_de_coherence_de_la_page() {
         let f = r(0, 0, 1600, 500);
-        assert!(controler_page((1280.0, 400.0), f).is_ok());
-        // Une page de taille CSS quelconque donne son échelle, quel que soit le DPR.
-        assert!(controler_page((1066.0, 333.0), f).is_ok());
-        // kx et ky à moins de 2 % : accepté ; au-delà : refusé.
-        assert!(controler_page((1280.0, 395.0), f).is_ok());
+        let k = (1.25, 1.25);
+        assert!(controler_page((1280.0, 400.0), k, f).is_ok());
+        // Largeur CSS non entière (1366 px à 125 % : 1092,8 px CSS, innerWidth 1093) :
+        // devicePixelRatio retenu, à 1 px CSS près.
+        assert!(controler_page((1093.0, 401.0), k, r(0, 0, 1366, 501)).is_ok());
+        // 2560 × 1440 à 150 % : 1706,67 px CSS, innerWidth 1707.
+        assert!(controler_page((1707.0, 960.0), (1.5, 1.5), r(0, 0, 2560, 1440)).is_ok());
+        // Repli mesuré (taille CSS non arrondie) : accepté s'il explique la fenêtre.
+        let m = (1366.0 / 1092.8, 501.0 / 400.8);
+        assert!(controler_page((1092.8, 400.8), m, r(0, 0, 1366, 501)).is_ok());
+        // Échelle qui n'explique pas la fenêtre (plus d'un pixel CSS d'écart) : refusée.
         assert_eq!(
-            controler_page((1280.0, 380.0), f),
+            controler_page((1280.0, 400.0), (1.5, 1.5), f),
+            Err("page 1280x400 pour fenetre 1600x500".into())
+        );
+        assert!(controler_page((1282.0, 400.0), k, f).is_err());
+        // kx et ky à plus de 2 % l'un de l'autre : refusé, même s'ils expliquent la fenêtre.
+        assert_eq!(
+            controler_page((1280.0, 380.0), (1.25, 500.0 / 380.0), f),
             Err("page 1280x380 pour fenetre 1600x500".into())
         );
-        for page in [
-            (0.0, 400.0),
-            (1280.0, 0.0),
-            (-1280.0, 400.0),
-            (f64::NAN, 400.0),
-            (1280.0, f64::INFINITY),
-            (100.0, 31.25),   // k = 16
-            (6400.0, 2000.0), // k = 0,25
+        assert!(controler_page((1280.0, 395.0), (1.25, 500.0 / 395.0), f).is_ok());
+        for (page, k) in [
+            ((0.0, 400.0), k),
+            ((1280.0, 0.0), k),
+            ((-1280.0, 400.0), k),
+            ((f64::NAN, 400.0), k),
+            ((1280.0, f64::INFINITY), k),
+            ((1280.0, 400.0), (f64::NAN, 1.25)),
+            ((1280.0, 400.0), (1.25, 0.0)),
+            ((100.0, 31.25), (16.0, 16.0)),
+            ((6400.0, 2000.0), (0.25, 0.25)),
         ] {
-            assert!(controler_page(page, f).is_err(), "{page:?}");
+            assert!(controler_page(page, k, f).is_err(), "{page:?} {k:?}");
         }
-        assert!(controler_page((1280.0, 400.0), r(0, 0, 0, 500)).is_err());
+        assert!(controler_page((1280.0, 400.0), k, r(0, 0, 0, 500)).is_err());
         // Bornes de k incluses.
-        assert!(controler_page((3200.0, 1000.0), f).is_ok());
-        assert!(controler_page((320.0, 100.0), f).is_ok());
+        assert!(controler_page((3200.0, 1000.0), (0.5, 0.5), f).is_ok());
+        assert!(controler_page((320.0, 100.0), (5.0, 5.0), f).is_ok());
+    }
+
+    #[test]
+    fn numero_de_charge_courant_ou_ancien() {
+        let mut e = Etat::default();
+        let (id, _) = e.commencer(&demande(), None, None, Instant::now());
+        assert!(!e.charge_courante(id, 0), "pas encore de charge");
+        let c1 = e.nouvelle_charge(id, r(0, 0, 1600, 500)).expect("charge");
+        assert!(e.charge_courante(id, c1.numero));
+        assert!(!e.charge_courante(id + 1, c1.numero), "autre affichage");
+        // Fenêtre relue : nouvelle charge, l'ancien numéro n'est plus courant.
+        let c2 = e.nouvelle_charge(id, r(0, 0, 1250, 475)).expect("charge");
+        assert!(c2.numero > c1.numero);
+        assert!(!e.charge_courante(id, c1.numero));
+        assert!(e.charge_courante(id, c2.numero));
+        let a = e.courant(id).expect("en cours");
+        assert_eq!(
+            (a.fenetre, a.charge.as_ref().map(|c| c.largeur)),
+            (r(0, 0, 1250, 475), Some(1250))
+        );
+        // Les numéros continuent d'un affichage à l'autre ; un affichage fini n'en a plus.
+        let (id2, _) = e.commencer(&demande(), None, None, Instant::now());
+        assert!(!e.charge_courante(id, c2.numero) && !e.charge_courante(id2, c2.numero));
+        let c3 = e.nouvelle_charge(id2, r(0, 0, 1600, 500)).expect("charge");
+        assert!(c3.numero > c2.numero && e.charge_courante(id2, c3.numero));
+        assert!(
+            e.nouvelle_charge(id, r(0, 0, 1, 1)).is_none(),
+            "affichage oublie"
+        );
+        e.terminer(id2);
+        assert!(!e.charge_courante(id2, c3.numero));
     }
 
     #[test]
@@ -1275,11 +1438,11 @@ mod tests {
 
     #[test]
     fn charge_envoyee_a_la_page() {
-        let c = charge_pour(3, r(-1920, 0, 3520, 1080), &[r(0, 0, 1600, 900)], 3);
+        let c = charge_pour(3, 8, r(-1920, 0, 3520, 1080), &[r(0, 0, 1600, 900)], 3);
         assert_eq!(
             serde_json::to_string(&c).unwrap(),
             concat!(
-                r#"{"id":3,"largeur":3520,"hauteur":1080,"#,
+                r#"{"id":3,"numero":8,"largeur":3520,"hauteur":1080,"#,
                 r#""ecrans":[{"x":1920,"y":0,"largeur":1600,"hauteur":900}],"cote_min":3}"#
             )
         );

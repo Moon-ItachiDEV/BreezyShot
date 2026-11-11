@@ -2,27 +2,32 @@
 // (ARCHITECTURE.md §2.5). Elle ne dessine que le voile et le rectangle : ni texte, ni viseur,
 // ni taille, ni poignée, ni animation.
 //
-// Une seule échelle, celle qu'on mesure : k = taille réelle de la fenêtre (envoyée par le
-// cœur) / taille de la page en pixels CSS. devicePixelRatio ne sert qu'au journal.
+// Échelle k (pixels réels par pixel CSS) : devicePixelRatio, l'échelle de rendu vraie, quand
+// il explique la taille réelle de la fenêtre (envoyée par le cœur) à 1 px CSS près sur chaque
+// axe ; sinon, taille réelle / taille CSS non arrondie (visualViewport, à défaut innerWidth).
+// innerWidth est arrondi au pixel CSS entier : 1366 px à 125 % font 1092,8 px CSS, pas 1093.
 //
 // Contrat avec le cœur (fenetres/selection.rs) :
-// - écoute `selection:montrer` { id, largeur, hauteur, ecrans: [{ x, y, largeur, hauteur }],
-//   cote_min } : tout en pixels réels entiers, relatifs au coin haut gauche de la fenêtre
-//   (`largeur`, `hauteur` : rectangle réel de la fenêtre). Retour au repos (voile plein).
-//   Dès que innerWidth/innerHeight sont non nuls et identiques deux images de suite, la page
-//   mesure kx = largeur / innerWidth, ky = hauteur / innerHeight, règle son dessin, puis
-//   envoie `selection_prete` { id, largeur: innerWidth, hauteur: innerHeight,
-//   echelle: devicePixelRatio }. Avant cela, aucun glisser n'est accepté. Une demande
+// - écoute `selection:montrer` { id, numero, largeur, hauteur, ecrans: [{ x, y, largeur,
+//   hauteur }], cote_min } : tout en pixels réels entiers, relatifs au coin haut gauche de la
+//   fenêtre (`largeur`, `hauteur` : rectangle réel de la fenêtre ; `numero` : celui de la
+//   charge, renvoyé avec chaque message). Retour au repos (voile plein). Dès que
+//   innerWidth/innerHeight sont non nuls et identiques deux images de suite, la page retient
+//   son échelle (kx, ky), règle son dessin, puis envoie `selection_prete` { id, numero,
+//   largeur, hauteur (taille CSS sur laquelle l'échelle est retenue), echelle:
+//   devicePixelRatio, kx, ky }. Avant cela, aucun glisser n'est accepté. Une demande
 //   invalide est ignorée (console.warn) : le cœur cache la fenêtre au bout de son délai. Une
 //   même demande reçue de nouveau (zone refusée, fenêtre changée, page rechargée) remet la
 //   page au repos et la fait mesurer de nouveau.
 // - `resize` pendant un affichage : le glisser en cours est abandonné, la page redevient
-//   « pas prête », attend la stabilité et renvoie `selection_prete`.
+//   « pas prête » jusqu'à la charge suivante ; elle attend la stabilité et renvoie
+//   `selection_prete` (le cœur relit alors la fenêtre et renvoie la charge).
 // - écoute `selection:cachee` : retour au repos, plus rien n'est envoyé.
-// - `selection_terminee` { id, depart: { x, y }, arrivee: { x, y } } au relâchement : les deux
-//   coins finals (bords, après carré, déplacement et bornage), en pixels réels entiers
+// - `selection_terminee` { id, numero, depart: { x, y }, arrivee: { x, y } } au relâchement :
+//   les deux coins finals (bords, après carré, déplacement et bornage), en pixels réels entiers
 //   relatifs à la fenêtre. Rien n'est redessiné ensuite : le cœur cache la fenêtre.
-// - `selection_annulee` { id, cause: "echap" | "clic_droit" }, une seule fois par affichage.
+// - `selection_annulee` { id, numero, cause: "echap" | "clic_droit" }, une seule fois par
+//   affichage.
 // - `selection_chargee` {} une fois, quand les deux écoutes sont en place.
 // Gestes : glisser du bouton gauche ; Maj tenue : carré ; Espace tenue : la zone se déplace ;
 // Échap ou clic droit : annuler. Une zone reste sur l'écran où le glisser a commencé.
@@ -44,6 +49,8 @@ const morceaux = {
 
 // Toute la géométrie est en pixels réels entiers, relatifs au coin de la fenêtre.
 let id = null; // affichage en cours ; null : fenêtre cachée
+let numero = 0; // numéro de la charge reçue
+let redimensionnee = false; // taille changée : pas prête avant la charge suivante
 let largeur = 0; // taille réelle de la fenêtre
 let hauteur = 0;
 let ecrans = [];
@@ -102,6 +109,7 @@ function valider(m) {
   };
   if (!m || typeof m !== "object") return rejeter("pas un objet");
   if (!entier(m.id) || m.id < 0) return rejeter("id invalide");
+  if (!entier(m.numero) || m.numero < 0) return rejeter("numero invalide");
   if (!entier(m.largeur) || !entier(m.hauteur) || m.largeur <= 0 || m.hauteur <= 0) {
     return rejeter("taille invalide");
   }
@@ -114,7 +122,7 @@ function valider(m) {
     liste.push({ x: e.x, y: e.y, largeur: e.largeur, hauteur: e.hauteur });
   }
   if (!entier(m.cote_min) || m.cote_min < 0) return rejeter("cote_min invalide");
-  return { id: m.id, largeur: m.largeur, hauteur: m.hauteur, ecrans: liste, coteMin: m.cote_min };
+  return { id: m.id, numero: m.numero, largeur: m.largeur, hauteur: m.hauteur, ecrans: liste, coteMin: m.cote_min };
 }
 
 /** Voile plein, sans rectangle. */
@@ -132,10 +140,10 @@ function mesurer() {
   prete = false;
   // En attente du cœur, la zone dessinée reste telle quelle jusqu'à la fin.
   if (!attente) scene_css();
-  const numero = ++mesure;
+  const tour = ++mesure;
   let avant = null;
   const verifier = () => {
-    if (numero !== mesure || id === null) return;
+    if (tour !== mesure || id === null) return;
     const l = innerWidth;
     const h = innerHeight;
     const stable = l > 0 && h > 0 && avant !== null && avant.l === l && avant.h === h;
@@ -144,11 +152,19 @@ function mesurer() {
       requestAnimationFrame(verifier);
       return;
     }
-    kx = largeur / l;
-    ky = hauteur / h;
+    const dpr = window.devicePixelRatio || 1;
+    let css = { l, h };
+    if (Math.abs(largeur / dpr - l) <= 1 && Math.abs(hauteur / dpr - h) <= 1) {
+      kx = ky = dpr; // cas normal : l'échelle de rendu, exacte
+    } else {
+      const vv = window.visualViewport;
+      if (vv && vv.width > 0 && vv.height > 0) css = { l: vv.width, h: vv.height };
+      kx = largeur / css.l;
+      ky = hauteur / css.h;
+    }
     scene_reelle();
-    prete = true;
-    appeler("selection_prete", { id, largeur: l, hauteur: h, echelle: window.devicePixelRatio || 1 });
+    prete = !redimensionnee;
+    appeler("selection_prete", { id, numero, largeur: css.l, hauteur: css.h, echelle: dpr, kx, ky });
   };
   requestAnimationFrame(verifier);
 }
@@ -160,6 +176,8 @@ export function montrer(brut) {
   clearTimeout(filet);
   envoi++;
   id = m.id;
+  numero = m.numero;
+  redimensionnee = false;
   largeur = m.largeur;
   hauteur = m.hauteur;
   ecrans = m.ecrans;
@@ -186,9 +204,9 @@ function envoyer(commande, args) {
   attente = true;
   if (image) cancelAnimationFrame(image);
   image = 0;
-  const numero = envoi;
+  const tour = envoi;
   const liberer = () => {
-    if (numero !== envoi || !attente) return;
+    if (tour !== envoi || !attente) return;
     clearTimeout(filet);
     attente = false;
     repos();
@@ -279,7 +297,7 @@ function planifier() {
 
 function annuler(cause) {
   if (id === null || attente) return;
-  envoyer("selection_annulee", { id, cause });
+  envoyer("selection_annulee", { id, numero, cause });
 }
 
 addEventListener(
@@ -337,7 +355,7 @@ addEventListener(
       return;
     }
     // Rien n'est redessiné : le cœur cache la fenêtre.
-    envoyer("selection_terminee", { id, depart: { x: a.x, y: a.y }, arrivee: { x: b.x, y: b.y } });
+    envoyer("selection_terminee", { id, numero, depart: { x: a.x, y: a.y }, arrivee: { x: b.x, y: b.y } });
   },
   true,
 );
@@ -382,10 +400,12 @@ addEventListener(
 addEventListener("blur", () => {
   espace = false;
 });
-// La taille change : l'échelle n'est plus sûre. Le glisser en cours est abandonné et la
-// page mesure de nouveau (puis renvoie `selection_prete`).
+// La taille change : l'échelle n'est plus sûre. Le glisser en cours est abandonné, la page
+// n'est plus prête jusqu'à la charge suivante, et elle mesure de nouveau (puis renvoie
+// `selection_prete`, sur quoi le cœur relit la fenêtre).
 addEventListener("resize", () => {
   if (id === null) return;
+  redimensionnee = true;
   if (!attente) repos();
   mesurer();
 });
@@ -407,6 +427,7 @@ if (tauri?.event?.listen) {
     const d = window.devicePixelRatio || 1;
     montrer({
       id: 1,
+      numero: 1,
       largeur: Math.round(innerWidth * d),
       hauteur: Math.round(innerHeight * d),
       ecrans: [],
