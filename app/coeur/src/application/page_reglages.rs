@@ -199,6 +199,7 @@ pub fn libelle_action(action: &str) -> &'static str {
         "zone" => "Zone",
         "plein_ecran" => "Plein écran",
         "fenetre" => "Fenêtre",
+        "derniere_zone" => "Refaire la dernière zone",
         _ => "",
     }
 }
@@ -338,6 +339,7 @@ pub fn fixer_candidats(r: &mut Raccourcis, action: &str, candidats: Vec<String>)
         "zone" => &mut r.zone,
         "plein_ecran" => &mut r.plein_ecran,
         "fenetre" => &mut r.fenetre,
+        "derniere_zone" => &mut r.derniere_zone,
         _ => return false,
     };
     *cible = candidats;
@@ -793,6 +795,13 @@ mod tests {
         let mut r = Raccourcis::par_defaut(Plateforme::Windows);
         assert!(fixer_candidats(&mut r, "fenetre", vec!["F9".into()]));
         assert_eq!(r.fenetre, ["F9"]);
+        assert!(fixer_candidats(
+            &mut r,
+            "derniere_zone",
+            vec!["Ctrl+Maj+9".into()]
+        ));
+        assert_eq!(r.derniere_zone, ["Ctrl+Maj+9"]);
+        assert_eq!(libelle_action("derniere_zone"), "Refaire la dernière zone");
         assert!(!fixer_candidats(&mut r, "annoter", vec![]));
     }
 

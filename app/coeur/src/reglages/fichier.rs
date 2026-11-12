@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use chrono::{DateTime, Local};
 
 use super::constat::{Constat, ErreurEcriture};
-use super::lecture::{analyser, duree_valide, interpreter, TAILLE_MAX};
+use super::lecture::{analyser, duree_valide, interpreter, retardateur_valide, TAILLE_MAX};
 use super::modele::{vers_json, Plateforme, Reglages, VERSION_ACTUELLE};
 
 /// Nom du fichier de réglages dans le dossier donné.
@@ -189,8 +189,8 @@ pub(super) fn texte_du_fichier(reglages: &Reglages) -> Result<String, ErreurEcri
 pub const MODELE_NOM_MAX: usize = 200;
 
 /// Les contrôles de valeur que fait `ecrire`, sans le disque ni la protection : au moins
-/// une sortie active, durée permise, modèle de nom non vide, dossier non vide. Fonction
-/// pure, pour refuser un changement avant de l'appliquer.
+/// une sortie active, durée et retardateur permis, modèle de nom non vide, dossier non vide.
+/// Fonction pure, pour refuser un changement avant de l'appliquer.
 pub fn valider(reglages: &Reglages) -> Result<(), ErreurEcriture> {
     if !reglages.une_sortie_active() {
         return Err(ErreurEcriture::AucuneSortie);
@@ -198,6 +198,11 @@ pub fn valider(reglages: &Reglages) -> Result<(), ErreurEcriture> {
     if duree_valide(&reglages.vignette.duree_s.into()).is_none() {
         return Err(ErreurEcriture::ValeurInvalide {
             champ: "vignette.duree_s",
+        });
+    }
+    if retardateur_valide(&reglages.capture.retardateur_s.into()).is_none() {
+        return Err(ErreurEcriture::ValeurInvalide {
+            champ: "capture.retardateur_s",
         });
     }
     if reglages.modele_nom.trim().is_empty() || reglages.modele_nom.chars().count() > MODELE_NOM_MAX

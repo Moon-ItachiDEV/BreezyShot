@@ -107,7 +107,7 @@ function Ecrire-Reglages([string]$Dossier, $Objet) {
 # le temps d'une capture, le point 8 allume l'enregistrement.
 function Reglages-Du-Cas {
     return [ordered]@{
-        version                   = 2
+        version                   = 3
         raccourcis                = [ordered]@{ zone = @('Ctrl+Maj+1'); plein_ecran = @('Ctrl+Maj+2'); fenetre = @('Ctrl+Maj+3') }
         copier_apres_capture      = $true
         enregistrer_apres_capture = $false

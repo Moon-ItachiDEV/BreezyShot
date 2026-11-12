@@ -3,7 +3,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use super::{Changement, EcranInfo, FenetreInfo, Pixels, Rect};
+use super::{Changement, EcranInfo, FenetreInfo, Pixels, Pointeur, Rect};
 
 pub const DISPONIBLE: bool = false;
 
@@ -60,3 +60,17 @@ pub fn surveillance_session() -> bool {
 pub fn poignee_ecran_fige() -> Option<isize> {
     None
 }
+
+pub fn lire_pointeur() -> Result<Option<Pointeur>, String> {
+    Ok(None)
+}
+
+pub fn loupe_disponible() -> bool {
+    false
+}
+
+pub fn montrer_loupe() -> Result<(), String> {
+    Err("loupe non disponible sur ce systeme".into())
+}
+
+pub fn cacher_loupe() {}

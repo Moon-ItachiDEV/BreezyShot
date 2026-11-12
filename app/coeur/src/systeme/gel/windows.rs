@@ -45,7 +45,7 @@ use ::windows::Win32::UI::WindowsAndMessaging::{
 
 use super::{
     bgra_en_rgba, coins_de, echelle_depuis_dpi, est_classe_du_bureau, garder_fenetre, Changement,
-    Coins, EcranInfo, EtatCoins, EtatFenetre, FenetreInfo, Pixels, Rect,
+    Coins, EcranInfo, EtatCoins, EtatFenetre, FenetreInfo, Pixels, Pointeur, Rect,
 };
 
 pub const DISPONIBLE: bool = true;
@@ -1041,6 +1041,24 @@ pub fn detruire_ecran_fige() {
 pub fn poignee_ecran_fige() -> Option<isize> {
     fenetre_figee().map(|(hwnd, _)| hwnd.0 as isize)
 }
+
+// ---------------------------------------------------------------------------------------
+// Pointeur et loupe (0.4) : corps vides du socle, remplis par le chantier « Pointeur et
+// loupe » (`GetCursorInfo`, `DrawIconEx` ; fenêtre native `BreezyShotLoupe`).
+
+pub fn lire_pointeur() -> Result<Option<Pointeur>, String> {
+    Ok(None)
+}
+
+pub fn loupe_disponible() -> bool {
+    false
+}
+
+pub fn montrer_loupe() -> Result<(), String> {
+    Err("loupe non construite".into())
+}
+
+pub fn cacher_loupe() {}
 
 // ---------------------------------------------------------------------------------------
 // Fil de garde : si le fil de l'écran figé ne répond plus, prévenir l'Application.

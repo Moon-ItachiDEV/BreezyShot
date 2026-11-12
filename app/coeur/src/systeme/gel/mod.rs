@@ -268,6 +268,42 @@ pub fn poignee_ecran_fige() -> Option<isize> {
     plateforme::poignee_ecran_fige()
 }
 
+/// Le pointeur de la souris, lu juste après la photo (0.4), pour être posé dans les pixels
+/// découpés. Les deux images sont en RGBA, ligne par ligne de haut en bas : le pointeur
+/// peint sur un fond noir, puis sur un fond blanc (leur différence donne la transparence et
+/// les parties inversées). Jamais écrit au journal (ni forme ni nom).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Pointeur {
+    /// Position de la pointe moins le point chaud, en pixels réels du bureau.
+    pub origine: (i32, i32),
+    pub largeur: u32,
+    pub hauteur: u32,
+    pub sur_noir: Vec<u8>,
+    pub sur_blanc: Vec<u8>,
+}
+
+/// Lit le pointeur tel que Windows le montre. `Ok(None)` : pointeur caché (écran tactile,
+/// saisie). N'importe quel fil. Hors Windows : `Ok(None)`.
+pub fn lire_pointeur() -> Result<Option<Pointeur>, String> {
+    plateforme::lire_pointeur()
+}
+
+/// Vrai si la loupe de la sélection de zone existe sur ce système (Windows).
+pub fn loupe_disponible() -> bool {
+    plateforme::loupe_disponible()
+}
+
+/// Montre la loupe au-dessus de la sélection de zone. Fil principal, écran figé montré ;
+/// arme la minuterie qui la fait suivre la pointe (premier dessin au premier tour).
+pub fn montrer_loupe() -> Result<(), String> {
+    plateforme::montrer_loupe()
+}
+
+/// Cache la loupe. Sûr à tout moment, de partout (`cacher_ecran_fige` l'appellera).
+pub fn cacher_loupe() {
+    plateforme::cacher_loupe()
+}
+
 /// Ordre des écrans : de gauche à droite, puis de haut en bas.
 pub fn trier_ecrans(ecrans: &mut [EcranInfo]) {
     ecrans.sort_by_key(|e| (e.rect.x, e.rect.y));

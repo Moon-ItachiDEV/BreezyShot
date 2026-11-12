@@ -1,4 +1,4 @@
-//! Les six états d'une capture et la table unique de leurs passages.
+//! Les sept états d'une capture et la table unique de leurs passages.
 //!
 //! La table suit le tableau « États » du document de workflow. Ajouter un état ou un
 //! passage, c'est ajouter des lignes à `PASSAGES` ; `suivant` ne change pas.
@@ -12,6 +12,8 @@ pub enum Etat {
     Decoupe,
     Souffle,
     Vignette,
+    /// Retardateur en cours : rien n'est photographié avant la fin du délai (0.4).
+    Decompte,
 }
 
 /// Modes de capture. Ce sont aussi les noms d'action des raccourcis.
@@ -20,17 +22,25 @@ pub enum Mode {
     Zone,
     PleinEcran,
     Fenetre,
+    /// Refaire la dernière zone (0.4) : la même zone du même écran, sans sélection.
+    DerniereZone,
 }
 
 impl Mode {
-    pub const TOUS: [Mode; 3] = [Mode::Zone, Mode::PleinEcran, Mode::Fenetre];
+    pub const TOUS: [Mode; 4] = [
+        Mode::Zone,
+        Mode::PleinEcran,
+        Mode::Fenetre,
+        Mode::DerniereZone,
+    ];
 
-    /// Nom d'action (`zone`, `plein_ecran`, `fenetre`).
+    /// Nom d'action (`zone`, `plein_ecran`, `fenetre`, `derniere_zone`).
     pub fn nom(self) -> &'static str {
         match self {
             Mode::Zone => "zone",
             Mode::PleinEcran => "plein_ecran",
             Mode::Fenetre => "fenetre",
+            Mode::DerniereZone => "derniere_zone",
         }
     }
 
@@ -82,6 +92,12 @@ pub enum Declencheur {
     VignetteImpossible,
     /// Fin du délai d'annulation de Supprimer : la capture est effacée.
     CaptureSupprimee,
+    /// Capture demandée avec le retardateur (0.4).
+    DemandeDecompte(Mode),
+    /// Fin du délai du retardateur.
+    DecompteFini(Mode),
+    /// Échap, croix du décompte ou session verrouillée pendant le décompte.
+    DecompteAnnule,
 }
 
 impl Declencheur {
@@ -90,6 +106,8 @@ impl Declencheur {
         match self {
             Declencheur::DemandeCapture(m) => format!("DemandeCapture {}", m.nom()),
             Declencheur::PhotoPrise(m) => format!("PhotoPrise {}", m.nom()),
+            Declencheur::DemandeDecompte(m) => format!("DemandeDecompte {}", m.nom()),
+            Declencheur::DecompteFini(m) => format!("DecompteFini {}", m.nom()),
             autre => format!("{autre:?}"),
         }
     }
@@ -136,6 +154,38 @@ pub const PASSAGES: &[(Etat, Declencheur, Etat)] = &[
     (E::Vignette, D::DemandeCapture(Mode::Zone), E::Gel),
     (E::Vignette, D::DemandeCapture(Mode::PleinEcran), E::Gel),
     (E::Vignette, D::DemandeCapture(Mode::Fenetre), E::Gel),
+    // 0.4 : refaire la dernière zone, sans sélection (Gel → Découpe, comme le plein écran).
+    // Dernière zone inutilisable : la suite passe par `PhotoPrise(Zone)` (ligne existante).
+    (E::Repos, D::DemandeCapture(Mode::DerniereZone), E::Gel),
+    (E::Vignette, D::DemandeCapture(Mode::DerniereZone), E::Gel),
+    (E::Gel, D::PhotoPrise(Mode::DerniereZone), E::Decoupe),
+    // 0.4 : le retardateur, avant la photo dans tous les modes. La vignette est fermée à
+    // l'entrée ; en Décompte, seuls la fin et l'annulation passent.
+    (E::Repos, D::DemandeDecompte(Mode::Zone), E::Decompte),
+    (E::Repos, D::DemandeDecompte(Mode::PleinEcran), E::Decompte),
+    (E::Repos, D::DemandeDecompte(Mode::Fenetre), E::Decompte),
+    (
+        E::Repos,
+        D::DemandeDecompte(Mode::DerniereZone),
+        E::Decompte,
+    ),
+    (E::Vignette, D::DemandeDecompte(Mode::Zone), E::Decompte),
+    (
+        E::Vignette,
+        D::DemandeDecompte(Mode::PleinEcran),
+        E::Decompte,
+    ),
+    (E::Vignette, D::DemandeDecompte(Mode::Fenetre), E::Decompte),
+    (
+        E::Vignette,
+        D::DemandeDecompte(Mode::DerniereZone),
+        E::Decompte,
+    ),
+    (E::Decompte, D::DecompteFini(Mode::Zone), E::Gel),
+    (E::Decompte, D::DecompteFini(Mode::PleinEcran), E::Gel),
+    (E::Decompte, D::DecompteFini(Mode::Fenetre), E::Gel),
+    (E::Decompte, D::DecompteFini(Mode::DerniereZone), E::Gel),
+    (E::Decompte, D::DecompteAnnule, E::Repos),
 ];
 
 /// Fonction pure : l'état suivant, ou `None` si le déclencheur est ignoré dans cet état.
@@ -188,7 +238,18 @@ impl Automate {
 mod tests {
     use super::*;
 
-    const TOUS_LES_ETATS: [Etat; 6] = [
+    const TOUS_LES_ETATS: [Etat; 7] = [
+        E::Repos,
+        E::Gel,
+        E::Selection,
+        E::Decoupe,
+        E::Souffle,
+        E::Vignette,
+        E::Decompte,
+    ];
+
+    /// Les six états de la 0.3.
+    const ETATS_0_3: [Etat; 6] = [
         E::Repos,
         E::Gel,
         E::Selection,
@@ -196,6 +257,203 @@ mod tests {
         E::Souffle,
         E::Vignette,
     ];
+
+    /// Les trois modes de la 0.3.
+    const MODES_0_3: [Mode; 3] = [Mode::Zone, Mode::PleinEcran, Mode::Fenetre];
+
+    /// Copie littérale de la table de la 0.3 (28 lignes) : elle ne doit jamais changer.
+    const PASSAGES_0_3: &[(Etat, Declencheur, Etat)] = &[
+        (E::Repos, D::DemandeCapture(Mode::Zone), E::Gel),
+        (E::Repos, D::DemandeCapture(Mode::PleinEcran), E::Gel),
+        (E::Repos, D::DemandeCapture(Mode::Fenetre), E::Gel),
+        (E::Gel, D::PhotoPrise(Mode::Zone), E::Selection),
+        (E::Gel, D::PhotoPrise(Mode::Fenetre), E::Selection),
+        (E::Gel, D::PhotoPrise(Mode::PleinEcran), E::Decoupe),
+        (E::Gel, D::GelImpossible, E::Repos),
+        (E::Selection, D::ZoneChoisie, E::Decoupe),
+        (E::Selection, D::SelectionAnnulee, E::Repos),
+        (E::Selection, D::EcransChanges, E::Repos),
+        (E::Selection, D::SessionVerrouillee, E::Repos),
+        (E::Selection, D::BureauSecurise, E::Repos),
+        (E::Selection, D::SelectionMuette, E::Repos),
+        (E::Selection, D::SelectionImpossible, E::Repos),
+        (E::Decoupe, D::DecoupeImpossible, E::Repos),
+        (E::Decoupe, D::SortieSansBilan, E::Repos),
+        (E::Decoupe, D::ImagePrete, E::Souffle),
+        (E::Decoupe, D::ImagePreteSansVignette, E::Repos),
+        (E::Souffle, D::SouffleTermine, E::Vignette),
+        (E::Souffle, D::VignetteImpossible, E::Repos),
+        (E::Vignette, D::VignetteFermee, E::Repos),
+        (E::Vignette, D::DelaiEcoule, E::Repos),
+        (E::Vignette, D::GlisserReussi, E::Repos),
+        (E::Vignette, D::VignetteImpossible, E::Repos),
+        (E::Vignette, D::CaptureSupprimee, E::Repos),
+        (E::Vignette, D::DemandeCapture(Mode::Zone), E::Gel),
+        (E::Vignette, D::DemandeCapture(Mode::PleinEcran), E::Gel),
+        (E::Vignette, D::DemandeCapture(Mode::Fenetre), E::Gel),
+    ];
+
+    /// Les déclencheurs sans mode de la 0.3.
+    const SANS_MODE_0_3: [Declencheur; 18] = [
+        D::GelImpossible,
+        D::ZoneChoisie,
+        D::SelectionAnnulee,
+        D::EcransChanges,
+        D::SessionVerrouillee,
+        D::BureauSecurise,
+        D::SelectionMuette,
+        D::SelectionImpossible,
+        D::DecoupeImpossible,
+        D::SortieSansBilan,
+        D::ImagePrete,
+        D::ImagePreteSansVignette,
+        D::SouffleTermine,
+        D::VignetteFermee,
+        D::DelaiEcoule,
+        D::GlisserReussi,
+        D::VignetteImpossible,
+        D::CaptureSupprimee,
+    ];
+
+    /// Tous les déclencheurs de la 0.3 (les trois modes de la 0.3).
+    fn declencheurs_0_3() -> Vec<Declencheur> {
+        let mut v: Vec<Declencheur> = SANS_MODE_0_3.to_vec();
+        for m in MODES_0_3 {
+            v.push(D::DemandeCapture(m));
+            v.push(D::PhotoPrise(m));
+        }
+        v
+    }
+
+    /// Tous les déclencheurs de la 0.4, chaque mode compris.
+    fn tous_les_declencheurs() -> Vec<Declencheur> {
+        let mut v: Vec<Declencheur> = SANS_MODE_0_3.to_vec();
+        v.push(D::DecompteAnnule);
+        for m in Mode::TOUS {
+            v.extend([
+                D::DemandeCapture(m),
+                D::PhotoPrise(m),
+                D::DemandeDecompte(m),
+                D::DecompteFini(m),
+            ]);
+        }
+        v
+    }
+
+    fn suivant_0_3(etat: Etat, d: Declencheur) -> Option<Etat> {
+        PASSAGES_0_3
+            .iter()
+            .find(|(e, x, _)| *e == etat && *x == d)
+            .map(|(_, _, a)| *a)
+    }
+
+    fn porte_derniere_zone(d: &Declencheur) -> bool {
+        matches!(
+            d,
+            D::DemandeCapture(Mode::DerniereZone)
+                | D::PhotoPrise(Mode::DerniereZone)
+                | D::DemandeDecompte(Mode::DerniereZone)
+                | D::DecompteFini(Mode::DerniereZone)
+        )
+    }
+
+    #[test]
+    fn table_0_3_incluse() {
+        assert_eq!(PASSAGES_0_3.len(), 28);
+        for ligne in PASSAGES_0_3 {
+            assert!(
+                PASSAGES.contains(ligne),
+                "ligne de la 0.3 perdue : {ligne:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn seulement_des_lignes_nouvelles() {
+        for ligne @ (depart, d, arrivee) in PASSAGES {
+            if PASSAGES_0_3.contains(ligne) {
+                continue;
+            }
+            assert!(
+                *depart == E::Decompte || *arrivee == E::Decompte || porte_derniere_zone(d),
+                "ligne nouvelle sans Décompte ni dernière zone : {ligne:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn six_etats_inchanges() {
+        for etat in ETATS_0_3 {
+            for d in declencheurs_0_3() {
+                assert_eq!(suivant(etat, d), suivant_0_3(etat, d), "{etat:?} {d:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn decompte_n_accepte_que_ses_sorties() {
+        for d in tous_les_declencheurs() {
+            let attendu = match d {
+                D::DecompteFini(_) => Some(E::Gel),
+                D::DecompteAnnule => Some(E::Repos),
+                _ => None,
+            };
+            assert_eq!(suivant(E::Decompte, d), attendu, "{d:?}");
+        }
+    }
+
+    #[test]
+    fn parcours_avec_retardateur() {
+        for depart in [E::Repos, E::Vignette] {
+            for m in Mode::TOUS {
+                let mut a = Automate { etat: depart };
+                assert_eq!(a.traiter(D::DemandeDecompte(m)), Some(E::Decompte));
+                // Un second appui pendant le décompte est ignoré.
+                assert_eq!(a.traiter(D::DemandeCapture(m)), None);
+                assert_eq!(a.traiter(D::DemandeDecompte(m)), None);
+                assert_eq!(a.traiter(D::DecompteFini(m)), Some(E::Gel));
+                match m {
+                    Mode::Zone | Mode::Fenetre => {
+                        assert_eq!(a.traiter(D::PhotoPrise(m)), Some(E::Selection));
+                        assert_eq!(a.traiter(D::ZoneChoisie), Some(E::Decoupe));
+                    }
+                    Mode::PleinEcran | Mode::DerniereZone => {
+                        assert_eq!(a.traiter(D::PhotoPrise(m)), Some(E::Decoupe));
+                    }
+                }
+                assert_eq!(a.traiter(D::ImagePreteSansVignette), Some(E::Repos));
+            }
+        }
+        // Annulé : retour au repos ; le souffle ignore le retardateur.
+        let mut a = Automate::default();
+        a.traiter(D::DemandeDecompte(Mode::Zone));
+        assert_eq!(a.traiter(D::DecompteAnnule), Some(E::Repos));
+        for m in Mode::TOUS {
+            assert_eq!(suivant(E::Souffle, D::DemandeDecompte(m)), None);
+        }
+        // Dernière zone inutilisable : la photo sert à la sélection de zone.
+        let mut a = Automate::default();
+        a.traiter(D::DemandeCapture(Mode::DerniereZone));
+        assert_eq!(a.traiter(D::PhotoPrise(Mode::Zone)), Some(E::Selection));
+    }
+
+    #[test]
+    fn libelles_du_decompte() {
+        assert_eq!(
+            D::DemandeDecompte(Mode::Zone).libelle(),
+            "DemandeDecompte zone"
+        );
+        assert_eq!(
+            D::DecompteFini(Mode::PleinEcran).libelle(),
+            "DecompteFini plein_ecran"
+        );
+        assert_eq!(D::DecompteAnnule.libelle(), "DecompteAnnule");
+        assert_eq!(
+            D::PhotoPrise(Mode::DerniereZone).libelle(),
+            "PhotoPrise derniere_zone"
+        );
+        assert_eq!(Mode::depuis_nom("derniere_zone"), Some(Mode::DerniereZone));
+    }
 
     #[test]
     fn parcours_normal_d_une_zone() {

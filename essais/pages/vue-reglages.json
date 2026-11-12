@@ -63,6 +63,17 @@
         ],
         "modifie": false,
         "refus": null
+      },
+      {
+        "action": "derniere_zone",
+        "libelle": "Refaire la dernière zone",
+        "touches": [
+          "Ctrl",
+          "Maj",
+          "4"
+        ],
+        "modifie": false,
+        "refus": null
       }
     ],
     "version": "7.8.9-essai",

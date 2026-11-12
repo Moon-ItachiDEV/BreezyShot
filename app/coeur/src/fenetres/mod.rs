@@ -5,6 +5,7 @@
 //! Le module crée, place, montre et cache ; il ne décide d'aucun message. Ce qu'il reçoit
 //! de la page remonte à l'Application par `Signal`.
 
+pub mod decompte;
 pub mod installateur;
 mod place;
 pub mod reglages;
@@ -21,6 +22,7 @@ use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, State, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
 
 use crate::systeme;
+pub use decompte::Decompte;
 pub use place::{
     borner_zone, borner_zone_dans, cacher_d_office, cliquable, ecran_sous, geste_cliquable,
     intervalle, placer, zone_ecran, Ecran, Rect, ZoneCss, DELAI_REUSSITE_MAX, DELAI_ZONE_MAX,
@@ -458,6 +460,21 @@ impl Bandeau {
             cacher(&f);
         }
         true
+    }
+
+    /// Montre le décompte `d` dans la fenêtre du bandeau ; il remplace le message en cours.
+    /// Rend son `id` (même compteur que les messages). Socle de la 0.4 : rien n'est montré,
+    /// rend 0 (« sans affichage » : le délai court quand même).
+    pub fn montrer_decompte(&self, d: Decompte) -> u64 {
+        log::info!("bandeau decompte {}: affichage non construit", d.numero);
+        0
+    }
+
+    /// Cache le décompte `id` s'il est en cours ; rend vrai s'il l'était. `cacher()` le
+    /// cache aussi. Socle de la 0.4 : rien n'est jamais montré, rend faux.
+    pub fn cacher_decompte(&self, id: u64) -> bool {
+        let _ = id;
+        false
     }
 
     /// À l'arrêt de l'app : la surveillance s'arrête, la fenêtre est cachée puis détruite.

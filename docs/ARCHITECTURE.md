@@ -152,7 +152,8 @@ privé. Trois précautions suffisent, dès maintenant :
 
 ### 3.1 États (`application/etats.rs`)
 
-Six états : `Repos`, `Gel`, `Selection`, `Decoupe`, `Souffle`, `Vignette`. Les passages sont
+Sept états : `Repos`, `Gel`, `Selection`, `Decoupe`, `Souffle`, `Vignette` et, depuis la
+0.4, `Decompte` (retardateur). Les passages sont
 une **table constante unique** `(Etat, Declencheur) -> Etat` et une fonction pure
 `suivant(etat, declencheur) -> Option<Etat>` (`None` = déclencheur ignoré dans cet état).
 Ajouter un état, c'est ajouter des lignes. La table suit le tableau « États » du workflow :
@@ -169,7 +170,27 @@ impossible, par `ImagePreteSansVignette`. Ajoutés à l'étape 9 : `VignetteImpo
 (`Souffle -> Repos` et `Vignette -> Repos`, la page n'a pas posé la carte à temps) et
 `CaptureSupprimee` (`Vignette -> Repos`, fin du délai d'annulation de Supprimer).
 
-Modes : `zone`, `plein_ecran`, `fenetre`. Ce sont aussi les **noms d'action** des raccourcis.
+Ajoutés en 0.4 (aucune ligne de la 0.3 n'est changée ni retirée ; tests `table_0_3_incluse`,
+`seulement_des_lignes_nouvelles`, `six_etats_inchanges`) :
+
+```text
+Repos     DemandeCapture(DerniereZone)  -> Gel
+Vignette  DemandeCapture(DerniereZone)  -> Gel
+Gel       PhotoPrise(DerniereZone)      -> Decoupe
+Repos     DemandeDecompte(m)            -> Decompte   (m : les quatre modes)
+Vignette  DemandeDecompte(m)            -> Decompte   (la vignette est fermée à l'entrée)
+Decompte  DecompteFini(m)               -> Gel        (puis la suite de m, inchangée)
+Decompte  DecompteAnnule                -> Repos
+```
+
+En Décompte, tout autre déclencheur est ignoré : un raccourci de capture (`DemandeCapture`,
+`DemandeDecompte`) donne `capture deja en cours: appui ignore`. La dernière zone inutilisable
+passe par `PhotoPrise(Zone)` (ligne de la 0.3) vers la sélection. Libellés du journal :
+`DemandeDecompte zone`, `DecompteFini plein_ecran`, `DecompteAnnule`, `PhotoPrise
+derniere_zone`.
+
+Modes : `zone`, `plein_ecran`, `fenetre` et `derniere_zone` (0.4). Ce sont aussi les **noms
+d'action** des raccourcis.
 
 ### 3.2 Journal (`application/journal.rs`)
 
@@ -432,16 +453,18 @@ Module pur : il reçoit le dossier où écrire, ne connaît ni Tauri ni les autr
 
 ```json
 {
-  "version": 2,
+  "version": 3,
   "raccourcis": {
     "zone": ["ImprEcran", "Ctrl+Maj+1"],
     "plein_ecran": ["Ctrl+Maj+2"],
-    "fenetre": ["Ctrl+Maj+3"]
+    "fenetre": ["Ctrl+Maj+3"],
+    "derniere_zone": ["Ctrl+Maj+4"]
   },
   "copier_apres_capture": true,
   "enregistrer_apres_capture": false,
   "vignette": { "afficher": true, "duree_s": 6, "coin": "bas_gauche" },
   "selection": { "loupe": false },
+  "capture": { "retardateur_s": 0, "pointeur": false },
   "demarrer_avec_systeme": false,
   "dossier_enregistrement": null,
   "modele_nom": "BreezyShot {date} à {heure}",
@@ -453,9 +476,14 @@ Module pur : il reçoit le dossier où écrire, ne connaît ni Tauri ni les autr
 - `raccourcis` : par **nom d'action**, une liste de candidats par ordre de préférence. Le
   premier qui peut être réservé est utilisé : le repli n'est pas un cas particulier. Les
   réglages gardent des chaînes sans les interpréter (c'est le module `raccourcis` qui les lit).
-  Les valeurs par défaut dépendent du système (`ImprEcran` n'existe pas sur Mac).
+  Les valeurs par défaut dépendent du système (`ImprEcran` n'existe pas sur Mac ; la
+  dernière zone : `Ctrl+Maj+4` sous Windows, `Cmd+Maj+7` sur Mac, provisoire).
 - `duree_s` : 1 à 60 s, ou `0` = toujours (`DUREE_TOUJOURS`, version 2 ; la page propose
   3, 6, 10 et Toujours).
+- `capture` (version 3) : `retardateur_s` vaut 0 (aucun) ou 1 à 10 s entières
+  (`RETARDATEUR_MAX_S`) ; la page propose 0, 3, 5, 10 ; une autre valeur valide (7) reste
+  telle quelle ; invalide (11, -1, `"3"`, 2,5) → 0 avec un avertissement. `pointeur` :
+  booléen, le pointeur dessiné dans l'image. `selection.loupe` ne bouge pas.
 - `dossier_enregistrement: null` = Images › BreezyShot. `coin` : `bas_gauche`, `bas_droite`,
   `haut_gauche`, `haut_droite`. `animations` : `systeme`, `normales`, `reduites`.
   `theme` : `systeme`, `clair`, `sombre`.
@@ -467,17 +495,23 @@ Module pur : il reçoit le dossier où écrire, ne connaît ni Tauri ni les autr
   de 1 à 60 s) : la valeur par défaut remplace cette valeur seulement, avec un avertissement.
 - **Champ inconnu** : conservé tel quel à la réécriture.
 - **Version plus ancienne** : mise à niveau pas à pas par une liste de fonctions
-  (`v0 -> v1`, `v1 -> v2`) qui complète sans rien effacer, puis réécriture. `v1 -> v2` ne
-  change rien à la forme : il permet seulement `duree_s: 0`, qu'une app de version 1 aurait
-  remplacé par 6.
+  (`v0 -> v1`, `v1 -> v2`, `v2 -> v3`) qui complète sans rien effacer, puis réécriture.
+  `v1 -> v2` ne change rien à la forme : il permet seulement `duree_s: 0`, qu'une app de
+  version 1 aurait remplacé par 6. `v2 -> v3` (0.4) ajoute `raccourcis.derniere_zone`
+  (défaut de la plateforme, seulement dans un objet `raccourcis` présent et seulement s'il
+  manque) et l'objet `capture`, sans rien remplacer : constat `MisANiveau { de: 2, a: 3 }`,
+  une seule ligne d'info. Une 0.3 lancée sur un fichier v3 le lit au mieux et refuse de
+  l'écrire. Si `Ctrl+Maj+4` est déjà donné à une autre action, la dernière zone n'a pas de
+  raccourci et l'annonce du démarrage le dit une fois (« Aucun raccourci pour la dernière
+  zone »).
   Un fichier sans champ `version` est une version 0.
 - **Version plus récente que l'app** : on lit ce qu'on comprend et on ne réécrit pas le fichier.
 - **Au moins une sortie active** : si copie, enregistrement et vignette sont tous éteints, la
   copie est rallumée à la lecture, et `ecrire` refuse cette combinaison.
 - Écriture atomique (fichier temporaire puis renommage), JSON indenté, UTF-8, fin de ligne finale.
 - `valider(&Reglages)` dit sans toucher au disque ce que `ecrire` refuserait (aucune sortie
-  active, durée invalide, modèle de nom vide ou de plus de `MODELE_NOM_MAX` caractères,
-  dossier vide) : la fenêtre Réglages refuse un
+  active, durée ou retardateur invalide, modèle de nom vide ou de plus de `MODELE_NOM_MAX`
+  caractères, dossier vide) : la fenêtre Réglages refuse un
   changement avant de l'appliquer. `ErreurEcriture::code()` et `Constat::code()` donnent un
   code court sans chemin, pour les nouvelles lignes du journal.
 - Interface : `charger(dossier, plateforme) -> (Reglages, Vec<Constat>)`, `ecrire(dossier,
@@ -578,8 +612,9 @@ Module pur : il reçoit le dossier où écrire, ne connaît ni Tauri ni les autr
   libérés (`suspendre`), sinon le système avalerait les touches ; `reprendre` les reprend et
   une perte (prise entre-temps par une autre application) devient `refuse_par_le_systeme`
   dans le bilan. Filet : la saisie est reprise d'office au bout de 15 s.
-  Ctrl+Maj+4, T et H tapés par l'utilisateur sont acceptés ; ils ne sont jamais proposés par
-  défaut.
+  `Ctrl + Maj + 4` est, depuis la 0.4, le raccourci par défaut de « Refaire la dernière
+  zone » (`derniere_zone`, modifiable dans Réglages › Raccourcis). T et H tapés par
+  l'utilisateur sont acceptés ; ils ne sont jamais proposés par défaut.
 
 ## 6. Fenêtres et bandeau (`fenetres/`, `interface/vignette/bandeau.*`)
 

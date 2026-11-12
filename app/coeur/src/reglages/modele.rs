@@ -13,6 +13,8 @@ pub const DUREE_MIN_S: u32 = 1;
 pub const DUREE_MAX_S: u32 = 60;
 /// `vignette.duree_s = 0` : la vignette reste affichée (version 2 du fichier).
 pub const DUREE_TOUJOURS: u32 = 0;
+/// Retardateur permis, en secondes entières : 0 (aucun) à `RETARDATEUR_MAX_S` (version 3).
+pub const RETARDATEUR_MAX_S: u32 = 10;
 
 /// Le système pour lequel on choisit les valeurs par défaut. Le module ne le devine pas
 /// lui-même (aucun `cfg` hors de `systeme/`) : l'Application le lui donne.
@@ -78,13 +80,15 @@ pub struct Raccourcis {
     pub zone: Vec<String>,
     pub plein_ecran: Vec<String>,
     pub fenetre: Vec<String>,
+    /// Refaire la dernière zone (version 3).
+    pub derniere_zone: Vec<String>,
     /// Actions que cette version ne connaît pas, gardées telles quelles pour la réécriture.
     pub(in crate::reglages) autres: Map<String, Value>,
 }
 
 impl Raccourcis {
     /// Les noms d'action connus, dans l'ordre où ils sont écrits.
-    pub const ACTIONS: [&'static str; 3] = ["zone", "plein_ecran", "fenetre"];
+    pub const ACTIONS: [&'static str; 4] = ["zone", "plein_ecran", "fenetre", "derniere_zone"];
 
     /// Les candidats d'une action connue, `None` pour une action inconnue.
     pub fn candidats(&self, action: &str) -> Option<&[String]> {
@@ -92,6 +96,7 @@ impl Raccourcis {
             "zone" => Some(&self.zone),
             "plein_ecran" => Some(&self.plein_ecran),
             "fenetre" => Some(&self.fenetre),
+            "derniere_zone" => Some(&self.derniere_zone),
             _ => None,
         }
     }
@@ -101,6 +106,7 @@ impl Raccourcis {
             "zone" => Some(&mut self.zone),
             "plein_ecran" => Some(&mut self.plein_ecran),
             "fenetre" => Some(&mut self.fenetre),
+            "derniere_zone" => Some(&mut self.derniere_zone),
             _ => None,
         }
     }
@@ -113,6 +119,7 @@ impl Raccourcis {
                 zone: liste(&["ImprEcran", "Ctrl+Maj+1"]),
                 plein_ecran: liste(&["Ctrl+Maj+2"]),
                 fenetre: liste(&["Ctrl+Maj+3"]),
+                derniere_zone: liste(&["Ctrl+Maj+4"]),
                 autres: Map::new(),
             },
             // Provisoire : les raccourcis du Mac restent à choisir (Cmd+Maj+3, 4 et 5 sont
@@ -121,6 +128,7 @@ impl Raccourcis {
                 zone: liste(&["Cmd+Maj+1"]),
                 plein_ecran: liste(&["Cmd+Maj+2"]),
                 fenetre: liste(&["Cmd+Maj+6"]),
+                derniere_zone: liste(&["Cmd+Maj+7"]),
                 autres: Map::new(),
             },
         }
@@ -163,6 +171,26 @@ impl Selection {
     }
 }
 
+/// Réglages de la capture (version 3) : retardateur et pointeur dans l'image.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Capture {
+    /// 0 (aucun) ou 1 à `RETARDATEUR_MAX_S` secondes entières.
+    pub retardateur_s: u32,
+    /// Le pointeur est dessiné dans l'image.
+    pub pointeur: bool,
+    pub(in crate::reglages) inconnus: Map<String, Value>,
+}
+
+impl Capture {
+    pub fn par_defaut() -> Self {
+        Capture {
+            retardateur_s: 0,
+            pointeur: false,
+            inconnus: Map::new(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct Reglages {
     pub raccourcis: Raccourcis,
@@ -170,6 +198,7 @@ pub struct Reglages {
     pub enregistrer_apres_capture: bool,
     pub vignette: Vignette,
     pub selection: Selection,
+    pub capture: Capture,
     pub demarrer_avec_systeme: bool,
     /// `None` = Images › BreezyShot (résolu par `systeme`).
     pub dossier_enregistrement: Option<PathBuf>,
@@ -193,6 +222,7 @@ impl Reglages {
             enregistrer_apres_capture: false,
             vignette: Vignette::par_defaut(),
             selection: Selection::par_defaut(),
+            capture: Capture::par_defaut(),
             demarrer_avec_systeme: false,
             dossier_enregistrement: None,
             modele_nom: "BreezyShot {date} à {heure}".to_string(),
@@ -266,6 +296,13 @@ pub(in crate::reglages) fn vers_json(r: &Reglages) -> Result<Value, &'static str
         selection.insert(cle.clone(), valeur.clone());
     }
 
+    let mut capture = Map::new();
+    capture.insert("retardateur_s".into(), Value::from(r.capture.retardateur_s));
+    capture.insert("pointeur".into(), Value::Bool(r.capture.pointeur));
+    for (cle, valeur) in &r.capture.inconnus {
+        capture.insert(cle.clone(), valeur.clone());
+    }
+
     let dossier = match &r.dossier_enregistrement {
         None => Value::Null,
         Some(chemin) => match chemin.to_str() {
@@ -287,6 +324,7 @@ pub(in crate::reglages) fn vers_json(r: &Reglages) -> Result<Value, &'static str
     );
     m.insert("vignette".into(), Value::Object(vignette));
     m.insert("selection".into(), Value::Object(selection));
+    m.insert("capture".into(), Value::Object(capture));
     m.insert(
         "demarrer_avec_systeme".into(),
         Value::Bool(r.demarrer_avec_systeme),

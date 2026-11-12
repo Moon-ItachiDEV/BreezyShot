@@ -13,6 +13,7 @@
 //! fait sur le fil principal ; la sortie (disque, presse-papiers) part dans un fil à part.
 
 pub mod arguments;
+pub mod decompte;
 pub mod etat;
 pub mod etats;
 pub mod fenetre_reglages;
@@ -72,11 +73,16 @@ pub const VIGNETTE_CONSTRUITE: bool = true;
 
 /// Les actions dont la capture existe : seules celles-ci reçoivent un raccourci (§5) et
 /// une entrée au menu.
-pub const ACTIONS_CONSTRUITES: [&str; 3] = ["zone", "plein_ecran", "fenetre"];
+pub const ACTIONS_CONSTRUITES: [&str; 4] = ["zone", "plein_ecran", "fenetre", "derniere_zone"];
 
-/// L'ordre des entrées de capture dans le menu de l'icône (celui des raccourcis 1, 2, 3).
+/// L'ordre des entrées de capture dans le menu de l'icône (celui des raccourcis 1 à 4).
 /// Seuls les modes construits (`ACTIONS_CONSTRUITES`) y paraissent.
-pub const ORDRE_MENU: [Mode; 3] = [Mode::Zone, Mode::PleinEcran, Mode::Fenetre];
+pub const ORDRE_MENU: [Mode; 4] = [
+    Mode::Zone,
+    Mode::PleinEcran,
+    Mode::Fenetre,
+    Mode::DerniereZone,
+];
 
 /// Tout ce qui arrive à l'Application : signaux des modules, du système, du menu.
 #[derive(Debug, Clone, PartialEq)]
@@ -798,6 +804,7 @@ pub fn libelle_menu(mode: Mode) -> &'static str {
         Mode::Zone => "Capturer une zone",
         Mode::PleinEcran => "Capturer l'écran",
         Mode::Fenetre => "Capturer une fenêtre",
+        Mode::DerniereZone => "Refaire la dernière zone",
     }
 }
 
@@ -1062,6 +1069,9 @@ fn demarrer_capture(app: &AppHandle, mode: Mode) {
         Mode::Zone => capturer_avec_selection(app, recu_a, Mode::Zone),
         Mode::Fenetre => capturer_avec_selection(app, recu_a, Mode::Fenetre),
         Mode::PleinEcran => capturer_plein_ecran(app, recu_a),
+        // Provisoire (socle de la 0.4) : la sélection de zone, comme `Ctrl + Maj + 1`. Le
+        // vrai parcours (zone retenue refaite sans sélection, §5 du contrat) viendra.
+        Mode::DerniereZone => capturer_avec_selection(app, recu_a, Mode::Zone),
     }
 }
 
@@ -1078,7 +1088,7 @@ fn photographier(app: &AppHandle) -> Option<capture::Gel> {
             ATTENTE_COMPOSITION.as_millis()
         );
     }
-    match capture::figer() {
+    match capture::figer(false) {
         Ok(g) => Some(g),
         Err(e) => {
             log::warn!("gel impossible: {e}");
@@ -2200,11 +2210,12 @@ mod tests {
     }
 
     #[test]
-    fn menu_avec_les_trois_raccourcis() {
+    fn menu_avec_les_quatre_raccourcis() {
         let m = entrees_menu(|mode| match mode {
             Mode::Zone => Some("Ctrl + Maj + 1".into()),
             Mode::PleinEcran => Some("Ctrl + Maj + 2".into()),
             Mode::Fenetre => Some("Ctrl + Maj + 3".into()),
+            Mode::DerniereZone => Some("Ctrl + Maj + 4".into()),
         });
         assert_eq!(
             m,
@@ -2212,6 +2223,10 @@ mod tests {
                 action("capturer_zone", "Capturer une zone\tCtrl + Maj + 1"),
                 action("capturer_plein_ecran", "Capturer l'écran\tCtrl + Maj + 2"),
                 action("capturer_fenetre", "Capturer une fenêtre\tCtrl + Maj + 3"),
+                action(
+                    "capturer_derniere_zone",
+                    "Refaire la dernière zone\tCtrl + Maj + 4"
+                ),
                 EntreeMenu::Separateur,
                 action(MENU_REGLAGES, "Réglages"),
                 EntreeMenu::Separateur,
@@ -2229,6 +2244,7 @@ mod tests {
                 action("capturer_zone", "Capturer une zone"),
                 action("capturer_plein_ecran", "Capturer l'écran"),
                 action("capturer_fenetre", "Capturer une fenêtre"),
+                action("capturer_derniere_zone", "Refaire la dernière zone"),
                 EntreeMenu::Separateur,
                 action(MENU_REGLAGES, "Réglages"),
                 EntreeMenu::Separateur,
@@ -2243,6 +2259,10 @@ mod tests {
         );
         assert_eq!(m[1], action("capturer_plein_ecran", "Capturer l'écran"));
         assert_eq!(m[2], action("capturer_fenetre", "Capturer une fenêtre"));
+        assert_eq!(
+            m[3],
+            action("capturer_derniere_zone", "Refaire la dernière zone")
+        );
     }
 
     #[test]
@@ -2254,30 +2274,66 @@ mod tests {
         assert_eq!(mode_du_menu("capturer_autre"), None);
         assert_eq!(
             modes_au_menu(),
-            [Mode::Zone, Mode::PleinEcran, Mode::Fenetre]
+            [
+                Mode::Zone,
+                Mode::PleinEcran,
+                Mode::Fenetre,
+                Mode::DerniereZone
+            ]
         );
+        assert_eq!(id_menu(Mode::DerniereZone), "capturer_derniere_zone");
         assert_eq!(texte_capturer(Mode::Fenetre, None), "Capturer une fenêtre");
     }
 
     #[test]
     fn actions_construites() {
-        assert_eq!(ACTIONS_CONSTRUITES, ["zone", "plein_ecran", "fenetre"]);
+        assert_eq!(
+            ACTIONS_CONSTRUITES,
+            ["zone", "plein_ecran", "fenetre", "derniere_zone"]
+        );
         for a in ACTIONS_CONSTRUITES {
             assert!(Mode::depuis_nom(a).is_some(), "{a}");
         }
+        // `--capturer derniere_zone` est accepté sans code de plus.
+        assert_eq!(mode_journal("derniere_zone"), "derniere_zone");
+        assert_eq!(mode_journal("derniere"), "<inconnu>");
     }
 
     #[test]
     fn seules_les_actions_construites_sont_proposees() {
         let r = Reglages::par_defaut(Plateforme::Windows);
         let t = table_candidats(&r);
-        assert_eq!(t.len(), 3);
+        assert_eq!(t.len(), 4);
         assert_eq!(t["zone"], ["ImprEcran", "Ctrl+Maj+1"]);
         assert_eq!(t["plein_ecran"], ["Ctrl+Maj+2"]);
         assert_eq!(t["fenetre"], ["Ctrl+Maj+3"]);
+        assert_eq!(t["derniere_zone"], ["Ctrl+Maj+4"]);
     }
 
-    /// Ctrl + Maj + 4, T et H ne sont pris pour rien, sur aucune plateforme.
+    /// Ctrl + Maj + 4 pris par une autre application : la dernière zone reste au menu sans
+    /// raccourci, l'annonce nomme l'action.
+    #[test]
+    fn derniere_zone_sans_raccourci() {
+        let t = table_candidats(&Reglages::par_defaut(Plateforme::Windows));
+        let b = choisir(&t, false, |r| r.canonique() != "Ctrl+Maj+4");
+        assert_eq!(b.libelle_menu("derniere_zone"), None);
+        let m = entrees_menu(|mode| b.libelle_menu(mode.nom()));
+        assert_eq!(
+            m[3],
+            action("capturer_derniere_zone", "Refaire la dernière zone")
+        );
+        assert_eq!(
+            b.annonce().map(|a| (a.erreur, a.titre)),
+            Some((false, "Aucun raccourci pour la dernière zone".to_string()))
+        );
+        let tout = choisir(&t, false, |_| true);
+        assert_eq!(
+            tout.libelle_menu("derniere_zone").as_deref(),
+            Some("Ctrl + Maj + 4")
+        );
+    }
+
+    /// Ctrl + Maj + T et H ne sont pris pour rien, sur aucune plateforme.
     #[test]
     fn raccourcis_reserves_a_plus_tard_jamais_pris() {
         for p in [Plateforme::Windows, Plateforme::Mac, Plateforme::Autre] {
@@ -2285,7 +2341,7 @@ mod tests {
             let b = choisir(&t, false, |_| true);
             for a in &b.actions {
                 let retenu = a.retenu.as_ref().map(|r| r.canonique());
-                for interdit in ["Ctrl+Maj+4", "Ctrl+Maj+T", "Ctrl+Maj+H"] {
+                for interdit in ["Ctrl+Maj+T", "Ctrl+Maj+H"] {
                     assert_ne!(retenu.as_deref(), Some(interdit), "{p:?} {}", a.action);
                 }
             }

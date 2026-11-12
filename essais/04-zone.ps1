@@ -124,13 +124,14 @@ function Attendre-Motif([string]$Motif, [string]$Dossier, [double]$DelaiS, [stri
 # parcours de 0.2 (bandeau, fichier enregistré).
 function Ecrire-Reglages([string]$Dossier, [bool]$Enregistrer, $DossierEnregistrement) {
     $r = [ordered]@{
-        version                   = 2
-        raccourcis                = [ordered]@{ zone = @('Ctrl+Maj+1'); plein_ecran = @(); fenetre = @() }
+        version                   = 3
+        raccourcis                = [ordered]@{ zone = @('Ctrl+Maj+1'); plein_ecran = @(); fenetre = @(); derniere_zone = @() }
         copier_apres_capture      = $true
         enregistrer_apres_capture = $Enregistrer
         dossier_enregistrement    = $DossierEnregistrement
         vignette                  = [ordered]@{ afficher = $false; duree_s = 6; coin = 'bas_gauche' }
         selection                 = [ordered]@{ loupe = $false }
+        capture                   = [ordered]@{ retardateur_s = 0; pointeur = $false }
         demarrer_avec_systeme     = $false
         modele_nom                = 'BreezyShot {date} à {heure}'
         animations                = 'systeme'
