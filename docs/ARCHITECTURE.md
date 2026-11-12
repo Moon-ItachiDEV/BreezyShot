@@ -1315,7 +1315,11 @@ sortie 0 (l'app tourne), erreur → sortie 1. Jamais d'installateur caché qui r
 Envol : la fenêtre part de sa place **réelle** (`GetWindowRect`), suit un arc vers la zone de
 notification (sinon le coin bas droit) en 460 ms (jeton `duree-envol-fenetre`, égal à
 `envol::DUREE_ENVOL`, vérifié par un test) pendant que la page réduit la carte ; animations
-réduites : fondu de 120 ms sans déplacement.
+réduites (« Effets d'animation » coupés) : fondu de 120 ms sans déplacement
+(`envol::envol_en_fondu`). Le journal dit lequel a joué : `envol: anime` ou `envol: fondu`.
+Variable réservée aux essais `BREEZYSHOT_ESSAI_ANIMATIONS=1` (lue par
+`systeme::installation::essai_animations_forcees()`, sans effet sans dossier d'essai) : l'envol
+joue même si Windows coupe les animations (`envol: anime (force par l'essai)`).
 
 Page : elle montre et rapporte ; chaque minuteur posé dans un état ne fait rien si la page en est
 sortie (une erreur reçue pendant le départ s'affiche et y reste). La barre suit le rythme du
@@ -1367,6 +1371,7 @@ erreur fichier: fichier pris | autre volume | <type>, code <n>
 installation finie <v> en <n> ms | installation erreur: <code>
 installation fermee pendant les etapes: sortie <0|1>
 essayer: capture zone demandee
+envol: anime | envol: anime (force par l'essai) | envol: fondu (animations reduites)
 envol cible <notification|coin> en <n> ms | envol impossible (<e>): fermeture directe
 installateur ferme en <etat>
 desinstallation BreezyShot <v> | desinstallation refusee: installateur en cours
@@ -1407,6 +1412,11 @@ place sur le disque C:. Libérez N Mo, puis réessayez. »), `ouvert`, `ecriture
   ferme par son interface, le tuer est un échec ; une « app qui ne se ferme pas » (mutex tenu)
   n'est jamais tuée ; « Fermer » pendant l'installation, en réussite et en erreur ;
   désinstallation (démarrage d'essai retiré, données gardées) ; état réel inchangé à la fin.
+  « Terminer » vérifie le chemin que le journal annonce (envol : la fenêtre part de sa place
+  réelle et se déplace ; fondu : elle reste immobile), puis une seconde fois sous
+  `BREEZYSHOT_ESSAI_ANIMATIONS=1` (l'envol doit jouer). Le « OK » de la boîte native (WebView2
+  absent) est pressé par Win32 (`BM_CLICK`, sinon `WM_COMMAND IDOK`). À la fin, un
+  installateur resté est fermé (échec) et la clé `Run` d'essai laissée vide est retirée.
 - La tâche `publier` vérifie qu'elle envoie exactement un `.exe`, qui ne s'appelle pas
   `breezyshot.exe` (sinon il serait l'app, pas l'installateur).
 
