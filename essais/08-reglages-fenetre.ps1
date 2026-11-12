@@ -236,6 +236,8 @@ public static IntPtr[] Visibles(string classe) {
 public static extern IntPtr SendMessage(IntPtr h, uint msg, IntPtr w, IntPtr l);
 [DllImport("user32.dll", CharSet = CharSet.Unicode, EntryPoint = "SendMessageW")]
 static extern IntPtr SendMessageTexte(IntPtr h, uint msg, IntPtr w, string l);
+[DllImport("user32.dll")]
+public static extern IntPtr GetDlgItem(IntPtr dialogue, int id);
 // WM_SETTEXT au contrôle : vrai si le contrôle l'a accepté.
 public static bool EcrireTexte(IntPtr h, string texte) { return SendMessageTexte(h, 0x000C, IntPtr.Zero, texte) != IntPtr.Zero; }
 [DllImport("user32.dll")]
@@ -801,16 +803,33 @@ public static string Titre(IntPtr h) {
         }
     }
     if (-not (Verifier '(8) dossier écrit dans le champ du sélecteur' ($ecrit -ne '') "$ecrit ; $(Decrire $champ) ; motifs : $(Motifs $champ)")) { throw '(8) champ du dossier non écrit' }
-    $ok = Par-Id $dialogue '1' ([System.Windows.Automation.ControlType]::Button) '(8) bouton de validation'
+    # Bouton de validation : sur la machine de GitHub, UI Automation ne montre pas les
+    # contrôles Win32 du dialogue comme des boutons. Le contrôle d'identifiant 1 (IDOK) est
+    # donc pris par GetDlgItem et pressé par BM_CLICK ; à défaut par UI Automation, puis par
+    # WM_COMMAND IDOK au dialogue (messages postés : le dialogue se ferme).
     $presse = ''
-    try { $ok.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke(); $presse = 'InvokePattern' }
-    catch {
-        $h = Poignee $ok
-        # BM_CLICK au bouton, sinon WM_COMMAND IDOK au dialogue (postés : le dialogue se ferme).
-        if ($h -ne [IntPtr]::Zero -and [BreezyShotEssai.Reglages]::PostMessage($h, 0x00F5, [IntPtr]::Zero, [IntPtr]::Zero)) { $presse = 'BM_CLICK' }
-        elseif ([BreezyShotEssai.Reglages]::PostMessage($dialogue, 0x0111, [IntPtr]1, [IntPtr]::Zero)) { $presse = 'WM_COMMAND IDOK' }
+    $hOk = [BreezyShotEssai.Reglages]::GetDlgItem($dialogue, 1)
+    if ($hOk -ne [IntPtr]::Zero -and [BreezyShotEssai.Reglages]::PostMessage($hOk, 0x00F5, [IntPtr]::Zero, [IntPtr]::Zero)) { $presse = 'GetDlgItem + BM_CLICK' }
+    else {
+        $ok = $null
+        try {
+            $ok = $AE::FromHandle($dialogue).FindFirst([System.Windows.Automation.TreeScope]::Descendants,
+                [System.Windows.Automation.PropertyCondition]::new($AE::AutomationIdProperty, '1'))
+        } catch { }
+        if ($null -ne $ok) {
+            try { $ok.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke(); $presse = 'InvokePattern' }
+            catch {
+                $h = Poignee $ok
+                if ($h -ne [IntPtr]::Zero -and [BreezyShotEssai.Reglages]::PostMessage($h, 0x00F5, [IntPtr]::Zero, [IntPtr]::Zero)) { $presse = 'BM_CLICK' }
+            }
+        }
+        if ($presse -eq '' -and [BreezyShotEssai.Reglages]::PostMessage($dialogue, 0x0111, [IntPtr]1, [IntPtr]::Zero)) { $presse = 'WM_COMMAND IDOK' }
     }
-    if (-not (Verifier '(8) bouton de validation pressé' ($presse -ne '') "$presse ; $(Decrire $ok) ; motifs : $(Motifs $ok)")) { throw '(8) bouton de validation non pressé' }
+    if (-not (Verifier '(8) bouton de validation pressé' ($presse -ne '') "$presse ; contrôle 1 : $hOk")) { throw '(8) bouton de validation non pressé' }
+    # Le dialogue doit se fermer : sinon le message dit ce qu'il montre encore.
+    $limite = [DateTime]::UtcNow.AddSeconds(10)
+    while ([BreezyShotEssai.Reglages]::IsWindowVisible($dialogue) -and [DateTime]::UtcNow -lt $limite) { Start-Sleep -Milliseconds 100 }
+    Verifier '(8) le sélecteur se ferme' (-not [BreezyShotEssai.Reglages]::IsWindowVisible($dialogue)) $presse | Out-Null
     $null = Attendre-Motif -Motif 'reglage change: dossier$' -Dossier $cas -DelaiS 10 -Quoi '(8) dossier changé'
     Verifier '(8) fichier : dossier choisi' ((Lire-Reglages $cas).dossier_enregistrement -eq $choisi) | Out-Null
     $n = Presses; $repos = Compter-Motif -Motif 'Decoupe -> Repos' -Dossier $cas
