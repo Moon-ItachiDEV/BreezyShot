@@ -14,7 +14,7 @@ use std::time::{Duration, Instant};
 use log::{Level, LevelFilter, Log, Metadata, Record};
 
 pub const NOM_FICHIER: &str = "breezyshot.log";
-/// Journal de l'installateur et de la désinstallation (contrat installateur §6).
+/// Journal de l'installateur et de la désinstallation (ARCHITECTURE §12.6).
 pub const NOM_INSTALLATION: &str = "installation.log";
 /// Journal de secours, dans le dossier temporaire du système, si le dossier local manque.
 pub const NOM_SECOURS: &str = "breezyshot-secours.log";

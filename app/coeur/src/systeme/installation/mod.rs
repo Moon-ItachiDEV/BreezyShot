@@ -1,9 +1,10 @@
 //! Gestes système de l'installation (fichiers, registre de l'utilisateur, raccourci,
 //! processus). Aucune décision ici : `installation/` dit quoi faire et où.
 //!
-//! Exception à la règle du Microsoft Store (ARCHITECTURE §2) : ce fichier, et lui seul,
-//! écrit dans le registre de l'utilisateur, et seulement la clé de désinstallation, pour
-//! le chemin d'installation et de désinstallation. L'app n'y écrit toujours aucun état.
+//! Exception à la règle du Microsoft Store (ARCHITECTURE §2) : ce fichier est la seule
+//! écriture du registre de l'installateur, et seulement la clé de désinstallation (HKCU),
+//! pour le chemin d'installation et de désinstallation. Les Réglages écrivent, eux, la
+//! valeur `Run` du démarrage avec Windows. Aucun autre état de l'app n'y est écrit.
 
 use std::fs::{File, OpenOptions};
 use std::io::{self, Read, Write};
@@ -52,7 +53,10 @@ pub enum Valeur {
 pub enum ErreurFichier {
     /// Le fichier est pris par un autre programme.
     Pris,
-    /// Accès refusé, dossier impossible à créer, disque plein…
+    /// Déplacement vers un autre volume (impossible par renommage).
+    AutreVolume,
+    /// Accès refusé, dossier impossible à créer, disque plein… Le diagnostic donne le type
+    /// d'erreur et son code système, jamais de chemin.
     Refuse(String),
 }
 
@@ -60,6 +64,7 @@ impl std::fmt::Display for ErreurFichier {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             ErreurFichier::Pris => write!(f, "fichier pris"),
+            ErreurFichier::AutreVolume => write!(f, "autre volume"),
             ErreurFichier::Refuse(e) => write!(f, "{e}"),
         }
     }
@@ -68,8 +73,18 @@ impl std::fmt::Display for ErreurFichier {
 fn vers_erreur(e: io::Error) -> ErreurFichier {
     if plateforme::est_partage_refuse(&e) {
         ErreurFichier::Pris
+    } else if e.kind() == io::ErrorKind::CrossesDevices {
+        ErreurFichier::AutreVolume
     } else {
-        ErreurFichier::Refuse(e.kind().to_string())
+        ErreurFichier::Refuse(diagnostic(&e))
+    }
+}
+
+/// Type d'erreur et code système (« permission denied, code 5 »), sans le chemin.
+pub fn diagnostic(e: &io::Error) -> String {
+    match e.raw_os_error() {
+        Some(code) => format!("{}, code {code}", e.kind()),
+        None => e.kind().to_string(),
     }
 }
 
@@ -80,7 +95,7 @@ pub fn dossiers_connus() -> DossiersConnus {
 
 /// Le chemin du programme en cours.
 pub fn exe_courant() -> Result<PathBuf, String> {
-    std::env::current_exe().map_err(|e| e.kind().to_string())
+    std::env::current_exe().map_err(|e| diagnostic(&e))
 }
 
 /// Place libre sur le volume du premier dossier existant parmi `dossier` et ses parents.
@@ -231,6 +246,7 @@ pub fn supprimer_dossier_webview(chemin: &Path) -> Result<bool, ErreurFichier> {
 }
 
 /// Crée (ou remplace) le raccourci `lien` vers `cible`. `Ok(false)` : sans objet ici.
+/// L'erreur donne l'appel et son HRESULT (ou son code système), jamais de chemin.
 pub fn creer_raccourci(lien: &Path, cible: &Path) -> Result<bool, String> {
     plateforme::creer_raccourci(lien, cible)
 }
@@ -241,6 +257,7 @@ pub fn cible_raccourci(lien: &Path) -> Option<PathBuf> {
 }
 
 /// Écrit les valeurs dans la clé `cle` de HKCU (créée au besoin). `Ok(false)` : sans objet.
+/// L'erreur donne le geste et le code Win32, jamais le nom de la clé.
 pub fn ecrire_cle(cle: &str, valeurs: &[(&str, Valeur)]) -> Result<bool, String> {
     plateforme::ecrire_cle(cle, valeurs)
 }
@@ -280,7 +297,7 @@ pub fn lancer(exe: &Path, arguments: &[&str]) -> Result<u32, String> {
     commande
         .spawn()
         .map(|enfant| enfant.id())
-        .map_err(|e| e.kind().to_string())
+        .map_err(|e| diagnostic(&e))
 }
 
 /// Lance `exe` et attend sa fin, `delai` au plus. Rend le code de sortie, `None` au-delà.
@@ -329,6 +346,17 @@ pub fn zone_utile_sous_souris() -> Option<(super::Rect, f64)> {
 /// Message système bloquant, un bouton OK. Hors Windows : écrit sur la sortie d'erreur.
 pub fn message_bloquant(titre: &str, texte: &str) {
     plateforme::message_bloquant(titre, texte)
+}
+
+/// Rectangle réel de la fenêtre à l'écran (pixels réels), `None` s'il est inconnu.
+pub fn rect_fenetre(identifiant: isize) -> Option<super::Rect> {
+    plateforme::rect_fenetre(identifiant)
+}
+
+/// Ramène au premier plan la fenêtre visible qui porte ce titre (seconde ouverture de
+/// l'installateur). Rend vrai si une fenêtre visible a été trouvée.
+pub fn ramener_fenetre(titre: &str) -> bool {
+    plateforme::ramener_fenetre(titre)
 }
 
 /// Pose la fenêtre (son coin haut gauche, pixels réels) sans la redimensionner ni
