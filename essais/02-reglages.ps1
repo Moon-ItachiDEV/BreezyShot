@@ -47,7 +47,7 @@ try {
     Verifier 'fichier absent : reglages.json créé' (Test-Path -LiteralPath $fichier) | Out-Null
     $lu = Get-Content -LiteralPath $fichier -Raw | ConvertFrom-Json
     $attenduZone = if ($IsMacOS) { 'Cmd+Maj+1' } else { 'ImprEcran,Ctrl+Maj+1' }
-    Verifier 'valeurs par défaut : version 1' ($lu.version -eq 1) "version $($lu.version)" | Out-Null
+    Verifier 'valeurs par défaut : version 2' ($lu.version -eq 2) "version $($lu.version)" | Out-Null
     Verifier 'valeurs par défaut : raccourcis de zone' (($lu.raccourcis.zone -join ',') -eq $attenduZone) ($lu.raccourcis.zone -join ',') | Out-Null
     Verifier 'valeurs par défaut : vignette 6 s en bas à gauche' (($lu.vignette.duree_s -eq 6) -and ($lu.vignette.coin -eq 'bas_gauche')) | Out-Null
     Verifier 'ligne « reglages crees »' ((Compter-Lignes -Texte 'reglages crees avec les valeurs par defaut') -eq 1) | Out-Null
@@ -92,7 +92,7 @@ try {
     $avant = Empreinte $fichier
     Cycle 'version plus récente'
     Verifier 'version plus récente : identique octet pour octet' ((Empreinte $fichier) -eq $avant) | Out-Null
-    Verifier 'ligne « plus recente que la version 1 connue »' ((Compter-Lignes -Texte 'plus recente que la version 1 connue') -eq 1) | Out-Null
+    Verifier 'ligne « plus recente que la version 2 connue »' ((Compter-Lignes -Texte 'plus recente que la version 2 connue') -eq 1) | Out-Null
 
     Verifier 'cinq démarrages complets' ($script:Demarrages -eq 5) | Out-Null
 }

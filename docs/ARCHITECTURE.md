@@ -19,32 +19,55 @@ app/
       application/          chef d'orchestre : démarrage, table des états, icône et menu,
                             journal, chrono, arguments de la ligne de commande ;
                             zone.rs : décisions de la capture d'une zone, d'une fenêtre et
-                            du plein écran (fonctions pures)
+                            du plein écran (fonctions pures) ; vignette.rs : décisions
+                            de la vignette (pures, étape 9) ; page_reglages.rs :
+                            décisions de la fenêtre Réglages (pures),
+                            fenetre_reglages.rs : ses commandes (étape 10)
       raccourcis/           raccourcis globaux (étape 3), Échap global de la sélection
       capture/              figer (appelle systeme::gel), géométrie de la sélection, découpe
                             (étape 4) ; fenetre.rs : liste des fenêtres, partie à découper,
                             rayon et coins à arrondir (étape 8) ; aucun code propre à un
                             système
-      sortie/               presse-papiers, PNG, « Récents », enregistrement (étape 6)
+      sortie/               presse-papiers, PNG, « Récents », enregistrement (étape 6) ;
+                            glisser.rs : fichier donné au glisser, effacement de Supprimer
       reglages/             fichier de réglages (étape 2)
       fenetres/             crée, place, montre et cache les fenêtres de l'interface :
-                            mod.rs (bandeau), place.rs, selection.rs (étape 5)
+                            mod.rs (bandeau, création commune des fenêtres outil), place.rs,
+                            selection.rs (étape 5), vignette.rs (vignette et souffle,
+                            étape 9), reglages.rs (fenêtre Réglages), theme.rs (thème
+                            des pages),
+                            installateur.rs (fenêtre de l'installateur, version 0.3)
+      installation/         décisions pures de l'installateur (version 0.3) : version.rs,
+                            emplacements.rs, parcours.rs, envol.rs ; n'utilise que systeme.
+                            Câblage : application/installateur.rs
       systeme/              tous les gestes propres à un système : mod.rs (façade commune),
                             windows.rs, autre.rs (Linux pour le développement, macos.rs ensuite),
                             composition.rs (attendre le compositeur),
                             gel/ (photo du bureau et écran figé natif : mod.rs, windows.rs,
                             autre.rs), presse_papiers/ (image avec transparence : format
-                            « PNG » puis CF_DIB sur blanc ; mod.rs, windows.rs, autre.rs)
+                            « PNG » puis CF_DIB sur blanc ; mod.rs, windows.rs, autre.rs),
+                            glisser/ (glisser-déposer d'un fichier, étape 9),
+                            demarrage/ (démarrer avec le système), dossier/ (sélecteur de
+                            dossier natif) (étape 10),
+                            installation/ (fichiers, registre de l'utilisateur, raccourci,
+                            WebView2, processus ; mod.rs, windows.rs, autre.rs)
   interface/                ce qu'on voit (web), partagé entre Windows et Mac
-    commun/                 jetons du design system (jetons.css), composants partagés
-    vignette/               vignette, souffle et bandeau de messages (bandeau.* dès l'étape 3)
+    commun/                 jetons du design system (jetons.css), theme.js (data-theme),
+                            composants partagés
+    vignette/               bandeau de messages (bandeau.*, étape 3), vignette.* et souffle.*
+                            (étape 9)
     selection/              page de la sélection (étape 5)
-    barre/  reglages/       (étape 10)
+    installateur/           page de l'installateur (version 0.3 ; A + C du design validé)
+    reglages/               fenêtre des Réglages (étape 10) : html (structure), css
+                            (habillage, jetons seulement), js (comportement),
+                            habillage.js (affichage seulement)
+    barre/                  barre de capture (plus tard)
 design/                     jetons et icônes Moulinet, copiés du design system
 docs/                       ce fichier, TRAVAIL-VALIDE.md, notices d'essai
 essais/                     scénarios PowerShell joués sur la machine Windows de GitHub
                             (NN-*.ps1 ; aides : tenir-raccourci.ps1, temoin.ps1, qui
-                            prend un cadre avec -Cadre pour l'essai 06)
+                            prend un cadre avec -Cadre pour l'essai 06, cible-glisser.ps1
+                            pour l'essai 07)
   pages/                    essais des pages dans Chromium (Playwright), sur Linux
 outils/                     petits scripts Node sans dépendance (generer-jetons.mjs)
 ```
@@ -84,8 +107,10 @@ outils/                     petits scripts Node sans dépendance (generer-jetons
 Habitudes qui préparent les lots suivants (feuille de route, à respecter dès maintenant) :
 états et passages listés à un seul endroit sous forme de table ; raccourcis rangés par nom
 d'action ; « Récents » lu et écrit par `sortie` seulement, aucun autre module ne fabrique un
-chemin de capture ; tout ce qui quitte l'app passera par une seule fonction de `sortie` ;
-les boutons de la vignette viendront d'une liste d'actions fournie par l'Application ; la
+chemin de capture ; ce qui quitte l'app passe par une seule fonction de `sortie` pour chaque
+voie : les pixels par `sortir`, un fichier donné à une autre application par
+`fichier_a_glisser`, un effacement par `supprimer` (étape 9, §10) ; les boutons de la vignette
+viennent d'une liste d'actions fournie par l'Application (`application/vignette.rs`) ; la
 Sélection rendra une zone ou une fenêtre sans savoir ce qu'on en fera ; rien ne suppose quelle
 méthode a pris l'image (GDI aujourd'hui).
 
@@ -113,8 +138,14 @@ empaquetée voit ses écritures dans AppData et dans le registre redirigées ver
 privé. Trois précautions suffisent, dès maintenant :
 
 - tous les chemins passent par `systeme::dossiers()`, et l'app n'écrit jamais à côté du .exe ;
-- l'app lit le registre de l'utilisateur mais n'y écrit jamais d'état à elle ;
-- « démarrer avec le système » (étape 10) restera derrière une seule fonction de `systeme`,
+- l'app lit le registre de l'utilisateur mais n'y écrit jamais d'état à elle ; deux
+  exceptions : la valeur `BreezyShot` de
+  `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`, écrite à la demande de
+  l'utilisateur (Réglages), et la clé de désinstallation de l'utilisateur
+  (`HKCU\…\Uninstall\BreezyShot`), écrite et retirée par l'installateur et la
+  désinstallation seulement, pour le chemin d'installation (§12) ;
+- « démarrer avec le système » (étape 10) est derrière une seule fonction de `systeme`,
+  `demarrage_avec_systeme(voulu: Option<bool>) -> Result<EtatDemarrage, String>` (§6.1),
   pour pouvoir choisir plus tard entre l'entrée de démarrage classique et celle d'un paquet.
 
 ## 3. Application
@@ -132,8 +163,11 @@ Chaque changement d'état écrit une ligne de journal `etat Repos -> Gel (Demand
 zone)`. La capture d'une zone suit `Repos -> Gel -> Selection -> Decoupe -> Repos` (§3.6).
 Ajouté à l'assemblage : `DecoupeImpossible` (`Decoupe -> Repos`), quand les pixels de la
 zone n'ont pas pu être lus, et `SortieSansBilan` (`Decoupe -> Repos`), quand la sortie ne
-rend aucun bilan dans son délai. Tant que la vignette (étape 9) n'existe pas, la découpe finit
-par `ImagePreteSansVignette`.
+rend aucun bilan dans son délai. Depuis l'étape 9, la découpe finit par `ImagePrete`
+(`Decoupe -> Souffle -> Vignette -> Repos`, §11) ou, vignette coupée par le réglage ou
+impossible, par `ImagePreteSansVignette`. Ajoutés à l'étape 9 : `VignetteImpossible`
+(`Souffle -> Repos` et `Vignette -> Repos`, la page n'a pas posé la carte à temps) et
+`CaptureSupprimee` (`Vignette -> Repos`, fin du délai d'annulation de Supprimer).
 
 Modes : `zone`, `plein_ecran`, `fenetre`. Ce sont aussi les **noms d'action** des raccourcis.
 
@@ -177,6 +211,15 @@ dans le dossier temporaire du système (`systeme::dossier_secours()`), sous le n
 - `breezyshot.exe --quitter` : demande à l'instance en cours de se fermer proprement (libère
   les raccourcis, retire l'icône, écrit `arret propre`), puis sort. Sans instance en cours,
   sort tout de suite avec le code 0. C'est le moyen qu'utilisent les essais pour fermer l'app.
+- `breezyshot.exe --capturer <mode>` (`zone`, `plein_ecran`, `fenetre`) : lance cette capture
+  (seconde instance qui confie l'ordre à la première, ou au démarrage, où l'ordre attend
+  `pret`). Un mode inconnu ne fait qu'une ligne au journal, sans la valeur reçue. Sert à
+  « Essayer une capture » de l'installateur. Lignes : `--capturer recu: <mode>` (ou `<vide>`,
+  `<inconnu>`), `--capturer: mode inconnu`, `--capturer: en attente du demarrage`.
+- **Ce que l'exe est (version 0.3)** : lancé sous le nom `breezyshot.exe`, ou `breezyshot`
+  sans extension (macOS, Linux), casse ignorée, il est l'app ; sous tout autre nom (le fichier téléchargé `BreezyShot-<v>-essai.exe`), il est
+  l'installateur ; `--desinstaller` le fait désinstaller. Décision pure `arguments::lancement`.
+  Le contexte Tauri n'est engendré qu'une fois. Détails : §12.
 - Aucune autre option pour l'instant.
 - Au démarrage, après `icone installee`, l'app vérifie que l'icône est réellement dans la
   zone de notification (son rectangle est connu du système) et écrit `icone visible` ou
@@ -209,8 +252,10 @@ dans le dossier temporaire du système (`systeme::dossier_secours()`), sous le n
   un mode construit y entre sans autre code. Identifiants `capturer_<mode>`.
   Le raccourci suit une tabulation dans le texte de l'entrée (aligné à droite par les menus
   Windows) ; sans raccourci retenu, l'entrée reste, sans raccourci affiché.
-  Les entrées « Captures récentes », « Vider les récentes », « Réglages » arrivent avec leurs
-  étapes.
+  Depuis l'étape 10 : captures, séparateur, « Réglages » (identifiant `reglages`, journal
+  `menu: reglages`, ouvre la fenêtre ou la ramène devant, §6.1), séparateur, « Quitter
+  BreezyShot ». Le menu est refait (`icone::changer_menu`) quand un raccourci change.
+  Les entrées « Captures récentes », « Vider les récentes » arrivent avec leurs étapes.
 - Info-bulle : « BreezyShot ».
 
 ### 3.6 Capture d'une zone (assemblage des étapes 4 à 6)
@@ -261,12 +306,12 @@ sur le fil principal tout ce qui touche à la capture et arriverait d'ailleurs. 
    verrouillée → `EcransChanges`, `SessionVerrouillee`, sans message. Un signal d'un autre
    affichage que celui en cours est ignoré.
 8. Sortie dans un fil `sortie` : `sortie::sortir` avec les réglages lus au démarrage
-   (sauf l'enregistrement : `zone::doit_enregistrer(réglage, VIGNETTE_CONSTRUITE,
-   dossier_connu)`, vrai tant que la vignette n'existe pas, versions 0.1 et 0.2, si un
-   dossier d'enregistrement est connu ; le réglage lu n'est pas modifié et le fichier de
-   réglages n'est jamais écrit pour cela), puis
-   retour sur le fil principal : journal, `ImagePreteSansVignette` → Repos, annonce dans
-   le bandeau. Dossier affiché : « Images › BreezyShot » quand le réglage est absent ou
+   (l'enregistrement : `zone::doit_enregistrer(réglage, VIGNETTE_CONSTRUITE, dossier_connu)` ;
+   depuis l'étape 9, `VIGNETTE_CONSTRUITE` est vrai et seul le réglage décide ; en 0.1 et
+   0.2, la capture était enregistrée quand même), avec, si la vignette est voulue, l'aperçu
+   fait en même temps (§11), puis retour sur le fil principal : journal, puis la vignette
+   (`ImagePrete` → Souffle, §11) ou, sans elle, `ImagePreteSansVignette` → Repos et annonce
+   dans le bandeau. Dossier affiché : « Images › BreezyShot » quand le réglage est absent ou
    vide, sinon `sortie::nom_affiche(dossier)`. « Récents » : `<local>/Recents`.
    Chaque sortie a un numéro. Le fil rend toujours un bilan : une panique de `sortir`
    donne un bilan d'échec (`zone::bilan_d_echec`). Un petit fil tient une échéance de
@@ -339,7 +384,7 @@ s'affiche par-dessus l'écran avant le bandeau. Séquence de `lancer_capture(Ple
    Échap réservé, aucune `GardeEcran`, aucune `CaptureEnCours` rangée.
 6. `capture::decouper(&gel, ecran.rect)` puis `lancer_sortie` (le même que la zone).
    Erreur de lecture → `DecoupeImpossible`, bandeau.
-7. Bilan : `finir_sortie`, inchangé (`ImagePreteSansVignette` → Repos, annonce).
+7. Bilan : `finir_sortie`, le même que la zone (vignette, ou bandeau sans elle).
 
 L'image a la taille de l'écran choisi en pixels réels, barre des tâches comprise.
 
@@ -387,7 +432,7 @@ Module pur : il reçoit le dossier où écrire, ne connaît ni Tauri ni les autr
 
 ```json
 {
-  "version": 1,
+  "version": 2,
   "raccourcis": {
     "zone": ["ImprEcran", "Ctrl+Maj+1"],
     "plein_ecran": ["Ctrl+Maj+2"],
@@ -409,6 +454,8 @@ Module pur : il reçoit le dossier où écrire, ne connaît ni Tauri ni les autr
   premier qui peut être réservé est utilisé : le repli n'est pas un cas particulier. Les
   réglages gardent des chaînes sans les interpréter (c'est le module `raccourcis` qui les lit).
   Les valeurs par défaut dépendent du système (`ImprEcran` n'existe pas sur Mac).
+- `duree_s` : 1 à 60 s, ou `0` = toujours (`DUREE_TOUJOURS`, version 2 ; la page propose
+  3, 6, 10 et Toujours).
 - `dossier_enregistrement: null` = Images › BreezyShot. `coin` : `bas_gauche`, `bas_droite`,
   `haut_gauche`, `haut_droite`. `animations` : `systeme`, `normales`, `reduites`.
   `theme` : `systeme`, `clair`, `sombre`.
@@ -416,16 +463,23 @@ Module pur : il reçoit le dossier où écrire, ne connaît ni Tauri ni les autr
 - **Fichier illisible** (pas du JSON, ou pas un objet) : renommé `reglages.abime-<horodatage>.json`
   (on ne détruit jamais ce que l'utilisateur avait), puis recréé par défaut. On garde au plus
   3 fichiers abîmés.
-- **Valeur invalide dans un fichier lisible** (mauvais type, valeur inconnue, durée hors de
-  1 à 60 s) : la valeur par défaut remplace cette valeur seulement, avec un avertissement.
+- **Valeur invalide dans un fichier lisible** (mauvais type, valeur inconnue, durée ni 0 ni
+  de 1 à 60 s) : la valeur par défaut remplace cette valeur seulement, avec un avertissement.
 - **Champ inconnu** : conservé tel quel à la réécriture.
 - **Version plus ancienne** : mise à niveau pas à pas par une liste de fonctions
-  (`v0 -> v1`, puis `v1 -> v2` un jour) qui complète sans rien effacer, puis réécriture.
+  (`v0 -> v1`, `v1 -> v2`) qui complète sans rien effacer, puis réécriture. `v1 -> v2` ne
+  change rien à la forme : il permet seulement `duree_s: 0`, qu'une app de version 1 aurait
+  remplacé par 6.
   Un fichier sans champ `version` est une version 0.
 - **Version plus récente que l'app** : on lit ce qu'on comprend et on ne réécrit pas le fichier.
 - **Au moins une sortie active** : si copie, enregistrement et vignette sont tous éteints, la
   copie est rallumée à la lecture, et `ecrire` refuse cette combinaison.
 - Écriture atomique (fichier temporaire puis renommage), JSON indenté, UTF-8, fin de ligne finale.
+- `valider(&Reglages)` dit sans toucher au disque ce que `ecrire` refuserait (aucune sortie
+  active, durée invalide, modèle de nom vide ou de plus de `MODELE_NOM_MAX` caractères,
+  dossier vide) : la fenêtre Réglages refuse un
+  changement avant de l'appliquer. `ErreurEcriture::code()` et `Constat::code()` donnent un
+  code court sans chemin, pour les nouvelles lignes du journal.
 - Interface : `charger(dossier, plateforme) -> (Reglages, Vec<Constat>)`, `ecrire(dossier,
   &Reglages) -> Result`, `Reglages::par_defaut(plateforme)`. La `Plateforme` (Windows, Mac,
   Autre) vient de `systeme` par l'Application : elle ne change que les raccourcis par défaut
@@ -515,8 +569,27 @@ Module pur : il reçoit le dossier où écrire, ne connaît ni Tauri ni les autr
   `annonce raccourci: deja faite`, rien si tout est normal. `etat.json` :
   `{ "annonce_raccourci": { "action", "candidat", "raison" } }`, les autres champs gardés.
 - À l'appui, l'Application appelle `lancer_capture(mode)` (§3.6).
+- **Changement à chaud** (étape 10) : `reserver` rend des `Reservations` (bilan partagé avec
+  le rappel). `Reservations::changer(app, action, candidats, impr)` choisit par la fonction
+  pure `choisir_action` (le raccourci actuel de l'action est gardé sans redemander au
+  système ; ceux des autres actions sont « déjà pris ») ; l'ancien raccourci n'est libéré
+  qu'une fois le nouveau tenu. Un raccourci refusé laisse l'ancien en place.
+- **Saisie** : pendant qu'on tape un raccourci dans les Réglages, tous les raccourcis sont
+  libérés (`suspendre`), sinon le système avalerait les touches ; `reprendre` les reprend et
+  une perte (prise entre-temps par une autre application) devient `refuse_par_le_systeme`
+  dans le bilan. Filet : la saisie est reprise d'office au bout de 15 s.
+  Ctrl+Maj+4, T et H tapés par l'utilisateur sont acceptés ; ils ne sont jamais proposés par
+  défaut.
 
 ## 6. Fenêtres et bandeau (`fenetres/`, `interface/vignette/bandeau.*`)
+
+- **Création commune** (étape 9) : `fenetres::creer_fenetre_outil(app, etiquette, page,
+  taille, exclusion)` fait la fenêtre « outil » (cachée, sans focus, non focusable, sans
+  cadre, transparente, sans ombre, toujours au-dessus, hors barre des tâches,
+  `content_protected` sauf essai, `ARGUMENTS_NAVIGATEUR`), `preparer_fenetre_outil`,
+  l'identifiant, l'exclusion des captures relue, les clics traversants et la surveillance
+  de destruction. Le bandeau, la vignette et le souffle l'utilisent ; journal `<etiquette>
+  fenetre <hwnd>` et `<exclusion> des captures: oui|non|non (essai)`.
 
 - Le bandeau est une fenêtre préparée au démarrage et cachée : transparente, sans bordure,
   sans ombre système, toujours au-dessus, absente de la barre des tâches, **ne prend jamais le
@@ -617,13 +690,117 @@ Module pur : il reçoit le dossier où écrire, ne connaît ni Tauri ni les autr
   généré à partir de `design/jetons.json` ; aucune valeur du design system n'est recopiée à
   la main dans une page.
 
+### 6.1 Fenêtre des Réglages (étape 10)
+
+- Fenêtre ordinaire unique (étiquette `reglages`, « Réglages de BreezyShot », 680 × 512,
+  560 × 420 au moins, redimensionnable, dans la barre des tâches), créée à la demande par le
+  menu de l'icône et détruite à la fermeture ; une seconde demande la ramène devant. Elle
+  s'ouvre centrée dans la zone utile de l'écran de la souris (`place::centrer`, pixels
+  réels avec l'échelle de cet écran, bornée à la zone utile).
+  `fenetres::reglages` la crée et l'envoie ; `application::fenetre_reglages` tient les
+  commandes ; `application::page_reglages` prend toutes les décisions (fonctions pures).
+- **La page ne décide rien.** Elle appelle `reglages_lire` (à l'ouverture et à chaque retour
+  du focus), `reglages_changer { changement: { cle, valeur } }`, `reglages_apercu_nom`,
+  `reglages_parcourir`, `reglages_saisie`, `reglages_raccourci`, `reglages_retablir`. Chaque
+  commande rend `{ vue, refus }` : la vue entière (lignes montrées, valeurs, raccourcis,
+  alerte, version du programme) et au plus un refus d'une ligne pour la ligne concernée.
+  Le cœur peut aussi pousser la vue (`reglages:etat`). Droits : `capabilities/reglages.json`
+  (fenêtre `reglages`, écoute et les sept commandes).
+- **Lignes montrées** : seulement ce qui marche (`lignes_montrees`) ; la vignette, sa durée,
+  son coin et « Enregistrer automatiquement » n'apparaissent que si
+  `VIGNETTE_CONSTRUITE` est vrai (sans vignette, chaque capture est enregistrée).
+- **Application immédiate** : chaque changement est validé (`reglages::valider`), appliqué,
+  écrit. Si l'écriture échoue, il reste appliqué pour la session et l'alerte « Réglages non
+  enregistrés » s'affiche. Avant d'écrire, le fichier est relu : s'il a changé depuis la
+  dernière lecture (main de l'utilisateur), il est adopté puis le changement appliqué
+  dessus ; un changement extérieur n'est jamais écrasé. Le disque n'est pas surveillé.
+  Un fichier relu mais illisible (verrou passager, valeurs « protégées ») ne compte pas
+  comme un changement : la mémoire reste la base (`page_reglages::relecture`, pure).
+- Le modèle de nom fait au plus `MODELE_NOM_MAX` (200) caractères : refus « Nom trop long »
+  dans la page, valeur par défaut à la lecture d'un fichier plus long.
+- Refus des raccourcis : ils s'effacent quand la saisie est annulée (Échap, perte du
+  focus, filet des 15 s) et à la fermeture. La vue porte `saisie_en_cours` : poussée par
+  le filet, elle fait sortir la page de « Appuyez… ». Une liste vide écrite à la main
+  rend le raccourci au système (`raccourci <action> change: aucun`), sans refus. À l'arrêt,
+  la fenêtre est fermée avant la libération des raccourcis.
+- **Dossier** : « Parcourir… » ouvre le sélecteur de dossier de Windows
+  (`systeme::choisir_dossier`, `IFileOpenDialog` en mode dossier, fil STA à part, modal à
+  la fenêtre). Un seul à la fois : un second « Parcourir… » est ignoré tant que le premier
+  est ouvert. La page n'en montre que le nom court ; le chemin n'est jamais au journal.
+- **Démarrer avec Windows** : `systeme::demarrage_avec_systeme(Some(oui))` écrit ou efface
+  la valeur `BreezyShot` (`"<current_exe>"` entre guillemets) de la clé `Run`, `None` la lit.
+  `EtatDemarrage` : `Actif`, `Inactif`, `DesactiveParWindows` (désactivé dans le Gestionnaire
+  des tâches : `StartupApproved\Run`, affiché éteint, jamais réactivé par l'app),
+  `Indisponible` (hors Windows). Avec `BREEZYSHOT_DOSSIER_ESSAI` non vide (même règle que
+  les dossiers), la clé est
+  `HKCU\Software\BreezyShot\Essais\Run` (`demarrage: cle d'essai`). La désinstallation
+  la retire par la fermeture que lui donne `application::desinstaller` (§12.5).
+  Au démarrage de l'app, une valeur existante qui pointe vers un autre exe (copie lancée
+  hors installation, puis installée) est réécrite vers l'exe en cours
+  (`systeme::mettre_a_jour_chemin`, règle pure `doit_reecrire` : jamais si elle est
+  absente, casse ignorée ; journal `demarrage avec le systeme: chemin mis a jour`). La
+  désactivation par le Gestionnaire des tâches vit sous le même nom dans
+  `StartupApproved\Run`, que cette écriture ne touche pas : elle reste telle quelle.
+  **La vérité est le registre** : `demarrer_avec_systeme` est écrit dans `reglages.json`
+  pour mémoire, mais jamais lu ; rien ne doit s'y fier.
+- **Thème** : `fenetres::theme::fixer` émet `interface:theme { theme: "light"|"dark"|null }`
+  à toutes les pages et règle le cadre des Réglages (`set_theme`) ; une page prête le reçoit
+  par `theme::envoyer_a` (le bandeau, la vignette et le souffle, à leur commande « prêt »).
+  `commun/theme.js` pose `data-theme` sur `<html>`, que lisent les jetons. Ces trois pages
+  suivent donc le thème choisi ; l'installateur, processus sans réglages, suit le système.
+- **Habillage (direction B « Épuré »)** : onglets en haut avec un trait qui glisse,
+  contenu centré, presque monochrome. `reglages.css` n'utilise que les jetons ;
+  `habillage.js` ne fait que de l'affichage (place du trait et des pastilles, repli de
+  « Nom des fichiers » sous « Enregistrer automatiquement » et de Durée et Coin sous
+  « Vignette » quand l'interrupteur est éteint : `data-replie` et `inert`) et ne touche à
+  aucun réglage. Le comportement (`reglages.js`) et les essais ne s'appuient que sur les
+  attributs `data-*`, les rôles et les noms accessibles, pour que le design puisse être
+  refait sans y toucher.
+- Lignes du journal (contrat des essais, sans chemin, jamais un texte brut de la page) :
+  `menu: reglages`, `reglages fenetre <hwnd>`, `reglages ramenes devant`,
+  `reglages non ouverts: <erreur>`, `reglages page prete` (une fois par fenêtre créée),
+  `reglages fermes`, `demarrage avec le systeme: actif|inactif|desactive par windows|indisponible`,
+  `demarrage avec le systeme: echec (<erreur>)`, `reglages relus: <code du constat>`,
+  `reglage change: <ligne> <valeur>` (`reglage change: modele_nom`, `reglage change: dossier`
+  sans valeur), `reglage refuse: <ligne> (<code>)`, `reglages ecrits`,
+  `reglages non ecrits: <code>`, `reglages relus: changes exterieurs`,
+  `theme interface: systeme|clair|sombre`, `demarrage avec le systeme ecrit: oui|non`,
+  `demarrage avec le systeme: chemin mis a jour|chemin non mis a jour (<erreur>)`,
+  `dossier: dialogue annule`, `dossier: dialogue impossible (<erreur>)`,
+  `dossier: dialogue deja ouvert`, `raccourcis suspendus (saisie <action>)`,
+  `raccourcis repris`, `raccourcis repris d'office`,
+  `raccourci <action> change: <canonique>|aucun`,
+  `raccourci <action> refuse: <candidat> (<raison>)` (une touche refusée par la page :
+  son code, ASCII imprimable, 24 caractères au plus), `raccourci <action> perdu a la reprise`.
+
 ## 7. Vérification
 
 - `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `cargo test` : sur Windows (machine
   GitHub), et un `cargo check` + `cargo test` sur macOS pour garder le Mac ouvert.
 - `node outils/generer-jetons.mjs --verifier` : `jetons.css` est à jour. `node
   essais/pages/bandeau.cjs` : la page du bandeau dans Chromium, servie avec la CSP de l'app
-  (job `pages`, Linux).
+  (job `pages`, Linux). `essais/pages/reglages.cjs` : la page des Réglages de la même façon
+  (rubriques au clavier, lignes montrées, changements, refus, nom et aperçu, saisie d'un
+  raccourci, thème), sur la vue réelle de l'app assemblée et le vrai refus « Gardez au
+  moins… », écrits par le cœur dans `essais/pages/vue-reglages.json` (le test
+  `vue_de_l_essai_de_page_a_jour` échoue si ce fichier n'est plus à jour ;
+  `BREEZYSHOT_ECRIRE_VUE=1` le réécrit). Seuls les raccourcis y sont remplacés.
+- Essai 08 sous Windows (`08-reglages-fenetre.ps1`) : ouverture par le vrai menu de l'icône
+  (si le menu ne s'ouvre pas, l'essai échoue en le disant), fenêtre unique ramenée devant,
+  dernière sortie refusée pour de vrai, vignette allumée par la fenêtre (préparée au coin
+  et à la durée du réglage, partie au délai) puis éteinte (plus de `vignette preparee`),
+  copie éteinte, raccourci changé à chaud (l'ancien rendu à Windows) puis refusé quand une
+  autre application le tient, démarrage avec Windows sur la clé d'essai seulement (la vraie
+  clé `Run` est relue inchangée à la fin), enregistrement allumé par la fenêtre, sélecteur
+  de dossier puis capture enregistrée dedans, changement extérieur gardé, thème clair puis
+  sombre peint, fermeture, arrêt propre. Le cas part de la copie seule (ni vignette, ni
+  enregistrement) : la vignette ne gêne aucun autre point.
+- Pages de l'étape 9 : `vignette.cjs` (carte aux mesures des jetons et à sa place
+  pour les coins et un retrait à 150 %, boutons rendus depuis la liste, cachés avant le
+  survol, « Copié » puis retour, état supprimé, barre en marche, en pause, absente pour
+  « toujours », glisser à 5 px et pas à 3 px, coup de vent et son miroir, fondus réduits,
+  charges invalides, textes posés en texte, CSP avec `blob:`, captures claire et sombre) et
+  `souffle.cjs` (flash et envol aux images clés, `souffle_termine` à la fin).
 - Essai 03 sous Windows, en plus des raccourcis : style étendu du bandeau (outil, sans
   `APPWINDOW`, sans activation), `IsWindowVisible` faux après `bandeau termine`,
   `WindowFromPoint` à côté de la pilule (pas le bandeau) et sur la croix (le bandeau),
@@ -660,8 +837,24 @@ Module pur : il reçoit le dossier où écrire, ne connaît ni Tauri ni les autr
   bureau (point sans fenêtre vérifié avant, sinon sauté et dit) puis Échap ; glisser sans
   effet puis clic droit ; rien ne reste à l'écran, premier plan rendu, arrêt propre. Une
   fenêtre à cheval sur deux écrans et les échelles mêlées ne s'y vérifient pas.
+- Essai 07 sous Windows (`07-vignette.ps1`), réglages écrits par l'essai (plein écran,
+  copie, vignette 3 s) : les deux fenêtres (styles, cachées) ; **glisser d'abord** : une
+  fenêtre cible de l'essai (`cible-glisser.ps1`, `AllowDrop`) reçoit exactement un fichier
+  nommé au modèle, mêmes octets que « Récents », par un vrai glisser à la souris
+  (`mouse_event`) ; tenu plus que la durée puis Échap : annulé, la vignette reste ; lâché
+  sur la carte : annulé ; souffle vu visible (guetté toutes les 2 ms) puis caché, carte à
+  12 px du coin de la zone utile, aucun bandeau, presse-papiers, « Récents » sans fichier
+  dans Images ; `WindowFromPoint` sur et à côté de la carte ; délai de 3 s et carte peinte ;
+  pause au survol ; Copier ; Enregistrer puis « deja fait » ; Fermer ; Supprimer, Annuler,
+  puis effacement des deux fichiers après 4 s et rien d'autre ; aucune fenêtre BreezyShot
+  dans la photo suivante (zone de la carte comparée à une photo de référence) ; exclusion
+  réelle sans la variable ; appui pendant le souffle ignoré ; réglages (vignette coupée,
+  coin haut droit, animations réduites) ; fenêtres et fils stables après 10 vignettes,
+  mémoire notée ; `--quitter` avec une suppression en attente. Les essais 04 à 06 coupent la
+  vignette et demandent l'enregistrement par leurs réglages (parcours de 0.2).
 - `essais/` : un script par étape (`01-socle.ps1`, `02-reglages.ps1`, `03-raccourci.ps1`,
-  `04-zone.ps1`, `05-plein-ecran.ps1`, `06-fenetre.ps1`),
+  `04-zone.ps1`, `05-plein-ecran.ps1`, `06-fenetre.ps1`, `07-vignette.ps1`,
+  `08-reglages-fenetre.ps1`),
   lancés par `essais/lancer.ps1` sur le .exe de release. Chaque essai démarre l'app avec
   `BREEZYSHOT_DOSSIER_ESSAI`, agit (lancer une seconde instance, simuler une touche, abîmer un
   fichier), puis lit le journal et les fichiers. Un essai qui échoue fait échouer GitHub.
@@ -843,9 +1036,11 @@ Tout ce qui quitte l'app passe par une seule fonction, `sortir(&Pixels, &Demande
 son `Bilan`, et `annonce(&Bilan, &Demande)` dit quoi montrer.
 
 - `Demande { copier, enregistrer, dossier_enregistrement, dossier_affiche, dossier_recents,
-  modele_nom, maintenant, transparence }`, chemins absolus résolus par l'Application. `Bilan {
-  copie: Faite | NonDemandee | Echec, recent: Result<chemin>, enregistrement: Fait | NonDemande |
-  Echec { dossier, cause } }`.
+  ranger_recents, modele_nom, maintenant, transparence }`, chemins absolus résolus par
+  l'Application. `Bilan { copie: Faite | NonDemandee | Echec, recent: Option<Result<chemin>>,
+  enregistrement: Fait | NonDemande | Echec { dossier, cause } }`. `ranger_recents` est vrai
+  pour une capture et faux pour Copier et Enregistrer depuis la vignette (le fichier y est
+  déjà) ; `recent` vaut alors `None` (journal : `recent non demande`).
 - **Ordre** : valider les pixels (sinon tout en échec, sans panique) ; la copie part dans
   un fil à part ; pendant ce temps, encoder le PNG une fois, écrire « Récents », enregistrer
   si demandé. Une étape qui échoue n'empêche pas les suivantes. `sortir` bloque : jamais sur
@@ -889,8 +1084,356 @@ son `Bilan`, et `annonce(&Bilan, &Demande)` dit quoi montrer.
   enregistrement en échec : « Impossible d'enregistrer » / cause en clair ; copie en échec
   seule : « Impossible de copier » / cause ; copie ratée mais fichier enregistré :
   « Impossible de copier » / « La capture est enregistrée dans <dossier affiché>. » ; rien
-  demandé : « Capture prise ». Aujourd'hui, « Capture prise » n'arrive que si copie et
-  enregistrement sont éteints et la vignette (pas encore construite) allumée : les réglages
-  ne rallument la copie que si les trois sont éteints. Seul « Récents » en échec : la réussite est
-  annoncée, l'échec va au journal (par l'Application).
+  demandé : « Capture prise ». « Capture prise » n'arrive que si copie et enregistrement
+  sont éteints et la vignette allumée (les réglages ne rallument la copie que si les trois
+  sont éteints) ; la vignette montrée, une réussite ne va jamais au bandeau (§11). Seul
+  « Récents » en échec : la réussite est annoncée, l'échec va au journal (par
+  l'Application).
+- **Glisser et Supprimer** (étape 9, `sortie/glisser.rs`). `fichier_a_glisser(recent,
+  dossier, nom)` : le fichier donné au glisser est `<local>/Glisser/<nom au modèle>.png`
+  (« (2) » si besoin), lien dur vers le fichier de « Récents » (aucune donnée copiée) ;
+  lien impossible : copie ; copie impossible : le fichier de « Récents » lui-même. Le
+  dossier garde au plus `GLISSER_GARDES` (= `RECENTS_GARDES`) fichiers `.png`, jamais celui
+  qu'on vient d'y mettre. `supprimer(&Suppression { recent, enregistre, liens },
+  dossier_recents, dossier_glisser)` n'efface que ce que `a_effacer` (fonction pure) garde :
+  le fichier de « Récents » s'il est dans son dossier et au format exact, le fichier
+  enregistré pour cette capture (chemin rendu par son bilan, absolu, `.png`), les fichiers
+  de glisser s'ils sont dans leur dossier et en `.png`, sans doublon ; jamais le
+  presse-papiers, jamais un autre fichier. Un fichier déjà absent compte comme effacé.
 - `sortie` n'importe que `crate::systeme` (`Pixels` vient de `systeme::gel`).
+
+## 11. Vignette (`fenetres/vignette.rs`, `application/vignette.rs`, `interface/vignette/`, étape 9)
+
+Après une capture, la carte apparaît dans un coin (disposition A « Au survol » du design
+`vignette5`) : l'image seule ; au survol, un voile et les boutons. Elle ne prend jamais le
+premier plan ni le clavier ; les clics hors de la carte passent à travers. Une seule à la
+fois ; une nouvelle capture la retire d'un coup.
+
+**Boutons** : la liste vient de l'Application (`vignette::actions()`) : Copier et
+Enregistrer (pilules, « Copié », « Enregistré » 1,8 s), Supprimer (rond), la croix
+(Fermer), Annuler (seulement sur la carte « supprimée »). Annoter et Épingler n'existent
+pas en 0.3 (rien qui ne marche pas). Décisions pures (`vignette::decider`) : pendant l'état
+« supprimée », seul Annuler compte ; une action qui tourne encore (moins de `DELAI_SORTIE`)
+est ignorée ; Enregistrer déjà fait (réglage ou clic précédent) : « Enregistré » sans
+rien écrire. Copier et Enregistrer passent par `sortie::sortir` sur les pixels gardés, dans
+un fil, sans « Récents », à l'heure de la capture (`demande_action`). Échec : bandeau
+d'erreur, la vignette reste.
+
+**Supprimer** : la carte passe à l'état « supprimée » ; la minuterie repart sur 4 s
+(`DELAI_ANNULATION`). Rien n'est effacé avant la fin de ces 4 s. Au bout : `CaptureSupprimee`,
+départ, puis `sortie::supprimer` dans un fil (fichier de « Récents », fichier enregistré
+pour cette capture, ses fichiers de glisser ; jamais le presse-papiers). **Une nouvelle
+capture ou l'arrêt pendant les 4 s font la suppression tout de suite, sans l'abandonner**
+(dans un fil pour une capture, sur le fil principal à l'arrêt ; l'arrêt attend aussi, 2 s
+au plus, les fils de suppression déjà lancés avant `arret propre`). Le fil écrit le bilan au
+journal ; échec : « Impossible de supprimer » / cause.
+
+**Enregistrer en retard** : Supprimer reste accepté pendant qu'un Enregistrer écrit. Une
+capture qui part avec son effacement lancé alors que son Enregistrer tourne encore est
+retenue (`a_retenir`, 8 au plus) ; le fichier qui arrive ensuite (carte partie et retenue,
+ou carte encore là mais effacement lancé) est effacé à son tour, par les mêmes gardes que
+Supprimer (`enregistrement_tardif` puis `sortie::a_effacer`) : `vignette suppression <id>
+tardive recent aucun fichier <ok|echec>`. Arrivé pendant les 4 s, il rejoint simplement
+la suppression en attente.
+
+**Durée** : `vignette.duree_s` du réglage, 0 = toujours (`duree_affichage`). La minuterie
+(`fenetres::vignette::Minuterie`, pure) est tenue par le cœur : elle démarre à l'entrée,
+s'arrête au survol et pendant tout un glisser, reprend le temps restant ; Copier ou
+Enregistrer réussis la remettent à plein. La page ne fait qu'animer la barre.
+
+**Place** : l'écran qui contient le centre du rectangle capturé, le coin du réglage, à
+`vignette-marge` (12 px logiques) de la zone utile. `placer_vignette` (pure) pose la
+fenêtre (340 × 280 logiques) sur le coin de la zone utile, repoussée vers le bord de l'écran
+d'au plus 48 px logiques ; le `Retrait` part dans la charge.
+
+**Déroulé** (fil principal) : la sortie fait aussi l'aperçu (`capture::reduire` à 1600 px
+au plus, `sortie::encoder_png`, fil `apercu` à côté de `sortir`) ; `finir_sortie` →
+`vignette::issue` : `ImagePrete` → Souffle, seul un message d'erreur passe au bandeau
+(`message_bandeau`), `Vignette::preparer`. La page lit l'aperçu (`vignette_image`, octets
+PNG → `Blob`), pose la carte invisible et répond `vignette_zone` → `Signal::Prete` →
+`jouer_souffle` (fenêtre `souffle` sur l'union du départ et de l'arrivée, flash 180 ms puis
+envol 420 ms) → `souffle_termine` → `SouffleTermine` → Vignette, `entrer` ; au premier
+dessin de l'entrée, `vignette_entree` cache le souffle (sa dernière image tient jusque-là).
+Animations réduites (réglage, ou celui de Windows avec « système ») : aucun souffle
+(`souffle saute <id>: animations reduites`), fondus de 120 ms. Le départ du souffle est au
+bilan de la sortie (mesure `chrono vignette relache-souffle <ms> relache-entree <ms>`).
+Fin : délai, croix, dépôt, suppression → Repos, `vignette:partir` (coup de vent, en miroir
+pour un coin de droite), `vignette_terminee` → fenêtre cachée, pixels et aperçu rendus.
+
+**Filets** : pas de `vignette_zone` en 2 s (même si la page n'est pas prête) →
+`VignetteImpossible`, l'annonce va au bandeau ; pas de `souffle_termine` en 1,5 s → souffle
+caché, on continue ; pas de `vignette_entree` en 0,5 s → souffle caché quand même ; pas de
+`vignette_terminee` 1 s après `partir` → vignette cachée d'office.
+
+**Cas particuliers** : raccourci pendant la vignette : `photographier` la cache sans
+animation (avec le bandeau), attend le compositeur, puis la photo (`vignette fermee <id>
+capture`). Raccourci pendant le souffle : ignoré par la table. Pendant un glisser : toute
+demande de capture est ignorée avant la table (`capture ignoree: glisser en cours`).
+
+**Glisser-déposer** (`systeme::glisser`, `SHDoDragDrop` écrit à la main avec l'objet de
+données du Shell pour le fichier, effet « copier » seulement, source du système) : la page
+envoie `vignette_glisser` après un appui sur l'image et 4 px ; le cœur refuse sans fichier
+« Récents », pendant une suppression ou un glisser (`indisponible`), pose le fichier
+(`sortie::fichier_a_glisser`), puis **reposte** le geste (jamais de boucle modale dans le
+gestionnaire de WebView2). Bouton déjà relâché : `annule (bouton relache)`. Dépôt sur une
+fenêtre de BreezyShot (vignette, souffle, bandeau, par `fenetre_sous` à la position de la
+souris) : compte comme annulé (`vignette::depot`). Dépôt ailleurs : `GlisserReussi`, départ.
+Le bouton lu est le bouton principal : le droit quand les boutons sont inversés
+(`SM_SWAPBUTTON`, `systeme::glisser::bouton_principal`, pure).
+L'image qui suit la souris est celle du Shell (pas d'image propre en 0.3).
+
+**Pixels** : les pixels pleine taille de la capture restent en mémoire tant que la vignette
+est là (recopier, réenregistrer), rendus à sa fermeture.
+
+**Fond** : uni, jeton `acrylic-solid` (pas de faux verre flouté en 0.3 : aucune copie du
+bureau n'est gardée).
+
+**Thème** : la page de la vignette et celle du souffle suivent le thème (`commun/theme.js`,
+attendu avant `vignette_pret` et `souffle_pret`, qui renvoient `interface:theme` à leur
+fenêtre). Animations : la page suit seulement `reduites` de la charge (le cœur a déjà tenu
+compte du système). Une page qui redit prête ne reçoit plus la charge d'une carte partie, et
+`Prete` ne lance le souffle qu'en état Souffle (`prete_acceptee`) : `vignette prete <id>
+ignoree`.
+Les deux pages peuvent dire prêtes avant que l'Application gère la `Vignette` (sous Windows,
+créer la fenêtre de la vignette fait tourner les messages pendant que la page du souffle,
+créée avant, est déjà chargée) : `vignette_pret` et `souffle_pret` refusent alors (`<page>
+pret refuse: vignette pas encore en place`) et la page retente toutes les 100 ms, 10 s au
+plus.
+
+**Journal** (jamais de chemin ni de contenu) : `vignette fenetre <hwnd>`, `souffle fenetre
+<hwnd>`, `vignette exclue des captures: …`, `souffle exclu des captures: …`, `vignette
+prete`, `souffle pret`, `vignette preparee <id> coin <coin> ecran <x>,<y> <l>x<h> echelle <e>
+fenetre <x>,<y> <l>x<h> duree <s|toujours> actions <a,b,…> glisser <oui|non>`, `vignette zone
+<id> <x>,<y> <l>x<h>`, `vignette bouton <id> <action> <x>,<y> <l>x<h>`, `souffle joue <id>
+depart … arrivee …`, `souffle saute <id>: animations reduites|fenetre absente`, `souffle
+termine [d'office] <id>`, `vignette entree <id>`, `chrono vignette …`, `vignette minuterie
+<id> pause survol|pause glisser|reprise`, `vignette action <id> <action> [ignoree]`,
+`vignette copie <id> faite|echec`, `vignette enregistrement <id> fait|deja fait|echec`,
+`vignette suppression <id> en attente|annulee|faite|tardive recent <ok|echec|aucun> fichier
+<ok|echec|aucun>`, `suppression non attendue (<n> fil(s) encore en cours)`, `vignette
+glisser <id> debut|depose|annule|annule (bouton relache)|
+indisponible|refuse (<cause>)`, `capture ignoree: glisser en cours`, `vignette fermee <id>
+delai|fermer|glisser|supprimer|capture|arret`, `vignette terminee <id>`, `vignette cachee
+d'office <id>`, `vignette impossible <id>: <cause>` (dont `page muette`), `vignette: apercu
+impossible`, `vignette zone <id> refusee (valeur non finie)`, `vignette prete <id> ignoree`,
+`vignette: charge non envoyee: <e>`, `souffle: charge non envoyee: <e>`, `vignette:
+surveillance impossible: <e>`, `fil de l'action impossible (<e>): action sur le fil
+principal`, `fil de suppression impossible (<e>): suppression sur le fil principal`.
+
+**Commandes** (fil principal ; un `id` qui n'est pas celui en cours est ignoré) :
+`vignette_pret`, `vignette_image`, `vignette_zone`, `vignette_entree`, `vignette_action`,
+`vignette_glisser`, `vignette_terminee` (fenêtre `vignette`), `souffle_pret`,
+`souffle_termine` et `vignette_image` (fenêtre `souffle`) ; droits dans
+`capabilities/vignette.json` et `souffle.json`. Événements : `vignette:preparer`, `:entrer`,
+`:survol`, `:minuterie`, `:confirmer`, `:supprimee`, `:glisser`, `:partir`, `:cachee` ;
+`souffle:jouer`, `souffle:effacer`. CSP : `img-src` reçoit `blob:`.
+
+## 12. Installation (version 0.3)
+
+L'utilisateur télécharge un seul `BreezyShot-<version>-essai.exe`. Ouvert, il montre l'écran
+validé (`interface/installateur/`, « A + C » de `d-mix.html`), s'installe pour l'utilisateur
+courant sans droits d'administrateur, lance l'app, puis dit « BreezyShot est prêt ».
+
+### 12.1 Ce que l'exe est
+
+Un seul exe, trois rôles, décidés par `arguments::lancement` (pur, testé) :
+
+- nom de fichier `breezyshot.exe`, ou `breezyshot` sans extension (le programme sous macOS
+  et Linux, où il n'y a pas d'installateur), casse ignorée, rien d'autre de toléré : l'app ;
+- tout autre nom (le fichier téléchargé) : l'installateur ;
+- `--desinstaller`, quel que soit le nom : la désinstallation, sans fenêtre ni question.
+
+La désinstallation ne construit pas Tauri ; les deux autres reçoivent le contexte Tauri,
+engendré une seule fois dans `application::lancer`.
+
+### 12.2 Où, et rien d'autre
+
+`installation::emplacements` (pur) rend tous les emplacements ; `ecritures` énumère tout ce que
+l'installateur et la désinstallation écrivent, `retraits` tout ce que la désinstallation retire.
+
+Réel (`<P>` = `%LOCALAPPDATA%\Programs`) ; en essai (`BREEZYSHOT_DOSSIER_ESSAI=<E>`), tout est
+sous `<E>`, entre parenthèses :
+
+- exe : `<P>\BreezyShot\breezyshot.exe` (`<E>\programmes\BreezyShot\…`) ; copie en cours :
+  `breezyshot.exe.nouveau` à côté ;
+- raccourci : `BreezyShot.lnk` au menu Démarrer de l'utilisateur (`<E>\menu\`) ;
+- clé (HKCU) : `Software\Microsoft\Windows\CurrentVersion\Uninstall\BreezyShot`
+  (`Software\BreezyShot-essais\<nom de E>\Uninstall\BreezyShot`) ;
+- WebView2 de l'installateur : `%TEMP%\BreezyShot-installateur` (`<E>\temp\…`) ;
+- journal : `%LOCALAPPDATA%\BreezyShot\Journal\installation.log` (`<E>\local\Journal\…`) ;
+- exe désinstallé : `%TEMP%\BreezyShot-desinstalle-<pid>.exe` (`<E>\temp\…`), repli sur le
+  même volume : `%LOCALAPPDATA%\…` (`<E>\…`).
+
+- Variable d'essai présente mais **vide** : refus (erreur `Dossier`, message système), jamais les
+  emplacements réels.
+- Le dossier installé n'est retiré que **vide** ; aucun dossier n'est supprimé par son nom, sauf
+  le dossier WebView2 de l'installateur, et seulement s'il ne contient que `EBWebView`.
+- Réglages, Récents, journal de l'app et captures gardent leurs dossiers (§3.3) : ni une mise à
+  jour ni une désinstallation n'y touchent. Le cache WebView2 de l'app
+  (`%LOCALAPPDATA%\dev.breezyshot.desktop\EBWebView`) reste aussi à la désinstallation
+  (accepté).
+- Registre : `systeme/installation` est la seule écriture du registre de l'installateur, et
+  seulement la clé de désinstallation. La valeur `Run` (démarrage avec Windows) appartient aux
+  Réglages ; l'installateur ne l'écrit jamais.
+
+### 12.3 Installation
+
+Au lancement : journal ouvert, verrou `BreezyShotInstallateur` pris (sinon : la fenêtre du
+premier installateur est ramenée au premier plan, puis sortie 0), WebView2 vérifié (absent :
+message, sortie 1), dossier WebView2 d'une installation précédente nettoyé, état trouvé, plan.
+
+`decider_plan(version courante, trouvée)` : rien (ou clé sans exe, ou exe sans clé) →
+`installer` ; même version → `reinstaller` ; plus ancienne ou illisible → `mettre a jour depuis
+<v>` ; plus récente → `plus recente installee <v>` (écran « prêt » direct, l'exe n'est pas
+réécrit, l'app est lancée si elle ne tourne pas).
+
+La fenêtre (sans cadre, transparente, carte + marge d'ombre) est posée et dimensionnée par
+`place_fenetre` (bornée à la zone utile de l'écran de la souris), puis montrée à
+`installateur_pret` (page prête), au plus tard 2 s après sa création.
+
+« Installer » lance le fil d'installation, étapes dans l'ordre :
+
+1. `place` : place libre ≥ taille de l'exe + 64 Mo (inconnue : on essaie) ;
+2. `arret` : une app en cours (0.1, 0.2 ou 0.3 : même mutex `dev.breezyshot.desktop-sim`) reçoit
+   `--quitter` et a 10 s pour se fermer ; elle n'est **jamais tuée** (sinon erreur `ouvert`) ;
+3. `copie` : flux principal seulement (aucun `Zone.Identifier`) vers `.nouveau`, par blocs,
+   avancement réel envoyé à la page ; puis renommage sur `breezyshot.exe` (retenté 5 s si pris) ;
+4. `verification` : octet à octet ;
+5. `raccourci` (IShellLinkW) ; 6. `inscription` (onze valeurs, ci-dessous) ;
+7. `lancement` : l'app installée démarre et tient son instance en 10 s.
+
+Les onze valeurs de la clé : `DisplayName`, `DisplayVersion`, `Publisher`, `DisplayIcon`
+(`"<exe>",0`), `InstallLocation`, `UninstallString` et `QuietUninstallString`
+(`"<exe>" --desinstaller`), `NoModify` = 1, `NoRepair` = 1, `EstimatedSize` (Kio),
+`InstallDate` (`AAAAMMJJ`).
+
+### 12.4 Réactions (`reagir`, `apres_etapes`)
+
+État et décision sont lus et écrits **sous un seul verrou** (fil principal et fil
+d'installation).
+
+| État | Action | Nouvel état, geste |
+|---|---|---|
+| accueil | installer | installation, lance les étapes |
+| erreur | réessayer | installation, relance les étapes |
+| accueil, erreur | fermer | fermeture, fondu puis sortie 0 |
+| installation | fermer | fermeture, fenêtre cachée, les étapes continuent |
+| prêt | essayer | prêt, `--capturer zone` à l'app installée |
+| prêt | terminer, fermer | envol, puis sortie 0 |
+| tout sauf envol, fermeture | réduire | inchangé, fenêtre réduite |
+| envol, fermeture | tout | ignoré |
+
+Fin des étapes (`apres_etapes`) : en `installation`, réussite → `pret` (écran 3), erreur →
+`erreur` (cause d'une ligne, « Réessayer ») ; en `fermeture` (fenêtre cachée), réussite →
+sortie 0 (l'app tourne), erreur → sortie 1. Jamais d'installateur caché qui reste.
+
+Envol : la fenêtre part de sa place **réelle** (`GetWindowRect`), suit un arc vers la zone de
+notification (sinon le coin bas droit) en 460 ms (jeton `duree-envol-fenetre`, égal à
+`envol::DUREE_ENVOL`, vérifié par un test) pendant que la page réduit la carte ; animations
+réduites (« Effets d'animation » coupés) : fondu de 120 ms sans déplacement
+(`envol::envol_en_fondu`). Le journal dit lequel a joué : `envol: anime` ou `envol: fondu`.
+Variable réservée aux essais `BREEZYSHOT_ESSAI_ANIMATIONS=1` (lue par
+`systeme::installation::essai_animations_forcees()`, sans effet sans dossier d'essai) : l'envol
+joue même si Windows coupe les animations (`envol: anime (force par l'essai)`).
+
+Page : elle montre et rapporte ; chaque minuteur posé dans un état ne fait rien si la page en est
+sortie (une erreur reçue pendant le départ s'affiche et y reste). La barre suit le rythme du
+design sans jamais dépasser la part réellement copiée, ni 100 % avant « prêt » ; « Réessayer »
+repart de zéro. Durées, couleurs, courbes et mesures viennent des jetons.
+
+### 12.5 Désinstallation
+
+`breezyshot.exe --desinstaller` (« Applications installées ») : journal, verrou de
+l'installateur (pas de désinstallation pendant une installation, ni l'inverse), puis :
+
+1. app en cours : `--quitter`, 10 s, jamais tuée ; toujours là → l'exe reste ;
+2. `.nouveau` éventuel supprimé ;
+3. l'exe (souvent celui qui tourne) est **déplacé** dans `%TEMP%` ; autre volume → repli sur le
+   parent du dossier des programmes, même volume ; échec → il reste ;
+4. seulement si l'exe est parti : raccourci (seulement s'il pointe vers l'exe installé), puis
+   valeurs de la clé et la clé si elle est vide ;
+5. dossier installé s'il est vide, dossier WebView2 de l'installateur s'il est reconnu ;
+6. démarrage avec Windows, seulement si l'exe est parti : fermeture donnée par l'Application
+   (`RetirerDemarrage`), qui lit puis retire la valeur `BreezyShot` de `Run` (en essai :
+   `HKCU\Software\BreezyShot\Essais\Run`) ; l'exe resté garde son démarrage.
+
+Sortie 0 si l'exe est parti, 1 sinon.
+
+### 12.6 Journal `installation.log`
+
+Jamais de chemin d'utilisateur, de titre de fenêtre ni de texte reçu (option, action de la
+page) ; une erreur système donne son type et son code (Win32, HRESULT), pas son chemin.
+
+```
+installateur BreezyShot <v> | systeme windows build <n>
+installateur: webview2 <version> | installateur: webview2 absent
+installateur: taille de l'exe inconnue
+seconde installation refusee: premier plan rendu | seconde installation refusee: aucune fenetre
+installation trouvee: aucune | <v|sans cle|illisible> <exe present|exe absent>
+plan: installer | reinstaller | mettre a jour depuis <v|illisible> | plus recente installee <v>
+installateur fenetre <hwnd>
+installateur montre: page prete | installateur montre: delai
+installateur pret | installateur action <nom> | installateur action inconnue
+action ignoree: <action> en <etat>
+etape place: libre <n> Mo besoin <n> Mo
+etape arret: aucune instance | instance arretee en <n> ms | instance toujours la
+etape copie: <n> octets en <n> ms | etape copie: exe courant illisible (<diag>)
+etape verification: ok | differente | exe courant illisible (<diag>)
+etape raccourci: fait | sans objet | erreur <appel> hresult 0x<…> | erreur dossier <diag>
+etape inscription: faite | sans objet | erreur <geste>, code <n>
+etape lancement: instance en <n> ms | aucune instance | erreur <diag>
+erreur fichier: fichier pris | autre volume | <type>, code <n>
+installation finie <v> en <n> ms | installation erreur: <code>
+installation fermee pendant les etapes: sortie <0|1>
+essayer: capture zone demandee
+envol: anime | envol: anime (force par l'essai) | envol: fondu (animations reduites)
+envol cible <notification|coin> en <n> ms | envol impossible (<e>): fermeture directe
+installateur ferme en <etat>
+desinstallation BreezyShot <v> | desinstallation refusee: installateur en cours
+desinstallation: aucune instance | instance arretee | instance toujours la
+desinstallation exe: deplace | deplace sur le meme volume | absent | reste (app ouverte)
+desinstallation exe: reste (<diag>)
+desinstallation raccourci: retire | absent | garde (autre cible) | reste (<diag>)
+desinstallation raccourci: garde (exe reste) | desinstallation inscription: garde (exe reste)
+desinstallation inscription: retiree | absente | <geste>, code <n>
+desinstallation inscription: la cle garde des valeurs qui ne sont pas a nous
+desinstallation cache webview: supprime | sans objet | absent
+desinstallation demarrage: retire | absent | <erreur>   (fermeture de l'Application)
+desinstallation demarrage: garde (exe reste)
+desinstallation finie: complete | incomplete
+```
+
+Codes d'erreur (`installation erreur: <code>`) et causes affichées : `place` (« Il manque de la
+place sur le disque C:. Libérez N Mo, puis réessayez. »), `ouvert`, `ecriture`, `copie`,
+`raccourci`, `inscription`, `lancement`, `dossier` (`ErreurInstallation::cause`).
+
+### 12.7 Modules
+
+- `installation/` (pur, n'utilise que `systeme`) : `version.rs`, `emplacements.rs`,
+  `parcours.rs` (étapes, erreurs, `reagir`, `apres_etapes`), `envol.rs`.
+- `systeme/installation/` : copie, remplacement, déplacement, raccourci, clé, mutex, WebView2,
+  zone de notification, place de fenêtre ; `autre.rs` : fichiers réels, le reste « sans
+  objet » (parcours jouable sous Linux).
+- `fenetres/installateur.rs` : la fenêtre (crée, pose, montre, cache, émet).
+- `application/installateur.rs` : le câblage ; aucune décision.
+
+### 12.8 Essais
+
+- `essais/pages/installateur.cjs` (tâche `pages`) : la page seule, cœur simulé (états, erreur
+  immédiate relue après 1 s, anneau, durées égales aux jetons, espaces insécables, envol).
+- `essais/09-installateur.ps1` (Windows) : le parcours réel sous un dossier d'essai, boutons
+  trouvés par UI Automation (nom et type), fichier lancé sans `ShellExecute` avec une marque
+  du Web ; chaque attente ne lit que les lignes nouvelles du journal ; un installateur se
+  ferme par son interface, le tuer est un échec ; une « app qui ne se ferme pas » (mutex tenu)
+  n'est jamais tuée ; « Fermer » pendant l'installation, en réussite et en erreur ;
+  désinstallation (démarrage d'essai retiré, données gardées) ; état réel inchangé à la fin.
+  « Terminer » vérifie le chemin que le journal annonce (envol : la fenêtre part de sa place
+  réelle et se déplace ; fondu : elle reste immobile), puis une seconde fois sous
+  `BREEZYSHOT_ESSAI_ANIMATIONS=1` (l'envol doit jouer). Le « OK » de la boîte native (WebView2
+  absent) est pressé par Win32 (`BM_CLICK`, sinon `WM_COMMAND IDOK`). À la fin, un
+  installateur resté est fermé (échec) et la clé `Run` d'essai laissée vide est retirée.
+- La tâche `publier` vérifie qu'elle envoie exactement un `.exe`, qui ne s'appelle pas
+  `breezyshot.exe` (sinon il serait l'app, pas l'installateur).
+
+Hors périmètre : signature du code, mise à jour automatique, installation pour tous les
+utilisateurs, MSIX, macOS, installation de WebView2.

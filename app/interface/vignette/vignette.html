@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Vignette BreezyShot</title>
+<link rel="stylesheet" href="../commun/jetons.css">
+<link rel="stylesheet" href="vignette.css">
+<script type="module" src="vignette.js"></script>
+</head>
+<body>
+  <!-- La fenêtre est transparente et laisse passer les clics : seule la carte se voit. -->
+  <div class="carte" id="carte" role="group" aria-label="Capture" hidden>
+    <div class="apercu" id="apercu"><img id="image" alt="" draggable="false"></div>
+    <div class="voile"></div>
+    <div class="actions">
+      <div class="principales"></div>
+      <div class="secondaires"></div>
+    </div>
+    <div class="annulation"></div>
+    <div class="barre" id="barre"><i></i></div>
+  </div>
+  <div class="infobulle" id="infobulle" role="tooltip"></div>
+</body>
+</html>

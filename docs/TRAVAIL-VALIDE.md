@@ -187,8 +187,8 @@ Vérifications GitHub sur `442da12` (exécution n° 18, 2026-11-11), toutes vert
 
 ## MVP, version 0.2 « Trois modes » : l'écran et la fenêtre
 
-Les étapes 7 et 8 entrent ensemble dans `main` le 2026-11-12 par la demande d'intégration
-n° 3 (le commit d'entrée sera noté ici au début de la version suivante). La version passe à
+Les étapes 7 et 8 sont entrées ensemble dans `main` le 2026-11-12 par le commit `8429ab4`
+(demande d'intégration n° 3, tête `36a5d44`, verte elle aussi). La version passe à
 0.2.0 : la pré-version publiée devient « v0.2.0-essai », et les anciennes pré-versions
 d'essai sont supprimées à chaque publication.
 
@@ -264,3 +264,150 @@ Vérifications GitHub sur `de1427b` (2026-11-12), toutes vertes :
 - Noté, non corrigé : comme la bibliothèque du presse-papiers, l'app ouvre le
   presse-papiers sans fenêtre ; une application qui l'a ouvert de la même façon ne la
   bloque pas, et les deux écritures peuvent se croiser.
+
+## MVP, version 0.3 « Vignette, Réglages, installateur »
+
+Les étapes 9 et 10 et l'installateur entrent ensemble dans `main` par la demande
+d'intégration de la branche `claude/project-thread-tkz3qd` (dernier commit de code :
+`87d1950` ; le commit suivant n'ajoute que cette section). La version passe à 0.3.0. Le fichier publié devient un
+installateur : son nom décide du rôle (`breezyshot.exe` est l'app, tout autre nom installe,
+`--desinstaller` désinstalle).
+
+Vérifications GitHub sur `87d1950` (2026-11-12, passage 42), toutes vertes :
+
+- Windows : `cargo fmt`, `cargo clippy -D warnings`, les tests (423 et 2 tests
+  d'architecture), construction du `.exe`, puis essais sur le vrai `.exe` :
+  `01-socle` 19 points, `02-reglages` 16, `03-raccourci` 40, `04-zone` 95,
+  `05-plein-ecran` 41, `06-fenetre` 46, `07-vignette` 64, `08-reglages-fenetre` 61,
+  `09-installateur` 138, aucun échec. Un point de `06-fenetre` est sauté et dit comme tel
+  (clic sur le bureau : aucun point libre sur cet écran).
+- macOS : `cargo check` et `cargo test`.
+- Pages dans Chromium : bandeau 22 points, sélection 214, réglages 49, vignette 39,
+  souffle 12, installateur 23.
+- Machine de l'essai : un écran 1024×768 à 100 %, Windows build 26100, animations coupées
+  par le système.
+- Mémoire privée au repos : 185 Mo (126,6 en 0.2 : les pages de la vignette et du souffle
+  sont créées au démarrage). Chrono de la sélection : 67 ms. Installation : 0,4 s.
+  Fichier téléchargé : 10,8 Mo.
+- Lenteurs de la machine de GitHub vues pendant la mise au point, sans défaut de l'app
+  trouvé : WebView2 a mis plus de 15 s à charger la page de l'installateur, deux fois sur
+  sept passages (la fenêtre se montre alors vide au bout de 2 s, comme prévu ; 1,9 s au
+  plus lent du passage vert) ; le sélecteur de dossier de Windows s'ouvre en 0,7 à 13 s.
+
+Chaque chantier a été écrit par un agent (effort moyen), sur un contrat écrit d'abord, puis
+relu par un agent distinct (effort élevé) ; un quatrième relecteur (effort élevé) a relu
+l'ensemble assemblé. Les reprises faites après les passages sous Windows (essais 07 à 09) et
+le nouvel habillage des Réglages n'ont pas été relus par un agent distinct : ils l'ont été
+par l'assembleur (l'habillage sur photos, comparé au design), et prouvés par les passages
+suivants. Sept passages ont été nécessaires pour les essais 07 à 09 : toutes les corrections
+portent sur les essais eux-mêmes, aucune sur le code de l'app ; aucun point n'a été retiré.
+
+### Étape 9, la vignette
+
+- La carte à cinq actions (copier, enregistrer, glisser, supprimer, fermer) et le souffle
+  qui part de la zone capturée. Les captures ne sont plus enregistrées d'office : bouton
+  « Enregistrer » de la vignette, ou réglage « Enregistrer automatiquement ».
+- Corrigé après relecture : un « Enregistrer » arrivé après « Supprimer » ne recrée pas le
+  fichier ; le bouton principal suit le réglage des gauchers ; une page qui redit prête
+  ne relance rien ; l'arrêt attend 2 s les suppressions en cours ; le souffle suit le
+  thème ; un point de l'essai qui dépendait du précédent est isolé.
+- Trouvé par l'essai sur Windows : la page du souffle pouvait dire prête avant que
+  l'Application ne gère la vignette, et son appel était perdu ; l'appel est maintenant
+  refusé explicitement et retenté par la page. Un test du glisser utilisait un chemin qui
+  n'est pas absolu sous Windows.
+- Prouvé sur la machine Windows de GitHub (`07-vignette`) : les deux fenêtres créées
+  cachées, pages prêtes ; le souffle visible puis caché, la carte au coin bas gauche de la
+  zone utile à 12 px ; presse-papiers, un PNG dans « Récents », aucun dans Images, premier
+  plan inchangé ; la carte ne prend les clics que sur elle ; départ à 3 s (3,043 s) et
+  pause au survol ; Copier, Enregistrer (puis « déjà fait »), Fermer, Supprimer puis
+  Annuler ; glisser : une fenêtre cible reçoit exactement un fichier, mêmes octets que
+  « Récents », Échap et dépôt sur soi annulent ; après Supprimer, ce fichier, son
+  enregistrement et son fichier de glisser sont effacés, aucun autre ; aucune fenêtre de
+  BreezyShot sur la photo suivante ; un second appui pendant le souffle est ignoré ;
+  fenêtres et fils stables après 10 vignettes (197,3 Mo) ; réglages : vignette coupée, coin
+  haut droit, animations réduites.
+- Non contrôlé : l'allure du souffle et de la carte ; le survol ; l'image de glisser
+  (celle de Windows par défaut) ; le dépôt dans une vraie conversation ou un vrai
+  document ; plusieurs écrans ; échelles autres que 100 % ; les animations (coupées sur
+  cette machine).
+- Noté, non corrigé : pas de verre flouté derrière la carte ; les deux fenêtres créées au
+  démarrage coûtent environ 60 Mo au repos (les créer à la première capture les
+  rendrait, au prix d'un délai sur la première vignette).
+
+### Étape 10, la fenêtre Réglages
+
+- Trois rubriques montrées sur les quatre du design : la rubrique Capture n'a aucun
+  réglage qui ait un effet dans cette version (règle : un réglage sans effet n'est pas
+  montré). La barre de capture du plan n'est pas construite (mode Zone épuré, choix de
+  l'utilisateur). Fichier des réglages en version 2, la version 1 est reprise au
+  démarrage.
+- Corrigé après relecture : la relecture du fichier pendant que la fenêtre est ouverte
+  est une décision pure (garder ou adopter) ; les refus s'effacent ; les codes d'erreur
+  vont au journal sans chemin ; la fenêtre s'ouvre sur l'écran de la souris ; un seul
+  choix de dossier à la fois ; trois points de l'essai qui pouvaient réussir sans rien
+  prouver.
+- Décidé en route : l'app refuse d'éteindre sa dernière sortie (« Gardez au moins la
+  copie, l'enregistrement ou la vignette ») ; le démarrage avec Windows a pour vérité le
+  registre, et une valeur qui pointe vers une autre copie de l'exe est réécrite au
+  démarrage ; les raccourcis `Ctrl + Maj + 4`, `T` et `H` ne sont pas proposés.
+- Trouvé par l'essai sur Windows, erreurs de l'essai : le menu de l'icône n'est pas
+  visible par l'automatisation de l'interface (lu par l'API des menus) ; une recherche
+  par nom trouvait le libellé et non l'interrupteur ; l'essai éteignait la dernière
+  sortie, ce que l'app refuse à raison ; le bureau de la machine n'est pas figé entre
+  deux photos (comparaison de la carte à moins de 2 % de points près) ; une console d'aide
+  couvrait la ligne cliquée ; un clic parti pendant qu'une ligne se déplie tombait à côté
+  (l'essai attend que l'élément ne bouge plus) ; le sélecteur de dossier ne prend pas un
+  texte posé par message, le chemin est tapé au clavier comme le ferait une personne.
+- Habillage : direction B « Épuré » du design, validée par l'utilisateur le 2026-11-12
+  (onglets en haut, contenu centré, logo une fois dans Général, touches en relief), fenêtre
+  de 680 × 512.
+- Prouvé sur la machine Windows de GitHub (`08-reglages-fenetre`) : ouverture par le vrai
+  menu de l'icône, une seule fenêtre ; la dernière sortie ne s'éteint pas (deux refus) ;
+  copie éteinte, la capture ne touche pas le presse-papiers ; vignette au coin et à la durée
+  du réglage, puis éteinte sans redémarrer ; raccourci changé au clavier, l'ancien rendu à
+  Windows, le nouveau tenu par l'app ; un raccourci tenu par une autre application n'arrive
+  pas à la saisie, Échap la ferme ; démarrage avec Windows écrit, relu dans le système et
+  retiré, sur une clé d'essai, la vraie clé intacte, et une valeur qui visait une autre
+  copie réécrite ; dossier tapé dans le sélecteur de Windows et validé, la capture y est, le chemin
+  jamais au journal ; fichier changé de l'extérieur non écrasé ; thème clair (#FAFAFA) puis
+  sombre (#1C1C1C), les fonds de l'habillage B ; mémoire après fermeture : 185,2 Mo.
+- Non contrôlé : l'allure de la fenêtre dans le .exe (police de Windows, mouvement) ; le
+  refus « Pris par une autre application » en vrai (Windows ne laisse pas taper un
+  raccourci tenu ailleurs : tests purs seulement) ; le démarrage réel à l'ouverture de
+  session et sa désactivation par le gestionnaire des tâches (l'essai écrit dans une clé
+  à part) ; plusieurs écrans.
+
+### L'installateur
+
+- Un seul fichier : il se copie dans `%LOCALAPPDATA%\Programs\BreezyShot`, crée le
+  raccourci du menu Démarrer et l'entrée « Applications installées », lance l'app, puis
+  s'envole vers la zone de notification. Aucun réglage dedans. La désinstallation retire
+  aussi le démarrage avec Windows, si l'exe est bien parti.
+- Corrigé après relecture : la suite des étapes est une décision pure sous verrou ; une
+  minuterie n'écrase plus une erreur ; la désinstallation retire l'exe d'abord, et le
+  raccourci seulement s'il vise cet exe ; la fenêtre ne se montre que page prête ; les
+  codes vont au journal sans chemin.
+- Relecture de l'assemblage : aucun point bloquant. Reprises faites : le démarrage avec
+  Windows est gardé si l'exe reste ; une copie lancée sans extension (Linux, macOS) est
+  l'app et non l'installateur ; documents.
+- Trouvé par l'essai sur Windows : la machine coupe les animations, l'envol devenait un
+  fondu sans rien écrire (le journal dit maintenant lequel joue, et l'essai force l'envol
+  par une variable réservée aux essais) ; le bouton de la boîte « WebView2 absent »
+  n'est pas un bouton pour l'automatisation de l'interface (pressé par message Windows) ;
+  l'essai attend maintenant « installateur pret » avant de chercher un bouton, et note le
+  lancement le plus lent.
+- Prouvé sur la machine Windows de GitHub (`09-installateur`) : installation, raccourci,
+  inscription et lancement de l'app ; l'envol (forcé par l'essai) part de la place réelle de
+  la fenêtre, et le fondu quand les animations sont coupées ; réinstallation et mise à jour
+  par-dessus une app ouverte ; refus d'une version plus ancienne ; place insuffisante ;
+  fermeture pendant l'installation ; une app qui ne se ferme pas n'est pas tuée ;
+  désinstallation complète (exe, raccourci, inscription, démarrage avec Windows), réglages
+  et captures gardés ; WebView2 absent : message, « OK », code 1, rien d'installé ; la vraie
+  clé de désinstallation, le vrai dossier et la vraie clé Run intacts.
+- Non contrôlé : SmartScreen et l'antivirus sur un fichier téléchargé (non signé) ;
+  l'entrée dans « Applications installées » telle que Windows la montre, et la
+  désinstallation lancée de là ; le menu Démarrer ; l'allure de l'envol et sa cible quand
+  l'icône est rangée derrière « ^ » ; l'installation de WebView2 quand il manque
+  vraiment ; une mise à jour par-dessus une version qui tourne sur un vrai poste.
+- Noté, non corrigé : le cache WebView2 de l'app
+  (`%LOCALAPPDATA%\dev.breezyshot.desktop\EBWebView`) reste après la désinstallation.

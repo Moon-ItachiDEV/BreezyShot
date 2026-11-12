@@ -323,7 +323,7 @@ dependencies = [
 
 [[package]]
 name = "breezyshot"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "arboard",
  "chrono",
@@ -340,6 +340,7 @@ dependencies = [
  "tauri-plugin-single-instance",
  "tempfile",
  "tracing",
+ "webview2-com",
  "windows",
 ]
 

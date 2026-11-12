@@ -118,40 +118,97 @@ where
     let mut bilan = Bilan::default();
 
     for action in ordre_actions(candidats.keys()) {
-        let liste = &candidats[action];
-        let mut choix = ChoixAction {
-            action: action.clone(),
-            retenu: None,
-            ecartes: Vec::new(),
-            nb_candidats: liste.len(),
-        };
-        for texte in liste {
-            let raison = match analyser(texte) {
-                Err(e) => Raison::Invalide(e),
-                Ok(r) if impr_ecran_reserve && r.est_impr_ecran_seule() => {
-                    Raison::ReserveParLeSysteme
-                }
-                Ok(r) => {
-                    if let Some((_, autre)) = pris.iter().find(|(p, _)| *p == r) {
-                        Raison::DejaPrisParUneAutreAction(autre.clone())
-                    } else if refuses.contains(&r) || !essayer(&r) {
-                        refuses.insert(r);
-                        Raison::RefuseParLeSysteme
-                    } else {
-                        pris.push((r, action.clone()));
-                        choix.retenu = Some(r);
-                        break;
-                    }
-                }
-            };
-            choix.ecartes.push(Ecarte {
-                candidat: texte.clone(),
-                raison,
-            });
+        let choix = choisir_parmi(
+            action,
+            &candidats[action],
+            &pris,
+            None,
+            &mut refuses,
+            impr_ecran_reserve,
+            &mut essayer,
+        );
+        if let Some(r) = choix.retenu {
+            pris.push((r, action.clone()));
         }
         bilan.actions.push(choix);
     }
     bilan
+}
+
+/// Choisit le raccourci d'une seule action, les autres gardant les leurs (changement fait
+/// dans la fenêtre Réglages, étape 10).
+///
+/// - `pris` : les raccourcis retenus par les autres actions, avec leur nom d'action.
+/// - `actuel` : le raccourci que l'action tient déjà ; s'il est parmi les candidats, il est
+///   retenu sans redemander au système (il est déjà à elle).
+///
+/// Les autres règles sont celles de `choisir`.
+pub fn choisir_action<F>(
+    action: &str,
+    candidats: &[String],
+    pris: &[(Raccourci, String)],
+    actuel: Option<Raccourci>,
+    impr_ecran_reserve: bool,
+    mut essayer: F,
+) -> ChoixAction
+where
+    F: FnMut(&Raccourci) -> bool,
+{
+    let mut refuses = HashSet::new();
+    choisir_parmi(
+        action,
+        candidats,
+        pris,
+        actuel,
+        &mut refuses,
+        impr_ecran_reserve,
+        &mut essayer,
+    )
+}
+
+fn choisir_parmi<F>(
+    action: &str,
+    liste: &[String],
+    pris: &[(Raccourci, String)],
+    actuel: Option<Raccourci>,
+    refuses: &mut HashSet<Raccourci>,
+    impr_ecran_reserve: bool,
+    essayer: &mut F,
+) -> ChoixAction
+where
+    F: FnMut(&Raccourci) -> bool,
+{
+    let mut choix = ChoixAction {
+        action: action.to_string(),
+        retenu: None,
+        ecartes: Vec::new(),
+        nb_candidats: liste.len(),
+    };
+    for texte in liste {
+        let raison = match analyser(texte) {
+            Err(e) => Raison::Invalide(e),
+            Ok(r) if impr_ecran_reserve && r.est_impr_ecran_seule() => Raison::ReserveParLeSysteme,
+            Ok(r) => {
+                if let Some((_, autre)) = pris.iter().find(|(p, _)| *p == r) {
+                    Raison::DejaPrisParUneAutreAction(autre.clone())
+                } else if actuel == Some(r) {
+                    choix.retenu = Some(r);
+                    break;
+                } else if refuses.contains(&r) || !essayer(&r) {
+                    refuses.insert(r);
+                    Raison::RefuseParLeSysteme
+                } else {
+                    choix.retenu = Some(r);
+                    break;
+                }
+            }
+        };
+        choix.ecartes.push(Ecarte {
+            candidat: texte.clone(),
+            raison,
+        });
+    }
+    choix
 }
 
 #[cfg(test)]
@@ -332,5 +389,55 @@ mod tests {
         assert!(zone.ecartes.is_empty());
         assert!(!zone.premier_ecarte());
         assert!(choisir(&BTreeMap::new(), true, |_| true).actions.is_empty());
+    }
+
+    #[test]
+    fn une_action_a_la_fois() {
+        let pris = vec![(r("Ctrl+Maj+1"), "zone".to_string())];
+        let liste = |l: &[&str]| l.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        // Déjà pris par une autre action : jamais essayé.
+        let mut essais = Vec::new();
+        let c = choisir_action(
+            "plein_ecran",
+            &liste(&["Ctrl+Maj+1"]),
+            &pris,
+            Some(r("Ctrl+Maj+2")),
+            false,
+            |x| {
+                essais.push(x.canonique());
+                true
+            },
+        );
+        assert_eq!(c.retenu, None);
+        assert!(essais.is_empty());
+        assert_eq!(
+            c.ecartes[0].raison,
+            Raison::DejaPrisParUneAutreAction("zone".into())
+        );
+        // Le raccourci actuel est gardé sans redemander au système.
+        let c = choisir_action(
+            "plein_ecran",
+            &liste(&["ctrl + maj + 2"]),
+            &pris,
+            Some(r("Ctrl+Maj+2")),
+            false,
+            |_| panic!("ne doit pas être essayé"),
+        );
+        assert_eq!(c.retenu, Some(r("Ctrl+Maj+2")));
+        // Refusé par le système, puis repli.
+        let c = choisir_action(
+            "plein_ecran",
+            &liste(&["Ctrl+Maj+7", "Ctrl+Maj+8"]),
+            &pris,
+            None,
+            false,
+            |x| *x != r("Ctrl+Maj+7"),
+        );
+        assert_eq!(c.retenu, Some(r("Ctrl+Maj+8")));
+        assert_eq!(c.ecartes[0].raison, Raison::RefuseParLeSysteme);
+        // Impr. écran réservée par Windows.
+        let c = choisir_action("zone", &liste(&["ImprEcran"]), &[], None, true, |_| true);
+        assert_eq!(c.retenu, None);
+        assert_eq!(c.ecartes[0].raison, Raison::ReserveParLeSysteme);
     }
 }

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-reglages-lire"
+description = "Enables the reglages_lire command without any pre-configured scope."
+commands.allow = ["reglages_lire"]
+
+[[permission]]
+identifier = "deny-reglages-lire"
+description = "Denies the reglages_lire command without any pre-configured scope."
+commands.deny = ["reglages_lire"]

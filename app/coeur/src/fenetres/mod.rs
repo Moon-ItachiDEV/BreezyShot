@@ -1,10 +1,16 @@
-//! Fenêtres de l'interface (§6). Pour l'instant : le bandeau de messages.
+//! Fenêtres de l'interface (§6) : le bandeau de messages, la sélection, la vignette et
+//! son souffle, `reglages` (fenêtre des Réglages) et `theme` (thème des pages). Le
+//! bandeau, la vignette et le souffle naissent par `creer_fenetre_outil`.
 //!
 //! Le module crée, place, montre et cache ; il ne décide d'aucun message. Ce qu'il reçoit
 //! de la page remonte à l'Application par `Signal`.
 
+pub mod installateur;
 mod place;
+pub mod reglages;
 pub mod selection;
+pub mod theme;
+pub mod vignette;
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -16,8 +22,9 @@ use tauri::{AppHandle, Emitter, Manager, State, WebviewUrl, WebviewWindow, Webvi
 
 use crate::systeme;
 pub use place::{
-    borner_zone, cacher_d_office, cliquable, ecran_sous, geste_cliquable, intervalle, placer,
-    zone_ecran, Ecran, Rect, ZoneCss, DELAI_REUSSITE_MAX, DELAI_ZONE_MAX, TAILLE_LOGIQUE,
+    borner_zone, borner_zone_dans, cacher_d_office, cliquable, ecran_sous, geste_cliquable,
+    intervalle, placer, zone_ecran, Ecran, Rect, ZoneCss, DELAI_REUSSITE_MAX, DELAI_ZONE_MAX,
+    TAILLE_LOGIQUE,
 };
 
 /// Étiquette de la fenêtre du bandeau (aussi dans `capabilities/`).
@@ -175,52 +182,14 @@ impl Bandeau {
     where
         F: Fn(Signal) + Send + Sync + 'static,
     {
-        let capturable = systeme::essai_capturable();
-        let (largeur, hauteur) = TAILLE_LOGIQUE;
-        let fenetre = WebviewWindowBuilder::new(
+        let outil = creer_fenetre_outil(
             app,
             ETIQUETTE_BANDEAU,
-            WebviewUrl::App("vignette/bandeau.html".into()),
-        )
-        .title("BreezyShot")
-        .inner_size(largeur, hauteur)
-        .visible(false)
-        .focused(false)
-        .focusable(false)
-        .decorations(false)
-        .transparent(true)
-        .shadow(false)
-        .always_on_top(true)
-        .skip_taskbar(true)
-        .resizable(false)
-        .content_protected(!capturable)
-        .additional_browser_args(ARGUMENTS_NAVIGATEUR)
-        .build()
-        .map_err(|e| format!("fenetre du bandeau: {e}"))?;
-        if let Err(e) = systeme::preparer_fenetre_outil(&fenetre) {
-            log::warn!("bandeau: style outil non pose: {e}");
-        }
-        let identifiant = systeme::identifiant_fenetre(&fenetre);
-        if let Some(h) = identifiant {
-            log::info!("bandeau fenetre {h}");
-        }
-        if capturable {
-            log::info!("bandeau exclu des captures: non (essai)");
-        } else {
-            let exclue = systeme::exclure_des_captures(&fenetre);
-            log::info!(
-                "bandeau exclu des captures: {}",
-                if exclue { "oui" } else { "non" }
-            );
-        }
-        traverser(&fenetre, true);
-        let vivante = Arc::new(AtomicBool::new(true));
-        let pour_destruction = Arc::clone(&vivante);
-        fenetre.on_window_event(move |e| {
-            if matches!(e, tauri::WindowEvent::Destroyed) {
-                pour_destruction.store(false, Ordering::SeqCst);
-            }
-        });
+            "vignette/bandeau.html",
+            TAILLE_LOGIQUE,
+            "bandeau exclu",
+        )?;
+        let (vivante, identifiant) = (outil.vivante, outil.identifiant);
         Ok(Bandeau {
             app: app.clone(),
             rappel: Box::new(rappel),
@@ -233,6 +202,11 @@ impl Bandeau {
 
     fn fenetre(&self) -> Option<WebviewWindow> {
         self.app.get_webview_window(ETIQUETTE_BANDEAU)
+    }
+
+    /// Identifiant système de la fenêtre du bandeau (Windows : le HWND).
+    pub fn identifiant(&self) -> Option<isize> {
+        self.identifiant
     }
 
     fn etat(&self) -> Option<std::sync::MutexGuard<'_, Etat>> {
@@ -513,6 +487,72 @@ impl Bandeau {
     }
 }
 
+/// Une fenêtre « outil » prête : cachée, sans focus, hors barre des tâches, exclue des
+/// captures (sauf essai), clics traversants.
+pub(crate) struct FenetreOutil {
+    /// Identifiant système (Windows : le HWND), gardé pour les fils de surveillance.
+    pub identifiant: Option<isize>,
+    /// Faux une fois la fenêtre détruite.
+    pub vivante: Arc<AtomicBool>,
+}
+
+/// Crée une fenêtre de l'interface qui ne prend jamais le focus (bandeau, vignette,
+/// souffle), sur le fil principal. Journal : `<etiquette> fenetre <hwnd>` et
+/// `<exclusion> des captures: oui|non|non (essai)` (`exclusion` : « bandeau exclu »…).
+pub(crate) fn creer_fenetre_outil(
+    app: &AppHandle,
+    etiquette: &str,
+    page: &str,
+    taille: (f64, f64),
+    exclusion: &str,
+) -> Result<FenetreOutil, String> {
+    let capturable = systeme::essai_capturable();
+    let fenetre = WebviewWindowBuilder::new(app, etiquette, WebviewUrl::App(page.into()))
+        .title("BreezyShot")
+        .inner_size(taille.0, taille.1)
+        .visible(false)
+        .focused(false)
+        .focusable(false)
+        .decorations(false)
+        .transparent(true)
+        .shadow(false)
+        .always_on_top(true)
+        .skip_taskbar(true)
+        .resizable(false)
+        .content_protected(!capturable)
+        .additional_browser_args(ARGUMENTS_NAVIGATEUR)
+        .build()
+        .map_err(|e| format!("fenetre {etiquette}: {e}"))?;
+    if let Err(e) = systeme::preparer_fenetre_outil(&fenetre) {
+        log::warn!("{etiquette}: style outil non pose: {e}");
+    }
+    let identifiant = systeme::identifiant_fenetre(&fenetre);
+    if let Some(h) = identifiant {
+        log::info!("{etiquette} fenetre {h}");
+    }
+    if capturable {
+        log::info!("{exclusion} des captures: non (essai)");
+    } else {
+        let exclue = systeme::exclure_des_captures(&fenetre);
+        log::info!(
+            "{exclusion} des captures: {}",
+            if exclue { "oui" } else { "non" }
+        );
+    }
+    traverser(&fenetre, true);
+    let vivante = Arc::new(AtomicBool::new(true));
+    let pour_destruction = Arc::clone(&vivante);
+    fenetre.on_window_event(move |e| {
+        if matches!(e, tauri::WindowEvent::Destroyed) {
+            pour_destruction.store(false, Ordering::SeqCst);
+        }
+    });
+    Ok(FenetreOutil {
+        identifiant,
+        vivante,
+    })
+}
+
 /// Les écrans connus de Tauri, l'écran principal en tête.
 fn ecrans(app: &AppHandle) -> Vec<Ecran> {
     let principal = app.primary_monitor().ok().flatten();
@@ -555,7 +595,7 @@ fn poser(fenetre: &WebviewWindow, place: Rect) {
         .and_then(|_| fenetre.set_size(taille))
         .and_then(|_| fenetre.set_position(position));
     if let Err(e) = r {
-        log::warn!("bandeau: placement impossible: {e}");
+        log::warn!("{}: placement impossible: {e}", fenetre.label());
     }
 }
 
@@ -569,7 +609,7 @@ fn cacher(fenetre: &WebviewWindow) {
         Err(e) => Err(e),
     };
     if let Err(e) = fait {
-        log::warn!("bandeau: fenetre non cachee: {e}");
+        log::warn!("{}: fenetre non cachee: {e}", fenetre.label());
     }
 }
 
@@ -608,7 +648,7 @@ fn traverser(fenetre: &WebviewWindow, oui: bool) {
         Err(e) => Err(e),
     };
     if let Err(e) = fait {
-        log::warn!("bandeau: clics non regles: {e}");
+        log::warn!("{}: clics non regles: {e}", fenetre.label());
     }
 }
 
@@ -617,6 +657,7 @@ fn traverser(fenetre: &WebviewWindow, oui: bool) {
 /// La page écoute `bandeau:afficher` : le message en attente peut partir.
 #[tauri::command]
 pub fn bandeau_pret(bandeau: State<'_, Bandeau>) {
+    theme::envoyer_a(&bandeau.app, ETIQUETTE_BANDEAU);
     bandeau.page_prete();
 }
 

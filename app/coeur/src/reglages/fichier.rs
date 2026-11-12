@@ -169,26 +169,7 @@ pub(super) fn texte_du_fichier(reglages: &Reglages) -> Result<String, ErreurEcri
             version: reglages.version_fichier,
         });
     }
-    if !reglages.une_sortie_active() {
-        return Err(ErreurEcriture::AucuneSortie);
-    }
-    if duree_valide(&reglages.vignette.duree_s.into()).is_none() {
-        return Err(ErreurEcriture::ValeurInvalide {
-            champ: "vignette.duree_s",
-        });
-    }
-    if reglages.modele_nom.trim().is_empty() {
-        return Err(ErreurEcriture::ValeurInvalide {
-            champ: "modele_nom",
-        });
-    }
-    if let Some(d) = &reglages.dossier_enregistrement {
-        if d.as_os_str().to_string_lossy().trim().is_empty() {
-            return Err(ErreurEcriture::ValeurInvalide {
-                champ: "dossier_enregistrement",
-            });
-        }
-    }
+    valider(reglages)?;
     let valeur = vers_json(reglages).map_err(|champ| ErreurEcriture::ValeurInvalide { champ })?;
     let mut texte = serde_json::to_string_pretty(&valeur).map_err(|e| ErreurEcriture::Disque {
         etape: "mise en forme",
@@ -201,6 +182,38 @@ pub(super) fn texte_du_fichier(reglages: &Reglages) -> Result<String, ErreurEcri
         });
     }
     Ok(texte)
+}
+
+/// Longueur maximale du modèle de nom, en caractères (un nom de fichier Windows tient en
+/// 255 caractères ; au-delà, une page fausse seulement).
+pub const MODELE_NOM_MAX: usize = 200;
+
+/// Les contrôles de valeur que fait `ecrire`, sans le disque ni la protection : au moins
+/// une sortie active, durée permise, modèle de nom non vide, dossier non vide. Fonction
+/// pure, pour refuser un changement avant de l'appliquer.
+pub fn valider(reglages: &Reglages) -> Result<(), ErreurEcriture> {
+    if !reglages.une_sortie_active() {
+        return Err(ErreurEcriture::AucuneSortie);
+    }
+    if duree_valide(&reglages.vignette.duree_s.into()).is_none() {
+        return Err(ErreurEcriture::ValeurInvalide {
+            champ: "vignette.duree_s",
+        });
+    }
+    if reglages.modele_nom.trim().is_empty() || reglages.modele_nom.chars().count() > MODELE_NOM_MAX
+    {
+        return Err(ErreurEcriture::ValeurInvalide {
+            champ: "modele_nom",
+        });
+    }
+    if let Some(d) = &reglages.dossier_enregistrement {
+        if d.as_os_str().to_string_lossy().trim().is_empty() {
+            return Err(ErreurEcriture::ValeurInvalide {
+                champ: "dossier_enregistrement",
+            });
+        }
+    }
+    Ok(())
 }
 
 /// Renomme le fichier abîmé en `reglages.abime-<horodatage>.json` sans écraser une

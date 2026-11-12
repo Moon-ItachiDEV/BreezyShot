@@ -19,6 +19,240 @@
     },
     "usage": "Pastille d'erreur du bandeau.",
     "origine": "Maquette complète, variable --danger (le #C42B1C clair est aussi celui de ARCHITECTURE.md §6 et de « Choix 2 »)."
+   },
+   {
+    "name": "vignette-voile",
+    "value": "linear-gradient(to top, rgba(8,10,14,0.62), rgba(8,10,14,0.18) 45%, transparent 70%)",
+    "usage": "Voile de la carte au survol (sous les boutons).",
+    "origine": "design/vignette5 (disposition A « Au survol »), .la .veil."
+   },
+   {
+    "name": "vignette-voile-supprimee",
+    "value": "rgba(8,10,14,0.40)",
+    "usage": "Voile de la carte « supprimée ».",
+    "origine": "design/vignette5 (disposition A « Au survol »), .la.deleted .veil."
+   },
+   {
+    "name": "vignette-rond-fond",
+    "value": "rgba(20,20,22,0.58)",
+    "usage": "Fond des boutons ronds et de la croix.",
+    "origine": "design/vignette5 (disposition A « Au survol »), .la .rb."
+   },
+   {
+    "name": "vignette-rond-fond-survol",
+    "value": "rgba(20,20,22,0.82)",
+    "usage": "Fond des boutons ronds au survol.",
+    "origine": "design/vignette5 (disposition A « Au survol »), .la .rb:hover."
+   },
+   {
+    "name": "vignette-rond-bord",
+    "value": "rgba(255,255,255,0.16)",
+    "usage": "Bord des boutons ronds.",
+    "origine": "design/vignette5 (disposition A « Au survol »), .la .rb."
+   },
+   {
+    "name": "vignette-rond-texte",
+    "value": "#FFFFFF",
+    "usage": "Pictogramme des boutons ronds.",
+    "origine": "design/vignette5 (disposition A « Au survol »), .la .rb."
+   },
+   {
+    "name": "vignette-pilule-fond",
+    "value": "rgba(255,255,255,0.94)",
+    "usage": "Fond de la pilule secondaire (Enregistrer).",
+    "origine": "design/vignette5 (disposition A « Au survol »), .la .main .vb:not(.accent)."
+   },
+   {
+    "name": "vignette-pilule-texte",
+    "value": "#1A1A1A",
+    "usage": "Texte de la pilule secondaire.",
+    "origine": "design/vignette5 (disposition A « Au survol »), .la .main .vb:not(.accent)."
+   },
+   {
+    "name": "vignette-pilule-fait",
+    "value": "#0F7B0F",
+    "usage": "Texte de la pilule secondaire après réussite.",
+    "origine": "design/vignette5 (disposition A « Au survol »), .vb.done."
+   },
+   {
+    "name": "vignette-barre-fond",
+    "value": "rgba(0,0,0,0.14)",
+    "usage": "Fond de la barre du temps restant.",
+    "origine": "design/vignette5 (disposition A « Au survol »), .prog."
+   },
+   {
+    "name": "souffle-flash",
+    "value": "#FFFFFF",
+    "usage": "Flash sur la zone capturée.",
+    "origine": "design/vignette5 (disposition A « Au survol »), .flash."
+   },
+   {
+    "name": "fenetre-fond-haut",
+    "value": {
+     "light": "rgba(246,246,248,.93)",
+     "dark": "rgba(36,36,38,.93)"
+    },
+    "usage": "Haut du dégradé de la fenêtre de l'installateur.",
+    "origine": "Maquette validée de l'installateur (d-mix.html, « A + C »). Variable --win-a."
+   },
+   {
+    "name": "fenetre-fond-bas",
+    "value": {
+     "light": "rgba(238,240,245,.96)",
+     "dark": "rgba(30,31,34,.96)"
+    },
+    "usage": "Bas du dégradé de la fenêtre de l'installateur.",
+    "origine": "Maquette validée de l'installateur (d-mix.html, « A + C »). Variable --win-b."
+   },
+   {
+    "name": "fermer-survol",
+    "value": {
+     "light": "#C42B1C",
+     "dark": "#C42B1C"
+    },
+    "usage": "Fond rouge du bouton Fermer survolé (barre de titre).",
+    "origine": "Maquette validée de l'installateur (d-mix.html, « A + C »). Variable --close-hover ; même rouge que --danger clair."
+   },
+   {
+    "name": "installateur-croix-survol-texte",
+    "value": {
+     "light": "#FFFFFF",
+     "dark": "#FFFFFF"
+    },
+    "usage": "Croix blanche du bouton Fermer survolé.",
+    "origine": "Maquette validée de l'installateur (d-mix.html, « A + C »). .cap.x:hover{color:#fff}."
+   },
+   {
+    "name": "installateur-reflet",
+    "value": {
+     "light": "rgba(255,255,255,.55)",
+     "dark": "rgba(255,255,255,.55)"
+    },
+    "usage": "Reflet qui court sur la barre de progression.",
+    "origine": "Maquette validée de l'installateur (d-mix.html, « A + C »). .pbar .fill::after, linear-gradient(…,rgba(255,255,255,.55),…)."
+   },
+   {
+    "name": "installateur-bord-primaire",
+    "value": {
+     "light": "rgba(0,0,0,.2)",
+     "dark": "rgba(0,0,0,.2)"
+    },
+    "usage": "Bord bas d'un bouton principal.",
+    "origine": "Maquette validée de l'installateur (d-mix.html, « A + C »). .btn.primary border-bottom-color:rgba(0,0,0,.2)."
+   },
+   {
+    "name": "logo-degrade-1",
+    "value": {
+     "light": "#FFC06B",
+     "dark": "#FFC06B"
+    },
+    "usage": "Premier arrêt du dégradé du Moulinet.",
+    "origine": "Maquette validée de l'installateur (d-mix.html, « A + C »). logo(), stop offset 0."
+   },
+   {
+    "name": "logo-degrade-2",
+    "value": {
+     "light": "#FF7E6B",
+     "dark": "#FF7E6B"
+    },
+    "usage": "Arrêt médian du dégradé du Moulinet.",
+    "origine": "Maquette validée de l'installateur (d-mix.html, « A + C »). logo(), stop offset .55."
+   },
+   {
+    "name": "logo-degrade-3",
+    "value": {
+     "light": "#F0509A",
+     "dark": "#F0509A"
+    },
+    "usage": "Dernier arrêt du dégradé du Moulinet.",
+    "origine": "Maquette validée de l'installateur (d-mix.html, « A + C »). logo(), stop offset 1."
+   },
+   {
+    "name": "logo-lumiere",
+    "value": {
+     "light": "#FFFFFF",
+     "dark": "#FFFFFF"
+    },
+    "usage": "Lumière et pales blanches du Moulinet.",
+    "origine": "Maquette validée de l'installateur (d-mix.html, « A + C »). logo(), radialGradient et pales fill #fff."
+   },
+   {
+    "name": "reglages-fond",
+    "value": {
+     "light": "#FAFAFA",
+     "dark": "#1C1C1C"
+    },
+    "usage": "Fond de la fenêtre des Réglages.",
+    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), --micaB."
+   },
+   {
+    "name": "reglages-reflet",
+    "value": {
+     "light": "rgba(255,255,255,0.75)",
+     "dark": "rgba(255,255,255,0.07)"
+    },
+    "usage": "Reflet du haut des touches de raccourci.",
+    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), --hi."
+   },
+   {
+    "name": "reglages-segment-fond",
+    "value": {
+     "light": "rgba(0,0,0,0.05)",
+     "dark": "rgba(255,255,255,0.06)"
+    },
+    "usage": "Fond des contrôles segmentés (durée, thème).",
+    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), --segbg."
+   },
+   {
+    "name": "reglages-touche-haut",
+    "value": {
+     "light": "#FFFFFF",
+     "dark": "#3D3D3F"
+    },
+    "usage": "Haut du dégradé d'une touche de raccourci (kbd).",
+    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), --keytop."
+   },
+   {
+    "name": "reglages-touche-bas",
+    "value": {
+     "light": "#F1F1F3",
+     "dark": "#2F2F31"
+    },
+    "usage": "Bas du dégradé d'une touche de raccourci.",
+    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), --keybot."
+   },
+   {
+    "name": "reglages-touche-bord",
+    "value": {
+     "light": "rgba(0,0,0,0.16)",
+     "dark": "rgba(0,0,0,0.55)"
+    },
+    "usage": "Bord d'une touche de raccourci.",
+    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), --keyedge."
+   },
+   {
+    "name": "reglages-touche-ombre",
+    "value": "0 1px 1.5px rgba(0,0,0,0.08)",
+    "usage": "Ombre portée d'une touche de raccourci.",
+    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), [data-dir] kbd."
+   },
+   {
+    "name": "reglages-segment-ombre",
+    "value": "0 0 0 0.5px var(--stroke-strong), 0 1px 2px rgba(0,0,0,0.10), 0 2px 6px -2px rgba(0,0,0,0.10)",
+    "usage": "Ombre de la pastille d'un contrôle segmenté.",
+    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), [data-dir=b] .seg::before."
+   },
+   {
+    "name": "reglages-halo",
+    "value": "color-mix(in srgb, var(--accent) 18%, transparent)",
+    "usage": "Halo autour du bouton d'un interrupteur au survol.",
+    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), .sw:hover .k."
+   },
+   {
+    "name": "reglages-logo-ombre",
+    "value": "drop-shadow(0 2px 6px rgba(240,80,154,0.25))",
+    "usage": "Ombre du logo en haut de Général.",
+    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), [data-dir=b] .alogo."
    }
   ]
  },
@@ -41,6 +275,204 @@
     "value": "300ms",
     "usage": "Entrée en ressort de la pilule du bandeau (courbe-ressort).",
     "origine": "ARCHITECTURE.md §6 ; maquette complète (duration:300). Même valeur que duree-vignette, mais jeton propre au bandeau (relecture de l'étape 3)."
+   },
+   {
+    "name": "duree-souffle-flash",
+    "value": "180ms",
+    "usage": "Flash sur la zone capturée (opacité 0,55 → 0, courbe-douce).",
+    "origine": "Contrat de l'étape 9, décision D8 ; design/vignette5 (disposition A « Au survol »), animate 180."
+   },
+   {
+    "name": "duree-vignette-confirmation",
+    "value": "1800ms",
+    "usage": "« Copié » / « Enregistré » restent ce temps avant de revenir.",
+    "origine": "design/vignette5 (disposition A « Au survol »), setTimeout 1800."
+   },
+   {
+    "name": "duree-vignette-voile",
+    "value": "180ms",
+    "usage": "Fondu du voile au survol.",
+    "origine": "design/vignette5 (disposition A « Au survol »), .la .veil."
+   },
+   {
+    "name": "duree-vignette-bouton",
+    "value": "160ms",
+    "usage": "Fondu d'apparition d'un bouton au survol.",
+    "origine": "design/vignette5 (disposition A « Au survol »), .la .main>*."
+   },
+   {
+    "name": "duree-vignette-decalage",
+    "value": "60ms",
+    "usage": "Décalage entre deux boutons qui apparaissent.",
+    "origine": "design/vignette5 (disposition A « Au survol »), transition-delay 60/120 ms."
+   },
+   {
+    "name": "duree-vignette-grise",
+    "value": "220ms",
+    "usage": "Image grisée de la carte « supprimée ».",
+    "origine": "design/vignette5 (disposition A « Au survol »), .prev img."
+   },
+   {
+    "name": "duree-vignette-coche",
+    "value": "120ms",
+    "usage": "Retard du trait de la coche après le clic.",
+    "origine": "design/vignette5 (disposition A « Au survol »), .ok transition-delay:120ms."
+   },
+   {
+    "name": "duree-envol-fenetre",
+    "value": "460ms",
+    "usage": "Durée de l'envol de la fenêtre de l'installateur vers la zone de notification.",
+    "origine": "Maquette validée de l'installateur (d-mix.html, « A + C »). win.animate(..., duration:460)."
+   },
+   {
+    "name": "duree-installateur-fondu",
+    "value": "200ms",
+    "usage": "Fondus de la ligne « Mo », de la barre, de la cause et de la couleur du remplissage.",
+    "origine": "Maquette validée de l'installateur (d-mix.html, « A + C »). .prow/.pbar opacity 200ms, .fill background-color 200ms, .cause opacity 200ms, closing-ring .prow 200ms."
+   },
+   {
+    "name": "duree-installateur-montee",
+    "value": "380ms",
+    "usage": "Montée de la ligne « Mo » et de la barre à l'entrée de l'écran 2.",
+    "origine": "Maquette validée de l'installateur (d-mix.html, « A + C »). .prow/.pbar transform 380ms var(--ressort)."
+   },
+   {
+    "name": "duree-installateur-retard",
+    "value": "160ms",
+    "usage": "Retard de la ligne « Mo », de la barre, du disque de la coche et du fondu du bouton Installer.",
+    "origine": "Maquette validée de l'installateur (d-mix.html, « A + C »). .prow/.pbar … 160ms, .check .disc 160ms, #install opacity 160ms linear 160ms."
+   },
+   {
+    "name": "duree-installateur-retard-cause",
+    "value": "120ms",
+    "usage": "Retard de la cause d'erreur et du fondu de la barre qui se referme.",
+    "origine": "Maquette validée de l'installateur (d-mix.html, « A + C »). .cause transition-delay:120ms ; closing-ring .pbar opacity 220ms linear 120ms."
+   },
+   {
+    "name": "duree-installateur-anneau-barre",
+    "value": "220ms",
+    "usage": "Fondu de la barre qui se referme (anneau) et réduction du bouton Installer.",
+    "origine": "Maquette validée de l'installateur (d-mix.html, « A + C »). closing-ring .pbar opacity 220ms ; #install transform 220ms var(--vent)."
+   },
+   {
+    "name": "duree-installateur-retard-texte",
+    "value": "80ms",
+    "usage": "Retard du titre de l'accueil ; fondu du texte du bouton Installer.",
+    "origine": "Maquette validée de l'installateur (d-mix.html, « A + C »). .welcome.in-r h1 … 80ms ; #install color 80ms linear."
+   },
+   {
+    "name": "duree-installateur-retard-trait",
+    "value": "360ms",
+    "usage": "Retard du tracé de la coche.",
+    "origine": "Maquette validée de l'installateur (d-mix.html, « A + C »). .ready.in-r .check path … 360ms."
+   },
+   {
+    "name": "duree-installateur-retard-reduction",
+    "value": "140ms",
+    "usage": "Retard de la réduction du bouton Installer.",
+    "origine": "Maquette validée de l'installateur (d-mix.html, « A + C »). #install transform 220ms var(--vent) 140ms."
+   },
+   {
+    "name": "duree-installateur-reflet",
+    "value": "1600ms",
+    "usage": "Tour du reflet sur la barre de progression.",
+    "origine": "Maquette validée de l'installateur (d-mix.html, « A + C »). .pbar .fill::after animation:shine 1.6s."
+   },
+   {
+    "name": "duree-installateur-vers-progression",
+    "value": "260ms",
+    "usage": "Du clic sur Installer au passage à l'écran 2.",
+    "origine": "Maquette validée de l'installateur (d-mix.html, « A + C »). later(() => { go(1); … }, rm() ? 120 : 260)."
+   },
+   {
+    "name": "duree-installateur-vers-barre",
+    "value": "300ms",
+    "usage": "Du passage à l'écran 2 au départ de la barre.",
+    "origine": "Maquette validée de l'installateur (d-mix.html, « A + C »). later(run, rm() ? 120 : 300)."
+   },
+   {
+    "name": "duree-installateur-anneau",
+    "value": "520ms",
+    "usage": "Barre refermée en anneau avant l'écran 3.",
+    "origine": "Maquette validée de l'installateur (d-mix.html, « A + C »). later(() => { go(2); set('done'); … }, rm() ? 200 : 520)."
+   },
+   {
+    "name": "duree-installateur-anneau-reduit",
+    "value": "200ms",
+    "usage": "Même attente, animations réduites.",
+    "origine": "Maquette validée de l'installateur (d-mix.html, « A + C »). rm() ? 200 : 520."
+   },
+   {
+    "name": "duree-installateur-focus",
+    "value": "200ms",
+    "usage": "Délai avant le focus sur Terminer.",
+    "origine": "Maquette validée de l'installateur (d-mix.html, « A + C »). later(() => $('#done').focus(), 200)."
+   },
+   {
+    "name": "duree-installateur-moulinet-arret",
+    "value": "420ms",
+    "usage": "Arrêt en douceur du Moulinet sur un quart de tour.",
+    "origine": "Maquette validée de l'installateur (d-mix.html, « A + C »). settle = { …, d: 420, … }."
+   },
+   {
+    "name": "duree-reglages-trait",
+    "value": "380ms",
+    "usage": "Fenêtre des Réglages.",
+    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), .npill transition."
+   },
+   {
+    "name": "duree-reglages-repli",
+    "value": "300ms",
+    "usage": "Fenêtre des Réglages.",
+    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), .sub transition."
+   },
+   {
+    "name": "duree-reglages-entree",
+    "value": "260ms",
+    "usage": "Fenêtre des Réglages.",
+    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), section animation bIn."
+   },
+   {
+    "name": "duree-reglages-glissiere",
+    "value": "340ms",
+    "usage": "Fenêtre des Réglages.",
+    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), .sw .k, .seg::before, .cp .th."
+   },
+   {
+    "name": "duree-reglages-interrupteur-couleur",
+    "value": "220ms",
+    "usage": "Fenêtre des Réglages.",
+    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), .sw transition."
+   },
+   {
+    "name": "duree-reglages-coche",
+    "value": "220ms",
+    "usage": "Fenêtre des Réglages.",
+    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), .sw .k .chk."
+   },
+   {
+    "name": "duree-reglages-coche-retard",
+    "value": "120ms",
+    "usage": "Fenêtre des Réglages.",
+    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), .sw .k .chk delay."
+   },
+   {
+    "name": "duree-reglages-secousse",
+    "value": "300ms",
+    "usage": "Fenêtre des Réglages.",
+    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), .kc.bad."
+   },
+   {
+    "name": "duree-reglages-menu",
+    "value": "200ms",
+    "usage": "Fenêtre des Réglages.",
+    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), .menu mIn."
+   },
+   {
+    "name": "duree-reglages-clignote",
+    "value": "1s",
+    "usage": "Fenêtre des Réglages.",
+    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), .kc.rec .ph::after."
    }
   ]
  },
@@ -172,6 +604,784 @@
     "value": "160px",
     "usage": "Largeur maximale d'un bouton d'action en texte, au-delà : « … ». Garde la place du texte et de la croix.",
     "origine": "À valider par le fil design : choix de l'agent pour que les boutons restent à droite sans passer à la ligne."
+   },
+   {
+    "name": "vignette-largeur",
+    "value": "260px",
+    "usage": "Largeur de la carte.",
+    "origine": "design/vignette5 (disposition A « Au survol »), .thumb width (max)."
+   },
+   {
+    "name": "vignette-ratio",
+    "value": "16 / 10",
+    "usage": "Proportions de l'image de la carte.",
+    "origine": "design/vignette5 (disposition A « Au survol »), .la .prev."
+   },
+   {
+    "name": "vignette-marge",
+    "value": "12px",
+    "usage": "Écart entre la carte et les bords de la zone utile.",
+    "origine": "design/vignette5 (disposition A « Au survol »), .thumb left:12px."
+   },
+   {
+    "name": "vignette-rayon",
+    "value": "8px",
+    "usage": "Coins de la carte.",
+    "origine": "design/vignette5 (disposition A « Au survol »), .thumb."
+   },
+   {
+    "name": "vignette-barre",
+    "value": "3px",
+    "usage": "Hauteur de la barre du temps restant.",
+    "origine": "design/vignette5 (disposition A « Au survol »), .prog."
+   },
+   {
+    "name": "vignette-pilule",
+    "value": "28px",
+    "usage": "Hauteur des pilules (Copier, Enregistrer).",
+    "origine": "design/vignette5 (disposition A « Au survol »), .la .main .vb."
+   },
+   {
+    "name": "vignette-pilule-texte-taille",
+    "value": "12.5px",
+    "usage": "Taille du texte des pilules.",
+    "origine": "design/vignette5 (disposition A « Au survol »), .la .main .vb."
+   },
+   {
+    "name": "vignette-rond",
+    "value": "26px",
+    "usage": "Côté des boutons ronds et de la croix.",
+    "origine": "design/vignette5 (disposition A « Au survol »), .la .rb."
+   },
+   {
+    "name": "vignette-picto",
+    "value": "14px",
+    "usage": "Pictogrammes des boutons ronds.",
+    "origine": "design/vignette5 (disposition A « Au survol »), .la .rb .ico."
+   },
+   {
+    "name": "vignette-arc",
+    "value": "40px",
+    "usage": "Hauteur de l'arc de l'envol (à mi-chemin).",
+    "origine": "design/vignette5 (disposition A « Au survol »), envol dy*.5-40."
+   },
+   {
+    "name": "vignette-entree-decalage",
+    "value": "14px",
+    "usage": "Départ vertical de l'entrée (−14 px pour un coin du haut).",
+    "origine": "design/vignette5 (disposition A « Au survol »), translateY(14px)."
+   },
+   {
+    "name": "vignette-vent-recul",
+    "value": "6px",
+    "usage": "Petit recul au début du coup de vent.",
+    "origine": "design/vignette5 (disposition A « Au survol »), translateX(6px) rotate(1deg)."
+   },
+   {
+    "name": "vignette-vent-decalage",
+    "value": "125%",
+    "usage": "Distance du coup de vent (vers le bord le plus proche).",
+    "origine": "design/vignette5 (disposition A « Au survol »), translate(-125%,-14px)."
+   },
+   {
+    "name": "vignette-vent-angle",
+    "value": "6deg",
+    "usage": "Rotation finale du coup de vent.",
+    "origine": "design/vignette5 (disposition A « Au survol »), rotate(-6deg)."
+   },
+   {
+    "name": "vignette-vent-flou",
+    "value": "6px",
+    "usage": "Flou final du coup de vent.",
+    "origine": "design/vignette5 (disposition A « Au survol »), blur(6px)."
+   },
+   {
+    "name": "vignette-principales-bas",
+    "value": "11px",
+    "usage": "Écart entre le bas de la carte et les pilules Copier / Enregistrer.",
+    "origine": "design/vignette5 (disposition A « Au survol »), .actions bottom:11px."
+   },
+   {
+    "name": "vignette-principales-ecart",
+    "value": "6px",
+    "usage": "Écart entre les pilules Copier et Enregistrer.",
+    "origine": "design/vignette5 (disposition A « Au survol »), .actions gap:6px."
+   },
+   {
+    "name": "vignette-coin-ecart",
+    "value": "6px",
+    "usage": "Retrait de la croix et des ronds secondaires depuis le coin haut droit.",
+    "origine": "design/vignette5 (disposition A « Au survol »), .x top/right:6px."
+   },
+   {
+    "name": "vignette-pilule-ecart",
+    "value": "7px",
+    "usage": "Écart entre le pictogramme et le libellé d'une pilule (et d'Annuler).",
+    "origine": "design/vignette5 (disposition A « Au survol »), .pill gap:7px."
+   },
+   {
+    "name": "vignette-revele-decalage",
+    "value": "4px",
+    "usage": "Décalage vertical des boutons avant le survol.",
+    "origine": "design/vignette5 (disposition A « Au survol »), translateY(4px)."
+   },
+   {
+    "name": "vignette-croix-picto",
+    "value": "10px",
+    "usage": "Côté de la croix de fermeture.",
+    "origine": "design/vignette5 (disposition A « Au survol »), .x svg 10px."
+   },
+   {
+    "name": "vignette-picto-anime",
+    "value": "16px",
+    "usage": "Côté des pictogrammes animés de Copier, Enregistrer et Annuler.",
+    "origine": "design/vignette5 (disposition A « Au survol »), .pill svg 16px."
+   },
+   {
+    "name": "vignette-libelle-hauteur",
+    "value": "18px",
+    "usage": "Hauteur (et interligne) du libellé qui glisse « Copier » → « Copié ».",
+    "origine": "design/vignette5 (disposition A « Au survol »), .lbl height:18px."
+   },
+   {
+    "name": "vignette-onde",
+    "value": "8px",
+    "usage": "Diamètre de départ de l'onde du clic.",
+    "origine": "design/vignette5 (disposition A « Au survol »), .pill::after 8px."
+   },
+   {
+    "name": "vignette-grise-flou",
+    "value": "2px",
+    "usage": "Flou de l'image de la carte « supprimée ».",
+    "origine": "design/vignette5 (disposition A « Au survol »), blur(2px)."
+   },
+   {
+    "name": "vignette-annuler-hauteur",
+    "value": "32px",
+    "usage": "Hauteur du bouton Annuler.",
+    "origine": "design/vignette5 (disposition A « Au survol »), .undo height:32px."
+   },
+   {
+    "name": "vignette-annuler-texte-taille",
+    "value": "13px",
+    "usage": "Taille du texte du bouton Annuler.",
+    "origine": "design/vignette5 (disposition A « Au survol »), .undo font 13px."
+   },
+   {
+    "name": "vignette-rayon-petit",
+    "value": "6px",
+    "usage": "Coins du bouton Annuler et de l'infobulle.",
+    "origine": "design/vignette5 (disposition A « Au survol »), .undo / .tip radius:6px."
+   },
+   {
+    "name": "installateur-carte-largeur",
+    "value": "720px",
+    "usage": "Largeur de la carte de l'installateur.",
+    "origine": "Maquette validée de l'installateur (d-mix.html, « A + C »). .win width min(720px,…)."
+   },
+   {
+    "name": "installateur-carte-hauteur",
+    "value": "480px",
+    "usage": "Hauteur de la carte de l'installateur.",
+    "origine": "Maquette validée de l'installateur (d-mix.html, « A + C »). .win height min(480px,…)."
+   },
+   {
+    "name": "installateur-marge",
+    "value": "40px",
+    "usage": "Marge transparente autour de la carte (place de l'ombre).",
+    "origine": "Maquette validée de l'installateur (d-mix.html, « A + C »). écart carte/fenêtre."
+   },
+   {
+    "name": "installateur-titre-hauteur",
+    "value": "32px",
+    "usage": "Hauteur de la barre de titre.",
+    "origine": "Maquette validée de l'installateur (d-mix.html, « A + C »). .titlebar height:32px."
+   },
+   {
+    "name": "installateur-pied-hauteur",
+    "value": "64px",
+    "usage": "Hauteur du pied de la carte.",
+    "origine": "Maquette validée de l'installateur (d-mix.html, « A + C »). .foot height:64px."
+   },
+   {
+    "name": "installateur-logo",
+    "value": "96px",
+    "usage": "Taille du Moulinet de l'accueil et de l'installation.",
+    "origine": "Maquette validée de l'installateur (d-mix.html, « A + C »). .logo width:96px."
+   },
+   {
+    "name": "installateur-marque",
+    "value": "128px",
+    "usage": "Taille de la marque (moulinet) et de la coche.",
+    "origine": "Maquette validée de l'installateur (d-mix.html, « A + C »). .mark/.check 128px."
+   },
+   {
+    "name": "installateur-barre",
+    "value": "280px",
+    "usage": "Largeur de la barre de progression.",
+    "origine": "Maquette validée de l'installateur (d-mix.html, « A + C »). .pbar width:280px."
+   },
+   {
+    "name": "installateur-titre-taille",
+    "value": "40px",
+    "usage": "Taille du titre « BreezyShot » de l'accueil.",
+    "origine": "Maquette validée de l'installateur (d-mix.html, « A + C »). h1 font 40/52."
+   },
+   {
+    "name": "installateur-titre-interligne",
+    "value": "52px",
+    "usage": "Interligne du titre de l'accueil.",
+    "origine": "Maquette validée de l'installateur (d-mix.html, « A + C »). h1 line 52."
+   },
+   {
+    "name": "installateur-icone",
+    "value": "16px",
+    "usage": "Icône de la barre de titre.",
+    "origine": "Maquette validée de l'installateur (d-mix.html, « A + C »). .titlebar .ico 16px."
+   },
+   {
+    "name": "installateur-bouton-titre",
+    "value": "46px",
+    "usage": "Largeur des boutons Réduire et Fermer.",
+    "origine": "Maquette validée de l'installateur (d-mix.html, « A + C »). .cap width:46px."
+   },
+   {
+    "name": "installateur-picto-titre",
+    "value": "10px",
+    "usage": "Pictogrammes Réduire et Fermer.",
+    "origine": "Maquette validée de l'installateur (d-mix.html, « A + C »). .cap svg 10px."
+   },
+   {
+    "name": "installateur-etape-marge",
+    "value": "32px 40px",
+    "usage": "Marge intérieure d'un écran.",
+    "origine": "Maquette validée de l'installateur (d-mix.html, « A + C »). .step padding:32px 40px."
+   },
+   {
+    "name": "installateur-glisse",
+    "value": "28px",
+    "usage": "Glissement d'un écran à l'autre.",
+    "origine": "Maquette validée de l'installateur (d-mix.html, « A + C »). @keyframes outL/inR translateX(28px)."
+   },
+   {
+    "name": "installateur-monte",
+    "value": "14px",
+    "usage": "Montée de la carte et du titre à l'entrée.",
+    "origine": "Maquette validée de l'installateur (d-mix.html, « A + C »). @keyframes winIn/rise translateY(14px)."
+   },
+   {
+    "name": "installateur-decalage",
+    "value": "6px",
+    "usage": "Décalage d'entrée de la ligne « Mo », de la barre, de la cause et des boutons.",
+    "origine": "Maquette validée de l'installateur (d-mix.html, « A + C »). .prow/.pbar/.cause translateY(6px), btnIn."
+   },
+   {
+    "name": "installateur-ligne-haut",
+    "value": "28px",
+    "usage": "Espace au-dessus de la ligne « Mo ».",
+    "origine": "Maquette validée de l'installateur (d-mix.html, « A + C »). .prow margin-top:28px."
+   },
+   {
+    "name": "installateur-barre-hauteur",
+    "value": "4px",
+    "usage": "Épaisseur de la barre de progression.",
+    "origine": "Maquette validée de l'installateur (d-mix.html, « A + C »). .pbar height:4px."
+   },
+   {
+    "name": "installateur-barre-rayon",
+    "value": "2px",
+    "usage": "Rayon de la barre et de son remplissage.",
+    "origine": "Maquette validée de l'installateur (d-mix.html, « A + C »). .pbar/.fill border-radius:2px."
+   },
+   {
+    "name": "installateur-reflet-largeur",
+    "value": "72px",
+    "usage": "Largeur du reflet de la barre.",
+    "origine": "Maquette validée de l'installateur (d-mix.html, « A + C »). .fill::after width:72px."
+   },
+   {
+    "name": "installateur-cause-largeur",
+    "value": "320px",
+    "usage": "Largeur maximale de la cause d'erreur.",
+    "origine": "Maquette validée de l'installateur (d-mix.html, « A + C »). .cause max-width:320px."
+   },
+   {
+    "name": "installateur-coche-anneau",
+    "value": "2.5",
+    "usage": "Épaisseur de l'anneau de la coche (unités du dessin).",
+    "origine": "Maquette validée de l'installateur (d-mix.html, « A + C »). .check .full stroke-width:2.5."
+   },
+   {
+    "name": "installateur-coche-trait",
+    "value": "5",
+    "usage": "Épaisseur du trait de la coche (unités du dessin).",
+    "origine": "Maquette validée de l'installateur (d-mix.html, « A + C »). .check path stroke-width:5."
+   },
+   {
+    "name": "installateur-bouton-hauteur",
+    "value": "32px",
+    "usage": "Hauteur d'un bouton du pied (et diamètre d'Installer réduit).",
+    "origine": "Maquette validée de l'installateur (d-mix.html, « A + C »). .btn height:32px ; starting #install width:32px."
+   },
+   {
+    "name": "installateur-bouton-largeur",
+    "value": "96px",
+    "usage": "Largeur minimale d'un bouton du pied.",
+    "origine": "Maquette validée de l'installateur (d-mix.html, « A + C »). .btn min-width:96px."
+   },
+   {
+    "name": "installateur-bouton-rond",
+    "value": "16px",
+    "usage": "Rayon d'Installer réduit en rond.",
+    "origine": "Maquette validée de l'installateur (d-mix.html, « A + C »). starting #install border-radius:16px."
+   },
+   {
+    "name": "installateur-installer-largeur",
+    "value": "120px",
+    "usage": "Largeur du bouton Installer.",
+    "origine": "Maquette validée de l'installateur (d-mix.html, « A + C »). #install width:120px."
+   },
+   {
+    "name": "installateur-trait",
+    "value": "1px",
+    "usage": "Filets : bords de la carte, des boutons, séparateurs ; levée au survol.",
+    "origine": "Maquette validée de l'installateur (d-mix.html, « A + C »). border:1px, translateY(-1px)."
+   },
+   {
+    "name": "installateur-focus",
+    "value": "2px",
+    "usage": "Contour du focus clavier.",
+    "origine": "Maquette validée de l'installateur (d-mix.html, « A + C »). :focus-visible outline 2px, offset 2px."
+   },
+   {
+    "name": "reglages-onglet-hauteur",
+    "value": "46px",
+    "usage": "Fenêtre des Réglages.",
+    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), .nv height."
+   },
+   {
+    "name": "reglages-onglet-marge",
+    "value": "14px",
+    "usage": "Fenêtre des Réglages.",
+    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), .nv padding."
+   },
+   {
+    "name": "reglages-onglet-texte",
+    "value": "13.5px",
+    "usage": "Fenêtre des Réglages.",
+    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), .nv font-size."
+   },
+   {
+    "name": "reglages-onglet-ecart",
+    "value": "2px",
+    "usage": "Fenêtre des Réglages.",
+    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), .snav gap."
+   },
+   {
+    "name": "reglages-trait",
+    "value": "2px",
+    "usage": "Fenêtre des Réglages.",
+    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), .npill height."
+   },
+   {
+    "name": "reglages-trait-retrait",
+    "value": "12px",
+    "usage": "Fenêtre des Réglages.",
+    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), .npill left/width."
+   },
+   {
+    "name": "reglages-contenu-largeur",
+    "value": "540px",
+    "usage": "Fenêtre des Réglages.",
+    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), .spane section max-width."
+   },
+   {
+    "name": "reglages-contenu-marge",
+    "value": "28px",
+    "usage": "Fenêtre des Réglages.",
+    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), .spane padding."
+   },
+   {
+    "name": "reglages-contenu-marge-bas",
+    "value": "12px",
+    "usage": "Fenêtre des Réglages.",
+    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), .spane padding-bottom."
+   },
+   {
+    "name": "reglages-ligne-hauteur",
+    "value": "60px",
+    "usage": "Fenêtre des Réglages.",
+    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), .row min-height."
+   },
+   {
+    "name": "reglages-ligne-marge-v",
+    "value": "10px",
+    "usage": "Fenêtre des Réglages.",
+    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), .row padding."
+   },
+   {
+    "name": "reglages-ligne-marge-h",
+    "value": "12px",
+    "usage": "Fenêtre des Réglages.",
+    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), .row padding / margin."
+   },
+   {
+    "name": "reglages-ligne-ecart",
+    "value": "12px",
+    "usage": "Fenêtre des Réglages.",
+    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), .row gap."
+   },
+   {
+    "name": "reglages-sous-retrait",
+    "value": "28px",
+    "usage": "Fenêtre des Réglages.",
+    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), .sub .row padding-left."
+   },
+   {
+    "name": "reglages-groupe-ecart",
+    "value": "28px",
+    "usage": "Fenêtre des Réglages.",
+    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), .card margin-bottom."
+   },
+   {
+    "name": "reglages-libelle-taille",
+    "value": "14.5px",
+    "usage": "Fenêtre des Réglages.",
+    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), .lb font-size."
+   },
+   {
+    "name": "reglages-libelle-approche",
+    "value": "-0.003em",
+    "usage": "Fenêtre des Réglages.",
+    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), .lb letter-spacing."
+   },
+   {
+    "name": "reglages-interrupteur-largeur",
+    "value": "60px",
+    "usage": "Fenêtre des Réglages.",
+    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), .sw width."
+   },
+   {
+    "name": "reglages-interrupteur-hauteur",
+    "value": "28px",
+    "usage": "Fenêtre des Réglages.",
+    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), .sw height."
+   },
+   {
+    "name": "reglages-interrupteur-bouton",
+    "value": "20px",
+    "usage": "Fenêtre des Réglages.",
+    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), .sw .k."
+   },
+   {
+    "name": "reglages-interrupteur-marge",
+    "value": "3px",
+    "usage": "Fenêtre des Réglages.",
+    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), .sw .k top/left."
+   },
+   {
+    "name": "reglages-interrupteur-picto",
+    "value": "14px",
+    "usage": "Fenêtre des Réglages.",
+    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), .sw .ico2."
+   },
+   {
+    "name": "reglages-interrupteur-picto-marge",
+    "value": "7px",
+    "usage": "Fenêtre des Réglages.",
+    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), .sw .off/.on."
+   },
+   {
+    "name": "reglages-interrupteur-coche",
+    "value": "12px",
+    "usage": "Fenêtre des Réglages.",
+    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), .sw .k svg."
+   },
+   {
+    "name": "reglages-halo-largeur",
+    "value": "4px",
+    "usage": "Fenêtre des Réglages.",
+    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), .sw:hover .k."
+   },
+   {
+    "name": "reglages-segment-marge",
+    "value": "3px",
+    "usage": "Fenêtre des Réglages.",
+    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), .seg padding."
+   },
+   {
+    "name": "reglages-segment-hauteur",
+    "value": "26px",
+    "usage": "Fenêtre des Réglages.",
+    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), .seg button height."
+   },
+   {
+    "name": "reglages-segment-texte",
+    "value": "12.5px",
+    "usage": "Fenêtre des Réglages.",
+    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), .seg button font-size."
+   },
+   {
+    "name": "reglages-segment-rayon",
+    "value": "8px",
+    "usage": "Fenêtre des Réglages.",
+    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), .seg border-radius."
+   },
+   {
+    "name": "reglages-segment-rayon-pastille",
+    "value": "6px",
+    "usage": "Fenêtre des Réglages.",
+    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), .seg::before border-radius."
+   },
+   {
+    "name": "reglages-segment-bouton-marge",
+    "value": "11px",
+    "usage": "Fenêtre des Réglages.",
+    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), .seg button padding."
+   },
+   {
+    "name": "reglages-coin-largeur",
+    "value": "80px",
+    "usage": "Fenêtre des Réglages.",
+    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), .cp width."
+   },
+   {
+    "name": "reglages-coin-hauteur",
+    "value": "50px",
+    "usage": "Fenêtre des Réglages.",
+    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), .cp height."
+   },
+   {
+    "name": "reglages-coin-bord",
+    "value": "1.5px",
+    "usage": "Fenêtre des Réglages.",
+    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), .cp border."
+   },
+   {
+    "name": "reglages-coin-rayon",
+    "value": "6px",
+    "usage": "Fenêtre des Réglages.",
+    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), .cp border-radius."
+   },
+   {
+    "name": "reglages-coin-barre",
+    "value": "5px",
+    "usage": "Fenêtre des Réglages.",
+    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), .cp::after height."
+   },
+   {
+    "name": "reglages-coin-pouce-largeur",
+    "value": "20px",
+    "usage": "Fenêtre des Réglages.",
+    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), .cp .th width."
+   },
+   {
+    "name": "reglages-coin-pouce-hauteur",
+    "value": "13px",
+    "usage": "Fenêtre des Réglages.",
+    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), .cp .th height."
+   },
+   {
+    "name": "reglages-coin-pouce-marge",
+    "value": "4px",
+    "usage": "Fenêtre des Réglages.",
+    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), place du pouce dans l'écran."
+   },
+   {
+    "name": "reglages-touche-hauteur",
+    "value": "24px",
+    "usage": "Fenêtre des Réglages.",
+    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), kbd height."
+   },
+   {
+    "name": "reglages-touche-marge",
+    "value": "7px",
+    "usage": "Fenêtre des Réglages.",
+    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), kbd padding."
+   },
+   {
+    "name": "reglages-touche-rayon",
+    "value": "5px",
+    "usage": "Fenêtre des Réglages.",
+    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), kbd border-radius."
+   },
+   {
+    "name": "reglages-touche-texte",
+    "value": "11px",
+    "usage": "Fenêtre des Réglages.",
+    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), kbd font-size."
+   },
+   {
+    "name": "reglages-touche-bord-bas",
+    "value": "2px",
+    "usage": "Fenêtre des Réglages.",
+    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), kbd border-bottom-width."
+   },
+   {
+    "name": "reglages-touches-largeur",
+    "value": "120px",
+    "usage": "Fenêtre des Réglages.",
+    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), .kc min-width."
+   },
+   {
+    "name": "reglages-touches-ecart",
+    "value": "4px",
+    "usage": "Fenêtre des Réglages.",
+    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), .kc gap."
+   },
+   {
+    "name": "reglages-bouton-hauteur",
+    "value": "32px",
+    "usage": "Fenêtre des Réglages.",
+    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), .btn height."
+   },
+   {
+    "name": "reglages-retablir",
+    "value": "28px",
+    "usage": "Fenêtre des Réglages.",
+    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), .rst."
+   },
+   {
+    "name": "reglages-champ-largeur",
+    "value": "250px",
+    "usage": "Fenêtre des Réglages.",
+    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), .fld width."
+   },
+   {
+    "name": "reglages-champ-texte",
+    "value": "13px",
+    "usage": "Fenêtre des Réglages.",
+    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), .fld input font-size."
+   },
+   {
+    "name": "reglages-champ-bouton",
+    "value": "26px",
+    "usage": "Fenêtre des Réglages.",
+    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), .fld .ib."
+   },
+   {
+    "name": "reglages-apercu-texte",
+    "value": "12px",
+    "usage": "Fenêtre des Réglages.",
+    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), .prev font-size."
+   },
+   {
+    "name": "reglages-apercu-interligne",
+    "value": "16px",
+    "usage": "Fenêtre des Réglages.",
+    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), .prev line-height."
+   },
+   {
+    "name": "reglages-logo",
+    "value": "44px",
+    "usage": "Fenêtre des Réglages.",
+    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), .alogo."
+   },
+   {
+    "name": "reglages-apropos-hauteur",
+    "value": "72px",
+    "usage": "Fenêtre des Réglages.",
+    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), .about .row min-height."
+   },
+   {
+    "name": "reglages-apropos-ecart",
+    "value": "14px",
+    "usage": "Fenêtre des Réglages.",
+    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), .about .row gap."
+   },
+   {
+    "name": "reglages-apropos-marge",
+    "value": "20px",
+    "usage": "Fenêtre des Réglages.",
+    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), .about margin-bottom."
+   },
+   {
+    "name": "reglages-nom-interligne",
+    "value": "26px",
+    "usage": "Fenêtre des Réglages.",
+    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), .about .an line-height."
+   },
+   {
+    "name": "reglages-nom-approche",
+    "value": "-0.015em",
+    "usage": "Fenêtre des Réglages.",
+    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), .about .an letter-spacing."
+   },
+   {
+    "name": "reglages-version-texte",
+    "value": "12.5px",
+    "usage": "Fenêtre des Réglages.",
+    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), .about .av font-size."
+   },
+   {
+    "name": "reglages-entree-decalage",
+    "value": "4px",
+    "usage": "Fenêtre des Réglages.",
+    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), @keyframes bIn."
+   },
+   {
+    "name": "reglages-menu-largeur",
+    "value": "140px",
+    "usage": "Fenêtre des Réglages.",
+    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), .menu min-width."
+   },
+   {
+    "name": "reglages-saisie-curseur",
+    "value": "14px",
+    "usage": "Fenêtre des Réglages.",
+    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), .kc.rec .ph::after."
+   },
+   {
+    "name": "reglages-secousse",
+    "value": "3px",
+    "usage": "Fenêtre des Réglages.",
+    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), @keyframes shake."
+   },
+   {
+    "name": "reglages-filet",
+    "value": "1px",
+    "usage": "Fenêtre des Réglages : épaisseur des bords et filets.",
+    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), bords 1px des contrôles (base commune, gardée par B)."
+   },
+   {
+    "name": "reglages-focus",
+    "value": "2px",
+    "usage": "Fenêtre des Réglages : épaisseur et retrait du contour de focus clavier.",
+    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), :focus-visible outline 2px (base commune, gardée par B)."
+   },
+   {
+    "name": "reglages-segment-ecart",
+    "value": "2px",
+    "usage": "Fenêtre des Réglages : écart entre les choix d'un contrôle segmenté.",
+    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), .seg gap (base commune, gardée par B)."
+   },
+   {
+    "name": "reglages-pouce-rayon",
+    "value": "2px",
+    "usage": "Fenêtre des Réglages : rayon du pouce du choix du coin.",
+    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), .cp .th border-radius (base commune, gardée par B)."
+   },
+   {
+    "name": "reglages-champ-bouton-retrait",
+    "value": "2px",
+    "usage": "Fenêtre des Réglages : retrait du bouton Insérer dans le champ.",
+    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), .fld .ib margin-right (base commune, gardée par B)."
+   },
+   {
+    "name": "reglages-curseur-ecart",
+    "value": "3px",
+    "usage": "Fenêtre des Réglages : écart du curseur de saisie d'un raccourci.",
+    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), .kc.rec .ph::after margin-left (base commune, gardée par B)."
+   }
+  ]
+ },
+ "courbe": {
+  "tokens": [
+   {
+    "name": "courbe-reflet",
+    "value": "cubic-bezier(0.4, 0, 0.2, 1)",
+    "usage": "Course du reflet sur la barre de progression.",
+    "origine": "Maquette validée de l'installateur (d-mix.html, « A + C »). animation:shine 1.6s cubic-bezier(.4,0,.2,1)."
    }
   ]
  }

@@ -11,13 +11,16 @@
 // - `bandeau_zone` { id, x, y, largeur, hauteur } (pixels CSS, relatifs à la page) dès qu'un
 //   message à croix est affiché et à chaque changement de taille.
 // - `bandeau_termine` { id } quand le message a fini de disparaître.
-// - `bandeau_pret` {} une fois, quand l'écoute de `bandeau:afficher` est en place.
+// - `bandeau_pret` {} une fois, quand l'écoute de `bandeau:afficher` (et celle du thème,
+//   `interface:theme`, voir commun/theme.js) est en place.
 // Réussite : part seule après --duree-bandeau-reussite. Info et erreur : restent jusqu'au clic.
 // Sans window.__TAURI__ (aperçu dans un navigateur) : ?demo=reussite|info|erreur
 // (et &tenir pour qu'une réussite ne parte pas).
 //
 // Aucune donnée du message ne passe par innerHTML : textes par textContent, pictogrammes
 // tirés de constantes.
+
+import { suivreTheme } from "../commun/theme.js";
 
 const tauri = window.__TAURI__;
 const el = document.getElementById("bandeau");
@@ -253,7 +256,10 @@ addEventListener("contextmenu", (e) => e.preventDefault(), true);
 // Branchement : Tauri si présent, sinon aperçu.
 if (tauri?.event?.listen) {
   // Une fois l'écoute en place, le cœur peut envoyer le message qui attendait (démarrage).
-  Promise.resolve(tauri.event.listen("bandeau:afficher", (evenement) => afficher(evenement?.payload))).then(
+  Promise.all([
+    tauri.event.listen("bandeau:afficher", (evenement) => afficher(evenement?.payload)),
+    suivreTheme(),
+  ]).then(
     () => appeler("bandeau_pret", {}),
     (e) => console.warn("bandeau : écoute impossible :", e),
   );

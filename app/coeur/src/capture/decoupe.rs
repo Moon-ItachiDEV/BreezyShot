@@ -135,6 +135,55 @@ pub fn arrondir(pixels: &mut Pixels, rayon: i32, coins: [bool; 4]) {
     }
 }
 
+/// Réduit l'image pour qu'aucun côté ne dépasse `cote_max` (aperçu de la vignette) :
+/// chaque pixel d'arrivée est la moyenne des pixels de départ qu'il couvre (boîtes),
+/// couleurs pondérées par l'alpha, alpha gardé. Une image déjà assez petite, vide ou
+/// incohérente est rendue telle quelle.
+pub fn reduire(pixels: &Pixels, cote_max: u32) -> Pixels {
+    let (l, h) = (pixels.largeur, pixels.hauteur);
+    let coherent = pixels.rgba.len() as u64 == u64::from(l) * u64::from(h) * 4;
+    if cote_max == 0 || l.max(h) <= cote_max || !coherent || l == 0 || h == 0 {
+        return pixels.clone();
+    }
+    let k = f64::from(cote_max) / f64::from(l.max(h));
+    let nl = ((f64::from(l) * k).round() as u32).clamp(1, cote_max);
+    let nh = ((f64::from(h) * k).round() as u32).clamp(1, cote_max);
+    let mut rgba = vec![0u8; nl as usize * nh as usize * 4];
+    for y in 0..nh {
+        let y0 = (u64::from(y) * u64::from(h) / u64::from(nh)) as u32;
+        let y1 = ((u64::from(y + 1) * u64::from(h)).div_ceil(u64::from(nh)) as u32).max(y0 + 1);
+        for x in 0..nl {
+            let x0 = (u64::from(x) * u64::from(l) / u64::from(nl)) as u32;
+            let x1 = ((u64::from(x + 1) * u64::from(l)).div_ceil(u64::from(nl)) as u32).max(x0 + 1);
+            let mut somme = [0u64; 4];
+            let mut n = 0u64;
+            for sy in y0..y1.min(h) {
+                let ligne = sy as usize * l as usize;
+                for sx in x0..x1.min(l) {
+                    let i = (ligne + sx as usize) * 4;
+                    let a = u64::from(pixels.rgba[i + 3]);
+                    for (s, v) in somme.iter_mut().zip(&pixels.rgba[i..i + 3]) {
+                        *s += u64::from(*v) * a;
+                    }
+                    somme[3] += a;
+                    n += 1;
+                }
+            }
+            let o = (y as usize * nl as usize + x as usize) * 4;
+            let poids = somme[3];
+            for (d, s) in rgba[o..o + 3].iter_mut().zip(&somme[..3]) {
+                *d = (s + poids / 2).checked_div(poids).unwrap_or(0) as u8;
+            }
+            rgba[o + 3] = ((somme[3] + n / 2) / n.max(1)) as u8;
+        }
+    }
+    Pixels {
+        largeur: nl,
+        hauteur: nh,
+        rgba,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -377,5 +426,45 @@ mod tests {
         let copie = abimee.clone();
         arrondir(&mut abimee, 2, [true; 4]);
         assert_eq!(abimee, copie);
+    }
+
+    #[test]
+    fn reduire_garde_les_proportions_et_les_couleurs() {
+        // 4 × 2 : moitié gauche rouge, moitié droite bleue, opaque.
+        let mut rgba = Vec::new();
+        for _y in 0..2 {
+            for x in 0..4 {
+                rgba.extend_from_slice(if x < 2 {
+                    &[255, 0, 0, 255]
+                } else {
+                    &[0, 0, 255, 255]
+                });
+            }
+        }
+        let p = Pixels {
+            largeur: 4,
+            hauteur: 2,
+            rgba,
+        };
+        let r = reduire(&p, 2);
+        assert_eq!((r.largeur, r.hauteur), (2, 1));
+        assert_eq!(r.rgba, [255, 0, 0, 255, 0, 0, 255, 255]);
+        // Déjà assez petite : rendue telle quelle.
+        assert_eq!(reduire(&p, 4).rgba, p.rgba);
+        // Un pixel transparent ne salit pas la couleur, l'alpha est moyenné.
+        let p = Pixels {
+            largeur: 2,
+            hauteur: 1,
+            rgba: vec![10, 20, 30, 255, 200, 200, 200, 0],
+        };
+        let r = reduire(&p, 1);
+        assert_eq!(r.rgba, [10, 20, 30, 128]);
+        // Incohérente : rendue telle quelle.
+        let p = Pixels {
+            largeur: 10,
+            hauteur: 10,
+            rgba: vec![0; 4],
+        };
+        assert_eq!(reduire(&p, 2).largeur, 10);
     }
 }

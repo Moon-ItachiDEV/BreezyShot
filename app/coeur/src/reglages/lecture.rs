@@ -7,16 +7,16 @@ use serde_json::{json, Map, Value};
 use super::constat::{Constat, Raison};
 use super::modele::{
     vers_json, Animations, Coin, Plateforme, Raccourcis, Reglages, Selection, Theme, Vignette,
-    DUREE_MAX_S, DUREE_MIN_S, VERSION_ACTUELLE,
+    DUREE_MAX_S, DUREE_MIN_S, DUREE_TOUJOURS, VERSION_ACTUELLE,
 };
 
 /// Une mise à niveau d'une version à la suivante. Elle complète l'objet sans rien effacer ;
 /// le numéro de version est tenu par `interpreter`, pas par elle.
 pub(super) type MiseANiveau = fn(&mut Map<String, Value>, Plateforme);
 
-/// `MISES_A_NIVEAU[n]` fait passer de la version `n` à `n + 1`. Pour une version 2 un jour :
-/// ajouter `v1_vers_v2` à la fin, et `VERSION_ACTUELLE` passe à 2 tout seul.
-pub(super) const MISES_A_NIVEAU: &[MiseANiveau] = &[v0_vers_v1];
+/// `MISES_A_NIVEAU[n]` fait passer de la version `n` à `n + 1`. Pour une version 3 un jour :
+/// ajouter `v2_vers_v3` à la fin, et `VERSION_ACTUELLE` passe à 3 tout seul.
+pub(super) const MISES_A_NIVEAU: &[MiseANiveau] = &[v0_vers_v1, v1_vers_v2];
 
 /// Version 0 (aucun champ `version`) vers 1 : ajoute les champs de la version 1 qui manquent,
 /// y compris dans les sous-objets, sans toucher à ceux qui sont là (même invalides : la
@@ -39,6 +39,11 @@ fn v0_vers_v1(objet: &mut Map<String, Value>, plateforme: Plateforme) {
         completer(objet, &modele);
     }
 }
+
+/// Version 1 vers 2 (étape 10) : même forme. Seul le sens de `vignette.duree_s` s'élargit
+/// (`0` = toujours affichée). Le numéro change pour qu'une app plus ancienne, qui
+/// remplacerait 0 par sa valeur par défaut et réécrirait le fichier, le laisse intact.
+fn v1_vers_v2(_objet: &mut Map<String, Value>, _plateforme: Plateforme) {}
 
 /// Ajoute à `cible` les clés de `modele` qui lui manquent, en descendant dans les sous-objets
 /// présents des deux côtés. Rien n'est effacé ni remplacé.
@@ -141,7 +146,7 @@ pub(super) fn interpreter(objet: Map<String, Value>, plateforme: Plateforme) -> 
         c,
     );
     let dossier_enregistrement = lire(&mut m, "", "dossier_enregistrement", None, lire_dossier, c);
-    let modele_nom = lire(&mut m, "", "modele_nom", d.modele_nom, texte_non_vide, c);
+    let modele_nom = lire(&mut m, "", "modele_nom", d.modele_nom, modele_valide, c);
     let animations = lire(
         &mut m,
         "",
@@ -231,6 +236,12 @@ fn texte_non_vide(v: &Value) -> Option<String> {
     v.as_str()
         .filter(|s| !s.trim().is_empty())
         .map(str::to_string)
+}
+
+/// Modèle de nom : non vide, et pas plus long que `MODELE_NOM_MAX` (même règle que
+/// `valider`).
+fn modele_valide(v: &Value) -> Option<String> {
+    texte_non_vide(v).filter(|s| s.chars().count() <= super::fichier::MODELE_NOM_MAX)
 }
 
 /// `null` = dossier par défaut ; un texte vide (ou fait d'espaces) est invalide.
@@ -353,10 +364,10 @@ fn lire_vignette(m: &mut Map<String, Value>, constats: &mut Vec<Constat>) -> Vig
     }
 }
 
-/// Un nombre entier de secondes entre `DUREE_MIN_S` et `DUREE_MAX_S` (`30.0` vaut 30, `6.5`
-/// est refusé).
+/// Un nombre entier de secondes entre `DUREE_MIN_S` et `DUREE_MAX_S`, ou `DUREE_TOUJOURS`
+/// (`30.0` vaut 30, `6.5` est refusé).
 pub(super) fn duree_valide(v: &Value) -> Option<u32> {
-    entier_sature(v).filter(|n| (DUREE_MIN_S..=DUREE_MAX_S).contains(n))
+    entier_sature(v).filter(|n| *n == DUREE_TOUJOURS || (DUREE_MIN_S..=DUREE_MAX_S).contains(n))
 }
 
 /// Un entier positif ou nul, écrit `6` ou `6.0`, ramené à `u32::MAX` s'il ne tient pas.

@@ -20,6 +20,7 @@ const MODULES: &[&str] = &[
     "sortie",
     "reglages",
     "fenetres",
+    "installation",
     "systeme",
 ];
 
