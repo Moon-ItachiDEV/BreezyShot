@@ -7,7 +7,10 @@
 
 param(
     [Parameter(Mandatory)][string]$Exe,
-    [string]$Sortie = 'essais-resultats'
+    [string]$Sortie = 'essais-resultats',
+    # Un essai qui n'a pas fini dans ce délai est arrêté (lui et tout ce qu'il a lancé) et
+    # compte comme échoué : les suivants se jouent quand même.
+    [int]$LimiteS = 600
 )
 
 Set-StrictMode -Version Latest
@@ -27,8 +30,18 @@ $bilans = [System.Collections.Generic.List[object]]::new()
 foreach ($fichier in $essais) {
     $nom = [System.IO.Path]::GetFileNameWithoutExtension($fichier.Name)
     $chrono = [System.Diagnostics.Stopwatch]::StartNew()
-    & $pwsh -NoProfile -File $fichier.FullName -Exe $exeComplet -Sortie $sortieComplete
-    $code = $LASTEXITCODE
+    $arguments = @('-NoProfile', '-File', "`"$($fichier.FullName)`"",
+        '-Exe', "`"$exeComplet`"", '-Sortie', "`"$sortieComplete`"")
+    $processus = Start-Process -FilePath $pwsh -ArgumentList $arguments -NoNewWindow -PassThru
+    $null = $processus.Handle   # sans quoi ExitCode reste vide après la fin
+    if ($processus.WaitForExit($LimiteS * 1000)) {
+        $code = $processus.ExitCode
+    }
+    else {
+        Write-Host "$nom : pas fini en $LimiteS s, arrêté."
+        try { $processus.Kill($true) } catch { Write-Host "$nom : arrêt impossible ($_)" }
+        $code = -1
+    }
     $chrono.Stop()
     $json = Join-Path $sortieComplete "$nom.json"
     $bilan = $null
@@ -57,7 +70,8 @@ foreach ($b in $bilans) {
     $lignes.Add("### $($b.Nom)")
     $lignes.Add('')
     if ($null -eq $b.Bilan) {
-        $lignes.Add("Pas de bilan : l'essai s'est arrêté avant la fin (code $($b.Code)).")
+        $cause = if ($b.Code -eq -1) { "arrêté après $LimiteS s" } else { "code $($b.Code)" }
+        $lignes.Add("Pas de bilan : l'essai s'est arrêté avant la fin ($cause).")
         continue
     }
     foreach ($v in @($b.Bilan.Verifications)) {
