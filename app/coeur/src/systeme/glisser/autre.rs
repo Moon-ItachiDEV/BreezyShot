@@ -2,13 +2,17 @@
 
 use std::path::Path;
 
-use super::Depot;
+use super::{BoutonPhysique, Depot};
 
 pub fn glisser_fichier(_fenetre: isize, _chemin: &Path) -> Result<Depot, String> {
     Err("glisser non disponible".into())
 }
 
-pub fn bouton_gauche_enfonce() -> bool {
+pub fn boutons_inverses() -> bool {
+    false
+}
+
+pub fn bouton_enfonce(_bouton: BoutonPhysique) -> bool {
     false
 }
 

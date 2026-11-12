@@ -215,8 +215,8 @@ dans le dossier temporaire du système (`systeme::dossier_secours()`), sous le n
   `pret`). Un mode inconnu ne fait qu'une ligne au journal, sans la valeur reçue. Sert à
   « Essayer une capture » de l'installateur. Lignes : `--capturer recu: <mode>` (ou `<vide>`,
   `<inconnu>`), `--capturer: mode inconnu`, `--capturer: en attente du demarrage`.
-- **Ce que l'exe est (version 0.3)** : lancé sous le nom `breezyshot.exe` (casse ignorée), il
-  est l'app ; sous tout autre nom (le fichier téléchargé `BreezyShot-<v>-essai.exe`), il est
+- **Ce que l'exe est (version 0.3)** : lancé sous le nom `breezyshot.exe`, ou `breezyshot`
+  sans extension (macOS, Linux), casse ignorée, il est l'app ; sous tout autre nom (le fichier téléchargé `BreezyShot-<v>-essai.exe`), il est
   l'installateur ; `--desinstaller` le fait désinstaller. Décision pure `arguments::lancement`.
   Le contexte Tauri n'est engendré qu'une fois. Détails : §12.
 - Aucune autre option pour l'instant.
@@ -765,13 +765,20 @@ Module pur : il reçoit le dossier où écrire, ne connaît ni Tauri ni les autr
   essais/pages/bandeau.cjs` : la page du bandeau dans Chromium, servie avec la CSP de l'app
   (job `pages`, Linux). `essais/pages/reglages.cjs` : la page des Réglages de la même façon
   (rubriques au clavier, lignes montrées, changements, refus, nom et aperçu, saisie d'un
-  raccourci, thème), sur une vue simulée.
+  raccourci, thème), sur la vue réelle de l'app assemblée et le vrai refus « Gardez au
+  moins… », écrits par le cœur dans `essais/pages/vue-reglages.json` (le test
+  `vue_de_l_essai_de_page_a_jour` échoue si ce fichier n'est plus à jour ;
+  `BREEZYSHOT_ECRIRE_VUE=1` le réécrit). Seuls les raccourcis y sont remplacés.
 - Essai 08 sous Windows (`08-reglages-fenetre.ps1`) : ouverture par le vrai menu de l'icône
   (si le menu ne s'ouvre pas, l'essai échoue en le disant), fenêtre unique ramenée devant,
-  changements écrits, raccourci changé à chaud (l'ancien rendu à Windows) puis refusé
-  quand une autre application le tient, démarrage avec Windows sur la clé d'essai seulement (la vraie clé `Run` est relue
-  inchangée à la fin), sélecteur de dossier puis capture enregistrée dedans, changement
-  extérieur gardé, thème sombre peint, fermeture, arrêt propre.
+  dernière sortie refusée pour de vrai, vignette allumée par la fenêtre (préparée au coin
+  et à la durée du réglage, partie au délai) puis éteinte (plus de `vignette preparee`),
+  copie éteinte, raccourci changé à chaud (l'ancien rendu à Windows) puis refusé quand une
+  autre application le tient, démarrage avec Windows sur la clé d'essai seulement (la vraie
+  clé `Run` est relue inchangée à la fin), enregistrement allumé par la fenêtre, sélecteur
+  de dossier puis capture enregistrée dedans, changement extérieur gardé, thème clair puis
+  sombre peint, fermeture, arrêt propre. Le cas part de la copie seule (ni vignette, ni
+  enregistrement) : la vignette ne gêne aucun autre point.
 - Pages de l'étape 9 : `vignette.cjs` (carte aux mesures des jetons et à sa place
   pour les coins et un retrait à 150 %, boutons rendus depuis la liste, cachés avant le
   survol, « Copié » puis retour, état supprimé, barre en marche, en pause, absente pour
@@ -1101,8 +1108,17 @@ d'erreur, la vignette reste.
 départ, puis `sortie::supprimer` dans un fil (fichier de « Récents », fichier enregistré
 pour cette capture, ses fichiers de glisser ; jamais le presse-papiers). **Une nouvelle
 capture ou l'arrêt pendant les 4 s font la suppression tout de suite, sans l'abandonner**
-(dans un fil pour une capture, sur le fil principal à l'arrêt). Échec : « Impossible de
-supprimer » / cause.
+(dans un fil pour une capture, sur le fil principal à l'arrêt ; l'arrêt attend aussi, 2 s
+au plus, les fils de suppression déjà lancés avant `arret propre`). Le fil écrit le bilan au
+journal ; échec : « Impossible de supprimer » / cause.
+
+**Enregistrer en retard** : Supprimer reste accepté pendant qu'un Enregistrer écrit. Une
+capture qui part avec son effacement lancé alors que son Enregistrer tourne encore est
+retenue (`a_retenir`, 8 au plus) ; le fichier qui arrive ensuite (carte partie et retenue,
+ou carte encore là mais effacement lancé) est effacé à son tour, par les mêmes gardes que
+Supprimer (`enregistrement_tardif` puis `sortie::a_effacer`) : `vignette suppression <id>
+tardive recent aucun fichier <ok|echec>`. Arrivé pendant les 4 s, il rejoint simplement
+la suppression en attente.
 
 **Durée** : `vignette.duree_s` du réglage, 0 = toujours (`duree_affichage`). La minuterie
 (`fenetres::vignette::Minuterie`, pure) est tenue par le cœur : elle démarre à l'entrée,
@@ -1146,6 +1162,8 @@ envoie `vignette_glisser` après un appui sur l'image et 4 px ; le cœur refuse 
 gestionnaire de WebView2). Bouton déjà relâché : `annule (bouton relache)`. Dépôt sur une
 fenêtre de BreezyShot (vignette, souffle, bandeau, par `fenetre_sous` à la position de la
 souris) : compte comme annulé (`vignette::depot`). Dépôt ailleurs : `GlisserReussi`, départ.
+Le bouton lu est le bouton principal : le droit quand les boutons sont inversés
+(`SM_SWAPBUTTON`, `systeme::glisser::bouton_principal`, pure).
 L'image qui suit la souris est celle du Shell (pas d'image propre en 0.3).
 
 **Pixels** : les pixels pleine taille de la capture restent en mémoire tant que la vignette
@@ -1153,6 +1171,13 @@ est là (recopier, réenregistrer), rendus à sa fermeture.
 
 **Fond** : uni, jeton `acrylic-solid` (pas de faux verre flouté en 0.3 : aucune copie du
 bureau n'est gardée).
+
+**Thème** : la page de la vignette et celle du souffle suivent le thème (`commun/theme.js`,
+attendu avant `vignette_pret` et `souffle_pret`, qui renvoient `interface:theme` à leur
+fenêtre). Animations : la page suit seulement `reduites` de la charge (le cœur a déjà tenu
+compte du système). Une page qui redit prête ne reçoit plus la charge d'une carte partie, et
+`Prete` ne lance le souffle qu'en état Souffle (`prete_acceptee`) : `vignette prete <id>
+ignoree`.
 
 **Journal** (jamais de chemin ni de contenu) : `vignette fenetre <hwnd>`, `souffle fenetre
 <hwnd>`, `vignette exclue des captures: …`, `souffle exclu des captures: …`, `vignette
@@ -1163,11 +1188,16 @@ depart … arrivee …`, `souffle saute <id>: animations reduites|fenetre absent
 termine [d'office] <id>`, `vignette entree <id>`, `chrono vignette …`, `vignette minuterie
 <id> pause survol|pause glisser|reprise`, `vignette action <id> <action> [ignoree]`,
 `vignette copie <id> faite|echec`, `vignette enregistrement <id> fait|deja fait|echec`,
-`vignette suppression <id> en attente|annulee|faite recent <ok|echec|aucun> fichier
-<ok|echec|aucun>`, `vignette glisser <id> debut|depose|annule|annule (bouton relache)|
+`vignette suppression <id> en attente|annulee|faite|tardive recent <ok|echec|aucun> fichier
+<ok|echec|aucun>`, `suppression non attendue (<n> fil(s) encore en cours)`, `vignette
+glisser <id> debut|depose|annule|annule (bouton relache)|
 indisponible|refuse (<cause>)`, `capture ignoree: glisser en cours`, `vignette fermee <id>
 delai|fermer|glisser|supprimer|capture|arret`, `vignette terminee <id>`, `vignette cachee
-d'office <id>`, `vignette impossible <id>: <cause>`, `vignette: apercu impossible`.
+d'office <id>`, `vignette impossible <id>: <cause>` (dont `page muette`), `vignette: apercu
+impossible`, `vignette zone <id> refusee (valeur non finie)`, `vignette prete <id> ignoree`,
+`vignette: charge non envoyee: <e>`, `souffle: charge non envoyee: <e>`, `vignette:
+surveillance impossible: <e>`, `fil de l'action impossible (<e>): action sur le fil
+principal`, `fil de suppression impossible (<e>): suppression sur le fil principal`.
 
 **Commandes** (fil principal ; un `id` qui n'est pas celui en cours est ignoré) :
 `vignette_pret`, `vignette_image`, `vignette_zone`, `vignette_entree`, `vignette_action`,
@@ -1187,7 +1217,8 @@ courant sans droits d'administrateur, lance l'app, puis dit « BreezyShot est pr
 
 Un seul exe, trois rôles, décidés par `arguments::lancement` (pur, testé) :
 
-- nom de fichier `breezyshot.exe` (casse ignorée, rien d'autre de toléré) : l'app ;
+- nom de fichier `breezyshot.exe`, ou `breezyshot` sans extension (le programme sous macOS
+  et Linux, où il n'y a pas d'installateur), casse ignorée, rien d'autre de toléré : l'app ;
 - tout autre nom (le fichier téléchargé) : l'installateur ;
 - `--desinstaller`, quel que soit le nom : la désinstallation, sans fenêtre ni question.
 

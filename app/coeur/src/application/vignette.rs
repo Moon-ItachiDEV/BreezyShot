@@ -8,7 +8,7 @@ use std::time::{Duration, Instant};
 
 use chrono::{DateTime, Local};
 
-use super::etats::Declencheur;
+use super::etats::{Declencheur, Etat};
 use super::zone::{message_annonce, DELAI_SORTIE};
 use crate::fenetres::vignette::{ActionVignette, Coin, Place};
 use crate::fenetres::{self, Genre, Message};
@@ -245,6 +245,93 @@ pub fn a_supprimer(capture: &CaptureMontree) -> Suppression {
     }
 }
 
+/// La carte se dit posée : le souffle part seulement si l'automate l'attend (état
+/// Souffle) et la carte n'est pas partie ; une page rechargée plus tard ne le rejoue pas.
+pub fn prete_acceptee(etat: Option<Etat>, partie: bool) -> bool {
+    etat == Some(Etat::Souffle) && !partie
+}
+
+/// Nombre de captures supprimées retenues pour un Enregistrer qui tourne encore.
+pub const RETENUES_MAX: usize = 8;
+
+/// La capture quitte l'Application (carte partie, nouvelle capture, arrêt) : retenue si
+/// son effacement est lancé alors qu'un Enregistrer tourne encore (son fichier arrivera
+/// après).
+pub fn a_retenir(capture: &CaptureMontree) -> bool {
+    capture.suppression == EtatSuppression::Lancee && capture.enregistrement.is_some()
+}
+
+/// Ajoute `id` aux captures retenues, les plus anciennes oubliées au-delà de `RETENUES_MAX`.
+pub fn retenir(retenues: &mut Vec<u64>, id: u64) {
+    if !retenues.contains(&id) {
+        retenues.push(id);
+    }
+    let trop = retenues.len().saturating_sub(RETENUES_MAX);
+    retenues.drain(..trop);
+}
+
+/// Le fichier d'un Enregistrer arrive : à effacer (seul, `sortie::a_effacer` refait le tri)
+/// si l'effacement de sa capture est déjà lancé, la carte encore là (`etat`) ou déjà
+/// partie mais retenue (`retenue`). Sinon gardé : la carte l'ajoute à sa suppression.
+pub fn enregistrement_tardif(
+    etat: Option<EtatSuppression>,
+    retenue: bool,
+    fichier: Option<&Path>,
+) -> Option<Suppression> {
+    let lancee = match etat {
+        Some(e) => e == EtatSuppression::Lancee,
+        None => retenue,
+    };
+    let fichier = fichier.filter(|_| lancee)?;
+    Some(Suppression {
+        recent: None,
+        enregistre: Some(fichier.to_path_buf()),
+        liens: Vec::new(),
+    })
+}
+
+/// Une suppression en attente au départ de la carte : la nouvelle capture ou l'arrêt la
+/// font tout de suite ; à l'arrêt sur le fil même (la boucle d'événements s'arrête).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SuppressionAuDepart {
+    Aucune,
+    DansUnFil,
+    SurCeFil,
+}
+
+pub fn suppression_au_depart(etat: EtatSuppression, arret: bool) -> SuppressionAuDepart {
+    match (etat, arret) {
+        (EtatSuppression::EnAttente, true) => SuppressionAuDepart::SurCeFil,
+        (EtatSuppression::EnAttente, false) => SuppressionAuDepart::DansUnFil,
+        _ => SuppressionAuDepart::Aucune,
+    }
+}
+
+/// Fin des secondes d'affichage (ou des 4 s d'Annuler) : la carte part, et sa suppression
+/// est lancée si elle attendait.
+pub fn au_delai(etat: EtatSuppression) -> (Declencheur, &'static str, bool) {
+    if etat == EtatSuppression::EnAttente {
+        (Declencheur::CaptureSupprimee, "supprimer", true)
+    } else {
+        (Declencheur::DelaiEcoule, "delai", false)
+    }
+}
+
+/// Le glisser part vraiment : possible pour la carte, une fenêtre pour le lancer, et le
+/// bouton principal encore enfoncé ; sinon la raison écrite au journal.
+pub fn glisser_pret(
+    possible: bool,
+    fenetre: Option<isize>,
+    bouton_enfonce: bool,
+) -> Result<isize, &'static str> {
+    match (possible, fenetre) {
+        (false, _) => Err("indisponible"),
+        (true, None) => Err("refuse (fenetre absente)"),
+        (true, Some(_)) if !bouton_enfonce => Err("annule (bouton relache)"),
+        (true, Some(f)) => Ok(f),
+    }
+}
+
 /// Un glisser peut partir : un fichier « Récents », pas de suppression, pas de glisser en
 /// cours. Rend le fichier de « Récents ».
 pub fn glisser_possible(capture: &CaptureMontree) -> Option<&Path> {
@@ -304,12 +391,14 @@ pub fn ligne_action_faite(id: u64, action: &str, reussi: bool) -> String {
     }
 }
 
-/// `vignette suppression <id> faite recent <ok|echec|aucun> fichier <ok|echec|aucun>`, et
-/// le message d'erreur du bandeau si un fichier n'a pas pu être effacé.
+/// `vignette suppression <id> <faite|tardive> recent <ok|echec|aucun> fichier
+/// <ok|echec|aucun>` (`tardive` : le fichier d'un Enregistrer arrivé après l'effacement),
+/// et le message d'erreur du bandeau si un fichier n'a pas pu être effacé.
 pub fn bilan_suppression(
     id: u64,
     s: &Suppression,
     resultats: &[(PathBuf, Result<(), String>)],
+    tardive: bool,
 ) -> (String, Option<Message>) {
     let etat = |chemin: &Option<PathBuf>| match chemin
         .as_ref()
@@ -320,7 +409,8 @@ pub fn bilan_suppression(
         None => "aucun",
     };
     let ligne = format!(
-        "vignette suppression {id} faite recent {} fichier {}",
+        "vignette suppression {id} {} recent {} fichier {}",
+        if tardive { "tardive" } else { "faite" },
         etat(&s.recent),
         etat(&s.enregistre)
     );
@@ -536,14 +626,118 @@ mod tests {
             enregistre: Some(PathBuf::from("/i/a.png")),
             liens: vec![],
         };
-        let (l, m) = bilan_suppression(3, &s, &[r("/l/Recents/x.png", true), r("/i/a.png", true)]);
+        let (l, m) = bilan_suppression(
+            3,
+            &s,
+            &[r("/l/Recents/x.png", true), r("/i/a.png", true)],
+            false,
+        );
         assert_eq!(l, "vignette suppression 3 faite recent ok fichier ok");
         assert!(m.is_none());
-        let (l, m) = bilan_suppression(3, &s, &[r("/l/Recents/x.png", true), r("/i/a.png", false)]);
+        let (l, m) = bilan_suppression(
+            3,
+            &s,
+            &[r("/l/Recents/x.png", true), r("/i/a.png", false)],
+            false,
+        );
         assert_eq!(l, "vignette suppression 3 faite recent ok fichier echec");
         assert_eq!(m.map(|m| m.titre), Some("Impossible de supprimer".into()));
-        let (l, _) = bilan_suppression(3, &Suppression::default(), &[]);
+        let (l, _) = bilan_suppression(3, &Suppression::default(), &[], false);
         assert_eq!(l, "vignette suppression 3 faite recent aucun fichier aucun");
+        let tard = Suppression {
+            enregistre: Some(PathBuf::from("/i/a.png")),
+            ..Suppression::default()
+        };
+        let (l, _) = bilan_suppression(3, &tard, &[r("/i/a.png", true)], true);
+        assert_eq!(l, "vignette suppression 3 tardive recent aucun fichier ok");
+    }
+
+    #[test]
+    fn enregistrer_tardif_contre_supprimer() {
+        use EtatSuppression::*;
+        let f = Path::new("/i/a.png");
+        // Retenue au départ seulement si l'effacement est lancé et Enregistrer tourne.
+        let mut c = capture();
+        c.suppression = Lancee;
+        assert!(!a_retenir(&c), "pas d'Enregistrer en cours");
+        c.enregistrement = Some(Instant::now());
+        assert!(a_retenir(&c));
+        c.suppression = EnAttente;
+        assert!(!a_retenir(&c), "en attente : la suppression le prendra");
+        // Le fichier qui arrive.
+        let seul = enregistrement_tardif(Some(Lancee), false, Some(f)).expect("effacé");
+        assert_eq!(seul.enregistre.as_deref(), Some(f));
+        assert_eq!((seul.recent, seul.liens.len()), (None, 0));
+        assert!(
+            enregistrement_tardif(None, true, Some(f)).is_some(),
+            "carte partie, retenue"
+        );
+        assert!(
+            enregistrement_tardif(None, false, Some(f)).is_none(),
+            "jamais supprimée"
+        );
+        assert!(enregistrement_tardif(Some(EnAttente), true, Some(f)).is_none());
+        assert!(enregistrement_tardif(Some(Aucune), false, Some(f)).is_none());
+        assert!(
+            enregistrement_tardif(Some(Lancee), false, None).is_none(),
+            "échec : rien"
+        );
+        // Mêmes gardes que Supprimer : un chemin relatif ou pas PNG n'est pas effacé.
+        let relatif = enregistrement_tardif(None, true, Some(Path::new("a.png"))).unwrap();
+        assert!(sortie::a_effacer(&relatif, Path::new("/l/R"), Path::new("/l/G")).is_empty());
+        // Retenues bornées, sans doublon.
+        let mut r = Vec::new();
+        for i in 0..(RETENUES_MAX as u64 + 3) {
+            retenir(&mut r, i);
+        }
+        retenir(&mut r, RETENUES_MAX as u64 + 2);
+        assert_eq!(r.len(), RETENUES_MAX);
+        assert_eq!(r[0], 3);
+    }
+
+    #[test]
+    fn depart_delai_glisser_et_page_prete() {
+        use EtatSuppression::*;
+        assert_eq!(
+            suppression_au_depart(EnAttente, true),
+            SuppressionAuDepart::SurCeFil
+        );
+        assert_eq!(
+            suppression_au_depart(EnAttente, false),
+            SuppressionAuDepart::DansUnFil
+        );
+        assert_eq!(
+            suppression_au_depart(Aucune, true),
+            SuppressionAuDepart::Aucune
+        );
+        assert_eq!(
+            suppression_au_depart(Lancee, false),
+            SuppressionAuDepart::Aucune
+        );
+        assert_eq!(
+            au_delai(EnAttente),
+            (Declencheur::CaptureSupprimee, "supprimer", true)
+        );
+        assert_eq!(au_delai(Aucune), (Declencheur::DelaiEcoule, "delai", false));
+        assert_eq!(au_delai(Lancee), (Declencheur::DelaiEcoule, "delai", false));
+        assert_eq!(glisser_pret(true, Some(5), true), Ok(5));
+        assert_eq!(glisser_pret(false, Some(5), true), Err("indisponible"));
+        assert_eq!(
+            glisser_pret(true, None, true),
+            Err("refuse (fenetre absente)")
+        );
+        assert_eq!(
+            glisser_pret(true, Some(5), false),
+            Err("annule (bouton relache)")
+        );
+        assert!(prete_acceptee(Some(Etat::Souffle), false));
+        assert!(!prete_acceptee(Some(Etat::Souffle), true), "carte partie");
+        assert!(
+            !prete_acceptee(Some(Etat::Vignette), false),
+            "souffle déjà joué"
+        );
+        assert!(!prete_acceptee(Some(Etat::Repos), false), "après la croix");
+        assert!(!prete_acceptee(None, false));
     }
 
     #[test]

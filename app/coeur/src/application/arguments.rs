@@ -2,7 +2,8 @@
 //!
 //! `breezyshot.exe`, `breezyshot.exe --quitter`, `breezyshot.exe --capturer <mode>`,
 //! `breezyshot.exe --desinstaller`. Sans option, l'exe est l'app s'il s'appelle
-//! `breezyshot.exe` (casse ignorée), l'installateur sinon (le fichier téléchargé).
+//! `breezyshot.exe` ou `breezyshot` (casse ignorée), l'installateur sinon (le fichier
+//! téléchargé).
 
 /// Ce que la ligne de commande demande.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -27,8 +28,11 @@ pub enum Lancement {
     Desinstallation,
 }
 
-/// Le nom de l'exe installé : le seul qui fait de l'exe l'app sans option.
+/// Le nom de l'exe installé (Windows) : il fait de l'exe l'app sans option.
 pub const NOM_DE_L_APP: &str = "breezyshot.exe";
+/// Le même sans extension : le nom du programme sous macOS et Linux, où il n'y a pas
+/// d'installateur (sans cela, le programme de développement se prendrait pour lui).
+pub const NOM_DE_L_APP_SANS_EXTENSION: &str = "breezyshot";
 
 /// Lecture des arguments, sans le nom du programme. Rend la commande et les arguments
 /// inconnus (ignorés, à écrire au journal). `--desinstaller` l'emporte sur tout, puis
@@ -72,9 +76,10 @@ where
     (commande, inconnus)
 }
 
-/// Vrai si le nom de fichier est celui de l'app (casse ignorée, rien d'autre de toléré).
+/// Vrai si le nom de fichier est celui de l'app, avec ou sans `.exe` (casse ignorée, rien
+/// d'autre de toléré).
 pub fn est_nom_de_l_app(nom: &str) -> bool {
-    nom.eq_ignore_ascii_case(NOM_DE_L_APP)
+    nom.eq_ignore_ascii_case(NOM_DE_L_APP) || nom.eq_ignore_ascii_case(NOM_DE_L_APP_SANS_EXTENSION)
 }
 
 /// Ce que l'exe est, d'après le nom de son fichier (`None` : inconnu, on reste l'app) et
@@ -150,14 +155,21 @@ mod tests {
 
     #[test]
     fn nom_de_l_app() {
-        for oui in ["breezyshot.exe", "BreezyShot.exe", "BREEZYSHOT.EXE"] {
+        for oui in [
+            "breezyshot.exe",
+            "BreezyShot.exe",
+            "BREEZYSHOT.EXE",
+            "breezyshot",
+            "BreezyShot",
+        ] {
             assert!(est_nom_de_l_app(oui), "{oui}");
         }
         for non in [
             "BreezyShot-0.3.0-essai.exe",
             "BreezyShot-0.3.0-essai (1).exe",
             "breezyshot (1).exe",
-            "breezyshot",
+            "breezyshot (1)",
+            "breezyshot.",
             " breezyshot.exe",
             "breezyshot.exe.nouveau",
             "breezyshot.éxe",

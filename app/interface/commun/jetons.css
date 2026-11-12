@@ -58,6 +58,7 @@
   --duree-vignette-bouton: 160ms;
   --duree-vignette-decalage: 60ms;
   --duree-vignette-grise: 220ms;
+  --duree-vignette-coche: 120ms;
   --duree-envol-fenetre: 460ms;
   --duree-installateur-fondu: 200ms;
   --duree-installateur-montee: 380ms;
@@ -115,6 +116,19 @@
   --vignette-vent-decalage: 125%;
   --vignette-vent-angle: 6deg;
   --vignette-vent-flou: 6px;
+  --vignette-principales-bas: 11px;
+  --vignette-principales-ecart: 6px;
+  --vignette-coin-ecart: 6px;
+  --vignette-pilule-ecart: 7px;
+  --vignette-revele-decalage: 4px;
+  --vignette-croix-picto: 10px;
+  --vignette-picto-anime: 16px;
+  --vignette-libelle-hauteur: 18px;
+  --vignette-onde: 8px;
+  --vignette-grise-flou: 2px;
+  --vignette-annuler-hauteur: 32px;
+  --vignette-annuler-texte-taille: 13px;
+  --vignette-rayon-petit: 6px;
   --installateur-carte-largeur: 720px;
   --installateur-carte-hauteur: 480px;
   --installateur-marge: 40px;

@@ -6,6 +6,9 @@
 # Avec -Cadre (essai 06) : une vraie fenêtre à cadre (FormBorderStyle Sizable, titre,
 # toujours au-dessus), posée en ($X, $Y) par son coin extérieur ; les carrés remplissent
 # sa zone cliente de $Cote × $Cote pixels.
+# Avec -CacherConsole (essai 07) : la console de l'aide est cachée une fois la fenêtre
+# montrée (pas de -WindowStyle Hidden au lancement : Windows l'appliquerait au premier
+# ShowWindow du processus, c'est-à-dire au témoin lui-même).
 #   pwsh -NoProfile -File essais/temoin.ps1 -X 400 -Y 40 -Cote 200 -Couleurs '220,40,40;...' -Fichier t.txt
 
 param(
@@ -14,7 +17,8 @@ param(
     [Parameter(Mandatory)][int]$Cote,
     [Parameter(Mandatory)][string]$Couleurs,
     [Parameter(Mandatory)][string]$Fichier,
-    [switch]$Cadre
+    [switch]$Cadre,
+    [switch]$CacherConsole
 )
 
 Set-StrictMode -Version Latest
@@ -23,6 +27,10 @@ $ErrorActionPreference = 'Stop'
 Add-Type -Namespace BreezyShotEssai -Name Temoin -MemberDefinition @'
 [DllImport("user32.dll", SetLastError = true)]
 public static extern bool SetProcessDpiAwarenessContext(IntPtr contexte);
+[DllImport("kernel32.dll")]
+public static extern IntPtr GetConsoleWindow();
+[DllImport("user32.dll")]
+public static extern bool ShowWindow(IntPtr h, int commande);
 '@
 # Pixels réels, avant toute fenêtre (comme l'essai et l'app).
 try { [void][BreezyShotEssai.Temoin]::SetProcessDpiAwarenessContext([IntPtr]::new(-4)) } catch { }
@@ -69,5 +77,9 @@ $fenetre.Add_Shown({
         $temporaire = "$Fichier.tmp"
         Set-Content -LiteralPath $temporaire -Value ([long]$fenetre.Handle) -Encoding utf8
         Move-Item -LiteralPath $temporaire -Destination $Fichier -Force
+        if ($CacherConsole) {
+            $console = [BreezyShotEssai.Temoin]::GetConsoleWindow()
+            if ($console -ne [IntPtr]::Zero) { [void][BreezyShotEssai.Temoin]::ShowWindow($console, 0) }
+        }
     })
 [System.Windows.Forms.Application]::Run($fenetre)

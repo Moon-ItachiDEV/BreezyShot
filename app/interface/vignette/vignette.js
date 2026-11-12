@@ -36,7 +36,6 @@ const annulation = carte.querySelector(".annulation");
 const barre = document.getElementById("barre");
 const remplissage = barre.querySelector("i");
 const infobulle = document.getElementById("infobulle");
-const systemeReduit = matchMedia("(prefers-reduced-motion: reduce)");
 
 const COINS = ["bas_gauche", "bas_droite", "haut_gauche", "haut_droite"];
 const PLACES = ["principale", "secondaire", "fermer", "annulation"];
@@ -203,7 +202,8 @@ function valider(c) {
 // La carte en cours : { id, coin, actions, reduites, glisser, url, zone, animation,
 // barre, supprimee, partie, entree }
 let courant = null;
-const reduites = () => courant?.reduites || systemeReduit.matches;
+// Le cœur décide (réglage « Animations » et système) ; la page suit sa valeur seule.
+const reduites = () => courant?.reduites === true;
 const aDroite = () => courant?.coin.endsWith("droite");
 const enHaut = () => courant?.coin.startsWith("haut");
 
