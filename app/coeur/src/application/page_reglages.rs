@@ -9,6 +9,7 @@ use std::path::{Path, PathBuf};
 use chrono::{DateTime, Local};
 use serde::{Deserialize, Serialize};
 
+use super::decompte::RETARDATEURS_PROPOSES;
 use crate::fenetres::theme::ThemePage;
 use crate::raccourcis::{self, ErreurNotation, Raison};
 use crate::reglages::{self, Coin, ErreurEcriture, Raccourcis, Reglages, Theme};
@@ -25,9 +26,23 @@ pub const ALERTE_NON_ENREGISTRES: &str = "Réglages non enregistrés";
 pub const AUCUN_RACCOURCI: &str = "Aucun raccourci";
 
 /// Les lignes fixes de la page, dans l'ordre (les raccourcis viennent de la vue). Seules
-/// celles qui ont un effet dans cette version sont montrées (`lignes_montrees`).
-pub fn lignes_montrees(vignette_construite: bool) -> Vec<&'static str> {
-    let mut l = vec!["copier"];
+/// celles qui ont un effet dans cette version sont montrées (`lignes_montrees`) : la
+/// rubrique Capture demande le Gel (`capture_disponible`, sinon aucune photo et la rubrique
+/// se cache seule), la loupe demande en plus qu'elle existe (`loupe_disponible`).
+pub fn lignes_montrees(
+    vignette_construite: bool,
+    capture_disponible: bool,
+    loupe_disponible: bool,
+) -> Vec<&'static str> {
+    let mut l = Vec::new();
+    if capture_disponible {
+        l.push("retardateur");
+        if loupe_disponible {
+            l.push("loupe");
+        }
+        l.push("pointeur");
+    }
+    l.push("copier");
     if vignette_construite {
         l.extend(["vignette", "vignette_duree", "vignette_coin"]);
     }
@@ -54,6 +69,9 @@ pub enum Changement {
     ModeleNom(String),
     Theme(String),
     Demarrage(bool),
+    Retardateur(u32),
+    Loupe(bool),
+    Pointeur(bool),
 }
 
 impl Changement {
@@ -68,6 +86,9 @@ impl Changement {
             Changement::ModeleNom(_) => "modele_nom",
             Changement::Theme(_) => "theme",
             Changement::Demarrage(_) => "demarrage",
+            Changement::Retardateur(_) => "retardateur",
+            Changement::Loupe(_) => "loupe",
+            Changement::Pointeur(_) => "pointeur",
         }
     }
 }
@@ -108,8 +129,10 @@ pub fn ligne_changement(c: &Changement) -> String {
         Changement::Copier(b)
         | Changement::Enregistrer(b)
         | Changement::VignetteAfficher(b)
-        | Changement::Demarrage(b) => oui_non(*b).to_string(),
-        Changement::VignetteDuree(n) => n.to_string(),
+        | Changement::Demarrage(b)
+        | Changement::Loupe(b)
+        | Changement::Pointeur(b) => oui_non(*b).to_string(),
+        Changement::VignetteDuree(n) | Changement::Retardateur(n) => n.to_string(),
         Changement::VignetteCoin(t) | Changement::Theme(t) => t.clone(),
         Changement::ModeleNom(_) => return "reglage change: modele_nom".into(),
     };
@@ -179,6 +202,11 @@ pub fn appliquer(r: &Reglages, c: &Changement) -> Result<Reglages, Refus> {
         Changement::ModeleNom(t) => n.modele_nom = t.clone(),
         Changement::Theme(t) => n.theme = Theme::depuis_texte(t).ok_or_else(invalide)?,
         Changement::Demarrage(b) => n.demarrer_avec_systeme = *b,
+        Changement::Retardateur(s) if *s > reglages::RETARDATEUR_MAX_S => return Err(invalide()),
+        Changement::Retardateur(s) => n.capture.retardateur_s = *s,
+        // La loupe reste dans `selection` (compatibilité du fichier, version 3).
+        Changement::Loupe(b) => n.selection.loupe = *b,
+        Changement::Pointeur(b) => n.capture.pointeur = *b,
     }
     reglages::valider(&n).map_err(|e| refus_validation(c.ligne(), &e, &n))?;
     Ok(n)
@@ -354,6 +382,15 @@ pub struct VueVignette {
     pub coin: &'static str,
 }
 
+/// La rubrique Capture vue par la page.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct VueCapture {
+    /// Une valeur du fichier hors de `retardateurs` (7) s'affiche sans segment coché.
+    pub retardateur_s: u32,
+    pub loupe: bool,
+    pub pointeur: bool,
+}
+
 /// Une ligne de la rubrique Raccourcis.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct VueRaccourci {
@@ -372,6 +409,9 @@ pub struct VueRaccourci {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct VueReglages {
     pub lignes: Vec<&'static str>,
+    pub capture: VueCapture,
+    /// Les segments du retardateur, dans l'ordre de la page (`0` = aucun).
+    pub retardateurs: [u32; 4],
     pub copier: bool,
     pub enregistrer: bool,
     pub vignette: VueVignette,
@@ -393,6 +433,10 @@ pub struct VueReglages {
 /// Ce que la vue prend ailleurs que dans les réglages.
 pub struct Contexte<'a> {
     pub vignette_construite: bool,
+    /// Le Gel existe sur ce système (`gel::disponible`) : la rubrique Capture a un effet.
+    pub capture_disponible: bool,
+    /// La loupe existe sur ce système (`gel::loupe_disponible`).
+    pub loupe_disponible: bool,
     pub actions: &'a [&'a str],
     pub bilan: &'a raccourcis::Bilan,
     pub defaut: &'a Raccourcis,
@@ -419,7 +463,11 @@ pub fn nom_demarrage(e: EtatDemarrage) -> &'static str {
 
 /// La vue complète. Fonction pure.
 pub fn vue(r: &Reglages, c: &Contexte<'_>) -> VueReglages {
-    let mut lignes = lignes_montrees(c.vignette_construite);
+    let mut lignes = lignes_montrees(
+        c.vignette_construite,
+        c.capture_disponible,
+        c.loupe_disponible,
+    );
     if c.demarrage == EtatDemarrage::Indisponible {
         lignes.retain(|l| *l != "demarrage");
     }
@@ -447,6 +495,12 @@ pub fn vue(r: &Reglages, c: &Contexte<'_>) -> VueReglages {
         .collect();
     VueReglages {
         lignes,
+        capture: VueCapture {
+            retardateur_s: r.capture.retardateur_s,
+            loupe: r.selection.loupe,
+            pointeur: r.capture.pointeur,
+        },
+        retardateurs: RETARDATEURS_PROPOSES,
         copier: r.copier_apres_capture,
         enregistrer: r.enregistrer_apres_capture,
         vignette: VueVignette {
@@ -492,7 +546,7 @@ mod tests {
 
     #[test]
     fn lignes_selon_la_vignette() {
-        let sans = lignes_montrees(false);
+        let sans = lignes_montrees(false, false, false);
         assert_eq!(
             sans,
             [
@@ -504,7 +558,7 @@ mod tests {
                 "version"
             ]
         );
-        let avec = lignes_montrees(true);
+        let avec = lignes_montrees(true, false, false);
         assert_eq!(
             avec,
             [
@@ -520,16 +574,28 @@ mod tests {
                 "version"
             ]
         );
-        // Rien de ce qui n'est pas construit en 0.3.
-        for absent in [
-            "loupe",
-            "retardateur",
-            "pointeur",
-            "barre",
-            "format",
-            "mise_a_jour",
-        ] {
+        // Sans Gel, la rubrique Capture n'a aucun effet : aucune de ses lignes.
+        for absent in ["loupe", "retardateur", "pointeur"] {
             assert!(!avec.contains(&absent));
+        }
+    }
+
+    #[test]
+    fn lignes_de_la_capture() {
+        // En tête, dans l'ordre de la page ; la loupe seulement si elle existe.
+        let tout = lignes_montrees(true, true, true);
+        assert_eq!(tout[..4], ["retardateur", "loupe", "pointeur", "copier"]);
+        assert_eq!(tout.len(), 13);
+        let sans_loupe = lignes_montrees(true, true, false);
+        assert_eq!(sans_loupe[..3], ["retardateur", "pointeur", "copier"]);
+        // La loupe ne vient jamais sans le Gel.
+        assert_eq!(
+            lignes_montrees(true, false, true),
+            lignes_montrees(true, false, false)
+        );
+        // Rien de ce qui n'a pas d'effet en 0.4.
+        for absent in ["barre", "format", "mise_a_jour"] {
+            assert!(!tout.contains(&absent));
         }
     }
 
@@ -539,8 +605,17 @@ mod tests {
         assert_eq!(c, Changement::Copier(false));
         let c: Changement = serde_json::from_str(r#"{"cle":"vignette_duree","valeur":0}"#).unwrap();
         assert_eq!(c, Changement::VignetteDuree(0));
+        let c: Changement = serde_json::from_str(r#"{"cle":"retardateur","valeur":5}"#).unwrap();
+        assert_eq!(c, Changement::Retardateur(5));
+        let c: Changement = serde_json::from_str(r#"{"cle":"loupe","valeur":true}"#).unwrap();
+        assert_eq!(c, Changement::Loupe(true));
+        let c: Changement = serde_json::from_str(r#"{"cle":"pointeur","valeur":true}"#).unwrap();
+        assert_eq!(c, Changement::Pointeur(true));
         for faux in [
-            r#"{"cle":"loupe","valeur":true}"#,
+            r#"{"cle":"barre","valeur":true}"#,
+            r#"{"cle":"retardateur","valeur":-1}"#,
+            r#"{"cle":"retardateur","valeur":"3"}"#,
+            r#"{"cle":"pointeur","valeur":1}"#,
             r#"{"cle":"copier","valeur":"oui"}"#,
             r#"{"cle":"dossier_enregistrement","valeur":"C:\\x"}"#,
             r#"{"cle":"vignette_duree","valeur":-1}"#,
@@ -593,6 +668,47 @@ mod tests {
     }
 
     #[test]
+    fn appliquer_la_capture() {
+        let r = defaut();
+        for s in [0, 3, 5, 7, 10] {
+            let n = appliquer(&r, &Changement::Retardateur(s)).unwrap();
+            assert_eq!(n.capture.retardateur_s, s);
+        }
+        for s in [11, 60, u32::MAX] {
+            let e = appliquer(&r, &Changement::Retardateur(s)).unwrap_err();
+            assert_eq!(
+                (e.ligne.as_str(), e.texte.as_str(), e.code),
+                ("retardateur", "", "invalide")
+            );
+        }
+        let n = appliquer(&r, &Changement::Loupe(true)).unwrap();
+        assert!(n.selection.loupe);
+        let mut attendu = r.clone();
+        attendu.selection.loupe = true;
+        assert_eq!(n, attendu, "rien d'autre ne bouge");
+        // Un retardateur du fichier hors de la liste (7) survit aux autres changements.
+        let mut sept = r.clone();
+        sept.capture.retardateur_s = 7;
+        for c in [
+            Changement::Loupe(true),
+            Changement::Pointeur(true),
+            Changement::Copier(false),
+        ] {
+            assert_eq!(
+                appliquer(&sept, &c).unwrap().capture.retardateur_s,
+                7,
+                "{c:?}"
+            );
+        }
+        let n = appliquer(&r, &Changement::Pointeur(true)).unwrap();
+        assert!(n.capture.pointeur);
+        // Rien d'autre ne bouge.
+        let mut attendu = r.clone();
+        attendu.capture.pointeur = true;
+        assert_eq!(n, attendu);
+    }
+
+    #[test]
     fn relecture_du_fichier() {
         let derniere = defaut();
         // Relu sain, égal : rien.
@@ -637,6 +753,18 @@ mod tests {
         assert_eq!(
             ligne_changement(&Changement::Demarrage(true)),
             "reglage change: demarrage oui"
+        );
+        assert_eq!(
+            ligne_changement(&Changement::Retardateur(5)),
+            "reglage change: retardateur 5"
+        );
+        assert_eq!(
+            ligne_changement(&Changement::Loupe(true)),
+            "reglage change: loupe oui"
+        );
+        assert_eq!(
+            ligne_changement(&Changement::Pointeur(false)),
+            "reglage change: pointeur non"
         );
     }
 
@@ -756,6 +884,8 @@ mod tests {
         r2.raccourcis.plein_ecran = vec!["Ctrl+Maj+7".into()];
         let c = Contexte {
             vignette_construite: false,
+            capture_disponible: true,
+            loupe_disponible: false,
             actions: &["zone", "plein_ecran", "fenetre"],
             bilan: &bilan,
             defaut: &defaut_r,
@@ -788,6 +918,31 @@ mod tests {
             ..c
         };
         assert!(!vue(&r, &ailleurs).lignes.contains(&"demarrage"));
+        // Rubrique Capture : valeurs du fichier, loupe lue dans `selection`.
+        assert_eq!(v.retardateurs, [0, 3, 5, 10]);
+        assert_eq!(v.lignes[..2], ["retardateur", "pointeur"]);
+        let mut r3 = r.clone();
+        r3.capture.retardateur_s = 7;
+        r3.capture.pointeur = true;
+        r3.selection.loupe = true;
+        let v3 = vue(&r3, &ailleurs);
+        assert_eq!(
+            v3.capture,
+            VueCapture {
+                retardateur_s: 7,
+                loupe: true,
+                pointeur: true
+            }
+        );
+        let sans_gel = Contexte {
+            capture_disponible: false,
+            loupe_disponible: true,
+            ..ailleurs
+        };
+        let l = vue(&r, &sans_gel).lignes;
+        assert!(!l
+            .iter()
+            .any(|x| ["retardateur", "loupe", "pointeur"].contains(x)));
     }
 
     #[test]
@@ -836,6 +991,11 @@ mod essai_de_page {
         let defaut = Raccourcis::par_defaut(Plateforme::Windows);
         let c = Contexte {
             vignette_construite: crate::application::VIGNETTE_CONSTRUITE,
+            // La vue de Windows, loupe comprise (chantier C) : l'essai de page retire
+            // lui-même « loupe » pour le cas sans loupe. Jamais `gel::disponible()` ici, qui
+            // changerait le fichier selon le système de l'essai.
+            capture_disponible: true,
+            loupe_disponible: true,
             actions: &crate::application::ACTIONS_CONSTRUITES,
             bilan: &bilan,
             defaut: &defaut,

@@ -76,17 +76,22 @@ function texteDuree(s) {
   return s === 0 ? "Toujours" : `${s} s`;
 }
 
-function poserDurees(durees) {
-  const groupe = $('[data-controle="vignette_duree"]');
-  const voulues = durees.map(String).join(",");
-  if (groupe.dataset.durees === voulues) return;
-  groupe.dataset.durees = voulues;
+function texteRetardateur(s) {
+  return s === 0 ? "Aucun" : `${s} s`;
+}
+
+// Segments rendus depuis une liste de secondes de la vue (durées, retardateurs).
+function poserSegments(nom, valeurs, texte) {
+  const groupe = $(`[data-controle="${nom}"]`);
+  const voulues = valeurs.map(String).join(",");
+  if (groupe.dataset.valeurs === voulues) return;
+  groupe.dataset.valeurs = voulues;
   groupe.replaceChildren(
-    ...durees.map((d) => {
+    ...valeurs.map((d) => {
       const b = document.createElement("button");
       b.setAttribute("role", "radio");
       b.dataset.valeur = String(d);
-      b.textContent = texteDuree(d);
+      b.textContent = texte(d);
       return b;
     }),
   );
@@ -144,11 +149,21 @@ function afficher(v) {
     const vide = s.dataset.rubrique !== "raccourcis" && !$$("[data-reglage]", s).some((l) => !l.hidden);
     $(`[role="tab"][data-rubrique="${s.dataset.rubrique}"]`).hidden = vide;
   }
+  // L'onglet ouvert caché (Capture sans Gel) : le premier onglet visible s'ouvre.
+  const ouvert = $('[role="tab"][aria-selected="true"]');
+  if (!ouvert || ouvert.hidden) {
+    const premier = $$('[role="tab"]').find((o) => !o.hidden);
+    if (premier) montrerRubrique(premier.dataset.rubrique);
+  }
+  poserInterrupteur("loupe", v.capture.loupe);
+  poserInterrupteur("pointeur", v.capture.pointeur);
+  poserSegments("retardateur", v.retardateurs, texteRetardateur);
+  poserChoix("retardateur", v.capture.retardateur_s);
   poserInterrupteur("copier", v.copier);
   poserInterrupteur("enregistrer", v.enregistrer);
   poserInterrupteur("vignette", v.vignette.afficher);
   poserInterrupteur("demarrage", v.demarrage === "oui");
-  poserDurees(v.durees);
+  poserSegments("vignette_duree", v.durees, texteDuree);
   poserChoix("vignette_duree", v.vignette.duree_s);
   poserChoix("vignette_coin", v.vignette.coin);
   poserChoix("theme", v.theme);
@@ -187,9 +202,15 @@ for (const b of $$('[role="switch"]')) {
 }
 
 // Groupes de choix : clic et flèches.
-const CLES_CHOIX = { vignette_duree: "vignette_duree", vignette_coin: "vignette_coin", theme: "theme" };
+const CLES_CHOIX = {
+  retardateur: "retardateur",
+  vignette_duree: "vignette_duree",
+  vignette_coin: "vignette_coin",
+  theme: "theme",
+};
+const CHOIX_NOMBRES = ["retardateur", "vignette_duree"];
 function valeurChoix(nom, b) {
-  return nom === "vignette_duree" ? Number(b.dataset.valeur) : b.dataset.valeur;
+  return CHOIX_NOMBRES.includes(nom) ? Number(b.dataset.valeur) : b.dataset.valeur;
 }
 for (const groupe of $$('[role="radiogroup"]')) {
   const nom = groupe.dataset.controle;
@@ -416,8 +437,10 @@ if (tauri?.event?.listen) {
   });
 } else {
   afficher({
-    lignes: ["copier", "vignette", "vignette_duree", "vignette_coin", "dossier", "enregistrer", "modele_nom",
-      "theme", "demarrage", "version"],
+    lignes: ["retardateur", "loupe", "pointeur", "copier", "vignette", "vignette_duree",
+      "vignette_coin", "dossier", "enregistrer", "modele_nom", "theme", "demarrage", "version"],
+    capture: { retardateur_s: 0, loupe: false, pointeur: false },
+    retardateurs: [0, 3, 5, 10],
     copier: true,
     enregistrer: false,
     vignette: { afficher: true, duree_s: 6, coin: "bas_gauche" },
@@ -431,6 +454,13 @@ if (tauri?.event?.listen) {
       { action: "zone", libelle: "Zone", touches: ["Ctrl", "Maj", "1"], modifie: false, refus: null },
       { action: "plein_ecran", libelle: "Plein écran", touches: ["Ctrl", "Maj", "2"], modifie: false, refus: null },
       { action: "fenetre", libelle: "Fenêtre", touches: ["Ctrl", "Maj", "3"], modifie: false, refus: null },
+      {
+        action: "derniere_zone",
+        libelle: "Refaire la dernière zone",
+        touches: ["Ctrl", "Maj", "4"],
+        modifie: false,
+        refus: null,
+      },
     ],
     version: "0.0.0",
     alerte: null,

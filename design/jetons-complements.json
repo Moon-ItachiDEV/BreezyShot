@@ -253,6 +253,18 @@
     "value": "drop-shadow(0 2px 6px rgba(240,80,154,0.25))",
     "usage": "Ombre du logo en haut de Général.",
     "origine": "design/reglages/premium.html, direction B « Épuré » (validée), [data-dir=b] .alogo."
+   },
+   {
+    "name": "decompte-fond",
+    "value": "color-mix(in srgb, var(--acrylic-solid) 70%, transparent)",
+    "usage": "Fond du disque du décompte.",
+    "origine": "design/capture/index.html (prototype du décompte), .disc background."
+   },
+   {
+    "name": "decompte-croix-fond",
+    "value": "color-mix(in srgb, var(--acrylic-solid) 80%, transparent)",
+    "usage": "Fond de la croix « Annuler » du décompte.",
+    "origine": "design/capture/index.html (prototype du décompte), .cdx background."
    }
   ]
  },
@@ -473,6 +485,12 @@
     "value": "1s",
     "usage": "Fenêtre des Réglages.",
     "origine": "design/reglages/premium.html, direction B « Épuré » (validée), .kc.rec .ph::after."
+   },
+   {
+    "name": "duree-decompte-chiffre",
+    "value": "300ms",
+    "usage": "Arrivée de chaque chiffre du décompte.",
+    "origine": "design/capture/index.html (prototype du décompte), .num.tick (numIn 300ms)."
    }
   ]
  },
@@ -1372,6 +1390,72 @@
     "value": "3px",
     "usage": "Fenêtre des Réglages : écart du curseur de saisie d'un raccourci.",
     "origine": "design/reglages/premium.html, direction B « Épuré » (validée), .kc.rec .ph::after margin-left (base commune, gardée par B)."
+   },
+   {
+    "name": "decompte-ecart",
+    "value": "10px",
+    "usage": "Écart entre le disque du décompte et sa croix.",
+    "origine": "design/capture/index.html (prototype du décompte), .cd gap."
+   },
+   {
+    "name": "decompte-anneau-trait",
+    "value": "2px",
+    "usage": "Épaisseur de l'anneau du décompte (piste et progression).",
+    "origine": "design/capture/index.html (prototype du décompte), .disc circle stroke-width."
+   },
+   {
+    "name": "decompte-chiffre-part",
+    "value": "0.5",
+    "usage": "Taille du chiffre du décompte, en part du diamètre du disque.",
+    "origine": "design/capture/index.html (prototype du décompte), .num font-size calc(var(--z)*.5)."
+   },
+   {
+    "name": "decompte-chiffre-graisse",
+    "value": "200",
+    "usage": "Graisse du chiffre du décompte.",
+    "origine": "design/capture/index.html (prototype du décompte), .num font 200."
+   },
+   {
+    "name": "decompte-chiffre-approche",
+    "value": "-0.02em",
+    "usage": "Approche du chiffre du décompte.",
+    "origine": "design/capture/index.html (prototype du décompte), .num letter-spacing."
+   },
+   {
+    "name": "decompte-chiffre-echelle",
+    "value": "1.14",
+    "usage": "Échelle de départ de chaque chiffre du décompte.",
+    "origine": "design/capture/index.html (prototype du décompte), @keyframes numIn scale(1.14)."
+   },
+   {
+    "name": "decompte-entree-echelle",
+    "value": "0.92",
+    "usage": "Échelle de départ de l'entrée du décompte.",
+    "origine": "design/capture/index.html (prototype du décompte), @keyframes cdIn scale(.92)."
+   },
+   {
+    "name": "decompte-croix",
+    "value": "26px",
+    "usage": "Côté de la croix ronde « Annuler » du décompte.",
+    "origine": "design/capture/index.html (prototype du décompte), .cdx width/height."
+   },
+   {
+    "name": "decompte-croix-picto",
+    "value": "12px",
+    "usage": "Côté du pictogramme de la croix du décompte.",
+    "origine": "design/capture/index.html (prototype du décompte), .cdx .ico."
+   },
+   {
+    "name": "decompte-croix-trait",
+    "value": "1.4",
+    "usage": "Trait du pictogramme de la croix (unités du dessin 20 × 20).",
+    "origine": "design/capture/index.html (prototype du décompte), .ico stroke-width."
+   },
+   {
+    "name": "decompte-croix-rotation",
+    "value": "90deg",
+    "usage": "Rotation de la croix du décompte au survol.",
+    "origine": "design/capture/index.html (prototype du décompte), .cdx:hover rotate(90deg)."
    }
   ]
  },

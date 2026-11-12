@@ -10,8 +10,13 @@
 #     s'ouvre pas, la vérification ÉCHOUE (jamais sautée). Fenêtre ordinaire : visible,
 #     dans la barre des tâches (pas WS_EX_TOOLWINDOW).
 # (3) Rouvrir : une seule fenêtre, ramenée devant.
+# (3b) Rubrique Capture ouverte au départ (sans aucun clic d'onglet) : retardateur 3 s
+#     écrit dans le fichier puis remis à Aucun ; Inclure le pointeur allumé puis éteint ;
+#     Loupe de même si l'app a créé sa fenêtre (« loupe fenetre »), sinon la ligne est
+#     absente de la page.
 # (4) Copie seule sortie : l'éteindre est refusé (« Gardez au moins… », reste allumée).
-#     Vignette allumée par la fenêtre, copie éteinte : Ctrl+Maj+2 : « sortie copie non
+#     (Rubrique « Après la capture » ouverte d'abord.) Vignette allumée par la fenêtre,
+#     copie éteinte : Ctrl+Maj+2 : « sortie copie non
 #     demandee », presse-papiers inchangé, vignette préparée au coin et à la durée du
 #     réglage, partie au bout de 3 s ; l'éteindre, seule sortie, est refusé (second refus
 #     voulu) ; copie rallumée puis vignette éteinte. (5) vérifie
@@ -19,6 +24,9 @@
 # (5) Raccourci du plein écran changé au clavier en Ctrl+Maj+7 : raccourcis suspendus puis
 #     repris, fichier, Ctrl+Maj+7 capture, Ctrl+Maj+2 ne fait plus rien et est rendu à
 #     Windows (une autre application peut le tenir).
+# (5b) « Refaire la dernière zone » changée au clavier en Ctrl+Maj+9 (libre : le cas tient
+#     Ctrl+Maj+1, 3, 4 et 7) : fichier, puis le menu de l'icône lu par l'API des menus :
+#     l'entrée vaut « Refaire la dernière zone<tab>Ctrl + Maj + 9 » ; menu fermé par Échap.
 # (6) Ctrl+Maj+8 tenu par une autre application : Windows lui donne la touche, la page ne
 #     la reçoit pas : ni changement ni refus, la saisie reste ouverte ; Échap : rien ne
 #     change, raccourcis repris (une autre application ne peut plus prendre Ctrl+Maj+7).
@@ -108,10 +116,12 @@ function Ecrire-Reglages([string]$Dossier, $Objet) {
 function Reglages-Du-Cas {
     return [ordered]@{
         version                   = 3
-        raccourcis                = [ordered]@{ zone = @('Ctrl+Maj+1'); plein_ecran = @('Ctrl+Maj+2'); fenetre = @('Ctrl+Maj+3') }
+        raccourcis                = [ordered]@{ zone = @('Ctrl+Maj+1'); plein_ecran = @('Ctrl+Maj+2'); fenetre = @('Ctrl+Maj+3'); derniere_zone = @('Ctrl+Maj+4') }
         copier_apres_capture      = $true
         enregistrer_apres_capture = $false
         vignette                  = [ordered]@{ afficher = $false; duree_s = 3; coin = 'bas_gauche' }
+        selection                 = [ordered]@{ loupe = $false }
+        capture                   = [ordered]@{ retardateur_s = 0; pointeur = $false }
         dossier_enregistrement    = $null
     }
 }
@@ -316,7 +326,14 @@ public static string Titre(IntPtr h) {
     # affichée) ou sans rectangle.
     function Cliquer-Element($e, [string]$Quoi) {
         if ($null -eq $e) { throw "$Quoi : élément introuvable" }
+        # Une ligne qui se déplie au-dessus (repli sous un interrupteur) fait glisser
+        # l'élément : on clique quand son rectangle ne bouge plus (deux lectures à 120 ms).
         $c = $e.Current; $r = $c.BoundingRectangle
+        $limite = [DateTime]::UtcNow.AddSeconds(2)
+        do {
+            Start-Sleep -Milliseconds 120
+            $avant = $r; $c = $e.Current; $r = $c.BoundingRectangle
+        } while (($r.X -ne $avant.X -or $r.Y -ne $avant.Y -or $r.Width -ne $avant.Width -or $r.Height -ne $avant.Height) -and [DateTime]::UtcNow -lt $limite)
         if ($c.IsOffscreen -or $r.IsEmpty -or $r.Width -le 0 -or $r.Height -le 0) {
             $d = Decrire $e
             Verifier "$Quoi : élément à l'écran" $false $d | Out-Null
@@ -474,7 +491,43 @@ public static string Titre(IntPtr h) {
         return $lu
     }
 
+    # (3b) Rubrique Capture, ouverte au départ : ses contrôles sont à l'écran sans aucun
+    # clic d'onglet, ceux d'« Après la capture » ne le sont pas.
+    $aucun = Element $fen 'Aucun' $RADIO
+    $ouverte = ($null -ne $aucun) -and (-not $aucun.Current.IsOffscreen)
+    Verifier '(3b) rubrique Capture ouverte au départ (« Aucun » du retardateur à l''écran)' $ouverte $(if ($null -eq $aucun) { Introuvable $fen 'Aucun' $RADIO } else { Decrire $aucun }) | Out-Null
+    $copier = Element $fen 'Copier automatiquement' $INTERRUPTEUR 0.5
+    Verifier '(3b) « Après la capture » fermée au départ' (($null -eq $copier) -or $copier.Current.IsOffscreen) $(if ($null -ne $copier) { Decrire $copier } else { '' }) | Out-Null
+    # Retardateur : 3 s écrit, puis remis à Aucun (les captures suivantes partent tout de suite).
+    Cliquer-Nom $fen '3 s' $RADIO '(3b) retardateur 3 s'
+    $null = Attendre-Motif -Motif 'reglage change: retardateur 3$' -Dossier $cas -DelaiS 5 -Quoi '(3b) retardateur 3'
+    Verifier '(3b) fichier : capture.retardateur_s = 3' ((Lire-Reglages $cas).capture.retardateur_s -eq 3) | Out-Null
+    Cliquer-Nom $fen 'Aucun' $RADIO '(3b) retardateur Aucun'
+    $null = Attendre-Motif -Motif 'reglage change: retardateur 0$' -Dossier $cas -DelaiS 5 -Quoi '(3b) retardateur 0'
+    Verifier '(3b) fichier : capture.retardateur_s = 0' ((Lire-Reglages $cas).capture.retardateur_s -eq 0) | Out-Null
+    # Inclure le pointeur : allumé puis éteint, chaque fois dans le fichier.
+    Cliquer-Interrupteur $fen 'Inclure le pointeur' '(3b) interrupteur Inclure le pointeur'
+    $null = Attendre-Motif -Motif 'reglage change: pointeur oui$' -Dossier $cas -DelaiS 5 -Quoi '(3b) pointeur oui'
+    Verifier '(3b) fichier : capture.pointeur true' ((Lire-Reglages $cas).capture.pointeur -eq $true) | Out-Null
+    Cliquer-Interrupteur $fen 'Inclure le pointeur' '(3b) interrupteur Inclure le pointeur (éteindre)'
+    $null = Attendre-Motif -Motif 'reglage change: pointeur non$' -Dossier $cas -DelaiS 5 -Quoi '(3b) pointeur non'
+    Verifier '(3b) fichier : capture.pointeur false' ((Lire-Reglages $cas).capture.pointeur -eq $false) | Out-Null
+    # Loupe : la ligne suit l'existence de la loupe, que dit la fenêtre créée au démarrage.
+    if ((Compter-Motif -Motif 'loupe fenetre \d+$' -Dossier $cas) -gt 0) {
+        Cliquer-Interrupteur $fen 'Loupe' '(3b) interrupteur Loupe'
+        $null = Attendre-Motif -Motif 'reglage change: loupe oui$' -Dossier $cas -DelaiS 5 -Quoi '(3b) loupe oui'
+        Verifier '(3b) fichier : selection.loupe true' ((Lire-Reglages $cas).selection.loupe -eq $true) | Out-Null
+        Cliquer-Interrupteur $fen 'Loupe' '(3b) interrupteur Loupe (éteindre)'
+        $null = Attendre-Motif -Motif 'reglage change: loupe non$' -Dossier $cas -DelaiS 5 -Quoi '(3b) loupe non'
+        Verifier '(3b) fichier : selection.loupe false' ((Lire-Reglages $cas).selection.loupe -eq $false) | Out-Null
+    }
+    else {
+        $loupe = Element $fen 'Loupe' $INTERRUPTEUR 0.5
+        Verifier '(3b) pas de fenêtre de loupe : aucune ligne Loupe dans la page' ($null -eq $loupe) $(if ($null -ne $loupe) { Decrire $loupe } else { '' }) | Out-Null
+    }
+
     # (4) La copie est la seule sortie : l'éteindre est refusé, pour de vrai.
+    Cliquer-Nom $fen 'Après la capture' ([System.Windows.Automation.ControlType]::TabItem) '(4) rubrique Après la capture'
     $refuses = Compter-Motif -Motif 'reglage refuse: copier \(aucune_sortie\)$' -Dossier $cas
     Cliquer-Nom $fen 'Copier automatiquement' $INTERRUPTEUR '(4) Copier, seule sortie'
     $null = Attendre-Suivante 'reglage refuse: copier \(aucune_sortie\)$' $cas $refuses '(4) refus de la dernière sortie'
@@ -550,6 +603,50 @@ public static string Titre(IntPtr h) {
     # L'ancien raccourci est rendu à Windows : une autre application peut le prendre.
     $t = Tenir-Ailleurs 0x32 6 'ctrl-maj-2'
     Verifier '(5) Ctrl+Maj+2 rendu à Windows (une autre application le tient)' ($t -eq 'tenu') $t | Out-Null
+
+    # (5b) Ctrl+Maj+9 pour la dernière zone (même geste que (5)), puis le menu de l'icône.
+    $lu = (Lire-Reglages $cas).raccourcis
+    $pris = @('zone', 'plein_ecran', 'fenetre', 'derniere_zone') | ForEach-Object { @($lu.$_) } | Where-Object { $_ -eq 'Ctrl+Maj+9' }
+    if (-not (Verifier '(5b) Ctrl+Maj+9 libre dans le fichier du cas' (@($pris).Count -eq 0))) { throw '(5b) Ctrl+Maj+9 déjà pris' }
+    $susp = Compter-Motif -Motif 'raccourcis suspendus \(saisie derniere_zone\)$' -Dossier $cas
+    $repris = Compter-Motif -Motif 'raccourcis repris$' -Dossier $cas
+    Cliquer-Nom $fen 'Refaire la dernière zone' ([System.Windows.Automation.ControlType]::Button) '(5b) raccourci de la dernière zone'
+    $null = Attendre-Suivante 'raccourcis suspendus \(saisie derniere_zone\)$' $cas $susp '(5b) saisie'
+    [BreezyShotEssai.Reglages]::Appuyer($CTRL_MAJ, 0x39)
+    $null = Attendre-Motif -Motif 'raccourci derniere_zone change: Ctrl\+Maj\+9$' -Dossier $cas -DelaiS 5 -Quoi '(5b) changé'
+    $null = Attendre-Suivante 'raccourcis repris$' $cas $repris '(5b) repris'
+    Start-Sleep -Milliseconds 300
+    $lu = @((Lire-Reglages $cas).raccourcis.derniere_zone)
+    Verifier '(5b) fichier : derniere_zone = [Ctrl+Maj+9]' ((@($lu).Count -eq 1) -and ($lu[0] -eq 'Ctrl+Maj+9')) ($lu -join ',') | Out-Null
+    # Le menu de l'icône (même message que Ouvrir-Par-Menu), lu sans rien y cliquer.
+    $icones = [BreezyShotEssai.Reglages]::Fenetres($p.Id, 'tray_icon_app')
+    if (-not (Verifier '(5b) fenêtre de l''icône trouvée' ($icones.Length -ge 1) 'aucune fenêtre tray_icon_app')) { throw '(5b) menu de l''icône impossible à ouvrir' }
+    $avant = @([BreezyShotEssai.Reglages]::Visibles('#32768') | ForEach-Object { [long]$_ })
+    foreach ($h in $icones) { [void][BreezyShotEssai.Reglages]::PostMessage($h, 6002, [IntPtr]::Zero, [IntPtr]0x205) }
+    $attendu = "Refaire la dernière zone`tCtrl + Maj + 9"
+    $menu = [IntPtr]::Zero; $textes = @(); $lus = ''
+    $limite = [DateTime]::UtcNow.AddSeconds(3)
+    do {
+        foreach ($f in @([BreezyShotEssai.Reglages]::Visibles('#32768') | Where-Object { $avant -notcontains [long]$_ })) {
+            $hm = [BreezyShotEssai.Reglages]::MenuDe($f)
+            if ($hm -eq [IntPtr]::Zero) { continue }
+            $t = [BreezyShotEssai.Reglages]::Textes($hm)
+            if ($null -ne $t -and $t.Length -gt 0) { $menu = $f; $textes = @($t); break }
+        }
+        if ($menu -eq [IntPtr]::Zero) { Start-Sleep -Milliseconds 50 }
+    } while ($menu -eq [IntPtr]::Zero -and [DateTime]::UtcNow -lt $limite)
+    $lus = ($textes | ForEach-Object { "« $($_ -replace "`t", '<tab>') »" }) -join ', '
+    if (-not (Verifier '(5b) le menu de l''icône s''ouvre' ($menu -ne [IntPtr]::Zero))) { throw '(5b) le menu de l''icône ne s''ouvre pas' }
+    $entrees = @($textes | Where-Object { $_ -like 'Refaire la dernière zone*' })
+    Verifier '(5b) menu : « Refaire la dernière zone<tab>Ctrl + Maj + 9 »' ((@($entrees).Count -eq 1) -and ($entrees[0] -ceq $attendu)) $lus | Out-Null
+    # Échap ferme le menu sans rien choisir.
+    $menus = Compter-Motif -Motif 'menu: (quitter|reglages|capturer)' -Dossier $cas
+    [BreezyShotEssai.Reglages]::Appuyer([byte[]]@(), 0x1B)
+    $limite = [DateTime]::UtcNow.AddSeconds(2)
+    while ((@([BreezyShotEssai.Reglages]::Visibles('#32768') | Where-Object { [long]$_ -eq [long]$menu }).Count -gt 0) -and [DateTime]::UtcNow -lt $limite) { Start-Sleep -Milliseconds 50 }
+    $ouvert = @([BreezyShotEssai.Reglages]::Visibles('#32768') | Where-Object { [long]$_ -eq [long]$menu }).Count -gt 0
+    Start-Sleep -Milliseconds 300
+    Verifier '(5b) Échap ferme le menu, aucune entrée choisie' ((-not $ouvert) -and ((Compter-Motif -Motif 'menu: (quitter|reglages|capturer)' -Dossier $cas) -eq $menus)) | Out-Null
 
     # (6) Ctrl+Maj+8 tenu ailleurs : la saisie ne le reçoit pas ; puis Échap.
     # L'aide tourne sans console : sa fenêtre couvrirait la ligne cliquée ensuite.
@@ -631,14 +728,24 @@ public static string Titre(IntPtr h) {
     Verifier '(8) fichier : enregistrer_apres_capture true' ((Lire-Reglages $cas).enregistrer_apres_capture -eq $true) | Out-Null
     $dialoguesAvant = @([BreezyShotEssai.Reglages]::Fenetres($p.Id, '#32770') | Where-Object { [BreezyShotEssai.Reglages]::IsWindowVisible($_) }).Count
     Cliquer-Nom $fen 'Parcourir…' ([System.Windows.Automation.ControlType]::Button) '(8) Parcourir'
+    # Un clic parti pendant que les lignes Format et Nom se déplient peut tomber à côté :
+    # sans sélecteur au bout de 3 s, un second clic, sur le bouton relu. Le détail dit
+    # combien de clics il a fallu et où est le bouton.
     $dialogue = [IntPtr]::Zero
-    $limite = [DateTime]::UtcNow.AddSeconds(10)
+    $clics = 1
+    $limite = [DateTime]::UtcNow.AddSeconds(12)
+    $second = [DateTime]::UtcNow.AddSeconds(3)
     do {
         $d = @([BreezyShotEssai.Reglages]::Fenetres($p.Id, '#32770') | Where-Object { [BreezyShotEssai.Reglages]::IsWindowVisible($_) })
-        if ($d.Count -gt $dialoguesAvant) { $dialogue = $d[0] }
+        if ($d.Count -gt $dialoguesAvant) { $dialogue = $d[0]; break }
+        if ($clics -eq 1 -and [DateTime]::UtcNow -ge $second) {
+            Cliquer-Nom $fen 'Parcourir…' ([System.Windows.Automation.ControlType]::Button) '(8) Parcourir, second clic'
+            $clics = 2
+        }
         Start-Sleep -Milliseconds 100
-    } while ($dialogue -eq [IntPtr]::Zero -and [DateTime]::UtcNow -lt $limite)
-    if (-not (Verifier '(8) le sélecteur de dossier s''ouvre' ($dialogue -ne [IntPtr]::Zero))) { throw '(8) pas de sélecteur' }
+    } while ([DateTime]::UtcNow -lt $limite)
+    $ouParcourir = Decrire (Element $fen 'Parcourir…' ([System.Windows.Automation.ControlType]::Button))
+    if (-not (Verifier '(8) le sélecteur de dossier s''ouvre' ($dialogue -ne [IntPtr]::Zero) "$clics clic(s) ; $ouParcourir")) { throw '(8) pas de sélecteur' }
     # Champ « Dossier : » (1152) puis bouton de validation (1) du dialogue de Windows,
     # attendus. Introuvables : le message liste les identifiants (pas les noms, qui peuvent
     # être des noms de dossiers) des champs et boutons vus.
