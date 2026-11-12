@@ -36,7 +36,7 @@ function serveur() {
 
 // Le cœur simulé : `__appels` (commande, arguments, en-têtes), `__exports` (corps gardés),
 // `__emettre(nom, charge)`. L'image : octets connus, d'après une graine.
-function simulerCoeur({ charge, graine, alpha, reponseFermer }) {
+function simulerCoeur({ charge, graine, alpha, reponseFermer, pretDiffere, imageEchec }) {
   window.__essaiEditeur = true;
   window.__appels = [];
   window.__exports = [];
@@ -71,7 +71,11 @@ function simulerCoeur({ charge, graine, alpha, reponseFermer }) {
           return Promise.resolve(numero);
         }
         window.__appels.push([c, a]);
-        if (c === 'editeur_pret') return Promise.resolve(window.__charge);
+        if (c === 'editeur_pret') {
+          if (!pretDiffere) return Promise.resolve(window.__charge);
+          return new Promise((ok) => (window.__lacherPret = () => ok(window.__charge)));
+        }
+        if (c === 'editeur_image' && imageEchec) return Promise.reject(new Error('image'));
         if (c === 'editeur_image')
           return Promise.resolve(window.__image(window.__charge, g).buffer);
         if (c === 'editeur_fermer') return Promise.resolve(a.force ? 'fermee' : window.__fermer);
@@ -131,9 +135,11 @@ const CHARGE = {
       graine: o.graine || 12345,
       alpha: !!o.alpha,
       reponseFermer: o.reponseFermer || 'demander',
+      pretDiffere: !!o.pretDiffere,
+      imageEchec: !!o.imageEchec,
     });
     await p.goto(URL_PAGE);
-    if (o.horloge) return p;
+    if (o.horloge || o.pretDiffere || o.imageEchec) return p;
     await p
       .waitForFunction(() => window.__appels.some((a) => a[0] === 'editeur_affiche'), null, {
         timeout: 5000,
@@ -169,6 +175,28 @@ const CHARGE = {
           ),
         [nom, egal],
         { timeout: 3000 },
+      )
+      .catch(() => {});
+  // Les animations et transitions finies (menus, bulles, boutons enfoncés) avant une mesure.
+  const calme = (p) =>
+    p
+      .waitForFunction(
+        () => document.getAnimations().every((a) => a.playState !== 'running'),
+        null,
+        { timeout: 3000 },
+      )
+      .catch(() => {});
+  // Aucun appel `nom` d'id `id` dans la seconde : attente bornée, jamais une réussite gratuite
+  // (la vérification qui suit lit les appels).
+  const sansAppel = (p, nom, egal) =>
+    p
+      .waitForFunction(
+        ([n, e]) =>
+          __appels.some(
+            (a) => a[0] === n && Object.entries(e).every(([k, v]) => a[1] && a[1][k] === v),
+          ),
+        [nom, egal],
+        { timeout: 1000 },
       )
       .catch(() => {});
   // Pixels de l'image → point CSS de la page.
@@ -428,8 +456,9 @@ const CHARGE = {
         o.epaisseur === 1 &&
         o.opacite === 1 &&
         o.cx == null &&
-        o.id === 1,
-      '4 Flèche : flèche droite rouge (ajouter du vrai modèle)',
+        o.id === 1 &&
+        (await p.evaluate(() => __ed.selection.length)) === 0,
+      '4 Flèche : flèche droite rouge (vrai modèle), non choisie après le tracé',
       JSON.stringify(o),
     );
     await variante(p, 'Flèche', 'Courbe');
@@ -816,7 +845,7 @@ const CHARGE = {
       s.map((x) => getComputedStyle(x).fontSize),
     );
     await p.locator('#reglages-outil').getByRole('button', { name: 'Épais' }).click();
-    const tt = await p.evaluate(() => __ed.prefs.tailleTexte);
+    const tt = await p.evaluate(() => __ed.prefs.tailles.texte);
     await p.keyboard.press('Escape');
     const flou = await contenu('Flou', 'Flou');
     await p.locator('#reglages-outil').getByRole('button', { name: 'Bloc noir' }).click();
@@ -835,7 +864,7 @@ const CHARGE = {
       surl === 'Fin,Moyen,Épais' &&
         texte === 'Fin,Moyen,Épais,Opacité' &&
         JSON.stringify(tailles) === '["12px","16px","21px"]' &&
-        tt === 40 &&
+        tt === 2 &&
         flou === 'Pixeliser,Flouter,Bloc noir,Léger,Moyen,Fort' &&
         bloc === 'Pixeliser,Flouter,Bloc noir' &&
         spot === 'Rectangle,Ovale' &&
@@ -852,7 +881,7 @@ const CHARGE = {
     await bouton(p, 'Vert').click();
     await uneImage(p);
     const r = await p.evaluate(() => ({
-      c: __ed.prefs.couleur,
+      c: __ed.prefs.couleurs.fleche,
       presse: [...document.querySelectorAll('#couleurs .dot[aria-pressed="true"]')].map((b) =>
         b.getAttribute('aria-label'),
       ),
@@ -908,6 +937,7 @@ const CHARGE = {
     await bouton(p, 'Fermer').click();
     await attendreAppel(p, 'editeur_fermer');
     await uneImage(p);
+    await calme(p);
     const f = (await appels(p, 'editeur_fermer')).pop();
     const prefs = JSON.parse(f[1].preferences);
     const etat = (await appels(p)).map((a) => a[0]);
@@ -1092,13 +1122,12 @@ const CHARGE = {
     );
     await uneImage(p);
     const done = await p.$eval('[data-act="copier"]', (b) => b.classList.contains('done'));
-    const fermeTot = (await appels(p, 'editeur_fermer')).length;
-    await attendreAppel(p, 'editeur_fermer');
-    const f = (await appels(p, 'editeur_fermer')).pop();
+    await sansAppel(p, 'editeur_fermer', {});
+    const f = await appels(p, 'editeur_fermer');
     verifier(
-      done && fermeTot === 0 && f && f[1].force === false,
-      '12 Copier réussi : coche (.done) puis editeur_fermer',
-      JSON.stringify([done, fermeTot, f]),
+      done && f.length === 0,
+      '12 Copier réussi : la coche, aucun editeur_fermer (le cœur ferme)',
+      JSON.stringify([done, f]),
     );
     await fin(p, '12');
   }
@@ -1142,12 +1171,101 @@ const CHARGE = {
     await fin(p, '12 Ctrl+C');
   }
 
+  // B1 : capture en attente (« remplacer ») : après « Copier et fermer » réussi, le cœur
+  // charge la capture 8 ; la page ne ferme jamais la nouvelle capture.
+  {
+    const p = await page();
+    await glisser(p, [50, 50], [150, 150]);
+    await p.evaluate(() => __emettre('editeur:fermer_demande', { id: 7, raison: 'remplacer' }));
+    await attendreAppel(p, 'editeur_fermer', { id: 7 });
+    await uneImage(p);
+    await p.getByRole('menuitem', { name: 'Copier et fermer' }).click();
+    await p.waitForFunction(() => window.__exports.length === 1);
+    await p.evaluate(() => {
+      __emettre('editeur:resultat', { id: 7, numero: 1, but: 'copier_fermer', etat: 'fait' });
+      window.__charge = { ...window.__charge, id: 8 };
+      __emettre('editeur:charger', window.__charge);
+    });
+    await attendreAppel(p, 'editeur_affiche', { id: 8 });
+    await sansAppel(p, 'editeur_fermer', { id: 8 });
+    const r = await p.evaluate(() => ({
+      f: __appels.filter((a) => a[0] === 'editeur_fermer').map((a) => a[1].id),
+      aff: __appels.filter((a) => a[0] === 'editeur_affiche').map((a) => a[1].id),
+    }));
+    verifier(
+      JSON.stringify(r) === '{"f":[7],"aff":[7,8]}',
+      '12 remplacer, Copier et fermer réussi, charger 8 : la capture 8 affichée, jamais fermée',
+      JSON.stringify(r),
+    );
+    await fin(p, '12 remplacer');
+  }
+  // B2 : un editeur:charger pendant un export lève le verrou.
+  {
+    const p = await page();
+    await p.keyboard.press('Control+s');
+    await p.waitForFunction(() => window.__exports.length === 1);
+    await p.evaluate(() => {
+      window.__charge = { ...window.__charge, id: 8 };
+      __emettre('editeur:charger', window.__charge);
+    });
+    await attendreAppel(p, 'editeur_affiche', { id: 8 });
+    await uneImage(p);
+    await p.keyboard.press('Control+c');
+    await p
+      .waitForFunction(() => window.__exports.length === 2, null, { timeout: 3000 })
+      .catch(() => {});
+    const r = await p.evaluate(() =>
+      window.__exports.map((e) => e.entetes['x-editeur-id'] + ':' + e.entetes['x-editeur-but']),
+    );
+    verifier(
+      JSON.stringify(r) === '["7:enregistrer","8:copier"]',
+      '12 charger pendant un export : le verrou tombe, Ctrl+C part pour la nouvelle capture',
+      JSON.stringify(r),
+    );
+    await fin(p, '12 verrou');
+  }
+  // fermer_demande reçue avant la charge : une seule réponse, dès que la charge est là.
+  {
+    const p = await page({ pretDiffere: true, reponseFermer: 'fermee' });
+    await p.waitForFunction(() => !!window.__lacherPret && !!__ecouteurs['editeur:fermer_demande']);
+    await p.evaluate(() => {
+      __emettre('editeur:fermer_demande', { id: 7, raison: 'bouton' });
+      window.__lacherPret();
+    });
+    await attendreAppel(p, 'editeur_fermer', { id: 7 });
+    await sansAppel(p, 'editeur_affiche', {});
+    const f = (await appels(p, 'editeur_fermer')).map((a) => [a[1].id, a[1].vide, a[1].force]);
+    verifier(
+      JSON.stringify(f) === '[[7,true,false]]',
+      '12 fermer_demande avant la charge : une réponse, dès la charge',
+      JSON.stringify(f),
+    );
+    await fin(p, '12 demande tôt');
+  }
+  // editeur_image en échec : editeur_fermer avec force, sans editeur_affiche.
+  {
+    const p = await page({ imageEchec: true });
+    await attendreAppel(p, 'editeur_fermer', { force: true });
+    const r = await p.evaluate(() => ({
+      f: __appels.filter((a) => a[0] === 'editeur_fermer').map((a) => [a[1].id, a[1].force]),
+      aff: __appels.filter((a) => a[0] === 'editeur_affiche').length,
+    }));
+    verifier(
+      JSON.stringify(r) === '{"f":[[7,true]],"aff":0}',
+      '12 editeur_image en échec : editeur_fermer force, sans editeur_affiche',
+      JSON.stringify(r),
+    );
+    p.erreurs = p.erreurs.filter((e) => !e.includes('editeur_image'));
+    await fin(p, '12 image en échec');
+  }
+
   // ---------- 13. « Glisser vers une appli » : vignette de prise, 4 px ----------
   {
     const p = await page();
     await bouton(p, 'Plus').click();
     await p.getByRole('menuitem', { name: 'Glisser vers une appli' }).click();
     await uneImage(p);
+    await calme(p);
     const v = p.getByRole('button', { name: 'Glisser vers une appli', exact: true });
     const r = await p.evaluate(() => {
       const g = document.querySelector('#vignette-prise');
@@ -1358,7 +1476,7 @@ const CHARGE = {
     await uneImage(p);
     verifier(
       JSON.stringify(noms) === '["Rouge","Jaune","Vert","Autre couleur","Bleu","Noir","Blanc"]' &&
-        (await p.evaluate(() => __ed.prefs.couleur)) === '#1A1A1A',
+        (await p.evaluate(() => __ed.prefs.couleurs.fleche)) === '#1A1A1A',
       '17 « Couleur » : les pastilles, Noir choisi',
       JSON.stringify(noms),
     );
@@ -1428,6 +1546,85 @@ const CHARGE = {
       JSON.stringify(r),
     );
     await fin(p, '18');
+  }
+
+  // ---------- 20. reprises de la relecture ----------
+  {
+    // Préférences par outil : chacun garde sa couleur, sa taille, son opacité.
+    const p = await page();
+    await bouton(p, 'Vert').click();
+    await outil(p, 'Flèche');
+    await p.locator('#reglages-outil').getByRole('button', { name: 'Épais' }).click();
+    await p.keyboard.press('Escape');
+    await outil(p, 'Stylo');
+    const r = await p.evaluate(() => ({
+      presse: document
+        .querySelector('#couleurs .dot[aria-pressed="true"]')
+        .getAttribute('aria-label'),
+      p: [__ed.prefs.couleurs, __ed.prefs.tailles.fleche, __ed.prefs.tailles.stylo],
+    }));
+    await glisser(p, [20, 20], [120, 60]);
+    const c = (await objets(p, 'crayon'))[0];
+    verifier(
+      r.presse === 'Rouge' &&
+        r.p[0].fleche === '#30A46C' &&
+        r.p[0].surligneur === '#FFD43B' &&
+        r.p[1] === 2 &&
+        r.p[2] === 1 &&
+        c.couleur === '#E5484D' &&
+        c.epaisseur === 1,
+      '20 préférences par outil (Flèche verte et épaisse, Stylo rouge et moyen)',
+      JSON.stringify([r, c]),
+    );
+    // Clic de souris sur un instrument : le focus revient à la scène, Espace déplace la vue.
+    await outil(p, 'Surligneur');
+    const foc = await p.evaluate(() => document.activeElement.id);
+    const x0 = await p.evaluate(() => __ed.vue.x);
+    await p.keyboard.down(' ');
+    await p.mouse.move(600, 300);
+    await p.mouse.down();
+    await p.mouse.move(650, 320);
+    await p.mouse.move(700, 340);
+    await p.mouse.up();
+    await p.keyboard.up(' ');
+    await uneImage(p);
+    const r2 = await p.evaluate(() => [__ed.vue.x, __ed.h.doc.objets.length]);
+    verifier(
+      foc === 'scene' && r2[0] === x0 + 100 && r2[1] === 1,
+      '20 clic sur un instrument : focus à la scène ; Espace tenu déplace la vue',
+      JSON.stringify([foc, x0, r2]),
+    );
+    await fin(p, '20 préférences');
+  }
+  {
+    // La poignée d'un objet choisi passe avant l'équerre de recadrage.
+    const p = await page({ reduit: true });
+    await ajouter(p, 'Forme');
+    await glisser(p, [100, 80], [1, 1]);
+    await cliquer(p, 50, 1);
+    const choisi1 = await p.evaluate(() => __ed.selection.slice());
+    const [x, y] = await point(p, 1, 1);
+    await glisserCss(p, x, y, x + 30, y + 30);
+    const r = await p.evaluate(() => [__ed.h.doc.recadrage, Math.round(__ed.h.doc.objets[0]?.x1)]);
+    verifier(
+      JSON.stringify(choisi1) === '[1]' && r[0] === null && r[1] > 20,
+      '20 poignée au coin de l’image : l’objet se redimensionne, l’image n’est pas recadrée',
+      JSON.stringify([choisi1, r]),
+    );
+    await fin(p, '20 poignée');
+  }
+  {
+    // Gomme : le bord d'un projecteur l'efface, le milieu non.
+    const p = await page();
+    await ajouter(p, 'Projecteur');
+    await glisser(p, [100, 100], [300, 250]);
+    await outil(p, 'Gomme');
+    await cliquer(p, 200, 175);
+    const n1 = (await objets(p, 'projecteur')).length;
+    await cliquer(p, 100, 175);
+    const n2 = (await objets(p, 'projecteur')).length;
+    verifier(n1 === 1 && n2 === 0, '20 Gomme : le bord du projecteur l’efface, le milieu non');
+    await fin(p, '20 gomme');
   }
 
   // Image de longueur fausse : la page la refuse (editeur_fermer avec force).

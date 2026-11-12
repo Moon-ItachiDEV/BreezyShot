@@ -5,7 +5,7 @@
 // la vue les équerres, le recadrage en cours et les poignées.
 
 import { jeton, jetonNombre } from "./editeur.js";
-import { sorteObjet, TYPE_DE_SORTE } from "./barre.js";
+import { sorteObjet, TYPE_DE_SORTE, TAILLES_TEXTE } from "./barre.js";
 
 const $ = (s) => document.querySelector(s);
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
@@ -76,8 +76,9 @@ export function installerOutils(ed) {
   // ---------- nouveaux objets ----------
   function nouvelObjet(s, p) {
     const pr = ed.prefs;
-    const couleur = ed.barre.couleur(s);
-    const opacite = pr.opacite / 100;
+    const couleur = ed.barre.couleur();
+    const opacite = ed.barre.opacite() / 100;
+    const epaisseur = ed.barre.rang();
     const base = { x1: p.x, y1: p.y, x2: p.x, y2: p.y };
     switch (TYPE_DE_SORTE[s]) {
       case "fleche":
@@ -87,7 +88,7 @@ export function installerOutils(ed) {
           double: false,
           courbe: s === "courbe",
           couleur,
-          epaisseur: pr.epaisseur,
+          epaisseur,
           opacite,
         };
       case "rectangle":
@@ -95,7 +96,7 @@ export function installerOutils(ed) {
           type: "rectangle",
           ...base,
           couleur,
-          epaisseur: pr.epaisseur,
+          epaisseur,
           plein: false,
           arrondi: 6,
           opacite,
@@ -105,32 +106,32 @@ export function installerOutils(ed) {
           type: "ellipse",
           ...base,
           couleur,
-          epaisseur: pr.epaisseur,
+          epaisseur,
           plein: false,
           opacite,
         };
       case "ligne":
-        return { type: "ligne", ...base, couleur, epaisseur: pr.epaisseur, opacite };
+        return { type: "ligne", ...base, couleur, epaisseur, opacite };
       case "crayon":
-        return { type: "crayon", points: [[p.x, p.y]], couleur, epaisseur: pr.epaisseur, opacite };
+        return { type: "crayon", points: [[p.x, p.y]], couleur, epaisseur, opacite };
       case "surligneur":
-        return { type: "surligneur", points: [[p.x, p.y]], couleur, epaisseur: pr.epaisseur };
+        return { type: "surligneur", points: [[p.x, p.y]], couleur, epaisseur };
       case "masque":
-        return { type: "masque", ...base, sorte: s, intensite: pr.intensite };
+        return { type: "masque", ...base, sorte: s, intensite: epaisseur };
       case "projecteur":
         return { type: "projecteur", forme: pr.variantes.projecteur, ...base };
       default:
         return null;
     }
   }
-  // Pose `o` dans le document (un pas ; `ajouter` donne l'`id`, et l'`ordre` d'un numéro),
-  // et le choisit (sauf un trait du stylo ou du surligneur).
+  // Pose `o` dans le document (un pas ; `ajouter` donne l'`id`, et l'`ordre` d'un numéro).
+  // Il n'est pas choisi (maquette) : la sélection ne vient que d'un appui sur un objet.
   function poser(o) {
     let id = 0;
     ed.modifier((doc) => {
       id = ed.modele.ajouter(doc, o);
     });
-    ed.selection = o.points ? [] : [id];
+    ed.selection = [];
     ed.barre.synchroniser();
     ed.dessiner();
     return id;
@@ -160,7 +161,9 @@ export function installerOutils(ed) {
       scene.dataset.curseur = "grabbing";
       return;
     }
-    const coin = equerreSous(e);
+    // La poignée de l'objet choisi passe avant l'équerre de recadrage.
+    const h = poigneeSous(p);
+    const coin = h ? null : equerreSous(e);
     if (coin) {
       const k = ed.modele.cadre(ed.h.doc);
       geste = { mode: "equerre", coin, k0: { ...k }, cadre: { ...k } };
@@ -175,7 +178,6 @@ export function installerOutils(ed) {
       return;
     }
     if (!SANS_PRISE.has(s)) {
-      const h = poigneeSous(p);
       if (h) {
         const o = ed.objet(ed.selection[0]);
         geste = {
@@ -222,25 +224,25 @@ export function installerOutils(ed) {
         type: "numero",
         x: p.x,
         y: p.y,
-        rayon: ed.dessin.RAYONS_NUMERO[ed.prefs.numero],
-        couleur: ed.barre.couleur(s),
-        opacite: ed.prefs.opacite / 100,
+        rayon: ed.dessin.RAYONS_NUMERO[ed.barre.rang()],
+        couleur: ed.barre.couleur(),
+        opacite: ed.barre.opacite() / 100,
       });
       return;
     }
     if (s === "texte") {
-      const pr = ed.prefs;
+      const taille = TAILLES_TEXTE[ed.barre.rang()];
       ouvrirSaisie(
         {
           type: "texte",
           x: p.x,
-          y: p.y - pr.tailleTexte * 0.6,
+          y: p.y - taille * 0.6,
           texte: "",
-          couleur: ed.barre.couleur(s),
-          taille: pr.tailleTexte,
+          couleur: ed.barre.couleur(),
+          taille,
           gras: true,
           style: "contour",
-          opacite: pr.opacite / 100,
+          opacite: ed.barre.opacite() / 100,
         },
         false,
       );
@@ -421,7 +423,7 @@ export function installerOutils(ed) {
       scene.dataset.curseur = "grab";
       return;
     }
-    const coin = equerreSous(e);
+    const coin = poigneeSous(p) ? null : equerreSous(e);
     if (coin) {
       scene.dataset.curseur = coin === "nw" || coin === "se" ? "nwse" : "nesw";
       return;
@@ -548,7 +550,6 @@ export function installerOutils(ed) {
           if (v) doc.objets.find((x) => x.id === o.id).texte = v;
           else doc.objets = doc.objets.filter((x) => x.id !== o.id);
         });
-        if (v) ed.selection = [o.id];
       }
     } else if (v) {
       poser({ ...e.objet, texte: v });

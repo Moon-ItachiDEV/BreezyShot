@@ -195,8 +195,23 @@ export function installerBarre(ed) {
 
   const prefs = () => ed.prefs ?? DEFAUTS;
   const sorte = () => sorteOutil(prefs());
-  const couleurDe = (s) =>
-    s === "surligneur" ? prefs().couleurSurligneur : AVEC_COULEUR.has(s) ? prefs().couleur : null;
+  // Préférences par outil (maquette : S.col, S.w, S.a).
+  const couleurDe = (t = prefs().outil) => prefs().couleurs[t] ?? null;
+  const rangDe = (t = prefs().outil) => prefs().tailles[t] ?? 1;
+  const opaciteDe = (t = prefs().outil) => prefs().opacites[t] ?? 100;
+  // Valeur de la préférence de l'outil pour un réglage (unités de l'objet sauf l'opacité).
+  function prefDe(cle) {
+    if (cle === "couleur") return couleurDe();
+    if (cle === "opacite") return opaciteDe();
+    if (cle === "tailleTexte") return TAILLES_TEXTE[rangDe()];
+    return rangDe();
+  }
+
+  // Après un clic de souris (pas au clavier) sur un instrument ou une pastille, le focus
+  // revient à la scène : Espace tenu y déplace la vue.
+  const rendreFocus = (e) => {
+    if (e.detail > 0) scene.focus({ preventScroll: true });
+  };
 
   // ---------- instruments ----------
   for (const t of [...BASE, ""]) {
@@ -204,11 +219,12 @@ export function installerBarre(ed) {
     b.type = "button";
     b.dataset.place = t || "emplacement";
     outilsEl.appendChild(b);
-    b.addEventListener("click", () => {
+    b.addEventListener("click", (e) => {
       const id = b.dataset.outil;
       const encore = id === prefs().outil && !ouvert(reglages);
       fermerMenus();
       choisirOutil(id);
+      rendreFocus(e);
       if (encore && id !== "gomme") ouvrirReglages(b);
     });
   }
@@ -235,8 +251,7 @@ export function installerBarre(ed) {
     for (const b of $$(".tl", outilsEl)) {
       const t = b.dataset.outil;
       b.setAttribute("aria-pressed", t === p.outil ? "true" : "false");
-      const s = t === p.outil ? sorte() : sorteOutil({ ...p, outil: t });
-      const c = couleurDe(s);
+      const c = couleurDe(t);
       if (c) b.style.setProperty("--c", c);
       else b.style.removeProperty("--c");
     }
@@ -265,12 +280,13 @@ export function installerBarre(ed) {
       nommer(b, nom);
       if (c) b.style.setProperty("--c", c);
       else b.appendChild(el("i"));
-      b.addEventListener("click", () => {
+      b.addEventListener("click", (e) => {
         if (!c) {
           choisirAutre();
           return;
         }
         regler("couleur", c);
+        if (!b.closest(".pop")) rendreFocus(e);
       });
       hote.appendChild(b);
     }
@@ -299,7 +315,7 @@ export function installerBarre(ed) {
   // Couleur montrée : celle de l'objet choisi s'il en a une, sinon celle de l'outil.
   function couleurCourante() {
     const o = ed.objetsChoisis().find((x) => x.couleur);
-    return o ? o.couleur : couleurDe(sorte());
+    return o ? o.couleur : couleurDe();
   }
   function synchroniserCouleurs() {
     const c = couleurCourante();
@@ -326,9 +342,12 @@ export function installerBarre(ed) {
   // d'annulation ; `marque` : une glissière tirée = un pas).
   function regler(cle, valeur, marque = null) {
     const p = prefs();
-    const s = sorte();
-    if (cle === "couleur" && s === "surligneur") p.couleurSurligneur = valeur;
-    else if (cle !== "couleur" || AVEC_COULEUR.has(s)) p[cle] = valeur;
+    const t = p.outil;
+    if (cle === "couleur") {
+      if (t in p.couleurs) p.couleurs[t] = valeur;
+    } else if (cle === "opacite") {
+      if (t in p.opacites) p.opacites[t] = valeur;
+    } else p.tailles[t] = cle === "tailleTexte" ? TAILLES_TEXTE.indexOf(valeur) : valeur;
     const [champ, sApplique] = CHAMPS[cle];
     const cibles = ed
       .objetsChoisis()
@@ -444,7 +463,7 @@ export function installerBarre(ed) {
       if (cle === "tailleTexte") return o[champ];
       return o[champ];
     }
-    return prefs()[cle];
+    return prefDe(cle);
   }
   let marqueGlissiere = 0;
   function construireReglages() {
@@ -547,8 +566,9 @@ export function installerBarre(ed) {
     if (but === "copier") message("Copié");
     else if (but === "enregistrer" || but === "enregistrer_sous") message("Enregistré");
   }
-  // « Copier » réussi (copier puis fermer) : la coche, puis la fenêtre se ferme.
-  function copierReussi(fermer) {
+  // « Copier » réussi (copier puis fermer) : la coche ; le cœur ferme la fenêtre ou charge la
+  // capture en attente (la page ne rappelle pas editeur_fermer).
+  function copierReussi() {
     fermerMenus(false);
     bCopier.classList.remove("done");
     void bCopier.offsetWidth;
@@ -557,10 +577,7 @@ export function installerBarre(ed) {
       "reduites" in document.documentElement.dataset ||
       matchMedia("(prefers-reduced-motion: reduce)").matches;
     const d = jetonNombre(`duree-editeur-copier-fermer${reduites ? "-reduite" : ""}`);
-    setTimeout(() => {
-      bCopier.classList.remove("done");
-      fermer();
-    }, d);
+    setTimeout(() => bCopier.classList.remove("done"), d);
   }
   const exporter = (but) => {
     if (ed.exportEnCours()) return;
@@ -667,9 +684,11 @@ export function installerBarre(ed) {
     const b = e.target.closest("[data-act]");
     if (!b || b.disabled) return;
     const a = b.dataset.act;
-    if (a === "annuler") ed.annuler();
-    else if (a === "retablir") ed.retablir();
-    else if (a === "copier") {
+    if (a === "annuler" || a === "retablir") {
+      if (a === "annuler") ed.annuler();
+      else ed.retablir();
+      if (!ed.outils?.saisieOuverte()) rendreFocus(e);
+    } else if (a === "copier") {
       fermerMenus();
       ed.actions.copierFermer();
     } else if (a === "enregistrer") {
@@ -902,6 +921,8 @@ export function installerBarre(ed) {
     choisirOutil,
     sorte,
     couleur: couleurDe,
+    rang: rangDe,
+    opacite: opaciteDe,
     regler,
     accent: () => jeton("accent"),
   };

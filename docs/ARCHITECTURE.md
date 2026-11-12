@@ -1293,7 +1293,7 @@ contenu d'une image) :
   vue à la taille réelle égale à l'export, temps sur 25 Mpx, Projecteur (P1 à P10 : prise
   par le bord, réunion, alpha, coût du voile) ; `ECHECS : 0` attendu. Étape du job `pages`.
 - `essais/pages/editeur.cjs` (0.4) : la page de l'éditeur dans Chromium, cœur simulé et
-  vrai modèle, 129 points : noms et rôles accessibles (contrat de l'essai 12), chaque
+  vrai modèle, 144 points : noms et rôles accessibles (contrat de l'essai 12), chaque
   outil, Gomme, Projecteur, recadrage par chaque coin, sélection, bulle de l'outil,
   couleurs, menu « Fermer » et ses issues, « Copier » qui ferme, vignette de prise, règle
   de `fermer_demande`, un seul export à la fois, clair, sombre, fenêtre étroite, aucune
@@ -1302,7 +1302,8 @@ contenu d'une image) :
   `04-zone.ps1`, `05-plein-ecran.ps1`, `06-fenetre.ps1`, `07-vignette.ps1`,
   `08-reglages-fenetre.ps1`, `09-installateur.ps1`, `10-confort.ps1`,
   `11-pointeur.ps1`, `12-editeur.ps1`), tous les `NN-*.ps1` pris dans l'ordre sans liste écrite,
-  lancés par `essais/lancer.ps1` sur le .exe de release. Chaque essai démarre l'app avec
+  lancés par `essais/lancer.ps1` sur le .exe de release (un essai pas fini en 600 s est
+  arrêté, avec ce qu'il a lancé, et compte comme échoué). Chaque essai démarre l'app avec
   `BREEZYSHOT_DOSSIER_ESSAI`, agit (lancer une seconde instance, simuler une touche, abîmer un
   fichier), puis lit le journal et les fichiers. Un essai qui échoue fait échouer GitHub.
 - Chaque exécution note la mémoire privée au repos (l'app et ses processus de moteur web) dans
