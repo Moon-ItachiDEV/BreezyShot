@@ -1179,6 +1179,11 @@ fenêtre). Animations : la page suit seulement `reduites` de la charge (le cœur
 compte du système). Une page qui redit prête ne reçoit plus la charge d'une carte partie, et
 `Prete` ne lance le souffle qu'en état Souffle (`prete_acceptee`) : `vignette prete <id>
 ignoree`.
+Les deux pages peuvent dire prêtes avant que l'Application gère la `Vignette` (sous Windows,
+créer la fenêtre de la vignette fait tourner les messages pendant que la page du souffle,
+créée avant, est déjà chargée) : `vignette_pret` et `souffle_pret` refusent alors (`<page>
+pret refuse: vignette pas encore en place`) et la page retente toutes les 100 ms, 10 s au
+plus.
 
 **Journal** (jamais de chemin ni de contenu) : `vignette fenetre <hwnd>`, `souffle fenetre
 <hwnd>`, `vignette exclue des captures: …`, `souffle exclu des captures: …`, `vignette
