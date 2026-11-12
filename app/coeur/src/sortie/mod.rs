@@ -29,6 +29,7 @@ use chrono::{DateTime, Local};
 use crate::systeme::gel::Pixels;
 
 pub use annonce::{annonce, Annonce};
+pub use fichier::enregistrer_a;
 pub use glisser::{
     a_effacer, fichier_a_glisser, liens_a_supprimer, supprimer, Suppression, GLISSER_GARDES,
 };

@@ -1,4 +1,4 @@
-# Joue tous les essais essais/NN-*.ps1 dans l'ordre (01-socle … 07-vignette), chacun dans
+# Joue tous les essais essais/NN-*.ps1 dans l'ordre (01-socle … 12-editeur), chacun dans
 # son propre pwsh. Les aides (temoin.ps1, tenir-raccourci.ps1, cible-glisser.ps1) ne sont
 # pas des essais.
 # Sort avec 1 si un essai échoue. Écrit un résumé lisible, aussi dans $env:GITHUB_STEP_SUMMARY.
@@ -7,7 +7,10 @@
 
 param(
     [Parameter(Mandatory)][string]$Exe,
-    [string]$Sortie = 'essais-resultats'
+    [string]$Sortie = 'essais-resultats',
+    # Un essai qui n'a pas fini dans ce délai est arrêté (lui et tout ce qu'il a lancé) et
+    # compte comme échoué : les suivants se jouent quand même.
+    [int]$LimiteS = 600
 )
 
 Set-StrictMode -Version Latest
@@ -27,10 +30,52 @@ $bilans = [System.Collections.Generic.List[object]]::new()
 foreach ($fichier in $essais) {
     $nom = [System.IO.Path]::GetFileNameWithoutExtension($fichier.Name)
     $chrono = [System.Diagnostics.Stopwatch]::StartNew()
-    & $pwsh -NoProfile -File $fichier.FullName -Exe $exeComplet -Sortie $sortieComplete
-    $code = $LASTEXITCODE
-    $chrono.Stop()
+    $avant = @(Get-Process | ForEach-Object { $_.Id })
     $json = Join-Path $sortieComplete "$nom.json"
+    Remove-Item -LiteralPath $json -Force -ErrorAction SilentlyContinue   # jamais un vieux bilan
+    $arguments = @('-NoProfile', '-File', "`"$($fichier.FullName)`"",
+        '-Exe', "`"$exeComplet`"", '-Sortie', "`"$sortieComplete`"")
+    $processus = Start-Process -FilePath $pwsh -ArgumentList $arguments -NoNewWindow -PassThru
+    $null = $processus.Handle   # sans quoi ExitCode reste vide après la fin
+    if ($processus.WaitForExit($LimiteS * 1000)) {
+        $code = $processus.ExitCode
+    }
+    else {
+        Write-Host "$nom : pas fini en $LimiteS s, arrêté."
+        try { $processus.Kill($true) } catch { Write-Host "$nom : arrêt impossible ($_)" }
+        $code = -1
+        # L'essai arrêté n'a pas rangé les journaux de l'app : ils sont pris dans son dossier.
+        $temp = [System.IO.Path]::GetTempPath()
+        foreach ($d in @(Get-ChildItem -LiteralPath $temp -Directory -Filter "breezyshot-$nom-*" -ErrorAction SilentlyContinue)) {
+            $journaux = @(Get-ChildItem -LiteralPath $d.FullName -Directory -Recurse -Depth 3 -Filter 'Journal' -ErrorAction SilentlyContinue |
+                Where-Object { $_.Parent.Name -eq 'local' })
+            foreach ($j in $journaux) {
+                $cas = [System.IO.Path]::GetRelativePath($d.FullName, $j.Parent.Parent.FullName)
+                $ici = Join-Path $sortieComplete "journaux/$nom"
+                if ($cas -ne '.') { $ici = Join-Path $ici $cas }
+                New-Item -ItemType Directory -Force -Path $ici | Out-Null
+                Copy-Item -Path (Join-Path $j.FullName '*') -Destination $ici -Force -ErrorAction SilentlyContinue
+            }
+        }
+    }
+    $chrono.Stop()
+    # Rien de ce qu'un essai a lancé ne doit lui survivre : l'app, une aide, ou les vues Web
+    # de l'app (WebView2 dit pour qui il tourne dans sa ligne de commande ; celui d'un autre
+    # programme n'est pas touché). L'essai suivant attend qu'ils soient partis.
+    $restes = @(Get-Process | Where-Object {
+            $_.Id -ne $PID -and $_.Id -notin $avant -and
+            $_.ProcessName -match '^(breezyshot.*|pwsh|msedgewebview2)$'
+        } | Where-Object {
+            if ($_.ProcessName -ne 'msedgewebview2') { return $true }
+            $ligne = ''
+            try { $ligne = "$((Get-CimInstance Win32_Process -Filter "ProcessId = $($_.Id)" -ErrorAction Stop).CommandLine)" } catch { }
+            return $ligne -match '--webview-exe-name=breezyshot'
+        })
+    if ($restes.Count -gt 0) {
+        $noms = ($restes | ForEach-Object { "$($_.ProcessName) ($($_.Id))" }) -join ', '
+        Write-Host "$nom : processus restés ouverts, arrêtés : $noms"
+        $restes | ForEach-Object { try { $_.Kill(); $null = $_.WaitForExit(5000) } catch { } }
+    }
     $bilan = $null
     if (Test-Path -LiteralPath $json) { $bilan = Get-Content -LiteralPath $json -Raw | ConvertFrom-Json }
     $bilans.Add([pscustomobject]@{
@@ -57,7 +102,8 @@ foreach ($b in $bilans) {
     $lignes.Add("### $($b.Nom)")
     $lignes.Add('')
     if ($null -eq $b.Bilan) {
-        $lignes.Add("Pas de bilan : l'essai s'est arrêté avant la fin (code $($b.Code)).")
+        $cause = if ($b.Code -eq -1) { "arrêté après $LimiteS s" } else { "code $($b.Code)" }
+        $lignes.Add("Pas de bilan : l'essai s'est arrêté avant la fin ($cause).")
         continue
     }
     foreach ($v in @($b.Bilan.Verifications)) {

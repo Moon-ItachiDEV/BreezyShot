@@ -268,6 +268,54 @@ pub fn poignee_ecran_fige() -> Option<isize> {
     plateforme::poignee_ecran_fige()
 }
 
+/// Le pointeur de la souris, lu juste après la photo (0.4), pour être posé dans les pixels
+/// découpés. Les deux images sont en RGBA, ligne par ligne de haut en bas : le pointeur
+/// peint sur un fond noir, puis sur un fond blanc (leur différence donne la transparence et
+/// les parties inversées). Jamais écrit au journal (ni forme ni nom).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Pointeur {
+    /// Position de la pointe moins le point chaud, en pixels réels du bureau.
+    pub origine: (i32, i32),
+    pub largeur: u32,
+    pub hauteur: u32,
+    pub sur_noir: Vec<u8>,
+    pub sur_blanc: Vec<u8>,
+}
+
+/// Lit le pointeur tel que Windows le montre (`GetCursorInfo`, `GetIconInfo`, puis
+/// `DrawIconEx` sur noir et sur blanc ; un pointeur animé donne sa première image).
+/// `Ok(None)` : pointeur caché (écran tactile, saisie). Erreur : un texte court, sans chemin
+/// ni titre. N'importe quel fil. Hors Windows : `Ok(None)`.
+pub fn lire_pointeur() -> Result<Option<Pointeur>, String> {
+    plateforme::lire_pointeur()
+}
+
+/// Valeurs de `CURSORINFO.flags` (winuser.h), recopiées pour la règle pure ; un test
+/// Windows les compare à celles de la crate `windows`.
+pub const POINTEUR_MONTRE: u32 = 0x1;
+pub const POINTEUR_SUPPRIME: u32 = 0x2;
+
+/// Vrai si Windows montre le pointeur : `CURSOR_SHOWING` posé et `CURSOR_SUPPRESSED`
+/// absent (écran tactile ou stylet : le pointeur est caché).
+pub fn pointeur_montre(drapeaux: u32) -> bool {
+    drapeaux & POINTEUR_MONTRE != 0 && drapeaux & POINTEUR_SUPPRIME == 0
+}
+
+/// Plus grand côté accepté pour un pointeur (Windows va jusqu'à 256 en Accessibilité).
+pub const POINTEUR_COTE_MAX: i32 = 512;
+
+/// Taille d'un pointeur d'après ses bitmaps (`GetObjectW`) : celle de l'image en couleurs
+/// si elle existe, sinon le masque seul, qui empile le masque ET et le masque XOR (moitié
+/// de sa hauteur). `None` si la taille est nulle ou dépasse `POINTEUR_COTE_MAX`.
+pub fn taille_pointeur(masque: (i32, i32), couleurs: Option<(i32, i32)>) -> Option<(u32, u32)> {
+    let (largeur, hauteur) = match couleurs {
+        Some(t) => t,
+        None => (masque.0, masque.1 / 2),
+    };
+    let bon = |v: i32| v > 0 && v <= POINTEUR_COTE_MAX;
+    (bon(largeur) && bon(hauteur)).then_some((largeur as u32, hauteur as u32))
+}
+
 /// Ordre des écrans : de gauche à droite, puis de haut en bas.
 pub fn trier_ecrans(ecrans: &mut [EcranInfo]) {
     ecrans.sort_by_key(|e| (e.rect.x, e.rect.y));
@@ -412,6 +460,30 @@ mod tests {
         assert_eq!(
             Rect::depuis_bords(i32::MIN, 0, i32::MAX, 1).largeur,
             i32::MAX
+        );
+    }
+
+    #[test]
+    fn pointeur_montre_ou_cache() {
+        assert!(pointeur_montre(POINTEUR_MONTRE));
+        assert!(!pointeur_montre(0));
+        assert!(!pointeur_montre(POINTEUR_SUPPRIME));
+        assert!(!pointeur_montre(POINTEUR_MONTRE | POINTEUR_SUPPRIME));
+    }
+
+    #[test]
+    fn taille_du_pointeur() {
+        assert_eq!(taille_pointeur((32, 32), Some((32, 32))), Some((32, 32)));
+        assert_eq!(taille_pointeur((48, 48), Some((48, 48))), Some((48, 48)));
+        // Masque seul (pointeur monochrome) : la moitié de sa hauteur.
+        assert_eq!(taille_pointeur((32, 64), None), Some((32, 32)));
+        assert_eq!(taille_pointeur((32, 1), None), None);
+        assert_eq!(taille_pointeur((0, 0), Some((0, 0))), None);
+        assert_eq!(taille_pointeur((32, 32), Some((-32, 32))), None);
+        assert_eq!(taille_pointeur((32, 32), Some((513, 32))), None);
+        assert_eq!(
+            taille_pointeur((32, 32), Some((512, 512))),
+            Some((512, 512))
         );
     }
 

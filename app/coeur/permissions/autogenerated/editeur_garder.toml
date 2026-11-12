@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-editeur-garder"
+description = "Enables the editeur_garder command without any pre-configured scope."
+commands.allow = ["editeur_garder"]
+
+[[permission]]
+identifier = "deny-editeur-garder"
+description = "Denies the editeur_garder command without any pre-configured scope."
+commands.deny = ["editeur_garder"]
