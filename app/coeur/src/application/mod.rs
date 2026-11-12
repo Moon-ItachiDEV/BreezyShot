@@ -2630,7 +2630,24 @@ fn annoter(app: &AppHandle, id: u64) {
         transparence,
         maintenant,
     };
-    recevoir_document(app, document, demande_a);
+    // Annoter arrive dans une commande de la page de la vignette. Sous Windows, créer une
+    // fenêtre Web dans le rappel d'une autre vue Web bloque le fil principal pour
+    // toujours : le document est reçu à un tour suivant de la boucle.
+    let pour_fil = app.clone();
+    let lance = std::thread::Builder::new()
+        .name("editeur-poste".into())
+        .spawn(move || {
+            let pour = pour_fil.clone();
+            let poste =
+                pour_fil.run_on_main_thread(move || recevoir_document(&pour, document, demande_a));
+            if let Err(e) = poste {
+                log::warn!("editeur impossible {id}: poste ({e})");
+            }
+        });
+    if let Err(e) = lance {
+        log::warn!("editeur impossible {id}: poste ({e})");
+        afficher(app, editeur::message_impossible());
+    }
 }
 
 /// Une capture pour l'éditeur : ouvrir, remplacer ou demander (§4.3).

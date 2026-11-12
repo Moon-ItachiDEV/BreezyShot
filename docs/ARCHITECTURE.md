@@ -981,7 +981,10 @@ donne l'écoute des événements, les huit commandes, `core:window:allow-start-d
 Tauri 2.12), rien d'autre. `regler_cadre` reste : le thème de la fenêtre va aussi à
 WebView2 (`prefers-color-scheme`) et au mode sombre de DWM.
 
-**Ouverture et remplacement.** Annoter range un `EtatEditeur` (numéro de fenêtre), crée la
+**Ouverture et remplacement.** Annoter arrive dans une commande de la page de la vignette :
+le document est reçu à un tour suivant de la boucle (fil `editeur-poste`), jamais dans la
+commande, parce que sous Windows créer une fenêtre Web dans le rappel d'une autre vue Web
+bloque le fil principal pour toujours. Il range un `EtatEditeur` (numéro de fenêtre), crée la
 fenêtre (`editeur fenetre <hwnd>`, `editeur ouvert …`) et arme le filet de la page : un
 fil attend `DELAI_PAGE` (30 s, WebView2 lent sur la machine GitHub) sur un canal que
 `editeur_pret` ferme ; muette, la fenêtre est détruite, le document rendu, bandeau
