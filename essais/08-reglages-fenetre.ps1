@@ -4,7 +4,8 @@
 # (1) Démarrage : « demarrage: cle d'essai » (la vraie clé Run n'est ni lue ni écrite).
 # (2) Ouverture par le VRAI menu de l'icône : l'essai envoie à la fenêtre cachée de l'icône
 #     (classe « tray_icon_app » de l'app) le message que Windows lui envoie au clic droit,
-#     puis choisit « Réglages » dans le menu (#32768) par UI Automation. Si le menu ne
+#     puis lit le menu (#32768) par l'API des menus Win32 (MN_GETHMENU, GetMenuStringW,
+#     GetMenuItemRect) et clique au centre de « Réglages ». Si le menu ne
 #     s'ouvre pas, la vérification ÉCHOUE (jamais sautée). Fenêtre ordinaire : visible,
 #     dans la barre des tâches (pas WS_EX_TOOLWINDOW).
 # (3) Rouvrir : une seule fenêtre, ramenée devant.
@@ -207,6 +208,33 @@ public static IntPtr[] Visibles(string classe) {
     }, IntPtr.Zero);
     return liste.ToArray();
 }
+// Menus Win32 : les HMENU se lisent d'un autre processus.
+[DllImport("user32.dll")]
+public static extern IntPtr SendMessage(IntPtr h, uint msg, IntPtr w, IntPtr l);
+[DllImport("user32.dll")]
+public static extern int GetMenuItemCount(IntPtr menu);
+[DllImport("user32.dll", CharSet = CharSet.Unicode, EntryPoint = "GetMenuStringW")]
+static extern int GetMenuString(IntPtr menu, uint item, System.Text.StringBuilder texte, int taille, uint drapeaux);
+[DllImport("user32.dll")]
+public static extern bool GetMenuItemRect(IntPtr h, IntPtr menu, uint item, out RECT r);
+const uint MN_GETHMENU = 0x01E1;
+const uint MF_BYPOSITION = 0x400;
+// Le HMENU d'une fenêtre de menu (#32768), IntPtr.Zero si elle n'en donne pas.
+public static IntPtr MenuDe(IntPtr fenetre) { return SendMessage(fenetre, MN_GETHMENU, IntPtr.Zero, IntPtr.Zero); }
+// Texte de chaque position (avant une éventuelle tabulation) ; "" pour un séparateur.
+public static string[] Textes(IntPtr menu) {
+    int n = GetMenuItemCount(menu);
+    if (n < 0) return null;
+    var textes = new string[n];
+    for (int i = 0; i < n; i++) {
+        var t = new System.Text.StringBuilder(256);
+        GetMenuString(menu, (uint)i, t, t.Capacity, MF_BYPOSITION);
+        var x = t.ToString();
+        int tab = x.IndexOf('\t');
+        textes[i] = tab >= 0 ? x.Substring(0, tab) : x;
+    }
+    return textes;
+}
 public static string Titre(IntPtr h) {
     var t = new System.Text.StringBuilder(512);
     GetWindowText(h, t, t.Capacity);
@@ -217,8 +245,25 @@ public static string Titre(IntPtr h) {
     $AE = [System.Windows.Automation.AutomationElement]
     $CTRL_MAJ = [byte[]]@(0x11, 0x10)
 
+    # Ce qu'UI Automation voit dans une fenêtre, pour le message d'un élément introuvable :
+    # le nombre d'éléments et les noms (ceux de la page de l'app), 60 au plus.
+    function Elements-Vus([IntPtr]$Racine) {
+        try {
+            $tous = $AE::FromHandle($Racine).FindAll([System.Windows.Automation.TreeScope]::Descendants,
+                [System.Windows.Automation.Condition]::TrueCondition)
+            $noms = @()
+            foreach ($e in $tous) {
+                $c = $e.Current
+                if ($c.Name -ne '') { $noms += "$($c.ControlType.ProgrammaticName -replace '^ControlType\.', '') « $($c.Name) »" }
+                if ($noms.Count -ge 60) { break }
+            }
+            return "$($tous.Count) éléments vus ; nommés : " + ($noms -join ', ')
+        } catch { return "UI Automation en échec : $($_.Exception.Message)" }
+    }
+    $script:ErreurElement = ''
     # Un élément de la fenêtre $Racine par son nom accessible (et son type), attendu.
     function Element([IntPtr]$Racine, [string]$Nom, $Type = $null, [double]$DelaiS = 5) {
+        $script:ErreurElement = ''
         $cond = [System.Windows.Automation.PropertyCondition]::new($AE::NameProperty, $Nom)
         if ($null -ne $Type) {
             $cond = [System.Windows.Automation.AndCondition]::new($cond,
@@ -229,7 +274,7 @@ public static string Titre(IntPtr h) {
             try {
                 $e = $AE::FromHandle($Racine).FindFirst([System.Windows.Automation.TreeScope]::Descendants, $cond)
                 if ($null -ne $e) { return $e }
-            } catch { }
+            } catch { $script:ErreurElement = $_.Exception.Message }
             Start-Sleep -Milliseconds 100
         } while ([DateTime]::UtcNow -lt $limite)
         return $null
@@ -240,12 +285,24 @@ public static string Titre(IntPtr h) {
         [BreezyShotEssai.Reglages]::Cliquer([int]($r.X + $r.Width / 2), [int]($r.Y + $r.Height / 2))
         Start-Sleep -Milliseconds 150
     }
+    # Message d'un élément introuvable : nom et type cherchés, dernière erreur, ce qui est vu.
+    function Introuvable([IntPtr]$Racine, [string]$Nom, $Type) {
+        $t = if ($null -ne $Type) { $Type.ProgrammaticName } else { 'tout type' }
+        $err = if ($script:ErreurElement -ne '') { " ; dernière erreur : $script:ErreurElement" } else { '' }
+        return "« $Nom » ($t) introuvable$err ; $(Elements-Vus $Racine)"
+    }
     function Cliquer-Nom([IntPtr]$Fenetre, [string]$Nom, $Type, [string]$Quoi) {
-        Cliquer-Element (Element $Fenetre $Nom $Type) $Quoi
+        $e = Element $Fenetre $Nom $Type
+        if ($null -eq $e) {
+            $d = Introuvable $Fenetre $Nom $Type
+            Verifier "$Quoi : élément trouvé" $false $d | Out-Null
+            throw "$Quoi : $d"
+        }
+        Cliquer-Element $e $Quoi
     }
     function Etat-Interrupteur([IntPtr]$Fenetre, [string]$Nom) {
         $e = Element $Fenetre $Nom
-        if ($null -eq $e) { return 'introuvable' }
+        if ($null -eq $e) { return "introuvable ($(Introuvable $Fenetre $Nom $null))" }
         try { return [string]$e.GetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern).Current.ToggleState }
         catch { return 'sans etat' }
     }
@@ -267,25 +324,43 @@ public static string Titre(IntPtr h) {
             Verifier "$Quoi : fenêtre de l'icône trouvée" $false 'aucune fenêtre tray_icon_app' | Out-Null
             throw "$Quoi : menu de l'icône impossible à ouvrir"
         }
-        $menusAvant = [BreezyShotEssai.Reglages]::Visibles('#32768').Length
+        $avant = @([BreezyShotEssai.Reglages]::Visibles('#32768') | ForEach-Object { [long]$_ })
         $vus = Compter-Motif -Motif 'menu: reglages$' -Dossier $cas
         # WM_USER_TRAYICON (6002) avec WM_RBUTTONUP (0x205) : ce que Windows envoie au clic droit.
         foreach ($h in $icones) { [void][BreezyShotEssai.Reglages]::PostMessage($h, 6002, [IntPtr]::Zero, [IntPtr]0x205) }
-        $menu = [IntPtr]::Zero
+        # Chaque fenêtre de menu nouvelle est lue par l'API des menus Win32 (MN_GETHMENU,
+        # GetMenuStringW) : l'entrée est celle dont le texte vaut exactement « Réglages ».
+        $nouveaux = @()
+        $trouve = $null
+        $lus = @{}
         $limite = [DateTime]::UtcNow.AddSeconds(3)
         do {
-            $m = [BreezyShotEssai.Reglages]::Visibles('#32768')
-            if ($m.Length -gt $menusAvant -or ($m.Length -gt 0 -and $menusAvant -eq 0)) { $menu = $m[0] }
-            Start-Sleep -Milliseconds 50
-        } while ($menu -eq [IntPtr]::Zero -and [DateTime]::UtcNow -lt $limite)
-        if (-not (Verifier "$Quoi : le menu de l'icône s'ouvre" ($menu -ne [IntPtr]::Zero))) {
+            $nouveaux = @([BreezyShotEssai.Reglages]::Visibles('#32768') | Where-Object { $avant -notcontains [long]$_ })
+            foreach ($f in $nouveaux) {
+                $hm = [BreezyShotEssai.Reglages]::MenuDe($f)
+                if ($hm -eq [IntPtr]::Zero) { $lus["$f"] = 'pas de HMENU'; continue }
+                $textes = [BreezyShotEssai.Reglages]::Textes($hm)
+                if ($null -eq $textes) { $lus["$f"] = "HMENU $hm : GetMenuItemCount en échec"; continue }
+                $lus["$f"] = "HMENU $hm, $($textes.Length) entrées : " + (($textes | ForEach-Object { "« $_ »" }) -join ', ')
+                for ($i = 0; $i -lt $textes.Length; $i++) {
+                    if ($textes[$i] -ceq 'Réglages') { $trouve = @{ Fenetre = $f; Menu = $hm; Position = $i }; break }
+                }
+                if ($null -ne $trouve) { break }
+            }
+            if ($null -eq $trouve) { Start-Sleep -Milliseconds 50 }
+        } while ($null -eq $trouve -and [DateTime]::UtcNow -lt $limite)
+        if (-not (Verifier "$Quoi : le menu de l'icône s'ouvre" ($nouveaux.Count -gt 0) "fenêtres #32768 nouvelles : $($nouveaux.Count), déjà là : $($avant.Count)")) {
             throw "$Quoi : le menu de l'icône ne s'ouvre pas"
         }
-        $entree = Element $menu 'Réglages' $null 3
-        if (-not (Verifier "$Quoi : entrée « Réglages » au menu" ($null -ne $entree))) { throw "$Quoi : pas d'entrée Réglages" }
-        try { $entree.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke() }
-        catch { Cliquer-Element $entree $Quoi }
-        $null = Attendre-Suivante 'menu: reglages$' $cas $vus "$Quoi : menu: reglages"
+        $diag = (($lus.GetEnumerator() | ForEach-Object { "fenêtre $($_.Key) : $($_.Value)" }) -join ' | ')
+        if (-not (Verifier "$Quoi : entrée « Réglages » au menu" ($null -ne $trouve) $diag)) { throw "$Quoi : pas d'entrée Réglages ($diag)" }
+        $r = New-Object BreezyShotEssai.Reglages+RECT
+        if (-not [BreezyShotEssai.Reglages]::GetMenuItemRect([IntPtr]::Zero, $trouve.Menu, [uint32]$trouve.Position, [ref]$r)) {
+            Verifier "$Quoi : rectangle de l'entrée « Réglages »" $false "GetMenuItemRect en échec, position $($trouve.Position)" | Out-Null
+            throw "$Quoi : rectangle de l'entrée Réglages illisible"
+        }
+        [BreezyShotEssai.Reglages]::Cliquer([int](($r.Left + $r.Right) / 2), [int](($r.Top + $r.Bottom) / 2))
+        $null = Attendre-Suivante 'menu: reglages$' $cas $vus "$Quoi : menu: reglages (clic en $($r.Left),$($r.Top) $($r.Right - $r.Left)x$($r.Bottom - $r.Top), position $($trouve.Position))"
     }
 
     $ouvertes = Compter-Motif -Motif 'reglages fenetre \d+$' -Dossier $cas
@@ -361,7 +436,8 @@ public static string Titre(IntPtr h) {
     $null = Attendre-Suivante 'raccourcis suspendus \(saisie plein_ecran\)$' $cas $susp '(6) saisie'
     [BreezyShotEssai.Reglages]::Appuyer($CTRL_MAJ, 0x38)
     $null = Attendre-Motif -Motif 'raccourci plein_ecran refuse: Ctrl\+Maj\+8 \(refuse par le systeme\)$' -Dossier $cas -DelaiS 5 -Quoi '(6) refus'
-    Verifier '(6) « Pris par une autre application » sur la ligne' ($null -ne (Element $fen 'Pris par une autre application')) | Out-Null
+    $pris = Element $fen 'Pris par une autre application'
+    Verifier '(6) « Pris par une autre application » sur la ligne' ($null -ne $pris) $(if ($null -eq $pris) { Introuvable $fen 'Pris par une autre application' $null } else { '' }) | Out-Null
     $lu = @((Lire-Reglages $cas).raccourcis.plein_ecran)
     Verifier '(6) fichier inchangé' (($lu.Count -eq 1) -and ($lu[0] -eq 'Ctrl+Maj+7')) ($lu -join ',') | Out-Null
     $n = Presses; $repos = Compter-Motif -Motif 'Decoupe -> Repos' -Dossier $cas
@@ -424,16 +500,41 @@ public static string Titre(IntPtr h) {
         Start-Sleep -Milliseconds 100
     } while ($dialogue -eq [IntPtr]::Zero -and [DateTime]::UtcNow -lt $limite)
     if (-not (Verifier '(8) le sélecteur de dossier s''ouvre' ($dialogue -ne [IntPtr]::Zero))) { throw '(8) pas de sélecteur' }
-    # Champ « Dossier : » (1152) puis bouton de validation (1) du dialogue de Windows.
-    $champ = $AE::FromHandle($dialogue).FindFirst([System.Windows.Automation.TreeScope]::Descendants,
-        [System.Windows.Automation.PropertyCondition]::new($AE::AutomationIdProperty, '1152'))
-    if ($null -eq $champ) { throw '(8) champ du dossier introuvable' }
+    # Champ « Dossier : » (1152) puis bouton de validation (1) du dialogue de Windows,
+    # attendus. Introuvables : le message liste les identifiants (pas les noms, qui peuvent
+    # être des noms de dossiers) des champs et boutons vus.
+    function Par-Id([IntPtr]$Racine, [string]$Id, $Type, [string]$Quoi) {
+        $cond = [System.Windows.Automation.PropertyCondition]::new($AE::AutomationIdProperty, $Id)
+        if ($null -ne $Type) {
+            $cond = [System.Windows.Automation.AndCondition]::new($cond,
+                [System.Windows.Automation.PropertyCondition]::new($AE::ControlTypeProperty, $Type))
+        }
+        $err = ''
+        $limite = [DateTime]::UtcNow.AddSeconds(5)
+        do {
+            try {
+                $e = $AE::FromHandle($Racine).FindFirst([System.Windows.Automation.TreeScope]::Descendants, $cond)
+                if ($null -ne $e) { return $e }
+            } catch { $err = $_.Exception.Message }
+            Start-Sleep -Milliseconds 100
+        } while ([DateTime]::UtcNow -lt $limite)
+        $ids = @()
+        try {
+            foreach ($x in $AE::FromHandle($Racine).FindAll([System.Windows.Automation.TreeScope]::Descendants,
+                    [System.Windows.Automation.Condition]::TrueCondition)) {
+                $c = $x.Current
+                if ($c.ControlType -eq [System.Windows.Automation.ControlType]::Edit -or $c.ControlType -eq [System.Windows.Automation.ControlType]::Button) {
+                    $ids += "$($c.ControlType.ProgrammaticName -replace '^ControlType\.', '') #$($c.AutomationId)"
+                }
+            }
+        } catch { $ids += "UI Automation en échec : $($_.Exception.Message)" }
+        $d = "identifiant $Id introuvable$(if ($err) { " ; dernière erreur : $err" }) ; champs et boutons vus : $($ids -join ', ')"
+        Verifier "$Quoi : trouvé" $false $d | Out-Null
+        throw "$Quoi : $d"
+    }
+    $champ = Par-Id $dialogue '1152' $null '(8) champ du dossier'
     $champ.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).SetValue($choisi)
-    $ok = $AE::FromHandle($dialogue).FindFirst([System.Windows.Automation.TreeScope]::Descendants,
-        [System.Windows.Automation.AndCondition]::new(
-            [System.Windows.Automation.PropertyCondition]::new($AE::AutomationIdProperty, '1'),
-            [System.Windows.Automation.PropertyCondition]::new($AE::ControlTypeProperty, [System.Windows.Automation.ControlType]::Button)))
-    if ($null -eq $ok) { throw '(8) bouton de validation introuvable' }
+    $ok = Par-Id $dialogue '1' ([System.Windows.Automation.ControlType]::Button) '(8) bouton de validation'
     $ok.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
     $null = Attendre-Motif -Motif 'reglage change: dossier$' -Dossier $cas -DelaiS 10 -Quoi '(8) dossier changé'
     Verifier '(8) fichier : dossier choisi' ((Lire-Reglages $cas).dossier_enregistrement -eq $choisi) | Out-Null
