@@ -117,13 +117,25 @@ pub struct EcranInfo {
 /// Une fenêtre visible d'une autre app. La liste va du premier plan vers le fond.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FenetreInfo {
-    /// Le vrai bord de la fenêtre, sans l'ombre, en pixels réels.
+    /// Le vrai bord, sans l'ombre (`DWMWA_EXTENDED_FRAME_BOUNDS`), en pixels réels.
     pub rect: Rect,
+    /// Jamais écrit au journal.
     pub titre: String,
+    pub coins: Coins,
 }
 
-/// Pixels lus dans l'image figée : 4 octets par pixel (rouge, vert, bleu, alpha = 255),
-/// ligne par ligne de haut en bas.
+/// Forme des coins d'une fenêtre, approchée : Windows ne donne pas le rayon des coins.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Coins {
+    Droits,
+    /// Rayon de 8 pixels à 100 % (Windows 11).
+    Arrondis,
+    /// Rayon de 4 pixels à 100 % (menus, petites fenêtres).
+    PetitsArrondis,
+}
+
+/// Pixels lus dans l'image figée : 4 octets par pixel (rouge, vert, bleu, alpha = 255,
+/// sauf après `capture::decoupe::arrondir`), ligne par ligne de haut en bas.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Pixels {
     pub largeur: u32,
@@ -278,18 +290,74 @@ pub struct EtatFenetre {
     pub reduite: bool,
     /// Masquée par Windows (`DWMWA_CLOAKED`) : autre bureau, app suspendue…
     pub masquee: bool,
-    pub a_un_titre: bool,
     pub de_breezyshot: bool,
+    /// Les clics la traversent (`WS_EX_TRANSPARENT`) : voile invisible d'une autre app.
+    pub traverse_clics: bool,
+    /// Le bureau lui-même (`est_classe_du_bureau`).
+    pub bureau: bool,
 }
 
-/// Règle du mode « fenêtre » : visible, non réduite, non masquée, avec un titre ou une
-/// taille non nulle, et pas à BreezyShot.
+/// Règle du mode « fenêtre » : visible, non réduite, non masquée, pas à BreezyShot, ni
+/// traversée par les clics, ni le bureau, et d'une taille non nulle. La barre des tâches
+/// reste une fenêtre comme une autre.
 pub fn garder_fenetre(etat: EtatFenetre, rect: Rect) -> bool {
     etat.visible
         && !etat.reduite
         && !etat.masquee
         && !etat.de_breezyshot
-        && (etat.a_un_titre || !rect.est_vide())
+        && !etat.traverse_clics
+        && !etat.bureau
+        && !rect.est_vide()
+}
+
+/// Vrai pour les classes de fenêtre du bureau (le fond d'écran et ses icônes).
+pub fn est_classe_du_bureau(classe: &str) -> bool {
+    classe == "Progman" || classe == "WorkerW"
+}
+
+/// Première build de Windows 11 (coins arrondis par DWM).
+pub const BUILD_WINDOWS_11: u32 = 22000;
+
+/// Valeurs de `DWM_WINDOW_CORNER_PREFERENCE` (dwmapi.h), recopiées ici pour la règle pure ;
+/// un test Windows les compare à celles de la crate `windows`.
+pub const PREFERENCE_DEFAUT: i32 = 0;
+pub const PREFERENCE_NE_PAS_ARRONDIR: i32 = 1;
+pub const PREFERENCE_ARRONDIR: i32 = 2;
+pub const PREFERENCE_ARRONDIR_PEU: i32 = 3;
+
+/// Ce que le système dit d'une fenêtre, pour approcher la forme de ses coins.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct EtatCoins {
+    /// Build de Windows ; `None` si inconnue.
+    pub build: Option<u32>,
+    /// Agrandie (`IsZoomed`).
+    pub agrandie: bool,
+    /// Ancrée sur un bord ou un quart d'écran (`IsWindowArranged`).
+    pub ancree: bool,
+    /// `DWMWA_WINDOW_CORNER_PREFERENCE` lue ; `None` si la lecture a échoué.
+    pub preference: Option<i32>,
+    /// `WS_CAPTION` entier ou `WS_THICKFRAME`.
+    pub a_un_cadre: bool,
+}
+
+/// Règle des coins (approximation assumée) :
+/// 1. build inconnue ou d'avant Windows 11 : droits ;
+/// 2. agrandie ou ancrée : droits ;
+/// 3. préférence lue : « ne pas arrondir » → droits, « arrondir » → arrondis,
+///    « arrondir peu » → petits arrondis ; « défaut », valeur inconnue ou lecture
+///    impossible : point 4 ;
+/// 4. arrondis si la fenêtre a un cadre, sinon droits (barre des tâches, plein écran…).
+pub fn coins_de(etat: EtatCoins) -> Coins {
+    if etat.build.is_none_or(|b| b < BUILD_WINDOWS_11) || etat.agrandie || etat.ancree {
+        return Coins::Droits;
+    }
+    match etat.preference {
+        Some(PREFERENCE_NE_PAS_ARRONDIR) => Coins::Droits,
+        Some(PREFERENCE_ARRONDIR) => Coins::Arrondis,
+        Some(PREFERENCE_ARRONDIR_PEU) => Coins::PetitsArrondis,
+        _ if etat.a_un_cadre => Coins::Arrondis,
+        _ => Coins::Droits,
+    }
 }
 
 /// Convertit sur place des pixels BGRA (ordre de Windows) en RGBA, alpha forcé à 255
@@ -380,52 +448,123 @@ mod tests {
             visible: true,
             reduite: false,
             masquee: false,
-            a_un_titre: true,
             de_breezyshot: false,
+            traverse_clics: false,
+            bureau: false,
         };
         let taille = r(0, 0, 10, 10);
         assert!(garder_fenetre(ok, taille));
-        assert!(garder_fenetre(
-            EtatFenetre {
-                a_un_titre: false,
-                ..ok
-            },
-            taille
-        ));
-        assert!(!garder_fenetre(
-            EtatFenetre {
-                a_un_titre: false,
-                ..ok
-            },
-            r(0, 0, 0, 10)
-        ));
-        assert!(!garder_fenetre(
+        assert!(garder_fenetre(ok, r(-3000, -200, 1, 1)));
+        // Rectangle vide : jamais gardée.
+        assert!(!garder_fenetre(ok, r(0, 0, 0, 10)));
+        assert!(!garder_fenetre(ok, r(0, 0, 10, 0)));
+        assert!(!garder_fenetre(ok, r(0, 0, -5, 10)));
+        let refusees = [
             EtatFenetre {
                 visible: false,
                 ..ok
             },
-            taille
-        ));
-        assert!(!garder_fenetre(
             EtatFenetre {
                 reduite: true,
                 ..ok
             },
-            taille
-        ));
-        assert!(!garder_fenetre(
             EtatFenetre {
                 masquee: true,
                 ..ok
             },
-            taille
-        ));
-        assert!(!garder_fenetre(
             EtatFenetre {
                 de_breezyshot: true,
                 ..ok
             },
-            taille
-        ));
+            EtatFenetre {
+                traverse_clics: true,
+                ..ok
+            },
+            EtatFenetre { bureau: true, ..ok },
+        ];
+        for etat in refusees {
+            assert!(!garder_fenetre(etat, taille), "{etat:?}");
+        }
+    }
+
+    #[test]
+    fn classes_du_bureau() {
+        assert!(est_classe_du_bureau("Progman"));
+        assert!(est_classe_du_bureau("WorkerW"));
+        // La barre des tâches reste une fenêtre comme une autre.
+        assert!(!est_classe_du_bureau("Shell_TrayWnd"));
+        assert!(!est_classe_du_bureau("progman"));
+        assert!(!est_classe_du_bureau(""));
+    }
+
+    #[test]
+    fn regle_des_coins() {
+        let base = EtatCoins {
+            build: Some(26100),
+            agrandie: false,
+            ancree: false,
+            preference: None,
+            a_un_cadre: true,
+        };
+        // 4. Par défaut : selon le cadre.
+        assert_eq!(coins_de(base), Coins::Arrondis);
+        assert_eq!(
+            coins_de(EtatCoins {
+                a_un_cadre: false,
+                ..base
+            }),
+            Coins::Droits
+        );
+        // 1. Avant Windows 11, ou build inconnue.
+        for build in [None, Some(19045), Some(BUILD_WINDOWS_11 - 1)] {
+            let etat = EtatCoins {
+                build,
+                preference: Some(PREFERENCE_ARRONDIR),
+                ..base
+            };
+            assert_eq!(coins_de(etat), Coins::Droits, "{etat:?}");
+        }
+        assert_eq!(
+            coins_de(EtatCoins {
+                build: Some(BUILD_WINDOWS_11),
+                ..base
+            }),
+            Coins::Arrondis
+        );
+        // 2. Agrandie ou ancrée : droits, quelle que soit la préférence.
+        for (agrandie, ancree) in [(true, false), (false, true), (true, true)] {
+            let etat = EtatCoins {
+                agrandie,
+                ancree,
+                preference: Some(PREFERENCE_ARRONDIR),
+                ..base
+            };
+            assert_eq!(coins_de(etat), Coins::Droits, "{etat:?}");
+        }
+        // 3. Préférence lue, avec ou sans cadre.
+        for a_un_cadre in [true, false] {
+            let avec = |preference| EtatCoins {
+                preference,
+                a_un_cadre,
+                ..base
+            };
+            assert_eq!(
+                coins_de(avec(Some(PREFERENCE_NE_PAS_ARRONDIR))),
+                Coins::Droits
+            );
+            assert_eq!(coins_de(avec(Some(PREFERENCE_ARRONDIR))), Coins::Arrondis);
+            assert_eq!(
+                coins_de(avec(Some(PREFERENCE_ARRONDIR_PEU))),
+                Coins::PetitsArrondis
+            );
+            let selon_cadre = if a_un_cadre {
+                Coins::Arrondis
+            } else {
+                Coins::Droits
+            };
+            assert_eq!(coins_de(avec(Some(PREFERENCE_DEFAUT))), selon_cadre);
+            assert_eq!(coins_de(avec(Some(42))), selon_cadre);
+            assert_eq!(coins_de(avec(None)), selon_cadre);
+        }
     }
 }

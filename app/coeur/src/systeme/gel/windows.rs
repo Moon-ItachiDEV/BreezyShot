@@ -16,7 +16,7 @@ use ::windows::Win32::Foundation::{
 };
 use ::windows::Win32::Graphics::Dwm::{
     DwmGetWindowAttribute, DwmSetWindowAttribute, DWMWA_CLOAKED, DWMWA_EXTENDED_FRAME_BOUNDS,
-    DWMWA_TRANSITIONS_FORCEDISABLED,
+    DWMWA_TRANSITIONS_FORCEDISABLED, DWMWA_WINDOW_CORNER_PREFERENCE,
 };
 use ::windows::Win32::Graphics::Gdi::{
     BeginPaint, BitBlt, CreateCompatibleBitmap, CreateCompatibleDC, DeleteDC, DeleteObject,
@@ -24,26 +24,28 @@ use ::windows::Win32::Graphics::Gdi::{
     SelectObject, ValidateRect, BITMAPINFO, BITMAPINFOHEADER, BI_RGB, CAPTUREBLT, DIB_RGB_COLORS,
     HBITMAP, HDC, HGDIOBJ, HMONITOR, MONITORINFO, PAINTSTRUCT, SRCCOPY,
 };
-use ::windows::Win32::System::LibraryLoader::GetModuleHandleW;
+use ::windows::Win32::System::LibraryLoader::{GetModuleHandleW, GetProcAddress};
 use ::windows::Win32::System::RemoteDesktop::{
     WTSRegisterSessionNotification, WTSUnRegisterSessionNotification, NOTIFY_FOR_THIS_SESSION,
 };
 use ::windows::Win32::System::Threading::{GetCurrentProcessId, GetCurrentThreadId};
 use ::windows::Win32::UI::HiDpi::{GetDpiForMonitor, MDT_EFFECTIVE_DPI};
 use ::windows::Win32::UI::WindowsAndMessaging::{
-    CreateWindowExW, DefWindowProcW, DestroyWindow, EnumWindows, GetSystemMetrics, GetWindowRect,
-    GetWindowTextLengthW, GetWindowTextW, GetWindowThreadProcessId, IsIconic, IsWindow,
-    IsWindowVisible, LoadCursorW, PostMessageW, RegisterClassW, SendMessageTimeoutW, SetWindowPos,
-    ShowWindow, ShowWindowAsync, HWND_TOPMOST, IDC_CROSS, MA_NOACTIVATE, MONITORINFOF_PRIMARY,
-    SMTO_ABORTIFHUNG, SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN, SM_XVIRTUALSCREEN, SM_YVIRTUALSCREEN,
-    SWP_NOACTIVATE, SWP_SHOWWINDOW, SW_HIDE, WM_CLOSE, WM_DESTROY, WM_DISPLAYCHANGE, WM_DPICHANGED,
-    WM_ERASEBKGND, WM_MOUSEACTIVATE, WM_NULL, WM_PAINT, WM_WTSSESSION_CHANGE, WNDCLASSW, WNDPROC,
-    WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP, WTS_SESSION_LOCK,
+    CreateWindowExW, DefWindowProcW, DestroyWindow, EnumWindows, GetClassNameW, GetSystemMetrics,
+    GetWindowLongW, GetWindowRect, GetWindowTextLengthW, GetWindowTextW, GetWindowThreadProcessId,
+    IsIconic, IsWindow, IsWindowVisible, IsZoomed, LoadCursorW, PostMessageW, RegisterClassW,
+    SendMessageTimeoutW, SetWindowPos, ShowWindow, ShowWindowAsync, GWL_EXSTYLE, GWL_STYLE,
+    HWND_TOPMOST, IDC_CROSS, MA_NOACTIVATE, MONITORINFOF_PRIMARY, SMTO_ABORTIFHUNG,
+    SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN, SM_XVIRTUALSCREEN, SM_YVIRTUALSCREEN, SWP_NOACTIVATE,
+    SWP_SHOWWINDOW, SW_HIDE, WM_CLOSE, WM_DESTROY, WM_DISPLAYCHANGE, WM_DPICHANGED, WM_ERASEBKGND,
+    WM_MOUSEACTIVATE, WM_NULL, WM_PAINT, WM_WTSSESSION_CHANGE, WNDCLASSW, WNDPROC, WS_CAPTION,
+    WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_EX_TRANSPARENT, WS_POPUP, WS_THICKFRAME,
+    WTS_SESSION_LOCK,
 };
 
 use super::{
-    bgra_en_rgba, echelle_depuis_dpi, garder_fenetre, Changement, EcranInfo, EtatFenetre,
-    FenetreInfo, Pixels, Rect,
+    bgra_en_rgba, coins_de, echelle_depuis_dpi, est_classe_du_bureau, garder_fenetre, Changement,
+    Coins, EcranInfo, EtatCoins, EtatFenetre, FenetreInfo, Pixels, Rect,
 };
 
 pub const DISPONIBLE: bool = true;
@@ -571,15 +573,88 @@ fn titre(hwnd: HWND) -> String {
     }
 }
 
+/// Nom de la classe de la fenêtre (lu sans message).
+fn classe(hwnd: HWND) -> String {
+    let mut tampon = [0u16; 64];
+    // SAFETY : tampon dont la longueur est passée.
+    let n = unsafe { GetClassNameW(hwnd, &mut tampon) };
+    let n = (n.max(0) as usize).min(tampon.len());
+    String::from_utf16_lossy(&tampon[..n])
+}
+
+type FonctionAncree = unsafe extern "system" fn(HWND) -> BOOL;
+
+/// `IsWindowArranged`, cherchée une fois dans user32 par `GetProcAddress`, comme le
+/// demande Microsoft (pas de bibliothèque d'import ; Windows 10 1903 et après). Un lien
+/// direct empêcherait l'app de démarrer sur un Windows qui ne l'a pas.
+fn fonction_ancree() -> Option<FonctionAncree> {
+    static FONCTION: std::sync::OnceLock<Option<FonctionAncree>> = std::sync::OnceLock::new();
+    *FONCTION.get_or_init(|| {
+        // SAFETY : user32 est déjà chargé dans un processus graphique ; le nom est une
+        // chaîne constante terminée par un zéro.
+        unsafe {
+            let module = GetModuleHandleW(w!("user32.dll")).ok()?;
+            let adresse = GetProcAddress(module, ::windows::core::s!("IsWindowArranged"))?;
+            // SAFETY : signature documentée : BOOL IsWindowArranged(HWND).
+            Some(std::mem::transmute::<
+                unsafe extern "system" fn() -> isize,
+                FonctionAncree,
+            >(adresse))
+        }
+    })
+}
+
+/// Build de Windows, lue une fois.
+fn build_windows() -> Option<u32> {
+    static BUILD: std::sync::OnceLock<Option<u32>> = std::sync::OnceLock::new();
+    *BUILD.get_or_init(crate::systeme::version_windows)
+}
+
+/// `DWMWA_WINDOW_CORNER_PREFERENCE`. Microsoft ne documente cet attribut que pour
+/// `DwmSetWindowAttribute` (Windows 11 build 22000) : sa lecture peut échouer, et
+/// l'échec vaut « inconnu » (`None`).
+fn preference_coins(hwnd: HWND) -> Option<i32> {
+    let mut valeur = 0i32;
+    // SAFETY : `valeur` est un i32 (taille de DWM_WINDOW_CORNER_PREFERENCE) dont la taille
+    // est passée.
+    unsafe {
+        DwmGetWindowAttribute(
+            hwnd,
+            DWMWA_WINDOW_CORNER_PREFERENCE,
+            &mut valeur as *mut i32 as *mut core::ffi::c_void,
+            std::mem::size_of::<i32>() as u32,
+        )
+    }
+    .ok()
+    .map(|()| valeur)
+}
+
+/// Forme approchée des coins d'une fenêtre gardée.
+fn coins(hwnd: HWND, style: u32) -> Coins {
+    // SAFETY : lectures d'état d'une fenêtre, sans message.
+    let agrandie = unsafe { IsZoomed(hwnd) }.as_bool();
+    // SAFETY : fonction trouvée dans user32, appelée avec sa signature.
+    let ancree = fonction_ancree().is_some_and(|f| unsafe { f(hwnd) }.as_bool());
+    coins_de(EtatCoins {
+        build: build_windows(),
+        agrandie,
+        ancree,
+        preference: preference_coins(hwnd),
+        a_un_cadre: style & WS_CAPTION.0 == WS_CAPTION.0 || style & WS_THICKFRAME.0 != 0,
+    })
+}
+
 fn decrire_fenetre(hwnd: HWND, exclure: Option<u32>) -> Option<FenetreInfo> {
     // SAFETY : `hwnd` vient d'`EnumWindows` ; ces lectures n'envoient aucun message.
-    let (visible, reduite, processus) = unsafe {
+    let (visible, reduite, processus, style, style_etendu) = unsafe {
         let mut processus = 0u32;
         GetWindowThreadProcessId(hwnd, Some(&mut processus));
         (
             IsWindowVisible(hwnd).as_bool(),
             IsIconic(hwnd).as_bool(),
             processus,
+            GetWindowLongW(hwnd, GWL_STYLE) as u32,
+            GetWindowLongW(hwnd, GWL_EXSTYLE) as u32,
         )
     };
     let de_breezyshot = exclure.is_some_and(|p| p == processus);
@@ -601,15 +676,22 @@ fn decrire_fenetre(hwnd: HWND, exclure: Option<u32>) -> Option<FenetreInfo> {
     .is_ok()
         && masque != 0;
     let rect = bord_reel(hwnd)?;
-    let titre = titre(hwnd);
     let etat = EtatFenetre {
         visible,
         reduite,
         masquee,
-        a_un_titre: !titre.is_empty(),
         de_breezyshot,
+        traverse_clics: style_etendu & WS_EX_TRANSPARENT.0 != 0,
+        bureau: est_classe_du_bureau(&classe(hwnd)),
     };
-    garder_fenetre(etat, rect).then_some(FenetreInfo { rect, titre })
+    if !garder_fenetre(etat, rect) {
+        return None;
+    }
+    Some(FenetreInfo {
+        rect,
+        titre: titre(hwnd),
+        coins: coins(hwnd, style),
+    })
 }
 
 /// Appelée par `EnumWindows` pour chaque fenêtre de premier niveau, du premier plan vers
@@ -1132,8 +1214,9 @@ mod tests {
         SetProcessDpiAwarenessContext, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2,
     };
     use ::windows::Win32::UI::WindowsAndMessaging::{
-        DispatchMessageW, GetForegroundWindow, GetWindowLongW, PeekMessageW, SendMessageW,
-        TranslateMessage, GWL_EXSTYLE, MSG, PM_REMOVE, WINDOW_EX_STYLE, WTS_SESSION_UNLOCK,
+        DispatchMessageW, FindWindowW, GetForegroundWindow, PeekMessageW, SendMessageW,
+        SetLayeredWindowAttributes, TranslateMessage, LWA_ALPHA, MSG, PM_REMOVE, SWP_NOMOVE,
+        SWP_NOSIZE, SW_SHOWMINNOACTIVE, WINDOW_EX_STYLE, WS_EX_LAYERED, WTS_SESSION_UNLOCK,
     };
 
     use crate::systeme::gel as facade;
@@ -1255,6 +1338,15 @@ mod tests {
 
     impl FenetreEssai {
         fn creer(titre: PCWSTR) -> FenetreEssai {
+            FenetreEssai::creer_avec(titre, CLASSE_ESSAI, WINDOW_EX_STYLE(0))
+        }
+
+        /// Comme `creer`, avec une autre classe et des styles étendus en plus.
+        fn creer_avec(
+            titre: PCWSTR,
+            classe: PCWSTR,
+            style_etendu: WINDOW_EX_STYLE,
+        ) -> FenetreEssai {
             let principal = facade::ecrans()
                 .into_iter()
                 .find(|e| e.principal)
@@ -1265,12 +1357,12 @@ mod tests {
                 largeur: 2 * COTE,
                 hauteur: 2 * COTE,
             };
-            let instance = enregistrer_classe(CLASSE_ESSAI, Some(procedure_essai)).unwrap();
+            let instance = enregistrer_classe(classe, Some(procedure_essai)).unwrap();
             // SAFETY : classe inscrite ; fenêtre de ce fil, détruite par `Drop`.
             unsafe {
                 let hwnd = CreateWindowExW(
-                    WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
-                    CLASSE_ESSAI,
+                    WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | style_etendu,
+                    classe,
                     titre,
                     WS_POPUP,
                     rect.x,
@@ -1522,6 +1614,136 @@ mod tests {
         assert!(!fenetres_visibles().iter().any(|f| f.titre == titre));
         drop(essai);
         assert!(!lister_fenetres(None).iter().any(|f| f.titre == titre));
+    }
+
+    /// Les valeurs recopiées pour la règle pure des coins sont celles de dwmapi.h.
+    #[test]
+    fn preferences_de_coins_recopiees() {
+        use ::windows::Win32::Graphics::Dwm::{DWMWCP_DEFAULT, DWMWCP_ROUND, DWMWCP_ROUNDSMALL};
+        assert_eq!(facade::PREFERENCE_DEFAUT, DWMWCP_DEFAULT.0);
+        assert_eq!(facade::PREFERENCE_NE_PAS_ARRONDIR, DWMWCP_DONOTROUND.0);
+        assert_eq!(facade::PREFERENCE_ARRONDIR, DWMWCP_ROUND.0);
+        assert_eq!(facade::PREFERENCE_ARRONDIR_PEU, DWMWCP_ROUNDSMALL.0);
+    }
+
+    #[test]
+    fn fenetre_d_essai_vue_avec_son_rectangle_et_ses_coins() {
+        let _s = Seance::ouvrir();
+        let titre = "BreezyShot essai coins";
+        let essai = FenetreEssai::creer(w!("BreezyShot essai coins"));
+        let toutes = lister_fenetres(None);
+        let trouvee = toutes.iter().find(|f| f.titre == titre);
+        // Sans cadre et réglée « ne pas arrondir » : coins droits.
+        assert_eq!(
+            trouvee.map(|f| (f.rect, f.coins)),
+            Some((essai.rect, Coins::Droits)),
+            "liste : {toutes:?}"
+        );
+        println!(
+            "build {:?}, IsWindowArranged {}, preference lue {:?}",
+            build_windows(),
+            if fonction_ancree().is_some() {
+                "trouvee"
+            } else {
+                "absente"
+            },
+            preference_coins(essai.hwnd)
+        );
+    }
+
+    #[test]
+    fn fenetres_ecartees_reduite_traversee_et_bureau() {
+        let _s = Seance::ouvrir();
+        let liste_a = |titre: &str| lister_fenetres(None).iter().any(|f| f.titre == titre);
+
+        // Réduite.
+        let reduite = FenetreEssai::creer(w!("BreezyShot essai reduite"));
+        assert!(
+            liste_a("BreezyShot essai reduite"),
+            "vue avant d'etre reduite"
+        );
+        // SAFETY : fenêtre de ce fil.
+        unsafe {
+            let _ = ShowWindow(reduite.hwnd, SW_SHOWMINNOACTIVE);
+        }
+        laisser_composer();
+        // SAFETY : fenêtre de ce fil.
+        assert!(unsafe { IsIconic(reduite.hwnd) }.as_bool(), "pas reduite");
+        assert!(decrire_fenetre(reduite.hwnd, None).is_none());
+        assert!(!liste_a("BreezyShot essai reduite"));
+        drop(reduite);
+
+        // Traversée par les clics.
+        let voile = FenetreEssai::creer_avec(
+            w!("BreezyShot essai voile"),
+            CLASSE_ESSAI,
+            WS_EX_LAYERED | WS_EX_TRANSPARENT,
+        );
+        // Une fenêtre `WS_EX_LAYERED` reste invisible tant qu'on ne pose pas son opacité.
+        // SAFETY : fenêtre de ce fil.
+        unsafe { SetLayeredWindowAttributes(voile.hwnd, COLORREF(0), 255, LWA_ALPHA) }.unwrap();
+        laisser_composer();
+        // SAFETY : fenêtre de ce fil.
+        assert!(unsafe { IsWindowVisible(voile.hwnd) }.as_bool());
+        assert!(decrire_fenetre(voile.hwnd, None).is_none());
+        assert!(!liste_a("BreezyShot essai voile"));
+        drop(voile);
+
+        // Une fenêtre de la classe du bureau (inscrite ici, dans ce processus).
+        let faux_bureau = FenetreEssai::creer_avec(
+            w!("BreezyShot essai bureau"),
+            w!("WorkerW"),
+            WINDOW_EX_STYLE(0),
+        );
+        // SAFETY : fenêtre de ce fil.
+        assert!(unsafe { IsWindowVisible(faux_bureau.hwnd) }.as_bool());
+        assert!(decrire_fenetre(faux_bureau.hwnd, None).is_none());
+        assert!(!liste_a("BreezyShot essai bureau"));
+        drop(faux_bureau);
+
+        // Le vrai bureau, s'il existe sur cette machine.
+        for nom in [w!("Progman"), w!("WorkerW")] {
+            // SAFETY : recherche par nom de classe, sans tampon.
+            if let Ok(hwnd) = unsafe { FindWindowW(nom, PCWSTR::null()) } {
+                assert!(decrire_fenetre(hwnd, None).is_none(), "{}", classe(hwnd));
+            }
+        }
+
+        // Témoin : une fenêtre ordinaire est bien vue.
+        let temoin = FenetreEssai::creer(w!("BreezyShot essai temoin"));
+        assert!(decrire_fenetre(temoin.hwnd, None).is_some());
+    }
+
+    #[test]
+    fn fenetres_du_premier_plan_vers_le_fond() {
+        let _s = Seance::ouvrir();
+        let a = FenetreEssai::creer(w!("BreezyShot essai ordre A"));
+        let b = FenetreEssai::creer(w!("BreezyShot essai ordre B"));
+        let rang = |titre: &str| {
+            lister_fenetres(None)
+                .iter()
+                .position(|f| f.titre == titre)
+                .unwrap_or_else(|| panic!("{titre} absente"))
+        };
+        // B, créée après, est au-dessus de A.
+        assert!(rang("BreezyShot essai ordre B") < rang("BreezyShot essai ordre A"));
+        // A remonte au-dessus de B.
+        // SAFETY : fenêtre de ce fil.
+        unsafe {
+            SetWindowPos(
+                a.hwnd,
+                Some(HWND_TOPMOST),
+                0,
+                0,
+                0,
+                0,
+                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
+            )
+        }
+        .unwrap();
+        laisser_composer();
+        assert!(rang("BreezyShot essai ordre A") < rang("BreezyShot essai ordre B"));
+        drop(b);
     }
 
     #[test]
