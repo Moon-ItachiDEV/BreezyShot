@@ -91,12 +91,17 @@ function Lignes-Depuis([string]$Dossier, [int]$Debut) {
 # son essai 07).
 function Ecrire-Reglages([string]$Dossier) {
     $r = [ordered]@{
-        version                   = 1
+        version                   = 2
         raccourcis                = [ordered]@{ zone = @('Ctrl+Maj+1'); plein_ecran = @(); fenetre = @('Ctrl+Maj+3') }
         copier_apres_capture      = $true
         enregistrer_apres_capture = $true
         dossier_enregistrement    = $null
         vignette                  = [ordered]@{ afficher = $false; duree_s = 6; coin = 'bas_gauche' }
+        selection                 = [ordered]@{ loupe = $false }
+        demarrer_avec_systeme     = $false
+        modele_nom                = 'BreezyShot {date} à {heure}'
+        animations                = 'systeme'
+        theme                     = 'systeme'
     }
     $d = Join-Path $Dossier 'reglages'
     New-Item -ItemType Directory -Force -Path $d | Out-Null

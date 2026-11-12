@@ -123,12 +123,17 @@ function Attendre-Motif([string]$Motif, [string]$Dossier, [double]$DelaiS, [stri
 # parcours de 0.2 (bandeau, fichier enregistré).
 function Ecrire-Reglages([string]$Dossier, [bool]$Enregistrer, $DossierEnregistrement) {
     $r = [ordered]@{
-        version                   = 1
+        version                   = 2
         raccourcis                = [ordered]@{ zone = @('Ctrl+Maj+1'); plein_ecran = @(); fenetre = @() }
         copier_apres_capture      = $true
         enregistrer_apres_capture = $Enregistrer
         dossier_enregistrement    = $DossierEnregistrement
         vignette                  = [ordered]@{ afficher = $false; duree_s = 6; coin = 'bas_gauche' }
+        selection                 = [ordered]@{ loupe = $false }
+        demarrer_avec_systeme     = $false
+        modele_nom                = 'BreezyShot {date} à {heure}'
+        animations                = 'systeme'
+        theme                     = 'systeme'
     }
     $d = Join-Path $Dossier 'reglages'
     New-Item -ItemType Directory -Force -Path $d | Out-Null

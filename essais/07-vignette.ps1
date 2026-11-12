@@ -81,16 +81,20 @@ function Fichiers-Png([string]$Dossier) {
     return @(Get-ChildItem -LiteralPath $Dossier -File -Filter '*.png' | Sort-Object LastWriteTimeUtc, Name)
 }
 
-# Réglages du cas (version 1 du fichier ; durée « toujours » non essayée ici).
+# Réglages du cas (version 2 du fichier, complète : rien à réécrire ; durée « toujours » non essayée ici).
 function Ecrire-Reglages([string]$Dossier, [bool]$Afficher = $true, [string]$Coin = 'bas_gauche', [string]$Animations = 'normales', $DossierEnregistrement = $null) {
     $r = [ordered]@{
-        version                   = 1
+        version                   = 2
         raccourcis                = [ordered]@{ zone = @(); plein_ecran = @('Ctrl+Maj+2'); fenetre = @() }
         copier_apres_capture      = $true
         enregistrer_apres_capture = $false
         dossier_enregistrement    = $DossierEnregistrement
         vignette                  = [ordered]@{ afficher = $Afficher; duree_s = 3; coin = $Coin }
         animations                = $Animations
+        selection                 = [ordered]@{ loupe = $false }
+        demarrer_avec_systeme     = $false
+        modele_nom                = 'BreezyShot {date} à {heure}'
+        theme                     = 'systeme'
     }
     $d = Join-Path $Dossier 'reglages'
     New-Item -ItemType Directory -Force -Path $d | Out-Null
