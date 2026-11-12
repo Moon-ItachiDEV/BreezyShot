@@ -224,6 +224,10 @@ public static IntPtr[] Visibles(string classe) {
 // Menus Win32 : les HMENU se lisent d'un autre processus.
 [DllImport("user32.dll")]
 public static extern IntPtr SendMessage(IntPtr h, uint msg, IntPtr w, IntPtr l);
+[DllImport("user32.dll", CharSet = CharSet.Unicode, EntryPoint = "SendMessageW")]
+static extern IntPtr SendMessageTexte(IntPtr h, uint msg, IntPtr w, string l);
+// WM_SETTEXT au contrôle : vrai si le contrôle l'a accepté.
+public static bool EcrireTexte(IntPtr h, string texte) { return SendMessageTexte(h, 0x000C, IntPtr.Zero, texte) != IntPtr.Zero; }
 [DllImport("user32.dll")]
 public static extern int GetMenuItemCount(IntPtr menu);
 [DllImport("user32.dll", CharSet = CharSet.Unicode, EntryPoint = "GetMenuStringW")]
@@ -667,10 +671,39 @@ public static string Titre(IntPtr h) {
         Verifier "$Quoi : trouvé" $false $d | Out-Null
         throw "$Quoi : $d"
     }
+    # Le motif UI Automation d'abord ; s'il manque (« Unsupported Pattern » vu sur la
+    # machine de GitHub), le message Windows adressé au contrôle lui-même. Un échec dit le
+    # type, la classe et les motifs de l'élément trouvé.
+    function Motifs($e) {
+        try { return (@($e.GetSupportedPatterns() | ForEach-Object { $_.ProgrammaticName }) -join ', ') } catch { return "motifs illisibles : $($_.Exception.Message)" }
+    }
+    function Poignee($e) { try { return [IntPtr][int]$e.Current.NativeWindowHandle } catch { return [IntPtr]::Zero } }
     $champ = Par-Id $dialogue '1152' $null '(8) champ du dossier'
-    $champ.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).SetValue($choisi)
+    $ecrit = ''
+    try { $champ.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).SetValue($choisi); $ecrit = 'ValuePattern' }
+    catch {
+        # Le champ lui-même, ou le premier champ de saisie qu'il contient.
+        $cibles = @($champ)
+        try {
+            $cibles += @($champ.FindAll([System.Windows.Automation.TreeScope]::Descendants,
+                [System.Windows.Automation.PropertyCondition]::new($AE::ControlTypeProperty, [System.Windows.Automation.ControlType]::Edit)))
+        } catch { }
+        foreach ($x in $cibles) {
+            $h = Poignee $x
+            if ($h -ne [IntPtr]::Zero -and [BreezyShotEssai.Reglages]::EcrireTexte($h, $choisi)) { $ecrit = 'WM_SETTEXT'; break }
+        }
+    }
+    if (-not (Verifier '(8) dossier écrit dans le champ du sélecteur' ($ecrit -ne '') "$ecrit ; $(Decrire $champ) ; motifs : $(Motifs $champ)")) { throw '(8) champ du dossier non écrit' }
     $ok = Par-Id $dialogue '1' ([System.Windows.Automation.ControlType]::Button) '(8) bouton de validation'
-    $ok.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    $presse = ''
+    try { $ok.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke(); $presse = 'InvokePattern' }
+    catch {
+        $h = Poignee $ok
+        # BM_CLICK au bouton, sinon WM_COMMAND IDOK au dialogue (postés : le dialogue se ferme).
+        if ($h -ne [IntPtr]::Zero -and [BreezyShotEssai.Reglages]::PostMessage($h, 0x00F5, [IntPtr]::Zero, [IntPtr]::Zero)) { $presse = 'BM_CLICK' }
+        elseif ([BreezyShotEssai.Reglages]::PostMessage($dialogue, 0x0111, [IntPtr]1, [IntPtr]::Zero)) { $presse = 'WM_COMMAND IDOK' }
+    }
+    if (-not (Verifier '(8) bouton de validation pressé' ($presse -ne '') "$presse ; $(Decrire $ok) ; motifs : $(Motifs $ok)")) { throw '(8) bouton de validation non pressé' }
     $null = Attendre-Motif -Motif 'reglage change: dossier$' -Dossier $cas -DelaiS 10 -Quoi '(8) dossier changé'
     Verifier '(8) fichier : dossier choisi' ((Lire-Reglages $cas).dossier_enregistrement -eq $choisi) | Out-Null
     $n = Presses; $repos = Compter-Motif -Motif 'Decoupe -> Repos' -Dossier $cas
