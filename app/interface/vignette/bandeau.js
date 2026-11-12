@@ -16,6 +16,8 @@
 // - `bandeau:decompte` et `bandeau:decompte_cache` : le décompte du retardateur
 //   (decompte.js). Il partage la fenêtre : une seule chose à la fois. Un message efface le
 //   disque ; un décompte efface la pilule sans `bandeau_termine`.
+// - `bandeau:message_cache` { id } : le cœur a caché le message `id` (avant une capture) ;
+//   la pilule est effacée tout de suite, sans `bandeau_termine`. Un autre `id` : rien.
 // Réussite : part seule après --duree-bandeau-reussite. Info et erreur : restent jusqu'au clic.
 // Sans window.__TAURI__ (aperçu dans un navigateur) : ?demo=reussite|info|erreur
 // (et &tenir pour qu'une réussite ne parte pas), ou ?demo=decompte.
@@ -275,6 +277,9 @@ if (tauri?.event?.listen) {
     tauri.event.listen("bandeau:afficher", (evenement) => afficher(evenement?.payload)),
     tauri.event.listen("bandeau:decompte", (evenement) => decompte.montrer(evenement?.payload)),
     tauri.event.listen("bandeau:decompte_cache", (e) => decompte.cacher(e?.payload)),
+    tauri.event.listen("bandeau:message_cache", (e) => {
+      if (courant && e?.payload?.id === courant.id) effacerMessage();
+    }),
     suivreTheme(),
   ]).then(
     () => appeler("bandeau_pret", {}),

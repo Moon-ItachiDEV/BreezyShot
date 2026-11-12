@@ -1,7 +1,8 @@
 /* Décompte du retardateur dans la fenêtre du bandeau (contrat 0.4 §4.3, d'après
    design/capture/index.html : .cd, .disc, .num, .cdx). Le disque est centré dans la
    fenêtre, elle-même centrée sur la cible ; la croix est dessous. Toutes les valeurs
-   viennent de ../commun/jetons.css ; --decompte-diametre est posé par decompte.js. */
+   viennent de ../commun/jetons.css ; --decompte-diametre et le décalage du disque depuis
+   le centre de la page (--decompte-dx, --decompte-dy) sont posés par decompte.js. */
 
 .decompte {
   position: fixed;
@@ -15,8 +16,8 @@
 
 .decompte .disque {
   position: absolute;
-  left: calc(50% - var(--decompte-diametre) / 2);
-  top: calc(50% - var(--decompte-diametre) / 2);
+  left: calc(50% + var(--decompte-dx) - var(--decompte-diametre) / 2);
+  top: calc(50% + var(--decompte-dy) - var(--decompte-diametre) / 2);
   width: var(--decompte-diametre);
   height: var(--decompte-diametre);
   border-radius: 50%;
@@ -65,8 +66,8 @@
   all: unset;
   box-sizing: border-box;
   position: absolute;
-  left: calc(50% - var(--decompte-croix) / 2);
-  top: calc(50% + var(--decompte-diametre) / 2 + var(--decompte-ecart));
+  left: calc(50% + var(--decompte-dx) - var(--decompte-croix) / 2);
+  top: calc(50% + var(--decompte-dy) + var(--decompte-diametre) / 2 + var(--decompte-ecart));
   width: var(--decompte-croix);
   height: var(--decompte-croix);
   border-radius: 50%;

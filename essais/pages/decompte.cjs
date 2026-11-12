@@ -155,15 +155,35 @@ const D = (o = {}) => ({ id: 5, secondes: 3, restant_ms: 3000, diametre: 80, red
   // 5. Charges invalides refusées, avec console.warn ; rien ne s'affiche.
   const avant = p.avert.length;
   for (const c of [null, 'x', D({ id: undefined }), D({ secondes: 0 }), D({ secondes: 2.5 }), D({ restant_ms: -1 }),
-    D({ restant_ms: NaN }), D({ diametre: 0 }), D({ diametre: 400 }), D({ diametre: '80' }), D({ reduites: 'oui' })]) {
+    D({ restant_ms: NaN }), D({ diametre: 0 }), D({ diametre: 400 }), D({ diametre: '80' }), D({ reduites: 'oui' }),
+    D({ decalage: { x: 400, y: 0 } }), D({ decalage: { x: '1', y: 0 } }), D({ decalage: 3 })]) {
     await emettre(p, 'bandeau:decompte', c);
   }
   e = await etat(p);
-  verifier(!e.visible && p.avert.length - avant === 11, '5 charges invalides refusées (11 avertissements)', `${p.avert.length - avant}`);
+  verifier(!e.visible && p.avert.length - avant === 14, '5 charges invalides refusées (14 avertissements)', `${p.avert.length - avant}`);
   // Envoi tardif (page prête après la demande) : 1,2 s restantes, « 2 ».
   await emettre(p, 'bandeau:decompte', D({ id: 12, restant_ms: 1200 }));
   e = await etat(p);
   verifier(e.chiffre === '2' && Math.abs(e.decalage + ANNEAU * 1.8 / 3) < 1, '5 envoi tardif : chiffre et anneau du temps qui reste', JSON.stringify(e));
+  // 7. Décalage : le disque reste sur sa cible, la zone de la croix le suit.
+  await emettre(p, 'bandeau:decompte', D({ id: 13, decalage: { x: -228, y: 22 } }));
+  await p.evaluate(() => document.getAnimations().forEach(a => a.finish()));
+  e = await etat(p);
+  const zd = (await appels(p, 'bandeau_zone')).filter(a => a[1].id === 13).map(a => a[1]);
+  const cd = await p.$eval('#decompte .annuler', b => { const r = b.getBoundingClientRect(); return { x: r.x, y: r.y, largeur: r.width, hauteur: r.height }; });
+  verifier(e.disque[2] === 52 && e.disque[3] === 132, '7 décalage appliqué : disque sur la cible', JSON.stringify(e.disque));
+  verifier(zd.length === 1 && zd[0].x === 39 && zd[0].y === 182 && zd[0].largeur === 26 && zd[0].hauteur === 26
+    && ['x', 'y', 'largeur', 'hauteur'].every(k => Math.abs(zd[0][k] - cd[k]) < 0.01) && cd.y + cd.hauteur <= 220,
+    '7 zone de la croix déplacée avec le disque, dans la fenêtre', JSON.stringify([zd, cd]));
+  // 8. bandeau:message_cache : un autre id ne change rien ; le sien efface la pilule, sans termine.
+  await emettre(p, 'bandeau:afficher', { id: 20, genre: 'reussite', titre: 'Copié dans le presse-papiers', tenir: true });
+  await emettre(p, 'bandeau:message_cache', { id: 19 });
+  const pilule = (await etat(p)).pilule;
+  await emettre(p, 'bandeau:message_cache', { id: 20 });
+  e = await etat(p);
+  const term = (await appels(p, 'bandeau_termine')).filter(a => a[1].id === 20);
+  verifier(pilule && !e.pilule && !e.visible && term.length === 0, '8 bandeau:message_cache efface la pilule (la sienne seulement), sans termine',
+    JSON.stringify([pilule, e, term]));
   const refus = await p.evaluate(() => __refus);
   verifier(refus.length === 0 && p.erreurs.length === 0, '5 CSP de l\'app respectée, aucune erreur de page', JSON.stringify([refus, p.erreurs]));
   await p.context().close();

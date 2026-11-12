@@ -34,6 +34,9 @@ pub use place::{
 pub const ETIQUETTE_BANDEAU: &str = "bandeau";
 /// Événement écouté par la page.
 pub const EVENEMENT_AFFICHER: &str = "bandeau:afficher";
+/// Événement écouté par la page : le message `{ id }` est caché par le cœur (`cacher()`,
+/// filet) ; la page efface la pilule pendant que la fenêtre est cachée.
+pub const EVENEMENT_MESSAGE_CACHE: &str = "bandeau:message_cache";
 
 /// Arguments de WebView2, les mêmes pour toutes les fenêtres : WebView2 refuse de créer
 /// une seconde fenêtre dont les arguments diffèrent de la première (même dossier de
@@ -125,11 +128,50 @@ impl Contenu {
     }
 }
 
-/// Ce qui a été retiré du bandeau : son `id`, et s'il s'agissait d'un décompte.
+/// Ce qui a été retiré du bandeau (ou ce qui est en cours) : son `id`, et s'il s'agit
+/// d'un décompte.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct Retire {
     id: u64,
     decompte: bool,
+}
+
+/// Quels contenus un retrait peut viser.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Vise {
+    Tout,
+    Message,
+    Decompte,
+}
+
+/// Décision de retrait : `en_cours` est le contenu en cours, `id` celui visé (`None` :
+/// quel qu'il soit). Rend ce qui est retiré, et si l'état doit être vidé (aussi quand rien
+/// n'était en cours et qu'aucun `id` n'est visé).
+fn decider_retrait(
+    en_cours: Option<Retire>,
+    id: Option<u64>,
+    vise: Vise,
+) -> (Option<Retire>, bool) {
+    let genre_ok = |c: &Retire| match vise {
+        Vise::Tout => true,
+        Vise::Message => !c.decompte,
+        Vise::Decompte => c.decompte,
+    };
+    let retire = en_cours.filter(|c| id.is_none_or(|id| c.id == id) && genre_ok(c));
+    (retire, retire.is_some() || id.is_none())
+}
+
+/// Un nouveau contenu remplace `ancien` : rend l'`id` du décompte remplacé, s'il en est un
+/// (`bandeau decompte <id> remplace`).
+fn decompte_remplace(ancien: Option<Retire>) -> Option<u64> {
+    ancien.filter(|a| a.decompte).map(|a| a.id)
+}
+
+/// Après un retrait, la fenêtre peut-elle être cachée ? Oui si rien n'est en cours, ou si
+/// le nouveau contenu n'est pas encore montré (`montrer` le montrera ensuite) ; non si un
+/// contenu arrivé entre-temps est déjà à l'écran.
+fn cacher_apres_retrait(en_cours_montre: Option<bool>) -> bool {
+    en_cours_montre != Some(true)
 }
 
 /// Le contenu en cours, vu du cœur.
@@ -172,6 +214,14 @@ impl EnCours {
         self.zone = None;
         self.signale = false;
         self.envoi
+    }
+
+    /// L'`id` et le genre du contenu.
+    fn resume(&self) -> Retire {
+        Retire {
+            id: self.id,
+            decompte: self.contenu.est_decompte(),
+        }
     }
 
     /// Temps écoulé depuis l'envoi à une page prête ; nul tant que le message attend
@@ -269,11 +319,7 @@ impl Bandeau {
             let Some(mut etat) = self.etat() else {
                 return 0;
             };
-            let remplace = etat
-                .en_cours
-                .as_ref()
-                .filter(|c| c.contenu.est_decompte())
-                .map(|c| c.id);
+            let remplace = decompte_remplace(etat.en_cours.as_ref().map(EnCours::resume));
             etat.dernier_id += 1;
             let id = etat.dernier_id;
             etat.en_cours = Some(EnCours::nouveau(id, contenu));
@@ -397,8 +443,7 @@ impl Bandeau {
                     .emit_to(ETIQUETTE_BANDEAU, EVENEMENT_AFFICHER, charge)
             }
             Contenu::Decompte(d) => {
-                let echelle = place.map_or(1.0, |(_, e)| e);
-                let charge = decompte::charge(id, d, demande_a.elapsed(), echelle);
+                let charge = decompte::charge(id, d, demande_a.elapsed(), place);
                 self.app
                     .emit_to(ETIQUETTE_BANDEAU, decompte::EVENEMENT_DECOMPTE, charge)
             }
@@ -499,17 +544,11 @@ impl Bandeau {
 
     /// Retire le contenu `id` (`None` : quel qu'il soit) s'il est en cours et s'il passe
     /// le filtre `garder`. Rend ce qui a été retiré.
-    fn retirer_si(&self, id: Option<u64>, garder: impl Fn(&Contenu) -> bool) -> Option<Retire> {
+    fn retirer_si(&self, id: Option<u64>, vise: Vise) -> Option<Retire> {
         let mut etat = self.etat()?;
-        let retire = etat
-            .en_cours
-            .as_ref()
-            .filter(|c| id.is_none_or(|id| c.id == id) && garder(&c.contenu))
-            .map(|c| Retire {
-                id: c.id,
-                decompte: c.contenu.est_decompte(),
-            });
-        if retire.is_some() || id.is_none() {
+        let (retire, vider) =
+            decider_retrait(etat.en_cours.as_ref().map(EnCours::resume), id, vise);
+        if vider {
             etat.en_cours = None;
             etat.recoit_clics = false;
         }
@@ -518,24 +557,33 @@ impl Bandeau {
 
     /// Retire le contenu `id` (`None` : quel qu'il soit) s'il est en cours.
     fn retirer(&self, id: Option<u64>) -> Option<Retire> {
-        self.retirer_si(id, |_| true)
+        self.retirer_si(id, Vise::Tout)
     }
 
-    /// Après un retrait (fil principal) : la fenêtre est cachée, et la page d'un décompte
-    /// efface son disque (`bandeau:decompte_cache`) pendant que la fenêtre est cachée.
+    /// Après un retrait (fil principal) : la fenêtre est cachée, sauf si un contenu arrivé
+    /// entre-temps est déjà à l'écran. La page efface ce qui a été retiré pendant que la
+    /// fenêtre est cachée (`bandeau:decompte_cache` ou `bandeau:message_cache`, par `id` :
+    /// la page ignore un `id` qui n'est plus le sien). Un décompte écrit
+    /// `bandeau decompte cache <id>`.
     fn cacher_retire(&self, retire: Retire) {
-        if let Some(f) = self.fenetre() {
+        // État inaccessible : la fenêtre est cachée (rien de sûr à l'écran).
+        let montre = self
+            .etat()
+            .and_then(|e| e.en_cours.as_ref().map(|c| c.montre_a.is_some()));
+        if let Some(f) = self.fenetre().filter(|_| cacher_apres_retrait(montre)) {
             cacher(&f);
         }
+        let evenement = if retire.decompte {
+            decompte::EVENEMENT_DECOMPTE_CACHE
+        } else {
+            EVENEMENT_MESSAGE_CACHE
+        };
+        let charge = serde_json::json!({ "id": retire.id });
+        if let Err(e) = self.app.emit_to(ETIQUETTE_BANDEAU, evenement, charge) {
+            log::warn!("bandeau: retrait non envoye: {e}");
+        }
         if retire.decompte {
-            let charge = serde_json::json!({ "id": retire.id });
-            if let Err(e) = self.app.emit_to(
-                ETIQUETTE_BANDEAU,
-                decompte::EVENEMENT_DECOMPTE_CACHE,
-                charge,
-            ) {
-                log::warn!("bandeau: fin du decompte non envoyee: {e}");
-            }
+            log::info!("bandeau decompte cache {}", retire.id);
         }
     }
 
@@ -574,11 +622,10 @@ impl Bandeau {
     /// s'il l'était (`bandeau decompte cache <id>`). Un autre contenu n'est pas touché.
     /// N'importe quel fil : le geste sur la fenêtre part sur le fil principal.
     pub fn cacher_decompte(&self, id: u64) -> bool {
-        let Some(r) = self.retirer_si(Some(id), Contenu::est_decompte) else {
+        let Some(r) = self.retirer_si(Some(id), Vise::Decompte) else {
             return false;
         };
         self.sur_fil_principal("fin du decompte", move |b| b.cacher_retire(r));
-        log::info!("bandeau decompte cache {id}");
         true
     }
 
@@ -841,7 +888,7 @@ pub fn bandeau_action(bandeau: State<'_, Bandeau>, id: u64, action: String) {
 /// par la page (le cœur le cache) : un `bandeau_termine` de son `id` est ignoré.
 #[tauri::command]
 pub fn bandeau_termine(bandeau: State<'_, Bandeau>, id: u64) {
-    if let Some(r) = bandeau.retirer_si(Some(id), |c| !c.est_decompte()) {
+    if let Some(r) = bandeau.retirer_si(Some(id), Vise::Message) {
         bandeau.cacher_retire(r);
         log::info!("bandeau termine {id}");
     }
@@ -890,6 +937,41 @@ mod tests {
             Duration::from_secs(60),
             true
         ));
+    }
+
+    const fn r(id: u64, decompte: bool) -> Retire {
+        Retire { id, decompte }
+    }
+
+    #[test]
+    fn decision_de_retrait() {
+        let (m, d) = (Some(r(3, false)), Some(r(4, true)));
+        // Par id : le sien seulement, du bon genre.
+        assert_eq!(decider_retrait(m, Some(3), Vise::Tout), (m, true));
+        assert_eq!(decider_retrait(m, Some(2), Vise::Tout), (None, false));
+        assert_eq!(decider_retrait(d, Some(4), Vise::Decompte), (d, true));
+        assert_eq!(decider_retrait(m, Some(3), Vise::Decompte), (None, false));
+        // bandeau_termine ne retire jamais un décompte.
+        assert_eq!(decider_retrait(d, Some(4), Vise::Message), (None, false));
+        assert_eq!(decider_retrait(m, Some(3), Vise::Message), (m, true));
+        // Sans id (cacher, fermer) : tout, et l'état est vidé même s'il était vide.
+        assert_eq!(decider_retrait(d, None, Vise::Tout), (d, true));
+        assert_eq!(decider_retrait(None, None, Vise::Tout), (None, true));
+        assert_eq!(decider_retrait(None, Some(1), Vise::Tout), (None, false));
+    }
+
+    #[test]
+    fn decision_remplace() {
+        assert_eq!(decompte_remplace(Some(r(4, true))), Some(4));
+        assert_eq!(decompte_remplace(Some(r(3, false))), None);
+        assert_eq!(decompte_remplace(None), None);
+    }
+
+    #[test]
+    fn la_fenetre_n_est_pas_cachee_sous_un_contenu_deja_montre() {
+        assert!(cacher_apres_retrait(None));
+        assert!(cacher_apres_retrait(Some(false)));
+        assert!(!cacher_apres_retrait(Some(true)));
     }
 
     #[test]

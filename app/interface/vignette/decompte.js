@@ -2,10 +2,12 @@
 // rapporte, le cœur décide et cache la fenêtre (ARCHITECTURE.md §6).
 //
 // Contrat avec le cœur (branché par bandeau.js) :
-// - `bandeau:decompte` { id, secondes, restant_ms, diametre, reduites } : montre le disque
-//   (diamètre en pixels CSS), le chiffre ceil(restant) (3, 2, 1, jamais 0) et l'anneau qui
-//   avance. Il remplace la pilule d'un message, sans `bandeau_termine`. Charge invalide :
-//   console.warn, rien ne change.
+// - `bandeau:decompte` { id, secondes, restant_ms, diametre, decalage: { x, y },
+//   reduites } : montre le disque (diamètre en pixels CSS), le chiffre ceil(restant)
+//   (3, 2, 1, jamais 0) et l'anneau qui avance. Le disque et sa croix sont déplacés de
+//   `decalage` depuis le centre de la page, pour rester sur la cible quand la fenêtre a été
+//   ramenée dans l'écran (le cœur le borne ; absent : centré). Il remplace la pilule d'un
+//   message, sans `bandeau_termine`. Charge invalide : console.warn, rien ne change.
 // - `bandeau:decompte_cache` { id } : la fenêtre est cachée, le disque est effacé.
 // - Un `bandeau:afficher` efface le disque (bandeau.js appelle `effacer`).
 // - `bandeau_zone` { id, x, y, largeur, hauteur } : rectangle de la croix seulement (pixels
@@ -23,6 +25,7 @@ const entree = (depart) => [
   { opacity: 1, transform: "none" },
 ];
 const DIAMETRE_MAX_PAGE = 148; // le disque et sa croix tiennent dans les 220 px de la page
+const DECALAGE_MAX = { x: 280, y: 110 }; // la moitié de la page de 560 × 220
 
 const racine = document.getElementById("decompte");
 const chiffre = racine.querySelector(".chiffre");
@@ -64,11 +67,21 @@ export function valider(c) {
     return rejeter("diametre");
   }
   if (c.reduites !== undefined && typeof c.reduites !== "boolean") return rejeter("reduites");
+  const decalage = c.decalage ?? { x: 0, y: 0 };
+  const coordonnee = (v, max) => typeof v === "number" && Number.isFinite(v) && Math.abs(v) <= max;
+  const decalageValide =
+    typeof decalage === "object" &&
+    coordonnee(decalage.x, DECALAGE_MAX.x) &&
+    coordonnee(decalage.y, DECALAGE_MAX.y);
+  if (!decalageValide) {
+    return rejeter("decalage");
+  }
   return {
     id: c.id,
     total: c.secondes * 1000,
     restant: Math.min(c.restant_ms, c.secondes * 1000),
     diametre: d,
+    decalage: { x: decalage.x, y: decalage.y },
     reduit: c.reduites === true || preference.matches,
   };
 }
@@ -157,6 +170,8 @@ export function creerDecompte({ appeler, effacerMessage }) {
     racine.classList.remove("ferme");
     racine.classList.toggle("reduit", d.reduit);
     racine.style.setProperty("--decompte-diametre", `${d.diametre}px`);
+    racine.style.setProperty("--decompte-dx", `${d.decalage.x}px`);
+    racine.style.setProperty("--decompte-dy", `${d.decalage.y}px`);
     racine.hidden = false;
     if (!d.reduit) {
       const depart = nombre("--decompte-entree-echelle", 1);
