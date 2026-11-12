@@ -291,21 +291,24 @@ pub struct EtatFenetre {
     /// Masquée par Windows (`DWMWA_CLOAKED`) : autre bureau, app suspendue…
     pub masquee: bool,
     pub de_breezyshot: bool,
-    /// Les clics la traversent (`WS_EX_TRANSPARENT`) : voile invisible d'une autre app.
-    pub traverse_clics: bool,
+    /// Fenêtre en calque (`WS_EX_LAYERED`).
+    pub calque: bool,
+    /// `WS_EX_TRANSPARENT`. Avec `calque`, les clics la traversent : voile invisible
+    /// d'une autre app. Seul, il ne rend pas une fenêtre de premier niveau traversable.
+    pub transparente: bool,
     /// Le bureau lui-même (`est_classe_du_bureau`).
     pub bureau: bool,
 }
 
 /// Règle du mode « fenêtre » : visible, non réduite, non masquée, pas à BreezyShot, ni
-/// traversée par les clics, ni le bureau, et d'une taille non nulle. La barre des tâches
+/// traversée par les clics (calque et transparente à la fois), ni le bureau, et d'une taille non nulle. La barre des tâches
 /// reste une fenêtre comme une autre.
 pub fn garder_fenetre(etat: EtatFenetre, rect: Rect) -> bool {
     etat.visible
         && !etat.reduite
         && !etat.masquee
         && !etat.de_breezyshot
-        && !etat.traverse_clics
+        && !(etat.calque && etat.transparente)
         && !etat.bureau
         && !rect.est_vide()
 }
@@ -449,7 +452,8 @@ mod tests {
             reduite: false,
             masquee: false,
             de_breezyshot: false,
-            traverse_clics: false,
+            calque: false,
+            transparente: false,
             bureau: false,
         };
         let taille = r(0, 0, 10, 10);
@@ -459,6 +463,15 @@ mod tests {
         assert!(!garder_fenetre(ok, r(0, 0, 0, 10)));
         assert!(!garder_fenetre(ok, r(0, 0, 10, 0)));
         assert!(!garder_fenetre(ok, r(0, 0, -5, 10)));
+        // Calque seul, ou transparente seule : les clics ne la traversent pas.
+        assert!(garder_fenetre(EtatFenetre { calque: true, ..ok }, taille));
+        assert!(garder_fenetre(
+            EtatFenetre {
+                transparente: true,
+                ..ok
+            },
+            taille
+        ));
         let refusees = [
             EtatFenetre {
                 visible: false,
@@ -477,7 +490,8 @@ mod tests {
                 ..ok
             },
             EtatFenetre {
-                traverse_clics: true,
+                calque: true,
+                transparente: true,
                 ..ok
             },
             EtatFenetre { bureau: true, ..ok },

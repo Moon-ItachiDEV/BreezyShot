@@ -32,13 +32,13 @@ use ::windows::Win32::System::Threading::{GetCurrentProcessId, GetCurrentThreadI
 use ::windows::Win32::UI::HiDpi::{GetDpiForMonitor, MDT_EFFECTIVE_DPI};
 use ::windows::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DefWindowProcW, DestroyWindow, EnumWindows, GetClassNameW, GetSystemMetrics,
-    GetWindowLongW, GetWindowRect, GetWindowTextLengthW, GetWindowTextW, GetWindowThreadProcessId,
-    IsIconic, IsWindow, IsWindowVisible, IsZoomed, LoadCursorW, PostMessageW, RegisterClassW,
-    SendMessageTimeoutW, SetWindowPos, ShowWindow, ShowWindowAsync, GWL_EXSTYLE, GWL_STYLE,
-    HWND_TOPMOST, IDC_CROSS, MA_NOACTIVATE, MONITORINFOF_PRIMARY, SMTO_ABORTIFHUNG,
-    SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN, SM_XVIRTUALSCREEN, SM_YVIRTUALSCREEN, SWP_NOACTIVATE,
-    SWP_SHOWWINDOW, SW_HIDE, WM_CLOSE, WM_DESTROY, WM_DISPLAYCHANGE, WM_DPICHANGED, WM_ERASEBKGND,
-    WM_MOUSEACTIVATE, WM_NULL, WM_PAINT, WM_WTSSESSION_CHANGE, WNDCLASSW, WNDPROC, WS_CAPTION,
+    GetWindowLongW, GetWindowRect, GetWindowTextW, GetWindowThreadProcessId, IsIconic, IsWindow,
+    IsWindowVisible, IsZoomed, LoadCursorW, PostMessageW, RegisterClassW, SendMessageTimeoutW,
+    SetWindowPos, ShowWindow, ShowWindowAsync, GWL_EXSTYLE, GWL_STYLE, HWND_TOPMOST, IDC_CROSS,
+    MA_NOACTIVATE, MONITORINFOF_PRIMARY, SMTO_ABORTIFHUNG, SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN,
+    SM_XVIRTUALSCREEN, SM_YVIRTUALSCREEN, SWP_NOACTIVATE, SWP_SHOWWINDOW, SW_HIDE, WM_CLOSE,
+    WM_DESTROY, WM_DISPLAYCHANGE, WM_DPICHANGED, WM_ERASEBKGND, WM_MOUSEACTIVATE, WM_NULL,
+    WM_PAINT, WM_WTSSESSION_CHANGE, WNDCLASSW, WNDPROC, WS_CAPTION, WS_EX_LAYERED,
     WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_EX_TRANSPARENT, WS_POPUP, WS_THICKFRAME,
     WTS_SESSION_LOCK,
 };
@@ -558,19 +558,15 @@ fn bord_reel(hwnd: HWND) -> Option<Rect> {
     Some(rect_de(r))
 }
 
+/// Le titre, coupé à 511 caractères. Un seul appel, `GetWindowTextW` : pour une fenêtre
+/// d'un autre processus, il lit le titre gardé par le système sans lui envoyer de message
+/// (rien de tel n'est promis pour `GetWindowTextLengthW`, qui n'est donc pas appelé).
 fn titre(hwnd: HWND) -> String {
-    // SAFETY : lecture du titre dans un tampon dont la longueur est passée. Pour une
-    // fenêtre d'un autre processus, Windows lit le titre sans lui envoyer de message.
-    unsafe {
-        let n = GetWindowTextLengthW(hwnd);
-        if n <= 0 {
-            return String::new();
-        }
-        let mut tampon = vec![0u16; n as usize + 1];
-        let lu = GetWindowTextW(hwnd, &mut tampon);
-        let lu = (lu.max(0) as usize).min(tampon.len());
-        String::from_utf16_lossy(&tampon[..lu])
-    }
+    let mut tampon = [0u16; 512];
+    // SAFETY : tampon dont la longueur est passée.
+    let lu = unsafe { GetWindowTextW(hwnd, &mut tampon) };
+    let lu = (lu.max(0) as usize).min(tampon.len());
+    String::from_utf16_lossy(&tampon[..lu])
 }
 
 /// Nom de la classe de la fenêtre (lu sans message).
@@ -681,7 +677,8 @@ fn decrire_fenetre(hwnd: HWND, exclure: Option<u32>) -> Option<FenetreInfo> {
         reduite,
         masquee,
         de_breezyshot,
-        traverse_clics: style_etendu & WS_EX_TRANSPARENT.0 != 0,
+        calque: style_etendu & WS_EX_LAYERED.0 != 0,
+        transparente: style_etendu & WS_EX_TRANSPARENT.0 != 0,
         bureau: est_classe_du_bureau(&classe(hwnd)),
     };
     if !garder_fenetre(etat, rect) {
@@ -1205,8 +1202,8 @@ mod tests {
 
     use ::windows::Win32::Foundation::COLORREF;
     use ::windows::Win32::Graphics::Dwm::{
-        DwmFlush, DWMWA_BORDER_COLOR, DWMWA_COLOR_NONE, DWMWA_WINDOW_CORNER_PREFERENCE,
-        DWMWCP_DONOTROUND,
+        DwmFlush, DWMWA_BORDER_COLOR, DWMWA_COLOR_NONE, DWMWCP_DEFAULT, DWMWCP_DONOTROUND,
+        DWMWCP_ROUNDSMALL, DWM_WINDOW_CORNER_PREFERENCE,
     };
     use ::windows::Win32::Graphics::Gdi::{CreateSolidBrush, FillRect, GetPixel, UpdateWindow};
     use ::windows::Win32::System::Threading::{GetCurrentProcess, GetGuiResources, GR_GDIOBJECTS};
@@ -1216,7 +1213,8 @@ mod tests {
     use ::windows::Win32::UI::WindowsAndMessaging::{
         DispatchMessageW, FindWindowW, GetForegroundWindow, PeekMessageW, SendMessageW,
         SetLayeredWindowAttributes, TranslateMessage, LWA_ALPHA, MSG, PM_REMOVE, SWP_NOMOVE,
-        SWP_NOSIZE, SW_SHOWMINNOACTIVE, WINDOW_EX_STYLE, WS_EX_LAYERED, WTS_SESSION_UNLOCK,
+        SWP_NOSIZE, SW_SHOWMINNOACTIVE, WINDOW_EX_STYLE, WINDOW_STYLE, WS_OVERLAPPEDWINDOW,
+        WTS_SESSION_UNLOCK,
     };
 
     use crate::systeme::gel as facade;
@@ -1347,6 +1345,17 @@ mod tests {
             classe: PCWSTR,
             style_etendu: WINDOW_EX_STYLE,
         ) -> FenetreEssai {
+            FenetreEssai::creer_complete(titre, classe, style_etendu, WS_POPUP, DWMWCP_DONOTROUND)
+        }
+
+        /// Comme `creer_avec`, avec un autre style et une autre préférence de coins.
+        fn creer_complete(
+            titre: PCWSTR,
+            classe: PCWSTR,
+            style_etendu: WINDOW_EX_STYLE,
+            style: WINDOW_STYLE,
+            coins: DWM_WINDOW_CORNER_PREFERENCE,
+        ) -> FenetreEssai {
             let principal = facade::ecrans()
                 .into_iter()
                 .find(|e| e.principal)
@@ -1364,7 +1373,7 @@ mod tests {
                     WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | style_etendu,
                     classe,
                     titre,
-                    WS_POPUP,
+                    style,
                     rect.x,
                     rect.y,
                     rect.largeur,
@@ -1376,12 +1385,11 @@ mod tests {
                 )
                 .unwrap();
                 let essai = FenetreEssai { hwnd, rect };
-                let carre = DWMWCP_DONOTROUND;
                 let _ = DwmSetWindowAttribute(
                     hwnd,
                     DWMWA_WINDOW_CORNER_PREFERENCE,
-                    &carre as *const _ as *const core::ffi::c_void,
-                    std::mem::size_of_val(&carre) as u32,
+                    &coins as *const _ as *const core::ffi::c_void,
+                    std::mem::size_of_val(&coins) as u32,
                 );
                 // Pas de liseré de couleur de Windows 11 autour de la fenêtre.
                 let sans_bord = DWMWA_COLOR_NONE;
@@ -1619,7 +1627,7 @@ mod tests {
     /// Les valeurs recopiées pour la règle pure des coins sont celles de dwmapi.h.
     #[test]
     fn preferences_de_coins_recopiees() {
-        use ::windows::Win32::Graphics::Dwm::{DWMWCP_DEFAULT, DWMWCP_ROUND, DWMWCP_ROUNDSMALL};
+        use ::windows::Win32::Graphics::Dwm::DWMWCP_ROUND;
         assert_eq!(facade::PREFERENCE_DEFAUT, DWMWCP_DEFAULT.0);
         assert_eq!(facade::PREFERENCE_NE_PAS_ARRONDIR, DWMWCP_DONOTROUND.0);
         assert_eq!(facade::PREFERENCE_ARRONDIR, DWMWCP_ROUND.0);
@@ -1649,6 +1657,56 @@ mod tests {
             },
             preference_coins(essai.hwnd)
         );
+    }
+
+    #[test]
+    fn coins_d_une_fenetre_avec_cadre() {
+        let _s = Seance::ouvrir();
+        let titre = "BreezyShot essai cadre";
+        let essai = FenetreEssai::creer_complete(
+            w!("BreezyShot essai cadre"),
+            CLASSE_ESSAI,
+            WINDOW_EX_STYLE(0),
+            WS_OVERLAPPEDWINDOW,
+            DWMWCP_DEFAULT,
+        );
+        let toutes = lister_fenetres(None);
+        let coins = toutes.iter().find(|f| f.titre == titre).map(|f| f.coins);
+        let attendu = if build_windows().is_some_and(|b| b >= facade::BUILD_WINDOWS_11) {
+            Coins::Arrondis
+        } else {
+            Coins::Droits
+        };
+        assert_eq!(coins, Some(attendu), "build {:?}", build_windows());
+        drop(essai);
+    }
+
+    #[test]
+    fn coins_d_une_fenetre_reglee_petits_arrondis() {
+        let _s = Seance::ouvrir();
+        let titre = "BreezyShot essai petits arrondis";
+        let essai = FenetreEssai::creer_complete(
+            w!("BreezyShot essai petits arrondis"),
+            CLASSE_ESSAI,
+            WINDOW_EX_STYLE(0),
+            WS_OVERLAPPEDWINDOW,
+            DWMWCP_ROUNDSMALL,
+        );
+        let lue = preference_coins(essai.hwnd);
+        let windows_11 = build_windows().is_some_and(|b| b >= facade::BUILD_WINDOWS_11);
+        if lue.is_some() && windows_11 {
+            assert_eq!(lue, Some(DWMWCP_ROUNDSMALL.0));
+            let toutes = lister_fenetres(None);
+            let coins = toutes.iter().find(|f| f.titre == titre).map(|f| f.coins);
+            assert_eq!(coins, Some(Coins::PetitsArrondis));
+            println!("preference de coins lue : petits arrondis prouves.");
+        } else {
+            println!(
+                "preference de coins non lue ici ({lue:?}, build {:?}) : petits arrondis NON prouves.",
+                build_windows()
+            );
+        }
+        drop(essai);
     }
 
     #[test]
@@ -1688,6 +1746,17 @@ mod tests {
         assert!(decrire_fenetre(voile.hwnd, None).is_none());
         assert!(!liste_a("BreezyShot essai voile"));
         drop(voile);
+
+        // `WS_EX_TRANSPARENT` seul ne rend pas une fenêtre de premier niveau
+        // traversable : elle reste proposée.
+        let transparente = FenetreEssai::creer_avec(
+            w!("BreezyShot essai transparente seule"),
+            CLASSE_ESSAI,
+            WS_EX_TRANSPARENT,
+        );
+        assert!(decrire_fenetre(transparente.hwnd, None).is_some());
+        assert!(liste_a("BreezyShot essai transparente seule"));
+        drop(transparente);
 
         // Une fenêtre de la classe du bureau (inscrite ici, dans ce processus).
         let faux_bureau = FenetreEssai::creer_avec(
