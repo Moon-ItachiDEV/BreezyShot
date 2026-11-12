@@ -23,8 +23,8 @@ mod modele;
 mod tests;
 
 pub use constat::{Constat, ErreurEcriture, Raison};
-pub use fichier::{charger, ecrire, NOM_FICHIER};
+pub use fichier::{charger, ecrire, valider, NOM_FICHIER};
 pub use modele::{
     Animations, Coin, Plateforme, Raccourcis, Reglages, Selection, Theme, Vignette, DUREE_MAX_S,
-    DUREE_MIN_S, VERSION_ACTUELLE,
+    DUREE_MIN_S, DUREE_TOUJOURS, VERSION_ACTUELLE,
 };

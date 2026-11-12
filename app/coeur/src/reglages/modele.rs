@@ -11,6 +11,8 @@ pub const VERSION_ACTUELLE: u32 = super::lecture::MISES_A_NIVEAU.len() as u32;
 /// Durée d'affichage de la vignette permise, en secondes (bornes comprises).
 pub const DUREE_MIN_S: u32 = 1;
 pub const DUREE_MAX_S: u32 = 60;
+/// `vignette.duree_s = 0` : la vignette reste affichée (version 2 du fichier).
+pub const DUREE_TOUJOURS: u32 = 0;
 
 /// Le système pour lequel on choisit les valeurs par défaut. Le module ne le devine pas
 /// lui-même (aucun `cfg` hors de `systeme/`) : l'Application le lui donne.
@@ -128,7 +130,7 @@ impl Raccourcis {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Vignette {
     pub afficher: bool,
-    /// Entre `DUREE_MIN_S` et `DUREE_MAX_S`, en secondes entières.
+    /// Entre `DUREE_MIN_S` et `DUREE_MAX_S`, en secondes entières, ou `DUREE_TOUJOURS`.
     pub duree_s: u32,
     pub coin: Coin,
     pub(in crate::reglages) inconnus: Map<String, Value>,

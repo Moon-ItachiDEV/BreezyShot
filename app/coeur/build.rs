@@ -15,6 +15,13 @@ fn main() {
         "selection_terminee",
         "selection_cliquee",
         "selection_annulee",
+        "reglages_lire",
+        "reglages_changer",
+        "reglages_apercu_nom",
+        "reglages_parcourir",
+        "reglages_saisie",
+        "reglages_raccourci",
+        "reglages_retablir",
     ]);
     tauri_build::try_build(
         tauri_build::Attributes::new()

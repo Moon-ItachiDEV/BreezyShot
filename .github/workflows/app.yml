@@ -124,6 +124,12 @@ jobs:
           SORTIE: ${{ github.workspace }}/essais-resultats/pages
         run: node essais/pages/selection.cjs
 
+      - name: Essai de la page des réglages
+        env:
+          NODE_PATH: ${{ github.workspace }}/app/node_modules
+          SORTIE: ${{ github.workspace }}/essais-resultats/pages
+        run: node essais/pages/reglages.cjs
+
       - name: Envoyer les captures de la page
         if: always()
         uses: actions/upload-artifact@v4

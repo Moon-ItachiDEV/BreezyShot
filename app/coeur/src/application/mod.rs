@@ -15,8 +15,10 @@
 pub mod arguments;
 pub mod etat;
 pub mod etats;
+pub mod fenetre_reglages;
 pub mod icone;
 pub mod journal;
+pub mod page_reglages;
 pub mod zone;
 
 use std::collections::BTreeMap;
@@ -45,6 +47,9 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// Identifiant de l'entrée « Quitter BreezyShot ».
 pub const MENU_QUITTER: &str = "quitter";
+
+/// Identifiant de l'entrée « Réglages ».
+pub const MENU_REGLAGES: &str = "reglages";
 
 /// Si le fil principal ne répond plus pendant ce délai alors que l'écran figé est montré,
 /// l'app s'arrête d'elle-même : l'écran ne doit jamais rester couvert.
@@ -166,8 +171,22 @@ pub struct Application {
     /// Vrai une fois le démarrage complet : l'arrêt écrit alors `arret propre`.
     demarree: AtomicBool,
     taille_icone: AtomicU32,
-    /// Réglages lus au démarrage.
+    /// Réglages en vigueur : lus au démarrage, changés par la fenêtre Réglages.
     reglages: Mutex<Option<Reglages>>,
+    /// Ce que l'app a lu ou écrit dans le fichier en dernier : un fichier relu différent
+    /// a été changé de l'extérieur (fenêtre Réglages).
+    derniere_lecture: Mutex<Option<Reglages>>,
+    /// Les raccourcis tenus (réservés au démarrage, changés à chaud par les Réglages).
+    reservations: OnceLock<raccourcis::Reservations>,
+    /// Refus à dire sous un raccourci dans la fenêtre Réglages, par action.
+    refus_raccourcis: Mutex<std::collections::BTreeMap<String, String>>,
+    /// « Réglages non enregistrés » quand la dernière écriture a échoué.
+    alerte_reglages: Mutex<Option<String>>,
+    /// Saisie de raccourci en cours (son numéro), et le dernier numéro donné.
+    saisie: Mutex<Option<u64>>,
+    numero_saisie: AtomicU64,
+    /// La page des Réglages a déjà demandé son état une fois.
+    page_reglages_prete: AtomicBool,
     /// Vrai si des raccourcis ont été réservés (à libérer à l'arrêt).
     raccourcis_reserves: AtomicBool,
     /// Annonce affichée mais pas encore vue : `(id du message, dossier local, situation)`.
@@ -220,7 +239,14 @@ pub fn lancer() {
             fenetres::selection::selection_prete,
             fenetres::selection::selection_terminee,
             fenetres::selection::selection_cliquee,
-            fenetres::selection::selection_annulee
+            fenetres::selection::selection_annulee,
+            fenetre_reglages::reglages_lire,
+            fenetre_reglages::reglages_changer,
+            fenetre_reglages::reglages_apercu_nom,
+            fenetre_reglages::reglages_parcourir,
+            fenetre_reglages::reglages_saisie,
+            fenetre_reglages::reglages_raccourci,
+            fenetre_reglages::reglages_retablir
         ])
         .setup(move |app| {
             demarrer(app.handle(), commande, &inconnus);
@@ -332,6 +358,14 @@ fn demarrer(app: &AppHandle, commande: Commande, inconnus: &[String]) {
         None => Reglages::par_defaut(plateforme),
     };
     let candidats = table_candidats(&reglages);
+    fenetre_reglages::retenir_theme(&reglages);
+    log::info!("theme interface: {}", reglages.theme.texte());
+    if systeme::demarrage::cle_d_essai() {
+        log::info!("demarrage: cle d'essai");
+    }
+    if let Ok(mut d) = app.state::<Application>().derniere_lecture.lock() {
+        *d = Some(reglages.clone());
+    }
     if let Ok(mut r) = app.state::<Application>().reglages.lock() {
         *r = Some(reglages);
     }
@@ -350,9 +384,12 @@ fn demarrer(app: &AppHandle, commande: Commande, inconnus: &[String]) {
 
     // Raccourcis.
     let pour_raccourcis = app.clone();
-    let bilan = raccourcis::reserver(app, &candidats, systeme::impr_ecran_reserve(), move |s| {
-        traiter(&pour_raccourcis, Evenement::Raccourci(s))
-    });
+    let reservations =
+        raccourcis::reserver(app, &candidats, systeme::impr_ecran_reserve(), move |s| {
+            traiter(&pour_raccourcis, Evenement::Raccourci(s))
+        });
+    let bilan = reservations.bilan();
+    let _ = app.state::<Application>().reservations.set(reservations);
     for ligne in raccourcis::lignes_journal(&bilan) {
         log::info!("{ligne}");
     }
@@ -621,8 +658,8 @@ pub fn texte_capturer(mode: Mode, raccourci: Option<&str>) -> String {
 }
 
 /// Les entrées du menu de l'icône, dans l'ordre : les modes construits (`raccourci` donne
-/// le raccourci actif d'un mode), un séparateur, « Quitter BreezyShot ». Seulement ce qui
-/// marche.
+/// le raccourci actif d'un mode), un séparateur, « Réglages », un séparateur, « Quitter
+/// BreezyShot ». Seulement ce qui marche.
 pub fn entrees_menu(raccourci: impl Fn(Mode) -> Option<String>) -> Vec<EntreeMenu> {
     let mut entrees: Vec<EntreeMenu> = modes_au_menu()
         .into_iter()
@@ -631,6 +668,11 @@ pub fn entrees_menu(raccourci: impl Fn(Mode) -> Option<String>) -> Vec<EntreeMen
             texte: texte_capturer(mode, raccourci(mode).as_deref()),
         })
         .collect();
+    entrees.push(EntreeMenu::Separateur);
+    entrees.push(EntreeMenu::Action {
+        id: MENU_REGLAGES.into(),
+        texte: "Réglages".into(),
+    });
     entrees.push(EntreeMenu::Separateur);
     entrees.push(EntreeMenu::Action {
         id: MENU_QUITTER.into(),
@@ -683,6 +725,10 @@ pub fn traiter(app: &AppHandle, evenement: Evenement) {
             (MENU_QUITTER, _) => {
                 log::info!("menu: quitter");
                 app.exit(0);
+            }
+            (MENU_REGLAGES, _) => {
+                log::info!("menu: reglages");
+                fenetre_reglages::ouvrir(app);
             }
             (_, Some(mode)) => {
                 log::info!("menu: capturer {}", mode.nom());
@@ -1148,7 +1194,7 @@ fn decouper(app: &AppHandle, zone: systeme::Rect, fenetre: Option<(i32, [bool; 4
     }
 }
 
-/// Ce que la sortie doit faire, d'après les réglages lus au démarrage ; `transparence` :
+/// Ce que la sortie doit faire, d'après les réglages en vigueur ; `transparence` :
 /// garder l'alpha (fenêtre aux coins arrondis).
 fn demande_sortie(app: &AppHandle, transparence: bool) -> sortie::Demande {
     let etat = app.state::<Application>();
@@ -1336,6 +1382,7 @@ fn arreter(app: &AppHandle) {
     if let Some(bandeau) = app.try_state::<Bandeau>() {
         bandeau.fermer();
     }
+    fenetres::reglages::fermer(app);
     if icone::retirer(app) {
         log::info!("icone retiree");
     }
@@ -1369,6 +1416,8 @@ mod tests {
                 action("capturer_plein_ecran", "Capturer l'écran\tCtrl + Maj + 2"),
                 action("capturer_fenetre", "Capturer une fenêtre\tCtrl + Maj + 3"),
                 EntreeMenu::Separateur,
+                action(MENU_REGLAGES, "Réglages"),
+                EntreeMenu::Separateur,
                 action(MENU_QUITTER, "Quitter BreezyShot"),
             ]
         );
@@ -1383,6 +1432,8 @@ mod tests {
                 action("capturer_zone", "Capturer une zone"),
                 action("capturer_plein_ecran", "Capturer l'écran"),
                 action("capturer_fenetre", "Capturer une fenêtre"),
+                EntreeMenu::Separateur,
+                action(MENU_REGLAGES, "Réglages"),
                 EntreeMenu::Separateur,
                 action(MENU_QUITTER, "Quitter BreezyShot"),
             ]

@@ -1,10 +1,13 @@
-//! Fenêtres de l'interface (§6). Pour l'instant : le bandeau de messages.
+//! Fenêtres de l'interface (§6) : le bandeau de messages ; `selection`, `reglages` (fenêtre
+//! des Réglages) et `theme` (thème des pages).
 //!
 //! Le module crée, place, montre et cache ; il ne décide d'aucun message. Ce qu'il reçoit
 //! de la page remonte à l'Application par `Signal`.
 
 mod place;
+pub mod reglages;
 pub mod selection;
+pub mod theme;
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -617,6 +620,7 @@ fn traverser(fenetre: &WebviewWindow, oui: bool) {
 /// La page écoute `bandeau:afficher` : le message en attente peut partir.
 #[tauri::command]
 pub fn bandeau_pret(bandeau: State<'_, Bandeau>) {
+    theme::envoyer_a(&bandeau.app, ETIQUETTE_BANDEAU);
     bandeau.page_prete();
 }
 

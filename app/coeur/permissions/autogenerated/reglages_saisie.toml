@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-reglages-saisie"
+description = "Enables the reglages_saisie command without any pre-configured scope."
+commands.allow = ["reglages_saisie"]
+
+[[permission]]
+identifier = "deny-reglages-saisie"
+description = "Denies the reglages_saisie command without any pre-configured scope."
+commands.deny = ["reglages_saisie"]

@@ -8,4 +8,6 @@ Chaque capture est aussi enregistrée dans Images › BreezyShot.
 
 Échap ou clic droit annule. Pour quitter : clic droit sur l'icône, près de l'horloge.
 
+Réglages : clic droit sur l'icône, « Réglages » : copie, dossier, nom des fichiers, raccourcis (cliquer puis taper le nouveau), thème, lancement au démarrage de Windows. Tout s'applique tout de suite.
+
 Le journal : `%LOCALAPPDATA%\BreezyShot\Journal\breezyshot.log`.

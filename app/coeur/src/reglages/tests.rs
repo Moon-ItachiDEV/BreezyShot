@@ -81,7 +81,7 @@ fn assert_stable(d: &TempDir) {
 fn par_defaut_windows_suit_le_contrat() {
     let texte = texte_du_fichier(&Reglages::par_defaut(W)).unwrap();
     let attendu = json!({
-        "version": 1,
+        "version": 2,
         "raccourcis": {
             "zone": ["ImprEcran", "Ctrl+Maj+1"],
             "plein_ecran": ["Ctrl+Maj+2"],
@@ -154,7 +154,7 @@ fn absent_cree_par_defaut_puis_stable() {
     assert_eq!(constats, vec![Constat::Cree { chemin: chemin(&d) }]);
     let texte = String::from_utf8(octets(&d)).unwrap();
     assert!(texte.ends_with("}\n"));
-    assert!(texte.contains("\n  \"version\": 1,"), "indenté");
+    assert!(texte.contains("\n  \"version\": 2,"), "indenté");
     assert!(
         texte.contains("BreezyShot {date} à {heure}"),
         "UTF-8 brut, pas \\u00e0"
@@ -628,7 +628,7 @@ fn champ_absent_dans_un_fichier_a_jour() {
 #[test]
 fn duree_hors_limites_ou_pas_entiere() {
     for mauvaise in [
-        json!(0),
+        json!(61),
         json!(1000),
         json!(6.5),
         json!(60.5),
@@ -650,7 +650,7 @@ fn duree_hors_limites_ou_pas_entiere() {
         assert_eq!(r.vignette.coin, Coin::HautDroite);
         assert_stable(&d);
     }
-    for bonne in [1u32, 60] {
+    for bonne in [0u32, 1, 60] {
         let (_, r, c) = charger_json(defaut_json(|m| m["vignette"]["duree_s"] = json!(bonne)));
         assert_eq!(c, vec![]);
         assert_eq!(r.vignette.duree_s, bonne);
@@ -784,7 +784,7 @@ fn selection_invalide() {
 #[test]
 fn selection_completee_par_la_mise_a_niveau() {
     let (d, r, c) = charger_json(json!({ "selection": { "zoom": 2 } }));
-    assert_eq!(c, vec![Constat::MisANiveau { de: 0, a: 1 }]);
+    assert_eq!(c, vec![Constat::MisANiveau { de: 0, a: 2 }]);
     assert!(!r.selection.loupe);
     assert_eq!(
         json_du_fichier(&d)["selection"],
@@ -792,7 +792,7 @@ fn selection_completee_par_la_mise_a_niveau() {
     );
     assert_stable(&d);
     let (_, r, c) = charger_json(json!({ "selection": { "loupe": true } }));
-    assert_eq!(c, vec![Constat::MisANiveau { de: 0, a: 1 }]);
+    assert_eq!(c, vec![Constat::MisANiveau { de: 0, a: 2 }]);
     assert!(r.selection.loupe);
 }
 
@@ -992,14 +992,14 @@ fn version_0_mise_a_niveau_sans_rien_effacer() {
         "raccourcis": { "zone": ["F9"] },
         "vieux": true
     }));
-    assert_eq!(c, vec![Constat::MisANiveau { de: 0, a: 1 }]);
+    assert_eq!(c, vec![Constat::MisANiveau { de: 0, a: 2 }]);
     assert_eq!(r.theme, Theme::Sombre);
     assert_eq!(r.vignette.duree_s, 10);
     assert!(r.vignette.afficher);
     assert_eq!(r.raccourcis.zone, vec!["F9".to_string()]);
     assert_eq!(r.raccourcis.fenetre, vec!["Ctrl+Maj+3".to_string()]);
     let f = json_du_fichier(&d);
-    assert_eq!(f["version"], json!(1));
+    assert_eq!(f["version"], json!(2));
     assert_eq!(f["vieux"], json!(true));
     assert_eq!(f["vignette"]["taille"], json!("grande"));
     assert_eq!(f["vignette"]["coin"], json!("bas_gauche"));
@@ -1009,7 +1009,7 @@ fn version_0_mise_a_niveau_sans_rien_effacer() {
 #[test]
 fn version_0_objet_vide() {
     let (d, r, c) = charger_json(json!({}));
-    assert_eq!(c, vec![Constat::MisANiveau { de: 0, a: 1 }]);
+    assert_eq!(c, vec![Constat::MisANiveau { de: 0, a: 2 }]);
     assert_eq!(r, Reglages::par_defaut(W));
     assert_stable(&d);
 }
@@ -1020,7 +1020,7 @@ fn version_0_avec_valeur_invalide() {
     assert_eq!(
         c,
         vec![
-            Constat::MisANiveau { de: 0, a: 1 },
+            Constat::MisANiveau { de: 0, a: 2 },
             remplacee("theme", Raison::Invalide)
         ]
     );
@@ -1035,11 +1035,11 @@ fn version_invalide_traitee_comme_0() {
             c,
             vec![
                 remplacee("version", Raison::Invalide),
-                Constat::MisANiveau { de: 0, a: 1 }
+                Constat::MisANiveau { de: 0, a: 2 }
             ],
             "{v}"
         );
-        assert_eq!(json_du_fichier(&d)["version"], json!(1));
+        assert_eq!(json_du_fichier(&d)["version"], json!(2));
         assert_stable(&d);
     }
 }
@@ -1048,7 +1048,7 @@ fn version_invalide_traitee_comme_0() {
 fn version_plus_recente_lue_sans_reecriture() {
     let d = dossier();
     let v = defaut_json(|m| {
-        m["version"] = json!(2);
+        m["version"] = json!(3);
         m["theme"] = json!("contraste");
         m.insert("nouveau".into(), json!([1]));
         m["copier_apres_capture"] = json!(false);
@@ -1063,17 +1063,17 @@ fn version_plus_recente_lue_sans_reecriture() {
             remplacee("theme", Raison::Invalide),
             Constat::CopieRallumee,
             Constat::VersionPlusRecente {
-                version: 2,
-                connue: 1
+                version: 3,
+                connue: 2
             },
         ]
     );
-    assert_eq!(r.version_fichier(), 2);
+    assert_eq!(r.version_fichier(), 3);
     assert!(r.copier_apres_capture, "copie rallumée en mémoire");
     assert_eq!(octets(&d), avant, "fichier non réécrit");
     assert!(matches!(
         ecrire(d.path(), &r),
-        Err(ErreurEcriture::VersionPlusRecente { version: 2 })
+        Err(ErreurEcriture::VersionPlusRecente { version: 3 })
     ));
     assert_eq!(octets(&d), avant);
 }
@@ -1083,7 +1083,7 @@ fn version_gigantesque_ou_decimale_plus_recente() {
     for (v, lue) in [
         (json!(4294967296u64), u32::MAX),
         (json!(1e30), u32::MAX),
-        (json!(2.0), 2),
+        (json!(3.0), 3),
     ] {
         let d = dossier();
         poser_json(
@@ -1099,7 +1099,7 @@ fn version_gigantesque_ou_decimale_plus_recente() {
             c,
             vec![Constat::VersionPlusRecente {
                 version: lue,
-                connue: 1
+                connue: 2
             }],
             "{v}"
         );
@@ -1110,11 +1110,11 @@ fn version_gigantesque_ou_decimale_plus_recente() {
 }
 
 #[test]
-fn version_1_0_lue_comme_1() {
-    let (d, r, c) = charger_json(defaut_json(|m| m["version"] = json!(1.0)));
+fn version_2_0_lue_comme_2() {
+    let (d, r, c) = charger_json(defaut_json(|m| m["version"] = json!(2.0)));
     assert_eq!(c, vec![]);
-    assert_eq!(r.version_fichier(), 1);
-    assert_eq!(json_du_fichier(&d)["version"], json!(1));
+    assert_eq!(r.version_fichier(), 2);
+    assert_eq!(json_du_fichier(&d)["version"], json!(2));
     assert_stable(&d);
 }
 
@@ -1196,7 +1196,7 @@ fn ecrire_refuse_les_valeurs_invalides() {
     let d = dossier();
     type Cas = (&'static str, fn(&mut Reglages));
     let cas: [Cas; 4] = [
-        ("vignette.duree_s", |r| r.vignette.duree_s = 0),
+        ("vignette.duree_s", |r| r.vignette.duree_s = 1000),
         ("vignette.duree_s", |r| r.vignette.duree_s = 61),
         ("modele_nom", |r| r.modele_nom = " ".into()),
         ("dossier_enregistrement", |r| {
@@ -1260,7 +1260,7 @@ fn constats_lisibles_et_sans_accents() {
             chemin: PathBuf::from("a.json"),
         },
         Constat::LectureImpossible { erreur: "e".into() },
-        Constat::MisANiveau { de: 0, a: 1 },
+        Constat::MisANiveau { de: 0, a: 2 },
         remplacee("vignette.duree_s", Raison::Invalide),
         remplacee("theme", Raison::Absente),
         Constat::CopieRallumee,
@@ -1283,7 +1283,76 @@ fn constats_lisibles_et_sans_accents() {
     );
     assert_eq!(
         constats[5].to_string(),
-        "reglages mis a niveau de la version 0 a la version 1"
+        "reglages mis a niveau de la version 0 a la version 2"
     );
     assert!(ErreurEcriture::AucuneSortie.to_string().is_ascii());
+}
+
+// ---------- Version 2 (étape 10) ----------
+
+/// Un fichier de version 1 passe en version 2 sans rien perdre ni changer d'autre ; sa
+/// durée « toujours » (0) n'existait pas en version 1 : elle y était invalide.
+#[test]
+fn version_1_mise_a_niveau_vers_2() {
+    let (d, r, c) = charger_json(defaut_json(|m| {
+        m["version"] = json!(1);
+        m["theme"] = json!("sombre");
+        m["vignette"]["duree_s"] = json!(10);
+        m.insert("inconnu".into(), json!({ "a": 1 }));
+    }));
+    assert_eq!(c, vec![Constat::MisANiveau { de: 1, a: 2 }]);
+    assert_eq!(r.theme, Theme::Sombre);
+    assert_eq!(r.vignette.duree_s, 10);
+    let f = json_du_fichier(&d);
+    assert_eq!(f["version"], json!(2));
+    assert_eq!(f["inconnu"], json!({ "a": 1 }));
+    assert_stable(&d);
+}
+
+#[test]
+fn duree_toujours_ecrite_et_relue() {
+    let d = dossier();
+    let mut r = Reglages::par_defaut(W);
+    r.vignette.duree_s = DUREE_TOUJOURS;
+    ecrire(d.path(), &r).unwrap();
+    assert_eq!(json_du_fichier(&d)["vignette"]["duree_s"], json!(0));
+    let (relu, c) = charger(d.path(), W);
+    assert_eq!(c, vec![]);
+    assert_eq!(relu.vignette.duree_s, DUREE_TOUJOURS);
+}
+
+#[test]
+fn valider_sans_disque() {
+    let r = Reglages::par_defaut(W);
+    assert!(valider(&r).is_ok());
+    let mut sans_sortie = r.clone();
+    sans_sortie.copier_apres_capture = false;
+    sans_sortie.vignette.afficher = false;
+    assert!(matches!(
+        valider(&sans_sortie),
+        Err(ErreurEcriture::AucuneSortie)
+    ));
+    let mut vide = r.clone();
+    vide.modele_nom = "  ".into();
+    assert!(matches!(
+        valider(&vide),
+        Err(ErreurEcriture::ValeurInvalide {
+            champ: "modele_nom"
+        })
+    ));
+    // Des réglages protégés restent valides : seule l'écriture les refuse.
+    assert!(valider(&Reglages::par_defaut_protege(W)).is_ok());
+}
+
+#[test]
+fn codes_sans_chemin() {
+    let e = ErreurEcriture::LectureSeule {
+        chemin: PathBuf::from("/home/lea/reglages.json"),
+    };
+    assert_eq!(e.code(), "lecture_seule");
+    let c = Constat::Cree {
+        chemin: PathBuf::from("/home/lea/reglages.json"),
+    };
+    assert_eq!(c.code(), "cree");
+    assert_eq!(Constat::MisANiveau { de: 1, a: 2 }.code(), "mis_a_niveau");
 }
