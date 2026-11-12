@@ -25,8 +25,9 @@ pub(super) const ECHEANCE: Duration = Duration::from_millis(250);
 /// Attente entre deux essais.
 pub(super) const PAS: Duration = Duration::from_millis(25);
 
-/// Ce que coute au pire un essai occupe dans `arboard` sous Windows :
-/// 6 ouvertures separees par 5 attentes de 5 ms.
+/// Ce que coute au pire un essai occupe dans `arboard` sous Windows, et dans
+/// `systeme::presse_papiers::ImagePreparee::poser` : 6 ouvertures separees par
+/// 5 attentes de 5 ms.
 pub(super) const COUT_ESSAI_INTERNE: Duration = Duration::from_millis(25);
 
 /// Vrai si l'erreur vaut un nouvel essai.
@@ -146,11 +147,14 @@ pub(super) fn copier_transparent(
 ) -> Result<(), String> {
     match png {
         Some(png) if natif::disponible() => {
+            // Prepare une fois (fond blanc, blocs de memoire) : seuls l'ouverture
+            // et le depot sont refaits a chaque essai.
             let blanc = super::png::sur_blanc(rgba);
-            avec_echeance(ECHEANCE, Instant::now, thread::sleep, || {
-                natif::poser_image(png, largeur, hauteur, &blanc)
-            })
-            .map_err(cause_native)
+            let mut image = natif::ImagePreparee::preparer(png, largeur, hauteur, &blanc)
+                .map_err(cause_native)?;
+            drop(blanc);
+            avec_echeance(ECHEANCE, Instant::now, thread::sleep, || image.poser())
+                .map_err(cause_native)
         }
         _ => copier(largeur, hauteur, rgba),
     }

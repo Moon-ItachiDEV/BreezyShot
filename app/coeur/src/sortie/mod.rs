@@ -2,10 +2,11 @@
 //!
 //! Une seule porte d'entree, `sortir` : elle valide les pixels, encode le PNG
 //! une fois, ecrit le fichier « Recents », copie dans le presse-papiers si
-//! demande, puis enregistre si demande. Avec `transparence`, l'alpha est garde
-//! partout et le presse-papiers recoit aussi une version sur fond blanc. Une etape qui echoue n'empeche pas les
+//! demande, puis enregistre si demande. Une etape qui echoue n'empeche pas les
 //! suivantes. La copie tourne dans un fil a part pendant l'encodage et les
-//! ecritures. `annonce` dit ensuite ce qu'il faut montrer a l'utilisateur.
+//! ecritures (avec `transparence`, apres l'encodage, pendant les ecritures :
+//! l'alpha est garde partout et le presse-papiers recoit aussi une version sur
+//! fond blanc). `annonce` dit ensuite ce qu'il faut montrer a l'utilisateur.
 //!
 //! Ce module n'ecrit jamais au journal : il rend un `Bilan`.
 

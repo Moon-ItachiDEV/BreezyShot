@@ -1408,6 +1408,37 @@ fn presse_papiers_pose_et_relit_avec_transparence() {
     println!("Presse-papiers : image 4x3 posee et relue avec son alpha.");
 }
 
+/// La chaine entiere, la ou le presse-papiers natif existe (Windows) : `sortir`
+/// en mode transparent, puis le `CF_DIB` relu directement, sur fond blanc.
+#[test]
+fn presse_papiers_natif_dib_sur_blanc_depuis_sortir() {
+    use crate::systeme::presse_papiers as natif;
+    let _seul = PRESSE_PAPIERS_TESTS
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    if !natif::disponible() {
+        println!("presse-papiers natif absent ici : chaine prouvee sous Windows seulement.");
+        return;
+    }
+    // 6 x 6 d'une couleur, coin haut gauche transparent.
+    let mut entree = Pixels {
+        largeur: 6,
+        hauteur: 6,
+        rgba: [10u8, 20, 30, 255].repeat(36),
+    };
+    entree.rgba[3] = 0;
+    let racine = tempfile::tempdir().expect("dossier temporaire");
+    let mut d = demande(racine.path());
+    d.copier = true;
+    d.enregistrer = false;
+    d.transparence = true;
+    assert_eq!(sortir(&entree, &d).copie, Etape::Faite);
+    let dib = natif::lire_dib().expect("CF_DIB relu");
+    assert_eq!(natif::pixel_dib(&dib, 0, 0), Some([255, 255, 255]), "coin");
+    assert_eq!(natif::pixel_dib(&dib, 3, 3), Some([10, 20, 30]), "centre");
+    assert_eq!(natif::pixel_dib(&dib, 5, 0), Some([10, 20, 30]));
+}
+
 // ---------- Mesures ----------
 
 /// Image de type ecran : aplats clairs, bandes de « texte ».
