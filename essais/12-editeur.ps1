@@ -18,7 +18,10 @@
 #     800 ms) ; sans barre de titre mais redimensionnable : tao garde WS_CAPTION et
 #     WS_SIZEBOX dans le style et rend toute la fenêtre à la zone cliente par WM_NCCALCSIZE,
 #     donc on vérifie WS_SIZEBOX et une zone cliente qui commence à 2 px au plus du haut de
-#     la fenêtre (1 px sous Windows 11 avec l'ombre, au lieu d'une barre de titre de ~30 px) ;
+#     la fenêtre (`round(dpi / 96)` sous Windows 11 avec l'ombre, 1 px à 100 % ; au lieu
+#     d'une barre de titre de ~30 px) ; zone cliente exactement au rectangle `fenetre x,y
+#     lxh` de `editeur ouvert` (tao pose la taille et la position en pixels physiques
+#     entiers, la taille cliente demandée plus les bords mesurés : aucun arrondi, 0 px) ;
 # (4) Ctrl+1 : une ligne `editeur vue … zoom 1.00` attendue, 1024x768 (un pixel pour un
 #     pixel) ; Ctrl+0 :
 #     Ajuster, rectangle de l'image lu (la capture plein écran ne tient pas à la taille
@@ -628,6 +631,11 @@ public static int Pixel(byte[] a, int l, int x, int y) {
                 Verifier '(3) au premier plan' ($E::GetForegroundWindow() -eq $hwnd) "premier plan $($E::GetForegroundWindow())" | Out-Null
                 Verifier '(3) dans la barre des tâches (ni outil ni propriétaire)' ((-not $outil) -and $E::GetWindow($hwnd, 4) -eq [IntPtr]::Zero) | Out-Null
                 Verifier '(3) zone cliente dans la zone utile' $dans "$($z.X),$($z.Y) $($z.L)x$($z.H) ; zone $utile" | Out-Null
+                $lo = Derniere-Ligne -Motif "editeur ouvert $($c1.Id) .* fenetre -?\d+,-?\d+ \d+x\d+$" -Dossier $da
+                if ($lo -notmatch 'fenetre (-?\d+,-?\d+ \d+x\d+)$') { throw "(3) ligne editeur ouvert illisible : $lo" }
+                $texte = $Matches[1]
+                $prevue = Lire-Rect $texte
+                Verifier '(3) zone cliente au rectangle fenetre de editeur ouvert (0 px)' ($z.X -eq $prevue.X -and $z.Y -eq $prevue.Y -and $z.L -eq $prevue.L -and $z.H -eq $prevue.H) "client $($z.X),$($z.Y) $($z.L)x$($z.H) ; ligne $texte" | Out-Null
                 $style = $E::GetWindowLongPtr($hwnd, -16).ToInt64()
                 $haut = $z.Y - $r.Top
                 Verifier '(3) sans barre de titre (zone cliente à 2 px au plus du haut), redimensionnable (WS_SIZEBOX)' (($haut -ge 0) -and ($haut -le 2) -and (($style -band 0x40000) -ne 0)) "haut $haut px, style 0x$('{0:X8}' -f $style)" | Out-Null

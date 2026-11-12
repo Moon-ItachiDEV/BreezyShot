@@ -387,6 +387,21 @@ export function touche(objet, point, tolerance, strict) {
   if (o.type === "crayon") return distPolyligne(p, o.points) < Math.max(trait(o), tol);
   if (o.type === "surligneur") return distPolyligne(p, o.points) < traitSurligneur(o) / 2 + 2;
   const b = boiteForme(o);
+  if (o.type === "projecteur") {
+    // Le BORD seul se touche (maquette, `hitOp` du projecteur) : une bande de tolérance + 7 px
+    // de part et d'autre du contour, pour que ce qui est posé dans la zone éclairée se prenne
+    // et qu'un tracé puisse y commencer.
+    const m = tol + 7;
+    if (o.forme === "ovale") {
+      const rx = b.largeur / 2, ry = b.hauteur / 2;
+      const d = Math.hypot((p.x - b.x - rx) / (rx || 1), (p.y - b.y - ry) / (ry || 1));
+      return Math.abs(d - 1) * Math.min(rx, ry) < m;
+    }
+    const horsBande = p.x < b.x - m || p.x > b.x + b.largeur + m
+      || p.y < b.y - m || p.y > b.y + b.hauteur + m;
+    return !horsBande && !(p.x > b.x + m && p.x < b.x + b.largeur - m
+      && p.y > b.y + m && p.y < b.y + b.hauteur - m);
+  }
   const dedans = p.x >= b.x - tol && p.x <= b.x + b.largeur + tol
     && p.y >= b.y - tol && p.y <= b.y + b.hauteur + tol;
   if (!dedans) return false;
@@ -395,11 +410,6 @@ export function touche(objet, point, tolerance, strict) {
     const t = Math.max(trait(o), tol);
     return !(p.x > b.x + t && p.x < b.x + b.largeur - t
       && p.y > b.y + t && p.y < b.y + b.hauteur - t);
-  }
-  if (o.type === "projecteur" && o.forme === "ovale") {
-    // Toute la zone éclairée se touche, comme une forme pleine, à la tolérance près.
-    const rx = b.largeur / 2 + tol, ry = b.hauteur / 2 + tol;
-    return Math.hypot((p.x - b.x - b.largeur / 2) / rx, (p.y - b.y - b.hauteur / 2) / ry) <= 1;
   }
   if (o.type === "ellipse") {
     const rx = b.largeur / 2, ry = b.hauteur / 2;
