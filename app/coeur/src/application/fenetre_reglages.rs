@@ -536,6 +536,16 @@ pub fn reglages_retablir(app: AppHandle, action: String) -> Reponse {
     reponse(&app, None)
 }
 
+/// Au démarrage de l'app : une valeur `Run` qui pointe vers une autre copie de l'exe est
+/// réécrite vers celle-ci (journal sans chemin). Absente : rien.
+pub fn mettre_a_jour_demarrage() {
+    match systeme::mettre_a_jour_chemin() {
+        Ok(true) => log::info!("demarrage avec le systeme: chemin mis a jour"),
+        Ok(false) => {}
+        Err(e) => log::warn!("demarrage avec le systeme: chemin non mis a jour ({e})"),
+    }
+}
+
 /// Thème du démarrage (avant que les pages existent).
 pub fn retenir_theme(r: &Reglages) {
     theme::retenir(page::theme_page(r.theme));

@@ -471,6 +471,7 @@ fn demarrer(app: &AppHandle, commande: Commande, inconnus: &[String]) {
     if systeme::demarrage::cle_d_essai() {
         log::info!("demarrage: cle d'essai");
     }
+    fenetre_reglages::mettre_a_jour_demarrage();
     if let Ok(mut d) = app.state::<Application>().derniere_lecture.lock() {
         *d = Some(reglages.clone());
     }

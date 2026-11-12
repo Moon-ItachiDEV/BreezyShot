@@ -734,6 +734,14 @@ Module pur : il reçoit le dossier où écrire, ne connaît ni Tauri ni les autr
   les dossiers), la clé est
   `HKCU\Software\BreezyShot\Essais\Run` (`demarrage: cle d'essai`). La désinstallation
   la retire par la fermeture que lui donne `application::desinstaller` (§12.5).
+  Au démarrage de l'app, une valeur existante qui pointe vers un autre exe (copie lancée
+  hors installation, puis installée) est réécrite vers l'exe en cours
+  (`systeme::mettre_a_jour_chemin`, règle pure `doit_reecrire` : jamais si elle est
+  absente, casse ignorée ; journal `demarrage avec le systeme: chemin mis a jour`). La
+  désactivation par le Gestionnaire des tâches vit sous le même nom dans
+  `StartupApproved\Run`, que cette écriture ne touche pas : elle reste telle quelle.
+  **La vérité est le registre** : `demarrer_avec_systeme` est écrit dans `reglages.json`
+  pour mémoire, mais jamais lu ; rien ne doit s'y fier.
 - **Thème** : `fenetres::theme::fixer` émet `interface:theme { theme: "light"|"dark"|null }`
   à toutes les pages et règle le cadre des Réglages (`set_theme`) ; une page prête le reçoit
   par `theme::envoyer_a` (le bandeau, la vignette et le souffle, à leur commande « prêt »).
@@ -751,6 +759,7 @@ Module pur : il reçoit le dossier où écrire, ne connaît ni Tauri ni les autr
   sans valeur), `reglage refuse: <ligne> (<code>)`, `reglages ecrits`,
   `reglages non ecrits: <code>`, `reglages relus: changes exterieurs`,
   `theme interface: systeme|clair|sombre`, `demarrage avec le systeme ecrit: oui|non`,
+  `demarrage avec le systeme: chemin mis a jour|chemin non mis a jour (<erreur>)`,
   `dossier: dialogue annule`, `dossier: dialogue impossible (<erreur>)`,
   `dossier: dialogue deja ouvert`, `raccourcis suspendus (saisie <action>)`,
   `raccourcis repris`, `raccourcis repris d'office`,
