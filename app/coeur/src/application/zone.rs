@@ -446,6 +446,91 @@ pub fn ligne_chrono_sortie(
     )
 }
 
+// Refaire la dernière zone (0.4, §5 du contrat).
+
+/// La dernière zone capturée, gardée en mémoire seulement (jamais sur le disque) : son
+/// rectangle et l'écran qui la contenait (rectangle et échelle), pour savoir si elle vaut
+/// encore.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct DerniereZone {
+    pub zone: Rect,
+    pub ecran: Rect,
+    pub echelle: f64,
+}
+
+/// Écart d'échelle au-delà duquel l'écran a changé.
+const ECART_ECHELLE: f64 = 0.001;
+
+/// La zone à retenir après une découpe de zone réussie : avec l'écran qui la contient
+/// entière. `None` si aucun écran ne la contient (elle n'est alors pas retenue).
+pub fn derniere_zone_retenue(zone: Rect, ecrans: &[EcranInfo]) -> Option<DerniereZone> {
+    ecrans
+        .iter()
+        .find(|e| e.rect.englobe(zone))
+        .map(|e| DerniereZone {
+            zone,
+            ecran: e.rect,
+            echelle: e.echelle,
+        })
+}
+
+/// Pourquoi la dernière zone ne peut pas être refaite : la sélection s'ouvre à la place.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RaisonRepli {
+    /// Aucune zone n'a encore été capturée depuis le démarrage.
+    Aucune,
+    /// L'écran de la zone a été débranché, déplacé, ou a changé de résolution ou d'échelle.
+    EcranChange,
+}
+
+/// Ce que fait une demande « Refaire la dernière zone ».
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Refaire {
+    /// La zone est découpée tout de suite, sans sélection.
+    Zone(Rect),
+    /// La sélection de zone s'ouvre sur la photo déjà prise (aucun message).
+    Selection(RaisonRepli),
+}
+
+/// La dernière zone vaut si un écran du moment a exactement le rectangle retenu, la même
+/// échelle (à 0,001 près) et contient toute la zone.
+pub fn refaire(derniere: Option<&DerniereZone>, ecrans: &[EcranInfo]) -> Refaire {
+    let Some(d) = derniere else {
+        return Refaire::Selection(RaisonRepli::Aucune);
+    };
+    let meme = ecrans.iter().any(|e| {
+        e.rect == d.ecran
+            && (e.echelle - d.echelle).abs() <= ECART_ECHELLE
+            && e.rect.englobe(d.zone)
+    });
+    if meme {
+        Refaire::Zone(d.zone)
+    } else {
+        Refaire::Selection(RaisonRepli::EcranChange)
+    }
+}
+
+/// `derniere zone <x>,<y> <l>x<h>`, `derniere zone: aucune, selection` ou `derniere zone:
+/// ecran change, selection`.
+pub fn ligne_refaire(r: &Refaire) -> String {
+    match r {
+        Refaire::Zone(z) => format!("derniere zone {},{} {}x{}", z.x, z.y, z.largeur, z.hauteur),
+        Refaire::Selection(RaisonRepli::Aucune) => "derniere zone: aucune, selection".into(),
+        Refaire::Selection(RaisonRepli::EcranChange) => {
+            "derniere zone: ecran change, selection".into()
+        }
+    }
+}
+
+/// `derniere zone retenue <x>,<y> <l>x<h>`.
+pub fn ligne_retenue(d: &DerniereZone) -> String {
+    let z = d.zone;
+    format!(
+        "derniere zone retenue {},{} {}x{}",
+        z.x, z.y, z.largeur, z.hauteur
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1043,5 +1128,77 @@ mod tests {
             ligne_chrono_photo(Duration::from_micros(12_900), Duration::from_micros(14_100)),
             "chrono gel photo 12 total 14"
         );
+    }
+
+    #[test]
+    fn derniere_zone_retenue_avec_son_ecran() {
+        let mut e = ecrans();
+        e[1].echelle = 1.25;
+        let d = derniere_zone_retenue(r(10, 20, 300, 200), &e).unwrap();
+        assert_eq!(d.ecran, r(0, 0, 1920, 1080));
+        assert_eq!(d.echelle, 1.25);
+        // Sur l'écran de gauche, aux coordonnées négatives.
+        let g = derniere_zone_retenue(r(-1000, 5, 50, 50), &e).unwrap();
+        assert_eq!(g.ecran, r(-1920, 0, 1920, 1080));
+        // À cheval sur deux écrans, ou hors de tout écran : rien n'est retenu.
+        assert_eq!(derniere_zone_retenue(r(-10, 0, 50, 50), &e), None);
+        assert_eq!(derniere_zone_retenue(r(1900, 1070, 50, 50), &e), None);
+        assert_eq!(derniere_zone_retenue(r(0, 0, 10, 10), &[]), None);
+    }
+
+    #[test]
+    fn refaire_la_derniere_zone() {
+        let e = ecrans();
+        assert_eq!(refaire(None, &e), Refaire::Selection(RaisonRepli::Aucune));
+        let d = derniere_zone_retenue(r(100, 100, 400, 300), &e).unwrap();
+        assert_eq!(refaire(Some(&d), &e), Refaire::Zone(r(100, 100, 400, 300)));
+        // Deux écrans, zone sur celui de gauche.
+        let g = derniere_zone_retenue(r(-1900, 10, 64, 64), &e).unwrap();
+        assert_eq!(refaire(Some(&g), &e), Refaire::Zone(r(-1900, 10, 64, 64)));
+        let change = Refaire::Selection(RaisonRepli::EcranChange);
+        // Écran débranché.
+        assert_eq!(refaire(Some(&d), &e[..1]), change);
+        assert_eq!(refaire(Some(&d), &[]), change);
+        // Déplacé d'un pixel.
+        let mut m = ecrans();
+        m[1].rect.x = 1;
+        assert_eq!(refaire(Some(&d), &m), change);
+        // Résolution changée.
+        let mut m = ecrans();
+        m[1].rect.largeur = 1280;
+        m[1].rect.hauteur = 1024;
+        assert_eq!(refaire(Some(&d), &m), change);
+        // Échelle 1,25 → 1,5 ; un écart de moins de 0,001 ne compte pas.
+        let mut m = ecrans();
+        m[1].echelle = 1.25;
+        let d125 = derniere_zone_retenue(r(100, 100, 400, 300), &m).unwrap();
+        m[1].echelle = 1.5;
+        assert_eq!(refaire(Some(&d125), &m), change);
+        m[1].echelle = 1.2505;
+        assert_eq!(refaire(Some(&d125), &m), Refaire::Zone(d125.zone));
+        // Zone qui ne tient plus dans l'écran retenu (valeur forgée).
+        let hors = DerniereZone {
+            zone: r(1800, 1000, 400, 300),
+            ..d
+        };
+        assert_eq!(refaire(Some(&hors), &e), change);
+    }
+
+    #[test]
+    fn lignes_de_la_derniere_zone() {
+        assert_eq!(
+            ligne_refaire(&Refaire::Zone(r(-40, 12, 300, 200))),
+            "derniere zone -40,12 300x200"
+        );
+        assert_eq!(
+            ligne_refaire(&Refaire::Selection(RaisonRepli::Aucune)),
+            "derniere zone: aucune, selection"
+        );
+        assert_eq!(
+            ligne_refaire(&Refaire::Selection(RaisonRepli::EcranChange)),
+            "derniere zone: ecran change, selection"
+        );
+        let d = derniere_zone_retenue(r(3, 4, 50, 60), &ecrans()).unwrap();
+        assert_eq!(ligne_retenue(&d), "derniere zone retenue 3,4 50x60");
     }
 }

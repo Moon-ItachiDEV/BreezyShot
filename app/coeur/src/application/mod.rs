@@ -7,6 +7,10 @@
 //! 3. libérer ce qu'il tient dans `arreter` (raccourcis, fenêtres) ;
 //! 4. ajouter ses entrées de menu dans `entrees_menu`.
 //!
+//! Retardateur (0.4) : `demarrer_capture` entre en Décompte (`commencer_decompte`), le fil
+//! `decompte` poste `DecompteFini`, puis la séquence du mode part (`apres_gel`) ;
+//! `decompte.rs` décide (fonctions pures). Dernière zone : `capturer_derniere_zone`.
+//!
 //! Capture d'une zone (§3.6) : `lancer_capture` puis `traiter_zone` font les gestes,
 //! `zone.rs` dit lesquels (fonctions pures). Plein écran (§3.7) : `lancer_capture` puis
 //! `capturer_plein_ecran`, sans écran figé ni sélection. Tout ce qui montre ou cache se
@@ -27,6 +31,7 @@ pub mod zone;
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
+use std::sync::mpsc::{self, RecvTimeoutError, Sender};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::thread::ThreadId;
 use std::time::{Duration, Instant};
@@ -43,10 +48,11 @@ use crate::sortie::{self, Annonce};
 use crate::systeme::gel::{self, Changement};
 use crate::systeme::{self, Dossiers, Systeme, Theme};
 use arguments::Commande;
+use decompte::{ArriveeDecompte, Cause};
 use etats::{Automate, Declencheur, Etat, Mode};
 use icone::EntreeMenu;
 use vignette::{CaptureMontree, EtatSuppression};
-use zone::{Arrivee, Geste, Probleme, Vue};
+use zone::{Arrivee, DerniereZone, Geste, Probleme, Refaire, Vue};
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -118,6 +124,8 @@ pub enum Evenement {
     LancerGlisser { id: u64, chemin: PathBuf },
     /// Capture demandée par la ligne de commande (`--capturer <mode>`, l'installateur).
     CaptureCli(String),
+    /// Le délai du décompte numéro `n` est écoulé (posté par le fil `decompte`).
+    DecompteFini(u64),
 }
 
 /// Ce que le fil d'une action de la vignette rend au fil principal.
@@ -164,6 +172,18 @@ struct CaptureEnCours {
     /// `Signal::Fenetre::indice` est un indice. Vide en mode zone.
     fenetres: Vec<selection::FenetreProposee>,
     garde: GardeEcran,
+}
+
+/// Le décompte du retardateur en cours (état Décompte), de la demande à sa fin ou à son
+/// annulation.
+struct DecompteEnCours {
+    numero: u64,
+    mode: Mode,
+    debut: Instant,
+    /// Jeté à l'annulation : le fil `decompte` se réveille et finit sans rien poster.
+    arret: Sender<()>,
+    /// L'`id` du décompte dans le bandeau ; `None` : sans affichage.
+    affichage: Option<u64>,
 }
 
 /// Filet de sécurité : à sa destruction, l'écran figé et la sélection sont cachés et Échap
@@ -261,6 +281,12 @@ pub struct Application {
     suppressions: (Mutex<u32>, std::sync::Condvar),
     /// Capture demandée par `--capturer` avant la fin du démarrage : jouée à `pret`.
     capture_en_attente: Mutex<Option<String>>,
+    /// Le décompte en cours (fil principal ; verrou jamais tenu pendant un appel à un
+    /// module), et le dernier numéro donné.
+    decompte: Mutex<Option<DecompteEnCours>>,
+    numero_decompte: AtomicU64,
+    /// La dernière zone capturée, en mémoire seulement (§5 du contrat de la 0.4).
+    derniere_zone: Mutex<Option<DerniereZone>>,
 }
 
 /// Une annonce envoyée au bandeau, dont la situation attend d'être retenue.
@@ -855,6 +881,8 @@ pub fn traiter(app: &AppHandle, evenement: Evenement) {
             | Evenement::ActionFaite(_)
             | Evenement::SuppressionFaite { .. }
             | Evenement::LancerGlisser { .. }
+            | Evenement::DecompteFini(_)
+            | Evenement::Fenetres(fenetres::Signal::ActionBandeau { .. })
     );
     if de_capture && hors_fil_principal(app) {
         let pour = app.clone();
@@ -914,13 +942,18 @@ pub fn traiter(app: &AppHandle, evenement: Evenement) {
         },
         Evenement::Raccourci(raccourcis::Signal::Echap) => {
             log::info!("echap global presse");
-            traiter_zone(app, Arrivee::Echap);
+            if !annuler_si_decompte(app, ArriveeDecompte::Echap) {
+                traiter_zone(app, Arrivee::Echap);
+            }
         }
         Evenement::Selection(signal) => traiter_zone(app, Arrivee::Selection(&signal)),
         Evenement::Bureau(changement) => {
             log::info!("bureau change pendant la capture: {changement:?}");
-            traiter_zone(app, Arrivee::Bureau(changement));
+            if !annuler_si_decompte(app, ArriveeDecompte::Bureau(changement)) {
+                traiter_zone(app, Arrivee::Bureau(changement));
+            }
         }
+        Evenement::DecompteFini(numero) => finir_decompte(app, numero),
         Evenement::SortieFaite(fin) => {
             if prendre_sortie_attendue(app, fin.numero) {
                 finir_sortie(app, *fin);
@@ -955,8 +988,15 @@ pub fn traiter(app: &AppHandle, evenement: Evenement) {
             }
         }
         Evenement::Fenetres(fenetres::Signal::ActionBandeau { id, action }) => {
-            // La page ferme le message elle-même ; aucune action n'existe encore.
+            // La page ferme un message elle-même ; seule la croix du décompte agit.
             log::info!("bandeau action {id} {action}");
+            annuler_si_decompte(
+                app,
+                ArriveeDecompte::Action {
+                    id,
+                    action: &action,
+                },
+            );
         }
         Evenement::Vignette(signal) => traiter_vignette(app, signal),
         Evenement::ActionFaite(fin) => action_faite(app, *fin),
@@ -1050,9 +1090,10 @@ pub fn lancer_capture(app: &AppHandle, mode: Mode) {
 }
 
 /// Démarre une capture (fil principal). La table ignore la demande hors Repos et
-/// Vignette (aucun second `figer` tant qu'une capture est en cours) ; acceptée, elle est
-/// comptée (une demande du menu en attente devient caduque), puis chaque mode suit sa
-/// séquence : zone (§3.6), plein écran (§3.7).
+/// Vignette (aucun second `figer` tant qu'une capture est en cours, ni pendant un
+/// décompte) ; acceptée, elle est comptée (une demande du menu en attente devient
+/// caduque). Avec le retardateur (réglages en vigueur, D12 : raccourci, menu et
+/// `--capturer`), le décompte d'abord ; sinon la séquence du mode, tout de suite.
 fn demarrer_capture(app: &AppHandle, mode: Mode) {
     let recu_a = Instant::now();
     let glisser = app.state::<Application>().glisser.load(Ordering::SeqCst);
@@ -1060,35 +1101,202 @@ fn demarrer_capture(app: &AppHandle, mode: Mode) {
         log::info!("capture ignoree: glisser en cours");
         return;
     }
-    if appliquer(app, Declencheur::DemandeCapture(mode)).is_none() {
+    let retardateur_s = reglages_lus(app).capture.retardateur_s;
+    let declencheur = decompte::declencheur(mode, retardateur_s);
+    if appliquer(app, declencheur).is_none() {
         log::info!("capture deja en cours: appui ignore");
         return;
     }
     noter_demande(app);
-    match mode {
-        Mode::Zone => capturer_avec_selection(app, recu_a, Mode::Zone),
-        Mode::Fenetre => capturer_avec_selection(app, recu_a, Mode::Fenetre),
-        Mode::PleinEcran => capturer_plein_ecran(app, recu_a),
-        // Provisoire (socle de la 0.4) : la sélection de zone, comme `Ctrl + Maj + 1`. Le
-        // vrai parcours (zone retenue refaite sans sélection, §5 du contrat) viendra.
-        Mode::DerniereZone => capturer_avec_selection(app, recu_a, Mode::Zone),
+    match declencheur {
+        Declencheur::DemandeDecompte(_) => commencer_decompte(app, mode, retardateur_s),
+        _ => apres_gel(app, mode, recu_a, false),
     }
 }
 
+/// La séquence de chaque mode, une fois en Gel : zone et fenêtre (§3.6), plein écran
+/// (§3.7), dernière zone (§5 de la 0.4). `bandeau_cache` : le décompte vient d'être
+/// caché, le compositeur est attendu avant la photo.
+fn apres_gel(app: &AppHandle, mode: Mode, recu_a: Instant, bandeau_cache: bool) {
+    match mode {
+        Mode::Zone => capturer_avec_selection(app, recu_a, Mode::Zone, bandeau_cache),
+        Mode::Fenetre => capturer_avec_selection(app, recu_a, Mode::Fenetre, bandeau_cache),
+        Mode::PleinEcran => capturer_plein_ecran(app, recu_a, bandeau_cache),
+        Mode::DerniereZone => capturer_derniere_zone(app, recu_a, bandeau_cache),
+    }
+}
+
+/// Entrée en Décompte (fil principal, état déjà Décompte) : vignette fermée, disque montré
+/// dans le bandeau sur sa cible, Échap réservé, fil `decompte` lancé. Sans fil possible,
+/// la capture part tout de suite.
+fn commencer_decompte(app: &AppHandle, mode: Mode, secondes: u32) {
+    fermer_vignette(app, "capture");
+    let etat = app.state::<Application>();
+    let numero = etat.numero_decompte.fetch_add(1, Ordering::SeqCst) + 1;
+    let duree = decompte::duree(secondes);
+    log::info!("{}", decompte::ligne_debut(numero, secondes, mode));
+    let derniere = etat
+        .derniere_zone
+        .lock()
+        .ok()
+        .and_then(|d| d.map(|d| d.zone));
+    let cible = decompte::cible(mode, derniere, souris_bureau(app), &gel::ecrans());
+    let reglages = reglages_lus(app);
+    let reduites =
+        vignette::animations_reduites(reglages.animations, systeme::animations_reduites());
+    let affichage = match (cible, app.try_state::<Bandeau>()) {
+        (Some(c), Some(b)) => Some(b.montrer_decompte(fenetres::Decompte {
+            numero,
+            secondes,
+            restant: duree,
+            centre: c.centre,
+            cote: c.cote,
+            reduites,
+        }))
+        .filter(|id| *id != 0),
+        _ => None,
+    };
+    if affichage.is_none() {
+        log::info!("decompte {numero} sans affichage");
+    }
+    reserver_echap(app);
+    let (arret, attente) = mpsc::channel::<()>();
+    // Un verrou empoisonné est repris : sans décompte rangé, l'état resterait Décompte.
+    let ancien = etat
+        .decompte
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .replace(DecompteEnCours {
+            numero,
+            mode,
+            debut: Instant::now(),
+            arret,
+            affichage,
+        });
+    if let Some(a) = ancien {
+        // Impossible (la table refuse une demande en Décompte) : l'ancien fil s'arrête.
+        log::error!("decompte {} encore range: remplace", a.numero);
+    }
+    let pour_fil = app.clone();
+    let lance = std::thread::Builder::new()
+        .name("decompte".into())
+        .spawn(move || {
+            // Échéance : la fin est postée. Message reçu ou canal fermé (annulation) : rien.
+            if let Err(RecvTimeoutError::Timeout) = attente.recv_timeout(duree) {
+                poster_plus_tard(&pour_fil, Evenement::DecompteFini(numero));
+            }
+        });
+    if let Err(e) = lance {
+        log::warn!("decompte impossible ({e}): capture tout de suite");
+        finir_decompte(app, numero);
+    }
+}
+
+/// Retire le décompte en cours s'il porte ce numéro (sinon le laisse).
+fn prendre_decompte(app: &AppHandle, numero: Option<u64>) -> Option<DecompteEnCours> {
+    let etat = app.state::<Application>();
+    let mut d = etat.decompte.lock().unwrap_or_else(|e| e.into_inner());
+    match numero {
+        Some(n) => d.take_if(|d| d.numero == n),
+        None => d.take(),
+    }
+}
+
+/// Le numéro et l'affichage du décompte en cours.
+fn decompte_en_cours(app: &AppHandle) -> (Option<u64>, Option<u64>) {
+    let etat = app.state::<Application>();
+    let d = etat.decompte.lock().unwrap_or_else(|e| e.into_inner());
+    (
+        d.as_ref().map(|d| d.numero),
+        d.as_ref().and_then(|d| d.affichage),
+    )
+}
+
+/// Fin du délai `numero` (fil principal) : une fin périmée (décompte annulé, ou d'un autre
+/// numéro) est ignorée. Sinon : Échap rendu (la sélection le reprendra), disque caché,
+/// Gel, puis la séquence du mode (les chronos partent d'ici ; plein écran : la souris
+/// est lue maintenant, D14).
+fn finir_decompte(app: &AppHandle, numero: u64) {
+    let (attendu, _) = decompte_en_cours(app);
+    if !decompte::fin_a_jour(attendu, numero) {
+        log::info!("decompte {numero}: fin perimee ignoree");
+        return;
+    }
+    let Some(d) = prendre_decompte(app, Some(numero)) else {
+        log::info!("decompte {numero}: fin perimee ignoree");
+        return;
+    };
+    liberer_echap(app);
+    let cache = cacher_affichage_decompte(app, d.affichage);
+    if appliquer(app, Declencheur::DecompteFini(d.mode)).is_none() {
+        log::error!("decompte {numero}: fin refusee par la table");
+        return;
+    }
+    log::info!("{}", decompte::ligne_fin(numero, d.debut.elapsed()));
+    apres_gel(app, d.mode, Instant::now(), cache);
+}
+
+/// Cache le disque `affichage` dans le bandeau ; vrai s'il était montré.
+fn cacher_affichage_decompte(app: &AppHandle, affichage: Option<u64>) -> bool {
+    match (affichage, app.try_state::<Bandeau>()) {
+        (Some(id), Some(b)) => b.cacher_decompte(id),
+        _ => false,
+    }
+}
+
+/// Annule le décompte si l'arrivée le concerne (`decompte::annulation`) ; rend vrai si
+/// elle était pour lui (rien d'autre à faire).
+fn annuler_si_decompte(app: &AppHandle, arrivee: ArriveeDecompte<'_>) -> bool {
+    let (_, affichage) = decompte_en_cours(app);
+    match decompte::annulation(etat_automate(app), affichage, arrivee) {
+        Some(cause) => {
+            annuler_decompte(app, cause);
+            true
+        }
+        None => false,
+    }
+}
+
+/// Annule le décompte en cours : fil arrêté, disque caché, Échap rendu, Repos (sauf à
+/// l'arrêt de l'app). Aucun message. Sans décompte en cours, ne fait rien.
+fn annuler_decompte(app: &AppHandle, cause: Cause) {
+    let Some(d) = prendre_decompte(app, None) else {
+        return;
+    };
+    let DecompteEnCours {
+        numero,
+        arret,
+        affichage,
+        ..
+    } = d;
+    drop(arret);
+    cacher_affichage_decompte(app, affichage);
+    liberer_echap(app);
+    if cause != Cause::Arret {
+        appliquer(app, Declencheur::DecompteAnnule);
+    }
+    log::info!("{}", decompte::ligne_annule(numero, cause));
+}
+
 /// Début commun à tous les modes, une fois en Gel : la vignette (suppression en attente
-/// validée) et le bandeau sont cachés sans animation (ni l'un ni l'autre ne doit figurer
-/// sur la photo ni rester au-dessus de l'écran figé), le compositeur attendu (borné), puis
-/// la photo. Erreur → `GelImpossible` (Repos) et bandeau d'erreur ; rend `None`.
-fn photographier(app: &AppHandle) -> Option<capture::Gel> {
+/// validée) et le bandeau (message ou décompte) sont cachés sans animation (ni l'un ni
+/// l'autre ne doit figurer sur la photo ni rester au-dessus de l'écran figé), le
+/// compositeur attendu (borné) si l'un d'eux était montré ou si `deja_cache` (le décompte
+/// caché juste avant), puis la photo, avec le pointeur si le réglage le veut. Erreur →
+/// `GelImpossible` (Repos) et bandeau d'erreur ; rend `None`.
+fn photographier(app: &AppHandle, deja_cache: bool) -> Option<capture::Gel> {
     let vignette_cachee = fermer_vignette(app, "capture");
     let bandeau_cache = app.try_state::<Bandeau>().is_some_and(|b| b.cacher());
-    if (bandeau_cache || vignette_cachee) && !systeme::attendre_composition(ATTENTE_COMPOSITION) {
+    if (bandeau_cache || vignette_cachee || deja_cache)
+        && !systeme::attendre_composition(ATTENTE_COMPOSITION)
+    {
         log::warn!(
             "composition non attendue ({} ms): photo prise quand meme",
             ATTENTE_COMPOSITION.as_millis()
         );
     }
-    match capture::figer(false) {
+    let avec_pointeur = reglages_lus(app).capture.pointeur;
+    match capture::figer(avec_pointeur) {
         Ok(g) => Some(g),
         Err(e) => {
             log::warn!("gel impossible: {e}");
@@ -1109,12 +1317,27 @@ fn souris_bureau(app: &AppHandle) -> Option<(i32, i32)> {
     zone::point_souris(fenetres::souris(app))
 }
 
+/// Pose le pointeur pris avec la photo dans les pixels découpés de `zone` (avant
+/// l'arrondi des coins d'une fenêtre). Rien si le pointeur n'a pas été pris.
+fn poser_pointeur(gel_pris: &capture::Gel, pixels: &mut gel::Pixels, zone: systeme::Rect) {
+    let Some(p) = gel_pris.pointeur.as_ref() else {
+        return;
+    };
+    // Les pixels sont ceux de la zone coupée au bureau (`capture::decouper`).
+    let lue = zone.intersection(gel_pris.bureau).unwrap_or(zone);
+    if capture::poser_pointeur(pixels, lue, p) {
+        log::info!("pointeur pose");
+    } else {
+        log::info!("pointeur hors zone");
+    }
+}
+
 /// Plein écran (§3.7), en Gel, sur le fil principal : souris lue avant tout, photo,
 /// écran choisi (`capture::ecran_de_capture`), Découpe, puis la sortie. Rien n'est
 /// montré : ni écran figé, ni sélection, ni Échap réservé, ni garde.
-fn capturer_plein_ecran(app: &AppHandle, recu_a: Instant) {
+fn capturer_plein_ecran(app: &AppHandle, recu_a: Instant, bandeau_cache: bool) {
     let souris = souris_bureau(app);
-    let Some(gel_pris) = photographier(app) else {
+    let Some(gel_pris) = photographier(app, bandeau_cache) else {
         return;
     };
     let Some((ecran, origine)) = capture::ecran_de_capture(souris, &gel_pris.ecrans) else {
@@ -1130,7 +1353,10 @@ fn capturer_plein_ecran(app: &AppHandle, recu_a: Instant) {
     );
     appliquer(app, Declencheur::PhotoPrise(Mode::PleinEcran));
     let debut = Instant::now();
-    let pixels = capture::decouper(&gel_pris, ecran.rect);
+    let pixels = capture::decouper(&gel_pris, ecran.rect).map(|mut p| {
+        poser_pointeur(&gel_pris, &mut p, ecran.rect);
+        p
+    });
     let duree_decoupe = debut.elapsed();
     drop(gel_pris);
     match pixels {
@@ -1143,13 +1369,11 @@ fn capturer_plein_ecran(app: &AppHandle, recu_a: Instant) {
     }
 }
 
-/// Zone et fenêtre (§3.6), en Gel : photo, écran figé, (en mode fenêtre, la liste des
-/// fenêtres), sélection, Échap réservé. Même code pour les deux modes. Toute erreur après
-/// `montrer_ecran_fige` cache tout (garde) et revient au Repos.
-fn capturer_avec_selection(app: &AppHandle, recu_a: Instant, mode: Mode) {
-    // Avant toute photo : aucune capture ne doit rester rangée (sa garde, détruite plus
-    // tard, cacherait le nouvel écran figé), et la Sélection doit exister (sinon l'écran
-    // figé ne serait jamais montré pour rien).
+/// Contrôles d'avant photo des captures qui peuvent montrer la sélection : aucune capture
+/// ne doit rester rangée (sa garde, détruite plus tard, cacherait le nouvel écran figé), et
+/// la Sélection doit exister (sinon l'écran figé ne serait jamais montré pour rien). Faux :
+/// Repos et bandeau d'erreur, pas de photo.
+fn pret_pour_selection(app: &AppHandle) -> bool {
     if let Some(ancienne) = ranger_capture(app, None) {
         log::error!("capture precedente encore rangee: abandonnee avant la photo");
         drop(ancienne);
@@ -1158,12 +1382,73 @@ fn capturer_avec_selection(app: &AppHandle, recu_a: Instant, mode: Mode) {
         log::warn!("selection absente: pas de photo");
         appliquer(app, Declencheur::GelImpossible);
         afficher_probleme(app, Probleme::Selection);
+        return false;
+    }
+    true
+}
+
+/// Zone et fenêtre (§3.6), en Gel : contrôles, photo, puis `montrer_selection`. Même code
+/// pour les deux modes.
+fn capturer_avec_selection(app: &AppHandle, recu_a: Instant, mode: Mode, bandeau_cache: bool) {
+    if !pret_pour_selection(app) {
         return;
     }
     // 2 et 3. Bandeau caché, compositeur attendu, la photo.
-    let Some(gel_pris) = photographier(app) else {
+    let Some(gel_pris) = photographier(app, bandeau_cache) else {
         return;
     };
+    montrer_selection(app, recu_a, mode, gel_pris);
+}
+
+/// Refaire la dernière zone (§5 de la 0.4), en Gel : contrôles et photo comme la zone,
+/// puis la zone retenue découpée tout de suite si son écran n'a pas changé (rien n'est
+/// montré, comme le plein écran) ; sinon la sélection de zone sur cette même photo, sans
+/// message.
+fn capturer_derniere_zone(app: &AppHandle, recu_a: Instant, bandeau_cache: bool) {
+    if !pret_pour_selection(app) {
+        return;
+    }
+    let Some(gel_pris) = photographier(app, bandeau_cache) else {
+        return;
+    };
+    let derniere = app
+        .state::<Application>()
+        .derniere_zone
+        .lock()
+        .ok()
+        .and_then(|d| *d);
+    let refaire = zone::refaire(derniere.as_ref(), &gel_pris.ecrans);
+    log::info!("{}", zone::ligne_refaire(&refaire));
+    let Refaire::Zone(rect) = refaire else {
+        montrer_selection(app, recu_a, Mode::Zone, gel_pris);
+        return;
+    };
+    log::info!(
+        "{}",
+        zone::ligne_chrono_photo(gel_pris.duree_photo, gel_pris.duree_totale)
+    );
+    appliquer(app, Declencheur::PhotoPrise(Mode::DerniereZone));
+    let debut = Instant::now();
+    let pixels = capture::decouper(&gel_pris, rect).map(|mut p| {
+        poser_pointeur(&gel_pris, &mut p, rect);
+        p
+    });
+    let duree_decoupe = debut.elapsed();
+    drop(gel_pris);
+    match pixels {
+        Ok(pixels) => lancer_sortie(app, pixels, rect, duree_decoupe, recu_a, false),
+        Err(e) => {
+            log::warn!("decoupe impossible: {e}");
+            appliquer(app, Declencheur::DecoupeImpossible);
+            afficher_probleme(app, Probleme::Lecture);
+        }
+    }
+}
+
+/// La photo prise, en Gel (zone, fenêtre, repli de la dernière zone) : écran figé, (en
+/// mode fenêtre, la liste des fenêtres), sélection, Échap réservé, loupe si voulue. Toute
+/// erreur après `montrer_ecran_fige` cache tout (garde) et revient au Repos.
+fn montrer_selection(app: &AppHandle, recu_a: Instant, mode: Mode, gel_pris: capture::Gel) {
     // 4. L'écran figé. La garde vit dès maintenant : toute sortie le cache.
     let garde = GardeEcran::new(app);
     if let Err(e) = gel::montrer_ecran_fige(&gel_pris.image) {
@@ -1248,6 +1533,16 @@ fn capturer_avec_selection(app: &AppHandle, recu_a: Instant, mode: Mode) {
     }
     // 6. Échap global, le temps de la sélection.
     reserver_echap(app);
+    // 7. La loupe (mode zone, réglage allumé), après tout le reste : le chrono `selection
+    // prete` ne change pas. Cachée avec l'écran figé, par tous les chemins.
+    if mode_selection == selection::Mode::Zone
+        && reglages_lus(app).selection.loupe
+        && gel::loupe_disponible()
+    {
+        if let Err(e) = gel::montrer_loupe() {
+            log::warn!("loupe impossible: {e}");
+        }
+    }
 }
 
 /// La capture en cours, sous son verrou. Un verrou empoisonné (panique pendant qu'il
@@ -1377,13 +1672,25 @@ fn decouper(app: &AppHandle, zone: systeme::Rect, fenetre: Option<(i32, [bool; 4
     }
     let debut = Instant::now();
     let pixels = capture::decouper(&capture.gel, zone).map(|mut p| {
+        poser_pointeur(&capture.gel, &mut p, zone);
         if let Some((rayon, coins)) = fenetre.filter(|(rayon, _)| *rayon > 0) {
             capture::arrondir(&mut p, rayon, coins);
         }
         p
     });
     let duree_decoupe = debut.elapsed();
+    // Seule une zone devient la dernière zone (D7) ; une fenêtre, non.
+    let retenue = match (&pixels, fenetre) {
+        (Ok(_), None) => zone::derniere_zone_retenue(zone, &capture.gel.ecrans),
+        _ => None,
+    };
     drop(capture);
+    if let Some(d) = retenue {
+        log::info!("{}", zone::ligne_retenue(&d));
+        if let Ok(mut place) = app.state::<Application>().derniere_zone.lock() {
+            *place = Some(d);
+        }
+    }
     let transparence = fenetre.is_some_and(|(rayon, coins)| zone::avec_transparence(rayon, coins));
     match pixels {
         Ok(pixels) => lancer_sortie(app, pixels, zone, duree_decoupe, relache, transparence),
@@ -2147,6 +2454,8 @@ fn arreter(app: &AppHandle) {
         journal::vider();
         return;
     }
+    // Décompte en cours : annulé (fil arrêté, disque caché, Échap rendu), aucune photo.
+    annuler_decompte(app, Cause::Arret);
     // Capture en cours : la garde cache tout et libère Échap. Puis la sélection est
     // fermée avant la destruction de l'écran figé, et l'image du bureau rendue.
     let capture = ranger_capture(app, None);
