@@ -1,6 +1,13 @@
-//! Fenêtre de l'éditeur d'annotation (contrat 0.4 « Éditeur », §4.1) : une fenêtre Windows
-//! ordinaire (cadre du système, barre des tâches, Alt+Tab), une seule à la fois, créée
-//! cachée à la demande, montrée à `editeur_pret`, détruite à la fermeture.
+//! Fenêtre de l'éditeur d'annotation (contrat 0.4 « Éditeur », §4.1 ; avenant « Éditeur
+//! épuré », §3) : une fenêtre sans cadre Windows (la barre du haut de la page la déplace
+//! par `data-tauri-drag-region`), avec l'ombre et les coins arrondis du système,
+//! redimensionnable par ses bords, dans la barre des tâches et Alt+Tab ; une seule à la
+//! fois, créée cachée à la demande, montrée à `editeur_pret`, détruite à la fermeture.
+//!
+//! Sans cadre, sous Windows (tao 0.37) : le style garde `WS_CAPTION` et `WS_SIZEBOX` (menu
+//! système, Alt+F4, redimensionnement) ; `WM_NCCALCSIZE` rend toute la fenêtre à la zone
+//! cliente, sauf, avec l'ombre, des bords invisibles (épaisseur du cadre à gauche, à
+//! droite et en bas, 1 px en haut sous Windows 11) qui portent le redimensionnement.
 //!
 //! Le module crée, place, montre et prévient la page ; il ne décide de rien : les
 //! commandes de la page et les décisions sont dans l'Application.
@@ -15,14 +22,15 @@ use crate::systeme;
 
 /// Étiquette de la fenêtre (aussi dans `capabilities/editeur.json`).
 pub const ETIQUETTE_EDITEUR: &str = "editeur";
-/// Titre de la fenêtre (barre de titre, barre des tâches).
+/// Titre de la fenêtre (barre des tâches, Alt+Tab ; aucune barre de titre affichée).
 pub const TITRE: &str = "Annoter la capture";
 /// Page de la fenêtre, sous `app/interface/`.
 pub const PAGE: &str = "editeur/editeur.html";
 /// Taille intérieure minimale, pixels logiques.
 pub const TAILLE_MIN: (f64, f64) = (640.0, 440.0);
-/// Marge et barre de la page autour de l'image, pixels logiques.
-pub const MARGES: (f64, f64) = (40.0, 84.0);
+/// Ce que la page garde autour de l'image, pixels logiques (avenant §3) : 36 px de chaque
+/// côté ; barre du haut 52, réserve haute 14, palette 72 et sa réserve 34 en bas.
+pub const MARGES: (f64, f64) = (72.0, 172.0);
 /// Part maximale de la zone utile prise par la fenêtre.
 pub const PART_MAX: f64 = 0.9;
 
@@ -43,8 +51,9 @@ pub enum Ouverture {
 
 /// Place de la fenêtre pour une image de `image` pixels sur `ecran` (pure, pixels réels) :
 /// image à la taille réelle + `MARGES`, bornée à `TAILLE_MIN` et à `PART_MAX` de la zone
-/// utile, centrée dans la zone utile. Le rectangle est celui de la zone intérieure (la
-/// page) ; `ouvrir` centre le cadre du système sur le même centre.
+/// utile, centrée dans la zone utile. Le rectangle est celui de la zone cliente (la
+/// page) ; `ouvrir` met la zone cliente exactement dessus (les bords invisibles de l'ombre
+/// débordent).
 pub fn placer(image: (u32, u32), ecran: &Ecran) -> Rect {
     let e = echelle_sure(ecran.echelle);
     let zone = ecran.zone_utile;
@@ -115,7 +124,8 @@ where
         .min_inner_size(lmin, hmin)
         .visible(false)
         .resizable(true)
-        .decorations(true)
+        .decorations(false)
+        .shadow(true)
         .skip_taskbar(false)
         .always_on_top(false)
         .theme(theme::pour_cadre(theme::actuel()))
@@ -131,18 +141,19 @@ where
         _ => {}
     });
     // D'abord sur l'écran de `place` (l'échelle de la taille est celle de cet écran),
-    // puis la zone intérieure à `place`, puis le cadre recentré sur le même centre.
+    // puis la zone cliente à la taille de `place` (tao ajoute les bords invisibles), puis
+    // la fenêtre décalée de ces bords : la zone cliente tombe exactement sur `place`.
     let _ = f.set_position(tauri::PhysicalPosition::new(place.x, place.y));
     let _ = f.set_size(tauri::PhysicalSize::new(place.largeur, place.hauteur));
-    let (dl, dh) = match (f.outer_size(), f.inner_size()) {
-        (Ok(o), Ok(i)) => (
-            i64::from(o.width.saturating_sub(i.width)),
-            i64::from(o.height.saturating_sub(i.height)),
+    let (dx, dy) = match (f.inner_position(), f.outer_position()) {
+        (Ok(i), Ok(o)) => (
+            i64::from(i.x) - i64::from(o.x),
+            i64::from(i.y) - i64::from(o.y),
         ),
         _ => (0, 0),
     };
-    let x = i64::from(place.x) - dl / 2;
-    let y = i64::from(place.y) - dh / 2;
+    let x = i64::from(place.x) - dx;
+    let y = i64::from(place.y) - dy;
     let _ = f.set_position(tauri::PhysicalPosition::new(x as i32, y as i32));
     Ok(Ouverture::Creee {
         identifiant: systeme::identifiant_fenetre(&f),
@@ -195,7 +206,9 @@ pub fn rect_page(app: &AppHandle) -> Option<(Rect, f64)> {
     ))
 }
 
-/// Le thème du cadre de la fenêtre ouverte.
+/// Le thème de la fenêtre ouverte. Sans cadre, il sert encore : tao le passe à WebView2
+/// (`PreferredColorScheme`, donc `prefers-color-scheme` de la page) et au mode sombre de
+/// DWM (liseré, menu système d'Alt+Espace).
 pub fn regler_cadre(app: &AppHandle, theme_page: Option<ThemePage>) {
     if let Some(f) = fenetre(app) {
         if let Err(e) = f.set_theme(theme::pour_cadre(theme_page)) {
@@ -254,9 +267,9 @@ mod tests {
         let r = placer((100, 80), &e);
         assert_eq!((r.largeur, r.hauteur), (640, 440));
         assert_eq!((r.x, r.y), (640, 296));
-        // Juste : l'image à la taille réelle, plus la marge et la barre.
+        // Juste : l'image à la taille réelle, plus les réserves de la page.
         let r = placer((1000, 600), &e);
-        assert_eq!((r.largeur, r.hauteur), (1040, 684));
+        assert_eq!((r.largeur, r.hauteur), (1072, 772));
         // Trop grande : 90 % de la zone utile.
         let r = placer((3000, 2000), &e);
         assert_eq!((r.largeur, r.hauteur), (1728, 928));
@@ -267,10 +280,10 @@ mod tests {
     #[test]
     fn echelles_de_100_a_200() {
         for (echelle, attendu) in [
-            (1.0, (1040, 684)),
-            (1.25, (1050, 705)),
-            (1.5, (1060, 726)),
-            (2.0, (1280, 880)),
+            (1.0, (1072, 772)),
+            (1.25, (1090, 815)),
+            (1.5, (1108, 858)),
+            (2.0, (1280, 944)),
         ] {
             let e = ecran(0, 0, 3840, 2160, echelle);
             let r = placer((1000, 600), &e);
@@ -289,7 +302,9 @@ mod tests {
         let e = ecran(-1920, -200, 1920, 1080, 1.0);
         let r = placer((400, 300), &e);
         assert!(dans(&r, &e.zone_utile));
-        assert_eq!((r.x, r.y), (-1920 + 640, -200 + 296));
+        // 400 + 72 sous la largeur minimale ; 300 + 172 = 472 de haut.
+        assert_eq!((r.largeur, r.hauteur), (640, 472));
+        assert_eq!((r.x, r.y), (-1920 + 640, -200 + 280));
         // Barre des tâches à gauche : la zone utile commence à 48.
         let gauche = Ecran {
             rect: Rect {

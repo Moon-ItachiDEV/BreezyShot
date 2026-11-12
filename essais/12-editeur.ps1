@@ -1,5 +1,6 @@
 # Version 0.4 « Éditeur d'annotation », chantier Cœur : l'éditeur de bout en bout sur le
-# vrai .exe, avec de vraies entrées clavier et souris (contrat 0.4 « Éditeur », §12.3).
+# vrai .exe, avec de vraies entrées clavier et souris (contrat 0.4 « Éditeur », §12.3), aux
+# noms et aux gestes de l'avenant « Éditeur épuré » (§3, §4 : rôles et noms accessibles).
 # Réglages : plein écran sur Ctrl+Maj+2, copie, pas d'enregistrement automatique, vignette
 # « toujours » en bas à gauche, animations réduites, dossier d'enregistrement de l'essai.
 # BREEZYSHOT_ESSAI_CAPTURABLE=1. Presse-papiers lu dans un fil STA. Référence : le PNG de
@@ -13,7 +14,11 @@
 #     fermer,annuler` ; clic réel au centre de `vignette bouton <id> annoter` : `vignette
 #     fermee <id> annoter`, `etat Vignette -> Repos (VignetteFermee)`, `editeur fenetre` ;
 # (3) fenêtre visible, titre exact, au premier plan, dans la barre des tâches (ni outil ni
-#     propriétaire), dans la zone utile ; `editeur image affichee` noté (budget 800 ms) ;
+#     propriétaire), zone cliente dans la zone utile ; `editeur image affichee` noté (budget
+#     800 ms) ; sans barre de titre mais redimensionnable : tao garde WS_CAPTION et
+#     WS_SIZEBOX dans le style et rend toute la fenêtre à la zone cliente par WM_NCCALCSIZE,
+#     donc on vérifie WS_SIZEBOX et une zone cliente qui commence à 2 px au plus du haut de
+#     la fenêtre (1 px sous Windows 11 avec l'ombre, au lieu d'une barre de titre de ~30 px) ;
 # (4) Ctrl+1 : une ligne `editeur vue … zoom 1.00` attendue, 1024x768 (un pixel pour un
 #     pixel) ; Ctrl+0 :
 #     Ajuster, rectangle de l'image lu (la capture plein écran ne tient pas à la taille
@@ -28,21 +33,25 @@
 #     second fichier ; « Récents » : un fichier par `recent ok` ;
 # (9) WM_CLOSE sans changement depuis l'export : `ferme <id> (propre)`, `pixels rendus`,
 #     fenêtre détruite ;
-# (10) capture, Annoter, un rectangle, Alt+F4 : `fermeture <id>: demander`, le dialogue
-#     « Fermer sans garder ? » et le focus sur « Copier et fermer » (UI Automation, bornés),
-#     la fenêtre reste après le filet de 2 s ; Échap : rien ; Alt+F4, Tab jusqu'au focus sur
-#     « Ne pas garder », Entrée : `(sans garder)` ;
+# (10) capture, Annoter, un rectangle, Alt+F4 : `fermeture <id>: demander`, le `menu`
+#     « Fermer » et le focus sur le `menuitem` « Copier et fermer » (UI Automation, bornés),
+#     la fenêtre reste après le filet de 2 s ; Échap sur le menu (« Continuer ») : rien ;
+#     Alt+F4, menu attendu, clic réel sur « Fermer sans copier » : `(sans garder)` ;
 # (11) éditeur propre puis Annoter d'une autre capture : `remplace <a> par <b>`, une seule
-#     fenêtre ; modifié puis Annoter : `fermeture demandee <b> (remplacer)`, dialogue et
-#     focus attendus, Échap (« Continuer ») : `capture <c> abandonnee`, le document b reste ;
+#     fenêtre ; modifié puis Annoter : `fermeture demandee <b> (remplacer)`, menu « Fermer »
+#     et focus attendus, Échap (« Continuer ») : `capture <c> abandonnee`, le document b
+#     reste ;
 # (12) Ctrl + Maj + 2 éditeur ouvert : capture faite, éditeur ouvert, même fenêtre, aucun
 #     `editeur ferme` ;
 # (13) Ctrl+Maj+S : dialogue #32770 possédé par l'éditeur (guetté, 30 s au plus), annulé
-#     (IDCANCEL) : `dialogue annule`, rien d'écrit ; Plus → Glisser vers la fenêtre de
-#     cible-glisser.ps1 : `glisser <id> debut`, `depose`, un fichier reçu au modèle, mêmes
-#     octets que le « Récents » de cet export ;
-# (14) éditeur ramené au premier plan (SetForegroundWindow, sinon clic réel dans sa barre
-#     de titre ; vérifié), un rectangle, --quitter : `ferme <id> (arret)`, `arret propre`.
+#     (IDCANCEL) : `dialogue annule`, rien d'écrit ; « Plus », `menuitem` « Glisser vers
+#     une appli », puis glisser réel depuis la vignette de prise (`button` « Glisser vers
+#     une appli » : appui, 4 px et plus) vers la fenêtre de cible-glisser.ps1 : `glisser
+#     <id> debut`, `depose`, un fichier reçu au modèle, mêmes octets que le « Récents » de
+#     cet export ;
+# (14) éditeur ramené au premier plan (SetForegroundWindow, sinon clic réel au milieu de la
+#     barre du haut de la page, zone de glisser, à 26 px CSS du haut ; vérifié), un
+#     rectangle, --quitter : `ferme <id> (arret)`, `arret propre`.
 # Cas B :
 # (15) éditeur ouvert ≤ repos + 90 Mo ; 10 ouvertures et fermetures ; 10 s après : ≤ repos
 #     froid + 8 Mo (le contrat) et ≤ repos chaud + 8 Mo (repos chaud : après la première
@@ -201,6 +210,14 @@ public static extern IntPtr GetForegroundWindow();
 [DllImport("user32.dll")]
 public static extern bool SetForegroundWindow(IntPtr h);
 [DllImport("user32.dll")]
+public static extern bool GetClientRect(IntPtr h, out RECT r);
+[DllImport("user32.dll")]
+public static extern uint GetDpiForWindow(IntPtr h);
+[StructLayout(LayoutKind.Sequential)]
+public struct POINT { public int X; public int Y; }
+[DllImport("user32.dll")]
+public static extern bool ClientToScreen(IntPtr h, ref POINT p);
+[DllImport("user32.dll")]
 public static extern IntPtr GetWindow(IntPtr h, uint quoi);
 [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW")]
 public static extern IntPtr GetWindowLongPtr(IntPtr h, int index);
@@ -325,8 +342,6 @@ public static int Pixel(byte[] a, int l, int x, int y) {
         $AUCUN = [byte[]]@()
         $TOUCHE_2 = [byte]0x32
         $ECHAP = [byte]0x1B
-        $TAB = [byte]0x09
-        $ENTREE = [byte]0x0D
         $WM_CLOSE = [uint32]0x10
         $WM_COMMAND = [uint32]0x111
         $TITRE = 'Annoter la capture'
@@ -504,39 +519,50 @@ public static int Pixel(byte[] a, int l, int x, int y) {
             throw "« $Nom » ($($Type.ProgrammaticName)) introuvable dans l'éditeur"
         }
 
-        # Le dialogue de fermeture de la page (alertdialog « Fermer sans garder ? ») est
-        # montré et le focus est sur le bouton `$Bouton` : attendus par UI Automation, bornés.
-        function Attendre-Focus([IntPtr]$Racine, [string]$Bouton, [string]$Quoi, [double]$DelaiS = 5) {
-            $titre = [System.Windows.Automation.PropertyCondition]::new($AE::NameProperty, 'Fermer sans garder ?')
+        # La zone cliente à l'écran : { X, Y, L, H } en pixels réels, et l'échelle.
+        function Zone-Cliente([IntPtr]$H) {
+            $c = [BreezyShotEssai.Editeur+RECT]::new()
+            $null = $E::GetClientRect($H, [ref]$c)
+            $o = [BreezyShotEssai.Editeur+POINT]::new()
+            $null = $E::ClientToScreen($H, [ref]$o)
+            $dpi = $E::GetDpiForWindow($H)
+            return [pscustomobject]@{ X = $o.X; Y = $o.Y; L = $c.Right; H = $c.Bottom; S = $(if ($dpi -gt 0) { $dpi / 96.0 } else { 1.0 }) }
+        }
+
+        # Le menu « Fermer » de la page (`menu` « Fermer », avenant §4) est ouvert et le focus
+        # est sur son `menuitem` `$Article` : attendus par UI Automation, bornés.
+        function Attendre-Focus([IntPtr]$Racine, [string]$Article, [string]$Quoi, [double]$DelaiS = 5) {
+            $menu = [System.Windows.Automation.AndCondition]::new(
+                [System.Windows.Automation.PropertyCondition]::new($AE::NameProperty, 'Fermer'),
+                [System.Windows.Automation.PropertyCondition]::new($AE::ControlTypeProperty, [System.Windows.Automation.ControlType]::Menu))
             $cond = [System.Windows.Automation.AndCondition]::new(
-                [System.Windows.Automation.PropertyCondition]::new($AE::NameProperty, $Bouton),
-                [System.Windows.Automation.PropertyCondition]::new($AE::ControlTypeProperty, [System.Windows.Automation.ControlType]::Button))
+                [System.Windows.Automation.PropertyCondition]::new($AE::NameProperty, $Article),
+                [System.Windows.Automation.PropertyCondition]::new($AE::ControlTypeProperty, [System.Windows.Automation.ControlType]::MenuItem))
             $limite = [DateTime]::UtcNow.AddSeconds($DelaiS)
             $vu = 'aucun'
             do {
                 try {
-                    $racine = $AE::FromHandle($Racine)
-                    $d = $racine.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $titre)
-                    $b = $racine.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $cond)
+                    $m = $AE::FromHandle($Racine).FindFirst([System.Windows.Automation.TreeScope]::Descendants, $menu)
+                    $b = if ($null -ne $m) { $m.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $cond) } else { $null }
                     $f = $AE::FocusedElement
                     if ($null -ne $f) { $vu = "« $($f.Current.Name) » ($($f.Current.ControlType.ProgrammaticName))" }
-                    if ($null -ne $d -and $null -ne $b -and $b.Current.HasKeyboardFocus) { return }
+                    if ($null -ne $b -and $b.Current.HasKeyboardFocus) { return $b }
                 } catch { }
                 Start-Sleep -Milliseconds 50
             } while ([DateTime]::UtcNow -lt $limite)
-            throw "$Quoi : dialogue « Fermer sans garder ? » ou focus sur « $Bouton » absent en $DelaiS s (focus $vu)"
+            throw "$Quoi : menu « Fermer » ou focus sur « $Article » absent en $DelaiS s (focus $vu)"
         }
 
-        # L'éditeur au premier plan : SetForegroundWindow, sinon un clic réel dans sa barre
-        # de titre ; vérifié, borné.
+        # L'éditeur au premier plan : SetForegroundWindow, sinon un clic réel au milieu de la
+        # barre du haut de la page (zone de glisser, 26 px CSS sous le haut : il n'y a plus
+        # de barre de titre Windows) ; vérifié, borné.
         function Ramener-Devant([IntPtr]$H, [string]$Quoi) {
             $null = $E::SetForegroundWindow($H)
             $limite = [DateTime]::UtcNow.AddSeconds(2)
             while ($E::GetForegroundWindow() -ne $H -and [DateTime]::UtcNow -lt $limite) { Start-Sleep -Milliseconds 50 }
             if ($E::GetForegroundWindow() -ne $H) {
-                $r = [BreezyShotEssai.Editeur+RECT]::new()
-                $null = $E::GetWindowRect($H, [ref]$r)
-                $E::Cliquer([int](($r.Left + $r.Right) / 2), $r.Top + 12)
+                $z = Zone-Cliente $H
+                $E::Cliquer([int]($z.X + $z.L / 2), [int]($z.Y + [math]::Round(26 * $z.S)))
                 $limite = [DateTime]::UtcNow.AddSeconds(3)
                 while ($E::GetForegroundWindow() -ne $H -and [DateTime]::UtcNow -lt $limite) { Start-Sleep -Milliseconds 50 }
             }
@@ -596,11 +622,15 @@ public static int Pixel(byte[] a, int l, int x, int y) {
                 $null = $E::GetWindowRect($hwnd, [ref]$r)
                 $exStyle = $E::GetWindowLongPtr($hwnd, -20).ToInt64()
                 $outil = ($exStyle -band 0x80) -ne 0
-                $dans = ($r.Left -ge $utile.Left - 8) -and ($r.Top -ge $utile.Top - 1) -and ($r.Right -le $utile.Right + 8) -and ($r.Bottom -le $utile.Bottom + 8)
+                $z = Zone-Cliente $hwnd
+                $dans = ($z.X -ge $utile.Left) -and ($z.Y -ge $utile.Top) -and ($z.X + $z.L -le $utile.Right) -and ($z.Y + $z.H -le $utile.Bottom)
                 Verifier '(3) visible, titre exact' ($E::IsWindowVisible($hwnd) -and $E::Titre($hwnd) -eq $TITRE) | Out-Null
                 Verifier '(3) au premier plan' ($E::GetForegroundWindow() -eq $hwnd) "premier plan $($E::GetForegroundWindow())" | Out-Null
                 Verifier '(3) dans la barre des tâches (ni outil ni propriétaire)' ((-not $outil) -and $E::GetWindow($hwnd, 4) -eq [IntPtr]::Zero) | Out-Null
-                Verifier '(3) dans la zone utile' $dans "$($r.Left),$($r.Top) $($r.Right),$($r.Bottom) ; zone $utile" | Out-Null
+                Verifier '(3) zone cliente dans la zone utile' $dans "$($z.X),$($z.Y) $($z.L)x$($z.H) ; zone $utile" | Out-Null
+                $style = $E::GetWindowLongPtr($hwnd, -16).ToInt64()
+                $haut = $z.Y - $r.Top
+                Verifier '(3) sans barre de titre (zone cliente à 2 px au plus du haut), redimensionnable (WS_SIZEBOX)' (($haut -ge 0) -and ($haut -le 2) -and (($style -band 0x40000) -ne 0)) "haut $haut px, style 0x$('{0:X8}' -f $style)" | Out-Null
                 $la = Derniere-Ligne -Motif "editeur image affichee $($c1.Id) en (\d+) ms$" -Dossier $da
                 $null = $la -match 'en (\d+) ms$'
                 Noter-Mesure -Nom 'clic Annoter -> image affichee (budget 800)' -Valeur ([int]$Matches[1]) -Unite 'ms'
@@ -696,7 +726,7 @@ public static int Pixel(byte[] a, int l, int x, int y) {
                 Verifier '(9) ferme (propre), pixels rendus, fenêtre détruite' (-not $E::IsWindow($hwnd)) | Out-Null
             }
 
-            # (10) Modifié : Alt+F4 demande ; Échap continue ; « Ne pas garder ».
+            # (10) Modifié : Alt+F4 ouvre le menu « Fermer » ; Échap continue ; « Fermer sans copier ».
             Point '(10) fermer sans garder' {
                 $c = Capturer $da '(10)'
                 $h = Ouvrir-Editeur $da $c '(10)'
@@ -705,7 +735,7 @@ public static int Pixel(byte[] a, int l, int x, int y) {
                 $n = Compter-Motif -Motif "editeur fermeture $($c.Id): demander$" -Dossier $da
                 $E::Appuyer($ALT, [byte]0x73)
                 $null = Attendre-Suivante "editeur fermeture $($c.Id): demander$" $da $n '(10) Alt+F4 : demander' 10
-                Attendre-Focus $h 'Copier et fermer' '(10) dialogue après Alt+F4'
+                $null = Attendre-Focus $h 'Copier et fermer' '(10) menu Fermer après Alt+F4'
                 Start-Sleep -Milliseconds 2600   # au-delà du filet de 2 s : la page a répondu
                 Verifier '(10) Alt+F4 : demander, la fenêtre reste' ($E::IsWindow($h) -and (Compter-Motif -Motif "editeur ferme $($c.Id) " -Dossier $da) -eq 0) | Out-Null
                 $E::Touche($ECHAP)
@@ -713,12 +743,12 @@ public static int Pixel(byte[] a, int l, int x, int y) {
                 Verifier '(10) Échap (Continuer) : rien' ($E::IsWindow($h) -and (Compter-Motif -Motif "editeur ferme $($c.Id) " -Dossier $da) -eq 0) | Out-Null
                 $E::Appuyer($ALT, [byte]0x73)
                 $null = Attendre-Suivante "editeur fermeture $($c.Id): demander$" $da ($n + 1) '(10) second Alt+F4' 10
-                Attendre-Focus $h 'Copier et fermer' '(10) dialogue après le second Alt+F4'
-                $E::Touche($TAB)
-                Attendre-Focus $h 'Ne pas garder' '(10) Tab'
-                $E::Touche($ENTREE)
+                $null = Attendre-Focus $h 'Copier et fermer' '(10) menu Fermer après le second Alt+F4'
+                $sans = Element $h 'Fermer sans copier' ([System.Windows.Automation.ControlType]::MenuItem)
+                $p = Centre-Stable $sans
+                $E::Cliquer($p[0], $p[1])
                 $null = Attendre-Motif -Motif "editeur ferme $($c.Id) \(sans garder\)$" -Dossier $da -DelaiS 10 -Quoi '(10) ferme (sans garder)'
-                Verifier '(10) Tab, Entrée sur « Ne pas garder » : ferme (sans garder)' $true | Out-Null
+                Verifier '(10) « Fermer sans copier » : ferme (sans garder)' $true | Out-Null
             }
 
             # (11) et (12) Remplacer ; capture éditeur ouvert ; demander, Continuer.
@@ -738,14 +768,14 @@ public static int Pixel(byte[] a, int l, int x, int y) {
                 Cliquer-Annoter $da $cc
                 $null = Attendre-Motif -Motif "editeur fermeture demandee $($cb.Id) \(remplacer\)$" -Dossier $da -DelaiS 10 -Quoi '(11) fermeture demandee (remplacer)'
                 $null = Attendre-Motif -Motif "editeur fermeture $($cb.Id): demander$" -Dossier $da -DelaiS 5 -Quoi '(11) demander'
-                Attendre-Focus $h 'Copier et fermer' '(11) dialogue (remplacer)'
+                $null = Attendre-Focus $h 'Copier et fermer' '(11) menu Fermer (remplacer)'
                 $E::Touche($ECHAP)
                 $null = Attendre-Motif -Motif "editeur: capture $($cc.Id) abandonnee$" -Dossier $da -DelaiS 5 -Quoi '(11) capture abandonnee'
                 Verifier '(11) Continuer : capture <c> abandonnee, le document b reste' ($E::IsWindow($h) -and (Compter-Motif -Motif "editeur remplace $($cb.Id) par" -Dossier $da) -eq 0) | Out-Null
                 $script:h11 = $h; $script:c11 = $cb
             }
 
-            # (13) Enregistrer sous… annulé ; Glisser vers une cible.
+            # (13) Enregistrer sous… annulé ; Glisser vers une appli, vers une cible.
             Point '(13) enregistrer sous annulé' {
                 $h = $script:h11; $c = $script:c11
                 $avant = @(Fichiers-Png $images).Count
@@ -770,8 +800,13 @@ public static int Pixel(byte[] a, int l, int x, int y) {
                 $plus = Element $h 'Plus' ([System.Windows.Automation.ControlType]::Button)
                 $p = Centre-Stable $plus
                 $E::Cliquer($p[0], $p[1])
-                $g = Element $h 'Glisser' ([System.Windows.Automation.ControlType]::MenuItem)
+                $g = Element $h 'Glisser vers une appli' ([System.Windows.Automation.ControlType]::MenuItem)
                 $q = Centre-Stable $g
+                $E::Cliquer($q[0], $q[1])
+                $E::Poser($REPOS_X, $REPOS_Y)
+                # La vignette de prise (avenant §3) : le glisser réel part d'elle.
+                $prise = Element $h 'Glisser vers une appli' ([System.Windows.Automation.ControlType]::Button)
+                $q = Centre-Stable $prise
                 $debuts = Compter-Motif -Motif "editeur glisser $($c.Id) debut$" -Dossier $da
                 $E::Poser($q[0], $q[1]); Start-Sleep -Milliseconds 100
                 $E::BoutonBas()
