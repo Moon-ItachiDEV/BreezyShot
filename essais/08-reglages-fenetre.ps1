@@ -19,9 +19,9 @@
 # (5) Raccourci du plein écran changé au clavier en Ctrl+Maj+7 : raccourcis suspendus puis
 #     repris, fichier, Ctrl+Maj+7 capture, Ctrl+Maj+2 ne fait plus rien et est rendu à
 #     Windows (une autre application peut le tenir).
-# (6) Ctrl+Maj+8 tenu par une autre application : refus dit sur la ligne, rien ne change ;
-#     saisie puis Échap : rien ne change, raccourcis repris (une autre application ne peut
-#     plus prendre Ctrl+Maj+7).
+# (6) Ctrl+Maj+8 tenu par une autre application : Windows lui donne la touche, la page ne
+#     la reçoit pas : ni changement ni refus, la saisie reste ouverte ; Échap : rien ne
+#     change, raccourcis repris (une autre application ne peut plus prendre Ctrl+Maj+7).
 # (7) Lancer au démarrage sur la clé d'essai : écrit, retiré par l'essai, fenêtre rouverte
 #     → éteint (état lu dans le système) ; allumé puis éteint → valeur absente. La vraie
 #     clé Run est identique avant et après.
@@ -224,6 +224,10 @@ public static IntPtr[] Visibles(string classe) {
 // Menus Win32 : les HMENU se lisent d'un autre processus.
 [DllImport("user32.dll")]
 public static extern IntPtr SendMessage(IntPtr h, uint msg, IntPtr w, IntPtr l);
+[DllImport("user32.dll", CharSet = CharSet.Unicode, EntryPoint = "SendMessageW")]
+static extern IntPtr SendMessageTexte(IntPtr h, uint msg, IntPtr w, string l);
+// WM_SETTEXT au contrôle : vrai si le contrôle l'a accepté.
+public static bool EcrireTexte(IntPtr h, string texte) { return SendMessageTexte(h, 0x000C, IntPtr.Zero, texte) != IntPtr.Zero; }
 [DllImport("user32.dll")]
 public static extern int GetMenuItemCount(IntPtr menu);
 [DllImport("user32.dll", CharSet = CharSet.Unicode, EntryPoint = "GetMenuStringW")]
@@ -547,7 +551,7 @@ public static string Titre(IntPtr h) {
     $t = Tenir-Ailleurs 0x32 6 'ctrl-maj-2'
     Verifier '(5) Ctrl+Maj+2 rendu à Windows (une autre application le tient)' ($t -eq 'tenu') $t | Out-Null
 
-    # (6) Ctrl+Maj+8 tenu ailleurs : refus sur la ligne ; puis saisie et Échap.
+    # (6) Ctrl+Maj+8 tenu ailleurs : la saisie ne le reçoit pas ; puis Échap.
     # L'aide tourne sans console : sa fenêtre couvrirait la ligne cliquée ensuite.
     $f = Join-Path $script:Essai.Dossier 'tenu-8.txt'
     $aide = Start-Process -FilePath $script:Pwsh -PassThru -WindowStyle Hidden -ArgumentList @('-NoProfile', '-File', (Join-Path $PSScriptRoot 'tenir-raccourci.ps1'), '-Vk', 0x38, '-Mods', 6, '-Fichier', $f)
@@ -556,32 +560,32 @@ public static string Titre(IntPtr h) {
     while (-not (Test-Path -LiteralPath $f) -and [DateTime]::UtcNow -lt $limite) { Start-Sleep -Milliseconds 100 }
     $tenu = (Test-Path -LiteralPath $f) -and ((Get-Content -LiteralPath $f -Raw).Trim() -eq 'tenu')
     if (-not (Verifier '(6) Ctrl+Maj+8 tenu par une autre application' $tenu)) { throw '(6) Ctrl+Maj+8 non tenu' }
+    # Windows donne un raccourci global à l'application qui le tient, avant la fenêtre
+    # active : la page ne reçoit pas la touche. La saisie reste donc ouverte, sans
+    # changement ni refus ; Échap la ferme (preuve que la page avait bien le clavier).
     $susp = Compter-Motif -Motif 'raccourcis suspendus \(saisie plein_ecran\)$' -Dossier $cas
+    $repris = Compter-Motif -Motif 'raccourcis repris$' -Dossier $cas
+    $changes = Compter-Motif -Motif 'raccourci plein_ecran change: ' -Dossier $cas
+    $refus = Compter-Motif -Motif 'raccourci plein_ecran refuse: ' -Dossier $cas
     Cliquer-Nom $fen 'Plein écran' ([System.Windows.Automation.ControlType]::Button) '(6) raccourci du plein écran'
     $null = Attendre-Suivante 'raccourcis suspendus \(saisie plein_ecran\)$' $cas $susp '(6) saisie'
     [BreezyShotEssai.Reglages]::Appuyer($CTRL_MAJ, 0x38)
-    $null = Attendre-Motif -Motif 'raccourci plein_ecran refuse: Ctrl\+Maj\+8 \(refuse par le systeme\)$' -Dossier $cas -DelaiS 5 -Quoi '(6) refus'
-    $pris = Element $fen 'Pris par une autre application'
-    Verifier '(6) « Pris par une autre application » sur la ligne' ($null -ne $pris) $(if ($null -eq $pris) { Introuvable $fen 'Pris par une autre application' $null } else { '' }) | Out-Null
+    Start-Sleep -Milliseconds 1200
+    $changesApres = Compter-Motif -Motif 'raccourci plein_ecran change: ' -Dossier $cas
+    $refusApres = Compter-Motif -Motif 'raccourci plein_ecran refuse: ' -Dossier $cas
+    $reprisApres = Compter-Motif -Motif 'raccourcis repris$' -Dossier $cas
+    Verifier '(6) Ctrl+Maj+8 tenu ailleurs : ni changement ni refus, la saisie reste ouverte' (($changesApres -eq $changes) -and ($refusApres -eq $refus) -and ($reprisApres -eq $repris)) "changements $changes → $changesApres, refus $refus → $refusApres, repris $repris → $reprisApres" | Out-Null
     $lu = @((Lire-Reglages $cas).raccourcis.plein_ecran)
     Verifier '(6) fichier inchangé' (($lu.Count -eq 1) -and ($lu[0] -eq 'Ctrl+Maj+7')) ($lu -join ',') | Out-Null
-    $n = Presses; $repos = Compter-Motif -Motif 'Decoupe -> Repos' -Dossier $cas
-    [BreezyShotEssai.Reglages]::Appuyer($CTRL_MAJ, 0x37)
-    $null = Attendre-Suivante 'raccourci presse: plein_ecran$' $cas $n '(6) Ctrl+Maj+7 marche encore'
-    Attendre-Repos $repos
-    Verifier '(6) Ctrl+Maj+7 capture toujours' $true | Out-Null
-    $susp = Compter-Motif -Motif 'raccourcis suspendus \(saisie plein_ecran\)$' -Dossier $cas
-    $repris = Compter-Motif -Motif 'raccourcis repris$' -Dossier $cas
-    Cliquer-Nom $fen 'Plein écran' ([System.Windows.Automation.ControlType]::Button) '(6) saisie avant Échap'
-    $null = Attendre-Suivante 'raccourcis suspendus \(saisie plein_ecran\)$' $cas $susp '(6) saisie avant Échap'
     [BreezyShotEssai.Reglages]::Appuyer([byte[]]@(), 0x1B)
     $null = Attendre-Suivante 'raccourcis repris$' $cas $repris '(6) Échap : repris'
     $lu = @((Lire-Reglages $cas).raccourcis.plein_ecran)
-    Verifier '(6) Échap : rien ne change' (($lu.Count -eq 1) -and ($lu[0] -eq 'Ctrl+Maj+7')) | Out-Null
+    Verifier '(6) Échap : rien ne change' (($lu.Count -eq 1) -and ($lu[0] -eq 'Ctrl+Maj+7')) ($lu -join ',') | Out-Null
     $n = Presses; $repos = Compter-Motif -Motif 'Decoupe -> Repos' -Dossier $cas
     [BreezyShotEssai.Reglages]::Appuyer($CTRL_MAJ, 0x37)
     $null = Attendre-Suivante 'raccourci presse: plein_ecran$' $cas $n '(6) Ctrl+Maj+7 après Échap'
     Attendre-Repos $repos
+    Verifier '(6) Ctrl+Maj+7 capture toujours' $true | Out-Null
     try { $aide.Kill() } catch { }
     # Repris après l'Échap, Ctrl+Maj+7 est bien retenu par l'app auprès de Windows.
     $t = Tenir-Ailleurs 0x37 6 'ctrl-maj-7'
@@ -667,10 +671,39 @@ public static string Titre(IntPtr h) {
         Verifier "$Quoi : trouvé" $false $d | Out-Null
         throw "$Quoi : $d"
     }
+    # Le motif UI Automation d'abord ; s'il manque (« Unsupported Pattern » vu sur la
+    # machine de GitHub), le message Windows adressé au contrôle lui-même. Un échec dit le
+    # type, la classe et les motifs de l'élément trouvé.
+    function Motifs($e) {
+        try { return (@($e.GetSupportedPatterns() | ForEach-Object { $_.ProgrammaticName }) -join ', ') } catch { return "motifs illisibles : $($_.Exception.Message)" }
+    }
+    function Poignee($e) { try { return [IntPtr][int]$e.Current.NativeWindowHandle } catch { return [IntPtr]::Zero } }
     $champ = Par-Id $dialogue '1152' $null '(8) champ du dossier'
-    $champ.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).SetValue($choisi)
+    $ecrit = ''
+    try { $champ.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).SetValue($choisi); $ecrit = 'ValuePattern' }
+    catch {
+        # Le champ lui-même, ou le premier champ de saisie qu'il contient.
+        $cibles = @($champ)
+        try {
+            $cibles += @($champ.FindAll([System.Windows.Automation.TreeScope]::Descendants,
+                [System.Windows.Automation.PropertyCondition]::new($AE::ControlTypeProperty, [System.Windows.Automation.ControlType]::Edit)))
+        } catch { }
+        foreach ($x in $cibles) {
+            $h = Poignee $x
+            if ($h -ne [IntPtr]::Zero -and [BreezyShotEssai.Reglages]::EcrireTexte($h, $choisi)) { $ecrit = 'WM_SETTEXT'; break }
+        }
+    }
+    if (-not (Verifier '(8) dossier écrit dans le champ du sélecteur' ($ecrit -ne '') "$ecrit ; $(Decrire $champ) ; motifs : $(Motifs $champ)")) { throw '(8) champ du dossier non écrit' }
     $ok = Par-Id $dialogue '1' ([System.Windows.Automation.ControlType]::Button) '(8) bouton de validation'
-    $ok.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    $presse = ''
+    try { $ok.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke(); $presse = 'InvokePattern' }
+    catch {
+        $h = Poignee $ok
+        # BM_CLICK au bouton, sinon WM_COMMAND IDOK au dialogue (postés : le dialogue se ferme).
+        if ($h -ne [IntPtr]::Zero -and [BreezyShotEssai.Reglages]::PostMessage($h, 0x00F5, [IntPtr]::Zero, [IntPtr]::Zero)) { $presse = 'BM_CLICK' }
+        elseif ([BreezyShotEssai.Reglages]::PostMessage($dialogue, 0x0111, [IntPtr]1, [IntPtr]::Zero)) { $presse = 'WM_COMMAND IDOK' }
+    }
+    if (-not (Verifier '(8) bouton de validation pressé' ($presse -ne '') "$presse ; $(Decrire $ok) ; motifs : $(Motifs $ok)")) { throw '(8) bouton de validation non pressé' }
     $null = Attendre-Motif -Motif 'reglage change: dossier$' -Dossier $cas -DelaiS 10 -Quoi '(8) dossier changé'
     Verifier '(8) fichier : dossier choisi' ((Lire-Reglages $cas).dossier_enregistrement -eq $choisi) | Out-Null
     $n = Presses; $repos = Compter-Motif -Motif 'Decoupe -> Repos' -Dossier $cas
