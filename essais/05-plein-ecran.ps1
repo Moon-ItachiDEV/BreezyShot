@@ -192,21 +192,31 @@ public static extern bool GetWindowRect(IntPtr h, out RECT r);
 static extern bool OpenClipboard(IntPtr h);
 [DllImport("user32.dll")]
 static extern bool CloseClipboard();
+[DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+static extern IntPtr CreateWindowExW(uint exStyle, string classe, string titre, uint style, int x, int y, int l, int h, IntPtr parent, IntPtr menu, IntPtr instance, IntPtr param);
+[DllImport("user32.dll", SetLastError = true)]
+static extern bool DestroyWindow(IntPtr h);
 // Appuie (comme Appuyer) en guettant les fenêtres données, toutes les 2 ms, depuis avant
 // l'appui jusqu'à $dureeMs après : rend le nombre de relevés où l'une était visible.
 // Avec $tenueMs > 0, le presse-papiers est ouvert (donc occupé pour l'app) avant l'appui
 // et refermé $tenueMs après : la copie de l'app réessaie jusqu'à son échéance (250 ms),
-// la Découpe dure donc au moins ce temps. Rend -1 si le presse-papiers n'a pas pu être
-// ouvert en 10 essais (rien n'est alors appuyé).
+// la Découpe dure donc au moins ce temps. Il est ouvert au nom d'une vraie fenêtre de
+// l'essai : un OpenClipboard(NULL) venu d'ailleurs réussit quand le premier a aussi été
+// ouvert avec NULL, et l'app ouvre avec NULL. Rend -1 si la fenêtre n'a pas pu être créée
+// ou le presse-papiers ouvert en 10 essais (rien n'est alors appuyé).
 public static int AppuyerEnGuettant(byte[] mods, byte touche, int fois, int ecart, IntPtr[] guettees, int dureeMs, int tenueMs) {
+    IntPtr tenante = IntPtr.Zero;
     if (tenueMs > 0) {
+        // Fenêtre de messages (HWND_MESSAGE = -3) sur ce fil, jamais montrée.
+        tenante = CreateWindowExW(0, "STATIC", "", 0, 0, 0, 0, 0, new IntPtr(-3), IntPtr.Zero, IntPtr.Zero, IntPtr.Zero);
+        if (tenante == IntPtr.Zero) return -1;
         // Quelques essais, 20 ms d'écart : une autre application peut le tenir un instant.
         bool ouvert = false;
         for (int i = 0; i < 10 && !ouvert; i++) {
             if (i > 0) System.Threading.Thread.Sleep(20);
-            ouvert = OpenClipboard(IntPtr.Zero);
+            ouvert = OpenClipboard(tenante);
         }
-        if (!ouvert) return -1;
+        if (!ouvert) { DestroyWindow(tenante); return -1; }
     }
     int vues = 0;
     bool fin = false;
@@ -223,7 +233,7 @@ public static int AppuyerEnGuettant(byte[] mods, byte touche, int fois, int ecar
         Appuyer(mods, touche, fois, ecart);
         if (tenueMs > 0) System.Threading.Thread.Sleep(tenueMs);
     }
-    finally { if (tenueMs > 0) CloseClipboard(); }
+    finally { if (tenueMs > 0) { CloseClipboard(); DestroyWindow(tenante); } }
     System.Threading.Thread.Sleep(dureeMs);
     System.Threading.Volatile.Write(ref fin, true);
     guet.Join();
@@ -432,7 +442,11 @@ public static int EcartsTemoin(byte[] o, int stride, int x, int y, int l, int h,
             $annonces = Compter-Motif -Motif 'sortie annonce ' -Dossier $Dossier
             $seq = [BreezyShotEssai.PleinEcran]::GetClipboardSequenceNumber()
             $vues = [BreezyShotEssai.PleinEcran]::AppuyerEnGuettant($MODS, $TOUCHE_2, $Fois, 30, $Guettees, 300, $TenirPressePapiersMs)
-            if ($vues -lt 0) { throw "$Quoi : presse-papiers impossible à ouvrir pour l'essai" }
+            if ($vues -lt 0) {
+                # Échec explicite, jamais un point sauté.
+                Verifier "$Quoi : presse-papiers tenu par l'essai" $false 'presse-papiers non tenu (fenêtre de l''essai ou ouverture impossible), rien n''a été appuyé' | Out-Null
+                throw "$Quoi : presse-papiers non tenu"
+            }
             $null = Attendre-Motif -Motif 'sortie annonce ' -Dossier $Dossier -DelaiS 10 -Quoi "$Quoi : annonce de la sortie" -Fois ($annonces + 1)
             $null = Attendre-Motif -Motif 'chrono decoupe \d+ sortie \d+ relache-annonce \d+$' -Dossier $Dossier -DelaiS 3 -Quoi "$Quoi : fin de la sortie" -Fois ($annonces + 1)
             # Après : toujours rien de visible.
