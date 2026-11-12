@@ -342,10 +342,22 @@ const SANS_LOUPE = { ...VUE, lignes: VUE.lignes.filter(l => l !== 'loupe') };
     await p.getByRole('radio', { name: 'Aucun' }).focus(); await p.keyboard.press('ArrowLeft'); await p.waitForTimeout(50);
     verifier(JSON.stringify((await dernier(p, 'reglages_changer'))?.[1]) === JSON.stringify({ changement: { cle: 'retardateur', valeur: 10 } }), '10 flèche gauche depuis « Aucun » → retardateur 10');
     // Valeur du fichier hors de la liste : aucun segment coché, le premier reste atteignable.
-    await p.evaluate(() => __emettre('reglages:etat', { ...__vue, capture: { ...__vue.capture, retardateur_s: 7 } })); await p.waitForTimeout(50);
+    // Le cœur garde 7 (chaque réponse le redit) : les flèches partent bien de 7.
+    await p.evaluate(() => { window.__vueAvant7 = __vue; __vue = { ...__vue, capture: { ...__vue.capture, retardateur_s: 7 } }; __emettre('reglages:etat', __vue); });
+    await p.waitForTimeout(50);
     const sept = await p.$$eval('[data-controle="retardateur"] [role="radio"]', bs => bs.map(b => [b.getAttribute('aria-checked'), b.tabIndex]));
     const pastille = await p.$eval('[data-controle="retardateur"]', g => g.hasAttribute('data-choisi'));
     verifier(sept.every(x => x[0] === 'false') && sept[0][1] === 0 && !pastille, '10 retardateur 7 : aucun segment coché, aucune pastille', JSON.stringify([sept, pastille]));
+    // Flèches depuis la valeur 7 : le segment atteignable (le premier) sert de départ.
+    await p.evaluate(() => document.querySelector('[data-controle="retardateur"] [tabindex="0"]').focus());
+    await p.keyboard.press('ArrowRight'); await p.waitForTimeout(50);
+    const droite = (await dernier(p, 'reglages_changer'))?.[1];
+    await p.evaluate(() => document.querySelector('[data-controle="retardateur"] [tabindex="0"]').focus());
+    await p.keyboard.press('ArrowLeft'); await p.waitForTimeout(50);
+    const gauche = (await dernier(p, 'reglages_changer'))?.[1];
+    verifier(JSON.stringify([droite, gauche]) === JSON.stringify([{ changement: { cle: 'retardateur', valeur: 3 } }, { changement: { cle: 'retardateur', valeur: 10 } }]),
+      '10 retardateur 7 : flèche droite → 3, flèche gauche → 10', JSON.stringify([droite, gauche]));
+    await p.evaluate(() => { __vue = window.__vueAvant7; });
     await p.evaluate(() => __emettre('reglages:etat', { ...__vue, capture: { retardateur_s: 10, loupe: true, pointeur: true } })); await p.waitForTimeout(50);
     const allume = [await segments(), await p.$$eval('[data-rubrique="capture"] [role="switch"]', bs => bs.map(b => b.getAttribute('aria-checked')))];
     verifier(allume[0][3][1] === 'true' && JSON.stringify(allume[1]) === '["true","true"]', '10 vue poussée : « 10 s », loupe et pointeur allumés', JSON.stringify(allume));
@@ -367,6 +379,31 @@ const SANS_LOUPE = { ...VUE, lignes: VUE.lignes.filter(l => l !== 'loupe') };
     const apres = await p.$$eval('[role="tab"]', os => os.filter(o => !o.hidden && o.getAttribute('aria-selected') === 'true').map(o => o.dataset.rubrique));
     const cache = await p.$eval('[role="tab"][data-rubrique="capture"]', o => o.hidden);
     verifier(cache && JSON.stringify(apres) === '["apres"]' && await visible(p, '[data-reglage="copier"]'), '10 Capture vidée : onglet caché, « Après la capture » ouverte', JSON.stringify([cache, apres]));
+    await p.context().close();
+  }
+  // Flèches sur les onglets : Capture en premier (Gauche depuis Capture mène à Général) ;
+  // Capture cachée, les flèches la sautent.
+  {
+    const p = await page();
+    const ouvert = () => p.evaluate(() => [document.activeElement.dataset.rubrique, document.querySelector('[role="tab"][aria-selected="true"]').dataset.rubrique,
+      [...document.querySelectorAll('section[role="tabpanel"]')].filter(s => !s.hidden).map(s => s.dataset.rubrique).join()]);
+    await p.getByRole('tab', { name: 'Capture', exact: true }).focus();
+    await p.keyboard.press('ArrowLeft');
+    const g = await ouvert();
+    await p.keyboard.press('ArrowRight');
+    const d = await ouvert();
+    await p.keyboard.press('ArrowRight');
+    const d2 = await ouvert();
+    verifier(JSON.stringify([g, d, d2]) === JSON.stringify([['general', 'general', 'general'], ['capture', 'capture', 'capture'], ['apres', 'apres', 'apres']]),
+      '10 onglets : Gauche depuis Capture → Général, Droite → Capture puis Après', JSON.stringify([g, d, d2]));
+    await p.evaluate((l) => __emettre('reglages:etat', { ...__vue, lignes: l }), SANS_VIGNETTE.lignes); await p.waitForTimeout(50);
+    await p.getByRole('tab', { name: 'Après la capture' }).focus();
+    await p.keyboard.press('ArrowLeft');
+    const g3 = await ouvert();
+    await p.keyboard.press('ArrowRight');
+    const d3 = await ouvert();
+    verifier(JSON.stringify([g3, d3]) === JSON.stringify([['general', 'general', 'general'], ['apres', 'apres', 'apres']]),
+      '10 Capture cachée : les flèches la sautent (Après ↔ Général)', JSON.stringify([g3, d3]));
     await p.context().close();
   }
   {

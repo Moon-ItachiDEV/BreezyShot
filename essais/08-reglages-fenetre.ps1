@@ -24,6 +24,9 @@
 # (5) Raccourci du plein écran changé au clavier en Ctrl+Maj+7 : raccourcis suspendus puis
 #     repris, fichier, Ctrl+Maj+7 capture, Ctrl+Maj+2 ne fait plus rien et est rendu à
 #     Windows (une autre application peut le tenir).
+# (5b) « Refaire la dernière zone » changée au clavier en Ctrl+Maj+9 (libre : le cas tient
+#     Ctrl+Maj+1, 3, 4 et 7) : fichier, puis le menu de l'icône lu par l'API des menus :
+#     l'entrée vaut « Refaire la dernière zone<tab>Ctrl + Maj + 9 » ; menu fermé par Échap.
 # (6) Ctrl+Maj+8 tenu par une autre application : Windows lui donne la touche, la page ne
 #     la reçoit pas : ni changement ni refus, la saisie reste ouverte ; Échap : rien ne
 #     change, raccourcis repris (une autre application ne peut plus prendre Ctrl+Maj+7).
@@ -600,6 +603,50 @@ public static string Titre(IntPtr h) {
     # L'ancien raccourci est rendu à Windows : une autre application peut le prendre.
     $t = Tenir-Ailleurs 0x32 6 'ctrl-maj-2'
     Verifier '(5) Ctrl+Maj+2 rendu à Windows (une autre application le tient)' ($t -eq 'tenu') $t | Out-Null
+
+    # (5b) Ctrl+Maj+9 pour la dernière zone (même geste que (5)), puis le menu de l'icône.
+    $lu = (Lire-Reglages $cas).raccourcis
+    $pris = @('zone', 'plein_ecran', 'fenetre', 'derniere_zone') | ForEach-Object { @($lu.$_) } | Where-Object { $_ -eq 'Ctrl+Maj+9' }
+    if (-not (Verifier '(5b) Ctrl+Maj+9 libre dans le fichier du cas' (@($pris).Count -eq 0))) { throw '(5b) Ctrl+Maj+9 déjà pris' }
+    $susp = Compter-Motif -Motif 'raccourcis suspendus \(saisie derniere_zone\)$' -Dossier $cas
+    $repris = Compter-Motif -Motif 'raccourcis repris$' -Dossier $cas
+    Cliquer-Nom $fen 'Refaire la dernière zone' ([System.Windows.Automation.ControlType]::Button) '(5b) raccourci de la dernière zone'
+    $null = Attendre-Suivante 'raccourcis suspendus \(saisie derniere_zone\)$' $cas $susp '(5b) saisie'
+    [BreezyShotEssai.Reglages]::Appuyer($CTRL_MAJ, 0x39)
+    $null = Attendre-Motif -Motif 'raccourci derniere_zone change: Ctrl\+Maj\+9$' -Dossier $cas -DelaiS 5 -Quoi '(5b) changé'
+    $null = Attendre-Suivante 'raccourcis repris$' $cas $repris '(5b) repris'
+    Start-Sleep -Milliseconds 300
+    $lu = @((Lire-Reglages $cas).raccourcis.derniere_zone)
+    Verifier '(5b) fichier : derniere_zone = [Ctrl+Maj+9]' ((@($lu).Count -eq 1) -and ($lu[0] -eq 'Ctrl+Maj+9')) ($lu -join ',') | Out-Null
+    # Le menu de l'icône (même message que Ouvrir-Par-Menu), lu sans rien y cliquer.
+    $icones = [BreezyShotEssai.Reglages]::Fenetres($p.Id, 'tray_icon_app')
+    if (-not (Verifier '(5b) fenêtre de l''icône trouvée' ($icones.Length -ge 1) 'aucune fenêtre tray_icon_app')) { throw '(5b) menu de l''icône impossible à ouvrir' }
+    $avant = @([BreezyShotEssai.Reglages]::Visibles('#32768') | ForEach-Object { [long]$_ })
+    foreach ($h in $icones) { [void][BreezyShotEssai.Reglages]::PostMessage($h, 6002, [IntPtr]::Zero, [IntPtr]0x205) }
+    $attendu = "Refaire la dernière zone`tCtrl + Maj + 9"
+    $menu = [IntPtr]::Zero; $textes = @(); $lus = ''
+    $limite = [DateTime]::UtcNow.AddSeconds(3)
+    do {
+        foreach ($f in @([BreezyShotEssai.Reglages]::Visibles('#32768') | Where-Object { $avant -notcontains [long]$_ })) {
+            $hm = [BreezyShotEssai.Reglages]::MenuDe($f)
+            if ($hm -eq [IntPtr]::Zero) { continue }
+            $t = [BreezyShotEssai.Reglages]::Textes($hm)
+            if ($null -ne $t -and $t.Length -gt 0) { $menu = $f; $textes = @($t); break }
+        }
+        if ($menu -eq [IntPtr]::Zero) { Start-Sleep -Milliseconds 50 }
+    } while ($menu -eq [IntPtr]::Zero -and [DateTime]::UtcNow -lt $limite)
+    $lus = ($textes | ForEach-Object { "« $($_ -replace "`t", '<tab>') »" }) -join ', '
+    if (-not (Verifier '(5b) le menu de l''icône s''ouvre' ($menu -ne [IntPtr]::Zero))) { throw '(5b) le menu de l''icône ne s''ouvre pas' }
+    $entrees = @($textes | Where-Object { $_ -like 'Refaire la dernière zone*' })
+    Verifier '(5b) menu : « Refaire la dernière zone<tab>Ctrl + Maj + 9 »' ((@($entrees).Count -eq 1) -and ($entrees[0] -ceq $attendu)) $lus | Out-Null
+    # Échap ferme le menu sans rien choisir.
+    $menus = Compter-Motif -Motif 'menu: (quitter|reglages|capturer)' -Dossier $cas
+    [BreezyShotEssai.Reglages]::Appuyer([byte[]]@(), 0x1B)
+    $limite = [DateTime]::UtcNow.AddSeconds(2)
+    while ((@([BreezyShotEssai.Reglages]::Visibles('#32768') | Where-Object { [long]$_ -eq [long]$menu }).Count -gt 0) -and [DateTime]::UtcNow -lt $limite) { Start-Sleep -Milliseconds 50 }
+    $ouvert = @([BreezyShotEssai.Reglages]::Visibles('#32768') | Where-Object { [long]$_ -eq [long]$menu }).Count -gt 0
+    Start-Sleep -Milliseconds 300
+    Verifier '(5b) Échap ferme le menu, aucune entrée choisie' ((-not $ouvert) -and ((Compter-Motif -Motif 'menu: (quitter|reglages|capturer)' -Dossier $cas) -eq $menus)) | Out-Null
 
     # (6) Ctrl+Maj+8 tenu ailleurs : la saisie ne le reçoit pas ; puis Échap.
     # L'aide tourne sans console : sa fenêtre couvrirait la ligne cliquée ensuite.

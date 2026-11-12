@@ -683,6 +683,23 @@ mod tests {
         }
         let n = appliquer(&r, &Changement::Loupe(true)).unwrap();
         assert!(n.selection.loupe);
+        let mut attendu = r.clone();
+        attendu.selection.loupe = true;
+        assert_eq!(n, attendu, "rien d'autre ne bouge");
+        // Un retardateur du fichier hors de la liste (7) survit aux autres changements.
+        let mut sept = r.clone();
+        sept.capture.retardateur_s = 7;
+        for c in [
+            Changement::Loupe(true),
+            Changement::Pointeur(true),
+            Changement::Copier(false),
+        ] {
+            assert_eq!(
+                appliquer(&sept, &c).unwrap().capture.retardateur_s,
+                7,
+                "{c:?}"
+            );
+        }
         let n = appliquer(&r, &Changement::Pointeur(true)).unwrap();
         assert!(n.capture.pointeur);
         // Rien d'autre ne bouge.

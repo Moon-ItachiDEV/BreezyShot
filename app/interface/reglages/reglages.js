@@ -437,8 +437,8 @@ if (tauri?.event?.listen) {
   });
 } else {
   afficher({
-    lignes: ["retardateur", "loupe", "pointeur", "copier", "vignette", "vignette_duree", "vignette_coin", "dossier", "enregistrer", "modele_nom",
-      "theme", "demarrage", "version"],
+    lignes: ["retardateur", "loupe", "pointeur", "copier", "vignette", "vignette_duree",
+      "vignette_coin", "dossier", "enregistrer", "modele_nom", "theme", "demarrage", "version"],
     capture: { retardateur_s: 0, loupe: false, pointeur: false },
     retardateurs: [0, 3, 5, 10],
     copier: true,
