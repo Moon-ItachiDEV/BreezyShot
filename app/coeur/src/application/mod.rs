@@ -17,6 +17,7 @@ pub mod etat;
 pub mod etats;
 pub mod fenetre_reglages;
 pub mod icone;
+pub mod installateur;
 pub mod journal;
 pub mod page_reglages;
 pub mod vignette;
@@ -112,6 +113,8 @@ pub enum Evenement {
     },
     /// Le glisser de la carte `id`, reposté hors du gestionnaire de la page.
     LancerGlisser { id: u64, chemin: PathBuf },
+    /// Capture demandée par la ligne de commande (`--capturer <mode>`, l'installateur).
+    CaptureCli(String),
 }
 
 /// Ce que le fil d'une action de la vignette rend au fil principal.
@@ -248,6 +251,8 @@ pub struct Application {
     montree: Mutex<Option<CaptureMontree>>,
     /// Vrai pendant la boucle d'un glisser.
     glisser: AtomicBool,
+    /// Capture demandée par `--capturer` avant la fin du démarrage : jouée à `pret`.
+    capture_en_attente: Mutex<Option<String>>,
 }
 
 /// Une annonce envoyée au bandeau, dont la situation attend d'être retenue.
@@ -258,9 +263,34 @@ struct AnnonceEnAttente {
     situation: Option<raccourcis::Situation>,
 }
 
-/// Point d'entrée de l'app (appelé par `main.rs`).
+/// Point d'entrée de l'exe (appelé par `main.rs`). Le même fichier est l'app, l'installateur
+/// ou la désinstallation, selon son nom et la ligne de commande (§3.1). Le contexte Tauri
+/// (qui embarque les pages) n'est engendré qu'une fois, puis donné à l'un des deux parcours.
 pub fn lancer() {
     let (commande, inconnus) = arguments::lire(std::env::args().skip(1));
+    let nom_exe = std::env::current_exe()
+        .ok()
+        .as_deref()
+        .and_then(arguments::nom_de_fichier);
+    // La désinstallation ne construit pas Tauri (pas de fenêtre) ; les deux autres parcours
+    // reçoivent le contexte, engendré une seule fois ici (un seul `generate_context!`).
+    if let arguments::Lancement::Desinstallation =
+        arguments::lancement(nom_exe.as_deref(), &commande)
+    {
+        std::process::exit(installateur::desinstaller());
+    }
+    let contexte = tauri::generate_context!();
+    match arguments::lancement(nom_exe.as_deref(), &commande) {
+        arguments::Lancement::App(commande) => lancer_app(contexte, commande, inconnus),
+        arguments::Lancement::Installateur => {
+            std::process::exit(installateur::lancer_installateur(contexte))
+        }
+        arguments::Lancement::Desinstallation => std::process::exit(installateur::desinstaller()),
+    }
+}
+
+/// Démarre l'app elle-même (la commande n'est jamais `Desinstaller` ici).
+fn lancer_app(contexte: tauri::Context, commande: Commande, inconnus: Vec<String>) {
     let construction = tauri::Builder::default()
         // L'instance unique en premier : une seconde instance confie ses arguments à la
         // première et sort avec le code 0 avant d'aller plus loin.
@@ -300,7 +330,7 @@ pub fn lancer() {
             demarrer(app.handle(), commande, &inconnus);
             Ok(())
         })
-        .build(tauri::generate_context!());
+        .build(contexte);
     match construction {
         Ok(app) => app.run(|app, evenement| match evenement {
             // L'app vit sans fenêtre : fermer la dernière fenêtre ne la quitte pas.
@@ -373,6 +403,13 @@ fn demarrer(app: &AppHandle, commande: Commande, inconnus: &[String]) {
         log::info!("--quitter: aucune instance en cours");
         app.exit(0);
         return;
+    }
+    // `--capturer <mode>` au démarrage (l'exe lancé directement) : la demande attend `pret`.
+    if let Commande::Capturer(mode) = &commande {
+        log::info!("--capturer recu: {}", mode_journal(mode));
+        if let Ok(mut attente) = app.state::<Application>().capture_en_attente.lock() {
+            *attente = Some(mode.clone());
+        }
     }
 
     match systeme::version_windows() {
@@ -501,6 +538,38 @@ fn demarrer(app: &AppHandle, commande: Commande, inconnus: &[String]) {
         .demarree
         .store(true, Ordering::SeqCst);
     log::info!("pret");
+
+    // Capture demandée avant `pret` (`--capturer` au démarrage) : postée pour le tour
+    // suivant, maintenant que tout est en place.
+    let en_attente = app
+        .state::<Application>()
+        .capture_en_attente
+        .lock()
+        .ok()
+        .and_then(|mut a| a.take());
+    if let Some(mode) = en_attente {
+        poster_plus_tard(app, Evenement::CaptureCli(mode));
+    }
+}
+
+/// Nom de mode pour le journal, ou `<vide>` / `<inconnu: …>`.
+fn mode_journal(mode: &str) -> String {
+    if mode.is_empty() {
+        "<vide>".into()
+    } else if Mode::depuis_nom(mode).is_some() {
+        mode.to_string()
+    } else {
+        format!("<inconnu: {mode}>")
+    }
+}
+
+/// Lance la capture demandée par `--capturer`. Une valeur inconnue ne fait qu'une ligne au
+/// journal (contrat §4.4). Sans `ATTENTE_MENU` : la demande est directe.
+fn capturer_cli(app: &AppHandle, mode: &str) {
+    match Mode::depuis_nom(mode) {
+        Some(m) => lancer_capture(app, m),
+        None => log::warn!("--capturer: mode inconnu {}", mode_journal(mode)),
+    }
 }
 
 /// Prépare l'écran figé, ses filets de sécurité et la sélection (fil principal). Un échec
@@ -771,7 +840,19 @@ pub fn traiter(app: &AppHandle, evenement: Evenement) {
                     log::info!("--quitter recu: fermeture demandee");
                     app.exit(0);
                 }
-                Commande::Demarrer => log::info!("seconde instance refusee"),
+                Commande::Capturer(mode) => {
+                    log::info!("--capturer recu: {}", mode_journal(&mode));
+                    if app.state::<Application>().demarree.load(Ordering::SeqCst) {
+                        capturer_cli(app, &mode);
+                    } else if let Ok(mut a) = app.state::<Application>().capture_en_attente.lock() {
+                        log::info!("--capturer: en attente du demarrage");
+                        *a = Some(mode);
+                    }
+                }
+                // Désinstaller via une seconde instance n'aurait pas de sens : ignoré.
+                Commande::Desinstaller | Commande::Demarrer => {
+                    log::info!("seconde instance refusee")
+                }
             }
         }
         Evenement::ThemeBarre(theme) => {
@@ -816,6 +897,7 @@ pub fn traiter(app: &AppHandle, evenement: Evenement) {
             }
         }
         Evenement::AnnonceDemarrage { local, bilan } => annoncer_raccourcis(app, &local, &bilan),
+        Evenement::CaptureCli(mode) => capturer_cli(app, &mode),
         Evenement::SortieEchue(numero) => {
             if prendre_sortie_attendue(app, numero) {
                 log::warn!("sortie sans bilan");

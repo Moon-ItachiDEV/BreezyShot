@@ -5,6 +5,7 @@
 //! Le module crée, place, montre et cache ; il ne décide d'aucun message. Ce qu'il reçoit
 //! de la page remonte à l'Application par `Signal`.
 
+pub mod installateur;
 mod place;
 pub mod reglages;
 pub mod selection;

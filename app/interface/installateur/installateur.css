@@ -1,0 +1,130 @@
+/* Installateur BreezyShot. Toutes les couleurs, durées, courbes et mesures viennent de
+   jetons.css (commun/), généré depuis le design system. Rien n'est recopié à la main.
+   La fenêtre est transparente : la page dessine la carte, son ombre et ses coins. */
+
+*{box-sizing:border-box}
+html,body{height:100%;margin:0}
+body{background:transparent;color:var(--text);
+  font:var(--texte-body-graisse) var(--texte-body-taille)/var(--texte-body-interligne) var(--police-ui);
+  overflow:hidden;-webkit-font-smoothing:antialiased}
+button{font:inherit;color:inherit}
+:focus-visible{outline:2px solid var(--text);outline-offset:2px}
+
+.scene{position:fixed;inset:0;display:grid;place-items:center}
+
+.win{
+  width:var(--installateur-carte-largeur);
+  height:min(var(--installateur-carte-hauteur), calc(100vh - 2 * var(--installateur-marge)));
+  max-width:calc(100vw - 2 * var(--installateur-marge));
+  border-radius:var(--radius-md);border:1px solid var(--stroke);box-shadow:var(--shadow-28);
+  background:linear-gradient(180deg,var(--fenetre-fond-haut),var(--fenetre-fond-bas));
+  display:flex;flex-direction:column;overflow:hidden;
+  animation:winIn var(--duree-vignette) var(--courbe-ressort)}
+.win.gone{visibility:hidden}
+@keyframes winIn{from{opacity:0;transform:translateY(14px) scale(.96)}}
+
+.titlebar{height:var(--installateur-titre-hauteur);display:flex;align-items:center;flex:none;user-select:none}
+.titlebar .ico{width:16px;height:16px;margin:0 12px 0 16px;display:block}
+.titlebar .name{font-size:12px;line-height:16px;flex:1}
+.cap{width:46px;height:var(--installateur-titre-hauteur);border:0;background:transparent;
+  display:grid;place-items:center;cursor:pointer;transition:background-color var(--duree-couleur) linear}
+.cap:hover{background:var(--subtle-hover)}
+.cap.x:hover{background:var(--fermer-survol);color:#fff}
+.cap svg{width:10px;height:10px}
+
+.body{flex:1;position:relative;background:var(--layer);border-top:1px solid var(--stroke);overflow:hidden}
+.step{position:absolute;inset:0;padding:32px 40px;display:flex;flex-direction:column;
+  align-items:center;justify-content:center;text-align:center}
+.step[hidden]{display:none}
+.step.out-l{animation:outL var(--duree-sortie) var(--courbe-vent) forwards}
+.step.in-r{animation:inR var(--duree-glissiere) var(--courbe-ressort) both}
+@keyframes outL{to{opacity:0;transform:translateX(-28px)}}
+@keyframes inR{from{opacity:0;transform:translateX(28px)}}
+
+h1{font:var(--texte-title-large-graisse) var(--installateur-titre-taille)/var(--installateur-titre-interligne) var(--police-display);margin:0}
+h2{font:var(--texte-subtitle-graisse) var(--texte-subtitle-taille)/var(--texte-subtitle-interligne) var(--police-display);margin:0}
+
+/* Accueil */
+.welcome .logo{width:var(--installateur-logo);height:var(--installateur-logo);margin-bottom:24px;display:block}
+.welcome.in-r .logo{animation:spin1 var(--duree-envol) var(--courbe-ressort) both}
+.welcome.in-r h1{animation:rise var(--duree-glissiere) var(--courbe-ressort) 80ms both}
+@keyframes spin1{from{transform:rotate(-360deg) scale(.7);opacity:0}}
+@keyframes rise{from{transform:translateY(14px);opacity:0}}
+
+/* Installation */
+.mark{position:relative;width:var(--installateur-marque);height:var(--installateur-marque);display:grid;place-items:center}
+.mark .logo{width:var(--installateur-logo);height:var(--installateur-logo);display:block}
+.prow{width:var(--installateur-barre);max-width:100%;display:flex;justify-content:space-between;
+  align-items:baseline;margin-top:28px;margin-bottom:8px;font-size:12px;line-height:16px;
+  font-variant-numeric:tabular-nums;color:var(--text-2);opacity:0;transform:translateY(6px);
+  transition:opacity var(--duree-onde) linear 160ms,transform var(--duree-envol) var(--courbe-ressort) 160ms}
+.prow b{font-size:14px;line-height:20px;font-weight:600;color:var(--text)}
+.in-r .prow,.step:not(.in-r) .prow{opacity:1;transform:none}
+.win[data-s="error"] .prow b{color:var(--danger)}
+.pbar{position:relative;width:var(--installateur-barre);max-width:100%;height:4px;border-radius:2px;
+  background:var(--ctrl-alt);box-shadow:inset 0 0 0 1px var(--stroke);overflow:hidden;
+  opacity:0;transform:translateY(6px) scaleX(.94);transform-origin:left center;
+  transition:opacity var(--duree-onde) linear 160ms,transform var(--duree-envol) var(--courbe-ressort) 160ms}
+.in-r .pbar,.step:not(.in-r) .pbar{opacity:1;transform:none}
+.pbar .fill{position:absolute;left:0;top:0;bottom:0;width:0;border-radius:2px;background:var(--accent);
+  overflow:hidden;transition:background-color var(--duree-onde) linear,width var(--duree-couleur) linear}
+.pbar .fill::after{content:"";position:absolute;top:0;bottom:0;left:0;width:72px;
+  background:linear-gradient(90deg,transparent,rgba(255,255,255,.55),transparent);
+  transform:translateX(-72px);animation:shine 1.6s var(--courbe-douce) infinite}
+@keyframes shine{to{transform:translateX(280px)}}
+.win[data-s="error"] .pbar .fill{background:var(--danger)}
+.win[data-s="error"] .pbar .fill::after{animation:none;opacity:0}
+.cause{margin-top:24px;max-width:320px;color:var(--text-2);opacity:0;transform:translateY(6px);
+  transition:opacity var(--duree-onde) linear,transform var(--duree-vignette) var(--courbe-ressort)}
+.win[data-s="error"] .cause{opacity:1;transform:none;transition-delay:120ms}
+
+/* Prêt */
+.check{width:var(--installateur-marque);height:var(--installateur-marque);margin-bottom:16px;display:block}
+.check .full{fill:none;stroke:var(--accent);stroke-width:2.5}
+.check .disc{fill:var(--accent);transform-origin:64px 64px}
+.check path{fill:none;stroke:var(--on-accent);stroke-width:5;stroke-linecap:round;stroke-linejoin:round;
+  stroke-dasharray:60;stroke-dashoffset:60}
+.ready.in-r .check .full{animation:close var(--duree-ressort) var(--courbe-douce) both}
+.ready.in-r .check .disc{animation:disc var(--duree-glissiere) var(--courbe-ressort) 160ms both}
+.ready.in-r .check path{animation:draw var(--duree-glissiere) var(--courbe-douce) 360ms forwards}
+.ready:not(.in-r) .check path{stroke-dashoffset:0}
+@keyframes close{from{transform:scale(1.04);opacity:.6}}
+@keyframes disc{from{transform:scale(0)}}
+@keyframes draw{to{stroke-dashoffset:0}}
+
+/* Pied */
+.foot{height:var(--installateur-pied-hauteur);flex:none;display:flex;align-items:center;gap:8px;
+  padding:0 24px;border-top:1px solid var(--divider);background:var(--ctrl-alt)}
+.grow{flex:1}
+.btn{height:32px;min-width:96px;padding:0 12px;border-radius:var(--radius-sm);border:1px solid var(--stroke);
+  border-bottom-color:var(--stroke-strong);background:var(--ctrl);cursor:pointer;white-space:nowrap;overflow:hidden;
+  transition:transform var(--duree-ressort) var(--courbe-ressort),box-shadow var(--duree-survol) var(--courbe-douce),
+    background-color var(--duree-couleur) linear,opacity var(--duree-reduite) linear}
+.btn:hover{background:var(--ctrl-hover);transform:translateY(-1px);box-shadow:var(--shadow-2)}
+.btn:active{background:var(--ctrl-press);transform:scale(.97)}
+.btn.primary{background:var(--accent);color:var(--on-accent);border-color:transparent;border-bottom-color:rgba(0,0,0,.2)}
+.btn.primary:hover{background:var(--accent-hover)}
+.btn.primary:active{background:var(--accent-press)}
+.foot .btn{display:none}
+.win[data-s="idle"] #install,.win[data-s="starting"] #install,.win[data-s="error"] #retry,
+.win[data-s="done"] #try,.win[data-s="done"] #done{display:inline-block}
+.win[data-s="error"] #retry,.win[data-s="done"] .btn{animation:btnIn var(--duree-vignette) var(--courbe-ressort) both}
+@keyframes btnIn{from{opacity:0;transform:translateY(6px)}}
+.win[data-s="starting"] #install{min-width:0;width:32px;border-radius:16px;color:transparent;opacity:0;
+  transform:scale(.6);pointer-events:none;
+  transition:width var(--duree-vent) var(--courbe-douce),border-radius var(--duree-vent) var(--courbe-douce),
+    color 80ms linear,opacity var(--duree-onde) linear 160ms,transform var(--duree-vent) var(--courbe-vent) 140ms}
+#install{width:120px;transition:width var(--duree-vent) var(--courbe-douce),transform var(--duree-ressort) var(--courbe-ressort),
+  background-color var(--duree-couleur) linear,box-shadow var(--duree-survol) var(--courbe-douce)}
+
+@media (prefers-reduced-motion:reduce){
+  *,*::before,*::after{animation-name:fadeOnly!important;animation-duration:var(--duree-reduite)!important;
+    animation-iteration-count:1!important;animation-delay:0ms!important;
+    transition-duration:var(--duree-reduite)!important;transition-delay:0ms!important;
+    transition-property:opacity,background-color,color,border-color,stroke,stroke-dashoffset,width!important}
+  .btn:hover,.btn:active{transform:none}
+  .check path{stroke-dashoffset:0!important}
+  .pbar .fill::after{display:none}
+  .pbar,.prow{transform:none!important}
+}
+@keyframes fadeOnly{from{opacity:0}}

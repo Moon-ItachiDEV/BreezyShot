@@ -31,6 +31,8 @@ fn main() {
         "vignette_terminee",
         "souffle_pret",
         "souffle_termine",
+        "installateur_pret",
+        "installateur_action",
     ]);
     tauri_build::try_build(
         tauri_build::Attributes::new()

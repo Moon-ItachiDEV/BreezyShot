@@ -36,6 +36,7 @@ windows = { version = "0.62", features = [
   "Win32_Graphics_Dwm",
   "Win32_Graphics_Gdi",
   "Win32_Security",
+  "Win32_Storage_FileSystem",
   "Win32_System_Com",
   "Win32_System_DataExchange",
   "Win32_System_LibraryLoader",
@@ -50,6 +51,8 @@ windows = { version = "0.62", features = [
   "Win32_UI_Shell_Common",
   "Win32_UI_WindowsAndMessaging",
 ] }
+# Savoir si WebView2 est là avant de montrer l'installateur (déjà tiré par wry).
+webview2-com = "0.39"
 
 [profile.release]
 opt-level = 3
