@@ -1,4 +1,4 @@
-# Joue tous les essais essais/NN-*.ps1 dans l'ordre (01-socle … 07-vignette), chacun dans
+# Joue tous les essais essais/NN-*.ps1 dans l'ordre (01-socle … 11-pointeur-loupe), chacun dans
 # son propre pwsh. Les aides (temoin.ps1, tenir-raccourci.ps1, cible-glisser.ps1) ne sont
 # pas des essais.
 # Sort avec 1 si un essai échoue. Écrit un résumé lisible, aussi dans $env:GITHUB_STEP_SUMMARY.
