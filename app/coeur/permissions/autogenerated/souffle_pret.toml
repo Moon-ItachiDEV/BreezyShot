@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-souffle-pret"
+description = "Enables the souffle_pret command without any pre-configured scope."
+commands.allow = ["souffle_pret"]
+
+[[permission]]
+identifier = "deny-souffle-pret"
+description = "Denies the souffle_pret command without any pre-configured scope."
+commands.deny = ["souffle_pret"]

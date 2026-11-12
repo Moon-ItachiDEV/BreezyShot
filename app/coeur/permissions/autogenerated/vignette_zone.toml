@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-vignette-zone"
+description = "Enables the vignette_zone command without any pre-configured scope."
+commands.allow = ["vignette_zone"]
+
+[[permission]]
+identifier = "deny-vignette-zone"
+description = "Denies the vignette_zone command without any pre-configured scope."
+commands.deny = ["vignette_zone"]

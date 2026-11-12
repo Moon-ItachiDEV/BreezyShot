@@ -15,6 +15,15 @@ fn main() {
         "selection_terminee",
         "selection_cliquee",
         "selection_annulee",
+        "vignette_pret",
+        "vignette_image",
+        "vignette_zone",
+        "vignette_entree",
+        "vignette_action",
+        "vignette_glisser",
+        "vignette_terminee",
+        "souffle_pret",
+        "souffle_termine",
     ]);
     tauri_build::try_build(
         tauri_build::Attributes::new()

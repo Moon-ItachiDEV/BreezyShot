@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-vignette-image"
+description = "Enables the vignette_image command without any pre-configured scope."
+commands.allow = ["vignette_image"]
+
+[[permission]]
+identifier = "deny-vignette-image"
+description = "Denies the vignette_image command without any pre-configured scope."
+commands.deny = ["vignette_image"]

@@ -299,15 +299,19 @@ pub fn ligne_annonce(annonce: &Annonce) -> String {
     }
 }
 
-/// `sortie copie <faite|non demandee|echec> recent <ok|echec> fichier <fait|non
-/// demande|echec>` : aucun chemin, aucun contenu.
+/// `sortie copie <faite|non demandee|echec> recent <ok|echec|non demande> fichier <fait|non
+/// demande|echec>` : aucun chemin, aucun contenu (`non demande` : action de la vignette).
 pub fn ligne_sortie(bilan: &Bilan) -> String {
     let copie = match bilan.copie {
         Etape::Faite => "faite",
         Etape::NonDemandee => "non demandee",
         Etape::Echec(_) => "echec",
     };
-    let recent = if bilan.recent.is_ok() { "ok" } else { "echec" };
+    let recent = match bilan.recent {
+        Some(Ok(_)) => "ok",
+        Some(Err(_)) => "echec",
+        None => "non demande",
+    };
     let fichier = match bilan.enregistrement {
         EtapeFichier::Fait(_) => "fait",
         EtapeFichier::NonDemande => "non demande",
@@ -346,7 +350,7 @@ pub fn bilan_d_echec(demande: &Demande, cause: &str) -> Bilan {
         } else {
             Etape::NonDemandee
         },
-        recent: Err(cause.into()),
+        recent: demande.ranger_recents.then(|| Err(cause.into())),
         enregistrement: if demande.enregistrer {
             EtapeFichier::Echec {
                 dossier: demande.dossier_enregistrement.clone(),
@@ -852,7 +856,7 @@ mod tests {
     fn ligne_de_sortie_sans_chemin() {
         let b = Bilan {
             copie: Etape::Faite,
-            recent: Ok(PathBuf::from("/secret/Recents/x.png")),
+            recent: Some(Ok(PathBuf::from("/secret/Recents/x.png"))),
             enregistrement: EtapeFichier::NonDemande,
         };
         assert_eq!(
@@ -861,7 +865,7 @@ mod tests {
         );
         let b = Bilan {
             copie: Etape::NonDemandee,
-            recent: Err("disque plein".into()),
+            recent: Some(Err("disque plein".into())),
             enregistrement: EtapeFichier::Fait(PathBuf::from("/secret/a.png")),
         };
         assert_eq!(
@@ -870,7 +874,7 @@ mod tests {
         );
         let b = Bilan {
             copie: Etape::Echec("occupe".into()),
-            recent: Ok(PathBuf::new()),
+            recent: Some(Ok(PathBuf::new())),
             enregistrement: EtapeFichier::Echec {
                 dossier: PathBuf::from("/secret"),
                 cause: "x".into(),
@@ -920,13 +924,14 @@ mod tests {
             dossier_enregistrement: PathBuf::from("/u/Images/BreezyShot"),
             dossier_affiche: "Images › BreezyShot".into(),
             dossier_recents: PathBuf::from("/u/Recents"),
+            ranger_recents: true,
             modele_nom: "BreezyShot {date} à {heure}".into(),
             maintenant: chrono::Local::now(),
             transparence: false,
         };
         let b = bilan_d_echec(&demande, CAUSE_SORTIE_INTERROMPUE);
         assert_eq!(b.copie, Etape::Echec(CAUSE_SORTIE_INTERROMPUE.into()));
-        assert!(b.recent.is_err());
+        assert!(matches!(b.recent, Some(Err(_))));
         assert!(matches!(b.enregistrement, EtapeFichier::Echec { .. }));
         assert!(matches!(
             sortie::annonce(&b, &demande),
@@ -971,10 +976,10 @@ mod tests {
         assert!(!doit_enregistrer(false, false, false));
         assert!(doit_enregistrer(true, false, false));
         assert!(!doit_enregistrer(false, true, false));
-        // Aujourd'hui (pas de vignette) : enregistré dès qu'un dossier est connu.
+        // Avec la vignette (0.3) : le réglage seul décide.
         let v = crate::application::VIGNETTE_CONSTRUITE;
-        assert!(doit_enregistrer(false, v, true));
-        assert!(!doit_enregistrer(false, v, false));
+        assert!(!doit_enregistrer(false, v, true));
+        assert!(doit_enregistrer(true, v, true));
     }
 
     #[test]

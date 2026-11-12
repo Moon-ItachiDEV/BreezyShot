@@ -4,7 +4,7 @@
 # (1) Démarrage : « raccourci plein_ecran: Ctrl+Maj+2 », aucune annonce. (2) Souris sur
 # l'écran principal, Ctrl+Maj+2 : Repos -> Gel, Gel -> Decoupe (PhotoPrise plein_ecran),
 # « plein ecran … souris », Decoupe -> Repos, « Copié et enregistré » (réglage
-# d'enregistrement faux, vignette absente : enregistré quand même, réglages inchangés).
+# d'enregistrement vrai, vignette coupée : le parcours de 0.2 ; réglages inchangés).
 # (3) Pour cette capture, aucune ligne « ecran fige », « selection » ni « echap global », et
 # ni l'écran figé ni la sélection ne deviennent visibles (guettés pendant et après).
 # (4) Le PNG enregistré et l'image du presse-papiers ont exactement la taille de l'écran
@@ -84,14 +84,16 @@ function Lignes-Depuis([string]$Dossier, [int]$Debut) {
 }
 
 # Réglages du cas : Ctrl+Maj+1 pour la zone, Ctrl+Maj+2 pour le plein écran (pas
-# d'Impr. écran, pas d'annonce au démarrage), copie, enregistrement faux (le défaut).
+# d'Impr. écran, pas d'annonce au démarrage), copie, enregistrement vrai, vignette coupée
+# (elle a son essai 07).
 function Ecrire-Reglages([string]$Dossier) {
     $r = [ordered]@{
         version                   = 1
         raccourcis                = [ordered]@{ zone = @('Ctrl+Maj+1'); plein_ecran = @('Ctrl+Maj+2'); fenetre = @() }
         copier_apres_capture      = $true
-        enregistrer_apres_capture = $false
+        enregistrer_apres_capture = $true
         dossier_enregistrement    = $null
+        vignette                  = [ordered]@{ afficher = $false; duree_s = 6; coin = 'bas_gauche' }
     }
     $d = Join-Path $Dossier 'reglages'
     New-Item -ItemType Directory -Force -Path $d | Out-Null

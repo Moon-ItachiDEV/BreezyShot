@@ -1,8 +1,8 @@
 # Étapes 4 à 6 assemblées : la capture d'une zone, de bout en bout (ARCHITECTURE.md §3.6,
 # §8, §9, §10), sur le vrai .exe, avec de vraies entrées clavier et souris.
 #
-# Cas A (réglage d'enregistrement par défaut, faux : tant que la vignette n'existe pas,
-# l'app enregistre quand même, « Copié et enregistré », sans toucher au réglage) :
+# Cas A (enregistrement demandé par le réglage, vignette coupée : « Copié et enregistré »,
+# comme en 0.2) :
 # (1) raccourci → chronos et lignes du journal ; (2) fenêtres pendant la sélection
 # (couverture, ordre, premier plan, styles étendus, bandeau caché, pas de focus_perdu
 # parasite en 3 s) ; (3) glisser exact sur les quatre carrés du témoin
@@ -118,8 +118,9 @@ function Attendre-Motif([string]$Motif, [string]$Dossier, [double]$DelaiS, [stri
 }
 
 # Réglages du cas : raccourci Ctrl+Maj+1 seul (pas d'Impr. écran, pas d'annonce au
-# démarrage), copie, enregistrement et dossier au choix. Version 0.2 : un réglage
-# d'enregistrement faux n'empêche pas l'enregistrement (vignette pas encore construite).
+# démarrage), copie, enregistrement et dossier au choix. Depuis 0.3, seul le réglage décide
+# de l'enregistrement : l'essai le met à vrai et coupe la vignette (essai 07) pour garder le
+# parcours de 0.2 (bandeau, fichier enregistré).
 function Ecrire-Reglages([string]$Dossier, [bool]$Enregistrer, $DossierEnregistrement) {
     $r = [ordered]@{
         version                   = 1
@@ -127,6 +128,7 @@ function Ecrire-Reglages([string]$Dossier, [bool]$Enregistrer, $DossierEnregistr
         copier_apres_capture      = $true
         enregistrer_apres_capture = $Enregistrer
         dossier_enregistrement    = $DossierEnregistrement
+        vignette                  = [ordered]@{ afficher = $false; duree_s = 6; coin = 'bas_gauche' }
     }
     $d = Join-Path $Dossier 'reglages'
     New-Item -ItemType Directory -Force -Path $d | Out-Null
@@ -166,7 +168,7 @@ try {
     if (-not $IsWindows) {
         # --- Hors Windows : démarrage seulement --------------------------------------------
         $commun = Dossier-Cas 'commun'
-        Ecrire-Reglages -Dossier $commun -Enregistrer $false -DossierEnregistrement $null
+        Ecrire-Reglages -Dossier $commun -Enregistrer $true -DossierEnregistrement $null
         $p = Demarrer-Cas -Dossier $commun -Quoi 'commun'
         Verifier 'écran figé et sélection préparés au démarrage' $true | Out-Null
         Fermer-Cas $p $commun 'commun'
@@ -524,7 +526,7 @@ function Fichiers-Png([string]$Dossier) {
             try {
                 Assurer-Temoin '(A)'
                 $da = Dossier-Cas 'a'
-                Ecrire-Reglages -Dossier $da -Enregistrer $false -DossierEnregistrement $null
+                Ecrire-Reglages -Dossier $da -Enregistrer $true -DossierEnregistrement $null
                 $p = Demarrer-Cas -Dossier $da -Quoi '(A)'
                 Verifier '(A) raccourci zone: Ctrl+Maj+1' ((Compter-Lignes -Texte 'raccourci zone: Ctrl+Maj+1' -Dossier $da) -eq 1) | Out-Null
                 $sel = Hwnd-Journal 'selection fenetre' $da 'HWND de la sélection'
@@ -585,7 +587,7 @@ function Fichiers-Png([string]$Dossier) {
                 Verifier '(3) Découpe -> Repos (ImagePreteSansVignette)' ((Compter-Lignes -Texte 'etat Decoupe -> Repos (ImagePreteSansVignette)' -Dossier $da) -eq 1) | Out-Null
                 $zone = Derniere-Ligne -Motif 'zone choisie ' -Dossier $da
                 Verifier '(3) zone choisie = le témoin' ($zone -match "zone choisie $TX,$TY ${COTE}x$COTE$") $zone | Out-Null
-                # Réglage faux, vignette absente : enregistré quand même (version 0.2).
+                # Réglage vrai, vignette coupée : enregistré, annoncé au bandeau.
                 Verifier '(3) le journal dit « Copié et enregistré »' ((Compter-Lignes -Texte 'sortie annonce reussite: Copié et enregistré' -Dossier $da) -eq 1) | Out-Null
                 Verifier '(3) sortie copie faite recent ok fichier fait' ((Compter-Lignes -Texte 'sortie copie faite recent ok fichier fait' -Dossier $da) -eq 1) | Out-Null
                 $imagesA = @(Fichiers-Png (Join-Path $da 'images'))

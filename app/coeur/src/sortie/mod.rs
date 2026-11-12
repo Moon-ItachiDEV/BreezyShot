@@ -12,6 +12,7 @@
 
 mod annonce;
 mod fichier;
+mod glisser;
 mod nom;
 mod png;
 mod presse_papiers;
@@ -28,6 +29,9 @@ use chrono::{DateTime, Local};
 use crate::systeme::gel::Pixels;
 
 pub use annonce::{annonce, Annonce};
+pub use glisser::{
+    a_effacer, fichier_a_glisser, liens_a_supprimer, supprimer, Suppression, GLISSER_GARDES,
+};
 pub use nom::{chemin_libre, nom_affiche, nom_fichier};
 pub use png::{encoder_png, sur_blanc};
 pub use recents::{recents_a_supprimer, RECENTS_GARDES};
@@ -47,6 +51,9 @@ pub struct Demande {
     pub dossier_affiche: String,
     /// <local>/Recents, chemin absolu.
     pub dossier_recents: PathBuf,
+    /// Ecrire la capture dans « Recents » (vrai pour une capture, faux pour Copier et
+    /// Enregistrer depuis la vignette : le fichier y est deja).
+    pub ranger_recents: bool,
     /// Reglage modele_nom, ex. « BreezyShot {date} à {heure} ».
     pub modele_nom: String,
     pub maintenant: DateTime<Local>,
@@ -75,7 +82,8 @@ pub enum EtapeFichier {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Bilan {
     pub copie: Etape,
-    pub recent: Result<PathBuf, String>,
+    /// `None` : « Recents » non demande (`ranger_recents` faux).
+    pub recent: Option<Result<PathBuf, String>>,
     pub enregistrement: EtapeFichier,
 }
 
@@ -148,11 +156,11 @@ fn sortir_transparent(pixels: &Pixels, demande: &Demande) -> Bilan {
 fn ecrire(
     demande: &Demande,
     encodage: &Result<Vec<u8>, String>,
-) -> (Result<PathBuf, String>, EtapeFichier) {
-    let recent = match encodage {
+) -> (Option<Result<PathBuf, String>>, EtapeFichier) {
+    let recent = demande.ranger_recents.then(|| match encodage {
         Ok(octets) => recents::ecrire(&demande.dossier_recents, demande.maintenant, octets),
         Err(cause) => Err(cause.clone()),
-    };
+    });
     let enregistrement = if !demande.enregistrer {
         EtapeFichier::NonDemande
     } else {
@@ -201,7 +209,7 @@ fn tout_en_echec(demande: &Demande, cause: &str) -> Bilan {
         } else {
             Etape::NonDemandee
         },
-        recent: Err(cause.to_string()),
+        recent: demande.ranger_recents.then(|| Err(cause.to_string())),
         enregistrement: if demande.enregistrer {
             EtapeFichier::Echec {
                 dossier: demande.dossier_enregistrement.clone(),

@@ -4,7 +4,7 @@ Version d'essai, non signée : Windows peut demander une confirmation au premier
 - Écran : Ctrl + Maj + 2 : tout l'écran sous la souris est dans le presse-papiers.
 - Fenêtre : Ctrl + Maj + 3, clic sur la fenêtre entourée de bleu : elle est dans le presse-papiers, coins arrondis compris.
 
-Chaque capture est aussi enregistrée dans Images › BreezyShot.
+Enregistrer dans Images › BreezyShot : bouton « Enregistrer » de la vignette, ou par le réglage.
 
 Échap ou clic droit annule. Pour quitter : clic droit sur l'icône, près de l'horloge.
 

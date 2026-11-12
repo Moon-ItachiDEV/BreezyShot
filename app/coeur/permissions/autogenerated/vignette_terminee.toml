@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-vignette-terminee"
+description = "Enables the vignette_terminee command without any pre-configured scope."
+commands.allow = ["vignette_terminee"]
+
+[[permission]]
+identifier = "deny-vignette-terminee"
+description = "Denies the vignette_terminee command without any pre-configured scope."
+commands.deny = ["vignette_terminee"]
