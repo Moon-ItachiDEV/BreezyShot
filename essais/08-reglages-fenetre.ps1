@@ -316,7 +316,14 @@ public static string Titre(IntPtr h) {
     # affichée) ou sans rectangle.
     function Cliquer-Element($e, [string]$Quoi) {
         if ($null -eq $e) { throw "$Quoi : élément introuvable" }
+        # Une ligne qui se déplie au-dessus (repli sous un interrupteur) fait glisser
+        # l'élément : on clique quand son rectangle ne bouge plus (deux lectures à 120 ms).
         $c = $e.Current; $r = $c.BoundingRectangle
+        $limite = [DateTime]::UtcNow.AddSeconds(2)
+        do {
+            Start-Sleep -Milliseconds 120
+            $avant = $r; $c = $e.Current; $r = $c.BoundingRectangle
+        } while (($r.X -ne $avant.X -or $r.Y -ne $avant.Y -or $r.Width -ne $avant.Width -or $r.Height -ne $avant.Height) -and [DateTime]::UtcNow -lt $limite)
         if ($c.IsOffscreen -or $r.IsEmpty -or $r.Width -le 0 -or $r.Height -le 0) {
             $d = Decrire $e
             Verifier "$Quoi : élément à l'écran" $false $d | Out-Null
@@ -631,14 +638,24 @@ public static string Titre(IntPtr h) {
     Verifier '(8) fichier : enregistrer_apres_capture true' ((Lire-Reglages $cas).enregistrer_apres_capture -eq $true) | Out-Null
     $dialoguesAvant = @([BreezyShotEssai.Reglages]::Fenetres($p.Id, '#32770') | Where-Object { [BreezyShotEssai.Reglages]::IsWindowVisible($_) }).Count
     Cliquer-Nom $fen 'Parcourir…' ([System.Windows.Automation.ControlType]::Button) '(8) Parcourir'
+    # Un clic parti pendant que les lignes Format et Nom se déplient peut tomber à côté :
+    # sans sélecteur au bout de 3 s, un second clic, sur le bouton relu. Le détail dit
+    # combien de clics il a fallu et où est le bouton.
     $dialogue = [IntPtr]::Zero
-    $limite = [DateTime]::UtcNow.AddSeconds(10)
+    $clics = 1
+    $limite = [DateTime]::UtcNow.AddSeconds(12)
+    $second = [DateTime]::UtcNow.AddSeconds(3)
     do {
         $d = @([BreezyShotEssai.Reglages]::Fenetres($p.Id, '#32770') | Where-Object { [BreezyShotEssai.Reglages]::IsWindowVisible($_) })
-        if ($d.Count -gt $dialoguesAvant) { $dialogue = $d[0] }
+        if ($d.Count -gt $dialoguesAvant) { $dialogue = $d[0]; break }
+        if ($clics -eq 1 -and [DateTime]::UtcNow -ge $second) {
+            Cliquer-Nom $fen 'Parcourir…' ([System.Windows.Automation.ControlType]::Button) '(8) Parcourir, second clic'
+            $clics = 2
+        }
         Start-Sleep -Milliseconds 100
-    } while ($dialogue -eq [IntPtr]::Zero -and [DateTime]::UtcNow -lt $limite)
-    if (-not (Verifier '(8) le sélecteur de dossier s''ouvre' ($dialogue -ne [IntPtr]::Zero))) { throw '(8) pas de sélecteur' }
+    } while ([DateTime]::UtcNow -lt $limite)
+    $ouParcourir = Decrire (Element $fen 'Parcourir…' ([System.Windows.Automation.ControlType]::Button))
+    if (-not (Verifier '(8) le sélecteur de dossier s''ouvre' ($dialogue -ne [IntPtr]::Zero) "$clics clic(s) ; $ouParcourir")) { throw '(8) pas de sélecteur' }
     # Champ « Dossier : » (1152) puis bouton de validation (1) du dialogue de Windows,
     # attendus. Introuvables : le message liste les identifiants (pas les noms, qui peuvent
     # être des noms de dossiers) des champs et boutons vus.
