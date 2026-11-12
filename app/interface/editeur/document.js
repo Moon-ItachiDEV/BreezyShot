@@ -18,6 +18,8 @@
 //   numero     { x, y, rayon, couleur, ordre, opacite }
 //   masque     { x1, y1, x2, y2, sorte, intensite, graine }
 //              sorte : "pixeliser"|"flouter"|"bloc" ; graine : entier tiré par `ajouter`
+//   projecteur { x1, y1, x2, y2, forme }   forme : "rectangle" | "ovale" ; voile sur toute
+//              l'image, percé de la réunion des projecteurs, peint après tous les objets
 // epaisseur et intensite : 0 | 1 | 2. opacite : de 0 à 1 (1 : opaque ; absente : 1 ; une
 // valeur au-dessus de 1 est lue en pour cent).
 // Historique : { doc, passe, futur, version, marque }. Annuler et rétablir remplacent les
@@ -32,7 +34,7 @@ export const TRAITS_SURLIGNEUR = [16, 24, 34];
 const PAS_MAX = 200;
 const OCTETS_MAX = 32 * 1024 * 1024; // JSON de l'historique (passé et futur) au plus
 const DECALAGE_COPIE = 16;
-const RECTANGULAIRES = { rectangle: 1, ellipse: 1, masque: 1 };
+const RECTANGULAIRES = { rectangle: 1, ellipse: 1, masque: 1, projecteur: 1 };
 
 // Marges des ombres et des traits autour de la forme (px de l'image), d'après le dessin :
 // une ombre de flou b décalée de d s'étend jusqu'à 1,5 b + d (écart type b / 2, trois écarts).
@@ -272,7 +274,7 @@ export function longueurPointe(o) {
 // Boîte de la forme elle-même (sans ombre) : poignées, contour de sélection, redimensionner.
 export function boiteForme(o) {
   switch (o.type) {
-    case "rectangle": case "ellipse": case "masque":
+    case "rectangle": case "ellipse": case "masque": case "projecteur":
       return norme(o);
     case "fleche": case "ligne": {
       const pts = o.cx != null ? [[o.x1, o.y1], [o.x2, o.y2], milieuCourbe(o)]
@@ -309,7 +311,8 @@ function boiteOmbre(o) {
       const r = norme(o), m = trait(o) / 2 + ombre(6, 1);
       return rectDe(r.x - m, r.y - m, r.x + r.largeur + m, r.y + r.hauteur + m);
     }
-    case "masque": {
+    case "masque": case "projecteur": {
+      // Projecteur : la zone éclairée ; son voile, lui, couvre toute l'image.
       const r = norme(o);
       return rectDe(Math.floor(r.x) - 1, Math.floor(r.y) - 1,
         Math.ceil(r.x + r.largeur) + 1, Math.ceil(r.y + r.hauteur) + 1);
@@ -393,6 +396,11 @@ export function touche(objet, point, tolerance, strict) {
     return !(p.x > b.x + t && p.x < b.x + b.largeur - t
       && p.y > b.y + t && p.y < b.y + b.hauteur - t);
   }
+  if (o.type === "projecteur" && o.forme === "ovale") {
+    // Toute la zone éclairée se touche, comme une forme pleine, à la tolérance près.
+    const rx = b.largeur / 2 + tol, ry = b.hauteur / 2 + tol;
+    return Math.hypot((p.x - b.x - b.largeur / 2) / rx, (p.y - b.y - b.hauteur / 2) / ry) <= 1;
+  }
   if (o.type === "ellipse") {
     const rx = b.largeur / 2, ry = b.hauteur / 2;
     const d = Math.hypot((p.x - b.x - rx) / rx, (p.y - b.y - ry) / ry);
@@ -401,17 +409,18 @@ export function touche(objet, point, tolerance, strict) {
   return true;
 }
 
-// L'objet du dessus sous `point`, ou null. Les masques sont sous tous les autres objets.
+// L'objet du dessus sous `point`, ou null. Les annotations d'abord, puis les projecteurs
+// (une zone éclairée laisse prendre ce qu'elle montre), puis les masques (sous tout).
 // `filtreType` : null, un type (« fleche »…) ou une liste de types.
 export function objetSous(doc, point, tolerance, filtreType) {
   const admis = filtreType == null ? null : [].concat(filtreType);
   const ok = (o) => !admis || admis.includes(o.type);
   const l = doc.objets;
-  for (let i = l.length - 1; i >= 0; i--) {
-    if (l[i].type !== "masque" && ok(l[i]) && touche(l[i], point, tolerance)) return l[i];
-  }
-  for (let i = l.length - 1; i >= 0; i--) {
-    if (l[i].type === "masque" && ok(l[i]) && touche(l[i], point, tolerance)) return l[i];
+  const rang = (o) => (o.type === "masque" ? 2 : o.type === "projecteur" ? 1 : 0);
+  for (const r of [0, 1, 2]) {
+    for (let i = l.length - 1; i >= 0; i--) {
+      if (rang(l[i]) === r && ok(l[i]) && touche(l[i], point, tolerance)) return l[i];
+    }
   }
   return null;
 }

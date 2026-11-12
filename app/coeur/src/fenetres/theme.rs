@@ -3,7 +3,7 @@
 //! Le module ne sait pas d'où vient le choix (les réglages) : l'Application le lui donne
 //! par `fixer`. Il le garde, l'envoie à toutes les pages (`interface:theme { theme }`, que
 //! `commun/theme.js` traduit en `data-theme` sur `<html>`), le renvoie à une page qui
-//! vient d'être prête (`envoyer_a`), et règle le cadre de la fenêtre Réglages.
+//! vient d'être prête (`envoyer_a`), et règle le cadre des fenêtres Réglages et Éditeur.
 
 use std::sync::Mutex;
 
@@ -69,8 +69,8 @@ pub fn retenir(theme: Option<ThemePage>) {
     }
 }
 
-/// Retient le thème et l'envoie à toutes les pages ouvertes ; règle le cadre de la
-/// fenêtre Réglages si elle est ouverte.
+/// Retient le thème et l'envoie à toutes les pages ouvertes ; règle le cadre des fenêtres
+/// Réglages et Éditeur si elles sont ouvertes.
 pub fn fixer(app: &AppHandle, theme: Option<ThemePage>) {
     retenir(theme);
     if let Err(e) = app.emit(EVENEMENT_THEME, charge(theme)) {
@@ -81,6 +81,7 @@ pub fn fixer(app: &AppHandle, theme: Option<ThemePage>) {
             log::warn!("theme du cadre non regle: {e}");
         }
     }
+    super::editeur::regler_cadre(app, theme);
 }
 
 /// Envoie le thème actuel à une seule page (elle vient de dire qu'elle écoute).
