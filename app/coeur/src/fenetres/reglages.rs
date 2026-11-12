@@ -19,7 +19,7 @@ pub const EVENEMENT_ETAT: &str = "reglages:etat";
 /// Titre de la fenêtre (barre de titre, barre des tâches).
 pub const TITRE: &str = "Réglages de BreezyShot";
 /// Taille d'ouverture et taille minimale, en pixels logiques.
-pub const TAILLE: (f64, f64) = (780.0, 540.0);
+pub const TAILLE: (f64, f64) = (680.0, 512.0);
 pub const TAILLE_MIN: (f64, f64) = (560.0, 420.0);
 
 /// Ce qu'a fait `ouvrir`.
