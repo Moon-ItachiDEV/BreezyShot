@@ -1,0 +1,112 @@
+/* Décompte du retardateur dans la fenêtre du bandeau (contrat 0.4 §4.3, d'après
+   design/capture/index.html : .cd, .disc, .num, .cdx). Le disque est centré dans la
+   fenêtre, elle-même centrée sur la cible ; la croix est dessous. Toutes les valeurs
+   viennent de ../commun/jetons.css ; --decompte-diametre est posé par decompte.js. */
+
+.decompte {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+}
+
+.decompte[hidden] {
+  display: none;
+}
+
+.decompte .disque {
+  position: absolute;
+  left: calc(50% - var(--decompte-diametre) / 2);
+  top: calc(50% - var(--decompte-diametre) / 2);
+  width: var(--decompte-diametre);
+  height: var(--decompte-diametre);
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: var(--decompte-fond);
+  box-shadow: var(--shadow-8);
+}
+
+.decompte .disque svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  transform: rotate(-90deg);
+}
+
+.decompte circle {
+  fill: none;
+  stroke-width: var(--decompte-anneau-trait);
+  vector-effect: non-scaling-stroke;
+}
+
+.decompte .piste {
+  stroke: var(--divider);
+}
+
+.decompte .progression {
+  stroke: var(--accent);
+  stroke-linecap: round;
+}
+
+.decompte .chiffre {
+  position: relative;
+  font-family: var(--police-display);
+  font-weight: var(--decompte-chiffre-graisse);
+  font-size: calc(var(--decompte-diametre) * var(--decompte-chiffre-part));
+  line-height: 1;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: var(--decompte-chiffre-approche);
+}
+
+/* Seule la croix reçoit les clics (son rectangle part dans bandeau_zone). */
+.decompte .annuler {
+  all: unset;
+  box-sizing: border-box;
+  position: absolute;
+  left: calc(50% - var(--decompte-croix) / 2);
+  top: calc(50% + var(--decompte-diametre) / 2 + var(--decompte-ecart));
+  width: var(--decompte-croix);
+  height: var(--decompte-croix);
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  color: var(--text);
+  background: var(--decompte-croix-fond);
+  box-shadow: var(--shadow-8);
+  pointer-events: auto;
+  transition:
+    background-color var(--duree-survol) linear,
+    transform var(--duree-ressort) var(--courbe-ressort);
+}
+
+.decompte .annuler:hover {
+  background: var(--acrylic-solid);
+  transform: rotate(var(--decompte-croix-rotation));
+}
+
+.decompte .annuler svg {
+  width: var(--decompte-croix-picto);
+  height: var(--decompte-croix-picto);
+  fill: none;
+  stroke: currentColor;
+  stroke-width: var(--decompte-croix-trait);
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* Après le clic : plus aucun clic. */
+.decompte.ferme .annuler {
+  pointer-events: none;
+}
+
+/* Animations réduites (réglage de Windows reçu du cœur, ou préférence du navigateur) :
+   aucune animation, aucune transition. */
+.decompte.reduit .annuler {
+  transition: none;
+}
+.decompte.reduit .annuler:hover {
+  transform: none;
+}

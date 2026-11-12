@@ -3,7 +3,8 @@
 //! bandeau, la vignette et le souffle naissent par `creer_fenetre_outil`.
 //!
 //! Le module crée, place, montre et cache ; il ne décide d'aucun message. Ce qu'il reçoit
-//! de la page remonte à l'Application par `Signal`.
+//! de la page remonte à l'Application par `Signal`. La fenêtre du bandeau montre une seule
+//! chose à la fois (`Contenu`) : un message, ou le décompte du retardateur (`decompte`).
 
 pub mod decompte;
 pub mod installateur;
@@ -16,7 +17,7 @@ pub mod vignette;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread::ThreadId;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, State, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
@@ -103,11 +104,41 @@ pub enum Signal {
 
 type Rappel = Box<dyn Fn(Signal) + Send + Sync + 'static>;
 
-/// Le message en cours, vu du cœur.
+/// Ce que la fenêtre du bandeau montre : un message, ou un décompte.
+#[derive(Debug, Clone)]
+enum Contenu {
+    Message(Message),
+    Decompte(Decompte),
+}
+
+impl Contenu {
+    /// Reçoit-il des clics ? Un message à croix, et le décompte (sa croix « Annuler »).
+    fn a_croix(&self) -> bool {
+        match self {
+            Contenu::Message(m) => m.genre.a_croix(),
+            Contenu::Decompte(_) => true,
+        }
+    }
+
+    fn est_decompte(&self) -> bool {
+        matches!(self, Contenu::Decompte(_))
+    }
+}
+
+/// Ce qui a été retiré du bandeau : son `id`, et s'il s'agissait d'un décompte.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Retire {
+    id: u64,
+    decompte: bool,
+}
+
+/// Le contenu en cours, vu du cœur.
 #[derive(Debug, Clone)]
 struct EnCours {
     id: u64,
-    message: Message,
+    contenu: Contenu,
+    /// Moment de la demande (un décompte envoyé plus tard part avec le temps qui reste).
+    demande_a: Instant,
     /// Numéro d'envoi à la page (un `bandeau_pret` répété renvoie le message).
     envoi: u64,
     /// Moment de l'affichage, place de la fenêtre et échelle de son écran.
@@ -119,11 +150,12 @@ struct EnCours {
 }
 
 impl EnCours {
-    /// Un message mis en attente : ni envoyé, ni montré.
-    fn nouveau(id: u64, message: Message) -> EnCours {
+    /// Un contenu mis en attente : ni envoyé, ni montré.
+    fn nouveau(id: u64, contenu: Contenu) -> EnCours {
         EnCours {
             id,
-            message,
+            contenu,
+            demande_a: Instant::now(),
             envoi: 0,
             montre_a: None,
             place: None,
@@ -144,7 +176,7 @@ impl EnCours {
 
     /// Temps écoulé depuis l'envoi à une page prête ; nul tant que le message attend
     /// (premier lancement de WebView2 lent) : le filet de sécurité ne court pas encore.
-    fn depuis_affichage(&self, maintenant: Instant) -> std::time::Duration {
+    fn depuis_affichage(&self, maintenant: Instant) -> Duration {
         self.montre_a
             .map(|t| maintenant.saturating_duration_since(t))
             .unwrap_or_default()
@@ -223,16 +255,33 @@ impl Bandeau {
 
     /// Montre un message ; il remplace aussitôt le précédent. Rend son `id`. Peut être
     /// appelé de n'importe quel fil : les gestes partent sur le fil principal.
+    /// Un message qui arrive pendant un décompte le remplace (le délai, lui, continue) :
+    /// `bandeau decompte <id> remplace`.
     pub fn afficher(&self, message: Message) -> u64 {
-        let (id, prete) = {
+        self.poser_contenu(Contenu::Message(message))
+    }
+
+    /// Range un nouveau contenu (il remplace le précédent) et le montre si la page est
+    /// prête. Rend son `id`, 0 si l'état est inaccessible.
+    fn poser_contenu(&self, contenu: Contenu) -> u64 {
+        let message = !contenu.est_decompte();
+        let (id, prete, remplace) = {
             let Some(mut etat) = self.etat() else {
                 return 0;
             };
+            let remplace = etat
+                .en_cours
+                .as_ref()
+                .filter(|c| message && c.contenu.est_decompte())
+                .map(|c| c.id);
             etat.dernier_id += 1;
             let id = etat.dernier_id;
-            etat.en_cours = Some(EnCours::nouveau(id, message));
-            (id, etat.page_prete)
+            etat.en_cours = Some(EnCours::nouveau(id, contenu));
+            (id, etat.page_prete, remplace)
         };
+        if let Some(ancien) = remplace {
+            log::info!("bandeau decompte {ancien} remplace");
+        }
         if prete {
             self.demander_montrer(id);
         }
@@ -241,27 +290,37 @@ impl Bandeau {
 
     /// `montrer(id)` sur le fil principal.
     fn demander_montrer(&self, id: u64) {
+        self.sur_fil_principal("affichage", move |b| b.montrer(id));
+    }
+
+    /// Fait `geste` tout de suite sur le fil principal, sinon l'y poste.
+    fn sur_fil_principal<F>(&self, quoi: &str, geste: F)
+    where
+        F: FnOnce(&Bandeau) + Send + 'static,
+    {
         if std::thread::current().id() == self.fil_principal {
-            self.montrer(id);
+            geste(self);
             return;
         }
         let app = self.app.clone();
         let poste = self.app.run_on_main_thread(move || {
             if let Some(b) = app.try_state::<Bandeau>() {
-                b.montrer(id);
+                geste(&b);
             }
         });
         if let Err(e) = poste {
-            log::warn!("bandeau: affichage non poste: {e}");
+            log::warn!("bandeau: {quoi} non poste: {e}");
         }
     }
 
-    /// Place, montre sans activer, et envoie le message `id` à la page (fil principal).
+    /// Place, montre sans activer, et envoie le contenu `id` à la page (fil principal).
+    /// Un message va en haut de l'écran de la souris ; un décompte est centré sur sa cible,
+    /// dans la zone utile de l'écran qui la contient.
     fn montrer(&self, id: u64) {
         if !self.vivante.load(Ordering::SeqCst) {
             return;
         }
-        let (message, envoi) = {
+        let (contenu, envoi, demande_a) = {
             let Some(mut etat) = self.etat() else {
                 return;
             };
@@ -269,27 +328,38 @@ impl Bandeau {
                 return;
             };
             let envoi = c.renvoyer();
-            (c.message.clone(), envoi)
+            (c.contenu.clone(), envoi, c.demande_a)
         };
         let Some(fenetre) = self.fenetre() else {
             log::warn!("bandeau: fenetre absente");
             return;
         };
-        let ecran = ecran_sous(souris(&self.app), &ecrans(&self.app));
-        let place = ecran.map(|e| (placer(&e, TAILLE_LOGIQUE), e.echelle));
+        let (nom, place) = match &contenu {
+            Contenu::Message(m) => {
+                let ecran = ecran_sous(souris(&self.app), &ecrans(&self.app));
+                let place = ecran.map(|e| (placer(&e, TAILLE_LOGIQUE), e.echelle));
+                (format!("bandeau affiche {id} {}", m.genre.nom()), place)
+            }
+            Contenu::Decompte(d) => {
+                let cible = (f64::from(d.centre.0), f64::from(d.centre.1));
+                let ecran = ecran_sous(Some(cible), &ecrans(&self.app));
+                let place =
+                    ecran.map(|e| (decompte::placer(d.centre, &e, TAILLE_LOGIQUE), e.echelle));
+                (format!("bandeau decompte {id}"), place)
+            }
+        };
         match place {
             Some((p, echelle)) => {
                 poser(&fenetre, p);
                 log::info!(
-                    "bandeau affiche {id} {} ecran {},{} {}x{} echelle {echelle}",
-                    message.genre.nom(),
+                    "{nom} ecran {},{} {}x{} echelle {echelle}",
                     p.x,
                     p.y,
                     p.largeur,
                     p.hauteur
                 );
             }
-            None => log::info!("bandeau affiche {id} {} ecran inconnu", message.genre.nom()),
+            None => log::info!("{nom} ecran inconnu"),
         }
         match systeme::montrer_sans_activer(&fenetre) {
             Ok(true) => {}
@@ -300,8 +370,8 @@ impl Bandeau {
             }
             Err(e) => log::warn!("bandeau: affichage impossible: {e}"),
         }
-        // Un message part toujours avec des clics traversants ; la surveillance (message à
-        // croix) les rend sur la pilule seulement.
+        // Un contenu part toujours avec des clics traversants ; la surveillance (message à
+        // croix, décompte) les rend sur la pilule ou sur la croix seulement.
         traverser(&fenetre, true);
         {
             let Some(mut etat) = self.etat() else {
@@ -314,18 +384,27 @@ impl Bandeau {
             c.montre_a = Some(Instant::now());
             c.place = place;
         }
-        let charge = Charge {
-            id,
-            genre: message.genre,
-            titre: &message.titre,
-            detail: &message.detail,
-            actions: &message.actions,
+        let envoye = match &contenu {
+            Contenu::Message(message) => {
+                let charge = Charge {
+                    id,
+                    genre: message.genre,
+                    titre: &message.titre,
+                    detail: &message.detail,
+                    actions: &message.actions,
+                };
+                self.app
+                    .emit_to(ETIQUETTE_BANDEAU, EVENEMENT_AFFICHER, charge)
+            }
+            Contenu::Decompte(d) => {
+                let echelle = place.map_or(1.0, |(_, e)| e);
+                let charge = decompte::charge(id, d, demande_a.elapsed(), echelle);
+                self.app
+                    .emit_to(ETIQUETTE_BANDEAU, decompte::EVENEMENT_DECOMPTE, charge)
+            }
         };
-        if let Err(e) = self
-            .app
-            .emit_to(ETIQUETTE_BANDEAU, EVENEMENT_AFFICHER, charge)
-        {
-            log::warn!("bandeau: message non envoye: {e}");
+        if let Err(e) = envoye {
+            log::warn!("bandeau: contenu non envoye: {e}");
         }
         self.surveiller(id, envoi);
     }
@@ -361,7 +440,7 @@ impl Bandeau {
                     else {
                         break;
                     };
-                    let a_croix = c.message.genre.a_croix();
+                    let a_croix = c.contenu.a_croix();
                     let depuis = c.depuis_affichage(Instant::now());
                     if cacher_d_office(a_croix, depuis, c.zone.is_some()) {
                         drop(etat);
@@ -408,10 +487,7 @@ impl Bandeau {
             let Some(mut etat) = self.etat() else {
                 return;
             };
-            let en_cours = etat
-                .en_cours
-                .as_ref()
-                .map(|c| (c.id, c.message.genre.a_croix()));
+            let en_cours = etat.en_cours.as_ref().map(|c| (c.id, c.contenu.a_croix()));
             let ok = geste_cliquable(en_cours, id, voulu);
             etat.recoit_clics = ok;
             ok
@@ -421,28 +497,52 @@ impl Bandeau {
         }
     }
 
-    /// Retire le message `id` s'il est en cours. Rend vrai s'il l'était.
-    fn retirer(&self, id: Option<u64>) -> bool {
-        let Some(mut etat) = self.etat() else {
-            return false;
-        };
-        let present = match id {
-            Some(id) => etat.en_cours.as_ref().is_some_and(|c| c.id == id),
-            None => etat.en_cours.is_some(),
-        };
-        if present || id.is_none() {
+    /// Retire le contenu `id` (`None` : quel qu'il soit) s'il est en cours et s'il passe
+    /// le filtre `garder`. Rend ce qui a été retiré.
+    fn retirer_si(&self, id: Option<u64>, garder: impl Fn(&Contenu) -> bool) -> Option<Retire> {
+        let mut etat = self.etat()?;
+        let retire = etat
+            .en_cours
+            .as_ref()
+            .filter(|c| id.is_none_or(|id| c.id == id) && garder(&c.contenu))
+            .map(|c| Retire {
+                id: c.id,
+                decompte: c.contenu.est_decompte(),
+            });
+        if retire.is_some() || id.is_none() {
             etat.en_cours = None;
             etat.recoit_clics = false;
         }
-        present
+        retire
+    }
+
+    /// Retire le contenu `id` (`None` : quel qu'il soit) s'il est en cours.
+    fn retirer(&self, id: Option<u64>) -> Option<Retire> {
+        self.retirer_si(id, |_| true)
+    }
+
+    /// Après un retrait (fil principal) : la fenêtre est cachée, et la page d'un décompte
+    /// efface son disque (`bandeau:decompte_cache`) pendant que la fenêtre est cachée.
+    fn cacher_retire(&self, retire: Retire) {
+        if let Some(f) = self.fenetre() {
+            cacher(&f);
+        }
+        if retire.decompte {
+            let charge = serde_json::json!({ "id": retire.id });
+            if let Err(e) = self.app.emit_to(
+                ETIQUETTE_BANDEAU,
+                decompte::EVENEMENT_DECOMPTE_CACHE,
+                charge,
+            ) {
+                log::warn!("bandeau: fin du decompte non envoyee: {e}");
+            }
+        }
     }
 
     /// Filet de sécurité : la page n'a pas fait sa part à temps.
     fn cacher_d_office(&self, id: u64) {
-        if self.retirer(Some(id)) {
-            if let Some(f) = self.fenetre() {
-                cacher(&f);
-            }
+        if let Some(r) = self.retirer(Some(id)) {
+            self.cacher_retire(r);
             log::warn!("bandeau cache d'office {id}");
         }
     }
@@ -452,29 +552,34 @@ impl Bandeau {
     /// Rend vrai s'il y avait un message en cours, donc une fenêtre peut-être à l'écran.
     /// Fil principal. La page garde son dernier message jusqu'au suivant, qui le remplace ;
     /// un `bandeau_termine` de l'ancien est ignoré (id qui n'est plus en cours).
+    /// Un décompte en cours est caché de même, sans animation (sa page reçoit
+    /// `bandeau:decompte_cache`).
     pub fn cacher(&self) -> bool {
-        if !self.retirer(None) {
+        let Some(r) = self.retirer(None) else {
             return false;
-        }
-        if let Some(f) = self.fenetre() {
-            cacher(&f);
-        }
+        };
+        self.cacher_retire(r);
         true
     }
 
-    /// Montre le décompte `d` dans la fenêtre du bandeau ; il remplace le message en cours.
-    /// Rend son `id` (même compteur que les messages). Socle de la 0.4 : rien n'est montré,
-    /// rend 0 (« sans affichage » : le délai court quand même).
+    /// Montre le décompte `d` dans la fenêtre du bandeau ; il remplace le message en cours
+    /// (la page efface la pilule, sans `bandeau_termine`). Rend son `id` (même compteur que
+    /// les messages ; 0 si l'état est inaccessible). N'importe quel fil. Le filet du bandeau
+    /// s'applique : sans `bandeau_zone` en 3 s, `bandeau cache d'office <id>`.
     pub fn montrer_decompte(&self, d: Decompte) -> u64 {
-        log::info!("bandeau decompte {}: affichage non construit", d.numero);
-        0
+        self.poser_contenu(Contenu::Decompte(d))
     }
 
-    /// Cache le décompte `id` s'il est en cours ; rend vrai s'il l'était. `cacher()` le
-    /// cache aussi. Socle de la 0.4 : rien n'est jamais montré, rend faux.
+    /// Cache tout de suite le décompte `id` s'il est en cours, sans animation ; rend vrai
+    /// s'il l'était (`bandeau decompte cache <id>`). Un autre contenu n'est pas touché.
+    /// N'importe quel fil : le geste sur la fenêtre part sur le fil principal.
     pub fn cacher_decompte(&self, id: u64) -> bool {
-        let _ = id;
-        false
+        let Some(r) = self.retirer_si(Some(id), Contenu::est_decompte) else {
+            return false;
+        };
+        self.sur_fil_principal("fin du decompte", move |b| b.cacher_retire(r));
+        log::info!("bandeau decompte cache {id}");
+        true
     }
 
     /// À l'arrêt de l'app : la surveillance s'arrête, la fenêtre est cachée puis détruite.
@@ -701,7 +806,8 @@ pub fn bandeau_zone(
             return;
         };
         c.zone = Some(zone);
-        let premiere = !c.signale;
+        // Seul un message signale `MessageMontre` (un décompte n'est pas un message).
+        let premiere = !c.signale && !c.contenu.est_decompte();
         c.signale = true;
         (c.place, premiere)
     };
@@ -731,13 +837,12 @@ pub fn bandeau_action(bandeau: State<'_, Bandeau>, id: u64, action: String) {
     }
 }
 
-/// Le message a fini de disparaître : on cache la fenêtre.
+/// Le message a fini de disparaître : on cache la fenêtre. Un décompte ne se termine pas
+/// par la page (le cœur le cache) : un `bandeau_termine` de son `id` est ignoré.
 #[tauri::command]
 pub fn bandeau_termine(bandeau: State<'_, Bandeau>, id: u64) {
-    if bandeau.retirer(Some(id)) {
-        if let Some(f) = bandeau.fenetre() {
-            cacher(&f);
-        }
+    if let Some(r) = bandeau.retirer_si(Some(id), |c| !c.est_decompte()) {
+        bandeau.cacher_retire(r);
         log::info!("bandeau termine {id}");
     }
 }
@@ -756,9 +861,40 @@ mod tests {
         }
     }
 
+    fn decompte() -> Decompte {
+        Decompte {
+            numero: 1,
+            secondes: 3,
+            restant: Duration::from_secs(3),
+            centre: (500, 400),
+            cote: None,
+            reduites: false,
+        }
+    }
+
+    #[test]
+    fn le_decompte_porte_une_croix_cliquable() {
+        assert!(Contenu::Decompte(decompte()).a_croix());
+        assert!(Contenu::Decompte(decompte()).est_decompte());
+        assert!(!Contenu::Message(info()).est_decompte());
+        let reussite = Message {
+            genre: Genre::Reussite,
+            ..info()
+        };
+        assert!(!Contenu::Message(reussite).a_croix());
+        // Le filet du bandeau vaut pour le décompte : sans zone en 3 s, caché d'office.
+        let c = EnCours::nouveau(2, Contenu::Decompte(decompte()));
+        assert!(cacher_d_office(c.contenu.a_croix(), DELAI_ZONE_MAX, false));
+        assert!(!cacher_d_office(
+            c.contenu.a_croix(),
+            Duration::from_secs(60),
+            true
+        ));
+    }
+
     #[test]
     fn le_delai_de_zone_ne_court_qu_apres_l_envoi() {
-        let c = EnCours::nouveau(1, info());
+        let c = EnCours::nouveau(1, Contenu::Message(info()));
         // En attente d'une page prête : même longtemps après, rien n'est caché d'office.
         let tard = Instant::now() + Duration::from_secs(60);
         assert_eq!(c.depuis_affichage(tard), Duration::ZERO);
@@ -782,7 +918,7 @@ mod tests {
 
     #[test]
     fn un_renvoi_oublie_la_zone_et_le_signal() {
-        let mut c = EnCours::nouveau(1, info());
+        let mut c = EnCours::nouveau(1, Contenu::Message(info()));
         assert_eq!(c.renvoyer(), 1);
         c.montre_a = Some(Instant::now());
         c.zone = borner_zone(10.0, 10.0, 100.0, 40.0);
