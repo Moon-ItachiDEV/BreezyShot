@@ -39,11 +39,11 @@ pub(super) fn opaques(rgba: &[u8]) -> Cow<'_, [u8]> {
 /// alpha force a 255.
 pub fn encoder_png(pixels: &Pixels) -> Result<Vec<u8>, String> {
     valider(pixels)?;
-    encoder_opaques(pixels.largeur, pixels.hauteur, &opaques(&pixels.rgba))
+    encoder_rgba(pixels.largeur, pixels.hauteur, &opaques(&pixels.rgba))
 }
 
-/// Encode des pixels deja valides et deja opaques.
-pub(super) fn encoder_opaques(largeur: u32, hauteur: u32, rgba: &[u8]) -> Result<Vec<u8>, String> {
+/// Encode des pixels deja valides, alpha tel quel.
+pub(super) fn encoder_rgba(largeur: u32, hauteur: u32, rgba: &[u8]) -> Result<Vec<u8>, String> {
     let mut sortie = Vec::new();
     let mut encodeur = ::png::Encoder::new(&mut sortie, largeur, hauteur);
     encodeur.set_color(::png::ColorType::Rgba);
@@ -60,3 +60,16 @@ pub(super) fn encoder_opaques(largeur: u32, hauteur: u32, rgba: &[u8]) -> Result
 
 /// Cause donnee si l'encodage echoue (jamais le message de la crate).
 const CAUSE_ENCODAGE: &str = "L'image n'a pas pu être convertie en PNG.";
+
+/// Compose des pixels RGBA sur un fond blanc : chaque couleur devient
+/// `(c × a + 255 × (255 − a)) / 255`, arrondi au plus proche, et l'alpha 255.
+/// Un reste d'octets qui ne forme pas un pixel entier est ignore.
+pub fn sur_blanc(rgba: &[u8]) -> Vec<u8> {
+    let mut sortie = Vec::with_capacity(rgba.len() / 4 * 4);
+    for p in rgba.chunks_exact(4) {
+        let a = p[3] as u32;
+        let melange = |c: u8| ((c as u32 * a + 255 * (255 - a) + 127) / 255) as u8;
+        sortie.extend_from_slice(&[melange(p[0]), melange(p[1]), melange(p[2]), 255]);
+    }
+    sortie
+}

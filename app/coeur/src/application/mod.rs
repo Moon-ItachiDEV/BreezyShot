@@ -987,6 +987,7 @@ fn demande_sortie(app: &AppHandle) -> sortie::Demande {
         dossier_recents,
         modele_nom: reglages.modele_nom,
         maintenant: chrono::Local::now(),
+        transparence: false,
     }
 }
 

@@ -2,7 +2,8 @@
 //!
 //! Une seule porte d'entree, `sortir` : elle valide les pixels, encode le PNG
 //! une fois, ecrit le fichier « Recents », copie dans le presse-papiers si
-//! demande, puis enregistre si demande. Une etape qui echoue n'empeche pas les
+//! demande, puis enregistre si demande. Avec `transparence`, l'alpha est garde
+//! partout et le presse-papiers recoit aussi une version sur fond blanc. Une etape qui echoue n'empeche pas les
 //! suivantes. La copie tourne dans un fil a part pendant l'encodage et les
 //! ecritures. `annonce` dit ensuite ce qu'il faut montrer a l'utilisateur.
 //!
@@ -27,7 +28,7 @@ use crate::systeme::gel::Pixels;
 
 pub use annonce::{annonce, Annonce};
 pub use nom::{chemin_libre, nom_affiche, nom_fichier};
-pub use png::encoder_png;
+pub use png::{encoder_png, sur_blanc};
 pub use recents::{recents_a_supprimer, RECENTS_GARDES};
 
 /// Ce que l'Application demande de faire d'une capture.
@@ -48,6 +49,9 @@ pub struct Demande {
     /// Reglage modele_nom, ex. « BreezyShot {date} à {heure} ».
     pub modele_nom: String,
     pub maintenant: DateTime<Local>,
+    /// Garder l'alpha des pixels (capture de fenetre aux coins arrondis).
+    /// Faux : alpha force a 255, comme pour une zone.
+    pub transparence: bool,
 }
 
 /// Resultat de la copie dans le presse-papiers.
@@ -86,6 +90,10 @@ pub fn sortir(pixels: &Pixels, demande: &Demande) -> Bilan {
         return tout_en_echec(demande, &cause);
     }
 
+    if demande.transparence {
+        return sortir_transparent(pixels, demande);
+    }
+
     // Alpha a 255, calcule une seule fois ; aucune copie s'il l'est deja.
     let opaques = png::opaques(&pixels.rgba);
     let (largeur, hauteur) = (pixels.largeur, pixels.hauteur);
@@ -100,41 +108,79 @@ pub fn sortir(pixels: &Pixels, demande: &Demande) -> Bilan {
             .then(|| thread::Builder::new().spawn_scoped(fils, copier));
 
         // 3. Pendant ce temps : encoder une fois, Recents, enregistrement.
-        let encodage = png::encoder_opaques(largeur, hauteur, &opaques);
-        let recent = match &encodage {
-            Ok(octets) => recents::ecrire(&demande.dossier_recents, demande.maintenant, octets),
-            Err(cause) => Err(cause.clone()),
-        };
-        let enregistrement = if !demande.enregistrer {
-            EtapeFichier::NonDemande
-        } else {
-            let dossier = demande.dossier_enregistrement.clone();
-            let resultat = encodage.as_ref().map_err(Clone::clone).and_then(|octets| {
-                let nom = nom_fichier(&demande.modele_nom, demande.maintenant);
-                fichier::enregistrer(&dossier, &demande.dossier_affiche, &nom, octets)
-            });
-            match resultat {
-                Ok(chemin) => EtapeFichier::Fait(chemin),
-                Err(cause) => EtapeFichier::Echec { dossier, cause },
-            }
-        };
+        let encodage = png::encoder_rgba(largeur, hauteur, &opaques);
+        let (recent, enregistrement) = ecrire(demande, &encodage);
 
         // 4. Attendre la copie.
-        let copie = match copie {
-            None => Etape::NonDemandee,
-            Some(Ok(fil)) => match fil.join() {
-                Ok(resultat) => etape_copie(resultat),
-                Err(_) => Etape::Echec(CAUSE_COPIE_INTERROMPUE.to_string()),
-            },
-            Some(Err(_)) => etape_copie(copier()),
-        };
-
         Bilan {
-            copie,
+            copie: attendre_copie(copie, copier),
             recent,
             enregistrement,
         }
     })
+}
+
+/// `sortir` avec transparence : l'alpha des pixels est garde. Le PNG est encode
+/// d'abord, une fois : il sert au presse-papiers, a « Recents » et au fichier.
+/// La copie part ensuite dans un fil a part pendant les ecritures.
+fn sortir_transparent(pixels: &Pixels, demande: &Demande) -> Bilan {
+    let (largeur, hauteur) = (pixels.largeur, pixels.hauteur);
+    let rgba = pixels.rgba.as_slice();
+    let encodage = png::encoder_rgba(largeur, hauteur, rgba);
+    let octets = encodage.as_ref().ok().map(Vec::as_slice);
+
+    thread::scope(|fils| {
+        let copier = || presse_papiers::copier_transparent(largeur, hauteur, rgba, octets);
+        let copie = demande
+            .copier
+            .then(|| thread::Builder::new().spawn_scoped(fils, copier));
+        let (recent, enregistrement) = ecrire(demande, &encodage);
+        Bilan {
+            copie: attendre_copie(copie, copier),
+            recent,
+            enregistrement,
+        }
+    })
+}
+
+/// Ecrit « Recents », puis le fichier si demande, a partir du PNG encode.
+fn ecrire(
+    demande: &Demande,
+    encodage: &Result<Vec<u8>, String>,
+) -> (Result<PathBuf, String>, EtapeFichier) {
+    let recent = match encodage {
+        Ok(octets) => recents::ecrire(&demande.dossier_recents, demande.maintenant, octets),
+        Err(cause) => Err(cause.clone()),
+    };
+    let enregistrement = if !demande.enregistrer {
+        EtapeFichier::NonDemande
+    } else {
+        let dossier = demande.dossier_enregistrement.clone();
+        let resultat = encodage.as_ref().map_err(Clone::clone).and_then(|octets| {
+            let nom = nom_fichier(&demande.modele_nom, demande.maintenant);
+            fichier::enregistrer(&dossier, &demande.dossier_affiche, &nom, octets)
+        });
+        match resultat {
+            Ok(chemin) => EtapeFichier::Fait(chemin),
+            Err(cause) => EtapeFichier::Echec { dossier, cause },
+        }
+    };
+    (recent, enregistrement)
+}
+
+/// Le resultat du fil de copie ; s'il n'a pas pu etre cree, la copie se fait ici.
+fn attendre_copie(
+    copie: Option<std::io::Result<thread::ScopedJoinHandle<'_, Result<(), String>>>>,
+    copier: impl FnOnce() -> Result<(), String>,
+) -> Etape {
+    match copie {
+        None => Etape::NonDemandee,
+        Some(Ok(fil)) => match fil.join() {
+            Ok(resultat) => etape_copie(resultat),
+            Err(_) => Etape::Echec(CAUSE_COPIE_INTERROMPUE.to_string()),
+        },
+        Some(Err(_)) => etape_copie(copier()),
+    }
 }
 
 fn etape_copie(resultat: Result<(), String>) -> Etape {
