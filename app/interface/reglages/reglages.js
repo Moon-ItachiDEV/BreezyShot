@@ -119,8 +119,14 @@ function poserRaccourcis(liste) {
   }
 }
 
+// Les touches déjà montrées ne sont pas redessinées : la vue est relue au retour du focus,
+// et remplacer les <kbd> entre l'appui et le relâchement de la souris ferait perdre le clic
+// (premier clic sur la fenêtre inactive).
 function montrerTouches(ligne, touches) {
   const bouton = $('[data-controle="saisie"]', ligne);
+  const cle = touches.join("\n");
+  if (bouton.dataset.touches === cle) return;
+  bouton.dataset.touches = cle;
   bouton.replaceChildren(
     ...touches.map((t) => {
       const k = document.createElement("kbd");
@@ -307,6 +313,7 @@ function commencerSaisie(action) {
   ligne.dataset.saisie = "oui";
   const bouton = $('[data-controle="saisie"]', ligne);
   bouton.setAttribute("aria-pressed", "true");
+  delete bouton.dataset.touches;
   bouton.textContent = "Appuyez…";
   appeler("reglages_saisie", { action, active: true }).then(recevoir);
 }
@@ -372,6 +379,7 @@ window.addEventListener(
       if (e.metaKey) tenus.push("Win");
       const bouton = $('[data-controle="saisie"]', ligneDe(saisie));
       if (tenus.length) {
+        delete bouton.dataset.touches;
         bouton.replaceChildren(
           ...tenus.map((t) => {
             const k = document.createElement("kbd");

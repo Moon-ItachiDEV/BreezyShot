@@ -257,6 +257,20 @@ const SANS_VIGNETTE = { ...VUE, lignes: ['copier', 'dossier', 'modele_nom', 'the
     verifier(avantFilet[0] === 'oui' && apresFilet[0] === null && !apresFilet[1].includes('Appuyez') && apresFilet[2] === 'false' && a.length === 1,
       '7 filet : vue poussée sans saisie → « Appuyez… » retiré, cœur non rappelé', JSON.stringify([avantFilet, apresFilet, a]));
     await bouton().click(); await p.keyboard.press('Escape'); await p.waitForTimeout(50);
+    // La vue est relue au retour du focus : si elle arrive entre l'appui et le relâchement
+    // de la souris (clic sur une fenêtre inactive), le clic doit quand même ouvrir la saisie.
+    await vider(p);
+    const boite = await bouton().boundingBox();
+    const touche = await p.$eval('[data-action="plein_ecran"] [data-controle="saisie"] kbd', (k) => {
+      const r = k.getBoundingClientRect(); return [r.x + r.width / 2, r.y + r.height / 2];
+    });
+    await p.mouse.move(touche[0], touche[1]); await p.mouse.down();
+    await p.evaluate(() => __emettre('reglages:etat', __vue)); await p.waitForTimeout(30);
+    await p.mouse.up(); await p.waitForTimeout(50);
+    a = await appels(p);
+    verifier(boite && JSON.stringify(a[0]) === JSON.stringify(['reglages_saisie', { action: 'plein_ecran', active: true }]),
+      '7 vue reçue pendant le clic (fenêtre inactive) : la saisie s’ouvre quand même', JSON.stringify(a));
+    await p.keyboard.press('Escape'); await p.waitForTimeout(50);
     // Impr. écran : seulement au relâchement.
     await vider(p);
     await bouton().click();

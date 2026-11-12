@@ -845,7 +845,11 @@ Module pur : il reçoit le dossier où écrire, ne connaît ni Tauri ni les autr
   `reglages_parcourir`, `reglages_saisie`, `reglages_raccourci`, `reglages_retablir`. Chaque
   commande rend `{ vue, refus }` : la vue entière (lignes montrées, valeurs, raccourcis,
   alerte, version du programme) et au plus un refus d'une ligne pour la ligne concernée.
-  Le cœur peut aussi pousser la vue (`reglages:etat`). Droits : `capabilities/reglages.json`
+  Le cœur peut aussi pousser la vue (`reglages:etat`). Une vue reçue ne remplace jamais un
+  élément cliquable dont la valeur n'a pas changé (touches d'un raccourci, segments) : la vue
+  relue au retour du focus arrive entre l'appui et le relâchement du premier clic sur la
+  fenêtre inactive, et un élément remplacé ferait perdre ce clic (défaut de la 0.3, corrigé
+  en 0.4). Droits : `capabilities/reglages.json`
   (fenêtre `reglages`, écoute et les sept commandes).
 - **Lignes montrées** : seulement ce qui marche (`lignes_montrees`) ; la vignette, sa durée,
   son coin et « Enregistrer automatiquement » n'apparaissent que si
