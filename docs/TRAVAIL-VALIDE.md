@@ -411,3 +411,155 @@ portent sur les essais eux-mêmes, aucune sur le code de l'app ; aucun point n'a
   vraiment ; une mise à jour par-dessus une version qui tourne sur un vrai poste.
 - Noté, non corrigé : le cache WebView2 de l'app
   (`%LOCALAPPDATA%\dev.breezyshot.desktop\EBWebView`) reste après la désinstallation.
+
+## MVP, version 0.4 « Confort et éditeur d'annotation »
+
+La 0.4 entre dans `main` par la demande d'intégration de la branche
+`claude/project-thread-tkz3qd` (dernier commit de code : `7fbaec6` ; le commit suivant
+n'ajoute que cette section). La version passe à 0.4.0.
+
+Ce qu'elle apporte : refaire la dernière zone (Ctrl + Maj + 4), le retardateur (3, 5 ou
+10 s), le pointeur dans l'image, et l'éditeur d'annotation ouvert par « Annoter » sur la
+vignette. La loupe de la sélection, construite puis retirée à la demande de l'utilisateur
+(12/11/2026), n'existe plus nulle part.
+
+Vérifications GitHub sur `7fbaec6` (2026-11-12, passage 56), toutes vertes :
+
+- Windows : `cargo fmt`, `cargo clippy -D warnings`, les tests (521 et 2 tests
+  d'architecture, 2 ignorés), construction du `.exe`, puis essais sur le vrai `.exe` :
+  `01-socle` 19 points, `02-reglages` 18, `03-raccourci` 40, `04-zone` 95,
+  `05-plein-ecran` 41, `06-fenetre` 46, `07-vignette` 64, `08-reglages-fenetre` 76,
+  `09-installateur` 138, `10-confort` 47, `11-pointeur` 14, `12-editeur` 42, aucun échec.
+  Un point de `06-fenetre` est sauté et dit comme tel (clic sur le bureau : aucun point
+  libre sur cet écran).
+- macOS : `cargo check` et `cargo test`.
+- Pages dans Chromium : bandeau 22 points, décompte 24, sélection 214, réglages 70,
+  vignette et souffle 55, installateur 23, modèle et dessin de l'éditeur 53, page de
+  l'éditeur 145.
+- Machine de l'essai : un écran 1024×768 à 100 %, animations coupées par le système.
+- Mémoire privée au repos : 172 à 184 Mo selon l'essai (185 en 0.3). Chrono de la
+  sélection : 71 ms. Installation : 0,4 s. Fichier téléchargé : 11,2 Mo (10,8 en 0.3).
+
+Chaque chantier a été écrit par un agent (effort moyen) sur un contrat écrit d'abord, puis
+relu par un agent distinct (effort élevé) : les quatre chantiers du confort et leur
+assemblage, le retrait de la loupe, puis pour l'éditeur le socle, les sorties natives, le
+modèle et le dessin, le cœur (deux relectures), la page (deux relectures : la première sur
+l'ancien design, la seconde sur la page refaite), et enfin les corrections faites d'après
+les passages sous Windows (voir « Trouvé sur Windows »). N'ont PAS été relus par un agent
+distinct : les dernières reprises de la page et du cœur faites après leur seconde
+relecture (contrôlées par l'assembleur, pour la page en rejouant les scénarios du
+relecteur), la correction du clic sur la fenêtre Réglages inactive, l'assemblage final de
+l'éditeur, et les reprises faites à la demande du dernier relecteur (bornes du navigateur
+et du GPU, journaux rangés par le lanceur, témoin de l'ombre dans l'essai de la page).
+
+### Confort : dernière zone, retardateur, pointeur
+
+- `Ctrl + Maj + 4` (et le menu de l'icône) refait la dernière zone sans rien tracer ; sans
+  zone depuis le lancement, ou si l'écran a changé, la sélection s'ouvre.
+- Retardateur de 3, 5 ou 10 s (Réglages › Capture) : un disque de décompte au centre de la
+  zone utile, caché avant la photo ; Échap ou la croix l'annulent.
+- « Inclure le pointeur dans l'image » (Réglages › Capture).
+- Prouvé sur la machine Windows de GitHub (`10-confort`, `11-pointeur`) : la dernière zone
+  rend le même PNG que le tracé au clavier ; le décompte dure entre 2,95 et 3,6 s, se cache
+  avant la photo, s'annule par Échap, par la croix et à l'arrêt ; le pointeur est dans
+  l'image quand le réglage est allumé, absent sinon, et les fenêtres restent stables.
+- Corrigé en chemin, défaut présent dans la 0.3 publiée : le premier clic sur un raccourci
+  dans une fenêtre Réglages inactive n'ouvrait pas la saisie (la page se redessinait entre
+  l'appui et le relâcher).
+- Non contrôlé : plusieurs écrans, échelles autres que 100 %, pointeur agrandi ou animé,
+  un vrai verrouillage de session pendant un décompte.
+
+### Éditeur d'annotation
+
+- Design : « Éditeur épuré », piste B « Fenêtre », choisi par l'utilisateur le 12/11/2026
+  (il remplace la piste A v2, sur laquelle la page avait d'abord été construite). Fenêtre
+  sans cadre Windows dont la barre du haut porte Fermer, Enregistrer et Copier ; palette du
+  bas : Flèche, Stylo, Surligneur, Gomme, puis par « + » Texte, Forme, Numéro, Flou,
+  Projecteur ; recadrage par les coins de l'image ; « … » : Enregistrer sous, Glisser vers
+  une appli.
+- Absents, pas grisés : Copier le texte, Fond, Épingler (feuille de route).
+- L'image va à la page et en revient en RGBA brut ; le même code dessine l'écran et
+  l'export ; tout ce qui quitte l'app passe par `sortie::sortir`.
+- Corrigé après relecture, entre autres : le filet de fermeture ne détruit plus un
+  document modifié quand la page ne répond pas ; un export accepté reçoit toujours un seul
+  résultat ; Flouter ne laisse plus passer l'image d'origine sur une image avec alpha ;
+  Pixeliser reçoit un grain tiré au hasard ; l'historique est borné en mémoire ; après
+  « Copier et fermer », la page ne referme plus la capture suivante ; le verrou d'export
+  est levé quand la capture change ; le Projecteur se prend par son bord.
+- Limite connue : en intensité Légère, un attaquant qui connaît la formule retrouve encore
+  une partie d'un petit texte pixelisé (1,9 chiffre sur 8 en moyenne). Pour cacher un
+  secret, l'outil sûr est Bloc noir.
+- Écarts voulus au design : Bloc noir est un rectangle plein ; les poignées de
+  redimensionnement de l'objet sélectionné sont gardées (la maquette n'en a pas) ; pas de
+  message « Déposé » ; le zoom se fait au clavier et à la molette, sans bouton.
+- Noté, non corrigé : si l'éditeur ne peut pas s'ouvrir, la capture reste dans
+  « Récents » et le presse-papiers seulement (bandeau « Impossible d'ouvrir l'éditeur ») ;
+  la gomme glissée très vite peut sauter un trait fin ; un tracé commencé à moins de 22 px
+  d'un coin de l'image devient un recadrage.
+- Prouvé sur la machine Windows de GitHub (`12-editeur`, clics et touches réels sur le vrai
+  .exe) : « Annoter » ouvre la fenêtre au premier plan, dans la barre des tâches, sans
+  barre de titre et redimensionnable ; un rectangle tracé puis copié laisse l'image égale
+  à l'original au bit près hors du trait, et le trait est au rouge exact ; le Flou rend
+  des blocs unis ; annuler et rétablir rendent les images attendues ; « Enregistrer »
+  écrit un PNG égal au presse-papiers, une seule fois ; fermeture propre, fermeture d'un
+  document modifié (menu, Continuer, Fermer sans copier) ; nouvelle capture pendant
+  l'édition (remplacement, abandon) ; dialogue « Enregistrer sous » ouvert et annulé ;
+  glisser réel depuis l'éditeur vers une fenêtre cible ; arrêt de l'app éditeur ouvert.
+- Mesuré au passage 56 : du clic sur Annoter à l'image affichée 284 ms
+  (budget 800 ; 182 à 312 ms d'un passage à l'autre), page prête en 217 ms,
+  de Ctrl+C au bilan 73 ms (budget 400). Éditeur ouvert : 229,6 Mo pour
+  172 au repos, soit environ 58 Mo de plus (un processus de rendu de plus, parti à
+  la fermeture).
+- Non contrôlé, à voir par l'utilisateur : l'allure de la fenêtre sans cadre (ombre, coins
+  arrondis), son déplacement par la barre, son redimensionnement par les bords et le
+  double-clic qui l'agrandit ; plusieurs écrans ; échelles de 125, 150 et 200 % ; captures
+  de trois écrans 1080p et de 2K ; « Enregistrer sous » jusqu'au bout ; le glisser vers
+  l'Explorateur, Word ou Teams ; le sélecteur « Autre couleur » de Windows.
+
+### Trouvé sur Windows, corrigé
+
+Aucun de ces défauts n'était visible hors de Windows ; tous ont été trouvés par l'essai
+`12-editeur` sur la machine de GitHub.
+
+- « Annoter » bloquait l'app pour toujours. La fenêtre de l'éditeur était créée dans la
+  commande de la page de la vignette ; sous Windows, créer une fenêtre Web dans le rappel
+  d'une autre vue Web bloque le fil principal. Le document est maintenant reçu à un tour
+  suivant de la boucle (`annoter`, `application/mod.rs`). Le relecteur a vérifié qu'aucune
+  autre commande d'une page ne crée de fenêtre, et que la destruction d'une fenêtre, elle,
+  est postée à la boucle.
+- L'essai arrêtait la machine de GitHub. Quand un point échouait, la suite envoyait encore
+  Ctrl+C, Alt+F4 et des clics à la fenêtre du premier plan, qui n'était plus celle de
+  l'app : trois passages sont restés sans journal. L'essai n'envoie plus aucune touche ni
+  aucun appui de souris hors des fenêtres de l'app, et s'arrête si l'éditeur ne s'ouvre
+  pas. Le lanceur arrête un essai pas fini en 600 s.
+- La page disait la place de l'image dans sa toile, pas dans la page (52 px trop haut) :
+  la ligne `editeur vue` était fausse, sans effet sur ce que voit l'utilisateur. Corrigé,
+  et vérifié dans l'essai de la page aux échelles 1, 1,25, 1,5 et 2.
+- Budget de mémoire après fermeture, changé et dit ici. Le contrat demandait « app et
+  WebView2 ≤ repos + 8 Mo après 10 fermetures » ; mesuré : 18,1 puis 8,4 Mo. La mesure par
+  processus montre que ce seuil ne mesurait pas l'éditeur : son processus de rendu part à
+  chaque fermeture (4 au repos, 5 éditeur ouvert, 4 après une fermeture comme après vingt), le processus de l'app prend 3,4 Mo en 19 ouvertures
+  de plus (une image gardée par ouverture en ferait 60), et ce sont les quatre pages
+  permanentes (bandeau, vignette, souffle, Réglages) qui grossissent avec les captures :
+  88,8 Mo après une capture, 99,9 après vingt, 94,8 après quarante de plus sans
+  éditeur. La hausse s'arrête donc ; tout l'arbre est à 197,2 Mo après vingt éditeurs et
+  188 après quarante captures de plus. L'essai vérifie maintenant ce que l'éditeur
+  laisse : nombre de processus de rendu revenu à celui du repos, processus de l'app
+  ≤ + 8 Mo, navigateur et GPU ≤ + 6 Mo chacun, et un filet de + 40 Mo sur l'ensemble.
+- Poignées : 394 → 413 en vingt ouvertures, environ une par ouverture. Sous le seuil de
+  l'essai, mais à suivre en 0.5.
+
+Relecture distincte de ces corrections (effort élevé), sur le code et les essais, sans
+machine Windows : le report de l'ouverture est juste et c'est le seul chemin à risque ; la
+garde de l'essai tient ; la place de l'image est juste aux quatre échelles ; les deux
+contrôles principaux de la mémoire prouvent quelque chose. Elle n'a pas relu les essais
+01 à 11, le reste de `commun.ps1`, `application/editeur.rs`, ni le comportement de la
+bibliothèque de fenêtres après l'arrêt, et n'a joué aucun script sur Windows.
+
+Noté, non corrigé :
+- Une bulle d'aide de WebView2 est une fenêtre à part : si elle se trouvait sous la souris,
+  la garde de l'essai refuserait un clic (essai rouge à tort, jamais l'inverse).
+- Si l'app quitte entre le clic sur Annoter et le tour suivant de la boucle, le document
+  est perdu avec elle (la capture reste dans « Récents »).
+- Trois essais bloqués de suite (600 s chacun) dépasseraient les 30 minutes de l'étape.
+- Taille du fichier téléchargé : 11,2 Mo, à la limite de son budget.
