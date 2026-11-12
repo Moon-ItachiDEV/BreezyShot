@@ -18,10 +18,13 @@ app/
       lib.rs                déclare les modules
       application/          chef d'orchestre : démarrage, table des états, icône et menu,
                             journal, chrono, arguments de la ligne de commande ;
-                            zone.rs : décisions de la capture d'une zone (fonctions pures)
+                            zone.rs : décisions de la capture d'une zone, d'une fenêtre et
+                            du plein écran (fonctions pures)
       raccourcis/           raccourcis globaux (étape 3), Échap global de la sélection
       capture/              figer (appelle systeme::gel), géométrie de la sélection, découpe
-                            (étape 4) ; aucun code propre à un système
+                            (étape 4) ; fenetre.rs : liste des fenêtres, partie à découper,
+                            rayon et coins à arrondir (étape 8) ; aucun code propre à un
+                            système
       sortie/               presse-papiers, PNG, « Récents », enregistrement (étape 6)
       reglages/             fichier de réglages (étape 2)
       fenetres/             crée, place, montre et cache les fenêtres de l'interface :
@@ -30,7 +33,8 @@ app/
                             windows.rs, autre.rs (Linux pour le développement, macos.rs ensuite),
                             composition.rs (attendre le compositeur),
                             gel/ (photo du bureau et écran figé natif : mod.rs, windows.rs,
-                            autre.rs)
+                            autre.rs), presse_papiers/ (image avec transparence : format
+                            « PNG » puis CF_DIB sur blanc ; mod.rs, windows.rs, autre.rs)
   interface/                ce qu'on voit (web), partagé entre Windows et Mac
     commun/                 jetons du design system (jetons.css), composants partagés
     vignette/               vignette, souffle et bandeau de messages (bandeau.* dès l'étape 3)
@@ -39,7 +43,8 @@ app/
 design/                     jetons et icônes Moulinet, copiés du design system
 docs/                       ce fichier, TRAVAIL-VALIDE.md, notices d'essai
 essais/                     scénarios PowerShell joués sur la machine Windows de GitHub
-                            (NN-*.ps1 ; aides : tenir-raccourci.ps1, temoin.ps1)
+                            (NN-*.ps1 ; aides : tenir-raccourci.ps1, temoin.ps1, qui
+                            prend un cadre avec -Cadre pour l'essai 06)
   pages/                    essais des pages dans Chromium (Playwright), sur Linux
 outils/                     petits scripts Node sans dépendance (generer-jetons.mjs)
 ```
@@ -197,10 +202,10 @@ dans le dossier temporaire du système (`systeme::dossier_secours()`), sous le n
   (`zone::demande_menu_a_jour`, `menu: demande perimee`). Si l'état n'est plus Repos ni
   Vignette à l'échéance, la table ignore la demande. Journal : `menu: capturer <mode>` à
   la réception.
-- Menu (clic droit) : seulement ce qui marche. Étape 1 : « Quitter BreezyShot ». Étape 7 :
-  une entrée par mode construit, dans l'ordre `ORDRE_MENU` (« Capturer une zone »,
-  [« Capturer une fenêtre » à l'étape 8], « Capturer l'écran »), un séparateur, « Quitter
-  BreezyShot ». La liste est construite par `entrees_menu` à partir de `ACTIONS_CONSTRUITES` :
+- Menu (clic droit) : seulement ce qui marche. Étape 1 : « Quitter BreezyShot ». Depuis
+  l'étape 8 : une entrée par mode construit, dans l'ordre `ORDRE_MENU` (« Capturer une
+  zone », « Capturer l'écran », « Capturer une fenêtre » : l'ordre des raccourcis 1, 2, 3),
+  un séparateur, « Quitter BreezyShot ». La liste est construite par `entrees_menu` à partir de `ACTIONS_CONSTRUITES` :
   un mode construit y entre sans autre code. Identifiants `capturer_<mode>`.
   Le raccourci suit une tabulation dans le texte de l'entrée (aligné à droite par les menus
   Windows) ; sans raccourci retenu, l'entrée reste, sans raccourci affiché.
@@ -209,6 +214,11 @@ dans le dossier temporaire du système (`systeme::dossier_secours()`), sous le n
 - Info-bulle : « BreezyShot ».
 
 ### 3.6 Capture d'une zone (assemblage des étapes 4 à 6)
+
+Trois séquences, un seul début (`photographier` : bandeau caché, compositeur attendu, photo) :
+la zone (ci-dessous), le plein écran (§3.7, sans écran figé ni sélection) et la fenêtre
+(§3.8, la séquence de la zone avec la liste des fenêtres et la Sélection en mode fenêtre :
+`capturer_avec_selection` sert aux deux, pas de copie).
 
 Le câblage est dans `application/mod.rs` ; les décisions (que faire de chaque signal, quel
 message, quel dossier, quelles lignes de journal) sont des fonctions pures de
@@ -304,7 +314,9 @@ recent <ok|echec> fichier <fait|non demande|echec>`, `recents: echec (…)`, `so
 reussite|erreur: <titre>`, `chrono decoupe <ms> sortie <ms> relache-annonce <ms>`,
 `capture impossible: <photo|ecran_fige|selection|muette|lecture|non_disponible|
 sortie_sans_bilan>`, `sortie sans bilan`, `sortie <n>: bilan perime ignore`,
-`menu: capturer <mode>`, `menu: demande perimee`. Aucun chemin de capture complet, aucun contenu.
+`menu: capturer <mode>`, `menu: demande perimee`, et pour la fenêtre (§3.8) `chrono fenetres
+<ms> nombre <n>`, `fenetre choisie <x>,<y> <l>x<h> rayon <r> coins <hg><hd><bg><bd>`. Aucun
+chemin de capture complet, aucun contenu, aucun titre de fenêtre.
 
 ### 3.7 Capture plein écran (étape 7)
 
@@ -335,6 +347,39 @@ L'image a la taille de l'écran choisi en pixels réels, barre des tâches compr
 <souris|principal|premier>` après le choix de l'écran, `chrono gel photo <ms> total <ms>`
 (sans `visible` : rien n'est montré), puis les lignes de sortie de §3.6 ;
 `relache-annonce` se compte ici depuis la réception de la demande.
+
+### 3.8 Capture d'une fenêtre (étape 8)
+
+`Ctrl + Maj + 3` (ou « Capturer une fenêtre » au menu, avec le même `ATTENTE_MENU`) :
+écran figé, la fenêtre sous la souris s'entoure de bleu, un clic la garde. On découpe
+l'image figée : aucune seconde photo, aucun appel à la fenêtre capturée. Séquence de
+`lancer_capture(Fenetre)` (fil principal) :
+
+1. à 4. Ceux de la zone (§3.6) : demande, début commun, écran figé montré, garde.
+5. `capture::fenetres()` (du premier plan vers le fond), seulement dans ce mode, après
+   l'écran figé : `chrono fenetres <ms> nombre <n>`. Pour chacune, `zone::fenetres_proposees`
+   : `FenetreProposee { rect, rayon: capture::rayon_coins(coins, rect, ecrans) }`.
+   `PhotoPrise(Fenetre)` → Selection ; la liste est rangée dans la `CaptureEnCours` (avec le
+   mode) et envoyée telle quelle dans `Demande { mode: Fenetre, fenetres }` (la Sélection la
+   tronque à `FENETRES_MAX`, les indices restent ceux de la liste).
+6. Échap global réservé, comme en zone.
+7. Signaux (`zone::decider`, qui reçoit le mode et la liste dans `Vue`) :
+   `Signal::Fenetre { indice, point }` → `zone::fenetre_choisie` : indice hors liste →
+   `SelectionImpossible`, bandeau ; `capture::zone_fenetre(rect, point, ecrans)` absente →
+   `SelectionAnnulee`, sans message ; sinon `Geste::DecouperFenetre { zone, rayon, coins }`,
+   avec `rayon = capture::rayon_plafonne(rayon, zone)` (la moitié du petit côté de la partie
+   coupée, comme la page) et `coins = capture::coins_a_arrondir(rect, zone)`. Un signal
+   `Zone` en mode fenêtre, ou `Fenetre` en mode zone → `SelectionImpossible`, bandeau. Le
+   reste comme en zone.
+8. Découpe : écran figé caché dans le même tour, `ZoneChoisie`, `fenetre choisie …`,
+   `capture::decouper` puis `capture::arrondir(rayon, coins)` si `rayon > 0`.
+9. Sortie : `lancer_sortie` avec `transparence = zone::avec_transparence(rayon, coins)`
+   (rayon > 0 et au moins un coin) : presse-papiers au format « PNG » (alpha) puis
+   `CF_DIB` sur blanc, PNG à coins transparents. Le reste comme en zone.
+
+**Journal** (contrat de l'essai 06) : `chrono fenetres <ms> nombre <n>`, `selection montree …
+mode fenetre fenetres <n>`, `selection fin <id> fenetre`, `fenetre choisie <x>,<y> <l>x<h>
+rayon <r> coins <hg><hd><bg><bd>` (quatre chiffres 0 ou 1), puis les lignes de §3.6.
 
 ## 4. Réglages (`reglages/`, étape 2)
 
@@ -424,8 +469,8 @@ Module pur : il reçoit le dossier où écrire, ne connaît ni Tauri ni les autr
   raccourci voulu » : ni raccourci ni message.
 - **Seules les actions qui existent sont réservées.** L'Application tient la liste des actions
   dont la capture est construite (`ACTIONS_CONSTRUITES` : `zone` à l'étape 3, `plein_ecran`
-  à l'étape 7, `fenetre` quand son étape arrive) et ne donne que celles-là au choix. BreezyShot ne prend jamais à une autre
-  application un raccourci qui ne ferait rien.
+  à l'étape 7, `fenetre` à l'étape 8 : les trois) et ne donne que celles-là au choix. BreezyShot ne
+  prend jamais à une autre application un raccourci qui ne ferait rien.
 - Le module ne connaît pas le type des réglages : l'Application lui passe une table
   `action → candidats` construite à partir d'eux.
 - **`systeme::impr_ecran_reserve()`** (Windows) : valeur `PrintScreenKeyForSnippingEnabled` de
@@ -598,13 +643,25 @@ Module pur : il reçoit le dossier où écrire, ne connaît ni Tauri ni les autr
   les 2 ms pendant et après), PNG enregistré et presse-papiers à la taille exacte de l'écran
   principal avec le témoin à sa place, seconde capture pendant le bandeau de la première
   (visible juste avant l'appui) sans lui sur la part du témoin qu'il couvre, second appui
-  ignoré (presse-papiers tenu par l'essai : la copie réessaie 250 ms, la Découpe dure
-  donc au moins autant ; « Impossible de copier »), puis une capture normale, réglages
-  non réécrits, arrêt propre. Le choix entre plusieurs
+  ignoré (presse-papiers tenu par l'essai au nom d'une fenêtre à lui, un
+  `OpenClipboard(NULL)` ne bloquant pas l'app qui ouvre aussi avec NULL : la copie
+  réessaie 250 ms, la Découpe dure donc au moins autant ; « Impossible de copier »), puis une
+  capture normale, réglages non réécrits, arrêt propre. Le choix entre plusieurs
   écrans (tests purs seulement) et le délai du menu (aucun clic sur l'icône) ne s'y
   vérifient pas.
+- Essai 06 sous Windows (`06-fenetre.ps1`), même cadre, avec une vraie fenêtre à cadre
+  (`temoin.ps1 -Cadre`, toujours au-dessus) dont le vrai bord (`DWMWA_EXTENDED_FRAME_BOUNDS`,
+  lu par l'essai) est la référence : `Ctrl + Maj + 3`, lignes d'état, `chrono fenetres`,
+  `selection montree … mode fenetre`, clic au milieu, `fenetre choisie` exactement sur le
+  vrai bord ; le rayon est lu dans cette ligne (jamais supposé) et décide des alphas
+  attendus dans le PNG (coins à 0, centre et milieux des bords à 255 ; rayon 0 : tout
+  opaque, mesure `rayon`) ; presse-papiers lu format par format (`GetImage`, « PNG » en
+  octets, `CF_DIB` décodé à la main : coin blanc) ; contenu de la témoin ; clic sur le
+  bureau (point sans fenêtre vérifié avant, sinon sauté et dit) puis Échap ; glisser sans
+  effet puis clic droit ; rien ne reste à l'écran, premier plan rendu, arrêt propre. Une
+  fenêtre à cheval sur deux écrans et les échelles mêlées ne s'y vérifient pas.
 - `essais/` : un script par étape (`01-socle.ps1`, `02-reglages.ps1`, `03-raccourci.ps1`,
-  `04-zone.ps1`, `05-plein-ecran.ps1`),
+  `04-zone.ps1`, `05-plein-ecran.ps1`, `06-fenetre.ps1`),
   lancés par `essais/lancer.ps1` sur le .exe de release. Chaque essai démarre l'app avec
   `BREEZYSHOT_DOSSIER_ESSAI`, agit (lancer une seconde instance, simuler une touche, abîmer un
   fichier), puis lit le journal et les fichiers. Un essai qui échoue fait échouer GitHub.
@@ -784,8 +841,8 @@ Tout ce qui quitte l'app passe par une seule fonction, `sortir(&Pixels, &Demande
 son `Bilan`, et `annonce(&Bilan, &Demande)` dit quoi montrer.
 
 - `Demande { copier, enregistrer, dossier_enregistrement, dossier_affiche, dossier_recents,
-  modele_nom, maintenant, transparence }`, chemins absolus résolus par l'Application. `Bilan { copie:
-  Faite | NonDemandee | Echec, recent: Result<chemin>, enregistrement: Fait | NonDemande |
+  modele_nom, maintenant, transparence }`, chemins absolus résolus par l'Application. `Bilan {
+  copie: Faite | NonDemandee | Echec, recent: Result<chemin>, enregistrement: Fait | NonDemande |
   Echec { dossier, cause } }`.
 - **Ordre** : valider les pixels (sinon tout en échec, sans panique) ; la copie part dans
   un fil à part ; pendant ce temps, encoder le PNG une fois, écrire « Récents », enregistrer
@@ -802,8 +859,8 @@ son `Bilan`, et `annonce(&Bilan, &Demande)` dit quoi montrer.
   `systeme::presse_papiers::ImagePreparee::preparer(png, largeur, hauteur,
   rgba_sur_blanc)` prépare une fois le format et les deux blocs (le DIB écrit directement
   dans le sien), puis chaque essai `poser` (6 ouvertures séparées de 5 ms, comme
-  `arboard`) pose dans la même ouverture le format `PNG` (`RegisterClipboardFormatW`, les octets du fichier,
-  posé en premier) et `CF_DIB` composé sur fond blanc (`sur_blanc`, fonction pure ;
+  `arboard`) pose dans la même ouverture le format `PNG` (`RegisterClipboardFormatW`, les octets du
+  fichier, posé en premier) et `CF_DIB` composé sur fond blanc (`sur_blanc`, fonction pure ;
   32 bits `BI_RGB`, de bas en haut, quatrième octet à 255) ; Windows fabrique les formats
   dérivés. Les apps qui lisent le PNG ont la transparence, les autres (Paint) le fond
   blanc. Erreurs `ErreurPressePapiers { Occupe, NonDisponible, Refuse }` (`OpenClipboard`
@@ -832,6 +889,6 @@ son `Bilan`, et `annonce(&Bilan, &Demande)` dit quoi montrer.
   « Impossible de copier » / « La capture est enregistrée dans <dossier affiché>. » ; rien
   demandé : « Capture prise ». Aujourd'hui, « Capture prise » n'arrive que si copie et
   enregistrement sont éteints et la vignette (pas encore construite) allumée : les réglages
-  ne rallument la copie que si les trois sont éteints. Seul « Récents » en échec : la réussite est annoncée, l'échec
-  va au journal (par l'Application).
+  ne rallument la copie que si les trois sont éteints. Seul « Récents » en échec : la réussite est
+  annoncée, l'échec va au journal (par l'Application).
 - `sortie` n'importe que `crate::systeme` (`Pixels` vient de `systeme::gel`).
