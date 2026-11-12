@@ -474,6 +474,19 @@ pub fn derniere_zone_retenue(zone: Rect, ecrans: &[EcranInfo]) -> Option<Dernier
         })
 }
 
+/// Ce que devient la dernière zone après une découpe : `None` si elle ne change pas (découpe
+/// manquée, ou fenêtre : seule une zone devient la dernière zone) ; sinon la nouvelle,
+/// `Some(None)` si la zone n'est contenue par aucun écran (l'ancienne est oubliée :
+/// « Refaire » ouvrira la sélection).
+pub fn nouvelle_derniere_zone(
+    decoupe_reussie: bool,
+    mode_zone: bool,
+    zone: Rect,
+    ecrans: &[EcranInfo],
+) -> Option<Option<DerniereZone>> {
+    (decoupe_reussie && mode_zone).then(|| derniere_zone_retenue(zone, ecrans))
+}
+
 /// Pourquoi la dernière zone ne peut pas être refaite : la sélection s'ouvre à la place.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RaisonRepli {
@@ -1144,6 +1157,24 @@ mod tests {
         assert_eq!(derniere_zone_retenue(r(-10, 0, 50, 50), &e), None);
         assert_eq!(derniere_zone_retenue(r(1900, 1070, 50, 50), &e), None);
         assert_eq!(derniere_zone_retenue(r(0, 0, 10, 10), &[]), None);
+    }
+
+    #[test]
+    fn la_derniere_zone_change_apres_chaque_zone_reussie() {
+        let e = ecrans();
+        let z = r(10, 20, 300, 200);
+        let d = derniere_zone_retenue(z, &e);
+        assert_eq!(nouvelle_derniere_zone(true, true, z, &e), Some(d));
+        // Une fenêtre ou une découpe manquée ne change rien.
+        assert_eq!(nouvelle_derniere_zone(true, false, z, &e), None);
+        assert_eq!(nouvelle_derniere_zone(false, true, z, &e), None);
+        // Une zone à cheval sur deux écrans efface l'ancienne : la sélection s'ouvrira.
+        let cheval = r(-10, 0, 50, 50);
+        assert_eq!(nouvelle_derniere_zone(true, true, cheval, &e), Some(None));
+        assert_eq!(
+            ligne_refaire(&refaire(None, &e)),
+            "derniere zone: aucune, selection"
+        );
     }
 
     #[test]

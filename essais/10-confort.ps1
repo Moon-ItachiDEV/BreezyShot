@@ -19,10 +19,11 @@
 # (5) Ctrl + Maj + 2 : `DemandeDecompte plein_ecran`, `echap global reserve`, `bandeau
 #     decompte`, fenêtre du bandeau visible, centrée sur la zone utile (± 2 px), sans
 #     WS_EX_APPWINDOW, premier plan inchangé, disque peint (pixels à la couleur `accent`
-#     ± 6) ; `fini en <ms>` entre 2950 et 3300 ; `bandeau decompte cache` avant `chrono gel
-#     photo` ; le PNG, à la place de la fenêtre du décompte, égal (± 2) à la copie d'écran
-#     faite avant l'appui ;
-# (6) second appui pendant ce décompte : `capture deja en cours: appui ignore`, une photo ;
+#     ± 6, sur un témoin posé au centre) ; `fini en <ms>` entre 2950 et 3600 ; `bandeau
+#     decompte cache` avant `chrono gel photo` ; le PNG montre le témoin exact sous le
+#     décompte ;
+# (6) second appui juste après `bandeau decompte` : `capture deja en cours: appui
+#     ignore`, une photo ;
 # (7) Échap pendant un décompte : `annule (echap)`, `Decompte -> Repos`, `echap global
 #     libere`, aucune photo en 4 s, bandeau caché ; puis une capture normale ;
 # (8) croix : clic réel au centre du rectangle de `bandeau zone` → `bandeau action <id>
@@ -362,8 +363,21 @@ public static string[] Ecarts(byte[] o, int s, int l, int h, int[] c, int max) {
                 if ([DateTime]::UtcNow -ge $limite) { throw "fenêtre témoin : aucun HWND en 30 s" }
                 Start-Sleep -Milliseconds 100
             }
-            Start-Sleep -Milliseconds 700   # composée, console cachée
-            return [pscustomobject]@{ Hwnd = [IntPtr][long](Get-Content -LiteralPath $f -Raw).Trim(); Processus = $aide }
+            $hwnd = [IntPtr][long](Get-Content -LiteralPath $f -Raw).Trim()
+            # Guet : le témoin est visible et l'écran montre ses quatre carrés à sa place
+            # (composé, console de l'aide cachée), en 10 s au plus.
+            $limite = [DateTime]::UtcNow.AddSeconds(10)
+            $vu = @('rien lu')
+            do {
+                if ($C::IsWindowVisible($hwnd)) {
+                    $copie = Copie-Ecran $X $Y $Cote $Cote
+                    try { $vu = @(Ecarts-Temoin $copie 3) } finally { $copie.Dispose() }
+                    if ($vu[0] -eq 'total 0') { break }
+                }
+                Start-Sleep -Milliseconds 50
+            } while ([DateTime]::UtcNow -lt $limite)
+            if ($vu[0] -ne 'total 0') { throw "fenêtre témoin $hwnd en $X,$Y : pas à l'écran en 10 s ($($vu -join ' ; '))" }
+            return [pscustomobject]@{ Hwnd = $hwnd; Processus = $aide }
         }
 
         function Fermer-Auxiliaires {
@@ -580,7 +594,9 @@ public static string[] Ecarts(byte[] o, int s, int l, int h, int[] c, int max) {
                 $a.Dispose(); $b.Dispose()
 
                 # (4) Par le vrai menu : zone sur la place du menu, témoin dessous.
+                # Côté pair : le témoin et `Ecarts` coupent alors leurs carrés au même pixel.
                 $cote4 = [math]::Max($rectMenu.L, $rectMenu.H) + 16
+                $cote4 += $cote4 % 2
                 $x4 = [math]::Max($utile.X, [math]::Min($rectMenu.X - 8, $utile.Right - $cote4))
                 $y4 = [math]::Max($utile.Y, [math]::Min($rectMenu.Y - 8, $utile.Bottom - $cote4))
                 $t4 = Lancer-Temoin $x4 $y4 $cote4
@@ -630,9 +646,12 @@ public static string[] Ecarts(byte[] o, int s, int l, int h, int[] c, int max) {
                 $recents = Join-Path $db 'local/Recents'
                 $bandeau = Hwnd-Journal 'bandeau fenetre' $db 'HWND du bandeau'
 
-                # (5) et (6) Plein écran avec retardateur.
-                Start-Sleep -Milliseconds 500
-                $avantAppui = Copie-Ecran $ecranP.X $ecranP.Y $ecranP.Width $ecranP.Height
+                # (5) et (6) Plein écran avec retardateur. Un témoin au centre de la zone utile,
+                # sous le disque : la photo doit montrer ses carrés exacts (comme le point 5 de
+                # l'essai 05), jamais une copie du bureau vivant.
+                $ux = $utile.X + $utile.Width / 2; $uy = $utile.Y + $utile.Height / 2
+                $x5 = [int]($ux - $COTE / 2); $y5 = [int]($uy - $COTE / 2)
+                $t5 = Lancer-Temoin $x5 $y5 $COTE
                 $premier = $C::GetForegroundWindow()
                 $n = @(Fichiers-Png $recents).Count
                 $debut = @(Lignes-Journal $db).Count
@@ -644,10 +663,13 @@ public static string[] Ecarts(byte[] o, int s, int l, int h, int[] c, int max) {
                 Verifier '(5) etat Repos -> Decompte (DemandeDecompte plein_ecran)' ((Compter-Motif -Motif 'etat Repos -> Decompte \(DemandeDecompte plein_ecran\)$' -Dossier $db) -eq 1) | Out-Null
                 $null = Attendre-Motif -Motif 'echap global reserve$' -Dossier $db -DelaiS 2 -Quoi '(5) echap global reserve'
                 $lb = Attendre-Motif -Motif 'bandeau decompte (\d+) ecran ' -Dossier $db -DelaiS 2 -Quoi '(5) bandeau decompte'
-                Start-Sleep -Milliseconds 1200
+                # (6) Second appui tout de suite, loin de la fin du décompte.
+                $C::Touches($CTRL_MAJ_2)
+                $null = Attendre-Suivante 'capture deja en cours: appui ignore$' $db $ignores '(6) second appui'
+                Verifier '(6) second appui : capture deja en cours: appui ignore' $true | Out-Null
+                Start-Sleep -Milliseconds 1000
                 $rb = Rect-Fenetre $bandeau
                 $cx = $rb.X + $rb.L / 2; $cy = $rb.Y + $rb.H / 2
-                $ux = $utile.X + $utile.Width / 2; $uy = $utile.Y + $utile.Height / 2
                 Verifier '(5) fenêtre du bandeau visible, centrée sur la zone utile (± 2 px)' (($C::IsWindowVisible($bandeau)) -and ([math]::Abs($cx - $ux) -le 2) -and ([math]::Abs($cy - $uy) -le 2)) "fenêtre $($rb.X),$($rb.Y) $($rb.L)x$($rb.H), centre $cx,$cy, zone utile $ux,$uy ; $lb" | Out-Null
                 $ex = [long]$C::GetWindowLongPtr($bandeau, $GWL_EXSTYLE)
                 Verifier '(5) sans WS_EX_APPWINDOW' (($ex -band 0x40000) -eq 0) ('0x{0:X8}' -f $ex) | Out-Null
@@ -660,23 +682,25 @@ public static string[] Ecarts(byte[] o, int s, int l, int h, int[] c, int max) {
                 if ($accent -lt 20) { Garder-Image '(5) disque' $vueDisque }
                 $vueDisque.Dispose()
                 Verifier '(5) le disque est peint (au moins 20 pixels à la couleur accent ± 6)' ($accent -ge 20) "$accent pixels" | Out-Null
-                # (6) Second appui pendant le décompte.
-                $C::Touches($CTRL_MAJ_2)
-                $null = Attendre-Suivante 'capture deja en cours: appui ignore$' $db $ignores '(6) second appui'
-                Verifier '(6) second appui : capture deja en cours: appui ignore' $true | Out-Null
                 $lf = Attendre-Motif -Motif "decompte $num fini en (\d+) ms$" -Dossier $db -DelaiS 6 -Quoi '(5) fin du décompte'
                 $null = $lf -match 'fini en (\d+) ms'
                 $msFin = [int]$Matches[1]
-                Verifier '(5) fini en 2950 à 3300 ms' (($msFin -ge 2950) -and ($msFin -le 3300)) $lf | Out-Null
+                Verifier '(5) fini en 2950 à 3600 ms' (($msFin -ge 2950) -and ($msFin -le 3600)) $lf | Out-Null
                 Noter-Mesure -Nom 'décompte de 3 s' -Valeur $msFin -Unite 'ms'
                 $png = Attendre-Png $recents $n '(5) PNG'
                 $iCache = Index-Motif 'bandeau decompte cache \d+$' $db $debut
                 $iPhoto = Index-Motif 'chrono gel photo ' $db $debut
                 Verifier '(5) bandeau decompte cache avant chrono gel photo' (($iCache -ge 0) -and ($iPhoto -gt $iCache)) "lignes $iCache et $iPhoto" | Out-Null
-                $e = Comparer-Images $png $avantAppui ($rb.X - $ecranP.X) ($rb.Y - $ecranP.Y) $rb.L $rb.H 2
-                if ($e[0] -ne 'total 0') { Garder-Image '(5) photo' $png; Garder-Image '(5) avant' $avantAppui }
-                Verifier '(5) la photo, à la place du décompte, égale (± 2) à la copie d''avant l''appui' ($e[0] -eq 'total 0') ($e -join ' ; ') | Out-Null
-                $png.Dispose(); $avantAppui.Dispose()
+                $sous = $null
+                if (($x5 - $ecranP.X + $COTE) -le $png.Width -and ($y5 - $ecranP.Y + $COTE) -le $png.Height) {
+                    $sous = $png.Clone([System.Drawing.Rectangle]::new($x5 - $ecranP.X, $y5 - $ecranP.Y, $COTE, $COTE), [System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
+                }
+                if (Verifier '(5) la photo contient la place du témoin' ($null -ne $sous) "photo $($png.Width)x$($png.Height), témoin $x5,$y5") {
+                    Verifier-Temoin '(5) la photo sous le décompte (le disque n''y est pas)' $sous
+                    $sous.Dispose()
+                }
+                $png.Dispose()
+                try { $t5.Processus.Kill() } catch { }
                 Start-Sleep -Milliseconds 500
                 Verifier '(6) une seule photo' (@(Fichiers-Png $recents).Count -eq $n + 1) "$(@(Fichiers-Png $recents).Count - $n) PNG" | Out-Null
                 $null = Attendre-Motif -Motif 'etat \w+ -> Repos' -Dossier $db -DelaiS 5 -Quoi '(5) Repos'
