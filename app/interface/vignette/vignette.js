@@ -143,6 +143,16 @@ function appeler(commande, args) {
   }
 }
 
+// Dit « prête » au cœur. Un refus (sous Windows, la page peut parler avant que le cœur ait
+// fini de se mettre en place) est retenté sans bruit toutes les 100 ms, 10 s au plus.
+const ESSAIS_PRET = 100;
+function direPret(commande, reste = ESSAIS_PRET) {
+  new Promise((ok) => ok(tauri.core.invoke(commande, {}))).catch((e) => {
+    if (reste > 1) setTimeout(() => direPret(commande, reste - 1), 100);
+    else console.warn(`${commande} : refusé ${ESSAIS_PRET} fois :`, e);
+  });
+}
+
 /** Vérifie et nettoie une charge `vignette:preparer` ; null si elle est rejetée. */
 function valider(c) {
   const rejeter = (raison) => {
@@ -580,7 +590,7 @@ if (tauri?.event?.listen) {
     ...Object.entries(ECOUTES).map(([nom, f]) => tauri.event.listen(nom, f)),
     suivreTheme(),
   ]).then(
-    () => appeler("vignette_pret", {}),
+    () => direPret("vignette_pret"),
     (e) => console.warn("vignette : écoute impossible :", e),
   );
 } else {

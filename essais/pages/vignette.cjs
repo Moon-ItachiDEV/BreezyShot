@@ -43,18 +43,23 @@ const charge = (o = {}) => ({ id: 5, coin: 'bas_gauche', retrait: { haut: 0, bas
     p.on('pageerror', e => erreurs.push(String(e)));
     p.on('console', m => { if (m.type() === 'error') erreurs.push(m.text()); if (m.type() === 'warning') p.avert.push(m.text()); });
     if (o.csp) await p.addInitScript(() => { window.__refus = []; document.addEventListener('securitypolicyviolation', e => window.__refus.push(e.violatedDirective + ' ' + e.blockedURI)); });
-    await p.addInitScript(() => {
-      window.__appels = []; const ecoutes = {};
+    await p.addInitScript((refus) => {
+      window.__appels = []; const ecoutes = {}; let refuses = 0;
       const toile = document.createElement('canvas'); toile.width = 64; toile.height = 40;
       const g = toile.getContext('2d'); g.fillStyle = '#E8B23A'; g.fillRect(0, 0, 64, 40); g.fillStyle = '#0067C0'; g.fillRect(0, 0, 32, 40);
       const octets = Uint8Array.from(atob(toile.toDataURL('image/png').split(',')[1]), x => x.charCodeAt(0));
       const png = Promise.resolve(octets.buffer); // sans fetch : la CSP de l'app l'interdit
       window.__TAURI__ = {
-        core: { invoke: (c, a) => { window.__appels.push([c, a]); return c === 'vignette_image' ? (window.__sansImage ? Promise.reject('vignette inconnue') : png) : Promise.resolve(); } },
+        core: { invoke: (c, a) => {
+          window.__appels.push([c, a]);
+          // `refus` premiers « prête » rejetés, comme un cœur pas encore en place.
+          if (c === 'vignette_pret' && refuses < refus) { refuses++; return Promise.reject('vignette pas encore en place'); }
+          return c === 'vignette_image' ? (window.__sansImage ? Promise.reject('vignette inconnue') : png) : Promise.resolve();
+        } },
         event: { listen: (n, f) => { ecoutes[n] = f; return Promise.resolve(() => {}); } },
       };
       window.__emettre = (n, payload) => ecoutes[n]({ payload });
-    });
+    }, o.refus || 0);
     await p.goto(base + (o.csp ? '?csp=1' : ''));
     await p.waitForTimeout(50);
     return p;
@@ -71,6 +76,14 @@ const charge = (o = {}) => ({ id: 5, coin: 'bas_gauche', retrait: { haut: 0, bas
   // 1. Prête : vignette_pret une fois, puis la carte posée invisible et sa zone.
   let p = await page();
   verifier(JSON.stringify(await appels(p)) === JSON.stringify([['vignette_pret', {}]]), '1 vignette_pret une fois, écoute en place');
+  {
+    // Cœur pas encore en place : les deux premiers « prête » rejetés, le troisième reçu.
+    const q = await page({ refus: 2 });
+    await q.waitForTimeout(400);
+    const n = (await appels(q, 'vignette_pret')).length;
+    verifier(n === 3 && q.avert.length === 0, '1 vignette_pret rejeté deux fois : retenté, reçu au troisième, sans bruit', `${n} appel(s), ${q.avert.length} avertissement(s)`);
+    await q.context().close();
+  }
   await prete(p);
   let z = (await appels(p, 'vignette_zone'))[0]?.[1];
   // Bord de 1 px : l'image fait 258 × 16/10 dans la carte de 260.

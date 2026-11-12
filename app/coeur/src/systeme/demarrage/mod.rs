@@ -2,8 +2,9 @@
 //!
 //! Windows : la valeur `BreezyShot` de la clé `Run` de l'utilisateur courant, et la
 //! désactivation éventuelle par le gestionnaire des tâches (`StartupApproved\Run`), lue
-//! seulement. C'est la seule écriture de l'app dans le registre (ARCHITECTURE §2) ; elle
-//! reste derrière cette fonction pour pouvoir passer plus tard à l'entrée d'un paquet.
+//! seulement. Avec la clé de désinstallation de l'installateur, c'est la seule écriture
+//! dans le registre (ARCHITECTURE §2) ; elle reste derrière cette fonction pour pouvoir
+//! passer plus tard à l'entrée d'un paquet.
 //! Pendant les essais (`BREEZYSHOT_DOSSIER_ESSAI`), une clé d'essai remplace la vraie : la
 //! vraie clé n'est alors ni lue ni écrite. Hors Windows : `Indisponible`.
 
@@ -90,6 +91,32 @@ pub fn etat_depuis(run: Option<&str>, approuve: Option<&[u8]>) -> EtatDemarrage 
     }
 }
 
+/// Règle pure : faut-il réécrire la valeur `Run` vers l'exe en cours ? Seulement si elle
+/// existe (jamais d'inscription que l'utilisateur n'a pas demandée) et pointe ailleurs
+/// (copie lancée hors installation, puis installée). Un chemin Windows ne tient pas compte
+/// de la casse. La désactivation par le gestionnaire des tâches ne compte pas : elle vit
+/// dans `StartupApproved\Run` sous le même nom, que la réécriture ne touche pas, et reste
+/// donc telle quelle.
+pub fn doit_reecrire(actuelle: Option<&str>, attendue: &str) -> bool {
+    actuelle.is_some_and(|v| !v.trim().eq_ignore_ascii_case(attendue.trim()))
+}
+
+/// Au démarrage de l'app : si la valeur `Run` existe et pointe vers un autre exe, la
+/// réécrit vers l'exe en cours. Rend vrai si elle a été réécrite.
+pub fn mettre_a_jour_chemin() -> Result<bool, String> {
+    let (run, _) = cles(cle_d_essai());
+    let exe = std::env::current_exe().map_err(|e| format!("exe introuvable: {e}"))?;
+    let attendue = commande(&exe);
+    if !doit_reecrire(
+        plateforme::lire_texte(run, NOM_VALEUR).as_deref(),
+        &attendue,
+    ) {
+        return Ok(false);
+    }
+    plateforme::ecrire(run, NOM_VALEUR, &attendue)?;
+    Ok(true)
+}
+
 /// Lit (`voulu = None`) ou change puis relit (`Some(oui)`) le démarrage avec le système.
 /// `Some(true)` écrit la valeur `Run` avec le chemin de l'exe en cours (`current_exe`),
 /// `Some(false)` la supprime (sans erreur si elle n'existait pas : c'est ce qu'appelle
@@ -133,6 +160,26 @@ mod tests {
             etat_depuis(Some("x"), Some(&[7])),
             EtatDemarrage::DesactiveParWindows
         );
+    }
+
+    #[test]
+    fn reecrire_seulement_une_valeur_qui_pointe_ailleurs() {
+        let moi = "\"C:\\Users\\a\\AppData\\Local\\Programs\\BreezyShot\\breezyshot.exe\"";
+        assert!(
+            !doit_reecrire(None, moi),
+            "absente : jamais inscrite d'office"
+        );
+        assert!(!doit_reecrire(Some(moi), moi));
+        assert!(
+            !doit_reecrire(Some(&moi.to_uppercase()), moi),
+            "casse ignorée"
+        );
+        assert!(!doit_reecrire(Some(&format!(" {moi} ")), moi));
+        assert!(doit_reecrire(
+            Some("\"C:\\Users\\a\\Downloads\\breezyshot.exe\""),
+            moi
+        ));
+        assert!(doit_reecrire(Some(""), moi));
     }
 
     #[test]

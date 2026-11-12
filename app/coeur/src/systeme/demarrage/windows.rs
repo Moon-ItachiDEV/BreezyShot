@@ -41,15 +41,20 @@ fn lire_octets(cle: &str, nom: &str, texte: bool) -> Option<Vec<u8>> {
     Some(tampon)
 }
 
-pub fn lire(run: &str, approuve: &str, nom: &str) -> EtatDemarrage {
-    let texte = lire_octets(run, nom, true).map(|o| {
+/// Le texte de la valeur `Run`, s'il existe.
+pub fn lire_texte(cle: &str, nom: &str) -> Option<String> {
+    lire_octets(cle, nom, true).map(|o| {
         let mots: Vec<u16> = o
             .chunks_exact(2)
             .map(|c| u16::from_le_bytes([c[0], c[1]]))
             .take_while(|&c| c != 0)
             .collect();
         String::from_utf16_lossy(&mots)
-    });
+    })
+}
+
+pub fn lire(run: &str, approuve: &str, nom: &str) -> EtatDemarrage {
+    let texte = lire_texte(run, nom);
     let approuve = lire_octets(approuve, nom, false);
     etat_depuis(texte.as_deref(), approuve.as_deref())
 }

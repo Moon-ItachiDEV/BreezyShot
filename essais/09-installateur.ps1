@@ -275,6 +275,12 @@ public static extern bool GetWindowRect(System.IntPtr h, out RECT r);
 public static extern bool SetWindowPos(System.IntPtr h, System.IntPtr apres, int x, int y, int l, int ht, uint options);
 [System.Runtime.InteropServices.DllImport("user32.dll")]
 public static extern void keybd_event(byte vk, byte scan, uint flags, System.UIntPtr extra);
+[System.Runtime.InteropServices.DllImport("user32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode)]
+public static extern System.IntPtr FindWindowW(string classe, string titre);
+[System.Runtime.InteropServices.DllImport("user32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode)]
+public static extern System.IntPtr FindWindowExW(System.IntPtr parent, System.IntPtr apres, string classe, string titre);
+[System.Runtime.InteropServices.DllImport("user32.dll")]
+public static extern bool PostMessageW(System.IntPtr h, uint message, System.IntPtr w, System.IntPtr l);
 '@
 
 function Place-Fenetre {
@@ -282,6 +288,90 @@ function Place-Fenetre {
     $r = [BreezyShotEssai09.Natif+RECT]::new()
     if (-not [BreezyShotEssai09.Natif]::GetWindowRect($Poignee, [ref]$r)) { return $null }
     return [pscustomobject]@{ X = $r.Left; Y = $r.Top }
+}
+
+# « Terminer » sur l'écran prêt : l'essai déplace d'abord la fenêtre, presse Terminer, relève
+# sa place pendant la fermeture, puis lit au journal LEQUEL des deux chemins a joué et le
+# vérifie : `envol: anime` (la fenêtre part de sa place réelle et se déplace, `envol cible`)
+# ou `envol: fondu` (animations coupées par Windows : fenêtre immobile). -Force : l'essai a
+# lancé l'installateur avec BREEZYSHOT_ESSAI_ANIMATIONS=1, l'envol doit jouer.
+function Verifier-Envol {
+    param(
+        [Parameter(Mandatory)][System.Diagnostics.Process]$Processus,
+        [Parameter(Mandatory)][string]$Quoi,
+        [switch]$Force
+    )
+    $fen = Attendre-Fenetre -DelaiS 3
+    $poignee = if ($null -ne $fen) { [System.IntPtr]$fen.Current.NativeWindowHandle } else { [System.IntPtr]::Zero }
+    $depart = $null
+    if ($poignee -ne [System.IntPtr]::Zero) {
+        $avant = Place-Fenetre -Poignee $poignee
+        # SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE
+        [void][BreezyShotEssai09.Natif]::SetWindowPos($poignee, [System.IntPtr]::Zero, $avant.X - 200, $avant.Y - 150, 0, 0, 0x0001 -bor 0x0004 -bor 0x0010)
+        Start-Sleep -Milliseconds 200
+        $depart = Place-Fenetre -Poignee $poignee
+    }
+    Verifier "$Quoi : fenêtre déplacée par l'essai avant Terminer" ($null -ne $depart) (Decrire-Fenetre) | Out-Null
+    $m = Marque
+    $null = Presser -Nom 'Terminer' -Quoi "$Quoi : « Terminer » pressé"
+    $places = [System.Collections.Generic.List[object]]::new()
+    $chrono = [System.Diagnostics.Stopwatch]::StartNew()
+    while ($chrono.ElapsedMilliseconds -lt 1500 -and -not $Processus.HasExited -and $null -ne $depart) {
+        $q = Place-Fenetre -Poignee $poignee
+        if ($null -ne $q) { $places.Add($q) }
+        Start-Sleep -Milliseconds 15
+    }
+    $sorti = $Processus.WaitForExit(5000)
+    $null = Attendre-Installation -Texte 'installateur ferme en' -Depuis $m -DelaiS 2
+    $vues = @(@(Nouvelles-Lignes -Depuis $m) | Where-Object { $_ -match 'envol|fermeture|installateur ferme' })
+    $journal = 'journal : ' + $(if ($vues.Count -gt 0) { $vues -join ' | ' } else { 'aucune ligne envol ni fermeture' })
+    $anime = @($vues | Where-Object { $_.Contains('envol: anime') }).Count -gt 0
+    $fondu = @($vues | Where-Object { $_.Contains('envol: fondu') }).Count -gt 0
+    Verifier "$Quoi : chemin journalisé (envol: anime ou envol: fondu)" ($anime -xor $fondu) $journal | Out-Null
+    if ($Force) { Verifier "$Quoi : envol forcé par l'essai (envol: anime)" $anime $journal | Out-Null }
+    if ($null -ne $depart) {
+        $bouge = @($places | Where-Object { [Math]::Abs($_.X - $depart.X) + [Math]::Abs($_.Y - $depart.Y) -gt 4 })
+        if ($anime) {
+            Verifier "$Quoi : « envol cible »" (@($vues | Where-Object { $_.Contains('envol cible') }).Count -gt 0) $journal | Out-Null
+            Verifier "$Quoi : la fenêtre se déplace" ($bouge.Count -gt 0) "$($places.Count) relevés ; $journal" | Out-Null
+            $saut = if ($bouge.Count -gt 0) { [Math]::Abs($bouge[0].X - $depart.X) + [Math]::Abs($bouge[0].Y - $depart.Y) } else { -1 }
+            Verifier "$Quoi : part de la place réelle (pas de saut au centre)" ($saut -ge 0 -and $saut -lt 80) "premier écart $saut px ; $journal" | Out-Null
+        }
+        elseif ($fondu) {
+            Verifier "$Quoi : fondu, fenêtre immobile" ($bouge.Count -eq 0) "$($places.Count) relevés, $($bouge.Count) déplacés ; $journal" | Out-Null
+        }
+    }
+    Verifier "$Quoi : installateur sorti en moins de 5 s après Terminer" $sorti $journal | Out-Null
+    if ($sorti) { Verifier "$Quoi : code de sortie 0" ($Processus.ExitCode -eq 0) "code $($Processus.ExitCode)" | Out-Null }
+    else { try { $Processus.Kill($true) } catch { }; Verifier "$Quoi : installateur jamais tué par l'essai" $false 'tué en dernier recours' | Out-Null }
+}
+
+# « OK » d'une boîte de message native, par Win32 (UI Automation peut rendre ses boutons en
+# Pane) : BM_CLICK au bouton, sinon WM_COMMAND IDOK à la boîte. Rend la condition.
+function Presser-OK-Natif {
+    param([Parameter(Mandatory)][System.Diagnostics.Process]$Processus, [Parameter(Mandatory)][string]$Quoi, [string]$Titre = $TitreInstallateur)
+    $boite = [System.IntPtr]::Zero
+    $limite = [DateTime]::UtcNow.AddSeconds(8)
+    do {
+        $boite = [BreezyShotEssai09.Natif]::FindWindowW('#32770', $Titre)
+        if ($boite -ne [System.IntPtr]::Zero) { break }
+        Start-Sleep -Milliseconds 150
+    } while ([DateTime]::UtcNow -lt $limite)
+    if ($boite -eq [System.IntPtr]::Zero) { return Verifier $Quoi $false "boîte #32770 « $Titre » introuvable ; $(Decrire-Fenetre -Titre $Titre)" }
+    $bouton = [BreezyShotEssai09.Natif]::FindWindowExW($boite, [System.IntPtr]::Zero, 'Button', 'OK')
+    if ($bouton -eq [System.IntPtr]::Zero) { $bouton = [BreezyShotEssai09.Natif]::FindWindowExW($boite, [System.IntPtr]::Zero, 'Button', $null) }
+    $essais = @()
+    if ($bouton -ne [System.IntPtr]::Zero) {
+        # BM_CLICK
+        [void][BreezyShotEssai09.Natif]::PostMessageW($bouton, 0x00F5, [System.IntPtr]::Zero, [System.IntPtr]::Zero)
+        $essais += 'BM_CLICK'
+        if ($Processus.WaitForExit(3000)) { return Verifier $Quoi $true 'BM_CLICK au bouton' }
+    }
+    # WM_COMMAND, IDOK
+    [void][BreezyShotEssai09.Natif]::PostMessageW($boite, 0x0111, [System.IntPtr]1, [System.IntPtr]::Zero)
+    $essais += 'WM_COMMAND IDOK'
+    if ($Processus.WaitForExit(3000)) { return Verifier $Quoi $true ($essais -join ' puis ') }
+    return Verifier $Quoi $false "bouton trouvé : $($bouton -ne [System.IntPtr]::Zero) ; essayé : $($essais -join ', ') ; $(Decrire-Fenetre -Titre $Titre)"
 }
 
 # --- Registre ------------------------------------------------------------------------------
@@ -434,40 +524,9 @@ try {
     [BreezyShotEssai09.Natif]::keybd_event(0x1B, 0, 2, [UIntPtr]::Zero)
     Verifier 'app : sélection annulée (Échap)' (Attendre-Ligne -Texte 'SelectionAnnulee' -DelaiS 10) | Out-Null
 
-    # 10. « Terminer » : la fenêtre s'envole depuis SA place réelle (l'essai la déplace
-    # d'abord), puis l'installateur sort de lui-même.
-    $fen = Attendre-Fenetre -DelaiS 3
-    $poignee = if ($null -ne $fen) { [System.IntPtr]$fen.Current.NativeWindowHandle } else { [System.IntPtr]::Zero }
-    $depart = $null
-    if ($poignee -ne [System.IntPtr]::Zero) {
-        $avant = Place-Fenetre -Poignee $poignee
-        # SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE
-        [void][BreezyShotEssai09.Natif]::SetWindowPos($poignee, [System.IntPtr]::Zero, $avant.X - 200, $avant.Y - 150, 0, 0, 0x0001 -bor 0x0004 -bor 0x0010)
-        Start-Sleep -Milliseconds 200
-        $depart = Place-Fenetre -Poignee $poignee
-    }
-    Verifier 'fenêtre déplacée par l''essai avant Terminer' ($null -ne $depart) | Out-Null
-    $m = Marque
-    $null = Presser -Nom 'Terminer' -Quoi 'bouton « Terminer » pressé'
-    $places = [System.Collections.Generic.List[object]]::new()
-    $chrono = [System.Diagnostics.Stopwatch]::StartNew()
-    while ($chrono.ElapsedMilliseconds -lt 1500 -and -not $inst.HasExited -and $null -ne $depart) {
-        $q = Place-Fenetre -Poignee $poignee
-        if ($null -ne $q) { $places.Add($q) }
-        Start-Sleep -Milliseconds 15
-    }
-    Verifier 'installateur : « envol cible »' (Attendre-Installation -Texte 'envol cible' -Depuis $m -DelaiS 5) | Out-Null
-    if ($null -ne $depart) {
-        $bouge = @($places | Where-Object { [Math]::Abs($_.X - $depart.X) + [Math]::Abs($_.Y - $depart.Y) -gt 4 })
-        $premier = if ($bouge.Count -gt 0) { $bouge[0] } else { $null }
-        Verifier 'envol : la fenêtre se déplace' ($bouge.Count -gt 0) "$($places.Count) relevés" | Out-Null
-        $saut = if ($null -ne $premier) { [Math]::Abs($premier.X - $depart.X) + [Math]::Abs($premier.Y - $depart.Y) } else { -1 }
-        Verifier 'envol : part de la place réelle (pas de saut au centre)' ($saut -ge 0 -and $saut -lt 80) "premier écart $saut px" | Out-Null
-    }
-    $sorti = $inst.WaitForExit(5000)
-    Verifier 'installateur sorti en moins de 5 s après Terminer' $sorti | Out-Null
-    if ($sorti) { Verifier 'installateur : code de sortie 0' ($inst.ExitCode -eq 0) "code $($inst.ExitCode)" | Out-Null }
-    else { try { $inst.Kill($true) } catch { }; Verifier 'installateur jamais tué par l''essai' $false 'tué en dernier recours' | Out-Null }
+    # 10. « Terminer » : envol depuis la place réelle, ou fondu si Windows coupe les
+    # animations (le journal dit lequel) ; l'installateur sort de lui-même.
+    Verifier-Envol -Processus $inst -Quoi 'Terminer'
     Verifier 'app toujours en cours après Terminer' (@(Processus-App).Count -ge 1) | Out-Null
 
     Quitter-App | Out-Null
@@ -478,12 +537,13 @@ try {
     Demarrer-App -Exe $exeInstalle | Out-Null
     Verifier 'app relancée (pret)' (Attendre-Ligne -Texte ' pret' -FinDeLigne -DelaiS 15 -Fois ($n + 1)) | Out-Null
     $m = Marque
-    $inst2 = Lancer-Telecharge -Fichier $telecharge
+    # Sous BREEZYSHOT_ESSAI_ANIMATIONS=1 : l'envol joue même si Windows coupe les animations.
+    $inst2 = Lancer-Telecharge -Fichier $telecharge -Variables @{ BREEZYSHOT_ESSAI_ANIMATIONS = '1' }
     Verifier 'plan: reinstaller' (Attendre-Installation -Texte 'plan: reinstaller' -Depuis $m -DelaiS 20) | Out-Null
     $null = Presser -Nom 'Installer' -Quoi 'bouton « Installer » (réinstallation) pressé'
     Verifier 'réinstallation : « etape arret: instance arretee »' (Attendre-Installation -Texte 'etape arret: instance arretee' -Depuis $m -DelaiS 20) | Out-Null
     Verifier 'réinstallation finie' (Attendre-Installation -Texte "installation finie $version" -Depuis $m -DelaiS 20) | Out-Null
-    Fermer-Installateur -Processus $inst2 -Bouton 'Terminer' -Quoi 'réinstallation' | Out-Null
+    Verifier-Envol -Processus $inst2 -Quoi 'réinstallation, envol forcé' -Force
     Quitter-App | Out-Null
     Start-Sleep -Milliseconds 500
 
@@ -649,7 +709,7 @@ try {
     $instSans = Lancer-Telecharge -Fichier $telecharge -Variables @{ BREEZYSHOT_ESSAI_SANS_WEBVIEW2 = '1' }
     Verifier 'webview2 absent journalisé' (Attendre-Installation -Texte 'installateur: webview2 absent' -Depuis $m -DelaiS 15) | Out-Null
     Verifier-Texte -Texte 'BreezyShot a besoin de Microsoft Edge WebView2, absent de ce PC.' -Quoi 'webview2 absent : message affiché' | Out-Null
-    $null = Presser -Nom 'OK' -Quoi 'webview2 absent : « OK » pressé' -DelaiS 5
+    $null = Presser-OK-Natif -Processus $instSans -Quoi 'webview2 absent : « OK » pressé'
     $sansSorti = $instSans.WaitForExit(8000)
     if (-not $sansSorti) { try { $instSans.Kill($true) } catch { } }
     Verifier 'webview2 absent : sorti de lui-même, code 1' ($sansSorti -and $instSans.ExitCode -eq 1) | Out-Null
@@ -672,10 +732,19 @@ catch {
 }
 finally {
     if ($null -ne $tetu) { Arreter-Tetu -Processus $tetu }
+    # Un installateur resté (après une exception) est fermé aussi, et c'est un échec.
+    $restants = @(Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.ProcessName -like 'BreezyShot-*-essai' })
+    foreach ($p in $restants) { try { $p.Kill($true); $null = $p.WaitForExit(5000) } catch { } }
+    Verifier 'aucun installateur resté à la fin' ($restants.Count -eq 0) "$($restants.Count) fermé(s) de force par le nettoyage" | Out-Null
     # Nettoyage des clés d'essai (jamais les vraies) : la clé de désinstallation d'essai et
     # la valeur de démarrage posée dans la clé d'essai des Réglages.
     $nom = Split-Path -Leaf $script:Essai.Dossier
     Remove-Item -LiteralPath "HKCU:\Software\BreezyShot-essais\$nom" -Recurse -Force -ErrorAction SilentlyContinue
     Remove-ItemProperty -LiteralPath $cleRunEssai -Name 'BreezyShot' -ErrorAction SilentlyContinue
+    # La clé Run d'essai, laissée vide, est retirée (jamais si elle garde autre chose).
+    $k = Get-Item -LiteralPath $cleRunEssai -ErrorAction SilentlyContinue
+    if ($null -ne $k -and $k.ValueCount -eq 0 -and $k.SubKeyCount -eq 0) {
+        Remove-Item -LiteralPath $cleRunEssai -Force -ErrorAction SilentlyContinue
+    }
     Terminer-Essai
 }

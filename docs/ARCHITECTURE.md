@@ -732,12 +732,21 @@ Module pur : il reçoit le dossier où écrire, ne connaît ni Tauri ni les autr
   des tâches : `StartupApproved\Run`, affiché éteint, jamais réactivé par l'app),
   `Indisponible` (hors Windows). Avec `BREEZYSHOT_DOSSIER_ESSAI` non vide (même règle que
   les dossiers), la clé est
-  `HKCU\Software\BreezyShot\Essais\Run` (`demarrage: cle d'essai`). L'installateur pourra
-  appeler `demarrage_avec_systeme(Some(false))`.
+  `HKCU\Software\BreezyShot\Essais\Run` (`demarrage: cle d'essai`). La désinstallation
+  la retire par la fermeture que lui donne `application::desinstaller` (§12.5).
+  Au démarrage de l'app, une valeur existante qui pointe vers un autre exe (copie lancée
+  hors installation, puis installée) est réécrite vers l'exe en cours
+  (`systeme::mettre_a_jour_chemin`, règle pure `doit_reecrire` : jamais si elle est
+  absente, casse ignorée ; journal `demarrage avec le systeme: chemin mis a jour`). La
+  désactivation par le Gestionnaire des tâches vit sous le même nom dans
+  `StartupApproved\Run`, que cette écriture ne touche pas : elle reste telle quelle.
+  **La vérité est le registre** : `demarrer_avec_systeme` est écrit dans `reglages.json`
+  pour mémoire, mais jamais lu ; rien ne doit s'y fier.
 - **Thème** : `fenetres::theme::fixer` émet `interface:theme { theme: "light"|"dark"|null }`
   à toutes les pages et règle le cadre des Réglages (`set_theme`) ; une page prête le reçoit
-  par `theme::envoyer_a` (le bandeau, dans `bandeau_pret`). `commun/theme.js` pose
-  `data-theme` sur `<html>`, que lisent les jetons. Le bandeau suit donc le thème choisi.
+  par `theme::envoyer_a` (le bandeau, la vignette et le souffle, à leur commande « prêt »).
+  `commun/theme.js` pose `data-theme` sur `<html>`, que lisent les jetons. Ces trois pages
+  suivent donc le thème choisi ; l'installateur, processus sans réglages, suit le système.
 - **Habillage provisoire** : `reglages.css` n'utilise que les jetons ; le comportement
   (`reglages.js`) et les essais ne s'appuient que sur les attributs `data-*`, les rôles et
   les noms accessibles, pour que le design puisse être refait sans y toucher.
@@ -750,6 +759,7 @@ Module pur : il reçoit le dossier où écrire, ne connaît ni Tauri ni les autr
   sans valeur), `reglage refuse: <ligne> (<code>)`, `reglages ecrits`,
   `reglages non ecrits: <code>`, `reglages relus: changes exterieurs`,
   `theme interface: systeme|clair|sombre`, `demarrage avec le systeme ecrit: oui|non`,
+  `demarrage avec le systeme: chemin mis a jour|chemin non mis a jour (<erreur>)`,
   `dossier: dialogue annule`, `dossier: dialogue impossible (<erreur>)`,
   `dossier: dialogue deja ouvert`, `raccourcis suspendus (saisie <action>)`,
   `raccourcis repris`, `raccourcis repris d'office`,
@@ -1178,6 +1188,11 @@ fenêtre). Animations : la page suit seulement `reduites` de la charge (le cœur
 compte du système). Une page qui redit prête ne reçoit plus la charge d'une carte partie, et
 `Prete` ne lance le souffle qu'en état Souffle (`prete_acceptee`) : `vignette prete <id>
 ignoree`.
+Les deux pages peuvent dire prêtes avant que l'Application gère la `Vignette` (sous Windows,
+créer la fenêtre de la vignette fait tourner les messages pendant que la page du souffle,
+créée avant, est déjà chargée) : `vignette_pret` et `souffle_pret` refusent alors (`<page>
+pret refuse: vignette pas encore en place`) et la page retente toutes les 100 ms, 10 s au
+plus.
 
 **Journal** (jamais de chemin ni de contenu) : `vignette fenetre <hwnd>`, `souffle fenetre
 <hwnd>`, `vignette exclue des captures: …`, `souffle exclu des captures: …`, `vignette
@@ -1249,7 +1264,8 @@ sous `<E>`, entre parenthèses :
   le dossier WebView2 de l'installateur, et seulement s'il ne contient que `EBWebView`.
 - Réglages, Récents, journal de l'app et captures gardent leurs dossiers (§3.3) : ni une mise à
   jour ni une désinstallation n'y touchent. Le cache WebView2 de l'app
-  (`%LOCALAPPDATA%\BreezyShot\EBWebView`) reste aussi à la désinstallation (accepté).
+  (`%LOCALAPPDATA%\dev.breezyshot.desktop\EBWebView`) reste aussi à la désinstallation
+  (accepté).
 - Registre : `systeme/installation` est la seule écriture du registre de l'installateur, et
   seulement la clé de désinstallation. La valeur `Run` (démarrage avec Windows) appartient aux
   Réglages ; l'installateur ne l'écrit jamais.
@@ -1308,7 +1324,11 @@ sortie 0 (l'app tourne), erreur → sortie 1. Jamais d'installateur caché qui r
 Envol : la fenêtre part de sa place **réelle** (`GetWindowRect`), suit un arc vers la zone de
 notification (sinon le coin bas droit) en 460 ms (jeton `duree-envol-fenetre`, égal à
 `envol::DUREE_ENVOL`, vérifié par un test) pendant que la page réduit la carte ; animations
-réduites : fondu de 120 ms sans déplacement.
+réduites (« Effets d'animation » coupés) : fondu de 120 ms sans déplacement
+(`envol::envol_en_fondu`). Le journal dit lequel a joué : `envol: anime` ou `envol: fondu`.
+Variable réservée aux essais `BREEZYSHOT_ESSAI_ANIMATIONS=1` (lue par
+`systeme::installation::essai_animations_forcees()`, sans effet sans dossier d'essai) : l'envol
+joue même si Windows coupe les animations (`envol: anime (force par l'essai)`).
 
 Page : elle montre et rapporte ; chaque minuteur posé dans un état ne fait rien si la page en est
 sortie (une erreur reçue pendant le départ s'affiche et y reste). La barre suit le rythme du
@@ -1327,8 +1347,9 @@ l'installateur (pas de désinstallation pendant une installation, ni l'inverse),
 4. seulement si l'exe est parti : raccourci (seulement s'il pointe vers l'exe installé), puis
    valeurs de la clé et la clé si elle est vide ;
 5. dossier installé s'il est vide, dossier WebView2 de l'installateur s'il est reconnu ;
-6. démarrage avec Windows : fermeture injectée par l'Application (`RetirerDemarrage`), qui lit
-   puis retire la valeur `BreezyShot` de `Run` (en essai : `HKCU\Software\BreezyShot\Essais\Run`).
+6. démarrage avec Windows, seulement si l'exe est parti : fermeture donnée par l'Application
+   (`RetirerDemarrage`), qui lit puis retire la valeur `BreezyShot` de `Run` (en essai :
+   `HKCU\Software\BreezyShot\Essais\Run`) ; l'exe resté garde son démarrage.
 
 Sortie 0 si l'exe est parti, 1 sinon.
 
@@ -1359,6 +1380,7 @@ erreur fichier: fichier pris | autre volume | <type>, code <n>
 installation finie <v> en <n> ms | installation erreur: <code>
 installation fermee pendant les etapes: sortie <0|1>
 essayer: capture zone demandee
+envol: anime | envol: anime (force par l'essai) | envol: fondu (animations reduites)
 envol cible <notification|coin> en <n> ms | envol impossible (<e>): fermeture directe
 installateur ferme en <etat>
 desinstallation BreezyShot <v> | desinstallation refusee: installateur en cours
@@ -1371,6 +1393,7 @@ desinstallation inscription: retiree | absente | <geste>, code <n>
 desinstallation inscription: la cle garde des valeurs qui ne sont pas a nous
 desinstallation cache webview: supprime | sans objet | absent
 desinstallation demarrage: retire | absent | <erreur>   (fermeture de l'Application)
+desinstallation demarrage: garde (exe reste)
 desinstallation finie: complete | incomplete
 ```
 
@@ -1398,6 +1421,11 @@ place sur le disque C:. Libérez N Mo, puis réessayez. »), `ouvert`, `ecriture
   ferme par son interface, le tuer est un échec ; une « app qui ne se ferme pas » (mutex tenu)
   n'est jamais tuée ; « Fermer » pendant l'installation, en réussite et en erreur ;
   désinstallation (démarrage d'essai retiré, données gardées) ; état réel inchangé à la fin.
+  « Terminer » vérifie le chemin que le journal annonce (envol : la fenêtre part de sa place
+  réelle et se déplace ; fondu : elle reste immobile), puis une seconde fois sous
+  `BREEZYSHOT_ESSAI_ANIMATIONS=1` (l'envol doit jouer). Le « OK » de la boîte native (WebView2
+  absent) est pressé par Win32 (`BM_CLICK`, sinon `WM_COMMAND IDOK`). À la fin, un
+  installateur resté est fermé (échec) et la clé `Run` d'essai laissée vide est retirée.
 - La tâche `publier` vérifie qu'elle envoie exactement un `.exe`, qui ne s'appelle pas
   `breezyshot.exe` (sinon il serait l'app, pas l'installateur).
 

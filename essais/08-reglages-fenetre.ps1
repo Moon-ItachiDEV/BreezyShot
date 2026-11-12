@@ -1,7 +1,8 @@
 # Étape 10 : la fenêtre des Réglages et le démarrage avec Windows (ARCHITECTURE.md §3.5,
 # §4, §5, §6), sur le vrai .exe, avec de vrais clics et de vraies touches.
 #
-# (1) Démarrage : « demarrage: cle d'essai » (la vraie clé Run n'est ni lue ni écrite).
+# (1) Démarrage : « demarrage: cle d'essai » (la vraie clé Run n'est ni lue ni écrite) ;
+#     une valeur Run d'essai posée vers une autre copie est réécrite vers l'exe.
 # (2) Ouverture par le VRAI menu de l'icône : l'essai envoie à la fenêtre cachée de l'icône
 #     (classe « tray_icon_app » de l'app) le message que Windows lui envoie au clic droit,
 #     puis lit le menu (#32768) par l'API des menus Win32 (MN_GETHMENU, GetMenuStringW,
@@ -12,7 +13,8 @@
 # (4) Copie seule sortie : l'éteindre est refusé (« Gardez au moins… », reste allumée).
 #     Vignette allumée par la fenêtre, copie éteinte : Ctrl+Maj+2 : « sortie copie non
 #     demandee », presse-papiers inchangé, vignette préparée au coin et à la durée du
-#     réglage, partie au bout de 3 s ; vignette éteinte, copie rallumée. (5) vérifie
+#     réglage, partie au bout de 3 s ; l'éteindre, seule sortie, est refusé (second refus
+#     voulu) ; copie rallumée puis vignette éteinte. (5) vérifie
 #     ensuite qu'aucune vignette n'est plus préparée.
 # (5) Raccourci du plein écran changé au clavier en Ctrl+Maj+7 : raccourcis suspendus puis
 #     repris, fichier, Ctrl+Maj+7 capture, Ctrl+Maj+2 ne fait plus rien et est rendu à
@@ -369,6 +371,10 @@ public static string Titre(IntPtr h) {
 
     $reelAvant = Valeur-Run $CLE_RUN
     Remove-Item -LiteralPath $CLE_ESSAI -Recurse -Force -ErrorAction SilentlyContinue
+    # (1) Une valeur Run (clé d'essai) laissée par une autre copie de l'exe : l'app la
+    # réécrit vers elle-même au démarrage.
+    New-Item -Path $CLE_RUN_ESSAI -Force | Out-Null
+    New-ItemProperty -LiteralPath $CLE_RUN_ESSAI -Name 'BreezyShot' -Value '"C:\Ailleurs\breezyshot.exe"' -PropertyType String -Force | Out-Null
 
     # (1) Démarrage.
     $p = Demarrer-App -Dossier $cas
@@ -379,6 +385,10 @@ public static string Titre(IntPtr h) {
         throw "(1) pas de clé d'essai : arrêt avant tout geste sur le démarrage"
     }
     Verifier '(1) raccourci plein_ecran: Ctrl+Maj+2' ((Compter-Motif -Motif 'raccourci plein_ecran: Ctrl\+Maj\+2$' -Dossier $cas) -eq 1) | Out-Null
+    $vu = Valeur-Run $CLE_RUN_ESSAI
+    Verifier '(1) valeur Run d''une autre copie réécrite vers l''exe de l''essai' (((Compter-Motif -Motif 'demarrage avec le systeme: chemin mis a jour$' -Dossier $cas) -eq 1) -and ($vu -eq ('"' + $script:Essai.Exe + '"'))) "$vu" | Out-Null
+    # Retirée : le point 7 part d'un démarrage éteint.
+    Remove-ItemProperty -LiteralPath $CLE_RUN_ESSAI -Name 'BreezyShot' -ErrorAction SilentlyContinue
 
     # (2) Ouvrir par le vrai menu de l'icône.
     function Ouvrir-Par-Menu([string]$Quoi) {
@@ -494,10 +504,20 @@ public static string Titre(IntPtr h) {
     Verifier '(4) vignette au coin et à la durée du réglage' (($lv -match ' coin bas_gauche ') -and ($lv -match ' duree 3 ')) $lv | Out-Null
     $null = Attendre-Suivante 'vignette fermee \d+ delai$' $cas $delais '(4) vignette partie au bout de 3 s' 15
     $null = Attendre-Suivante 'Vignette -> Repos' $cas $finVignette '(4) retour au repos' 10
-    Cliquer-Interrupteur $fen 'Vignette' '(4) interrupteur Vignette (éteindre)'
-    $null = Attendre-Motif -Motif 'reglage change: vignette non$' -Dossier $cas -DelaiS 5 -Quoi '(4) vignette non'
+    # Second refus, voulu : la vignette est maintenant la seule sortie (copie et
+    # enregistrement éteints) ; l'éteindre est refusé, elle reste allumée.
+    $refuses = Compter-Motif -Motif 'reglage refuse: vignette \(aucune_sortie\)$' -Dossier $cas
+    Cliquer-Nom $fen 'Vignette' $INTERRUPTEUR '(4) Vignette, seule sortie'
+    $null = Attendre-Suivante 'reglage refuse: vignette \(aucune_sortie\)$' $cas $refuses '(4) second refus : dernière sortie'
+    Start-Sleep -Milliseconds 300
+    $etat = Etat-Interrupteur $fen 'Vignette'
+    Verifier '(4) second refus : Vignette reste allumée (interface et fichier)' (($etat -eq 'On') -and ((Lire-Reglages $cas).vignette.afficher -eq $true)) $etat | Out-Null
+    # Règle : chaque extinction laisse une sortie. Copie rallumée d'abord, puis vignette
+    # éteinte.
     Cliquer-Interrupteur $fen 'Copier automatiquement' '(4) interrupteur Copier (rallumer)'
     $null = Attendre-Motif -Motif 'reglage change: copier oui$' -Dossier $cas -DelaiS 5 -Quoi '(4) copier oui'
+    Cliquer-Interrupteur $fen 'Vignette' '(4) interrupteur Vignette (éteindre)'
+    $null = Attendre-Motif -Motif 'reglage change: vignette non$' -Dossier $cas -DelaiS 5 -Quoi '(4) vignette non'
 
     # (5) Ctrl+Maj+7 pour le plein écran.
     Cliquer-Nom $fen 'Raccourcis' ([System.Windows.Automation.ControlType]::TabItem) '(5) rubrique Raccourcis'

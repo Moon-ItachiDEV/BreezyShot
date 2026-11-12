@@ -107,17 +107,41 @@ function Ecrire-Reglages([string]$Dossier, [bool]$Afficher = $true, [string]$Coi
     $r | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $d 'reglages.json') -Encoding utf8
 }
 
+# Les 40 dernières lignes du journal de l'app sur la vignette, le souffle, ou de niveau
+# WARN / ERROR (ni chemin ni contenu, ARCHITECTURE §11), sans horodatage : un échec se lit
+# sans les fichiers de l'essai.
+$script:DossierCourant = $null
+function Diagnostic-Journal([string]$Dossier) {
+    if (-not $Dossier) { return '(aucun journal)' }
+    $l = @(Lignes-Journal $Dossier | Where-Object { $_ -match 'souffle|vignette|WARN|ERROR' } | Select-Object -Last 40 | ForEach-Object { $_ -replace '^\S+\s+', '' })
+    if ($l.Count -eq 0) { return '(journal : aucune ligne souffle, vignette, WARN ni ERROR)' }
+    return 'journal : ' + ($l -join ' | ')
+}
+
+# Le souffle n'arrête pas le cas : sa page absente est notée ($script:SoufflePret), la carte
+# entre sans lui (`souffle saute <id>: fenetre absente`) et le reste continue.
+$script:SoufflePret = $true
 function Demarrer-Cas([string]$Dossier, [string]$Quoi, [bool]$Capturable = $true) {
+    $script:DossierCourant = $Dossier
     if ($Capturable) { $env:BREEZYSHOT_ESSAI_CAPTURABLE = '1' }
     # Comptes d'avant : une relance dans le même dossier attend les lignes de son démarrage.
     $deja = @{}
     foreach ($m in @('application +pret$', 'bandeau pret$', 'vignette prete$', 'souffle pret$')) { $deja[$m] = Compter-Motif -Motif $m -Dossier $Dossier }
     try { $proc = Demarrer-App -Dossier $Dossier }
     finally { Remove-Item Env:BREEZYSHOT_ESSAI_CAPTURABLE -ErrorAction SilentlyContinue }
-    $null = Attendre-Motif -Motif 'application +pret$' -Dossier $Dossier -DelaiS 30 -Quoi "$Quoi : démarrage" -Fois ($deja['application +pret$'] + 1)
-    $null = Attendre-Motif -Motif 'bandeau pret$' -Dossier $Dossier -DelaiS 20 -Quoi "$Quoi : page du bandeau" -Fois ($deja['bandeau pret$'] + 1)
-    $null = Attendre-Motif -Motif 'vignette prete$' -Dossier $Dossier -DelaiS 20 -Quoi "$Quoi : page de la vignette" -Fois ($deja['vignette prete$'] + 1)
-    $null = Attendre-Motif -Motif 'souffle pret$' -Dossier $Dossier -DelaiS 20 -Quoi "$Quoi : page du souffle" -Fois ($deja['souffle pret$'] + 1)
+    try {
+        $null = Attendre-Motif -Motif 'application +pret$' -Dossier $Dossier -DelaiS 30 -Quoi "$Quoi : démarrage" -Fois ($deja['application +pret$'] + 1)
+        $null = Attendre-Motif -Motif 'bandeau pret$' -Dossier $Dossier -DelaiS 20 -Quoi "$Quoi : page du bandeau" -Fois ($deja['bandeau pret$'] + 1)
+        $null = Attendre-Motif -Motif 'vignette prete$' -Dossier $Dossier -DelaiS 20 -Quoi "$Quoi : page de la vignette" -Fois ($deja['vignette prete$'] + 1)
+    }
+    catch { throw "$_ ; $(Diagnostic-Journal $Dossier)" }
+    $detail = ''
+    try {
+        $null = Attendre-Motif -Motif 'souffle pret$' -Dossier $Dossier -DelaiS 20 -Quoi "$Quoi : page du souffle" -Fois ($deja['souffle pret$'] + 1)
+        $script:SoufflePret = $true
+    }
+    catch { $script:SoufflePret = $false; $detail = "$_ ; $(Diagnostic-Journal $Dossier)" }
+    Verifier "$Quoi : page du souffle prête" $script:SoufflePret $detail | Out-Null
     return $proc
 }
 
@@ -554,7 +578,7 @@ public static IntPtr[] FenetresDe(int[] pids) {
             Verifier '(2) Decoupe -> Souffle (ImagePrete), Souffle -> Vignette' ($texte.Contains('etat Decoupe -> Souffle (ImagePrete)') -and $texte.Contains('etat Souffle -> Vignette (SouffleTermine)')) | Out-Null
             $joue = $lignes | Where-Object { $_ -match "souffle joue $($c.Id) depart " } | Select-Object -First 1
             Verifier '(2) souffle joué depuis l''écran entier' ($null -ne $joue -and $joue -match "depart $($principal.X),$($principal.Y) $($principal.Width)x$($principal.Height) arrivee") "$joue" | Out-Null
-            Verifier '(2) fenêtre du souffle vue visible, puis cachée' (($c.Vues -gt 0) -and -not $V::IsWindowVisible($hs)) "relevés $($c.Vues)" | Out-Null
+            Verifier '(2) fenêtre du souffle vue visible, puis cachée' (($c.Vues -gt 0) -and -not $V::IsWindowVisible($hs)) "relevés $($c.Vues)$(if (-not $script:SoufflePret) { ' ; page du souffle jamais prête' })" | Out-Null
             $marge = 12
             Verifier '(2) carte au coin bas gauche de la zone utile, à 12 px (± 1)' (([math]::Abs($c.Carte.X - ($utile.X + $marge)) -le 1) -and ([math]::Abs(($c.Carte.Y + $c.Carte.H) - ($utile.Bottom - $marge)) -le 1)) "carte $($c.Carte.X),$($c.Carte.Y) $($c.Carte.L)x$($c.Carte.H), zone utile $utile" | Out-Null
             Verifier '(2) aucun bandeau pour cette capture' (@($lignes | Where-Object { $_ -match 'bandeau affiche ' }).Count -eq 0) | Out-Null
@@ -728,21 +752,28 @@ public static IntPtr[] FenetresDe(int[] pids) {
 
             # (13) Seconde capture pendant le souffle : ignorée. Le second appui part dès que la
             # fenêtre du souffle est visible (guettée toutes les 2 ms), pas au rythme du journal.
-            $ignores = Compter-Motif -Motif 'capture deja en cours: appui ignore' -Dossier $da
-            $debut13 = @(Lignes-Journal $da).Count
-            $vignettes13 = Compter-Motif -Motif 'etat Souffle -> Vignette' -Dossier $da
-            $vu13 = $V::AppuyerDeuxFoisQuandVisible($MODS, $TOUCHE_2, $hs, 5000)
-            $null = Attendre-Motif -Motif 'etat Souffle -> Vignette' -Dossier $da -DelaiS 5 -Quoi '(13) vignette' -Fois ($vignettes13 + 1)
-            Start-Sleep -Milliseconds 300
-            $l13 = @(Lignes-Depuis $da $debut13)
-            $iSouffle = [array]::FindIndex([string[]]$l13, [Predicate[string]] { param($x) $x -match 'etat Decoupe -> Souffle' })
-            $iIgnore = [array]::FindIndex([string[]]$l13, [Predicate[string]] { param($x) $x -match 'capture deja en cours: appui ignore' })
-            $iVignette = [array]::FindIndex([string[]]$l13, [Predicate[string]] { param($x) $x -match 'etat Souffle -> Vignette' })
-            Verifier '(13) souffle vu visible au second appui' $vu13 | Out-Null
-            Verifier '(13) appui pendant le souffle : ignoré, une seule capture' (((Compter-Motif -Motif 'capture deja en cours: appui ignore' -Dossier $da) -eq $ignores + 1) -and ($iSouffle -ge 0) -and ($iIgnore -gt $iSouffle) -and ($iIgnore -lt $iVignette) -and (@($l13 | Where-Object { $_ -match 'etat Decoupe -> Souffle' }).Count -eq 1)) "souffle $iSouffle, ignoré $iIgnore, vignette $iVignette" | Out-Null
-            $dernier = [int]((Derniere-Ligne -Motif 'vignette entree \d+$' -Dossier $da) -replace '^.*vignette entree ', '')
-            $null = Attendre-Motif -Motif "vignette fermee $dernier delai$" -Dossier $da -DelaiS 6 -Quoi '(13) fin'
-            Start-Sleep -Milliseconds 500
+            # Dépend du souffle : isolé, un échec est noté avec le journal et l'essai continue.
+            try {
+                $ignores = Compter-Motif -Motif 'capture deja en cours: appui ignore' -Dossier $da
+                $debut13 = @(Lignes-Journal $da).Count
+                $vignettes13 = Compter-Motif -Motif 'etat Souffle -> Vignette' -Dossier $da
+                $vu13 = $V::AppuyerDeuxFoisQuandVisible($MODS, $TOUCHE_2, $hs, 5000)
+                $null = Attendre-Motif -Motif 'etat Souffle -> Vignette' -Dossier $da -DelaiS 5 -Quoi '(13) vignette' -Fois ($vignettes13 + 1)
+                Start-Sleep -Milliseconds 300
+                $l13 = @(Lignes-Depuis $da $debut13)
+                $iSouffle = [array]::FindIndex([string[]]$l13, [Predicate[string]] { param($x) $x -match 'etat Decoupe -> Souffle' })
+                $iIgnore = [array]::FindIndex([string[]]$l13, [Predicate[string]] { param($x) $x -match 'capture deja en cours: appui ignore' })
+                $iVignette = [array]::FindIndex([string[]]$l13, [Predicate[string]] { param($x) $x -match 'etat Souffle -> Vignette' })
+                Verifier '(13) souffle vu visible au second appui' $vu13 | Out-Null
+                Verifier '(13) appui pendant le souffle : ignoré, une seule capture' (((Compter-Motif -Motif 'capture deja en cours: appui ignore' -Dossier $da) -eq $ignores + 1) -and ($iSouffle -ge 0) -and ($iIgnore -gt $iSouffle) -and ($iIgnore -lt $iVignette) -and (@($l13 | Where-Object { $_ -match 'etat Decoupe -> Souffle' }).Count -eq 1)) "souffle $iSouffle, ignoré $iIgnore, vignette $iVignette" | Out-Null
+                $dernier = [int]((Derniere-Ligne -Motif 'vignette entree \d+$' -Dossier $da) -replace '^.*vignette entree ', '')
+                $null = Attendre-Motif -Motif "vignette fermee $dernier delai$" -Dossier $da -DelaiS 6 -Quoi '(13) fin'
+                Start-Sleep -Milliseconds 500
+            }
+            catch {
+                Verifier '(13) déroulement' $false "$_ ; $(Diagnostic-Journal $da)" | Out-Null
+                Assurer-Repos '(13)'
+            }
 
             # (15) Fenêtres et fils stables après 10 vignettes ; mémoire au repos notée.
             $proc.Refresh()
@@ -824,7 +855,7 @@ public static IntPtr[] FenetresDe(int[] pids) {
     }
 }
 catch {
-    Verifier "essai interrompu : $_" $false | Out-Null
+    Verifier "essai interrompu : $_" $false (Diagnostic-Journal $script:DossierCourant) | Out-Null
     Write-Host $_.ScriptStackTrace
 }
 finally {
