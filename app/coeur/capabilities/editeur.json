@@ -1,0 +1,18 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "editeur",
+  "description": "Droits de la page de l'éditeur d'annotation : écouter ses événements et appeler ses huit commandes, rien d'autre (ni fichiers, ni dialogues, ni shell).",
+  "windows": ["editeur"],
+  "permissions": [
+    "core:event:allow-listen",
+    "core:event:allow-unlisten",
+    "allow-editeur-pret",
+    "allow-editeur-image",
+    "allow-editeur-affiche",
+    "allow-editeur-vue",
+    "allow-editeur-etat",
+    "allow-editeur-exporter",
+    "allow-editeur-fermer",
+    "allow-editeur-garder"
+  ]
+}

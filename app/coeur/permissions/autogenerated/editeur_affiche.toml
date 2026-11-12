@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-editeur-affiche"
+description = "Enables the editeur_affiche command without any pre-configured scope."
+commands.allow = ["editeur_affiche"]
+
+[[permission]]
+identifier = "deny-editeur-affiche"
+description = "Denies the editeur_affiche command without any pre-configured scope."
+commands.deny = ["editeur_affiche"]

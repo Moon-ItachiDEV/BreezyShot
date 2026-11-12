@@ -15,6 +15,8 @@ use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use super::nom::chemin_libre;
+use super::EtapeFichier;
+use crate::systeme::gel::Pixels;
 
 /// Nombre de noms essayes si d'autres ecritures prennent le nom entre-temps.
 const TENTATIVES: usize = 64;
@@ -47,6 +49,18 @@ pub(super) fn enregistrer(
     octets: &[u8],
 ) -> Result<PathBuf, String> {
     ecrire_sans_ecraser(dossier, affiche, octets, |d| chemin_libre(d, nom, existe))
+}
+
+/// Enregistre `pixels` en PNG exactement a `chemin` (Enregistrer sous... de l'editeur, 0.4) :
+/// temporaire du meme dossier, puis remplacement (l'utilisateur l'a confirme dans le
+/// dialogue du systeme). Alpha garde avec `transparence`, sinon force a 255.
+pub fn enregistrer_a(pixels: &Pixels, chemin: &Path, transparence: bool) -> EtapeFichier {
+    // Provisoire (D) : rien n'est ecrit.
+    let _ = (pixels, transparence);
+    EtapeFichier::Echec {
+        dossier: chemin.parent().map(Path::to_path_buf).unwrap_or_default(),
+        cause: "Enregistrer sous n'est pas encore construit.".into(),
+    }
 }
 
 /// Vrai si le dossier peut recevoir une ecriture : non vide et absolu.
