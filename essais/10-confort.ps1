@@ -476,7 +476,7 @@ public static string[] Ecarts(byte[] o, int s, int l, int h, int[] c, int max) {
             if (-not (Verifier "$Nom : taille ${COTE}x$COTE" (($Image.Width -eq $COTE) -and ($Image.Height -eq $COTE)) "obtenu $($Image.Width)x$($Image.Height)")) {
                 Garder-Image $Nom $Image; return
             }
-            $e = Ecarts-Temoin $Image 8
+            $e = @(Ecarts-Temoin $Image 8)
             if ($e[0] -ne 'total 0') { Garder-Image $Nom $Image }
             Verifier "$Nom : chaque pixel à la couleur du témoin" ($e[0] -eq 'total 0') ($e -join ' ; ') | Out-Null
         }
@@ -486,7 +486,7 @@ public static string[] Ecarts(byte[] o, int s, int l, int h, int[] c, int max) {
             if (-not (Verifier "$Nom : même taille" (($A.Width -eq $B.Width) -and ($A.Height -eq $B.Height)) "$($A.Width)x$($A.Height) contre $($B.Width)x$($B.Height)")) {
                 Garder-Image "$Nom-a" $A; Garder-Image "$Nom-b" $B; return
             }
-            $e = Comparer-Images $A $B 0 0 $A.Width $A.Height 0
+            $e = @(Comparer-Images $A $B 0 0 $A.Width $A.Height 0)
             if ($e[0] -ne 'total 0') { Garder-Image "$Nom-a" $A; Garder-Image "$Nom-b" $B }
             Verifier "$Nom : identiques pixel pour pixel" ($e[0] -eq 'total 0') ($e -join ' ; ') | Out-Null
         }
@@ -624,7 +624,7 @@ public static string[] Ecarts(byte[] o, int s, int l, int h, int[] c, int max) {
                 if (-not $C::GetMenuItemRect([IntPtr]::Zero, $m.Menu, [uint32]$pos, [ref]$ri)) { throw '(4) rectangle de l''entrée illisible' }
                 # Le menu est bien au-dessus du témoin, dans la zone : sinon le point ne prouve rien.
                 $vue = Copie-Ecran $x4 $y4 $cote4 $cote4
-                $ecartsMenu = Ecarts-Temoin $vue 1
+                $ecartsMenu = @(Ecarts-Temoin $vue 1)
                 $vue.Dispose()
                 Verifier '(4) le menu ouvert couvre le témoin dans la zone' ($ecartsMenu[0] -ne 'total 0') ($ecartsMenu -join ' ; ') | Out-Null
                 $n = @(Fichiers-Png $recents).Count
