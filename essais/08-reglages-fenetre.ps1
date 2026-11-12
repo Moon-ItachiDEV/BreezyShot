@@ -123,6 +123,10 @@ function Reglages-Du-Cas {
         selection                 = [ordered]@{ loupe = $false }
         capture                   = [ordered]@{ retardateur_s = 0; pointeur = $false }
         dossier_enregistrement    = $null
+        demarrer_avec_systeme     = $false
+        modele_nom                = 'BreezyShot {date} à {heure}'
+        animations                = 'systeme'
+        theme                     = 'systeme'
     }
 }
 
@@ -250,7 +254,8 @@ const uint MN_GETHMENU = 0x01E1;
 const uint MF_BYPOSITION = 0x400;
 // Le HMENU d'une fenêtre de menu (#32768), IntPtr.Zero si elle n'en donne pas.
 public static IntPtr MenuDe(IntPtr fenetre) { return SendMessage(fenetre, MN_GETHMENU, IntPtr.Zero, IntPtr.Zero); }
-// Texte de chaque position (avant une éventuelle tabulation) ; "" pour un séparateur.
+// Texte complet de chaque position (tabulation et raccourci compris : le point (5b) les
+// lit) ; "" pour un séparateur.
 public static string[] Textes(IntPtr menu) {
     int n = GetMenuItemCount(menu);
     if (n < 0) return null;
@@ -258,9 +263,7 @@ public static string[] Textes(IntPtr menu) {
     for (int i = 0; i < n; i++) {
         var t = new System.Text.StringBuilder(256);
         GetMenuString(menu, (uint)i, t, t.Capacity, MF_BYPOSITION);
-        var x = t.ToString();
-        int tab = x.IndexOf('\t');
-        textes[i] = tab >= 0 ? x.Substring(0, tab) : x;
+        textes[i] = t.ToString();
     }
     return textes;
 }
