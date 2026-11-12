@@ -1037,11 +1037,12 @@ Module pur : il reçoit le dossier où écrire, ne connaît ni Tauri ni les autr
   global reserve`, `bandeau decompte`, fenêtre visible centrée sur la zone utile (± 2 px),
   sans `WS_EX_APPWINDOW`, premier plan inchangé, disque peint (au moins 20 pixels `accent`
   ± 6), `fini en` entre 2950 et 3600 ms, `bandeau decompte cache` avant `chrono gel photo`,
-  le témoin exact sous le disque dans le PNG ; (6) second appui ignoré, une photo ; (7)
-  Échap : `annule (echap)`, `echap global libere`, aucune photo en 4 s, puis une capture
-  normale ; (8) clic réel au centre de `bandeau zone` : `bandeau action <id> annuler`,
-  `annule (croix)` ; (9) zone avec retardateur, PNG juste ; (11) `--quitter` pendant un
-  décompte : `annule (arret)`, aucune photo. Cas C (vignette allumée) : (10) `vignette
+  le témoin exact sous le disque dans le PNG ; (6) second appui ignoré, une photo ; (9)
+  zone avec retardateur, PNG juste. Cas B' (retardateur 10 s, pour qu'une annulation arrive
+  toujours avant la fin) : (7) Échap : `annule (echap)`, `echap global libere`, aucune
+  photo 11 s après le début, puis une capture normale ; (8) clic réel au centre de `bandeau
+  zone` : `bandeau action <id> annuler`, `annule (croix)`, aucune photo 11 s après le
+  début ; (11) `--quitter` pendant un décompte : `annule (arret)`, aucune photo. Cas C (vignette allumée) : (10) `vignette
   fermee <id> capture` à l'entrée du décompte. (12) Mémoire et chrono notés. Plusieurs
   écrans, échelles, menu d'une autre application et vrai verrouillage ne s'y vérifient pas.
 - Essai 11 sous Windows (`11-pointeur.ps1`, 0.4), avec la variable capturable et le

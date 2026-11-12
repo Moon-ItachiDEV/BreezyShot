@@ -524,18 +524,26 @@ public static string Titre(IntPtr h) {
     $copier = Element $fen 'Copier automatiquement' $INTERRUPTEUR 0.5
     Verifier '(3b) « Après la capture » fermée au départ' (($null -eq $copier) -or $copier.Current.IsOffscreen) $(if ($null -ne $copier) { Decrire $copier } else { '' }) | Out-Null
     # Retardateur : 3 s écrit, puis remis à Aucun (les captures suivantes partent tout de suite).
+    $ecrits = Compter-Motif -Motif 'reglages ecrits$' -Dossier $cas
     Cliquer-Nom $fen '3 s' $RADIO '(3b) retardateur 3 s'
     $null = Attendre-Motif -Motif 'reglage change: retardateur 3$' -Dossier $cas -DelaiS 5 -Quoi '(3b) retardateur 3'
+    $null = Attendre-Suivante 'reglages ecrits$' $cas $ecrits '(3b) retardateur 3 : écrit'
     Verifier '(3b) fichier : capture.retardateur_s = 3' ((Lire-Reglages $cas).capture.retardateur_s -eq 3) | Out-Null
+    $ecrits = Compter-Motif -Motif 'reglages ecrits$' -Dossier $cas
     Cliquer-Nom $fen 'Aucun' $RADIO '(3b) retardateur Aucun'
     $null = Attendre-Motif -Motif 'reglage change: retardateur 0$' -Dossier $cas -DelaiS 5 -Quoi '(3b) retardateur 0'
+    $null = Attendre-Suivante 'reglages ecrits$' $cas $ecrits '(3b) retardateur 0 : écrit'
     Verifier '(3b) fichier : capture.retardateur_s = 0' ((Lire-Reglages $cas).capture.retardateur_s -eq 0) | Out-Null
     # Inclure le pointeur : allumé puis éteint, chaque fois dans le fichier.
+    $ecrits = Compter-Motif -Motif 'reglages ecrits$' -Dossier $cas
     Cliquer-Interrupteur $fen 'Inclure le pointeur' '(3b) interrupteur Inclure le pointeur'
     $null = Attendre-Motif -Motif 'reglage change: pointeur oui$' -Dossier $cas -DelaiS 5 -Quoi '(3b) pointeur oui'
+    $null = Attendre-Suivante 'reglages ecrits$' $cas $ecrits '(3b) pointeur oui : écrit'
     Verifier '(3b) fichier : capture.pointeur true' ((Lire-Reglages $cas).capture.pointeur -eq $true) | Out-Null
+    $ecrits = Compter-Motif -Motif 'reglages ecrits$' -Dossier $cas
     Cliquer-Interrupteur $fen 'Inclure le pointeur' '(3b) interrupteur Inclure le pointeur (éteindre)'
     $null = Attendre-Motif -Motif 'reglage change: pointeur non$' -Dossier $cas -DelaiS 5 -Quoi '(3b) pointeur non'
+    $null = Attendre-Suivante 'reglages ecrits$' $cas $ecrits '(3b) pointeur non : écrit'
     Verifier '(3b) fichier : capture.pointeur false' ((Lire-Reglages $cas).capture.pointeur -eq $false) | Out-Null
     # La loupe a été écartée (12/11/2026) : aucun interrupteur « Loupe » dans la page.
     $loupe = Element $fen 'Loupe' $INTERRUPTEUR 0.5
@@ -625,12 +633,13 @@ public static string Titre(IntPtr h) {
     if (-not (Verifier '(5b) Ctrl+Maj+9 libre dans le fichier du cas' (@($pris).Count -eq 0))) { throw '(5b) Ctrl+Maj+9 déjà pris' }
     $susp = Compter-Motif -Motif 'raccourcis suspendus \(saisie derniere_zone\)$' -Dossier $cas
     $repris = Compter-Motif -Motif 'raccourcis repris$' -Dossier $cas
+    $ecrits = Compter-Motif -Motif 'reglages ecrits$' -Dossier $cas
     Cliquer-Nom $fen 'Refaire la dernière zone' ([System.Windows.Automation.ControlType]::Button) '(5b) raccourci de la dernière zone'
     $null = Attendre-Suivante 'raccourcis suspendus \(saisie derniere_zone\)$' $cas $susp '(5b) saisie'
     [BreezyShotEssai.Reglages]::Appuyer($CTRL_MAJ, 0x39)
     $null = Attendre-Motif -Motif 'raccourci derniere_zone change: Ctrl\+Maj\+9$' -Dossier $cas -DelaiS 5 -Quoi '(5b) changé'
     $null = Attendre-Suivante 'raccourcis repris$' $cas $repris '(5b) repris'
-    Start-Sleep -Milliseconds 300
+    $null = Attendre-Suivante 'reglages ecrits$' $cas $ecrits '(5b) écrit'
     $lu = @((Lire-Reglages $cas).raccourcis.derniere_zone)
     Verifier '(5b) fichier : derniere_zone = [Ctrl+Maj+9]' ((@($lu).Count -eq 1) -and ($lu[0] -eq 'Ctrl+Maj+9')) ($lu -join ',') | Out-Null
     # Le menu de l'icône (même message que Ouvrir-Par-Menu), lu sans rien y cliquer.

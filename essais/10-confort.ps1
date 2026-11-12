@@ -24,11 +24,12 @@
 #     décompte ;
 # (6) second appui juste après `bandeau decompte` : `capture deja en cours: appui
 #     ignore`, une photo ;
+# (9) zone avec retardateur : décompte, puis sélection en mode zone, glisser, PNG juste.
+# Cas B' (retardateur 10 s, vignette coupée : une annulation arrive toujours avant la fin) :
 # (7) Échap pendant un décompte : `annule (echap)`, `Decompte -> Repos`, `echap global
-#     libere`, aucune photo en 4 s, bandeau caché ; puis une capture normale ;
+#     libere`, aucune photo 11 s après le début, bandeau caché ; puis une capture normale ;
 # (8) croix : clic réel au centre du rectangle de `bandeau zone` → `bandeau action <id>
-#     annuler`, `annule (croix)`, premier plan inchangé ;
-# (9) zone avec retardateur : décompte, puis sélection en mode zone, glisser, PNG juste ;
+#     annuler`, `annule (croix)`, premier plan inchangé, aucune photo 11 s après le début ;
 # (11) --quitter pendant un décompte : `annule (arret)`, aucune photo, `arret propre`.
 # Cas C (retardateur 3 s, vignette allumée) :
 # (10) depuis la vignette : `vignette fermee <id> capture` à l'entrée du décompte.
@@ -454,14 +455,20 @@ public static string[] Ecarts(byte[] o, int s, int l, int h, int[] c, int max) {
         }
 
         # Attend un PNG de plus dans « Récents » (le n-ième) et le rend (dernier écrit).
-        function Attendre-Png([string]$Recents, [int]$Avant, [string]$Quoi) {
-            $limite = [DateTime]::UtcNow.AddSeconds(10)
+        function Attendre-Png([string]$Recents, [int]$Avant, [string]$Quoi, [int]$DelaiS = 10) {
+            $limite = [DateTime]::UtcNow.AddSeconds($DelaiS)
             do {
                 $pngs = @(Fichiers-Png $Recents)
                 if ($pngs.Count -gt $Avant) { Start-Sleep -Milliseconds 200; return (Lire-Png (@(Fichiers-Png $Recents))[-1].FullName) }
                 Start-Sleep -Milliseconds 50
             } while ([DateTime]::UtcNow -lt $limite)
-            throw "$Quoi : aucun PNG de plus dans « Récents » en 10 s (avant $Avant, maintenant $(@(Fichiers-Png $Recents).Count))"
+            throw "$Quoi : aucun PNG de plus dans « Récents » en $DelaiS s (avant $Avant, maintenant $(@(Fichiers-Png $Recents).Count))"
+        }
+
+        # Attend que $Secondes soient passées depuis $Depuis (rien si c'est déjà fait).
+        function Attendre-Jusqua([DateTime]$Depuis, [double]$Secondes) {
+            $reste = ($Depuis.AddSeconds($Secondes) - [DateTime]::UtcNow).TotalMilliseconds
+            if ($reste -gt 0) { Start-Sleep -Milliseconds ([int]$reste) }
         }
 
         # Le témoin, pixel pour pixel, dans une image de ${COTE}x$COTE.
@@ -705,48 +712,8 @@ public static string[] Ecarts(byte[] o, int s, int l, int h, int[] c, int max) {
                 Verifier '(6) une seule photo' (@(Fichiers-Png $recents).Count -eq $n + 1) "$(@(Fichiers-Png $recents).Count - $n) PNG" | Out-Null
                 $null = Attendre-Motif -Motif 'etat \w+ -> Repos' -Dossier $db -DelaiS 5 -Quoi '(5) Repos'
 
-                # (7) Échap pendant le décompte.
-                $n = @(Fichiers-Png $recents).Count
-                $photos = Compter-Motif -Motif 'chrono gel photo ' -Dossier $db
-                $liberes = Compter-Motif -Motif 'echap global libere$' -Dossier $db
-                $C::Touches($CTRL_MAJ_2)
-                $ld = Attendre-Motif -Motif 'decompte (\d+) debut 3 s plein_ecran$' -Dossier $db -DelaiS 5 -Quoi '(7) decompte debut' -Fois 2
-                $null = $ld -match 'decompte (\d+) debut'
-                $num = $Matches[1]
-                Start-Sleep -Milliseconds 500
-                $C::Touches($ECHAP)
-                $la = Attendre-Motif -Motif "decompte $num annule \(\w+\)$" -Dossier $db -DelaiS 3 -Quoi '(7) annulation'
-                Verifier '(7) annule (echap)' ($la -match 'annule \(echap\)$') $la | Out-Null
-                Verifier '(7) etat Decompte -> Repos (DecompteAnnule)' ((Compter-Motif -Motif 'etat Decompte -> Repos \(DecompteAnnule\)$' -Dossier $db) -eq 1) | Out-Null
-                $null = Attendre-Suivante 'echap global libere$' $db $liberes '(7) echap global libere'
-                Start-Sleep -Seconds 4
-                Verifier '(7) aucune photo en 4 s, bandeau caché' (((Compter-Motif -Motif 'chrono gel photo ' -Dossier $db) -eq $photos) -and (@(Fichiers-Png $recents).Count -eq $n) -and -not ($C::IsWindowVisible($bandeau))) "photos $photos → $(Compter-Motif -Motif 'chrono gel photo ' -Dossier $db), bandeau $($C::IsWindowVisible($bandeau))" | Out-Null
-                $C::Touches($CTRL_MAJ_2)
-                $null = Attendre-Png $recents $n '(7) capture normale après Échap'
-                Verifier '(7) puis une capture normale' $true | Out-Null
-                $null = Attendre-Motif -Motif 'etat \w+ -> Repos' -Dossier $db -DelaiS 5 -Quoi '(7) Repos' -Fois 3
-
-                # (8) La croix.
-                $n = @(Fichiers-Png $recents).Count
-                $premier = $C::GetForegroundWindow()
-                $debuts = Compter-Motif -Motif 'decompte \d+ debut ' -Dossier $db
-                $C::Touches($CTRL_MAJ_2)
-                $null = Attendre-Suivante 'decompte \d+ debut ' $db $debuts '(8) decompte debut'
-                $lb = Attendre-Motif -Motif 'bandeau decompte (\d+) ecran ' -Dossier $db -DelaiS 2 -Quoi '(8) bandeau decompte' -Fois ($debuts + 1)
-                $null = $lb -match 'bandeau decompte (\d+) ecran '
-                $id = $Matches[1]
-                $lzb = Attendre-Motif -Motif "bandeau zone $id (-?\d+),(-?\d+) (\d+)x(\d+)$" -Dossier $db -DelaiS 2 -Quoi '(8) bandeau zone de la croix'
-                $null = $lzb -match "bandeau zone $id (-?\d+),(-?\d+) (\d+)x(\d+)$"
-                $px = [int]$Matches[1] + [int]([int]$Matches[3] / 2); $py = [int]$Matches[2] + [int]([int]$Matches[4] / 2)
-                $C::Cliquer($px, $py)
-                $null = Attendre-Motif -Motif "bandeau action $id annuler$" -Dossier $db -DelaiS 2 -Quoi "(8) bandeau action (clic en $px,$py)"
-                $la = Attendre-Motif -Motif 'decompte \d+ annule \(\w+\)$' -Dossier $db -DelaiS 2 -Quoi '(8) annulation' -Fois 2
-                Verifier '(8) bandeau action annuler, annule (croix)' ($la -match 'annule \(croix\)$') $la | Out-Null
-                Verifier '(8) premier plan inchangé' ($C::GetForegroundWindow() -eq $premier) "avant $premier, après $($C::GetForegroundWindow())" | Out-Null
-                Start-Sleep -Seconds 4
-                Verifier '(8) aucune photo' (@(Fichiers-Png $recents).Count -eq $n) | Out-Null
-
                 # (9) Zone avec retardateur.
+                $n = @(Fichiers-Png $recents).Count
                 $montrees = Compter-Motif -Motif 'selection montree \d+ ' -Dossier $db
                 $pretes = Compter-Motif -Motif 'chrono selection prete \d+' -Dossier $db
                 $zones = Compter-Motif -Motif 'zone choisie ' -Dossier $db
@@ -763,7 +730,65 @@ public static string[] Ecarts(byte[] o, int s, int l, int h, int[] c, int max) {
                 Verifier '(9) zone choisie = le témoin' ($zc -match "zone choisie $TX,$TY ${COTE}x$COTE$") $zc | Out-Null
                 Verifier-Temoin '(9) PNG' $png
                 $png.Dispose()
-                $null = Attendre-Motif -Motif 'etat \w+ -> Repos' -Dossier $db -DelaiS 5 -Quoi '(9) Repos' -Fois 5
+                $null = Attendre-Motif -Motif 'etat \w+ -> Repos' -Dossier $db -DelaiS 5 -Quoi '(9) Repos' -Fois 2
+
+                Fermer-Cas $p $db '(B)'
+            }
+            catch { Verifier "(B) déroulement" $false "$_" | Out-Null }
+            finally { Arreter-Tout }
+
+            # ===== Cas B' : retardateur 10 s ========================================================
+            # Les annulations se jouent sur un décompte de 10 s : sur une machine lente, Échap, la
+            # croix ou --quitter arrivent toujours bien avant la fin.
+            try {
+                $db = Dossier-Cas 'b10'
+                Ecrire-Reglages -Dossier $db -Retardateur 10 -Vignette $false
+                $p = Demarrer-Cas -Dossier $db -Quoi "(B')"
+                $recents = Join-Path $db 'local/Recents'
+                $bandeau = Hwnd-Journal 'bandeau fenetre' $db 'HWND du bandeau'
+
+                # (7) Échap pendant le décompte.
+                $n = @(Fichiers-Png $recents).Count
+                $photos = Compter-Motif -Motif 'chrono gel photo ' -Dossier $db
+                $liberes = Compter-Motif -Motif 'echap global libere$' -Dossier $db
+                $C::Touches($CTRL_MAJ_2)
+                $ld = Attendre-Motif -Motif 'decompte (\d+) debut 10 s plein_ecran$' -Dossier $db -DelaiS 5 -Quoi '(7) decompte debut'
+                $t7 = [DateTime]::UtcNow
+                $null = $ld -match 'decompte (\d+) debut'
+                $num = $Matches[1]
+                Start-Sleep -Milliseconds 500
+                $C::Touches($ECHAP)
+                $la = Attendre-Motif -Motif "decompte $num annule \(\w+\)$" -Dossier $db -DelaiS 3 -Quoi '(7) annulation'
+                Verifier '(7) annule (echap)' ($la -match 'annule \(echap\)$') $la | Out-Null
+                Verifier '(7) etat Decompte -> Repos (DecompteAnnule)' ((Compter-Motif -Motif 'etat Decompte -> Repos \(DecompteAnnule\)$' -Dossier $db) -eq 1) | Out-Null
+                $null = Attendre-Suivante 'echap global libere$' $db $liberes '(7) echap global libere'
+                Attendre-Jusqua $t7 11
+                Verifier '(7) aucune photo 11 s après le début, bandeau caché' (((Compter-Motif -Motif 'chrono gel photo ' -Dossier $db) -eq $photos) -and (@(Fichiers-Png $recents).Count -eq $n) -and -not ($C::IsWindowVisible($bandeau))) "photos $photos → $(Compter-Motif -Motif 'chrono gel photo ' -Dossier $db), bandeau $($C::IsWindowVisible($bandeau))" | Out-Null
+                $C::Touches($CTRL_MAJ_2)
+                $null = Attendre-Png $recents $n '(7) capture normale après Échap' 15
+                Verifier '(7) puis une capture normale' $true | Out-Null
+                $null = Attendre-Motif -Motif 'etat \w+ -> Repos' -Dossier $db -DelaiS 5 -Quoi '(7) Repos' -Fois 2
+
+                # (8) La croix.
+                $n = @(Fichiers-Png $recents).Count
+                $premier = $C::GetForegroundWindow()
+                $debuts = Compter-Motif -Motif 'decompte \d+ debut ' -Dossier $db
+                $C::Touches($CTRL_MAJ_2)
+                $null = Attendre-Suivante 'decompte \d+ debut ' $db $debuts '(8) decompte debut'
+                $t8 = [DateTime]::UtcNow
+                $lb = Attendre-Motif -Motif 'bandeau decompte (\d+) ecran ' -Dossier $db -DelaiS 2 -Quoi '(8) bandeau decompte' -Fois ($debuts + 1)
+                $null = $lb -match 'bandeau decompte (\d+) ecran '
+                $id = $Matches[1]
+                $lzb = Attendre-Motif -Motif "bandeau zone $id (-?\d+),(-?\d+) (\d+)x(\d+)$" -Dossier $db -DelaiS 2 -Quoi '(8) bandeau zone de la croix'
+                $null = $lzb -match "bandeau zone $id (-?\d+),(-?\d+) (\d+)x(\d+)$"
+                $px = [int]$Matches[1] + [int]([int]$Matches[3] / 2); $py = [int]$Matches[2] + [int]([int]$Matches[4] / 2)
+                $C::Cliquer($px, $py)
+                $null = Attendre-Motif -Motif "bandeau action $id annuler$" -Dossier $db -DelaiS 2 -Quoi "(8) bandeau action (clic en $px,$py)"
+                $la = Attendre-Motif -Motif 'decompte \d+ annule \(\w+\)$' -Dossier $db -DelaiS 2 -Quoi '(8) annulation' -Fois 2
+                Verifier '(8) bandeau action annuler, annule (croix)' ($la -match 'annule \(croix\)$') $la | Out-Null
+                Verifier '(8) premier plan inchangé' ($C::GetForegroundWindow() -eq $premier) "avant $premier, après $($C::GetForegroundWindow())" | Out-Null
+                Attendre-Jusqua $t8 11
+                Verifier '(8) aucune photo 11 s après le début' (@(Fichiers-Png $recents).Count -eq $n) | Out-Null
 
                 # (11) --quitter pendant un décompte.
                 $n = @(Fichiers-Png $recents).Count
@@ -778,7 +803,7 @@ public static string[] Ecarts(byte[] o, int s, int l, int h, int[] c, int max) {
                 $null = Attendre-Motif -Motif 'arret propre$' -Dossier $db -DelaiS 3 -Quoi '(11) arrêt'
                 Verifier '(11) annule (arret), aucune photo, arret propre' (((Compter-Motif -Motif 'decompte \d+ annule \(arret\)$' -Dossier $db) -eq 1) -and ((Compter-Motif -Motif 'chrono gel photo ' -Dossier $db) -eq $photos) -and (@(Fichiers-Png $recents).Count -eq $n)) | Out-Null
             }
-            catch { Verifier "(B) déroulement" $false "$_" | Out-Null }
+            catch { Verifier "(B') déroulement" $false "$_" | Out-Null }
             finally { Arreter-Tout }
 
             # ===== Cas C : retardateur 3 s, vignette allumée ========================================
