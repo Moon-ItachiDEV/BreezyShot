@@ -222,6 +222,12 @@ impl Reglages {
         !self.protege && self.version_fichier <= VERSION_ACTUELLE
     }
 
+    /// Vrai si ces réglages sont les valeurs par défaut mises à la place d'un fichier qu'on
+    /// n'a pas pu lire ou mettre de côté (verrou, droits) : ils ne disent rien du fichier.
+    pub fn protege(&self) -> bool {
+        self.protege
+    }
+
     /// Valeurs par défaut marquées « protégées » (voir `enregistrable`).
     pub(in crate::reglages) fn par_defaut_protege(plateforme: Plateforme) -> Self {
         Reglages {

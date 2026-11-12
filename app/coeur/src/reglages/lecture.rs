@@ -146,7 +146,7 @@ pub(super) fn interpreter(objet: Map<String, Value>, plateforme: Plateforme) -> 
         c,
     );
     let dossier_enregistrement = lire(&mut m, "", "dossier_enregistrement", None, lire_dossier, c);
-    let modele_nom = lire(&mut m, "", "modele_nom", d.modele_nom, texte_non_vide, c);
+    let modele_nom = lire(&mut m, "", "modele_nom", d.modele_nom, modele_valide, c);
     let animations = lire(
         &mut m,
         "",
@@ -236,6 +236,12 @@ fn texte_non_vide(v: &Value) -> Option<String> {
     v.as_str()
         .filter(|s| !s.trim().is_empty())
         .map(str::to_string)
+}
+
+/// Modèle de nom : non vide, et pas plus long que `MODELE_NOM_MAX` (même règle que
+/// `valider`).
+fn modele_valide(v: &Value) -> Option<String> {
+    texte_non_vide(v).filter(|s| s.chars().count() <= super::fichier::MODELE_NOM_MAX)
 }
 
 /// `null` = dossier par défaut ; un texte vide (ou fait d'espaces) est invalide.

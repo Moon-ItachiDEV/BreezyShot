@@ -444,7 +444,8 @@ Module pur : il reçoit le dossier où écrire, ne connaît ni Tauri ni les autr
   copie est rallumée à la lecture, et `ecrire` refuse cette combinaison.
 - Écriture atomique (fichier temporaire puis renommage), JSON indenté, UTF-8, fin de ligne finale.
 - `valider(&Reglages)` dit sans toucher au disque ce que `ecrire` refuserait (aucune sortie
-  active, durée invalide, modèle de nom vide, dossier vide) : la fenêtre Réglages refuse un
+  active, durée invalide, modèle de nom vide ou de plus de `MODELE_NOM_MAX` caractères,
+  dossier vide) : la fenêtre Réglages refuse un
   changement avant de l'appliquer. `ErreurEcriture::code()` et `Constat::code()` donnent un
   code court sans chemin, pour les nouvelles lignes du journal.
 - Interface : `charger(dossier, plateforme) -> (Reglages, Vec<Constat>)`, `ecrire(dossier,
@@ -653,7 +654,9 @@ Module pur : il reçoit le dossier où écrire, ne connaît ni Tauri ni les autr
 
 - Fenêtre ordinaire unique (étiquette `reglages`, « Réglages de BreezyShot », 780 × 540,
   560 × 420 au moins, redimensionnable, dans la barre des tâches), créée à la demande par le
-  menu de l'icône et détruite à la fermeture ; une seconde demande la ramène devant.
+  menu de l'icône et détruite à la fermeture ; une seconde demande la ramène devant. Elle
+  s'ouvre centrée dans la zone utile de l'écran de la souris (`place::centrer`, pixels
+  réels avec l'échelle de cet écran, bornée à la zone utile).
   `fenetres::reglages` la crée et l'envoie ; `application::fenetre_reglages` tient les
   commandes ; `application::page_reglages` prend toutes les décisions (fonctions pures).
 - **La page ne décide rien.** Elle appelle `reglages_lire` (à l'ouverture et à chaque retour
@@ -671,14 +674,25 @@ Module pur : il reçoit le dossier où écrire, ne connaît ni Tauri ni les autr
   enregistrés » s'affiche. Avant d'écrire, le fichier est relu : s'il a changé depuis la
   dernière lecture (main de l'utilisateur), il est adopté puis le changement appliqué
   dessus ; un changement extérieur n'est jamais écrasé. Le disque n'est pas surveillé.
+  Un fichier relu mais illisible (verrou passager, valeurs « protégées ») ne compte pas
+  comme un changement : la mémoire reste la base (`page_reglages::relecture`, pure).
+- Le modèle de nom fait au plus `MODELE_NOM_MAX` (200) caractères : refus « Nom trop long »
+  dans la page, valeur par défaut à la lecture d'un fichier plus long.
+- Refus des raccourcis : ils s'effacent quand la saisie est annulée (Échap, perte du
+  focus, filet des 15 s) et à la fermeture. La vue porte `saisie_en_cours` : poussée par
+  le filet, elle fait sortir la page de « Appuyez… ». Une liste vide écrite à la main
+  rend le raccourci au système (`raccourci <action> change: aucun`), sans refus. À l'arrêt,
+  la fenêtre est fermée avant la libération des raccourcis.
 - **Dossier** : « Parcourir… » ouvre le sélecteur de dossier de Windows
   (`systeme::choisir_dossier`, `IFileOpenDialog` en mode dossier, fil STA à part, modal à
-  la fenêtre). La page n'en montre que le nom court ; le chemin n'est jamais au journal.
+  la fenêtre). Un seul à la fois : un second « Parcourir… » est ignoré tant que le premier
+  est ouvert. La page n'en montre que le nom court ; le chemin n'est jamais au journal.
 - **Démarrer avec Windows** : `systeme::demarrage_avec_systeme(Some(oui))` écrit ou efface
   la valeur `BreezyShot` (`"<current_exe>"` entre guillemets) de la clé `Run`, `None` la lit.
   `EtatDemarrage` : `Actif`, `Inactif`, `DesactiveParWindows` (désactivé dans le Gestionnaire
   des tâches : `StartupApproved\Run`, affiché éteint, jamais réactivé par l'app),
-  `Indisponible` (hors Windows). Avec `BREEZYSHOT_DOSSIER_ESSAI`, la clé est
+  `Indisponible` (hors Windows). Avec `BREEZYSHOT_DOSSIER_ESSAI` non vide (même règle que
+  les dossiers), la clé est
   `HKCU\Software\BreezyShot\Essais\Run` (`demarrage: cle d'essai`). L'installateur pourra
   appeler `demarrage_avec_systeme(Some(false))`.
 - **Thème** : `fenetres::theme::fixer` émet `interface:theme { theme: "light"|"dark"|null }`
@@ -688,16 +702,21 @@ Module pur : il reçoit le dossier où écrire, ne connaît ni Tauri ni les autr
 - **Habillage provisoire** : `reglages.css` n'utilise que les jetons ; le comportement
   (`reglages.js`) et les essais ne s'appuient que sur les attributs `data-*`, les rôles et
   les noms accessibles, pour que le design puisse être refait sans y toucher.
-- Lignes du journal (contrat des essais, sans chemin) : `menu: reglages`,
-  `reglages fenetre <hwnd>`, `reglages ramenes devant`, `reglages page prete`,
-  `reglages fermes`, `demarrage avec le systeme: actif|inactif|desactive_par_windows|indisponible`,
+- Lignes du journal (contrat des essais, sans chemin, jamais un texte brut de la page) :
+  `menu: reglages`, `reglages fenetre <hwnd>`, `reglages ramenes devant`,
+  `reglages non ouverts: <erreur>`, `reglages page prete` (une fois par fenêtre créée),
+  `reglages fermes`, `demarrage avec le systeme: actif|inactif|desactive par windows|indisponible`,
+  `demarrage avec le systeme: echec (<erreur>)`, `reglages relus: <code du constat>`,
   `reglage change: <ligne> <valeur>` (`reglage change: modele_nom`, `reglage change: dossier`
   sans valeur), `reglage refuse: <ligne> (<code>)`, `reglages ecrits`,
   `reglages non ecrits: <code>`, `reglages relus: changes exterieurs`,
   `theme interface: systeme|clair|sombre`, `demarrage avec le systeme ecrit: oui|non`,
-  `dossier: dialogue annule`, `raccourcis suspendus (saisie <action>)`, `raccourcis repris`,
-  `raccourcis repris d'office`, `raccourci <action> change: <canonique>`,
-  `raccourci <action> refuse: <candidat> (<raison>)`.
+  `dossier: dialogue annule`, `dossier: dialogue impossible (<erreur>)`,
+  `dossier: dialogue deja ouvert`, `raccourcis suspendus (saisie <action>)`,
+  `raccourcis repris`, `raccourcis repris d'office`,
+  `raccourci <action> change: <canonique>|aucun`,
+  `raccourci <action> refuse: <candidat> (<raison>)` (une touche refusée par la page :
+  son code, ASCII imprimable, 24 caractères au plus), `raccourci <action> perdu a la reprise`.
 
 ## 7. Vérification
 
@@ -710,8 +729,8 @@ Module pur : il reçoit le dossier où écrire, ne connaît ni Tauri ni les autr
   raccourci, thème), sur une vue simulée.
 - Essai 08 sous Windows (`08-reglages-fenetre.ps1`) : ouverture par le vrai menu de l'icône
   (si le menu ne s'ouvre pas, l'essai échoue en le disant), fenêtre unique ramenée devant,
-  changements écrits, raccourci changé à chaud puis refusé quand une autre application le
-  tient, démarrage avec Windows sur la clé d'essai seulement (la vraie clé `Run` est relue
+  changements écrits, raccourci changé à chaud (l'ancien rendu à Windows) puis refusé
+  quand une autre application le tient, démarrage avec Windows sur la clé d'essai seulement (la vraie clé `Run` est relue
   inchangée à la fin), sélecteur de dossier puis capture enregistrée dedans, changement
   extérieur gardé, thème sombre peint, fermeture, arrêt propre.
 - Essai 03 sous Windows, en plus des raccourcis : style étendu du bandeau (outil, sans
