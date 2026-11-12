@@ -94,8 +94,9 @@ fn couverture(i: u32, j: u32, rayon: f64) -> u8 {
 /// quart de cercle de rayon `rayon`, l'alpha tombe à 0 ; sur le bord, il vaut la part du
 /// pixel couverte (bord adouci), multipliée par l'alpha déjà là. Les couleurs ne changent
 /// pas. Le pixel même du coin n'est à 0 qu'à partir d'un rayon de 4 : en dessous, le
-/// cercle en couvre vraiment une part (π/4 pour un rayon de 1), qui est gardée. Rayon nul ou négatif : rien. Des pixels incohérents ou plus petits que le rayon :
-/// jamais de panique.
+/// cercle en couvre vraiment une part (π/4 pour un rayon de 1), qui est gardée. Rayon nul
+/// ou négatif : rien. Des pixels incohérents ou plus petits que le rayon : jamais de
+/// panique.
 pub fn arrondir(pixels: &mut Pixels, rayon: i32, coins: [bool; 4]) {
     let (largeur, hauteur) = (pixels.largeur as usize, pixels.hauteur as usize);
     let attendu = largeur.checked_mul(hauteur).and_then(|n| n.checked_mul(4));

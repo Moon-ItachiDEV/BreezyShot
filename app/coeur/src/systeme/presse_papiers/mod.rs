@@ -56,8 +56,8 @@ impl ImagePreparee {
     /// Un essai : ouvre le presse-papiers (6 ouvertures au plus, séparées de 5 ms, comme
     /// `arboard`), le vide et y pose les deux versions, le PNG d'abord. `Occupe` si
     /// aucune ouverture ne réussit : rien n'est donné, un nouvel essai est permis. Après
-    /// une réussite ou un `Refuse`, les blocs ne sont plus là : un nouvel essai répond
-    /// `Refuse`. N'importe quel fil.
+    /// une réussite, ou après un refus du second format, les blocs ne sont plus là : un
+    /// nouvel essai répond `Refuse`. N'importe quel fil.
     pub fn poser(&mut self) -> Result<(), ErreurPressePapiers> {
         plateforme::poser(&mut self.interne)
     }

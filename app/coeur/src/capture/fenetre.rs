@@ -63,6 +63,13 @@ fn echelle_de(fenetre: Rect, ecrans: &[EcranInfo]) -> f64 {
     }
 }
 
+/// Le rayon appliqué à la découpe : celui de la fenêtre (`rayon_coins`), plafonné à la
+/// moitié du petit côté de la partie coupée (`zone`), comme le fait la page : l'image a
+/// l'arrondi que l'utilisateur a vu. Jamais négatif.
+pub fn rayon_plafonne(rayon: i32, zone: Rect) -> i32 {
+    rayon.min(zone.largeur.min(zone.hauteur) / 2).max(0)
+}
+
 /// Coins de la zone à arrondir : haut gauche, haut droit, bas gauche, bas droit. Vrai
 /// seulement si ce coin de la zone est un vrai coin de la fenêtre (une fenêtre coupée
 /// par le bord de l'écran garde des coins droits de ce côté).
@@ -77,6 +84,19 @@ pub fn coins_a_arrondir(fenetre: Rect, zone: Rect) -> [bool; 4] {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn rayon_plafonne_a_la_partie_coupee() {
+        // Fenêtre entière : rien ne change.
+        assert_eq!(rayon_plafonne(8, r(0, 0, 400, 300)), 8);
+        // Partie coupée de 10 px de haut : au plus 5.
+        assert_eq!(rayon_plafonne(8, r(0, 1070, 400, 10)), 5);
+        assert_eq!(rayon_plafonne(16, r(0, 0, 7, 300)), 3);
+        // Coins droits, ou rayon absurde : 0 au moins.
+        assert_eq!(rayon_plafonne(0, r(0, 0, 400, 300)), 0);
+        assert_eq!(rayon_plafonne(-3, r(0, 0, 400, 300)), 0);
+        assert_eq!(rayon_plafonne(8, r(0, 0, 0, 0)), 0);
+    }
 
     fn r(x: i32, y: i32, largeur: i32, hauteur: i32) -> Rect {
         Rect {

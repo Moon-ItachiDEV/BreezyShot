@@ -301,8 +301,8 @@ pub struct EtatFenetre {
 }
 
 /// Règle du mode « fenêtre » : visible, non réduite, non masquée, pas à BreezyShot, ni
-/// traversée par les clics (calque et transparente à la fois), ni le bureau, et d'une taille non nulle. La barre des tâches
-/// reste une fenêtre comme une autre.
+/// traversée par les clics (calque et transparente à la fois), ni le bureau, et d'une
+/// taille non nulle. La barre des tâches reste une fenêtre comme une autre.
 pub fn garder_fenetre(etat: EtatFenetre, rect: Rect) -> bool {
     etat.visible
         && !etat.reduite
