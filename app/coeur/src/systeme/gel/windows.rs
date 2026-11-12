@@ -6,23 +6,26 @@
 //! procédure de la fenêtre prend `IMAGE` pour peindre : un verrou gardé à ce moment-là
 //! bloquerait le fil. Un verrou empoisonné (fil qui a paniqué) est repris, jamais déballé.
 
-use std::sync::atomic::{AtomicIsize, Ordering};
+use std::cell::RefCell;
+use std::sync::atomic::{AtomicBool, AtomicIsize, AtomicUsize, Ordering};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
 use ::windows::core::{w, BOOL, PCWSTR};
 use ::windows::Win32::Foundation::{
-    GetLastError, ERROR_CLASS_ALREADY_EXISTS, HINSTANCE, HWND, LPARAM, LRESULT, RECT, WPARAM,
+    GetLastError, COLORREF, ERROR_CLASS_ALREADY_EXISTS, HINSTANCE, HWND, LPARAM, LRESULT, POINT,
+    RECT, SIZE, WPARAM,
 };
 use ::windows::Win32::Graphics::Dwm::{
     DwmGetWindowAttribute, DwmSetWindowAttribute, DWMWA_CLOAKED, DWMWA_EXTENDED_FRAME_BOUNDS,
     DWMWA_TRANSITIONS_FORCEDISABLED, DWMWA_WINDOW_CORNER_PREFERENCE,
 };
 use ::windows::Win32::Graphics::Gdi::{
-    BeginPaint, BitBlt, CreateCompatibleBitmap, CreateCompatibleDC, DeleteDC, DeleteObject,
-    EndPaint, EnumDisplayMonitors, GdiFlush, GetDC, GetDIBits, GetMonitorInfoW, ReleaseDC,
-    SelectObject, ValidateRect, BITMAPINFO, BITMAPINFOHEADER, BI_RGB, CAPTUREBLT, DIB_RGB_COLORS,
-    HBITMAP, HDC, HGDIOBJ, HMONITOR, MONITORINFO, PAINTSTRUCT, SRCCOPY,
+    BeginPaint, BitBlt, CreateCompatibleBitmap, CreateCompatibleDC, CreateDIBSection, DeleteDC,
+    DeleteObject, EndPaint, EnumDisplayMonitors, GdiFlush, GetDC, GetDIBits, GetMonitorInfoW,
+    GetObjectW, ReleaseDC, SelectObject, ValidateRect, AC_SRC_ALPHA, AC_SRC_OVER, BITMAP,
+    BITMAPINFO, BITMAPINFOHEADER, BI_RGB, BLENDFUNCTION, CAPTUREBLT, DIB_RGB_COLORS, HBITMAP, HDC,
+    HGDIOBJ, HMONITOR, MONITORINFO, PAINTSTRUCT, SRCCOPY,
 };
 use ::windows::Win32::System::LibraryLoader::{GetModuleHandleW, GetProcAddress};
 use ::windows::Win32::System::RemoteDesktop::{
@@ -31,21 +34,26 @@ use ::windows::Win32::System::RemoteDesktop::{
 use ::windows::Win32::System::Threading::{GetCurrentProcessId, GetCurrentThreadId};
 use ::windows::Win32::UI::HiDpi::{GetDpiForMonitor, MDT_EFFECTIVE_DPI};
 use ::windows::Win32::UI::WindowsAndMessaging::{
-    CreateWindowExW, DefWindowProcW, DestroyWindow, EnumWindows, GetClassNameW, GetSystemMetrics,
-    GetWindowLongW, GetWindowRect, GetWindowTextW, GetWindowThreadProcessId, IsIconic, IsWindow,
-    IsWindowVisible, IsZoomed, LoadCursorW, PostMessageW, RegisterClassW, SendMessageTimeoutW,
-    SetWindowPos, ShowWindow, ShowWindowAsync, GWL_EXSTYLE, GWL_STYLE, HWND_TOPMOST, IDC_CROSS,
-    MA_NOACTIVATE, MONITORINFOF_PRIMARY, SMTO_ABORTIFHUNG, SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN,
-    SM_XVIRTUALSCREEN, SM_YVIRTUALSCREEN, SWP_NOACTIVATE, SWP_SHOWWINDOW, SW_HIDE, WM_CLOSE,
-    WM_DESTROY, WM_DISPLAYCHANGE, WM_DPICHANGED, WM_ERASEBKGND, WM_MOUSEACTIVATE, WM_NULL,
-    WM_PAINT, WM_WTSSESSION_CHANGE, WNDCLASSW, WNDPROC, WS_CAPTION, WS_EX_LAYERED,
-    WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_EX_TRANSPARENT, WS_POPUP, WS_THICKFRAME,
-    WTS_SESSION_LOCK,
+    CreateWindowExW, DefWindowProcW, DestroyWindow, DrawIconEx, EnumWindows, GetClassNameW,
+    GetCursorInfo, GetCursorPos, GetIconInfo, GetSystemMetrics, GetWindow,
+    GetWindowDisplayAffinity, GetWindowLongW, GetWindowRect, GetWindowTextW,
+    GetWindowThreadProcessId, IsIconic, IsWindow, IsWindowVisible, IsZoomed, KillTimer,
+    LoadCursorW, PostMessageW, RegisterClassW, SendMessageTimeoutW, SetTimer,
+    SetWindowDisplayAffinity, SetWindowPos, ShowWindow, ShowWindowAsync, UpdateLayeredWindow,
+    CURSORINFO, DI_NORMAL, GWL_EXSTYLE, GWL_STYLE, GW_HWNDPREV, HICON, HWND_TOPMOST, ICONINFO,
+    IDC_CROSS, MA_NOACTIVATE, MONITORINFOF_PRIMARY, SMTO_ABORTIFHUNG, SM_CXVIRTUALSCREEN,
+    SM_CYVIRTUALSCREEN, SM_XVIRTUALSCREEN, SM_YVIRTUALSCREEN, SWP_NOACTIVATE, SWP_NOMOVE,
+    SWP_NOOWNERZORDER, SWP_NOSIZE, SWP_SHOWWINDOW, SW_HIDE, ULW_ALPHA, WDA_EXCLUDEFROMCAPTURE,
+    WM_APP, WM_CLOSE, WM_DESTROY, WM_DISPLAYCHANGE, WM_DPICHANGED, WM_ERASEBKGND, WM_MOUSEACTIVATE,
+    WM_NULL, WM_PAINT, WM_TIMER, WM_WTSSESSION_CHANGE, WNDCLASSW, WNDPROC, WS_CAPTION,
+    WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_EX_TRANSPARENT, WS_POPUP,
+    WS_THICKFRAME, WTS_SESSION_LOCK,
 };
 
 use super::{
-    bgra_en_rgba, coins_de, echelle_depuis_dpi, est_classe_du_bureau, garder_fenetre, Changement,
-    Coins, EcranInfo, EtatCoins, EtatFenetre, FenetreInfo, Pixels, Pointeur, Rect,
+    bgra_en_rgba, coins_de, echelle_depuis_dpi, est_classe_du_bureau, garder_fenetre, loupe,
+    pointeur_montre, taille_pointeur, Changement, Coins, EcranInfo, EtatCoins, EtatFenetre,
+    FenetreInfo, Pixels, Pointeur, Rect,
 };
 
 pub const DISPONIBLE: bool = true;
@@ -818,6 +826,7 @@ unsafe extern "system" fn procedure_ecran_fige(
             if !peinte {
                 // Plus d'image à montrer : jamais un écran figé vide ou faux.
                 retirer_marque();
+                cacher_loupe();
                 // SAFETY : notre fenêtre, sur son fil.
                 unsafe {
                     let _ = ShowWindow(hwnd, SW_HIDE);
@@ -850,6 +859,7 @@ pub fn surveillance_session() -> bool {
 /// Cache l'écran figé et, s'il était montré, prévient l'Application (sans verrou tenu).
 fn cacher_et_prevenir(hwnd: HWND, changement: Changement) {
     retirer_marque();
+    cacher_loupe();
     // SAFETY : notre fenêtre, sur son fil.
     let etait_visible = unsafe {
         let visible = IsWindowVisible(hwnd).as_bool();
@@ -906,6 +916,8 @@ pub fn preparer_ecran_fige() -> Result<(), String> {
             // SAFETY : simple vérification, aucun message envoyé.
             if unsafe { IsWindow(Some(f.hwnd)) }.as_bool() {
                 return if f.fil == fil {
+                    drop(garde);
+                    preparer_loupe_ou_le_dire(fil);
                     Ok(())
                 } else {
                     Err("ecran fige deja cree sur un autre fil".into())
@@ -952,7 +964,15 @@ pub fn preparer_ecran_fige() -> Result<(), String> {
     // Course improbable (deux appels en même temps) : l'autre fenêtre est détruite ici,
     // hors du verrou.
     drop(ancienne);
+    preparer_loupe_ou_le_dire(fil);
     Ok(())
+}
+
+/// La loupe est créée avec l'écran figé ; sans elle, l'écran figé marche quand même.
+fn preparer_loupe_ou_le_dire(fil: u32) {
+    if let Err(e) = preparer_loupe(fil) {
+        log::warn!("loupe impossible: {e}");
+    }
 }
 
 pub fn montrer_ecran_fige(image: &Image) -> Result<(), String> {
@@ -1015,8 +1035,9 @@ pub fn montrer_ecran_fige(image: &Image) -> Result<(), String> {
 
 pub fn cacher_ecran_fige() {
     // La marque est retirée dès la demande, même postée : la fenêtre ne peindra plus
-    // cette photo (une peinture sans marque cache la fenêtre).
+    // cette photo (une peinture sans marque cache la fenêtre). La loupe part avec.
     retirer_marque();
+    cacher_loupe();
     let Some((hwnd, fil)) = fenetre_figee() else {
         return;
     };
@@ -1033,6 +1054,7 @@ pub fn cacher_ecran_fige() {
 
 pub fn detruire_ecran_fige() {
     retirer_marque();
+    detruire_loupe();
     let fenetre = verrouiller(&ECRAN).take();
     // Hors du verrou : `DestroyWindow` envoie des messages.
     drop(fenetre);
@@ -1043,22 +1065,568 @@ pub fn poignee_ecran_fige() -> Option<isize> {
 }
 
 // ---------------------------------------------------------------------------------------
-// Pointeur et loupe (0.4) : corps vides du socle, remplis par le chantier « Pointeur et
-// loupe » (`GetCursorInfo`, `DrawIconEx` ; fenêtre native `BreezyShotLoupe`).
+// Une section DIB 32 bits, de haut en bas, sélectionnée dans un DC en mémoire : ses octets
+// (BGRA) se lisent et s'écrivent directement. Pointeur et loupe (0.4).
+
+struct Dib {
+    dc: DcMemoire,
+    _bitmap: Bitmap,
+    ancien: HGDIOBJ,
+    bits: *mut u8,
+    largeur: i32,
+    hauteur: i32,
+}
+
+impl Dib {
+    fn nouvelle(largeur: i32, hauteur: i32) -> Result<Dib, String> {
+        if largeur <= 0 || hauteur <= 0 {
+            return Err(format!("taille d'image invalide ({largeur}x{hauteur})"));
+        }
+        // SAFETY : DC en mémoire compatible avec l'écran.
+        let dc = unsafe { CreateCompatibleDC(None) };
+        if dc.is_invalid() {
+            return Err("CreateCompatibleDC a echoue".into());
+        }
+        let dc = DcMemoire(dc);
+        let info = BITMAPINFO {
+            bmiHeader: BITMAPINFOHEADER {
+                biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
+                biWidth: largeur,
+                // Hauteur négative : lignes de haut en bas.
+                biHeight: -hauteur,
+                biPlanes: 1,
+                biBitCount: 32,
+                biCompression: BI_RGB.0,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let mut bits: *mut core::ffi::c_void = std::ptr::null_mut();
+        // SAFETY : `info` décrit une image 32 bits sans table de couleurs ; `bits` reçoit
+        // l'adresse des pixels, valide tant que le bitmap existe.
+        let bitmap =
+            unsafe { CreateDIBSection(Some(dc.0), &info, DIB_RGB_COLORS, &mut bits, None, 0) }
+                .map_err(|e| format!("CreateDIBSection {largeur}x{hauteur}: {e}"))?;
+        let bitmap = Bitmap(bitmap);
+        if bits.is_null() {
+            return Err("CreateDIBSection sans pixels".into());
+        }
+        // SAFETY : DC et bitmap valides, possédés ici.
+        let ancien = unsafe { SelectObject(dc.0, bitmap.0.into()) };
+        if ancien.is_invalid() {
+            return Err("SelectObject de la section DIB a echoue".into());
+        }
+        Ok(Dib {
+            dc,
+            _bitmap: bitmap,
+            ancien,
+            bits: bits.cast(),
+            largeur,
+            hauteur,
+        })
+    }
+
+    /// Les octets de l'image, après avoir fini les dessins GDI en attente.
+    fn octets(&mut self) -> &mut [u8] {
+        // SAFETY : `bits` couvre largeur × hauteur × 4 octets (32 bits, aucune ligne n'est
+        // complétée) tant que le bitmap vit ; `&mut self` empêche tout autre accès.
+        unsafe {
+            let _ = GdiFlush();
+            std::slice::from_raw_parts_mut(
+                self.bits,
+                self.largeur as usize * self.hauteur as usize * 4,
+            )
+        }
+    }
+}
+
+impl Drop for Dib {
+    fn drop(&mut self) {
+        // SAFETY : remet dans le DC l'objet qu'il avait ; puis le DC et le bitmap sont
+        // détruits dans cet ordre (ordre des champs), comme pour `ImageGdi`.
+        unsafe {
+            SelectObject(self.dc.0, self.ancien);
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------------------
+// Le pointeur (0.4).
+
+/// Un bitmap rendu par `GetIconInfo`, qui peut être absent (pointeur monochrome).
+struct BitmapRecu(HBITMAP);
+
+impl Drop for BitmapRecu {
+    fn drop(&mut self) {
+        if !self.0.is_invalid() {
+            // SAFETY : bitmap donné par `GetIconInfo`, à rendre par l'appelant, une fois.
+            unsafe {
+                let _ = DeleteObject(self.0.into());
+            }
+        }
+    }
+}
+
+/// Le côté d'un bitmap (`GetObjectW`), `None` s'il est absent ou illisible.
+fn taille_bitmap(bitmap: HBITMAP) -> Option<(i32, i32)> {
+    if bitmap.is_invalid() {
+        return None;
+    }
+    let mut b = BITMAP::default();
+    // SAFETY : `b` est un BITMAP dont la taille est passée.
+    let lu = unsafe {
+        GetObjectW(
+            bitmap.into(),
+            std::mem::size_of::<BITMAP>() as i32,
+            Some((&mut b as *mut BITMAP).cast()),
+        )
+    };
+    (lu != 0).then_some((b.bmWidth, b.bmHeight))
+}
+
+/// Peint le pointeur sur un fond uni (`fond` : 0 noir, 255 blanc) et rend ses pixels RGBA.
+fn peindre_pointeur(dib: &mut Dib, icone: HICON, fond: u8) -> Result<Vec<u8>, String> {
+    dib.octets().fill(fond);
+    // SAFETY : DC et pointeur valides ; le dessin tient dans l'image (même taille).
+    unsafe {
+        DrawIconEx(
+            dib.dc.0,
+            0,
+            0,
+            icone,
+            dib.largeur,
+            dib.hauteur,
+            0,
+            None,
+            DI_NORMAL,
+        )
+    }
+    .map_err(|e| format!("DrawIconEx: {e}"))?;
+    let mut rgba = dib.octets().to_vec();
+    bgra_en_rgba(&mut rgba);
+    Ok(rgba)
+}
 
 pub fn lire_pointeur() -> Result<Option<Pointeur>, String> {
-    Ok(None)
+    let mut info = CURSORINFO {
+        cbSize: std::mem::size_of::<CURSORINFO>() as u32,
+        ..Default::default()
+    };
+    // SAFETY : `info` est un CURSORINFO dont la taille est renseignée.
+    unsafe { GetCursorInfo(&mut info) }.map_err(|e| format!("GetCursorInfo: {e}"))?;
+    if !pointeur_montre(info.flags.0) || info.hCursor.is_invalid() {
+        return Ok(None);
+    }
+    let icone = HICON(info.hCursor.0);
+    let mut icone_info = ICONINFO::default();
+    // SAFETY : `icone_info` reçoit deux bitmaps, rendus par les gardes ci-dessous.
+    unsafe { GetIconInfo(icone, &mut icone_info) }.map_err(|e| format!("GetIconInfo: {e}"))?;
+    let masque = BitmapRecu(icone_info.hbmMask);
+    let couleurs = BitmapRecu(icone_info.hbmColor);
+    let (largeur, hauteur) = taille_bitmap(masque.0)
+        .and_then(|m| taille_pointeur(m, taille_bitmap(couleurs.0)))
+        .ok_or("taille du pointeur illisible")?;
+    let mut dib = Dib::nouvelle(largeur as i32, hauteur as i32)?;
+    let sur_noir = peindre_pointeur(&mut dib, icone, 0)?;
+    let sur_blanc = peindre_pointeur(&mut dib, icone, 255)?;
+    Ok(Some(Pointeur {
+        origine: (
+            info.ptScreenPos
+                .x
+                .saturating_sub(icone_info.xHotspot as i32),
+            info.ptScreenPos
+                .y
+                .saturating_sub(icone_info.yHotspot as i32),
+        ),
+        largeur,
+        hauteur,
+        sur_noir,
+        sur_blanc,
+    }))
+}
+
+// ---------------------------------------------------------------------------------------
+// La loupe (0.4) : une petite fenêtre native en calque, au-dessus de la sélection, que les
+// clics traversent, dessinée depuis l'image figée. Son état de dessin vit sur le fil de sa
+// fenêtre (le fil principal) ; seuls la poignée et le drapeau « voulue » sont partagés.
+
+const CLASSE_LOUPE: PCWSTR = w!("BreezyShotLoupe");
+/// Identifiant de la minuterie de la loupe.
+const MINUTERIE_LOUPE: usize = 1;
+/// Cadence de la minuterie, en millisecondes.
+const CADENCE_LOUPE_MS: u32 = 16;
+/// Message posté pour cacher la loupe depuis un autre fil.
+const WM_CACHER_LOUPE: u32 = WM_APP + 1;
+
+static LOUPE: Mutex<Option<FenetreNative>> = Mutex::new(None);
+/// Vrai entre `montrer_loupe` et `cacher_loupe` : la minuterie ne dessine que si c'est vrai.
+static LOUPE_VOULUE: AtomicBool = AtomicBool::new(false);
+/// Numéro de la loupe montrée, augmenté à chaque `montrer_loupe` : un `cacher_loupe` posté
+/// depuis un autre fil ne cache que la loupe de son numéro, pas une montrée entre-temps.
+static LOUPE_GENERATION: AtomicUsize = AtomicUsize::new(0);
+
+/// Ce que la loupe garde entre deux tours, sur son fil.
+struct Dessin {
+    /// Les écrans au moment où la loupe a été montrée (l'écran figé ne change pas).
+    ecrans: Vec<EcranInfo>,
+    /// La pointe du dernier dessin ; `None` : rien n'est encore dessiné.
+    pointe: Option<(i32, i32)>,
+    /// La fenêtre a été montrée (pour écrire `loupe cachee` une fois).
+    montree: bool,
+    /// Les pixels vus (`PIXELS_VUS` de côté) et l'image de la loupe, gardés d'un tour à
+    /// l'autre, rendus quand la loupe se cache.
+    vus: Option<Dib>,
+    image: Option<Dib>,
+    /// L'opacité du rond pour le côté de `image`, calculée une fois par côté.
+    couverture: Vec<u8>,
+}
+
+thread_local! {
+    static DESSIN: RefCell<Option<Dessin>> = const { RefCell::new(None) };
+}
+
+/// Poignée et fil de la fenêtre de la loupe, copiés hors du verrou.
+fn fenetre_loupe() -> Option<(HWND, u32)> {
+    verrouiller(&LOUPE).as_ref().map(|f| (f.hwnd, f.fil))
+}
+
+/// Procédure de la fenêtre de la loupe. Ne panique jamais.
+unsafe extern "system" fn procedure_loupe(
+    hwnd: HWND,
+    message: u32,
+    wparam: WPARAM,
+    lparam: LPARAM,
+) -> LRESULT {
+    match message {
+        WM_MOUSEACTIVATE => LRESULT(MA_NOACTIVATE as isize),
+        WM_TIMER if wparam.0 == MINUTERIE_LOUPE => {
+            tour_loupe(hwnd);
+            LRESULT(0)
+        }
+        WM_CACHER_LOUPE => {
+            // Seulement la loupe que l'appelant voulait cacher.
+            if wparam.0 == LOUPE_GENERATION.load(Ordering::SeqCst) {
+                arreter_loupe(hwnd);
+            }
+            LRESULT(0)
+        }
+        // La fenêtre est placée en pixels réels à chaque dessin.
+        WM_DPICHANGED => LRESULT(0),
+        // SAFETY : traitement par défaut de Windows.
+        _ => unsafe { DefWindowProcW(hwnd, message, wparam, lparam) },
+    }
+}
+
+/// Crée la fenêtre de la loupe, cachée, sur ce fil (appelée par `preparer_ecran_fige`). Un
+/// second appel sur le même fil ne fait rien.
+fn preparer_loupe(fil: u32) -> Result<(), String> {
+    {
+        let mut garde = verrouiller(&LOUPE);
+        if let Some(f) = garde.as_ref() {
+            // SAFETY : simple vérification, aucun message envoyé.
+            if unsafe { IsWindow(Some(f.hwnd)) }.as_bool() {
+                return if f.fil == fil {
+                    Ok(())
+                } else {
+                    Err("loupe deja creee sur un autre fil".into())
+                };
+            }
+        }
+        // Fenêtre disparue : sa poignée est oubliée sans rien lui envoyer.
+        if let Some(morte) = garde.take() {
+            std::mem::forget(morte);
+        }
+    }
+    let instance = enregistrer_classe(CLASSE_LOUPE, Some(procedure_loupe))?;
+    // SAFETY : classe inscrite ci-dessus ; fenêtre sans parent, créée sur ce fil.
+    let hwnd = unsafe {
+        CreateWindowExW(
+            WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | WS_EX_TRANSPARENT | WS_EX_LAYERED,
+            CLASSE_LOUPE,
+            w!("BreezyShot"),
+            WS_POPUP,
+            0,
+            0,
+            1,
+            1,
+            None,
+            None,
+            Some(instance),
+            None,
+        )
+    }
+    .map_err(|e| format!("CreateWindowExW de la loupe: {e}"))?;
+    log::info!("loupe fenetre {}", hwnd.0 as isize);
+    if let Err(e) = sans_fondu(hwnd) {
+        log::warn!("loupe: {e}");
+    }
+    if crate::systeme::essai_capturable() {
+        log::info!("loupe exclue des captures: non (essai)");
+    } else {
+        let mut affinite = 0u32;
+        // SAFETY : notre fenêtre ; `affinite` reçoit un DWORD.
+        let exclue = unsafe {
+            let _ = SetWindowDisplayAffinity(hwnd, WDA_EXCLUDEFROMCAPTURE);
+            GetWindowDisplayAffinity(hwnd, &mut affinite).is_ok()
+                && affinite == WDA_EXCLUDEFROMCAPTURE.0
+        };
+        log::info!(
+            "loupe exclue des captures: {}",
+            if exclue { "oui" } else { "non" }
+        );
+    }
+    let ancienne = verrouiller(&LOUPE).replace(FenetreNative { hwnd, fil });
+    drop(ancienne);
+    Ok(())
 }
 
 pub fn loupe_disponible() -> bool {
-    false
+    // La fenêtre de la loupe existe (créée par `preparer_ecran_fige`, au démarrage).
+    fenetre_loupe().is_some()
 }
 
 pub fn montrer_loupe() -> Result<(), String> {
-    Err("loupe non construite".into())
+    let (hwnd, fil) = fenetre_loupe().ok_or("loupe non preparee")?;
+    // SAFETY : sans paramètre.
+    if unsafe { GetCurrentThreadId() } != fil {
+        return Err("montrer_loupe appele hors du fil de la loupe".into());
+    }
+    let marque = verrouiller(&IMAGE).montre.is_some();
+    if !marque || !ecran_fige_visible() {
+        return Err("ecran fige non montre".into());
+    }
+    let ecrans = ecrans();
+    if ecrans.is_empty() {
+        return Err("aucun ecran".into());
+    }
+    let pris = DESSIN
+        .try_with(|d| match d.try_borrow_mut() {
+            Ok(mut d) => {
+                *d = Some(Dessin {
+                    ecrans,
+                    pointe: None,
+                    montree: false,
+                    vus: None,
+                    image: None,
+                    couverture: Vec::new(),
+                });
+                true
+            }
+            Err(_) => false,
+        })
+        .unwrap_or(false);
+    if !pris {
+        return Err("loupe occupee".into());
+    }
+    LOUPE_GENERATION.fetch_add(1, Ordering::SeqCst);
+    LOUPE_VOULUE.store(true, Ordering::SeqCst);
+    // SAFETY : notre fenêtre, sur son fil ; la minuterie poste WM_TIMER à sa procédure.
+    if unsafe { SetTimer(Some(hwnd), MINUTERIE_LOUPE, CADENCE_LOUPE_MS, None) } == 0 {
+        arreter_loupe(hwnd);
+        return Err("SetTimer de la loupe a echoue".into());
+    }
+    Ok(())
 }
 
-pub fn cacher_loupe() {}
+/// Arrête la minuterie, cache la fenêtre, rend les images. Sur le fil de la loupe.
+fn arreter_loupe(hwnd: HWND) {
+    LOUPE_VOULUE.store(false, Ordering::SeqCst);
+    // SAFETY : notre fenêtre, sur son fil.
+    unsafe {
+        let _ = KillTimer(Some(hwnd), MINUTERIE_LOUPE);
+        let _ = ShowWindow(hwnd, SW_HIDE);
+    }
+    let dessin = DESSIN
+        .try_with(|d| d.try_borrow_mut().ok().and_then(|mut d| d.take()))
+        .ok()
+        .flatten();
+    if dessin.as_ref().is_some_and(|d| d.montree) {
+        log::info!("loupe cachee");
+    }
+    // Les images sont rendues ici, hors de tout emprunt.
+    drop(dessin);
+}
+
+pub fn cacher_loupe() {
+    LOUPE_VOULUE.store(false, Ordering::SeqCst);
+    let Some((hwnd, fil)) = fenetre_loupe() else {
+        return;
+    };
+    // SAFETY : sans paramètre.
+    if unsafe { GetCurrentThreadId() } == fil {
+        arreter_loupe(hwnd);
+    } else {
+        // Ailleurs que sur son fil : cachée tout de suite sans attendre ; la minuterie et
+        // les images sont rendues par le message posté.
+        // SAFETY : notre fenêtre ; deux appels permis depuis n'importe quel fil.
+        unsafe {
+            let _ = ShowWindowAsync(hwnd, SW_HIDE);
+            let generation = LOUPE_GENERATION.load(Ordering::SeqCst);
+            let _ = PostMessageW(Some(hwnd), WM_CACHER_LOUPE, WPARAM(generation), LPARAM(0));
+        }
+    }
+}
+
+/// Détruit la fenêtre de la loupe (avec celle de l'écran figé).
+fn detruire_loupe() {
+    LOUPE_VOULUE.store(false, Ordering::SeqCst);
+    let fenetre = verrouiller(&LOUPE).take();
+    if let Some(f) = fenetre.as_ref() {
+        // SAFETY : sans paramètre.
+        if unsafe { GetCurrentThreadId() } == f.fil {
+            arreter_loupe(f.hwnd);
+        }
+    }
+    // Hors du verrou : `DestroyWindow` envoie des messages.
+    drop(fenetre);
+}
+
+/// Un tour de minuterie : la loupe suit la pointe et reste au-dessus de la sélection.
+fn tour_loupe(hwnd: HWND) {
+    let marque = verrouiller(&IMAGE).montre.is_some();
+    if !LOUPE_VOULUE.load(Ordering::SeqCst) || !marque {
+        // Écran figé caché par un autre chemin : la loupe ne lui survit jamais.
+        arreter_loupe(hwnd);
+        return;
+    }
+    let mut point = POINT::default();
+    // SAFETY : un POINT en sortie.
+    if unsafe { GetCursorPos(&mut point) }.is_err() {
+        // Pointe illisible un instant : on réessaie au tour suivant.
+        return;
+    }
+    let pointe = (point.x, point.y);
+    let resultat = DESSIN
+        .try_with(|d| {
+            let Ok(mut d) = d.try_borrow_mut() else {
+                return Ok(false);
+            };
+            let Some(d) = d.as_mut() else {
+                return Err("loupe sans etat".to_string());
+            };
+            if d.pointe != Some(pointe) {
+                dessiner_loupe(hwnd, d, pointe)?;
+                d.pointe = Some(pointe);
+            }
+            Ok(!std::mem::replace(&mut d.montree, true))
+        })
+        .unwrap_or_else(|_| Err("loupe sans etat (fil en fin de vie)".to_string()));
+    match resultat {
+        Ok(premiere) => {
+            // SAFETY : lectures sur notre fenêtre, sur son fil.
+            let a_replacer = premiere
+                || unsafe { !IsWindowVisible(hwnd).as_bool() }
+                || unsafe { GetWindow(hwnd, GW_HWNDPREV) }.is_ok_and(|h| !h.is_invalid());
+            if !a_replacer {
+                return;
+            }
+            // SAFETY : notre fenêtre, sur son fil ; remise au-dessus de la sélection, sans
+            // activation, montrée au premier tour (ou de nouveau si un masquage posté depuis
+            // un autre fil pour une loupe précédente est arrivé après).
+            let place = unsafe {
+                SetWindowPos(
+                    hwnd,
+                    Some(HWND_TOPMOST),
+                    0,
+                    0,
+                    0,
+                    0,
+                    SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER | SWP_SHOWWINDOW,
+                )
+            };
+            if premiere {
+                match place {
+                    Ok(()) => log::info!("loupe montree"),
+                    Err(e) => log::warn!("loupe impossible: SetWindowPos: {e}"),
+                }
+            }
+        }
+        Err(e) => {
+            log::warn!("loupe impossible: {e}");
+            arreter_loupe(hwnd);
+        }
+    }
+}
+
+/// Dessine la loupe pour `pointe` : les pixels vus lus dans l'image figée (sous le verrou,
+/// sans message), l'image composée (fonction pure), puis la fenêtre posée et peinte d'un
+/// coup (`UpdateLayeredWindow`).
+fn dessiner_loupe(hwnd: HWND, d: &mut Dessin, pointe: (i32, i32)) -> Result<(), String> {
+    let ecran = *loupe::ecran_de(pointe, &d.ecrans).ok_or("aucun ecran")?;
+    let place = loupe::placer(pointe, &ecran);
+    let vus_rect = loupe::source(pointe);
+    if d.vus.is_none() {
+        d.vus = Some(Dib::nouvelle(loupe::PIXELS_VUS, loupe::PIXELS_VUS)?);
+    }
+    let vus = d.vus.as_mut().ok_or("image de la loupe absente")?;
+    // Hors du bureau : noir.
+    vus.octets().fill(0);
+    {
+        let etat = verrouiller(&IMAGE);
+        let photo = etat
+            .photo
+            .as_ref()
+            .filter(|p| etat.montre == Some(p.numero))
+            .ok_or("image de l'ecran fige absente")?;
+        if let Some(commun) = vus_rect.intersection(photo.rect) {
+            // SAFETY : DC valides ; la copie tient dans les deux images (coupée au bureau
+            // et au carré vu).
+            unsafe {
+                BitBlt(
+                    vus.dc.0,
+                    commun.x - vus_rect.x,
+                    commun.y - vus_rect.y,
+                    commun.largeur,
+                    commun.hauteur,
+                    Some(photo.gdi.dc.0),
+                    commun.x - photo.rect.x,
+                    commun.y - photo.rect.y,
+                    SRCCOPY,
+                )
+            }
+            .map_err(|e| format!("BitBlt de la loupe: {e}"))?;
+        }
+    }
+    let cote = place.largeur;
+    if d.image.as_ref().is_none_or(|i| i.largeur != cote) {
+        d.image = None;
+        d.image = Some(Dib::nouvelle(cote, cote)?);
+        d.couverture = loupe::couverture_ronde(cote);
+    }
+    let image = d.image.as_mut().ok_or("image de la loupe absente")?;
+    // Composée directement dans les octets de la section DIB, sans copie.
+    if !loupe::composer_dans(vus.octets(), ecran.echelle, &d.couverture, image.octets()) {
+        return Err("image de la loupe de mauvaise taille".into());
+    }
+    let position = POINT {
+        x: place.x,
+        y: place.y,
+    };
+    let taille = SIZE { cx: cote, cy: cote };
+    let origine = POINT::default();
+    let melange = BLENDFUNCTION {
+        BlendOp: AC_SRC_OVER as u8,
+        BlendFlags: 0,
+        SourceConstantAlpha: 255,
+        AlphaFormat: AC_SRC_ALPHA as u8,
+    };
+    // SAFETY : notre fenêtre en calque, sur son fil ; l'image a la taille donnée et sa
+    // couleur est prémultipliée (`loupe::composer`).
+    unsafe {
+        UpdateLayeredWindow(
+            hwnd,
+            None,
+            Some(&position),
+            Some(&taille),
+            Some(image.dc.0),
+            Some(&origine),
+            COLORREF(0),
+            Some(&melange),
+            ULW_ALPHA,
+        )
+    }
+    .map_err(|e| format!("UpdateLayeredWindow: {e}"))
+}
 
 // ---------------------------------------------------------------------------------------
 // Fil de garde : si le fil de l'écran figé ne répond plus, prévenir l'Application.
@@ -1230,9 +1798,9 @@ mod tests {
     };
     use ::windows::Win32::UI::WindowsAndMessaging::{
         DispatchMessageW, FindWindowW, GetForegroundWindow, PeekMessageW, SendMessageW,
-        SetLayeredWindowAttributes, TranslateMessage, LWA_ALPHA, MSG, PM_REMOVE, SWP_NOMOVE,
-        SWP_NOSIZE, SW_SHOWMINNOACTIVE, WINDOW_EX_STYLE, WINDOW_STYLE, WS_OVERLAPPEDWINDOW,
-        WTS_SESSION_UNLOCK,
+        SetCursorPos, SetLayeredWindowAttributes, TranslateMessage, LWA_ALPHA, MSG, PM_REMOVE,
+        SWP_NOMOVE, SWP_NOSIZE, SW_SHOWMINNOACTIVE, WINDOW_EX_STYLE, WINDOW_STYLE,
+        WS_OVERLAPPEDWINDOW, WTS_SESSION_UNLOCK,
     };
 
     use crate::systeme::gel as facade;
@@ -2055,5 +2623,225 @@ mod tests {
         envoyer(WM_DISPLAYCHANGE, 32);
         envoyer(WM_WTSSESSION_CHANGE, WTS_SESSION_LOCK as usize);
         assert_eq!(verrouiller(&recus).len(), 2);
+    }
+
+    // --- Pointeur et loupe (0.4) ---
+
+    fn objets_gdi() -> u32 {
+        // SAFETY : pseudo-poignée du processus courant.
+        unsafe { GetGuiResources(GetCurrentProcess(), GR_GDIOBJECTS) }
+    }
+
+    #[test]
+    fn drapeaux_du_pointeur_recopies() {
+        use ::windows::Win32::UI::WindowsAndMessaging::{CURSOR_SHOWING, CURSOR_SUPPRESSED};
+        assert_eq!(facade::POINTEUR_MONTRE, CURSOR_SHOWING.0);
+        assert_eq!(facade::POINTEUR_SUPPRIME, CURSOR_SUPPRESSED.0);
+    }
+
+    /// Un vrai mouvement de souris (1 px puis retour), qui fait montrer le pointeur par
+    /// Windows quand il était caché faute de mouvement.
+    fn bouger_la_souris() {
+        use ::windows::Win32::UI::Input::KeyboardAndMouse::{
+            SendInput, INPUT, INPUT_0, INPUT_MOUSE, MOUSEEVENTF_MOVE, MOUSEINPUT,
+        };
+        let mouvement = |dx: i32| INPUT {
+            r#type: INPUT_MOUSE,
+            Anonymous: INPUT_0 {
+                mi: MOUSEINPUT {
+                    dx,
+                    dy: 0,
+                    dwFlags: MOUSEEVENTF_MOVE,
+                    ..Default::default()
+                },
+            },
+        };
+        let entrees = [mouvement(1), mouvement(-1)];
+        // SAFETY : deux entrées dont la taille est passée.
+        unsafe {
+            SendInput(&entrees, std::mem::size_of::<INPUT>() as i32);
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+
+    fn drapeaux_du_pointeur() -> u32 {
+        let mut info = CURSORINFO {
+            cbSize: std::mem::size_of::<CURSORINFO>() as u32,
+            ..Default::default()
+        };
+        // SAFETY : CURSORINFO dont la taille est renseignée.
+        unsafe { GetCursorInfo(&mut info) }.unwrap();
+        info.flags.0
+    }
+
+    /// Le pointeur est d'abord rendu visible (pointe posée, vrai mouvement). S'il reste
+    /// caché (session sans souris), le test vérifie ce qui reste vrai (`Ok(None)`, aucune
+    /// fuite) et le dit ; la preuve du pointeur dans l'image appartient à l'essai 11.
+    #[test]
+    fn pointeur_lu_sans_fuite_gdi() {
+        let _s = Seance::ouvrir();
+        let bureau = bureau_virtuel().unwrap();
+        // SAFETY : sans tampon.
+        let _ =
+            unsafe { SetCursorPos(bureau.x + bureau.largeur / 2, bureau.y + bureau.hauteur / 2) };
+        bouger_la_souris();
+        let drapeaux = drapeaux_du_pointeur();
+        let avant_lecture = |n: usize| {
+            for _ in 0..n {
+                let _ = lire_pointeur().unwrap();
+            }
+        };
+        if !pointeur_montre(drapeaux) {
+            println!(
+                "pointeur non montre sur cette machine (drapeaux {drapeaux:#x}) : seules \
+                 l'absence de pointeur et l'absence de fuite sont verifiees"
+            );
+            assert_eq!(lire_pointeur(), Ok(None));
+            avant_lecture(5);
+            let avant = objets_gdi();
+            avant_lecture(200);
+            let apres = objets_gdi();
+            assert!(avant > 0, "GetGuiResources a echoue");
+            assert!(apres <= avant + 4, "fuite GDI : {avant} -> {apres}");
+            return;
+        }
+        let p = lire_pointeur()
+            .unwrap()
+            .expect("pointeur montre mais non lu");
+        assert!(p.largeur > 0 && p.hauteur > 0);
+        let taille = (p.largeur * p.hauteur * 4) as usize;
+        assert_eq!(p.sur_noir.len(), taille);
+        assert_eq!(p.sur_blanc.len(), taille);
+        // La pointe (point chaud) est dans l'image du pointeur.
+        let mut pointe = POINT::default();
+        // SAFETY : un POINT en sortie.
+        unsafe { GetCursorPos(&mut pointe) }.unwrap();
+        let rect = Rect {
+            x: p.origine.0,
+            y: p.origine.1,
+            largeur: p.largeur as i32,
+            hauteur: p.hauteur as i32,
+        };
+        assert!(rect.contient((pointe.x, pointe.y)), "{rect:?} {pointe:?}");
+        // Quelque chose est peint : au moins un pixel n'est pas transparent.
+        let peint = (0..taille / 4).any(|i| {
+            let n = &p.sur_noir[i * 4..i * 4 + 3];
+            let b = &p.sur_blanc[i * 4..i * 4 + 3];
+            n != [0, 0, 0] || b != [255, 255, 255]
+        });
+        assert!(peint, "pointeur entierement transparent");
+        avant_lecture(5);
+        let avant = objets_gdi();
+        avant_lecture(200);
+        let apres = objets_gdi();
+        println!("objets GDI : avant {avant}, apres 200 pointeurs {apres}");
+        assert!(avant > 0, "GetGuiResources a echoue");
+        assert!(apres <= avant + 4, "fuite GDI : {avant} -> {apres}");
+    }
+
+    fn rect_fenetre(hwnd: HWND) -> Rect {
+        let mut r = RECT::default();
+        // SAFETY : notre fenêtre ; un RECT en sortie.
+        unsafe { GetWindowRect(hwnd, &mut r) }.unwrap();
+        rect_de(r)
+    }
+
+    #[test]
+    fn loupe_refusee_sans_ecran_fige() {
+        let _s = Seance::ouvrir();
+        preparer_ecran_fige().unwrap();
+        assert!(fenetre_loupe().is_some(), "loupe creee avec l'ecran fige");
+        assert!(montrer_loupe().is_err());
+        cacher_loupe();
+    }
+
+    #[test]
+    fn loupe_suit_la_pointe_et_se_cache_sans_fuite_gdi() {
+        let _s = Seance::ouvrir();
+        let (_fige, _image) = montrer_un_ecran_fige();
+        let (loupe_hwnd, _) = fenetre_loupe().unwrap();
+        // SAFETY : lecture du style de notre fenêtre.
+        let style = unsafe { GetWindowLongW(loupe_hwnd, GWL_EXSTYLE) } as u32;
+        for attendu in [
+            WS_EX_TOPMOST,
+            WS_EX_TOOLWINDOW,
+            WS_EX_NOACTIVATE,
+            WS_EX_TRANSPARENT,
+            WS_EX_LAYERED,
+        ] {
+            assert_ne!(
+                style & attendu.0,
+                0,
+                "style {style:#x} sans {:#x}",
+                attendu.0
+            );
+        }
+        let visible = || {
+            pomper();
+            // SAFETY : lecture sur notre fenêtre.
+            unsafe { IsWindowVisible(loupe_hwnd) }.as_bool()
+        };
+        assert!(!visible());
+        let e = ecrans();
+        let principal = *e.iter().find(|e| e.principal).unwrap();
+        let milieu = (
+            principal.rect.x + principal.rect.largeur / 2,
+            principal.rect.y + principal.rect.hauteur / 2,
+        );
+        let coin = (
+            principal.rect.x + principal.rect.largeur - 2,
+            principal.rect.y + principal.rect.hauteur - 2,
+        );
+        // SAFETY : sans tampon.
+        unsafe { SetCursorPos(milieu.0, milieu.1) }.unwrap();
+        montrer_loupe().unwrap();
+        assert!(attendre(visible), "loupe jamais montree");
+        assert!(attendre(|| {
+            pomper();
+            rect_fenetre(loupe_hwnd) == loupe::placer(milieu, &principal)
+        }));
+        // Près du coin bas droit : de l'autre côté, dans l'écran.
+        // SAFETY : sans tampon.
+        unsafe { SetCursorPos(coin.0, coin.1) }.unwrap();
+        assert!(attendre(|| {
+            pomper();
+            rect_fenetre(loupe_hwnd) == loupe::placer(coin, &principal)
+        }));
+        assert!(principal.rect.englobe(rect_fenetre(loupe_hwnd)));
+        cacher_loupe();
+        assert!(!visible());
+        // L'écran figé caché par un autre chemin : la loupe ne lui survit pas.
+        montrer_loupe().unwrap();
+        assert!(attendre(visible));
+        retirer_marque();
+        assert!(attendre(|| !visible()));
+        cacher_ecran_fige();
+
+        let (_fige, _image) = montrer_un_ecran_fige();
+        for _ in 0..3 {
+            montrer_loupe().unwrap();
+            assert!(attendre(visible));
+            cacher_loupe();
+        }
+        let avant = objets_gdi();
+        for i in 0..200 {
+            montrer_loupe().unwrap();
+            assert!(attendre(visible), "tour {i}");
+            if i % 2 == 0 {
+                cacher_loupe();
+            } else {
+                // Depuis un autre fil : la demande est postée.
+                std::thread::spawn(cacher_loupe).join().unwrap();
+                assert!(attendre(|| !visible()));
+                pomper();
+            }
+        }
+        pomper();
+        let apres = objets_gdi();
+        println!("objets GDI : avant {avant}, apres 200 loupes {apres}");
+        assert!(avant > 0, "GetGuiResources a echoue");
+        assert!(apres <= avant + 4, "fuite GDI : {avant} -> {apres}");
+        // SAFETY : sans tampon.
+        unsafe { SetCursorPos(milieu.0, milieu.1) }.unwrap();
     }
 }

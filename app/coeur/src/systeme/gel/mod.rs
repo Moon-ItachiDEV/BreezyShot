@@ -19,6 +19,8 @@ mod plateforme;
 #[path = "autre.rs"]
 mod plateforme;
 
+pub mod loupe;
+
 /// Rectangle en pixels réels. `x`, `y` : coin haut gauche ; le bord droit et le bord bas
 /// sont exclus (`x + largeur` est le premier pixel dehors).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -282,8 +284,10 @@ pub struct Pointeur {
     pub sur_blanc: Vec<u8>,
 }
 
-/// Lit le pointeur tel que Windows le montre. `Ok(None)` : pointeur caché (écran tactile,
-/// saisie). N'importe quel fil. Hors Windows : `Ok(None)`.
+/// Lit le pointeur tel que Windows le montre (`GetCursorInfo`, `GetIconInfo`, puis
+/// `DrawIconEx` sur noir et sur blanc ; un pointeur animé donne sa première image).
+/// `Ok(None)` : pointeur caché (écran tactile, saisie). Erreur : un texte court, sans chemin
+/// ni titre. N'importe quel fil. Hors Windows : `Ok(None)`.
 pub fn lire_pointeur() -> Result<Option<Pointeur>, String> {
     plateforme::lire_pointeur()
 }
@@ -293,15 +297,45 @@ pub fn loupe_disponible() -> bool {
     plateforme::loupe_disponible()
 }
 
-/// Montre la loupe au-dessus de la sélection de zone. Fil principal, écran figé montré ;
-/// arme la minuterie qui la fait suivre la pointe (premier dessin au premier tour).
+/// Montre la loupe au-dessus de la sélection de zone. Fil principal (celui de
+/// `preparer_ecran_fige`, qui crée la fenêtre de la loupe, cachée), écran figé montré,
+/// sinon erreur. Ne dessine rien tout de suite : arme une minuterie de 16 ms dont le premier
+/// tour dessine et montre la loupe (`loupe montree`), puis la fait suivre la pointe.
 pub fn montrer_loupe() -> Result<(), String> {
     plateforme::montrer_loupe()
 }
 
-/// Cache la loupe. Sûr à tout moment, de partout (`cacher_ecran_fige` l'appellera).
+/// Cache la loupe (`loupe cachee` si elle était montrée) et rend ses images. Sûr à tout
+/// moment, de partout : hors du fil principal, la demande est postée. `cacher_ecran_fige`
+/// l'appelle, et la loupe se cache seule si l'écran figé n'est plus montré.
 pub fn cacher_loupe() {
     plateforme::cacher_loupe()
+}
+
+/// Valeurs de `CURSORINFO.flags` (winuser.h), recopiées pour la règle pure ; un test
+/// Windows les compare à celles de la crate `windows`.
+pub const POINTEUR_MONTRE: u32 = 0x1;
+pub const POINTEUR_SUPPRIME: u32 = 0x2;
+
+/// Vrai si Windows montre le pointeur : `CURSOR_SHOWING` posé et `CURSOR_SUPPRESSED`
+/// absent (écran tactile ou stylet : le pointeur est caché).
+pub fn pointeur_montre(drapeaux: u32) -> bool {
+    drapeaux & POINTEUR_MONTRE != 0 && drapeaux & POINTEUR_SUPPRIME == 0
+}
+
+/// Plus grand côté accepté pour un pointeur (Windows va jusqu'à 256 en Accessibilité).
+pub const POINTEUR_COTE_MAX: i32 = 512;
+
+/// Taille d'un pointeur d'après ses bitmaps (`GetObjectW`) : celle de l'image en couleurs
+/// si elle existe, sinon le masque seul, qui empile le masque ET et le masque XOR (moitié
+/// de sa hauteur). `None` si la taille est nulle ou dépasse `POINTEUR_COTE_MAX`.
+pub fn taille_pointeur(masque: (i32, i32), couleurs: Option<(i32, i32)>) -> Option<(u32, u32)> {
+    let (largeur, hauteur) = match couleurs {
+        Some(t) => t,
+        None => (masque.0, masque.1 / 2),
+    };
+    let bon = |v: i32| v > 0 && v <= POINTEUR_COTE_MAX;
+    (bon(largeur) && bon(hauteur)).then_some((largeur as u32, hauteur as u32))
 }
 
 /// Ordre des écrans : de gauche à droite, puis de haut en bas.
@@ -448,6 +482,30 @@ mod tests {
         assert_eq!(
             Rect::depuis_bords(i32::MIN, 0, i32::MAX, 1).largeur,
             i32::MAX
+        );
+    }
+
+    #[test]
+    fn pointeur_montre_ou_cache() {
+        assert!(pointeur_montre(POINTEUR_MONTRE));
+        assert!(!pointeur_montre(0));
+        assert!(!pointeur_montre(POINTEUR_SUPPRIME));
+        assert!(!pointeur_montre(POINTEUR_MONTRE | POINTEUR_SUPPRIME));
+    }
+
+    #[test]
+    fn taille_du_pointeur() {
+        assert_eq!(taille_pointeur((32, 32), Some((32, 32))), Some((32, 32)));
+        assert_eq!(taille_pointeur((48, 48), Some((48, 48))), Some((48, 48)));
+        // Masque seul (pointeur monochrome) : la moitié de sa hauteur.
+        assert_eq!(taille_pointeur((32, 64), None), Some((32, 32)));
+        assert_eq!(taille_pointeur((32, 1), None), None);
+        assert_eq!(taille_pointeur((0, 0), Some((0, 0))), None);
+        assert_eq!(taille_pointeur((32, 32), Some((-32, 32))), None);
+        assert_eq!(taille_pointeur((32, 32), Some((513, 32))), None);
+        assert_eq!(
+            taille_pointeur((32, 32), Some((512, 512))),
+            Some((512, 512))
         );
     }
 

@@ -12,8 +12,8 @@
 # (3) Rouvrir : une seule fenêtre, ramenée devant.
 # (3b) Rubrique Capture ouverte au départ (sans aucun clic d'onglet) : retardateur 3 s
 #     écrit dans le fichier puis remis à Aucun ; Inclure le pointeur allumé puis éteint ;
-#     Loupe de même si l'app a créé sa fenêtre (« loupe fenetre »), sinon la ligne est
-#     absente de la page.
+#     « loupe fenetre <hwnd> » exigé au démarrage (fenêtre de la loupe créée cachée), puis
+#     Loupe allumée puis éteinte de même.
 # (4) Copie seule sortie : l'éteindre est refusé (« Gardez au moins… », reste allumée).
 #     (Rubrique « Après la capture » ouverte d'abord.) Vignette allumée par la fenêtre,
 #     copie éteinte : Ctrl+Maj+2 : « sortie copie non
@@ -514,19 +514,16 @@ public static string Titre(IntPtr h) {
     Cliquer-Interrupteur $fen 'Inclure le pointeur' '(3b) interrupteur Inclure le pointeur (éteindre)'
     $null = Attendre-Motif -Motif 'reglage change: pointeur non$' -Dossier $cas -DelaiS 5 -Quoi '(3b) pointeur non'
     Verifier '(3b) fichier : capture.pointeur false' ((Lire-Reglages $cas).capture.pointeur -eq $false) | Out-Null
-    # Loupe : la ligne suit l'existence de la loupe, que dit la fenêtre créée au démarrage.
-    if ((Compter-Motif -Motif 'loupe fenetre \d+$' -Dossier $cas) -gt 0) {
-        Cliquer-Interrupteur $fen 'Loupe' '(3b) interrupteur Loupe'
-        $null = Attendre-Motif -Motif 'reglage change: loupe oui$' -Dossier $cas -DelaiS 5 -Quoi '(3b) loupe oui'
-        Verifier '(3b) fichier : selection.loupe true' ((Lire-Reglages $cas).selection.loupe -eq $true) | Out-Null
-        Cliquer-Interrupteur $fen 'Loupe' '(3b) interrupteur Loupe (éteindre)'
-        $null = Attendre-Motif -Motif 'reglage change: loupe non$' -Dossier $cas -DelaiS 5 -Quoi '(3b) loupe non'
-        Verifier '(3b) fichier : selection.loupe false' ((Lire-Reglages $cas).selection.loupe -eq $false) | Out-Null
-    }
-    else {
-        $loupe = Element $fen 'Loupe' $INTERRUPTEUR 0.5
-        Verifier '(3b) pas de fenêtre de loupe : aucune ligne Loupe dans la page' ($null -eq $loupe) $(if ($null -ne $loupe) { Decrire $loupe } else { '' }) | Out-Null
-    }
+    # Loupe : sous Windows, la fenêtre de la loupe est créée cachée au démarrage
+    # (« loupe fenetre <hwnd> ») ; sa ligne est donc exigée, puis l'interrupteur joué.
+    $null = Attendre-Motif -Motif 'loupe fenetre -?\d+$' -Dossier $cas -DelaiS 5 -Quoi '(3b) fenêtre de la loupe créée au démarrage'
+    Verifier '(3b) « loupe fenetre <hwnd> » au démarrage' $true | Out-Null
+    Cliquer-Interrupteur $fen 'Loupe' '(3b) interrupteur Loupe'
+    $null = Attendre-Motif -Motif 'reglage change: loupe oui$' -Dossier $cas -DelaiS 5 -Quoi '(3b) loupe oui'
+    Verifier '(3b) fichier : selection.loupe true' ((Lire-Reglages $cas).selection.loupe -eq $true) | Out-Null
+    Cliquer-Interrupteur $fen 'Loupe' '(3b) interrupteur Loupe (éteindre)'
+    $null = Attendre-Motif -Motif 'reglage change: loupe non$' -Dossier $cas -DelaiS 5 -Quoi '(3b) loupe non'
+    Verifier '(3b) fichier : selection.loupe false' ((Lire-Reglages $cas).selection.loupe -eq $false) | Out-Null
 
     # (4) La copie est la seule sortie : l'éteindre est refusé, pour de vrai.
     Cliquer-Nom $fen 'Après la capture' ([System.Windows.Automation.ControlType]::TabItem) '(4) rubrique Après la capture'
