@@ -24,7 +24,7 @@ export const COULEURS = [
 export const RAYONS_NUMERO = [12, 16, 21]; // P, M, G
 export const BLOCS = [8, 13, 20]; // Pixeliser : côté du bloc
 export const FLOUS = [6, 10, 16]; // Flouter : facteur de réduction
-export const COULEURS_PERSO_MAX = 3; // « Couleur perso », les plus récentes d'abord
+export const COULEURS_PERSO_MAX = 1; // « Autre couleur » : une seule couleur libre gardée
 
 const NOIR_BLOC = "#111214";
 const VOILE_PROJECTEUR = "rgba(8,10,16,.55)";
@@ -420,13 +420,23 @@ export function peindreMasques(ctxFond, base, doc) {
 // entière. La mémoire est celle d'un export sans recadrage.
 export function composer(doc, fond) {
   const k = cadre(doc);
-  const t = toile(doc.largeur, doc.hauteur);
+  // Une toile du document comme la vue quand il y en a un : Chromium ne lisse pas le bord
+  // d'une découpe pareil sur un `OffscreenCanvas` (bord des projecteurs).
+  const t = typeof document !== "undefined" ? document.createElement("canvas")
+    : toile(doc.largeur, doc.hauteur);
+  t.width = doc.largeur;
+  t.height = doc.hauteur;
   const c = t.getContext("2d", { willReadFrequently: true });
   c.globalCompositeOperation = "copy";
   c.imageSmoothingEnabled = false;
   c.drawImage(fond, 0, 0);
   c.globalCompositeOperation = "source-over";
   for (const o of doc.objets) dessinerObjet(c, doc, o);
+  // Même pile de découpes que la vue (le cadre, puis les trous) : Chromium lisse le bord
+  // d'une découpe selon celles qui la précèdent, et l'export doit être l'écran au bit près.
+  c.beginPath();
+  c.rect(k.x, k.y, k.largeur, k.hauteur);
+  c.clip();
   peindreVoile(c, projecteurs(doc.objets), doc.largeur, doc.hauteur);
   const rgba = c.getImageData(k.x, k.y, k.largeur, k.hauteur).data;
   t.width = 0;
@@ -482,34 +492,66 @@ function projecteurs(objets, ajout = null, cacher) {
   return l;
 }
 
-// Voile sur toute l'image (l × h px de l'image, dans la transformation posée sur `c`), percé
-// de la RÉUNION des projecteurs : peint sur un calque de la taille de la toile, d'où chaque
-// zone est ôtée (`destination-out` : deux zones qui se chevauchent ne se voilent pas), puis
-// posé d'un coup. Les coupes de `c` (cadre de la vue) s'appliquent à la pose.
+// Voile sur toute l'image (l × h px de l'image, dans la transformation posée sur `c`, sans
+// rotation), percé de la RÉUNION des projecteurs, sans calque. Hors de la boîte des trous
+// (arrondie au pixel de la toile), quatre bandes pleines ; dedans, une découpe pair-impair
+// « boîte + trou » par projecteur (leur intersection est la boîte moins la réunion des trous :
+// aucune zone commune revoilée), puis un seul `fillRect`. La découpe ne couvre que la boîte
+// des trous, pas toute l'image. `source-atop` : le voile n'assombrit que les pixels qui
+// existent (un pixel transparent de la capture le reste). Les coupes déjà posées sur `c`
+// (cadre de la vue) s'appliquent aussi.
 function peindreVoile(c, liste, l, h) {
   if (!liste.length) return;
-  const t = toile(c.canvas.width, c.canvas.height), v = t.getContext("2d");
-  v.setTransform(c.getTransform());
-  v.fillStyle = VOILE_PROJECTEUR;
-  v.fillRect(0, 0, l, h);
-  v.globalCompositeOperation = "destination-out";
-  v.fillStyle = "#000";
+  const m = c.getTransform();
+  const X0 = m.e, Y0 = m.f, X1 = m.e + l * m.a, Y1 = m.f + h * m.d;
+  let a = Infinity, b = Infinity, a2 = -Infinity, b2 = -Infinity;
   for (const o of liste) {
     const n = boiteForme(o);
-    if (o.forme === "ovale") {
-      v.beginPath();
-      v.ellipse(n.x + n.largeur / 2, n.y + n.hauteur / 2, Math.max(0.5, n.largeur / 2),
-        Math.max(0.5, n.hauteur / 2), 0, 0, 7);
-    } else rectArrondi(v, n.x, n.y, n.largeur, n.hauteur, RAYON_PROJECTEUR);
-    v.fill();
+    a = Math.min(a, n.x); b = Math.min(b, n.y);
+    a2 = Math.max(a2, n.x + n.largeur); b2 = Math.max(b2, n.y + n.hauteur);
   }
+  const bx0 = Math.min(X1, Math.max(X0, Math.floor(m.e + a * m.a) - 1));
+  const by0 = Math.min(Y1, Math.max(Y0, Math.floor(m.f + b * m.d) - 1));
+  const bx1 = Math.max(bx0, Math.min(X1, Math.ceil(m.e + a2 * m.a) + 1));
+  const by1 = Math.max(by0, Math.min(Y1, Math.ceil(m.f + b2 * m.d) + 1));
   c.save();
   c.setTransform(1, 0, 0, 1, 0, 0);
   c.globalAlpha = 1;
-  c.globalCompositeOperation = "source-over";
-  c.drawImage(t, 0, 0);
+  c.globalCompositeOperation = "source-atop";
+  c.fillStyle = VOILE_PROJECTEUR;
+  c.fillRect(X0, Y0, X1 - X0, by0 - Y0);
+  c.fillRect(X0, by1, X1 - X0, Y1 - by1);
+  c.fillRect(X0, by0, bx0 - X0, by1 - by0);
+  c.fillRect(bx1, by0, X1 - bx1, by1 - by0);
+  if (bx1 > bx0 && by1 > by0) {
+    for (const o of liste) {
+      const n = boiteForme(o);
+      c.setTransform(1, 0, 0, 1, 0, 0);
+      c.beginPath();
+      c.rect(bx0, by0, bx1 - bx0, by1 - by0);
+      c.setTransform(m);
+      if (o.forme === "ovale") {
+        c.moveTo(n.x + n.largeur, n.y + n.hauteur / 2);
+        c.ellipse(n.x + n.largeur / 2, n.y + n.hauteur / 2, Math.max(0.5, n.largeur / 2),
+          Math.max(0.5, n.hauteur / 2), 0, 0, 2 * Math.PI);
+      } else rectArrondiSuite(c, n.x, n.y, n.largeur, n.hauteur, RAYON_PROJECTEUR);
+      c.setTransform(1, 0, 0, 1, 0, 0);
+      c.clip("evenodd");
+    }
+    c.fillRect(bx0, by0, bx1 - bx0, by1 - by0);
+  }
   c.restore();
-  t.width = t.height = 0;
+}
+
+// Contour d'un rectangle arrondi ajouté au chemin en cours (sans `beginPath`).
+function rectArrondiSuite(c, x, y, w, h, r) {
+  r = Math.max(0, Math.min(r, Math.abs(w) / 2, Math.abs(h) / 2));
+  c.moveTo(x + r, y);
+  c.arcTo(x + w, y, x + w, y + h, r);
+  c.arcTo(x + w, y + h, x, y + h, r);
+  c.arcTo(x, y + h, x, y, r);
+  c.arcTo(x, y, x + w, y, r);
+  c.closePath();
 }
 
 // Peint la vue : `fond` mis à l'échelle, puis les objets en vectoriel, et la sélection.
