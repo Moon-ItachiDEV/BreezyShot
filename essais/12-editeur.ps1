@@ -6,6 +6,11 @@
 # BREEZYSHOT_ESSAI_CAPTURABLE=1. Presse-papiers lu dans un fil STA. Référence : le PNG de
 # la capture dans « Récents ». Chaque attente lit une ligne nouvelle du journal (ou guette
 # une fenêtre) avec une borne ; jamais un délai fixe à la place d'une preuve.
+# Garde : hors le raccourci global de capture, une touche ne part que si la fenêtre au
+# premier plan est à l'app, un appui de souris que si le point visé est sur une fenêtre de
+# l'app ; sinon le point échoue en nommant la fenêtre trouvée, et rien n'est envoyé (un
+# Ctrl+C ou un Alt+F4 reçu par une console de la machine d'essai l'arrêterait). Sans
+# éditeur après (2), la suite du cas A n'est pas jouée.
 #
 # Cas A :
 # (1) mémoire au repos notée ; aucune fenêtre « Annoter la capture », aucun `editeur
@@ -157,6 +162,7 @@ function Demarrer-Cas([string]$Dossier, [string]$Quoi) {
     $vignettes = Compter-Motif -Motif 'vignette prete$' -Dossier $Dossier
     try { $proc = Demarrer-App -Dossier $Dossier }
     finally { Remove-Item Env:BREEZYSHOT_ESSAI_CAPTURABLE -ErrorAction SilentlyContinue }
+    if ($IsWindows) { [BreezyShotEssai.Editeur]::PidApp = $proc.Id }
     $null = Attendre-Motif -Motif 'application +pret$' -Dossier $Dossier -DelaiS 30 -Quoi "$Quoi : démarrage" -Fois ($prets + 1)
     $null = Attendre-Motif -Motif 'vignette prete$' -Dossier $Dossier -DelaiS 30 -Quoi "$Quoi : page de la vignette" -Fois ($vignettes + 1)
     return $proc
@@ -239,11 +245,39 @@ static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid);
 delegate bool Rappel(IntPtr h, IntPtr p);
 [DllImport("user32.dll")]
 static extern bool EnumWindows(Rappel f, IntPtr p);
+[DllImport("user32.dll")]
+static extern IntPtr WindowFromPoint(POINT p);
+[DllImport("user32.dll")]
+static extern IntPtr GetAncestor(IntPtr h, uint quoi);
+[DllImport("user32.dll")]
+static extern bool GetCursorPos(out POINT p);
+
+// Garde : aucune touche ni aucun appui de souris ne part vers une fenêtre qui n'est pas à
+// l'app. Un Ctrl+C ou un Alt+F4 reçu par une console de la machine d'essai l'arrêterait.
+public static int PidApp;
+static int PidDe(IntPtr h) { uint q; GetWindowThreadProcessId(h, out q); return (int)q; }
+public static string Decrire(IntPtr h) {
+    if (h == IntPtr.Zero) return "aucune fenêtre";
+    string nom = "?";
+    try { nom = System.Diagnostics.Process.GetProcessById(PidDe(h)).ProcessName; } catch { }
+    string titre = Titre(h);
+    if (titre.Length > 60) titre = titre.Substring(0, 60);
+    return Classe(h) + " « " + titre + " », processus " + nom;
+}
+static void Garder(IntPtr h, string quoi) {
+    if (PidApp == 0 || h == IntPtr.Zero || PidDe(h) != PidApp)
+        throw new InvalidOperationException(quoi + " (" + Decrire(h) + ")");
+}
 
 const uint RELACHEE = 0x2;
 static void Bas(byte vk) { keybd_event(vk, (byte)MapVirtualKey(vk, 0), 0u, UIntPtr.Zero); }
 static void Haut(byte vk) { keybd_event(vk, (byte)MapVirtualKey(vk, 0), RELACHEE, UIntPtr.Zero); }
 public static void Appuyer(byte[] mods, byte touche) {
+    Garder(GetForegroundWindow(), "touche 0x" + touche.ToString("X2") + " non envoyée : le premier plan n'est pas à l'app");
+    AppuyerGlobal(mods, touche);
+}
+// Un raccourci global de l'app : il ne vise aucune fenêtre, il part sans garde.
+public static void AppuyerGlobal(byte[] mods, byte touche) {
     foreach (var m in mods) Bas(m);
     Bas(touche);
     System.Threading.Thread.Sleep(30);
@@ -253,7 +287,11 @@ public static void Appuyer(byte[] mods, byte touche) {
 }
 public static void Touche(byte vk) { Appuyer(new byte[0], vk); }
 public static void Poser(int x, int y) { SetCursorPos(x, y); mouse_event(0x1, 0, 0, 0, UIntPtr.Zero); }
-public static void BoutonBas() { mouse_event(0x2, 0, 0, 0, UIntPtr.Zero); }
+public static void BoutonBas() {
+    POINT p; GetCursorPos(out p);
+    Garder(GetAncestor(WindowFromPoint(p), 2), "appui de souris en " + p.X + "," + p.Y + " non envoyé : ce point n'est pas sur une fenêtre de l'app");
+    mouse_event(0x2, 0, 0, 0, UIntPtr.Zero);
+}
 public static void BoutonHaut() { mouse_event(0x4, 0, 0, 0, UIntPtr.Zero); }
 public static void Cliquer(int x, int y) {
     Poser(x, y); System.Threading.Thread.Sleep(40);
@@ -431,7 +469,7 @@ public static int Pixel(byte[] a, int l, int x, int y) {
             $E::Poser($REPOS_X, $REPOS_Y)
             $entrees = Compter-Motif -Motif 'vignette entree \d+$' -Dossier $Dossier
             $avant = @(Fichiers-Png (Join-Path $Dossier 'local/Recents') | ForEach-Object { $_.FullName })
-            $E::Appuyer($MODS, $TOUCHE_2)
+            $E::AppuyerGlobal($MODS, $TOUCHE_2)
             $l = Attendre-Suivante 'vignette entree (\d+)$' $Dossier $entrees "$Quoi : entrée de la vignette" 15
             $null = $l -match 'vignette entree (\d+)$'
             $id = [int]$Matches[1]
@@ -481,6 +519,7 @@ public static int Pixel(byte[] a, int l, int x, int y) {
         # Un geste d'outil (touche, puis glisser réel de (x0, y0) à (x1, y1) de l'image), et
         # le temps laissé à la page pour dire son état (`editeur_etat`, 250 ms au plus).
         function Tracer-Image($Vue, [byte]$Outil, [double]$X0, [double]$Y0, [double]$X1, [double]$Y1) {
+            if ($null -eq $Vue) { throw 'vue inconnue : aucun geste envoyé' }
             $E::Touche($Outil)
             $E::Tracer((Ecran-X $Vue $X0), (Ecran-Y $Vue $Y0), (Ecran-X $Vue $X1), (Ecran-Y $Vue $Y1))
             Start-Sleep -Milliseconds 600
@@ -618,6 +657,7 @@ public static int Pixel(byte[] a, int l, int x, int y) {
                 Verifier '(2) vignette fermee annoter, Vignette -> Repos (VignetteFermee), editeur fenetre' (((Compter-Motif -Motif 'etat Vignette -> Repos \(VignetteFermee\)' -Dossier $da) -ge 1) -and ([IntPtr][long]$Matches[1] -eq $script:h1)) "$lf" | Out-Null
             }
             $hwnd = $script:h1
+            if ($hwnd -eq [IntPtr]::Zero) { throw "(2) pas d'éditeur : la suite n'est pas jouée ; $(Diagnostic-Journal $da)" }
 
             # (3) La fenêtre.
             Point '(3) fenêtre de l''éditeur' {
@@ -644,6 +684,11 @@ public static int Pixel(byte[] a, int l, int x, int y) {
                 Noter-Mesure -Nom 'clic Annoter -> image affichee (budget 800)' -Valeur ([int]$Matches[1]) -Unite 'ms'
                 $lp = Derniere-Ligne -Motif "editeur pret $($c1.Id) en (\d+) ms$" -Dossier $da
                 if ($lp -match 'en (\d+) ms$') { Noter-Mesure -Nom 'clic Annoter -> page prete' -Valeur ([int]$Matches[1]) -Unite 'ms' }
+            }
+
+            # Si (3) a noté que l'éditeur n'est pas devant, la suite le ramène pour être jouée.
+            Point '(3) éditeur devant pour la suite' {
+                if ($E::GetForegroundWindow() -ne $hwnd) { Ramener-Devant $hwnd '(3)' }
             }
 
             if ($null -eq $c1.Recent) { throw "(2) aucun PNG de la capture dans « Récents » ; $(Diagnostic-Journal $da)" }
