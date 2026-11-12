@@ -30,6 +30,7 @@ $bilans = [System.Collections.Generic.List[object]]::new()
 foreach ($fichier in $essais) {
     $nom = [System.IO.Path]::GetFileNameWithoutExtension($fichier.Name)
     $chrono = [System.Diagnostics.Stopwatch]::StartNew()
+    $avant = @(Get-Process | ForEach-Object { $_.Id })
     $arguments = @('-NoProfile', '-File', "`"$($fichier.FullName)`"",
         '-Exe', "`"$exeComplet`"", '-Sortie', "`"$sortieComplete`"")
     $processus = Start-Process -FilePath $pwsh -ArgumentList $arguments -NoNewWindow -PassThru
@@ -43,6 +44,17 @@ foreach ($fichier in $essais) {
         $code = -1
     }
     $chrono.Stop()
+    # Rien de ce qu'un essai a lancé ne doit lui survivre : une app ou une aide restée
+    # ouverte garde la sortie de l'étape et la bloque jusqu'à sa limite de temps.
+    $restes = @(Get-Process | Where-Object {
+            $_.Id -ne $PID -and $_.Id -notin $avant -and
+            $_.ProcessName -match '^(breezyshot.*|pwsh|msedgewebview2)$'
+        })
+    if ($restes.Count -gt 0) {
+        $noms = ($restes | ForEach-Object { "$($_.ProcessName) ($($_.Id))" }) -join ', '
+        Write-Host "$nom : processus restés ouverts, arrêtés : $noms"
+        $restes | ForEach-Object { try { $_.Kill() } catch { } }
+    }
     $json = Join-Path $sortieComplete "$nom.json"
     $bilan = $null
     if (Test-Path -LiteralPath $json) { $bilan = Get-Content -LiteralPath $json -Raw | ConvertFrom-Json }
