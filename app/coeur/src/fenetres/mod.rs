@@ -256,15 +256,15 @@ impl Bandeau {
     /// Montre un message ; il remplace aussitôt le précédent. Rend son `id`. Peut être
     /// appelé de n'importe quel fil : les gestes partent sur le fil principal.
     /// Un message qui arrive pendant un décompte le remplace (le délai, lui, continue) :
-    /// `bandeau decompte <id> remplace`.
+    /// `bandeau decompte <id> remplace` (id de l'ancien décompte).
     pub fn afficher(&self, message: Message) -> u64 {
         self.poser_contenu(Contenu::Message(message))
     }
 
     /// Range un nouveau contenu (il remplace le précédent) et le montre si la page est
-    /// prête. Rend son `id`, 0 si l'état est inaccessible.
+    /// prête. Rend son `id`, 0 si l'état est inaccessible. Un décompte remplacé, par un
+    /// message ou par un autre décompte, écrit `bandeau decompte <id> remplace`.
     fn poser_contenu(&self, contenu: Contenu) -> u64 {
-        let message = !contenu.est_decompte();
         let (id, prete, remplace) = {
             let Some(mut etat) = self.etat() else {
                 return 0;
@@ -272,7 +272,7 @@ impl Bandeau {
             let remplace = etat
                 .en_cours
                 .as_ref()
-                .filter(|c| message && c.contenu.est_decompte())
+                .filter(|c| c.contenu.est_decompte())
                 .map(|c| c.id);
             etat.dernier_id += 1;
             let id = etat.dernier_id;
