@@ -1,6 +1,7 @@
 // Page de l'éditeur d'annotation (contrat 0.4 « Éditeur », §3.4, §3.5, §4, §6, §7.2, et
 // avenant « Éditeur épuré ») : entrée de la page. IPC avec le cœur, charge, image, les trois
-// toiles et la vue, sorties et fermeture. La barre (barre.js) et les gestes (outils.js) reçoivent l'objet `ed`.
+// toiles et la vue, sorties et fermeture. La barre (barre.js) et les gestes (outils.js)
+// reçoivent l'objet `ed`.
 //
 // Commandes (permises à la seule fenêtre `editeur`) : `editeur_pret` → ChargeEditeur ;
 // `editeur_image` { id } → octets RGBA ; `editeur_affiche` { id } ; `editeur_vue` { id, x,
@@ -72,20 +73,26 @@ const ed = {
 // Couleurs de contenu : celles de dessin.js, par leur nom.
 const couleurDessin = (nom) => dessin.COULEURS.find((c) => c[1] === nom)[0];
 // `emplacement` : l'outil venu de « Ajouter » (vide : l'emplacement n'est pas montré) ;
-// `autre` : la couleur libre gardée (« Autre couleur »).
+// `autre` : la couleur libre gardée (« Autre couleur »). Couleur, taille (rang 0 à 2) et
+// opacité : par outil, comme la maquette (S.col, S.w, S.a).
+const rouge = couleurDessin("Rouge");
 export const DEFAUTS = {
   outil: "fleche",
   emplacement: "",
   variantes: { fleche: "droite", forme: "rectangle", flou: "pixeliser", projecteur: "rectangle" },
-  couleur: couleurDessin("Rouge"),
-  couleurSurligneur: couleurDessin("Jaune"),
+  couleurs: {
+    fleche: rouge,
+    stylo: rouge,
+    surligneur: couleurDessin("Jaune"),
+    texte: rouge,
+    forme: rouge,
+    numero: rouge,
+  },
+  tailles: { fleche: 1, stylo: 1, surligneur: 1, texte: 1, forme: 1, numero: 1, flou: 1 },
+  opacites: { fleche: 100, stylo: 100, texte: 100, forme: 100, numero: 100 },
   autre: "",
-  epaisseur: 1,
-  tailleTexte: 28,
-  numero: 1,
-  intensite: 1,
-  opacite: 100,
 };
+const PAR_OUTIL = ["variantes", "couleurs", "tailles", "opacites"];
 const OUTILS_CONNUS = [
   "fleche",
   "stylo",
@@ -105,7 +112,7 @@ function lirePreferences(texte) {
     const lu = JSON.parse(texte);
     for (const k of Object.keys(DEFAUTS)) {
       if (lu[k] === undefined || typeof lu[k] !== typeof DEFAUTS[k]) continue;
-      p[k] = k === "variantes" ? { ...p.variantes, ...lu.variantes } : lu[k];
+      p[k] = PAR_OUTIL.includes(k) ? { ...p[k], ...lu[k] } : lu[k];
     }
     if (!OUTILS_CONNUS.includes(p.outil)) p.outil = DEFAUTS.outil;
   } catch {
@@ -424,10 +431,17 @@ async function charger(charge) {
   relacherToiles();
   ed.outils?.remiseAZero();
   ed.h = modele.creerHistorique(modele.nouveauDocument(charge.largeur, charge.hauteur));
+  // Une demande de fermeture reçue avant la charge : la réponse, une seule fois.
+  if (demandeEnAttente != null) {
+    const d = demandeEnAttente;
+    demandeEnAttente = null;
+    if (d === charge.id) fermer(false);
+  }
   ed.selection = [];
   ed.cadrage = { mode: "ajuster" };
   ed.exportee = null;
   ed.exports.clear();
+  exportEnCours = false;
   ed.affiche = false;
   cleMasques = "";
   cleCadre = "";
@@ -437,7 +451,9 @@ async function charger(charge) {
   try {
     octets = await appeler("editeur_image", { id });
   } catch (e) {
+    // Image impossible : comme une image refusée, le cœur ferme et montre son bandeau.
     console.info("editeur_image :", e);
+    if (ed.charge?.id === id) fermer(true);
     return;
   }
   if (ed.charge?.id !== id) return;
@@ -489,6 +505,7 @@ function preferencesTexte() {
 // Export : l'image composée part en corps brut, les en-têtes disent quoi en faire.
 // Un export à la fois : le drapeau tombe au résultat ou à l'échec de l'appel.
 let exportEnCours = false;
+let demandeEnAttente = null; // editeur:fermer_demande reçue avant la charge
 ed.exportEnCours = () => exportEnCours;
 ed.exporter = async (but) => {
   if (!ed.charge || !ed.h || !ed.fond || exportEnCours) return null;
@@ -532,7 +549,9 @@ function resultat(r) {
   else if (r.etat === "echec" && r.message) ed.barre?.message(r.message);
   // « Copier » (copier puis fermer) : la coche, puis la fenêtre se ferme ; en échec elle reste.
   if (r.but === "copier_fermer") {
-    if (reussi) ed.barre?.copierReussi(() => fermer(false));
+    // Le cœur ferme seul (ou envoie `editeur:charger`) : la page ne rappelle pas
+    // editeur_fermer, elle montre la coche.
+    if (reussi) ed.barre?.copierReussi();
     else ed.barre?.fermerMenuFermer();
   }
 }
@@ -590,7 +609,9 @@ async function demarrer() {
     await Promise.all([
       ecoute("editeur:charger", (e) => charger(e?.payload)),
       ecoute("editeur:fermer_demande", (e) => {
-        if (e?.payload?.id === ed.charge?.id) fermer(false);
+        const id = e?.payload?.id;
+        if (!ed.h) demandeEnAttente = id ?? null;
+        else if (id === ed.charge?.id) fermer(false);
       }),
       ecoute("editeur:resultat", (e) => resultat(e?.payload)),
       ecoute("editeur:glisser", (e) => {
@@ -605,6 +626,18 @@ async function demarrer() {
   } catch (e) {
     console.info("editeur_pret :", e);
   }
-  await charger(charge);
+  if (charge) await charger(charge);
+  else if (demandeEnAttente != null) {
+    // Rien de chargé, rien à perdre : une seule réponse.
+    const id = demandeEnAttente;
+    demandeEnAttente = null;
+    appeler("editeur_fermer", {
+      id,
+      version: 0,
+      vide: true,
+      force: false,
+      preferences: preferencesTexte(),
+    }).catch(signaler("editeur_fermer"));
+  }
 }
 demarrer();
