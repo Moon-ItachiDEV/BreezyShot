@@ -183,11 +183,14 @@ mod tests {
     fn seuls_les_fichiers_de_la_capture_s_effacent() {
         let rec = Path::new("/l/Recents");
         let gli = Path::new("/l/Glisser");
+        // Absolu sur tout système (sous Windows, « /i/… » sans lettre de lecteur ne l'est pas).
+        let enregistre = std::env::temp_dir()
+            .join("BreezyShot")
+            .join("BreezyShot 2026-11-11 à 19.40.12.png");
+        assert!(enregistre.is_absolute());
         let s = Suppression {
             recent: Some(rec.join("20261111-194012-123.png")),
-            enregistre: Some(PathBuf::from(
-                "/i/BreezyShot/BreezyShot 2026-11-11 à 19.40.12.png",
-            )),
+            enregistre: Some(enregistre.clone()),
             liens: vec![
                 gli.join("BreezyShot 2026-11-11 à 19.40.12.png"),
                 PathBuf::from("/ailleurs/x.png"),
@@ -198,7 +201,7 @@ mod tests {
             a_effacer(&s, rec, gli),
             [
                 rec.join("20261111-194012-123.png"),
-                PathBuf::from("/i/BreezyShot/BreezyShot 2026-11-11 à 19.40.12.png"),
+                enregistre,
                 gli.join("BreezyShot 2026-11-11 à 19.40.12.png"),
             ]
         );
