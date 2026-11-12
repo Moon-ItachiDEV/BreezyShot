@@ -296,6 +296,12 @@ function finirSaisie(annuler) {
   if (annuler) appeler("reglages_saisie", { action, active: false }).then(recevoir);
   else if (vue) afficher(vue);
 }
+// Une vue poussée par le cœur (`reglages:etat`). Si elle dit que la saisie est finie
+// (filet des 15 s), la page sort de « Appuyez… » sans rappeler le cœur.
+function etatPousse(v) {
+  if (saisie && v.saisie_en_cours === false) finirSaisie(false);
+  afficher(v);
+}
 function envoyerTouche(e) {
   const action = saisie;
   finirSaisie(false);
@@ -394,7 +400,7 @@ addEventListener("contextmenu", (e) => e.preventDefault(), true);
 
 // Branchement : Tauri si présent, sinon un aperçu fixe pour le navigateur.
 if (tauri?.event?.listen) {
-  Promise.all([tauri.event.listen("reglages:etat", (e) => e?.payload && afficher(e.payload)), suivreTheme()]).then(
+  Promise.all([tauri.event.listen("reglages:etat", (e) => e?.payload && etatPousse(e.payload)), suivreTheme()]).then(
     () => appeler("reglages_lire").then(recevoir),
     (e) => console.warn("reglages : écoute impossible :", e),
   );
@@ -421,5 +427,6 @@ if (tauri?.event?.listen) {
     ],
     version: "0.0.0",
     alerte: null,
+    saisie_en_cours: false,
   });
 }

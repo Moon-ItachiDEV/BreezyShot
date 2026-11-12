@@ -826,7 +826,19 @@ fn ecrire_refuse_un_texte_trop_gros() {
     charger(d.path(), W);
     let avant = octets(&d);
     let mut r = Reglages::par_defaut(W);
-    r.modele_nom = "x".repeat(1_100_000);
+    // Le modèle de nom est borné (`valider`) : le texte trop gros vient d'un champ inconnu.
+    r.modele_nom = "x".repeat(MODELE_NOM_MAX + 1);
+    assert!(matches!(
+        ecrire(d.path(), &r),
+        Err(ErreurEcriture::ValeurInvalide {
+            champ: "modele_nom"
+        })
+    ));
+    r.modele_nom = "x".repeat(MODELE_NOM_MAX);
+    r.inconnus.insert(
+        "gros".into(),
+        serde_json::Value::String("x".repeat(1_100_000)),
+    );
     assert!(matches!(
         ecrire(d.path(), &r),
         Err(ErreurEcriture::TropGros { .. })
@@ -1355,4 +1367,19 @@ fn codes_sans_chemin() {
     };
     assert_eq!(c.code(), "cree");
     assert_eq!(Constat::MisANiveau { de: 1, a: 2 }.code(), "mis_a_niveau");
+}
+
+#[test]
+fn modele_trop_long_remplace_a_la_lecture() {
+    let d = dossier();
+    let long = "a".repeat(MODELE_NOM_MAX + 1);
+    fs::write(
+        chemin(&d),
+        json!({ "version": 2, "modele_nom": long }).to_string(),
+    )
+    .unwrap();
+    let (r, _) = charger(d.path(), W);
+    assert_eq!(r.modele_nom, Reglages::par_defaut(W).modele_nom);
+    // Écrit par l'app juste après : jamais refusé à cause du nom lu.
+    assert!(valider(&r).is_ok());
 }

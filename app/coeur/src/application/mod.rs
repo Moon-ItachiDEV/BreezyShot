@@ -2081,7 +2081,9 @@ fn arreter(app: &AppHandle) {
     if let Some(v) = app.try_state::<Vignette>() {
         v.fermer();
     }
-    // Modules : libérer les raccourcis, fermer les fenêtres.
+    // Réglages fermés d'abord : la fin d'une saisie ne doit pas reprendre des raccourcis
+    // après leur libération. Puis libérer les raccourcis, fermer les autres fenêtres.
+    fenetres::reglages::fermer(app);
     if app
         .state::<Application>()
         .raccourcis_reserves
@@ -2095,7 +2097,6 @@ fn arreter(app: &AppHandle) {
     if let Some(bandeau) = app.try_state::<Bandeau>() {
         bandeau.fermer();
     }
-    fenetres::reglages::fermer(app);
     if icone::retirer(app) {
         log::info!("icone retiree");
     }

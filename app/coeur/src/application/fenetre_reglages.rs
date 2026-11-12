@@ -7,14 +7,15 @@
 //! Si le fichier ne peut pas être écrit, le changement vaut pour la session et la page
 //! le dit en une ligne.
 
-use std::sync::atomic::Ordering;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use serde::Serialize;
 use tauri::{AppHandle, Manager};
 
 use super::page_reglages::{
-    self as page, Changement, Contexte, Refus, Saisie, VueReglages, ALERTE_NON_ENREGISTRES,
+    self as page, Changement, Contexte, Refus, Relecture, Saisie, VueReglages,
+    ALERTE_NON_ENREGISTRES,
 };
 use super::{
     entrees_menu, icone, plateforme_reglages, zone, Application, ACTIONS_CONSTRUITES, VERSION,
@@ -27,6 +28,17 @@ use crate::systeme::{self, EtatDemarrage};
 
 /// La saisie d'un raccourci rend les raccourcis d'office après ce délai.
 pub const DELAI_SAISIE: Duration = Duration::from_secs(15);
+
+/// Vrai tant qu'un sélecteur de dossier est ouvert : un second « Parcourir… » est ignoré.
+static DIALOGUE_OUVERT: AtomicBool = AtomicBool::new(false);
+
+/// Rend `DIALOGUE_OUVERT` à la fin du dialogue, quoi qu'il arrive.
+struct GardeDialogue;
+impl Drop for GardeDialogue {
+    fn drop(&mut self) {
+        DIALOGUE_OUVERT.store(false, Ordering::SeqCst);
+    }
+}
 
 /// La réponse de chaque commande : l'état complet, et le refus éventuel.
 #[derive(Debug, Clone, Serialize)]
@@ -52,10 +64,12 @@ pub fn ouvrir(app: &AppHandle) {
     }
 }
 
-/// La fenêtre a été détruite : la saisie éventuelle est finie.
+/// La fenêtre a été détruite : la saisie éventuelle est annulée, les refus oubliés, et la
+/// prochaine page écrira de nouveau `reglages page prete`.
 fn fermee(app: &AppHandle) {
     log::info!("reglages fermes");
-    finir_saisie(app, "raccourcis repris");
+    etat(app).page_reglages_prete.store(false, Ordering::SeqCst);
+    annuler_saisie(app, "raccourcis repris");
 }
 
 fn etat(app: &AppHandle) -> tauri::State<'_, Application> {
@@ -101,8 +115,9 @@ fn reservations(app: &AppHandle) -> Option<&raccourcis::Reservations> {
 
 /// Relit le fichier. S'il a changé depuis la dernière lecture ou écriture faite par l'app
 /// (modification extérieure), il devient la base, et ses raccourcis changés sont repris.
-/// Sinon, la base reste la mémoire (qui peut porter des changements de la session non
-/// écrits). Rend la base.
+/// Sinon, ou s'il n'a pas pu être lu (valeurs protégées), la base reste la mémoire (qui
+/// peut porter des changements de la session non écrits). Décision : `page::relecture`.
+/// Rend la base.
 fn relire(app: &AppHandle) -> Reglages {
     let Some(dossier) = dossier_reglages(app) else {
         return memoire(app);
@@ -117,7 +132,7 @@ fn relire(app: &AppHandle) -> Reglages {
         .lock()
         .ok()
         .and_then(|d| d.clone());
-    if derniere.as_ref() == Some(&relu) {
+    if page::relecture(&relu, derniere.as_ref()) == Relecture::Garder {
         return memoire(app);
     }
     log::info!("reglages relus: changes exterieurs");
@@ -198,6 +213,11 @@ fn vue(app: &AppHandle) -> VueReglages {
         version: VERSION,
         alerte,
         maintenant: chrono::Local::now(),
+        saisie_en_cours: etat(app)
+            .saisie
+            .lock()
+            .map(|s| s.is_some())
+            .unwrap_or(false),
     };
     page::vue(&r, &contexte)
 }
@@ -240,6 +260,13 @@ fn changer_raccourci(app: &AppHandle, action: &str, candidats: &[String]) -> boo
         return false;
     };
     let choix = r.changer(app, action, candidats, systeme::impr_ecran_reserve());
+    if candidats.is_empty() {
+        // Liste vide (écrite à la main) : « pas de raccourci voulu », jamais un refus.
+        log::info!("raccourci {action} change: aucun");
+        noter_refus(app, action, None);
+        refaire_menu(app);
+        return true;
+    }
     match choix.retenu {
         Some(x) => {
             log::info!("raccourci {action} change: {}", x.canonique());
@@ -266,10 +293,23 @@ fn changer_raccourci(app: &AppHandle, action: &str, candidats: &[String]) -> boo
     }
 }
 
+/// Annule une saisie (Échap, perte du focus, filet, fermeture) : les refus affichés sont
+/// oubliés, puis les raccourcis repris (une perte à la reprise reste dite).
+fn annuler_saisie(app: &AppHandle, ligne: &str) {
+    if let Ok(mut r) = etat(app).refus_raccourcis.lock() {
+        r.clear();
+    }
+    finir_saisie(app, ligne);
+}
+
 /// Finit une saisie en cours (raccourcis repris), avec la ligne de journal donnée.
 fn finir_saisie(app: &AppHandle, ligne: &str) {
     if let Ok(mut s) = etat(app).saisie.lock() {
         *s = None;
+    }
+    // À l'arrêt, les raccourcis sont déjà libérés (ou vont l'être) : ne rien reprendre.
+    if !etat(app).raccourcis_reserves.load(Ordering::SeqCst) {
+        return;
     }
     let Some(r) = reservations(app) else {
         return;
@@ -361,6 +401,11 @@ pub fn reglages_apercu_nom(modele: String) -> Apercu {
 /// « Parcourir… » : le sélecteur de dossier du système, dans un fil à lui.
 #[tauri::command]
 pub async fn reglages_parcourir(app: AppHandle) -> Reponse {
+    if DIALOGUE_OUVERT.swap(true, Ordering::SeqCst) {
+        log::info!("dossier: dialogue deja ouvert");
+        return reponse(&app, None);
+    }
+    let _garde = GardeDialogue;
     let proprietaire = fenetre::identifiant(&app);
     let r = memoire(&app);
     let images = images(&app);
@@ -414,7 +459,7 @@ pub fn reglages_saisie(app: AppHandle, action: String, active: bool) -> Reponse 
         return refuser(&app, Refus::nouveau("raccourci", "", "action_inconnue"));
     }
     if !active {
-        finir_saisie(&app, "raccourcis repris");
+        annuler_saisie(&app, "raccourcis repris");
         return reponse(&app, None);
     }
     let Some(r) = reservations(&app) else {
@@ -436,7 +481,7 @@ pub fn reglages_saisie(app: AppHandle, action: String, active: bool) -> Reponse 
             let _ = pour_filet.run_on_main_thread(move || {
                 let en_cours = etat(&pour).saisie.lock().ok().and_then(|s| *s);
                 if en_cours == Some(numero) {
-                    finir_saisie(&pour, "raccourcis repris d'office");
+                    annuler_saisie(&pour, "raccourcis repris d'office");
                     fenetre::emettre_etat(&pour, vue(&pour));
                 }
             });
@@ -454,9 +499,10 @@ pub fn reglages_raccourci(app: AppHandle, action: String, saisie: Saisie) -> Rep
     let notation = match page::notation_saisie(&saisie) {
         Ok(n) => n,
         Err(refus) => {
+            // `saisie.code` vient de la page : jamais écrit tel quel.
             log::info!(
                 "raccourci {action} refuse: {} ({})",
-                saisie.code,
+                page::code_pour_journal(&saisie.code),
                 refus.code
             );
             noter_refus(&app, &action, Some(refus.texte.clone()));

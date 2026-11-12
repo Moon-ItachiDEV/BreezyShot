@@ -7,8 +7,9 @@
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
 
+use super::place::{centrer, ecran_sous};
 use super::theme::{self, ThemePage};
-use super::ARGUMENTS_NAVIGATEUR;
+use super::{ecrans, souris, ARGUMENTS_NAVIGATEUR};
 use crate::systeme;
 
 /// Étiquette de la fenêtre (aussi dans `capabilities/reglages.json`).
@@ -64,12 +65,21 @@ where
     .title(TITRE)
     .inner_size(largeur, hauteur)
     .min_inner_size(lmin, hmin)
-    .center()
+    .visible(false)
     .resizable(true)
     .theme(theme::pour_cadre(theme::actuel()))
     .additional_browser_args(ARGUMENTS_NAVIGATEUR)
     .build()
     .map_err(|e| format!("fenetre des reglages: {e}"))?;
+    // Centrée sur l'écran de la souris (pixels réels, échelle de cet écran), puis montrée.
+    if let Some(ecran) = ecran_sous(souris(app), &ecrans(app)) {
+        let r = centrer(&ecran, TAILLE);
+        let _ = f.set_size(tauri::PhysicalSize::new(r.largeur, r.hauteur));
+        let _ = f.set_position(tauri::PhysicalPosition::new(r.x, r.y));
+    } else {
+        let _ = f.center();
+    }
+    let _ = f.show();
     f.on_window_event(move |e| {
         if matches!(e, tauri::WindowEvent::Destroyed) {
             fermee();

@@ -184,6 +184,10 @@ pub(super) fn texte_du_fichier(reglages: &Reglages) -> Result<String, ErreurEcri
     Ok(texte)
 }
 
+/// Longueur maximale du modèle de nom, en caractères (un nom de fichier Windows tient en
+/// 255 caractères ; au-delà, une page fausse seulement).
+pub const MODELE_NOM_MAX: usize = 200;
+
 /// Les contrôles de valeur que fait `ecrire`, sans le disque ni la protection : au moins
 /// une sortie active, durée permise, modèle de nom non vide, dossier non vide. Fonction
 /// pure, pour refuser un changement avant de l'appliquer.
@@ -196,7 +200,8 @@ pub fn valider(reglages: &Reglages) -> Result<(), ErreurEcriture> {
             champ: "vignette.duree_s",
         });
     }
-    if reglages.modele_nom.trim().is_empty() {
+    if reglages.modele_nom.trim().is_empty() || reglages.modele_nom.chars().count() > MODELE_NOM_MAX
+    {
         return Err(ErreurEcriture::ValeurInvalide {
             champ: "modele_nom",
         });

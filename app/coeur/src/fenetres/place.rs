@@ -76,6 +76,21 @@ pub fn placer(ecran: &Ecran, taille_logique: (f64, f64)) -> Rect {
     }
 }
 
+/// Place d'une fenêtre ordinaire (Réglages) : centrée dans la zone utile de l'écran, taille
+/// logique convertie avec l'échelle de cet écran, bornée à la zone utile.
+pub fn centrer(ecran: &Ecran, taille_logique: (f64, f64)) -> Rect {
+    let e = echelle_sure(ecran.echelle);
+    let zone = ecran.zone_utile;
+    let largeur = ((taille_logique.0 * e).round().max(1.0) as u32).min(zone.largeur.max(1));
+    let hauteur = ((taille_logique.1 * e).round().max(1.0) as u32).min(zone.hauteur.max(1));
+    Rect {
+        x: (i64::from(zone.x) + (i64::from(zone.largeur) - i64::from(largeur)) / 2) as i32,
+        y: (i64::from(zone.y) + (i64::from(zone.hauteur) - i64::from(hauteur)) / 2) as i32,
+        largeur,
+        hauteur,
+    }
+}
+
 /// Le rectangle de la pilule envoyé par la page, vérifié : `None` si une valeur n'est pas
 /// finie ; sinon borné à la fenêtre (0..560 × 0..220 pixels CSS).
 pub fn borner_zone(x: f64, y: f64, largeur: f64, hauteur: f64) -> Option<ZoneCss> {
@@ -190,6 +205,15 @@ mod tests {
             zone_utile: utile,
             echelle,
         }
+    }
+
+    #[test]
+    fn reglages_centres_sur_l_ecran() {
+        let e = ecran(rect(1920, 0, 2560, 1440), rect(1920, 0, 2560, 1392), 1.5);
+        assert_eq!(centrer(&e, (780.0, 540.0)), rect(2615, 291, 1170, 810));
+        // Plus grande que la zone utile : bornée, collée en haut à gauche de la zone.
+        let petit = ecran(rect(0, 0, 800, 600), rect(0, 0, 800, 560), 1.0);
+        assert_eq!(centrer(&petit, (780.0, 600.0)), rect(10, 0, 780, 560));
     }
 
     #[test]
