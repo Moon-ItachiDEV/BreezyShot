@@ -340,6 +340,7 @@ dependencies = [
  "tauri-plugin-single-instance",
  "tempfile",
  "tracing",
+ "webview2-com",
  "windows",
 ]
 

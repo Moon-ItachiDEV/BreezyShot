@@ -69,8 +69,8 @@ jobs:
         run: npx tauri build --no-bundle -- --locked
 
       - name: Essais
-        # 01 à 04 ; une capture bloquée ne doit pas manger tout le temps du job.
-        timeout-minutes: 20
+        # 01 à 06 et 09 (installateur) ; une étape bloquée ne doit pas manger tout le job.
+        timeout-minutes: 30
         run: ./essais/lancer.ps1 -Exe app/coeur/target/release/breezyshot.exe -Sortie essais-resultats
 
       - name: Envoyer le .exe
@@ -123,6 +123,12 @@ jobs:
           NODE_PATH: ${{ github.workspace }}/app/node_modules
           SORTIE: ${{ github.workspace }}/essais-resultats/pages
         run: node essais/pages/selection.cjs
+
+      - name: Essai de la page de l'installateur
+        env:
+          NODE_PATH: ${{ github.workspace }}/app/node_modules
+          SORTIE: ${{ github.workspace }}/essais-resultats/pages
+        run: node essais/pages/installateur.cjs
 
       - name: Envoyer les captures de la page
         if: always()
@@ -182,6 +188,9 @@ jobs:
           test -n "$version"
           etiquette="v${version}-essai"
           fichier="exe/BreezyShot-${version}-essai.exe"
+          # Le fichier publié ne doit jamais s'appeler breezyshot.exe : ce nom ferait de
+          # l'exe l'app, pas l'installateur (arguments::lancement).
+          test "$(basename "$fichier")" != "breezyshot.exe"
           mv exe/breezyshot.exe "$fichier"
           gh release delete "$etiquette" --yes --cleanup-tag || true
           # Tant que l'ancienne étiquette existe, gh ignore --target et la pré-version

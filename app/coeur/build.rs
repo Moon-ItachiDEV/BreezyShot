@@ -15,6 +15,8 @@ fn main() {
         "selection_terminee",
         "selection_cliquee",
         "selection_annulee",
+        "installateur_pret",
+        "installateur_action",
     ]);
     tauri_build::try_build(
         tauri_build::Attributes::new()

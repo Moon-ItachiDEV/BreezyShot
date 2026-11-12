@@ -28,17 +28,24 @@ app/
       sortie/               presse-papiers, PNG, « Récents », enregistrement (étape 6)
       reglages/             fichier de réglages (étape 2)
       fenetres/             crée, place, montre et cache les fenêtres de l'interface :
-                            mod.rs (bandeau), place.rs, selection.rs (étape 5)
+                            mod.rs (bandeau), place.rs, selection.rs (étape 5),
+                            installateur.rs (fenêtre de l'installateur, version 0.3)
+      installation/         décisions pures de l'installateur (version 0.3) : version.rs,
+                            emplacements.rs, parcours.rs, envol.rs ; n'utilise que systeme.
+                            Câblage : application/installateur.rs
       systeme/              tous les gestes propres à un système : mod.rs (façade commune),
                             windows.rs, autre.rs (Linux pour le développement, macos.rs ensuite),
                             composition.rs (attendre le compositeur),
                             gel/ (photo du bureau et écran figé natif : mod.rs, windows.rs,
                             autre.rs), presse_papiers/ (image avec transparence : format
-                            « PNG » puis CF_DIB sur blanc ; mod.rs, windows.rs, autre.rs)
+                            « PNG » puis CF_DIB sur blanc ; mod.rs, windows.rs, autre.rs),
+                            installation/ (fichiers, registre de l'utilisateur, raccourci,
+                            WebView2, processus ; mod.rs, windows.rs, autre.rs)
   interface/                ce qu'on voit (web), partagé entre Windows et Mac
     commun/                 jetons du design system (jetons.css), composants partagés
     vignette/               vignette, souffle et bandeau de messages (bandeau.* dès l'étape 3)
     selection/              page de la sélection (étape 5)
+    installateur/           page de l'installateur (version 0.3 ; A + C du design validé)
     barre/  reglages/       (étape 10)
 design/                     jetons et icônes Moulinet, copiés du design system
 docs/                       ce fichier, TRAVAIL-VALIDE.md, notices d'essai
@@ -114,6 +121,10 @@ privé. Trois précautions suffisent, dès maintenant :
 
 - tous les chemins passent par `systeme::dossiers()`, et l'app n'écrit jamais à côté du .exe ;
 - l'app lit le registre de l'utilisateur mais n'y écrit jamais d'état à elle ;
+  **exception (version 0.3, installateur)** : l'installateur et la désinstallation écrivent et
+  retirent la seule clé de désinstallation de l'utilisateur
+  (`HKCU\…\Uninstall\BreezyShot`), pour le chemin d'installation ; aucun autre état, et
+  jamais depuis l'app elle-même. Voir `docs/contrat-installateur.md` ;
 - « démarrer avec le système » (étape 10) restera derrière une seule fonction de `systeme`,
   pour pouvoir choisir plus tard entre l'entrée de démarrage classique et celle d'un paquet.
 
@@ -177,6 +188,15 @@ dans le dossier temporaire du système (`systeme::dossier_secours()`), sous le n
 - `breezyshot.exe --quitter` : demande à l'instance en cours de se fermer proprement (libère
   les raccourcis, retire l'icône, écrit `arret propre`), puis sort. Sans instance en cours,
   sort tout de suite avec le code 0. C'est le moyen qu'utilisent les essais pour fermer l'app.
+- `breezyshot.exe --capturer <mode>` (`zone`, `plein_ecran`, `fenetre`) : lance cette capture
+  (seconde instance qui confie l'ordre à la première, ou au démarrage, où l'ordre attend
+  `pret`). Un mode inconnu ne fait qu'une ligne au journal. Sert à « Essayer une capture » de
+  l'installateur. Lignes : `--capturer recu: <mode>`, `--capturer: mode inconnu <…>`,
+  `--capturer: en attente du demarrage`.
+- **Ce que l'exe est (version 0.3)** : lancé sous le nom `breezyshot.exe` (casse ignorée), il
+  est l'app ; sous tout autre nom (le fichier téléchargé `BreezyShot-<v>-essai.exe`), il est
+  l'installateur ; `--desinstaller` le fait désinstaller. Décision pure `arguments::lancement`.
+  Le contexte Tauri n'est engendré qu'une fois. Détails : `docs/contrat-installateur.md`.
 - Aucune autre option pour l'instant.
 - Au démarrage, après `icone installee`, l'app vérifie que l'icône est réellement dans la
   zone de notification (son rectangle est connu du système) et écrit `icone visible` ou
@@ -894,3 +914,40 @@ son `Bilan`, et `annonce(&Bilan, &Demande)` dit quoi montrer.
   ne rallument la copie que si les trois sont éteints. Seul « Récents » en échec : la réussite est
   annoncée, l'échec va au journal (par l'Application).
 - `sortie` n'importe que `crate::systeme` (`Pixels` vient de `systeme::gel`).
+
+## 11. Installation (version 0.3)
+
+L'utilisateur télécharge un seul `BreezyShot-<version>-essai.exe`. Ouvert, il montre l'écran
+validé (`interface/installateur/`, « A + C »), s'installe pour l'utilisateur courant sans
+droits d'administrateur, lance l'app, puis « BreezyShot est prêt ». Le même fichier est l'app,
+l'installateur ou la désinstallation selon son nom et sa ligne de commande (§3.4). Le contrat
+complet (voie retenue, séquences, signatures, erreurs, essais) est `docs/contrat-installateur.md`.
+
+- **Décisions pures** (`installation/`, testées, n'utilisent que `systeme`) : `version.rs`
+  (lecture et comparaison, `decider_plan`), `emplacements.rs` (où écrire, ce que la
+  désinstallation retire ; garantie : rien hors des emplacements, aucun dossier supprimé par
+  son nom), `parcours.rs` (étapes, erreurs d'une ligne, table `reagir`), `envol.rs` (place de
+  la fenêtre, trajectoire).
+- **Gestes système** (`systeme/installation/`) : copie du flux principal seulement (aucun
+  `Zone.Identifier`), remplacement, raccourci (IShellLinkW), clé de désinstallation de
+  l'utilisateur (seule écriture du registre, §2), mutex d'instance, WebView2, zone de
+  notification. `autre.rs` : fichiers réels, le reste « sans objet » (parcours jouable sous
+  Linux).
+- **Câblage** (`application/installateur.rs`) : fenêtre, fil d'installation, envol,
+  désinstallation. La fermeture « retirer le démarrage avec Windows » est injectée par
+  l'Application à l'assemblage (`RetirerDemarrage`, `impl FnOnce() -> Result<(), String>`) ;
+  par défaut, un geste vide (`desinstallation demarrage: pas a nous`). L'installateur ne
+  touche jamais la valeur `Run` lui-même (chantier Réglages).
+- **Emplacements** réels : app sous `%LOCALAPPDATA%\Programs\BreezyShot\`, raccourci au menu
+  Démarrer de l'utilisateur, clé `HKCU\…\Uninstall\BreezyShot`. Essais : tout sous
+  `BREEZYSHOT_DOSSIER_ESSAI`, clés sous `HKCU\Software\BreezyShot-essais\<dossier>` ; jamais
+  les vrais. Réglages, Récents, journal et captures gardent leurs dossiers (§3.3) : une mise
+  à jour ou une désinstallation ne les touche jamais.
+- **Journal** `installation.log` (jamais de chemin d'utilisateur) : lignes listées au §6 du
+  contrat. Le dossier temporaire WebView2 de l'installateur est nettoyé au lancement et à la
+  désinstallation (quand WebView2 ne le tient plus).
+- **Essais** : `essais/pages/installateur.cjs` (page, tâche `pages`), `essais/09-installateur.ps1`
+  (Windows, boutons par UI Automation, fichier lancé sans `ShellExecute` avec une marque du
+  Web). La tâche `publier` garde un seul fichier et refuse qu'il s'appelle `breezyshot.exe`.
+- **Hors périmètre** : signature du code, mise à jour automatique, installation pour tous les
+  utilisateurs, MSIX, macOS, installation de WebView2, démarrage avec Windows (Réglages).

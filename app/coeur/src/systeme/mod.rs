@@ -11,6 +11,7 @@ use std::path::{Path, PathBuf};
 
 mod composition;
 pub mod gel;
+pub mod installation;
 pub mod presse_papiers;
 pub use composition::attendre_composition;
 pub use gel::Rect;

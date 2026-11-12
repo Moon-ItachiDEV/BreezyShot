@@ -52,6 +52,7 @@
   --duree-reduite: 120ms;
   --duree-bandeau-reussite: 2500ms;
   --duree-bandeau-entree: 300ms;
+  --duree-envol-fenetre: 460ms;
   --courbe-ressort: cubic-bezier(0.34, 1.4, 0.64, 1);
   --courbe-douce: cubic-bezier(0.2, 0.8, 0.2, 1);
   --courbe-vent: cubic-bezier(0.5, 0, 0.75, 0);
@@ -77,6 +78,16 @@
   --bandeau-titre-lignes: 2;
   --bandeau-detail-lignes: 3;
   --bandeau-action-largeur-max: 160px;
+  --installateur-carte-largeur: 720px;
+  --installateur-carte-hauteur: 480px;
+  --installateur-marge: 40px;
+  --installateur-titre-hauteur: 32px;
+  --installateur-pied-hauteur: 64px;
+  --installateur-logo: 96px;
+  --installateur-marque: 128px;
+  --installateur-barre: 280px;
+  --installateur-titre-taille: 40px;
+  --installateur-titre-interligne: 52px;
   --accent: #0067C0;
   --accent-hover: #1975C5;
   --accent-press: #3183CA;
@@ -115,6 +126,9 @@
   --notif-ink: #1B2227;
   --acrylic-solid: #F9F9F9;
   --danger: #C42B1C;
+  --fenetre-fond-haut: rgba(246,246,248,.93);
+  --fenetre-fond-bas: rgba(238,240,245,.96);
+  --fermer-survol: #C42B1C;
   --shadow-2: 0 0 2px rgba(0,0,0,0.12), 0 1px 2px rgba(0,0,0,0.14);
   --shadow-8: 0 0 2px rgba(0,0,0,0.12), 0 4px 8px rgba(0,0,0,0.14);
   --shadow-16: 0 0 2px rgba(0,0,0,0.12), 0 8px 16px rgba(0,0,0,0.14);
@@ -153,6 +167,8 @@
     --notif-ink: #FFFFFF;
     --acrylic-solid: #2C2C2C;
     --danger: #FF99A4;
+    --fenetre-fond-haut: rgba(36,36,38,.93);
+    --fenetre-fond-bas: rgba(30,31,34,.96);
     --shadow-2: 0 0 2px rgba(0,0,0,0.24), 0 1px 2px rgba(0,0,0,0.28);
     --shadow-8: 0 0 2px rgba(0,0,0,0.24), 0 4px 8px rgba(0,0,0,0.28);
     --shadow-16: 0 0 2px rgba(0,0,0,0.24), 0 8px 16px rgba(0,0,0,0.28);
@@ -191,6 +207,8 @@
   --notif-ink: #FFFFFF;
   --acrylic-solid: #2C2C2C;
   --danger: #FF99A4;
+  --fenetre-fond-haut: rgba(36,36,38,.93);
+  --fenetre-fond-bas: rgba(30,31,34,.96);
   --shadow-2: 0 0 2px rgba(0,0,0,0.24), 0 1px 2px rgba(0,0,0,0.28);
   --shadow-8: 0 0 2px rgba(0,0,0,0.24), 0 4px 8px rgba(0,0,0,0.28);
   --shadow-16: 0 0 2px rgba(0,0,0,0.24), 0 8px 16px rgba(0,0,0,0.28);

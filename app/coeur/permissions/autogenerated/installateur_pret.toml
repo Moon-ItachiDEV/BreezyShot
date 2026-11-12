@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-installateur-pret"
+description = "Enables the installateur_pret command without any pre-configured scope."
+commands.allow = ["installateur_pret"]
+
+[[permission]]
+identifier = "deny-installateur-pret"
+description = "Denies the installateur_pret command without any pre-configured scope."
+commands.deny = ["installateur_pret"]
