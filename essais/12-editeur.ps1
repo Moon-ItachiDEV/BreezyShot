@@ -940,8 +940,8 @@ public static int Pixel(byte[] a, int l, int x, int y) {
             Arreter-Tout
 
             # ===================== Cas B : mémoire, 20 ouvertures ==============================
+            $db = Dossier-Cas 'b'   # hors des points : chacun a sa portée, les trois le lisent
             Point '(15) mémoire et stabilité' {
-                $db = Dossier-Cas 'b'
                 $imagesB = Join-Path $db 'images'
                 New-Item -ItemType Directory -Force -Path $imagesB | Out-Null
                 Ecrire-Reglages -Dossier $db -Images $imagesB
