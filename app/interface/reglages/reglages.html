@@ -21,8 +21,10 @@
   <div class="cadre">
     <nav class="rubriques" role="tablist" aria-orientation="horizontal" aria-label="Rubriques">
       <span class="trait" aria-hidden="true"></span>
+      <button role="tab" id="onglet-capture" data-rubrique="capture"
+        aria-controls="rubrique-capture" aria-selected="true"><svg class="onglet-picto" viewBox="0 0 20 20" aria-hidden="true"><path d="M3 7V4.5A1.5 1.5 0 0 1 4.5 3H7M13 3h2.5A1.5 1.5 0 0 1 17 4.5V7M17 13v2.5a1.5 1.5 0 0 1-1.5 1.5H13M7 17H4.5A1.5 1.5 0 0 1 3 15.5V13"/><path d="M10 7.5v5M7.5 10h5"/></svg><span>Capture</span></button>
       <button role="tab" id="onglet-apres" data-rubrique="apres" aria-controls="rubrique-apres"
-        aria-selected="true"><svg class="onglet-picto" viewBox="0 0 20 20" aria-hidden="true"><rect x="2.5" y="3.5" width="15" height="11" rx="1.5"/><rect x="4.5" y="9" width="6" height="4" rx="1"/></svg><span>Après la capture</span></button>
+        aria-selected="false" tabindex="-1"><svg class="onglet-picto" viewBox="0 0 20 20" aria-hidden="true"><rect x="2.5" y="3.5" width="15" height="11" rx="1.5"/><rect x="4.5" y="9" width="6" height="4" rx="1"/></svg><span>Après la capture</span></button>
       <button role="tab" id="onglet-raccourcis" data-rubrique="raccourcis"
         aria-controls="rubrique-raccourcis" aria-selected="false" tabindex="-1"><svg class="onglet-picto" viewBox="0 0 20 20" aria-hidden="true"><rect x="2.5" y="5.5" width="15" height="9" rx="1.5"/><path d="M5.5 8.5h1M9.5 8.5h1M13.5 8.5h1M6.5 11.5h7"/></svg><span>Raccourcis</span></button>
       <button role="tab" id="onglet-general" data-rubrique="general" aria-controls="rubrique-general"
@@ -32,7 +34,28 @@
     <main class="contenu">
       <p class="alerte" data-alerte role="status" hidden></p>
 
-      <section id="rubrique-apres" role="tabpanel" data-rubrique="apres" aria-labelledby="onglet-apres">
+      <section id="rubrique-capture" role="tabpanel" data-rubrique="capture"
+        aria-labelledby="onglet-capture">
+        <div class="groupe">
+          <div class="ligne" data-reglage="retardateur" hidden>
+            <div class="lb"><span class="libelle" id="l-retardateur">Retardateur</span><p class="refus" data-refus role="status" hidden></p></div>
+            <div class="choix" role="radiogroup" data-controle="retardateur" aria-labelledby="l-retardateur"></div>
+          </div>
+          <div class="ligne" data-reglage="loupe" hidden>
+            <div class="lb"><span class="libelle" id="l-loupe">Loupe</span><p class="refus" data-refus role="status" hidden></p></div>
+            <button role="switch" data-controle="loupe" aria-labelledby="l-loupe"
+              aria-checked="false"><svg class="sw-picto sw-non" viewBox="0 0 14 14" aria-hidden="true"><path d="M3.5 3.5l7 7M10.5 3.5l-7 7"/></svg><svg class="sw-picto sw-oui" viewBox="0 0 14 14" aria-hidden="true"><path d="M2.5 7.5 5.5 10.5 11.5 3.5"/></svg><span class="sw-bouton" aria-hidden="true"><svg viewBox="0 0 12 12"><path d="M2.2 6.4 4.8 9 9.8 3.2"/></svg></span></button>
+          </div>
+          <div class="ligne" data-reglage="pointeur" hidden>
+            <div class="lb"><span class="libelle" id="l-pointeur">Inclure le pointeur</span><p class="refus" data-refus role="status" hidden></p></div>
+            <button role="switch" data-controle="pointeur" aria-labelledby="l-pointeur"
+              aria-checked="false"><svg class="sw-picto sw-non" viewBox="0 0 14 14" aria-hidden="true"><path d="M3.5 3.5l7 7M10.5 3.5l-7 7"/></svg><svg class="sw-picto sw-oui" viewBox="0 0 14 14" aria-hidden="true"><path d="M2.5 7.5 5.5 10.5 11.5 3.5"/></svg><span class="sw-bouton" aria-hidden="true"><svg viewBox="0 0 12 12"><path d="M2.2 6.4 4.8 9 9.8 3.2"/></svg></span></button>
+          </div>
+        </div>
+      </section>
+
+      <section id="rubrique-apres" role="tabpanel" data-rubrique="apres" aria-labelledby="onglet-apres"
+        hidden>
         <div class="groupe">
           <div class="ligne" data-reglage="copier" hidden>
             <div class="lb"><span class="libelle" id="l-copier">Copier automatiquement</span><p class="refus" data-refus role="status" hidden></p></div>

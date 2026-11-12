@@ -28,9 +28,14 @@ const VUE = {
     { action: 'zone', libelle: 'Zone', touches: ['Ctrl', 'Maj', '1'], modifie: false, refus: null },
     { action: 'plein_ecran', libelle: 'Plein écran', touches: ['Ctrl', 'Maj', '2'], modifie: false, refus: null },
     { action: 'fenetre', libelle: 'Fenêtre', touches: [], modifie: true, refus: 'Aucun raccourci' },
+    { action: 'derniere_zone', libelle: 'Refaire la dernière zone', touches: ['Ctrl', 'Maj', '4'], modifie: false, refus: null },
   ],
 };
+// Sans Gel (autre système) ni vignette : aucune ligne de la rubrique Capture.
 const SANS_VIGNETTE = { ...VUE, lignes: ['copier', 'dossier', 'modele_nom', 'theme', 'demarrage', 'version'] };
+// La vue réelle est celle de Windows, loupe comprise ; sans loupe (`gel::loupe_disponible`
+// faux), le cœur retire seulement cette ligne.
+const SANS_LOUPE = { ...VUE, lignes: VUE.lignes.filter(l => l !== 'loupe') };
 
 (async () => {
   await new Promise(ok => serveur.listen(0, ok));
@@ -42,7 +47,7 @@ const SANS_VIGNETTE = { ...VUE, lignes: ['copier', 'dossier', 'modele_nom', 'the
   // Page avec un cœur simulé : `__reponses[commande]` (fonction des arguments) donne la
   // réponse ; tous les appels sont notés dans `__appels`.
   async function page(o = {}) {
-    const ctx = await nav.newContext({ viewport: { width: o.largeur || 1024, height: o.hauteur || 768 }, colorScheme: o.theme || 'light' });
+    const ctx = await nav.newContext({ viewport: { width: o.largeur || 1024, height: o.hauteur || 768 }, deviceScaleFactor: o.echelle || 1, colorScheme: o.theme || 'light' });
     const p = await ctx.newPage();
     p.erreurs = [];
     p.on('pageerror', e => p.erreurs.push(String(e)));
@@ -79,7 +84,8 @@ const SANS_VIGNETTE = { ...VUE, lignes: ['copier', 'dossier', 'modele_nom', 'the
     const csp = await p.evaluate(() => window.__csp || []);
     const style = await p.$eval('[role="switch"][data-controle="copier"]', e => getComputedStyle(e).borderRadius);
     verifier(csp.length === 0 && style !== '0px', `1 ${theme} : CSP respectée, styles chargés`, JSON.stringify(csp));
-    await p.screenshot({ path: `${SORTIE}/reglages-apres-${theme}.png` });
+    await p.screenshot({ path: `${SORTIE}/reglages-capture-${theme}.png` });
+    await onglet(p, 'Après la capture'); await p.screenshot({ path: `${SORTIE}/reglages-apres-${theme}.png` });
     await onglet(p, 'Raccourcis'); await p.screenshot({ path: `${SORTIE}/reglages-raccourcis-${theme}.png` });
     await onglet(p, 'Général'); await p.screenshot({ path: `${SORTIE}/reglages-general-${theme}.png` });
     verifier(p.erreurs.length === 0, `1 ${theme} : aucune erreur de console`, JSON.stringify(p.erreurs));
@@ -93,15 +99,20 @@ const SANS_VIGNETTE = { ...VUE, lignes: ['copier', 'dossier', 'modele_nom', 'the
     await p.context().close();
   }
 
-  // 2. Lignes montrées : celles de la vue, rien d'autre ; pas de rubrique « Capture ».
+  // 2. Lignes montrées : celles de la vue, rien d'autre ; sans ses lignes, pas de rubrique
+  // « Capture », et « Après la capture » s'ouvre à sa place.
   {
     const p = await page({ vue: SANS_VIGNETTE });
     const montrees = await p.$$eval('[data-reglage]:not([data-reglage="raccourci"])', ls => ls.filter(l => !l.hidden).map(l => l.dataset.reglage));
     verifier(JSON.stringify([...montrees].sort()) === JSON.stringify([...SANS_VIGNETTE.lignes].sort()), '2 sans vignette : seules les lignes de la vue', JSON.stringify(montrees));
     const onglets = await p.$$eval('[role="tab"]', os => os.filter(o => !o.hidden).map(o => o.textContent.trim()));
     verifier(JSON.stringify(onglets) === JSON.stringify(['Après la capture', 'Raccourcis', 'Général']), '2 trois rubriques, pas de Capture', JSON.stringify(onglets));
-    const interdits = await p.$$('[data-reglage="loupe"],[data-reglage="retardateur"],[data-reglage="pointeur"],[data-reglage="format"]');
-    verifier(interdits.length === 0, '2 aucun contrôle non construit dans la page');
+    const ouvert = await p.$$eval('[role="tab"][aria-selected="true"]', os => os.map(o => o.textContent.trim()));
+    const sections = await p.$$eval('section[role="tabpanel"]', ss => ss.filter(s => !s.hidden).map(s => s.dataset.rubrique));
+    verifier(JSON.stringify(ouvert) === '["Après la capture"]' && JSON.stringify(sections) === '["apres"]'
+      && await visible(p, '[data-reglage="copier"]'), '2 Capture cachée : « Après la capture » ouverte', JSON.stringify([ouvert, sections]));
+    const interdits = await p.$$('[data-reglage="barre"],[data-reglage="format"],[data-reglage="mise_a_jour"]');
+    verifier(interdits.length === 0, '2 aucun contrôle sans effet dans la page (barre, format, mise à jour)');
     await p.context().close();
   }
 
@@ -127,6 +138,7 @@ const SANS_VIGNETTE = { ...VUE, lignes: ['copier', 'dossier', 'modele_nom', 'the
     await p.waitForTimeout(50);
     verifier(JSON.stringify(await repli()) === JSON.stringify([['enregistrer', false, false], ['vignette', true, true]]), '2 repli : nom déplié, durée et coin repliés sous la vignette éteinte', JSON.stringify(await repli()));
     await p.evaluate(() => __emettre('reglages:etat', __vue)); await p.waitForTimeout(50);
+    await onglet(p, 'Après la capture');
     await p.getByRole('switch', { name: 'Enregistrer automatiquement' }).click(); await p.waitForTimeout(50);
     verifier(JSON.stringify((await dernier(p, 'reglages_changer'))?.[1]) === JSON.stringify({ changement: { cle: 'enregistrer', valeur: !REEL.vue.enregistrer } }), '2 Enregistrer → reglages_changer enregistrer');
     await p.context().close();
@@ -136,6 +148,7 @@ const SANS_VIGNETTE = { ...VUE, lignes: ['copier', 'dossier', 'modele_nom', 'the
   // l'interrupteur et dit son texte sur la ligne.
   {
     const p = await page();
+    await onglet(p, 'Après la capture');
     await p.evaluate((r) => { window.__refus = r; }, REEL.refus_copier);
     await p.getByRole('switch', { name: 'Copier automatiquement' }).click(); await p.waitForTimeout(100);
     const a = await dernier(p, 'reglages_changer');
@@ -152,6 +165,7 @@ const SANS_VIGNETTE = { ...VUE, lignes: ['copier', 'dossier', 'modele_nom', 'the
   // 4. Choix : durée (Toujours = 0), coin à la souris et aux flèches, thème ; durée hors liste.
   {
     const p = await page();
+    await onglet(p, 'Après la capture');
     await p.getByRole('radio', { name: 'Toujours' }).click(); await p.waitForTimeout(50);
     verifier(JSON.stringify((await dernier(p, 'reglages_changer'))[1]) === JSON.stringify({ changement: { cle: 'vignette_duree', valeur: 0 } }), '4 Toujours → vignette_duree 0');
     await p.getByRole('radio', { name: 'En haut à droite' }).click(); await p.waitForTimeout(50);
@@ -172,6 +186,7 @@ const SANS_VIGNETTE = { ...VUE, lignes: ['copier', 'dossier', 'modele_nom', 'the
   {
     // Le nom se replie sous « Enregistrer automatiquement » éteint : la vue l'allume.
     const p = await page({ vue: { ...VUE, enregistrer: true } });
+    await onglet(p, 'Après la capture');
     await vider(p);
     const champ = p.getByRole('textbox', { name: 'Nom des fichiers' });
     await champ.fill(''); await champ.type('<img src=x onerror="window.__pwn=1">', { delay: 5 });
@@ -195,6 +210,7 @@ const SANS_VIGNETTE = { ...VUE, lignes: ['copier', 'dossier', 'modele_nom', 'the
   // 6. Parcourir.
   {
     const p = await page();
+    await onglet(p, 'Après la capture');
     await p.evaluate(() => { __vue = { ...__vue, dossier: 'D: › Captures' }; });
     await p.getByRole('button', { name: 'Parcourir…' }).click(); await p.waitForTimeout(100);
     const a = await dernier(p, 'reglages_parcourir');
@@ -255,7 +271,7 @@ const SANS_VIGNETTE = { ...VUE, lignes: ['copier', 'dossier', 'modele_nom', 'the
     const refus = await p.$eval('[data-action="fenetre"] [data-refus]', e => [e.hidden, e.textContent]);
     verifier(!refus[0] && refus[1] === 'Aucun raccourci', '7 refus de la vue sur sa ligne', JSON.stringify(refus));
     const retablir = await p.$$eval('[data-reglage="raccourci"]', ls => ls.map(l => l.querySelector('[data-controle="retablir"]').hidden));
-    verifier(JSON.stringify(retablir) === JSON.stringify([true, true, false]), '7 Rétablir seulement si modifié', JSON.stringify(retablir));
+    verifier(JSON.stringify(retablir) === JSON.stringify([true, true, false, true]), '7 Rétablir seulement si modifié', JSON.stringify(retablir));
     await p.getByRole('button', { name: 'Rétablir' }).click(); await p.waitForTimeout(50);
     verifier(JSON.stringify((await dernier(p, 'reglages_retablir'))?.[1]) === JSON.stringify({ action: 'fenetre' }), '7 Rétablir → reglages_retablir');
     const touches = await p.$$eval('[data-action="zone"] kbd', ks => ks.map(k => k.textContent));
@@ -266,6 +282,7 @@ const SANS_VIGNETTE = { ...VUE, lignes: ['copier', 'dossier', 'modele_nom', 'the
   // 8. État et thème poussés par le cœur.
   {
     const p = await page();
+    await onglet(p, 'Après la capture');
     await p.evaluate(() => __emettre('reglages:etat', { ...__vue, copier: false, alerte: 'Réglages non enregistrés' }));
     const copier = await p.getByRole('switch', { name: 'Copier automatiquement' }).getAttribute('aria-checked');
     const alerte = await p.$eval('[data-alerte]', e => [e.hidden, e.textContent]);
@@ -297,6 +314,119 @@ const SANS_VIGNETTE = { ...VUE, lignes: ['copier', 'dossier', 'modele_nom', 'the
       .filter(e => e.offsetParent && !(e.getAttribute('aria-label') || e.getAttribute('aria-labelledby') || e.labels?.length || e.textContent.trim()))
       .map(e => e.outerHTML.slice(0, 80)));
     verifier(sansNom.length === 0, '9 chaque contrôle visible a un nom', JSON.stringify(sansNom));
+    await p.context().close();
+  }
+
+  // 10. Rubrique Capture : premier onglet, ouvert au départ ; retardateur, loupe, pointeur.
+  {
+    const p = await page();
+    const onglets = await p.$$eval('[role="tab"]', os => os.filter(o => !o.hidden).map(o => [o.textContent.trim(), o.getAttribute('aria-selected')]));
+    verifier(JSON.stringify(onglets) === JSON.stringify([['Capture', 'true'], ['Après la capture', 'false'], ['Raccourcis', 'false'], ['Général', 'false']]),
+      '10 Capture en premier, ouverte', JSON.stringify(onglets));
+    const sections = await p.$$eval('section[role="tabpanel"]', ss => ss.filter(s => !s.hidden).map(s => s.dataset.rubrique));
+    verifier(JSON.stringify(sections) === '["capture"]', '10 seule la rubrique Capture est montrée', JSON.stringify(sections));
+    const lignes = await p.$$eval('[data-rubrique="capture"] [data-reglage]', ls => ls.filter(l => !l.hidden && l.offsetParent).map(l => l.dataset.reglage));
+    verifier(JSON.stringify(lignes) === '["retardateur","loupe","pointeur"]', '10 trois lignes d’après la vue, dans l’ordre', JSON.stringify(lignes));
+    const libelles = await p.$$eval('[data-rubrique="capture"] .ligne .libelle', ls => ls.map(l => l.textContent));
+    verifier(JSON.stringify(libelles) === JSON.stringify(['Retardateur', 'Loupe', 'Inclure le pointeur']), '10 libellés du design', JSON.stringify(libelles));
+    const segments = () => p.$$eval('[data-controle="retardateur"] [role="radio"]', bs => bs.map(b => [b.textContent, b.getAttribute('aria-checked')]));
+    verifier(JSON.stringify(await segments()) === JSON.stringify([['Aucun', 'true'], ['3 s', 'false'], ['5 s', 'false'], ['10 s', 'false']]),
+      '10 segments de vue.retardateurs, « Aucun » coché', JSON.stringify(await segments()));
+    const inter = await p.$$eval('[data-rubrique="capture"] [role="switch"]', bs => bs.map(b => [b.dataset.controle, b.getAttribute('aria-checked')]));
+    verifier(JSON.stringify(inter) === JSON.stringify([['loupe', 'false'], ['pointeur', 'false']]), '10 loupe et pointeur éteints d’après la vue', JSON.stringify(inter));
+    await vider(p);
+    await p.getByRole('radio', { name: '5 s' }).click(); await p.waitForTimeout(50);
+    verifier(JSON.stringify((await dernier(p, 'reglages_changer'))?.[1]) === JSON.stringify({ changement: { cle: 'retardateur', valeur: 5 } }), '10 « 5 s » → retardateur 5 (un nombre)');
+    await p.getByRole('radio', { name: 'Aucun' }).focus(); await p.keyboard.press('ArrowRight'); await p.waitForTimeout(50);
+    verifier(JSON.stringify((await dernier(p, 'reglages_changer'))?.[1]) === JSON.stringify({ changement: { cle: 'retardateur', valeur: 3 } }), '10 flèche droite depuis « Aucun » → retardateur 3');
+    await p.getByRole('radio', { name: 'Aucun' }).focus(); await p.keyboard.press('ArrowLeft'); await p.waitForTimeout(50);
+    verifier(JSON.stringify((await dernier(p, 'reglages_changer'))?.[1]) === JSON.stringify({ changement: { cle: 'retardateur', valeur: 10 } }), '10 flèche gauche depuis « Aucun » → retardateur 10');
+    // Valeur du fichier hors de la liste : aucun segment coché, le premier reste atteignable.
+    // Le cœur garde 7 (chaque réponse le redit) : les flèches partent bien de 7.
+    await p.evaluate(() => { window.__vueAvant7 = __vue; __vue = { ...__vue, capture: { ...__vue.capture, retardateur_s: 7 } }; __emettre('reglages:etat', __vue); });
+    await p.waitForTimeout(50);
+    const sept = await p.$$eval('[data-controle="retardateur"] [role="radio"]', bs => bs.map(b => [b.getAttribute('aria-checked'), b.tabIndex]));
+    const pastille = await p.$eval('[data-controle="retardateur"]', g => g.hasAttribute('data-choisi'));
+    verifier(sept.every(x => x[0] === 'false') && sept[0][1] === 0 && !pastille, '10 retardateur 7 : aucun segment coché, aucune pastille', JSON.stringify([sept, pastille]));
+    // Flèches depuis la valeur 7 : le segment atteignable (le premier) sert de départ.
+    await p.evaluate(() => document.querySelector('[data-controle="retardateur"] [tabindex="0"]').focus());
+    await p.keyboard.press('ArrowRight'); await p.waitForTimeout(50);
+    const droite = (await dernier(p, 'reglages_changer'))?.[1];
+    await p.evaluate(() => document.querySelector('[data-controle="retardateur"] [tabindex="0"]').focus());
+    await p.keyboard.press('ArrowLeft'); await p.waitForTimeout(50);
+    const gauche = (await dernier(p, 'reglages_changer'))?.[1];
+    verifier(JSON.stringify([droite, gauche]) === JSON.stringify([{ changement: { cle: 'retardateur', valeur: 3 } }, { changement: { cle: 'retardateur', valeur: 10 } }]),
+      '10 retardateur 7 : flèche droite → 3, flèche gauche → 10', JSON.stringify([droite, gauche]));
+    await p.evaluate(() => { __vue = window.__vueAvant7; });
+    await p.evaluate(() => __emettre('reglages:etat', { ...__vue, capture: { retardateur_s: 10, loupe: true, pointeur: true } })); await p.waitForTimeout(50);
+    const allume = [await segments(), await p.$$eval('[data-rubrique="capture"] [role="switch"]', bs => bs.map(b => b.getAttribute('aria-checked')))];
+    verifier(allume[0][3][1] === 'true' && JSON.stringify(allume[1]) === '["true","true"]', '10 vue poussée : « 10 s », loupe et pointeur allumés', JSON.stringify(allume));
+    await p.evaluate(() => __emettre('reglages:etat', __vue)); await p.waitForTimeout(50);
+    // Interrupteurs : bons appels ; refusés (sans texte), la vue les remet éteints.
+    for (const [nom, cle] of [['Loupe', 'loupe'], ['Inclure le pointeur', 'pointeur']]) {
+      await vider(p);
+      await p.evaluate((l) => { window.__refus = { ligne: l, texte: '' }; }, cle);
+      await p.getByRole('switch', { name: nom }).click(); await p.waitForTimeout(50);
+      const a = (await appels(p)).filter(x => x[0] === 'reglages_changer');
+      const etat = await p.getByRole('switch', { name: nom }).getAttribute('aria-checked');
+      const refus = await p.$eval(`[data-reglage="${cle}"] [data-refus]`, e => e.hidden);
+      verifier(a.length === 1 && JSON.stringify(a[0][1]) === JSON.stringify({ changement: { cle, valeur: true } }) && etat === 'false' && refus,
+        `10 ${nom} → ${cle} true une fois ; refus : remis par la vue, sans texte`, JSON.stringify([a, etat, refus]));
+    }
+    // La vue sans les lignes de la Capture (Gel absent) pendant qu'elle est ouverte :
+    // l'onglet se cache et « Après la capture » s'ouvre.
+    await p.evaluate((l) => __emettre('reglages:etat', { ...__vue, lignes: l }), SANS_VIGNETTE.lignes); await p.waitForTimeout(50);
+    const apres = await p.$$eval('[role="tab"]', os => os.filter(o => !o.hidden && o.getAttribute('aria-selected') === 'true').map(o => o.dataset.rubrique));
+    const cache = await p.$eval('[role="tab"][data-rubrique="capture"]', o => o.hidden);
+    verifier(cache && JSON.stringify(apres) === '["apres"]' && await visible(p, '[data-reglage="copier"]'), '10 Capture vidée : onglet caché, « Après la capture » ouverte', JSON.stringify([cache, apres]));
+    await p.context().close();
+  }
+  // Flèches sur les onglets : Capture en premier (Gauche depuis Capture mène à Général) ;
+  // Capture cachée, les flèches la sautent.
+  {
+    const p = await page();
+    const ouvert = () => p.evaluate(() => [document.activeElement.dataset.rubrique, document.querySelector('[role="tab"][aria-selected="true"]').dataset.rubrique,
+      [...document.querySelectorAll('section[role="tabpanel"]')].filter(s => !s.hidden).map(s => s.dataset.rubrique).join()]);
+    await p.getByRole('tab', { name: 'Capture', exact: true }).focus();
+    await p.keyboard.press('ArrowLeft');
+    const g = await ouvert();
+    await p.keyboard.press('ArrowRight');
+    const d = await ouvert();
+    await p.keyboard.press('ArrowRight');
+    const d2 = await ouvert();
+    verifier(JSON.stringify([g, d, d2]) === JSON.stringify([['general', 'general', 'general'], ['capture', 'capture', 'capture'], ['apres', 'apres', 'apres']]),
+      '10 onglets : Gauche depuis Capture → Général, Droite → Capture puis Après', JSON.stringify([g, d, d2]));
+    await p.evaluate((l) => __emettre('reglages:etat', { ...__vue, lignes: l }), SANS_VIGNETTE.lignes); await p.waitForTimeout(50);
+    await p.getByRole('tab', { name: 'Après la capture' }).focus();
+    await p.keyboard.press('ArrowLeft');
+    const g3 = await ouvert();
+    await p.keyboard.press('ArrowRight');
+    const d3 = await ouvert();
+    verifier(JSON.stringify([g3, d3]) === JSON.stringify([['general', 'general', 'general'], ['apres', 'apres', 'apres']]),
+      '10 Capture cachée : les flèches la sautent (Après ↔ Général)', JSON.stringify([g3, d3]));
+    await p.context().close();
+  }
+  {
+    const p = await page({ vue: SANS_LOUPE });
+    const lignes = await p.$$eval('[data-rubrique="capture"] [data-reglage]', ls => ls.filter(l => !l.hidden).map(l => l.dataset.reglage));
+    const ouvert = await p.$eval('[role="tab"][aria-selected="true"]', o => o.dataset.rubrique);
+    verifier(JSON.stringify(lignes) === '["retardateur","pointeur"]' && ouvert === 'capture', '10 sans loupe : retardateur et pointeur, Capture ouverte', JSON.stringify([lignes, ouvert]));
+    await p.context().close();
+  }
+  {
+    // Les raccourcis réels du cœur : quatre lignes, la dernière zone comprise.
+    const p = await page({ vue: REEL.vue });
+    await onglet(p, 'Raccourcis');
+    const lignes = await p.$$eval('[data-reglage="raccourci"]', ls => ls.map(l => [l.dataset.action, l.querySelector('[data-valeur="libelle"]').textContent, [...l.querySelectorAll('kbd')].map(k => k.textContent).join('+')]));
+    verifier(lignes.length === 4 && JSON.stringify(lignes[3]) === JSON.stringify(['derniere_zone', 'Refaire la dernière zone', 'Ctrl+Maj+4']),
+      '10 quatre raccourcis, « Refaire la dernière zone » en Ctrl + Maj + 4', JSON.stringify(lignes));
+    await p.context().close();
+  }
+  // Photos de la rubrique Capture à la taille de la fenêtre (680 × 512, échelle 2).
+  for (const theme of ['light', 'dark']) {
+    const p = await page({ theme, largeur: 680, hauteur: 512, echelle: 2 });
+    await p.screenshot({ path: `${SORTIE}/reglages-capture-680-${theme}.png` });
+    verifier(p.erreurs.length === 0, `10 ${theme} 680 × 512 : aucune erreur de console`, JSON.stringify(p.erreurs));
     await p.context().close();
   }
 
