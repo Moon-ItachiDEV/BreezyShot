@@ -1064,19 +1064,33 @@ fn montrer(fenetre: &WebviewWindow) {
 
 /// La page de la vignette écoute ses événements.
 #[tauri::command]
-pub fn vignette_pret(vignette: State<'_, Vignette>) {
+pub fn vignette_pret(app: AppHandle) -> Result<(), String> {
+    let vignette = vignette_en_place(&app, "vignette")?;
     theme::envoyer_a(&vignette.app, ETIQUETTE_VIGNETTE);
     vignette.page_prete();
+    Ok(())
+}
+
+/// La `Vignette` gérée par l'app. Les deux pages peuvent parler avant `manage` (sous
+/// Windows, créer la seconde fenêtre fait tourner les messages, et la page du souffle,
+/// créée la première, peut déjà être chargée) : refus explicite, la page retente.
+fn vignette_en_place<'a>(app: &'a AppHandle, page: &str) -> Result<State<'a, Vignette>, String> {
+    app.try_state::<Vignette>().ok_or_else(|| {
+        log::info!("{page} pret refuse: vignette pas encore en place");
+        "vignette pas encore en place".to_string()
+    })
 }
 
 /// La page du souffle écoute ses événements.
 #[tauri::command]
-pub fn souffle_pret(vignette: State<'_, Vignette>) {
+pub fn souffle_pret(app: AppHandle) -> Result<(), String> {
+    let vignette = vignette_en_place(&app, "souffle")?;
     theme::envoyer_a(&vignette.app, ETIQUETTE_SOUFFLE);
     if let Some(mut e) = vignette.etat() {
         e.souffle_pret = true;
     }
     log::info!("souffle pret");
+    Ok(())
 }
 
 /// L'aperçu de la carte `id`, en PNG.

@@ -28,18 +28,23 @@ const serveur = http.createServer((q, r) => {
     const p = await ctx.newPage();
     p.on('pageerror', e => erreurs.push(String(e)));
     p.on('console', m => { if (m.type() === 'error' || m.type() === 'warning') erreurs.push(m.text()); });
-    await p.addInitScript(() => {
+    await p.addInitScript((refus) => {
       window.__refus = []; document.addEventListener('securitypolicyviolation', e => window.__refus.push(e.violatedDirective));
-      window.__appels = []; const ecoutes = {};
+      window.__appels = []; const ecoutes = {}; let refuses = 0;
       const toile = document.createElement('canvas'); toile.width = 80; toile.height = 50;
       const g = toile.getContext('2d'); g.fillStyle = '#0067C0'; g.fillRect(0, 0, 80, 50);
       const octets = Uint8Array.from(atob(toile.toDataURL('image/png').split(',')[1]), x => x.charCodeAt(0));
       window.__TAURI__ = {
-        core: { invoke: (c, a) => { window.__appels.push([c, a]); return c === 'vignette_image' ? Promise.resolve(octets.buffer) : Promise.resolve(); } },
+        core: { invoke: (c, a) => {
+          window.__appels.push([c, a]);
+          // `refus` premiers « prêt » rejetés, comme un cœur pas encore en place.
+          if (c === 'souffle_pret' && refuses < refus) { refuses++; return Promise.reject('vignette pas encore en place'); }
+          return c === 'vignette_image' ? Promise.resolve(octets.buffer) : Promise.resolve();
+        } },
         event: { listen: (n, f) => { ecoutes[n] = f; return Promise.resolve(() => {}); } },
       };
       window.__emettre = (n, payload) => ecoutes[n]({ payload });
-    });
+    }, o.refus || 0);
     await p.goto(base);
     await p.waitForTimeout(50);
     return p;
@@ -49,6 +54,15 @@ const serveur = http.createServer((q, r) => {
   // Pixels réels à 150 % : départ 600,300 300×150 réels → 400,200 200×100 CSS.
   const p = await page({ echelle: 1.5 });
   verifier(JSON.stringify(await appels(p)) === JSON.stringify([['souffle_pret', {}]]), 'souffle_pret une fois');
+  {
+    // Cœur pas encore en place (vu sous Windows) : deux refus, reçu au troisième essai.
+    const avant = erreurs.length;
+    const q = await page({ refus: 2 });
+    await q.waitForTimeout(400);
+    const n = (await appels(q, 'souffle_pret')).length;
+    verifier(n === 3 && erreurs.length === avant, 'souffle_pret rejeté deux fois : retenté, reçu au troisième, sans bruit', `${n} appel(s)`);
+    await q.context().close();
+  }
   await p.evaluate(() => __emettre('souffle:jouer', { id: 3, depart: { x: 600, y: 300, largeur: 300, hauteur: 150 }, arrivee: { x: 18, y: 540, largeur: 390, hauteur: 240 } }));
   await p.waitForFunction(() => document.getAnimations().length >= 2, null, { timeout: 2000 }).catch(() => {});
   const a = await p.evaluate(() => {
