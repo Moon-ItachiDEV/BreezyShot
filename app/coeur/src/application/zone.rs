@@ -614,6 +614,7 @@ mod tests {
             dossier_recents: PathBuf::from("/u/Recents"),
             modele_nom: "BreezyShot {date} à {heure}".into(),
             maintenant: chrono::Local::now(),
+            transparence: false,
         };
         let b = bilan_d_echec(&demande, CAUSE_SORTIE_INTERROMPUE);
         assert_eq!(b.copie, Etape::Echec(CAUSE_SORTIE_INTERROMPUE.into()));

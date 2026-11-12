@@ -655,6 +655,33 @@ web. Donc l'écran figé ne passe jamais par le moteur web.
 - Tests Windows (`cargo test` sur la machine GitHub, un par un) : photo au pixel près d'une
   fenêtre de quatre carrés, écran figé montré sans prendre le premier plan puis caché,
   200 photos sans fuite d'objets GDI.
+- **Fenêtres** (étape 8) : `fenetres_visibles` (`EnumWindows`, du premier plan vers le
+  fond) rend des `FenetreInfo { rect, titre, coins }` ; `rect` est le vrai bord sans
+  l'ombre (`DWMWA_EXTENDED_FRAME_BOUNDS`). Règle pure `garder_fenetre` : visible, non
+  réduite, non masquée (`DWMWA_CLOAKED`), pas à BreezyShot, rectangle non vide, ni
+  traversée par les clics (`WS_EX_LAYERED` et `WS_EX_TRANSPARENT` à la fois : le second
+  seul ne rend pas une fenêtre de premier niveau traversable), ni le bureau (classes `Progman`,
+  `WorkerW`, `est_classe_du_bureau`) ; la barre des tâches reste une fenêtre comme une
+  autre. Règle pure `coins_de` (`Coins::Droits | Arrondis | PetitsArrondis`, approximation
+  assumée : Windows ne donne pas le rayon) : build inconnue ou < 22000 → droits ; agrandie
+  (`IsZoomed`) ou ancrée (`IsWindowArranged`, cherchée par `GetProcAddress` comme le
+  demande Microsoft) → droits ; préférence `DWMWA_WINDOW_CORNER_PREFERENCE` lue (attribut
+  documenté pour l'écriture seulement : un échec de lecture vaut « inconnu »)
+  `DONOTROUND` / `ROUND` / `ROUNDSMALL` ; sinon arrondis si `WS_CAPTION` entier ou
+  `WS_THICKFRAME`, droits sans cadre. Le titre n'est lu que pour une fenêtre gardée et
+  n'est jamais écrit au journal ; il est lu par le seul `GetWindowTextW` (tampon de 512),
+  sans `GetWindowTextLengthW`.
+- **Capture d'une fenêtre** (`capture/fenetre.rs`, `capture/decoupe.rs`, fonctions pures) :
+  `fenetre_sous(point, fenetres)` (la première qui contient le point),
+  `zone_fenetre(fenetre, point, ecrans)` (coupée à l'écran du point, `None` sous
+  `COTE_MIN`), `rayon_coins(coins, fenetre, ecrans)` (0 si droits ou si la fenêtre couvre
+  un écran ; sinon 8, ou 4, × l'échelle de l'écran du centre, à défaut de celui qu'elle
+  recouvre le plus, à défaut 1 ; arrondi, au plus la moitié du petit côté),
+  `coins_a_arrondir(fenetre, zone)` (seuls les vrais coins de la fenêtre),
+  `decoupe::arrondir(&mut pixels, rayon, coins)` (alpha multiplié par la part du pixel
+  dans le quart de cercle, mesurée en 16 × 16 points ; couleurs intactes ; le pixel du
+  coin n'est à 0 qu'à partir d'un rayon de 4). Après
+  `arrondir`, `Pixels` n'est plus forcément opaque.
 
 ## 9. Sélection (`fenetres/selection.rs`, `interface/selection/`, étape 5)
 
@@ -719,7 +746,7 @@ Tout ce qui quitte l'app passe par une seule fonction, `sortir(&Pixels, &Demande
 son `Bilan`, et `annonce(&Bilan, &Demande)` dit quoi montrer.
 
 - `Demande { copier, enregistrer, dossier_enregistrement, dossier_affiche, dossier_recents,
-  modele_nom, maintenant }`, chemins absolus résolus par l'Application. `Bilan { copie:
+  modele_nom, maintenant, transparence }`, chemins absolus résolus par l'Application. `Bilan { copie:
   Faite | NonDemandee | Echec, recent: Result<chemin>, enregistrement: Fait | NonDemande |
   Echec { dossier, cause } }`.
 - **Ordre** : valider les pixels (sinon tout en échec, sans panique) ; la copie part dans
@@ -727,8 +754,28 @@ son `Bilan`, et `annonce(&Bilan, &Demande)` dit quoi montrer.
   si demandé. Une étape qui échoue n'empêche pas les suivantes. `sortir` bloque : jamais sur
   le fil principal.
 - **Presse-papiers** : crate `arboard` (Windows, macOS, Linux) ; occupé : on réessaie
-  pendant 250 ms au plus, puis échec avec sa cause.
-- **PNG** : crate `png`, RGBA 8 bits, alpha 255, sans métadonnées, compression rapide.
+  pendant 250 ms au plus, puis échec avec sa cause (`avec_echeance`, commun aux deux
+  chemins).
+- **PNG** : crate `png`, RGBA 8 bits, sans métadonnées, compression rapide ; alpha forcé à
+  255, sauf avec `transparence` (voir plus bas).
+- **Transparence** (`transparence: true`, capture de fenêtre) : l'alpha est gardé. Le PNG
+  est encodé d'abord, une fois, avec son alpha ; « Récents » et le fichier reçoivent ces
+  octets ; la copie part ensuite dans un fil à part pendant les écritures. Sous Windows,
+  `systeme::presse_papiers::ImagePreparee::preparer(png, largeur, hauteur,
+  rgba_sur_blanc)` prépare une fois le format et les deux blocs (le DIB écrit directement
+  dans le sien), puis chaque essai `poser` (6 ouvertures séparées de 5 ms, comme
+  `arboard`) pose dans la même ouverture le format `PNG` (`RegisterClipboardFormatW`, les octets du fichier,
+  posé en premier) et `CF_DIB` composé sur fond blanc (`sur_blanc`, fonction pure ;
+  32 bits `BI_RGB`, de bas en haut, quatrième octet à 255) ; Windows fabrique les formats
+  dérivés. Les apps qui lisent le PNG ont la transparence, les autres (Paint) le fond
+  blanc. Erreurs `ErreurPressePapiers { Occupe, NonDisponible, Refuse }` (`OpenClipboard`
+  en échec → `Occupe`, réessayé). Mémoire : un bloc `GlobalAlloc(GMEM_MOVEABLE)` accepté
+  par `SetClipboardData` appartient au système, un bloc refusé est libéré ;
+  un bloc jamais donné est libéré avec l'image préparée ; `CloseClipboard` toujours
+  appelé (garde `Drop`) ; si le second format est refusé, le
+  presse-papiers est vidé (pas de demi-image). Hors Windows : `NonDisponible`, et la copie
+  passe par `arboard` avec l'alpha. `transparence: false` : comportement d'avant, au bit
+  près.
 - **Fichiers** : écrits dans un temporaire du même dossier, puis lien dur (jamais
   d'écrasement ; repli sur réservation et renommage). Dossier créé s'il manque. Dossier
   vide ou relatif : échec, rien d'écrit. Restes `.breezyshot-*.tmp` de plus d'une heure

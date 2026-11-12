@@ -7,6 +7,7 @@
 //! (`chrono gel photo <ms> total <ms>`).
 
 pub mod decoupe;
+pub mod fenetre;
 pub mod geometrie;
 
 use std::fmt;
@@ -15,6 +16,8 @@ use std::time::{Duration, Instant};
 use crate::systeme::gel::{self, EcranInfo, FenetreInfo, ImageFigee, Pixels};
 use crate::systeme::Rect;
 
+pub use decoupe::arrondir;
+pub use fenetre::{coins_a_arrondir, fenetre_sous, rayon_coins, zone_fenetre};
 pub use geometrie::{borner_a_un_ecran, ecran_sous, rect_entre, zone_valide, COTE_MIN};
 
 /// Un bureau figé : la photo, et ce qu'il faut pour choisir une zone ou une fenêtre.
