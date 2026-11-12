@@ -11,10 +11,10 @@ use std::time::Instant;
 
 use tauri::AppHandle;
 
-use super::editeur::{self, ChargeEditeur, Fermeture, RaisonFermeture};
+use super::editeur::{self, ChargeEditeur, RaisonFermeture, ReponseFermer};
 use super::{
-    afficher, avec_editeur, exporter_editeur, fermer_editeur, fermer_ou_suivant,
-    garder_preferences_editeur, preferences_editeur, reduites_editeur,
+    afficher, avec_editeur, desarmer_filet_page, exporter_editeur, fermer_editeur,
+    fermer_ou_suivant, garder_preferences_editeur, preferences_editeur, reduites_editeur,
 };
 use crate::fenetres::editeur as fenetre;
 use crate::fenetres::theme;
@@ -39,6 +39,7 @@ pub fn editeur_pret(app: AppHandle) -> Result<ChargeEditeur, String> {
         ignoree("pret", 0);
         return Err(AUTRE_DOCUMENT.into());
     };
+    desarmer_filet_page(&app);
     theme::envoyer_a(&app, fenetre::ETIQUETTE_EDITEUR);
     fenetre::montrer(&app);
     log::info!(
@@ -135,15 +136,12 @@ pub fn editeur_fermer(
     preferences: Option<String>,
 ) -> Result<String, String> {
     garder_preferences_editeur(&app, preferences);
-    let Some((repondue, affichee, decision)) = avec_editeur(&app, Some(id), |e| {
+    let Some((repondue, reponse)) = avec_editeur(&app, Some(id), |e| {
         e.version = version;
         e.vide = vide;
-        let repondue = e.fermeture_demandee.take().is_some();
-        (
-            repondue,
-            e.affichee,
-            editeur::fermeture(version, vide, e.exportee),
-        )
+        let repondue = editeur::reponse_recue(e);
+        let reponse = editeur::reponse_fermer(force, e.affichee, version, vide, e.exportee);
+        (repondue, reponse)
     }) else {
         ignoree("fermer", id);
         return Err(AUTRE_DOCUMENT.into());
@@ -151,24 +149,22 @@ pub fn editeur_fermer(
     if !repondue && !force {
         log::info!("editeur fermeture demandee {id} (page)");
     }
-    // Une page qui ferme d'office avant d'avoir montré l'image l'a refusée (§4.2).
-    if force && !affichee {
-        log::warn!("editeur impossible {id}: image");
-        fermer_editeur(&app, RaisonFermeture::Impossible);
-        afficher(&app, editeur::message_impossible());
-        return Ok("fermee".into());
+    match reponse {
+        ReponseFermer::ImageRefusee => {
+            log::warn!("editeur impossible {id}: image");
+            fermer_editeur(&app, RaisonFermeture::Impossible);
+            afficher(&app, editeur::message_impossible());
+            Ok("fermee".into())
+        }
+        ReponseFermer::Demander => {
+            log::info!("editeur fermeture {id}: demander");
+            Ok("demander".into())
+        }
+        ReponseFermer::Fermer(raison) => {
+            fermer_ou_suivant(&app, raison);
+            Ok("fermee".into())
+        }
     }
-    if !force && decision == Fermeture::Demander {
-        log::info!("editeur fermeture {id}: demander");
-        return Ok("demander".into());
-    }
-    let raison = if force {
-        RaisonFermeture::SansGarder
-    } else {
-        RaisonFermeture::Propre
-    };
-    fermer_ou_suivant(&app, raison);
-    Ok("fermee".into())
 }
 
 /// « Continuer » du dialogue de fermeture : le document en attente (nouvelle capture) est
@@ -176,7 +172,7 @@ pub fn editeur_fermer(
 #[tauri::command]
 pub fn editeur_garder(app: AppHandle, id: u64) {
     let Some(abandonnee) = avec_editeur(&app, Some(id), |e| {
-        e.fermeture_demandee = None;
+        editeur::reponse_recue(e);
         e.en_attente.take().map(|d| d.id)
     }) else {
         ignoree("garder", id);

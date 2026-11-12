@@ -313,6 +313,13 @@ pub struct Application {
     numero_export: AtomicU64,
     numero_fenetre_editeur: AtomicU64,
     numero_fermeture: AtomicU64,
+    /// Numéro de la fenêtre d'éditeur vivante (0 : aucune) : son `Destroyed` compte une
+    /// fois.
+    fenetre_editeur_vivante: AtomicU64,
+    /// Capture à ouvrir dès que la fenêtre précédente est détruite.
+    editeur_suivant: Mutex<Option<(editeur::Document, Instant)>>,
+    /// Le filet de la page de l'éditeur : fermé à `editeur_pret`, il finit son fil.
+    filet_page: Mutex<Option<Sender<()>>>,
 }
 
 /// Une annonce envoyée au bandeau, dont la situation attend d'être retenue.
@@ -2657,7 +2664,7 @@ fn recevoir_document(app: &AppHandle, document: editeur::Document, demande_a: In
                 log::info!("editeur: capture {a} abandonnee");
             }
             ramener_editeur(app, courant);
-            demander_fermeture(app, "remplacer");
+            demander_fermeture(app, editeur::Demande::Remplacer);
         }
     }
 }
@@ -2669,29 +2676,111 @@ fn ramener_editeur(app: &AppHandle, id: u64) {
     }
 }
 
+/// Fait `f` sur le fil principal à un tour suivant de la boucle (jamais tout de suite).
+fn plus_tard(app: &AppHandle, attente: Duration, f: impl FnOnce(&AppHandle) + Send + 'static) {
+    let pour_fil = app.clone();
+    let lance = std::thread::Builder::new()
+        .name("editeur-poste".into())
+        .spawn(move || {
+            if !attente.is_zero() {
+                std::thread::sleep(attente);
+            }
+            let pour = pour_fil.clone();
+            if let Err(e) = pour_fil.run_on_main_thread(move || f(&pour)) {
+                log::warn!("editeur: geste non poste: {e}");
+            }
+        });
+    if let Err(e) = lance {
+        log::warn!("editeur: geste non poste ({e})");
+    }
+}
+
+/// Range une capture à ouvrir dès que la fenêtre précédente est détruite (fermeture avec
+/// une capture en attente, ou Annoter arrivé entre `destroy()` et `Destroyed`).
+fn garder_suivant(app: &AppHandle, document: editeur::Document, demande_a: Instant) {
+    let id = document.id;
+    let ancien = app
+        .state::<Application>()
+        .editeur_suivant
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .replace((document, demande_a));
+    if let Some((a, _)) = ancien {
+        log::info!("editeur: capture {} abandonnee", a.id);
+    }
+    log::info!("editeur ouverture differee {id}");
+}
+
+/// Ouvre la capture rangée par `garder_suivant`, si la fenêtre précédente est partie ;
+/// sinon réessaie un peu plus tard (au plus `essais` fois).
+fn ouvrir_suivant(app: &AppHandle, essais: u32) {
+    if fenetres::editeur::existe(app) {
+        if essais > 0 {
+            plus_tard(app, Duration::from_millis(100), move |a| {
+                ouvrir_suivant(a, essais - 1)
+            });
+        } else if let Some((d, _)) = app
+            .state::<Application>()
+            .editeur_suivant
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .take()
+        {
+            log::warn!("editeur impossible {}: fenetre (encore ouverte)", d.id);
+            drop(d);
+            afficher(app, editeur::message_impossible());
+        }
+        return;
+    }
+    let suivant = app
+        .state::<Application>()
+        .editeur_suivant
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .take();
+    if let Some((document, demande_a)) = suivant {
+        recevoir_document(app, document, demande_a);
+    }
+}
+
 /// Crée la fenêtre (cachée) pour `document` ; l'état est rangé avant la création, pour
-/// qu'une commande de la page le trouve.
+/// qu'une commande de la page le trouve. Une fenêtre encore en train d'être détruite :
+/// la capture attend son `Destroyed`.
 fn ouvrir_editeur(app: &AppHandle, document: editeur::Document, demande_a: Instant) {
+    if fenetres::editeur::existe(app) {
+        garder_suivant(app, document, demande_a);
+        return;
+    }
     let id = document.id;
     let image = (document.pixels.largeur, document.pixels.hauteur);
     let ecran = fenetres::editeur::ecran_souris(app).unwrap_or(ECRAN_DE_SECOURS);
     let place = fenetres::editeur::placer(image, &ecran);
-    let numero = app
-        .state::<Application>()
+    let etat_app = app.state::<Application>();
+    let numero = etat_app
         .numero_fenetre_editeur
         .fetch_add(1, Ordering::SeqCst)
         + 1;
-    *app.state::<Application>()
+    *etat_app
         .inner()
         .editeur
         .lock()
         .unwrap_or_else(|e| e.into_inner()) =
         Some(editeur::EtatEditeur::nouveau(document, demande_a, numero));
+    etat_app
+        .fenetre_editeur_vivante
+        .store(numero, Ordering::SeqCst);
     let (pour_destruction, pour_fermeture) = (app.clone(), app.clone());
-    // `Destroyed` est traité sur-le-champ (fil principal), seulement pour cette fenêtre :
-    // la destruction d'une ancienne ne retire jamais l'état d'une nouvelle.
+    // `Destroyed` est traité sur-le-champ (fil principal), une seule fois, pour cette
+    // fenêtre seulement.
     let detruite = move || {
-        if avec_editeur(&pour_destruction, None, |e| e.fenetre) == Some(numero) {
+        let vivante = &pour_destruction
+            .state::<Application>()
+            .inner()
+            .fenetre_editeur_vivante;
+        if vivante
+            .compare_exchange(numero, 0, Ordering::SeqCst, Ordering::SeqCst)
+            .is_ok()
+        {
             traiter(&pour_destruction, Evenement::EditeurDetruit);
         }
     };
@@ -2706,7 +2795,6 @@ fn ouvrir_editeur(app: &AppHandle, document: editeur::Document, demande_a: Insta
             log::info!("{}", editeur::ligne_ouvert(id, image, &ecran, &place));
             armer_filet_page(app, numero);
         }
-        // Une fenêtre encore en train d'être détruite : ne jamais lui confier le document.
         Ok(fenetres::editeur::Ouverture::Existante) => {
             ouverture_impossible(app, id, "fenetre (encore ouverte)")
         }
@@ -2733,17 +2821,25 @@ fn ouverture_impossible(app: &AppHandle, id: u64, cause: &str) {
 }
 
 /// Filet : pas d'`editeur_pret` de la fenêtre `numero` en `DELAI_PAGE` → fenêtre détruite,
-/// document rendu, bandeau.
+/// document rendu, bandeau. Le fil attend sur un canal que `editeur_pret` (ou la
+/// fermeture) ferme : il finit aussitôt, sans dormir.
 fn armer_filet_page(app: &AppHandle, numero: u64) {
+    let (signal, attente) = mpsc::channel::<()>();
+    *app.state::<Application>()
+        .filet_page
+        .lock()
+        .unwrap_or_else(|e| e.into_inner()) = Some(signal);
     let pour_fil = app.clone();
     let lance = std::thread::Builder::new()
         .name("editeur-filet".into())
         .spawn(move || {
-            std::thread::sleep(editeur::DELAI_PAGE);
+            if attente.recv_timeout(editeur::DELAI_PAGE) != Err(RecvTimeoutError::Timeout) {
+                return;
+            }
             let pour = pour_fil.clone();
             let _ = pour_fil.run_on_main_thread(move || {
                 let muette = avec_editeur(&pour, None, |e| {
-                    (e.fenetre == numero && !e.page_prete).then_some(e.document.id)
+                    editeur::page_muette(e, numero).then_some(e.document.id)
                 })
                 .flatten();
                 if let Some(id) = muette {
@@ -2762,6 +2858,17 @@ fn armer_filet_page(app: &AppHandle, numero: u64) {
     }
 }
 
+/// La page a dit prête (ou l'éditeur se ferme) : le filet de la page finit.
+fn desarmer_filet_page(app: &AppHandle) {
+    drop(
+        app.state::<Application>()
+            .filet_page
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .take(),
+    );
+}
+
 /// `editeur:charger` : la page vide tout et redemande l'image (remplacement).
 fn charger_editeur(app: &AppHandle) {
     let reduites = reduites_editeur(app);
@@ -2771,12 +2878,19 @@ fn charger_editeur(app: &AppHandle) {
     }
 }
 
-/// Ferme l'éditeur sans demander : état retiré, documents rendus (journal), fenêtre
-/// détruite (jamais cachée : la mémoire du moteur de rendu est rendue).
+/// Ferme l'éditeur sans demander : état retiré, document rendu (journal), fenêtre
+/// détruite (jamais cachée : la mémoire du moteur de rendu est rendue). Une capture en
+/// attente s'ouvre ensuite dans une nouvelle fenêtre, sauf à l'arrêt.
 fn fermer_editeur(app: &AppHandle, raison: editeur::RaisonFermeture) {
-    if let Some(e) = retirer_editeur(app) {
+    desarmer_filet_page(app);
+    if let Some(mut e) = retirer_editeur(app) {
         let id = e.document.id;
         log::info!("{}", editeur::ligne_fermeture(id, raison));
+        if raison != editeur::RaisonFermeture::Arret {
+            if let Some(suivant) = e.en_attente.take() {
+                garder_suivant(app, suivant, Instant::now());
+            }
+        }
         rendre_document(id, e);
     }
     fenetres::editeur::fermer(app);
@@ -2800,62 +2914,66 @@ fn fermer_ou_suivant(app: &AppHandle, raison: editeur::RaisonFermeture) {
     }
 }
 
-/// La fenêtre est détruite sans que l'Application l'ait décidé : état retiré.
+/// La fenêtre est détruite : un état encore là (destruction que l'Application n'a pas
+/// décidée) est retiré ; puis la capture rangée pour la suite s'ouvre, au tour suivant.
 fn editeur_detruit(app: &AppHandle) {
+    desarmer_filet_page(app);
     if let Some(e) = retirer_editeur(app) {
         let id = e.document.id;
-        let raison = e.raison.unwrap_or(editeur::RaisonFermeture::Impossible);
-        log::info!("{}", editeur::ligne_fermeture(id, raison));
+        log::warn!(
+            "{}",
+            editeur::ligne_fermeture(id, editeur::RaisonFermeture::Impossible)
+        );
         rendre_document(id, e);
     }
+    plus_tard(app, Duration::ZERO, |a| ouvrir_suivant(a, 20));
 }
 
-/// Croix du cadre, Alt+F4, menu système (fermeture empêchée) : la page décide ; une page
-/// pas encore prête n'a rien à garder.
+/// Croix du cadre, Alt+F4, menu système (fermeture empêchée) : `editeur::au_cadre`.
 fn fermeture_du_cadre(app: &AppHandle) {
-    match avec_editeur(app, None, |e| e.page_prete) {
-        Some(true) => demander_fermeture(app, "cadre"),
-        Some(false) => fermer_editeur(app, editeur::RaisonFermeture::Propre),
+    match avec_editeur(app, None, |e| editeur::au_cadre(e)) {
+        Some(editeur::Cadre::Demander) => demander_fermeture(app, editeur::Demande::Cadre),
+        Some(editeur::Cadre::FermerPropre) => fermer_editeur(app, editeur::RaisonFermeture::Propre),
+        Some(editeur::Cadre::FermerMuette) => {
+            fermer_editeur(app, editeur::RaisonFermeture::PageMuette)
+        }
         None => fenetres::editeur::fermer(app),
     }
 }
 
-/// `editeur:fermer_demande { id, raison }`, et le filet : sans `editeur_fermer` ni
-/// `editeur_garder` en `DELAI_FERMETURE`, fermeture d'office (page muette).
-fn demander_fermeture(app: &AppHandle, raison: &'static str) {
+/// `editeur:fermer_demande { id, raison }`, et son filet (`DELAI_FERMETURE`) :
+/// `editeur::au_filet` ne ferme d'office qu'un document connu comme propre.
+fn demander_fermeture(app: &AppHandle, demande: editeur::Demande) {
     let numero = app
         .state::<Application>()
         .numero_fermeture
         .fetch_add(1, Ordering::SeqCst)
         + 1;
     let Some(id) = avec_editeur(app, None, |e| {
-        e.fermeture_demandee = Some(numero);
+        e.fermeture_demandee = Some((numero, demande));
         e.document.id
     }) else {
         return;
     };
+    let raison = demande.nom();
     log::info!("editeur fermeture demandee {id} ({raison})");
     fenetres::editeur::emettre(
         app,
         fenetres::editeur::EVENEMENT_FERMER_DEMANDE,
         editeur::ChargeFermerDemande { id, raison },
     );
-    let pour_fil = app.clone();
-    let lance = std::thread::Builder::new()
-        .name("editeur-filet".into())
-        .spawn(move || {
-            std::thread::sleep(editeur::DELAI_FERMETURE);
-            let pour = pour_fil.clone();
-            let _ = pour_fil.run_on_main_thread(move || {
-                let muette = avec_editeur(&pour, None, |e| e.fermeture_demandee == Some(numero));
-                if muette == Some(true) {
-                    fermer_editeur(&pour, editeur::RaisonFermeture::PageMuette);
-                }
-            });
-        });
-    if let Err(e) = lance {
-        log::warn!("editeur: filet de fermeture non arme: {e}");
-    }
+    plus_tard(app, editeur::DELAI_FERMETURE, move |a| {
+        let filet = avec_editeur(a, None, |e| (editeur::au_filet(e, numero), e.document.id));
+        match filet {
+            Some((editeur::Filet::Fermer, _)) => {
+                fermer_editeur(a, editeur::RaisonFermeture::PageMuette)
+            }
+            Some((editeur::Filet::Garder, id)) => {
+                log::warn!("editeur fermeture {id} sans reponse: gardee")
+            }
+            _ => {}
+        }
+    });
 }
 
 /// Un export de la page (`editeur_exporter`) : en-tête lu, export accepté, puis le corps
@@ -2890,22 +3008,35 @@ fn exporter_editeur(app: &AppHandle, requete: &tauri::ipc::Request<'_>) -> Resul
     };
     let maintenant = Instant::now();
     let decision = avec_editeur(app, None, |etat| {
-        editeur::accepter_export(etat, &e, corps.len(), maintenant)?;
-        etat.export = Some(editeur::ExportEnCours {
-            numero,
-            but: e.but,
-            version: e.version,
-            debut: maintenant,
-            dialogue: e.but == editeur::But::EnregistrerSous,
+        // Un export trop vieux est rendu ici pour que son résultat d'échec parte : chaque
+        // export accepté a exactement un `editeur:resultat`.
+        let perime = editeur::export_perime(etat, maintenant);
+        let id = etat.document.id;
+        let suite = editeur::accepter_export(etat, &e, corps.len(), maintenant).map(|()| {
+            let plan = editeur::plan_export(e.but, editeur::sortie_pour(etat, e.but, e.version));
+            etat.export = Some(editeur::ExportEnCours {
+                numero,
+                but: e.but,
+                version: e.version,
+                debut: maintenant,
+                dialogue: plan.is_some_and(|p| p.dialogue),
+            });
+            (plan, etat.document.transparence, etat.document.maintenant)
         });
-        Ok((
-            editeur::sortie_pour(etat, e.but, e.version),
-            etat.document.transparence,
-            etat.document.maintenant,
-        ))
-    })
-    .unwrap_or(Err(editeur::Refus::Id));
-    let (sortie, transparence, heure) = match decision {
+        (perime.map(|x| (id, x)), suite)
+    });
+    let Some((perime, decision)) = decision else {
+        return refuser(e.id, editeur::Refus::Id);
+    };
+    if let Some((id, x)) = perime {
+        log::warn!("editeur export {id} {} sans bilan", x.numero);
+        fenetres::editeur::emettre(
+            app,
+            fenetres::editeur::EVENEMENT_RESULTAT,
+            editeur::resultat_sans_bilan(id, x.numero, x.but),
+        );
+    }
+    let (plan, transparence, heure) = match decision {
         Ok(d) => d,
         Err(r) => return refuser(e.id, r),
     };
@@ -2913,12 +3044,7 @@ fn exporter_editeur(app: &AppHandle, requete: &tauri::ipc::Request<'_>) -> Resul
         "{}",
         editeur::ligne_export(e.id, numero, e.but, e.version, e.largeur, e.hauteur)
     );
-    let editeur::Sortie::Faire {
-        copier,
-        enregistrer,
-        ranger_recents,
-    } = sortie
-    else {
+    let Some(plan) = plan else {
         // Déjà enregistrée : rien n'est écrit ; le résultat part au tour suivant, après la
         // réponse à la page.
         let fin = editeur::FinExportEditeur {
@@ -2943,15 +3069,14 @@ fn exporter_editeur(app: &AppHandle, requete: &tauri::ipc::Request<'_>) -> Resul
     };
     let base = demande_sortie(app, transparence);
     let demande = sortie::Demande {
-        copier,
-        // Enregistrer sous… écrit le fichier choisi par `enregistrer_a`, pas `sortir`.
-        enregistrer: enregistrer && e.but == editeur::But::Enregistrer,
-        ranger_recents,
+        copier: plan.copier,
+        enregistrer: plan.enregistrer,
+        ranger_recents: plan.ranger_recents,
         maintenant: heure,
         transparence,
         ..base
     };
-    let dialogue = (e.but == editeur::But::EnregistrerSous).then(|| {
+    let dialogue = plan.dialogue.then(|| {
         (
             fenetres::editeur::identifiant(app),
             demande.dossier_enregistrement.clone(),
@@ -3023,7 +3148,7 @@ fn lancer_export(
             x.export = None;
             x.document.id
         }) {
-            log::info!("editeur export {id} {numero} sans bilan");
+            log::warn!("editeur export {id} {numero} sans bilan");
             fenetres::editeur::emettre(
                 app,
                 fenetres::editeur::EVENEMENT_RESULTAT,
@@ -3151,19 +3276,11 @@ fn finir_export(app: &AppHandle, fin: editeur::FinExportEditeur) {
         fenetres::editeur::EVENEMENT_RESULTAT,
         editeur::resultat(&fin),
     );
-    let reussi = fin
-        .bilan
-        .as_ref()
-        .is_some_and(|b| editeur::reussie(fin.but, b));
-    match fin.but {
-        editeur::But::CopierFermer if reussi => {
-            fermer_ou_suivant(app, editeur::RaisonFermeture::CopierFermer)
-        }
-        editeur::But::Glisser if reussi => preparer_glisser_editeur(app, id, recent, heure),
-        editeur::But::Glisser if fin.bilan.is_some() => {
-            log::info!("editeur glisser {id} refuse (recents)")
-        }
-        _ => {}
+    match editeur::apres_export(&fin) {
+        editeur::Apres::Fermer => fermer_ou_suivant(app, editeur::RaisonFermeture::CopierFermer),
+        editeur::Apres::Glisser => preparer_glisser_editeur(app, id, recent, heure),
+        editeur::Apres::GlisserRefuse => log::info!("editeur glisser {id} refuse (recents)"),
+        editeur::Apres::Rien => {}
     }
 }
 
@@ -3272,6 +3389,15 @@ fn arreter(app: &AppHandle) {
     // Éditeur fermé sans demander (R10), avant la libération des raccourcis : `destroy`
     // ne passe pas par `CloseRequested`, que l'éditeur empêche.
     fermer_editeur(app, editeur::RaisonFermeture::Arret);
+    if let Some((d, _)) = app
+        .state::<Application>()
+        .editeur_suivant
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .take()
+    {
+        log::info!("editeur: capture {} abandonnee", d.id);
+    }
     // Réglages fermés d'abord : la fin d'une saisie ne doit pas reprendre des raccourcis
     // après leur libération. Puis libérer les raccourcis, fermer les autres fenêtres.
     fenetres::reglages::fermer(app);

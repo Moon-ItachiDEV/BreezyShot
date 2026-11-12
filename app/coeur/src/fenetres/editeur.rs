@@ -81,6 +81,11 @@ fn fenetre(app: &AppHandle) -> Option<WebviewWindow> {
     app.get_webview_window(ETIQUETTE_EDITEUR)
 }
 
+/// Vrai tant que la fenêtre existe (y compris entre `destroy()` et `Destroyed`).
+pub fn existe(app: &AppHandle) -> bool {
+    fenetre(app).is_some()
+}
+
 /// L'écran sous la souris (le clic Annoter est sur la vignette, donc sur l'écran de la
 /// capture) ; à défaut le premier.
 pub fn ecran_souris(app: &AppHandle) -> Option<Ecran> {
@@ -125,7 +130,9 @@ where
         tauri::WindowEvent::Destroyed => detruite(),
         _ => {}
     });
-    // Zone intérieure à `place`, puis le cadre centré sur le même centre.
+    // D'abord sur l'écran de `place` (l'échelle de la taille est celle de cet écran),
+    // puis la zone intérieure à `place`, puis le cadre recentré sur le même centre.
+    let _ = f.set_position(tauri::PhysicalPosition::new(place.x, place.y));
     let _ = f.set_size(tauri::PhysicalSize::new(place.largeur, place.hauteur));
     let (dl, dh) = match (f.outer_size(), f.inner_size()) {
         (Ok(o), Ok(i)) => (

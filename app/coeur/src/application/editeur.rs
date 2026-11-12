@@ -59,14 +59,16 @@ pub struct EtatEditeur {
     pub rangee: Option<u64>,
     /// L'export en cours (un seul à la fois).
     pub export: Option<ExportEnCours>,
-    /// Pourquoi la fenêtre se ferme, une fois décidé.
-    pub raison: Option<RaisonFermeture>,
     /// Le fichier « Récents » de la version `rangee` (donné au glisser).
     pub recent: Option<PathBuf>,
     /// Numéro de la fenêtre (filet de la page : une fenêtre plus récente n'est pas visée).
     pub fenetre: u64,
-    /// `editeur:fermer_demande` envoyé et pas encore répondu (son numéro, filet de 2 s).
-    pub fermeture_demandee: Option<u64>,
+    /// `editeur:fermer_demande` envoyé et pas encore répondu (son numéro et sa raison,
+    /// filet de 2 s).
+    pub fermeture_demandee: Option<(u64, Demande)>,
+    /// Une demande est restée sans réponse à son échéance, et la page n'a pas répondu
+    /// depuis : un second `CloseRequested` ferme d'office.
+    pub sans_reponse: bool,
     /// La page a dit avoir dessiné l'image du document courant (`editeur_affiche`).
     pub affichee: bool,
 }
@@ -229,6 +231,24 @@ pub struct ChargeEditeur {
     pub preferences: Option<String>,
 }
 
+/// Pourquoi le cœur demande à la page de fermer (`editeur:fermer_demande`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Demande {
+    /// Croix du cadre, Alt+F4, menu système.
+    Cadre,
+    /// Une nouvelle capture attend (§4.3).
+    Remplacer,
+}
+
+impl Demande {
+    pub fn nom(self) -> &'static str {
+        match self {
+            Demande::Cadre => "cadre",
+            Demande::Remplacer => "remplacer",
+        }
+    }
+}
+
 /// Charge de `editeur:fermer_demande` (`raison` : "cadre" ou "remplacer").
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ChargeFermerDemande {
@@ -300,7 +320,8 @@ pub fn lire_en_tete(
 
 /// Accepte un export lu (`octets` : longueur du corps) : le document en cours, une taille
 /// de cadre possible (annotable, dans l'image), exactement `l × h × 4` octets, et aucun
-/// autre export en cours ; un export de plus de `DELAI_SORTIE` est oublié.
+/// autre export en cours (un export n'est oublié que par son échéance, ou par
+/// `export_perime` au-delà de `OUBLI_EXPORT`).
 pub fn accepter_export(
     etat: &EtatEditeur,
     e: &EnTete,
@@ -311,21 +332,185 @@ pub fn accepter_export(
         return Err(Refus::Id);
     }
     let image = &etat.document.pixels;
-    let attendu = u64::from(e.largeur) * u64::from(e.hauteur) * 4;
-    if !annotable(e.largeur, e.hauteur)
-        || e.largeur > image.largeur
-        || e.hauteur > image.hauteur
-        || u64::try_from(octets).ok() != Some(attendu)
-    {
+    // `annotable` d'abord : des en-têtes à 4 294 967 295 ne font jamais déborder le calcul.
+    if !annotable(e.largeur, e.hauteur) || e.largeur > image.largeur || e.hauteur > image.hauteur {
         return Err(Refus::Taille);
     }
+    let attendu = u64::from(e.largeur)
+        .checked_mul(u64::from(e.hauteur))
+        .and_then(|n| n.checked_mul(4));
+    if attendu.is_none() || u64::try_from(octets).ok() != attendu {
+        return Err(Refus::Taille);
+    }
+    // Un export n'est oublié que par son échéance (son résultat d'échec est alors émis) ou
+    // par `export_perime`, qui le rend pour son résultat : jamais en silence.
     let en_cours = etat.export.is_some_and(|x| {
-        x.dialogue || maintenant.saturating_duration_since(x.debut) < DELAI_SORTIE
+        x.dialogue || maintenant.saturating_duration_since(x.debut) < OUBLI_EXPORT
     });
     if en_cours {
         return Err(Refus::DejaEnCours);
     }
     Ok(())
+}
+
+/// Un export sans bilan ni échéance après ce délai (fil d'échéance impossible) est oublié
+/// à l'export suivant, avec son résultat d'échec.
+pub const OUBLI_EXPORT: Duration = Duration::from_secs(DELAI_SORTIE.as_secs() * 3);
+
+/// L'export en cours trop vieux pour être encore attendu (`OUBLI_EXPORT`, hors dialogue) :
+/// retiré et rendu, pour que son `editeur:resultat` d'échec parte avant le suivant.
+pub fn export_perime(etat: &mut EtatEditeur, maintenant: Instant) -> Option<ExportEnCours> {
+    let x = etat.export?;
+    if x.dialogue || maintenant.saturating_duration_since(x.debut) < OUBLI_EXPORT {
+        return None;
+    }
+    etat.export = None;
+    Some(x)
+}
+
+/// Ce que fait l'export dans son fil (`sortie::Demande` et dialogue).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Plan {
+    pub copier: bool,
+    /// Enregistrer au modèle par `sortie::sortir` (Enregistrer seulement).
+    pub enregistrer: bool,
+    pub ranger_recents: bool,
+    /// Le dialogue d'Enregistrer sous…, puis `sortie::enregistrer_a`.
+    pub dialogue: bool,
+}
+
+/// Le plan d'un export accepté ; `None` pour `DejaFait` (rien n'est écrit).
+pub fn plan_export(but: But, sortie: Sortie) -> Option<Plan> {
+    let Sortie::Faire {
+        copier,
+        enregistrer,
+        ranger_recents,
+    } = sortie
+    else {
+        return None;
+    };
+    let sous = but == But::EnregistrerSous;
+    Some(Plan {
+        copier,
+        enregistrer: enregistrer && !sous,
+        ranger_recents,
+        dialogue: sous && enregistrer,
+    })
+}
+
+/// Ce qui suit un export fini et attendu.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Apres {
+    Rien,
+    /// « Copier et fermer » réussi : fermer (ou charger la capture en attente).
+    Fermer,
+    /// Glisser : le fichier « Récents » est là, le glisser part.
+    Glisser,
+    /// Glisser sans fichier « Récents » : refusé (`editeur glisser <id> refuse (recents)`).
+    GlisserRefuse,
+}
+
+pub fn apres_export(fin: &FinExportEditeur) -> Apres {
+    let Some(b) = &fin.bilan else {
+        return Apres::Rien;
+    };
+    match (fin.but, reussie(fin.but, b)) {
+        (But::CopierFermer, true) => Apres::Fermer,
+        (But::Glisser, true) => Apres::Glisser,
+        (But::Glisser, false) => Apres::GlisserRefuse,
+        _ => Apres::Rien,
+    }
+}
+
+/// La réponse du cœur à `editeur_fermer`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReponseFermer {
+    /// La page ferme d'office avant d'avoir montré l'image : elle l'a refusée (§4.2).
+    ImageRefusee,
+    /// Des modifications : la page montre le dialogue (`"demander"`).
+    Demander,
+    /// Fermer (ou charger la capture en attente), pour cette raison (`"fermee"`).
+    Fermer(RaisonFermeture),
+}
+
+pub fn reponse_fermer(
+    force: bool,
+    affichee: bool,
+    version: u64,
+    vide: bool,
+    exportee: Option<u64>,
+) -> ReponseFermer {
+    match (force, fermeture(version, vide, exportee)) {
+        (true, _) if !affichee => ReponseFermer::ImageRefusee,
+        (true, _) => ReponseFermer::Fermer(RaisonFermeture::SansGarder),
+        (false, Fermeture::Demander) => ReponseFermer::Demander,
+        (false, Fermeture::Directe) => ReponseFermer::Fermer(RaisonFermeture::Propre),
+    }
+}
+
+/// `CloseRequested` (croix, Alt+F4, menu système), que le cœur a empêché.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Cadre {
+    /// Page pas encore prête : rien à garder (`propre`).
+    FermerPropre,
+    /// Second `CloseRequested` après une demande restée sans réponse : comme Windows pour
+    /// une fenêtre qui ne répond pas (`page muette`).
+    FermerMuette,
+    /// Demander à la page (`editeur:fermer_demande { raison: "cadre" }`).
+    Demander,
+}
+
+pub fn au_cadre(etat: &EtatEditeur) -> Cadre {
+    if !etat.page_prete {
+        Cadre::FermerPropre
+    } else if etat.sans_reponse {
+        Cadre::FermerMuette
+    } else {
+        Cadre::Demander
+    }
+}
+
+/// Le filet d'une demande de fermeture tombe (`DELAI_FERMETURE`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Filet {
+    /// La demande a eu sa réponse (ou une autre l'a remplacée) : rien.
+    Rien,
+    /// Document connu comme propre : fermer (`page muette`).
+    Fermer,
+    /// Document modifié, ou capture en attente : rien n'est détruit
+    /// (`editeur fermeture <id> sans reponse: gardee`).
+    Garder,
+}
+
+/// Décide le filet de la demande `numero` et met l'état à jour : la demande est effacée ;
+/// gardée, la page est notée sans réponse (un second `CloseRequested` fermera).
+pub fn au_filet(etat: &mut EtatEditeur, numero: u64) -> Filet {
+    let Some((n, demande)) = etat.fermeture_demandee else {
+        return Filet::Rien;
+    };
+    if n != numero {
+        return Filet::Rien;
+    }
+    etat.fermeture_demandee = None;
+    let propre = fermeture(etat.version, etat.vide, etat.exportee) == Fermeture::Directe;
+    if demande == Demande::Cadre && propre {
+        Filet::Fermer
+    } else {
+        etat.sans_reponse = true;
+        Filet::Garder
+    }
+}
+
+/// La page a répondu (`editeur_fermer`, `editeur_garder`) : plus de demande en cours, plus
+/// de « sans réponse ». Rend vrai si une demande attendait cette réponse.
+pub fn reponse_recue(etat: &mut EtatEditeur) -> bool {
+    etat.sans_reponse = false;
+    etat.fermeture_demandee.take().is_some()
+}
+
+/// Le filet de la page (`DELAI_PAGE`) tombe : la fenêtre `numero` n'a jamais dit prête.
+pub fn page_muette(etat: &EtatEditeur, numero: u64) -> bool {
+    etat.fenetre == numero && !etat.page_prete
 }
 
 /// Ce que fait un export accepté du but `but` pour la version `version`. Copier : copie
@@ -357,14 +542,16 @@ pub fn sortie_pour(etat: &EtatEditeur, but: But, version: u64) -> Sortie {
     }
 }
 
-/// Que faire d'un Annoter selon l'éditeur ouvert : ouvrir s'il n'y en a pas, remplacer
-/// son document s'il est propre, sinon demander (§4.3).
+/// Que faire d'un Annoter selon l'éditeur ouvert : ouvrir s'il n'y en a pas ; remplacer
+/// si sa page n'est pas encore prête (elle recevra le nouveau document à `editeur_pret`) ;
+/// sinon toujours demander à la page (décision du responsable : l'état gardé par
+/// `editeur_etat` peut manquer un texte en cours de saisie). La page valide sa saisie,
+/// envoie son état, puis répond `editeur_fermer(force: faux)` : c'est là, avec l'état
+/// frais, que le cœur charge la capture (document propre) ou fait demander.
 pub fn arrivee(ouvert: Option<&EtatEditeur>) -> Arrivee {
     match ouvert {
         None => Arrivee::Ouvrir,
-        Some(e) if fermeture(e.version, e.vide, e.exportee) == Fermeture::Directe => {
-            Arrivee::Remplacer
-        }
+        Some(e) if !e.page_prete => Arrivee::Remplacer,
         Some(_) => Arrivee::Demander,
     }
 }
@@ -535,10 +722,10 @@ impl EtatEditeur {
             enregistree: None,
             rangee: None,
             export: None,
-            raison: None,
             recent: None,
             fenetre,
             fermeture_demandee: None,
+            sans_reponse: false,
             affichee: false,
         }
     }
@@ -763,7 +950,10 @@ mod tests {
         assert!(!annotable(1, COTE_MAX + 1));
         // 25 000 000 pile (5000 × 5000), puis un pixel de trop (côtés sous 16 384).
         assert!(annotable(5000, 5000));
-        // 25 000 001 n'a pas de côtés ≤ 16 384 : le plus proche au-dessus, 16 384 × 1 526.
+        // Un peu au-dessus de 25 000 000 avec des côtés sous 16 384 : 5101 × 4901 =
+        // 25 000 001 pile ; 16 384 × 1 526 = 25 001 984.
+        assert_eq!(5101u64 * 4901, 25_000_001);
+        assert!(!annotable(5101, 4901));
         assert!(annotable(COTE_MAX, 1525));
         assert!(!annotable(COTE_MAX, 1526));
         assert!(annotable(10_000, 2500));
@@ -908,7 +1098,16 @@ mod tests {
             accepter_export(&e, &en_tete(0, 30), 0, t),
             Err(Refus::Taille)
         );
-        // Export en cours ; oublié après DELAI_SORTIE.
+        // En-têtes au maximum de u32 : refusés sans débordement.
+        assert_eq!(
+            accepter_export(&e, &en_tete(u32::MAX, u32::MAX), juste, t),
+            Err(Refus::Taille)
+        );
+        assert_eq!(
+            accepter_export(&e, &en_tete(u32::MAX, 1), juste, t),
+            Err(Refus::Taille)
+        );
+        // Export en cours : jamais oublié en silence avant OUBLI_EXPORT.
         e.export = Some(ExportEnCours {
             numero: 1,
             but: But::Copier,
@@ -921,13 +1120,42 @@ mod tests {
             Err(Refus::DejaEnCours)
         );
         assert_eq!(
-            accepter_export(&e, &en_tete(40, 30), juste, t + DELAI_SORTIE),
-            Ok(())
+            accepter_export(&e, &en_tete(40, 30), juste, t + Duration::from_secs(11)),
+            Err(Refus::DejaEnCours)
         );
         assert_eq!(
-            accepter_export(&e, &en_tete(40, 30), juste, t + Duration::from_secs(11)),
+            accepter_export(&e, &en_tete(40, 30), juste, t + OUBLI_EXPORT),
             Ok(())
         );
+    }
+
+    /// Un export accepté a toujours exactement un résultat : périmé, il est rendu (pour
+    /// son échec) avant d'être remplacé.
+    #[test]
+    fn export_perime_rendu_pour_son_resultat() {
+        let t = Instant::now();
+        let mut e = etat();
+        let x = ExportEnCours {
+            numero: 4,
+            but: But::Copier,
+            version: 3,
+            debut: t,
+            dialogue: false,
+        };
+        assert_eq!(export_perime(&mut e, t + OUBLI_EXPORT), None);
+        e.export = Some(x);
+        assert_eq!(export_perime(&mut e, t + Duration::from_secs(29)), None);
+        assert_eq!(e.export, Some(x));
+        assert_eq!(export_perime(&mut e, t + OUBLI_EXPORT), Some(x));
+        assert_eq!(e.export, None);
+        // Dialogue ouvert : jamais périmé.
+        e.export = Some(ExportEnCours {
+            dialogue: true,
+            ..x
+        });
+        assert_eq!(export_perime(&mut e, t + Duration::from_secs(3600)), None);
+        let r = resultat_sans_bilan(7, 4, But::Copier);
+        assert_eq!((r.numero, r.etat), (4, "echec"));
     }
 
     #[test]
@@ -1075,7 +1303,7 @@ mod tests {
             Err(Refus::DejaEnCours)
         );
         assert_eq!(
-            accepter_export(&e, &en_tete(40, 30), juste, tard + DELAI_SORTIE),
+            accepter_export(&e, &en_tete(40, 30), juste, tard + OUBLI_EXPORT),
             Ok(())
         );
     }
@@ -1130,14 +1358,165 @@ mod tests {
     fn arrivee_selon_l_editeur() {
         assert_eq!(arrivee(None), Arrivee::Ouvrir);
         let mut e = etat();
+        // Page pas encore prête : elle recevra le nouveau document.
         assert_eq!(arrivee(Some(&e)), Arrivee::Remplacer);
         e.vide = false;
         e.version = 2;
-        assert_eq!(arrivee(Some(&e)), Arrivee::Demander);
-        e.exportee = Some(2);
         assert_eq!(arrivee(Some(&e)), Arrivee::Remplacer);
-        e.version = 3;
+        // Page prête : toujours demander, même propre en apparence (saisie en cours).
+        e.page_prete = true;
         assert_eq!(arrivee(Some(&e)), Arrivee::Demander);
+        e.vide = true;
+        assert_eq!(arrivee(Some(&e)), Arrivee::Demander);
+    }
+
+    #[test]
+    fn reponses_a_editeur_fermer() {
+        use ReponseFermer as R;
+        // Image refusée : fermeture d'office avant tout affichage.
+        assert_eq!(reponse_fermer(true, false, 0, true, None), R::ImageRefusee);
+        assert_eq!(
+            reponse_fermer(true, true, 4, false, None),
+            R::Fermer(RaisonFermeture::SansGarder)
+        );
+        assert_eq!(reponse_fermer(false, true, 4, false, None), R::Demander);
+        assert_eq!(reponse_fermer(false, true, 4, false, Some(3)), R::Demander);
+        assert_eq!(
+            reponse_fermer(false, true, 4, false, Some(4)),
+            R::Fermer(RaisonFermeture::Propre)
+        );
+        assert_eq!(
+            reponse_fermer(false, false, 0, true, None),
+            R::Fermer(RaisonFermeture::Propre)
+        );
+    }
+
+    #[test]
+    fn croix_du_cadre() {
+        let mut e = etat();
+        assert_eq!(au_cadre(&e), Cadre::FermerPropre);
+        e.page_prete = true;
+        assert_eq!(au_cadre(&e), Cadre::Demander);
+        e.sans_reponse = true;
+        assert_eq!(au_cadre(&e), Cadre::FermerMuette);
+        // La page répond : plus « sans réponse ».
+        e.fermeture_demandee = Some((3, Demande::Cadre));
+        assert!(reponse_recue(&mut e));
+        assert!(!e.sans_reponse && e.fermeture_demandee.is_none());
+        assert!(!reponse_recue(&mut e));
+        assert_eq!(au_cadre(&e), Cadre::Demander);
+    }
+
+    /// Décision du responsable : le filet ne détruit jamais un document qui n'est pas
+    /// connu comme propre, ni sur une demande « remplacer ».
+    #[test]
+    fn filet_de_fermeture() {
+        let mut e = etat();
+        e.page_prete = true;
+        // Aucune demande, ou une autre : rien.
+        assert_eq!(au_filet(&mut e, 1), Filet::Rien);
+        e.fermeture_demandee = Some((2, Demande::Cadre));
+        assert_eq!(au_filet(&mut e, 1), Filet::Rien);
+        assert_eq!(e.fermeture_demandee, Some((2, Demande::Cadre)));
+        // Propre : fermer.
+        assert_eq!(au_filet(&mut e, 2), Filet::Fermer);
+        assert!(e.fermeture_demandee.is_none() && !e.sans_reponse);
+        // Modifié : gardé, sans réponse ; le second CloseRequested ferme.
+        e.vide = false;
+        e.version = 5;
+        e.fermeture_demandee = Some((3, Demande::Cadre));
+        assert_eq!(au_filet(&mut e, 3), Filet::Garder);
+        assert!(e.fermeture_demandee.is_none() && e.sans_reponse);
+        assert_eq!(au_cadre(&e), Cadre::FermerMuette);
+        // Exporté depuis : propre, fermer.
+        e.sans_reponse = false;
+        e.exportee = Some(5);
+        e.fermeture_demandee = Some((4, Demande::Cadre));
+        assert_eq!(au_filet(&mut e, 4), Filet::Fermer);
+        // Remplacer : jamais fermé, même propre ; la capture reste en attente.
+        e.mettre_en_attente(document(9, 2, 2));
+        e.fermeture_demandee = Some((5, Demande::Remplacer));
+        assert_eq!(au_filet(&mut e, 5), Filet::Garder);
+        assert_eq!(e.en_attente.as_ref().map(|d| d.id), Some(9));
+        e.vide = false;
+        e.exportee = None;
+        e.fermeture_demandee = Some((6, Demande::Remplacer));
+        assert_eq!(au_filet(&mut e, 6), Filet::Garder);
+        assert_eq!(Demande::Remplacer.nom(), "remplacer");
+        assert_eq!(Demande::Cadre.nom(), "cadre");
+    }
+
+    #[test]
+    fn filet_de_la_page() {
+        let mut e = etat();
+        assert!(page_muette(&e, 1));
+        assert!(!page_muette(&e, 2));
+        e.page_prete = true;
+        assert!(!page_muette(&e, 1));
+    }
+
+    #[test]
+    fn plan_et_suite_d_un_export() {
+        let faire = |c, f, r| Sortie::Faire {
+            copier: c,
+            enregistrer: f,
+            ranger_recents: r,
+        };
+        let plan = |c, f, r, d| Plan {
+            copier: c,
+            enregistrer: f,
+            ranger_recents: r,
+            dialogue: d,
+        };
+        assert_eq!(plan_export(But::Enregistrer, Sortie::DejaFait), None);
+        assert_eq!(
+            plan_export(But::Enregistrer, faire(false, true, true)),
+            Some(plan(false, true, true, false))
+        );
+        // Enregistrer sous… : le fichier vient du dialogue, jamais de `sortir`.
+        assert_eq!(
+            plan_export(But::EnregistrerSous, faire(false, true, false)),
+            Some(plan(false, false, false, true))
+        );
+        assert_eq!(
+            plan_export(But::Copier, faire(true, false, true)),
+            Some(plan(true, false, true, false))
+        );
+        assert_eq!(
+            plan_export(But::Glisser, faire(false, false, false)),
+            Some(plan(false, false, false, false))
+        );
+        let ok = bilan(
+            Etape::Faite,
+            Some(Ok("/r.png".into())),
+            EtapeFichier::NonDemande,
+        );
+        let ko = bilan(
+            Etape::Echec("x".into()),
+            Some(Err("x".into())),
+            EtapeFichier::NonDemande,
+        );
+        assert_eq!(
+            apres_export(&fin(But::CopierFermer, 1, Some(ok.clone()))),
+            Apres::Fermer
+        );
+        assert_eq!(
+            apres_export(&fin(But::CopierFermer, 1, Some(ko.clone()))),
+            Apres::Rien
+        );
+        assert_eq!(
+            apres_export(&fin(But::Copier, 1, Some(ok.clone()))),
+            Apres::Rien
+        );
+        assert_eq!(
+            apres_export(&fin(But::Glisser, 1, Some(ok))),
+            Apres::Glisser
+        );
+        assert_eq!(
+            apres_export(&fin(But::Glisser, 1, Some(ko))),
+            Apres::GlisserRefuse
+        );
+        assert_eq!(apres_export(&fin(But::Glisser, 1, None)), Apres::Rien);
     }
 
     #[test]
@@ -1506,6 +1885,37 @@ mod tests {
             (E::Decompte, D::DecompteAnnule, E::Repos),
         ];
         assert_eq!(PASSAGES, confort);
+        // Tous les déclencheurs, sans exception (un nouveau ne compile pas sans être vu
+        // ici) : aucun ne concerne l'éditeur.
+        for (_, d, _) in PASSAGES {
+            let editeur = match d {
+                D::DemandeCapture(_)
+                | D::PhotoPrise(_)
+                | D::GelImpossible
+                | D::ZoneChoisie
+                | D::SelectionAnnulee
+                | D::EcransChanges
+                | D::SessionVerrouillee
+                | D::BureauSecurise
+                | D::SelectionMuette
+                | D::SelectionImpossible
+                | D::DecoupeImpossible
+                | D::SortieSansBilan
+                | D::ImagePrete
+                | D::ImagePreteSansVignette
+                | D::SouffleTermine
+                | D::VignetteFermee
+                | D::DelaiEcoule
+                | D::GlisserReussi
+                | D::VignetteImpossible
+                | D::CaptureSupprimee
+                | D::DemandeDecompte(_)
+                | D::DecompteFini(_)
+                | D::DecompteAnnule => false,
+            };
+            assert!(!editeur);
+        }
+
         for (depart, d, arrivee) in PASSAGES {
             for texte in [format!("{depart:?}"), d.libelle(), format!("{arrivee:?}")] {
                 assert!(!texte.to_lowercase().contains("editeur"), "{texte}");
