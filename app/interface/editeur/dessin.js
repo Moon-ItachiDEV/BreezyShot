@@ -12,13 +12,12 @@ import {
 // Épaisseurs : valeurs tenues par `document.js` (qui ne dépend pas de ce module).
 export { TRAITS, TRAITS_SURLIGNEUR };
 
+// Les six de la maquette « Éditeur épuré », dans son ordre.
 export const COULEURS = [
   ["#E5484D", "Rouge"],
-  ["#F5A524", "Orange"],
   ["#FFD43B", "Jaune"],
   ["#30A46C", "Vert"],
   ["#0090FF", "Bleu"],
-  ["#8E4EC6", "Violet"],
   ["#1A1A1A", "Noir"],
   ["#FFFFFF", "Blanc"],
 ];
@@ -28,6 +27,8 @@ export const FLOUS = [6, 10, 16]; // Flouter : facteur de réduction
 export const COULEURS_PERSO_MAX = 3; // « Couleur perso », les plus récentes d'abord
 
 const NOIR_BLOC = "#111214";
+const VOILE_PROJECTEUR = "rgba(8,10,16,.55)";
+const RAYON_PROJECTEUR = 8; // px de l'image
 const SURLIGNEUR_ALPHA = 0.42;
 const ACCENT_DE_SECOURS = "#0067C0";
 
@@ -206,12 +207,13 @@ function dessinerNumero(c, doc, o) {
   c.fillText(String(n), o.x, o.y + R * 0.06);
 }
 
-// Dessine un objet (hors masque : les masques sont dans le fond) dans `ctx`, dont la
+// Dessine un objet (hors masque, dans le fond, et hors projecteur, peint par `peindreVoile`)
+// dans `ctx`, dont la
 // transformation est déjà posée (échelle de la vue, ou 1 pour l'export). `doc` sert au
 // chiffre des numéros.
 export function dessinerObjet(ctx, doc, objet) {
   const c = ctx, o = objet;
-  if (o.type === "masque") return;
+  if (o.type === "masque" || o.type === "projecteur") return;
   c.save();
   c.globalAlpha = o.type === "surligneur" ? SURLIGNEUR_ALPHA : alphaDe(o);
   switch (o.type) {
@@ -425,6 +427,7 @@ export function composer(doc, fond) {
   c.drawImage(fond, 0, 0);
   c.globalCompositeOperation = "source-over";
   for (const o of doc.objets) dessinerObjet(c, doc, o);
+  peindreVoile(c, projecteurs(doc.objets), doc.largeur, doc.hauteur);
   const rgba = c.getImageData(k.x, k.y, k.largeur, k.hauteur).data;
   t.width = 0;
   t.height = 0;
@@ -471,12 +474,51 @@ function contourSelection(c, o, vue) {
   c.restore();
 }
 
+// ---------- projecteurs ----------
+
+function projecteurs(objets, ajout = null, cacher) {
+  const l = objets.filter((o) => o.type === "projecteur" && o.id !== cacher);
+  if (ajout && ajout.type === "projecteur") l.push(ajout);
+  return l;
+}
+
+// Voile sur toute l'image (l × h px de l'image, dans la transformation posée sur `c`), percé
+// de la RÉUNION des projecteurs : peint sur un calque de la taille de la toile, d'où chaque
+// zone est ôtée (`destination-out` : deux zones qui se chevauchent ne se voilent pas), puis
+// posé d'un coup. Les coupes de `c` (cadre de la vue) s'appliquent à la pose.
+function peindreVoile(c, liste, l, h) {
+  if (!liste.length) return;
+  const t = toile(c.canvas.width, c.canvas.height), v = t.getContext("2d");
+  v.setTransform(c.getTransform());
+  v.fillStyle = VOILE_PROJECTEUR;
+  v.fillRect(0, 0, l, h);
+  v.globalCompositeOperation = "destination-out";
+  v.fillStyle = "#000";
+  for (const o of liste) {
+    const n = boiteForme(o);
+    if (o.forme === "ovale") {
+      v.beginPath();
+      v.ellipse(n.x + n.largeur / 2, n.y + n.hauteur / 2, Math.max(0.5, n.largeur / 2),
+        Math.max(0.5, n.hauteur / 2), 0, 0, 7);
+    } else rectArrondi(v, n.x, n.y, n.largeur, n.hauteur, RAYON_PROJECTEUR);
+    v.fill();
+  }
+  c.save();
+  c.setTransform(1, 0, 0, 1, 0, 0);
+  c.globalAlpha = 1;
+  c.globalCompositeOperation = "source-over";
+  c.drawImage(t, 0, 0);
+  c.restore();
+  t.width = t.height = 0;
+}
+
 // Peint la vue : `fond` mis à l'échelle, puis les objets en vectoriel, et la sélection.
 // `vue` : { x, y, echelle, dpr } : coin haut gauche de l'IMAGE ENTIÈRE dans la toile (px
 // physiques, entiers), px de la toile par px de l'image, `devicePixelRatio`. `selection` :
 // liste d'`id`. `options` (en plus du contrat) : { cacher: id à ne pas dessiner (texte en
 // saisie), ajout: objet en cours de tracé, dessiné au-dessus (un masque en cours y est
-// appliqué sur sa seule zone) }.
+// appliqué sur sa seule zone, un projecteur s'ajoute à la réunion), rayon: rayon des coins
+// de l'image affichée, en px de la toile (l'écran seul ; absent ou 0 : coins droits) }.
 export function peindreVue(ctx, doc, fond, vue, selection, options = {}) {
   const c = ctx, e = vue.echelle, k = cadre(doc);
   c.save();
@@ -487,15 +529,23 @@ export function peindreVue(ctx, doc, fond, vue, selection, options = {}) {
   const y1 = Math.round(vue.y + (k.y + k.hauteur) * e);
   c.imageSmoothingEnabled = e < 1;
   c.imageSmoothingQuality = "high";
+  const rayon = Math.max(0, options.rayon || 0);
+  if (rayon) {
+    rectArrondi(c, x0, y0, x1 - x0, y1 - y0, rayon);
+    c.clip();
+  }
   c.drawImage(fond, k.x, k.y, k.largeur, k.hauteur, x0, y0, x1 - x0, y1 - y0);
-  c.beginPath();
-  c.rect(x0, y0, x1 - x0, y1 - y0);
-  c.clip();
+  if (!rayon) {
+    c.beginPath();
+    c.rect(x0, y0, x1 - x0, y1 - y0);
+    c.clip();
+  }
   const ajout = options.ajout || null;
   if (ajout && ajout.type === "masque") masqueEnCours(c, doc, fond, ajout, vue);
   c.setTransform(e, 0, 0, e, vue.x, vue.y);
   for (const o of doc.objets) if (o.id !== options.cacher) dessinerObjet(c, doc, o);
   if (ajout && ajout.type !== "masque") dessinerObjet(c, doc, ajout);
+  peindreVoile(c, projecteurs(doc.objets, ajout, options.cacher), doc.largeur, doc.hauteur);
   c.restore();
   const choisis = new Set(selection || []);
   if (!choisis.size) return;

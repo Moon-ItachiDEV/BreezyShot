@@ -349,6 +349,52 @@ async function partieDocument() {
       + 'l\'image ou coupé, annulé, Image entière',
       [a, b, c, d, e, f, g].join());
   }
+  // (P) Projecteur : modèle (créer, toucher, poignées, déplacer, redimensionner, copier,
+  // annuler, rétablir, ordre de recherche).
+  {
+    const doc = D.nouveauDocument(640, 480), h = D.creerHistorique(doc);
+    const proj = (forme) => ({ type: 'projecteur', forme, x1: 300, y1: 200, x2: 100, y2: 80 });
+    let id, idO;
+    D.modifier(h, (d) => { const o = proj('rectangle'); D.normaliser(o); id = D.ajouter(d, o); });
+    D.modifier(h, (d) => { idO = D.ajouter(d, { ...proj('ovale'), x1: 400, y1: 300, x2: 600,
+      y2: 400 }); });
+    const r = doc.objets[0], ov = doc.objets[1];
+    const a = r.x1 === 100 && r.y1 === 80 && r.x2 === 300 && r.y2 === 200
+      && json(D.boiteForme(r)) === json({ x: 100, y: 80, largeur: 200, hauteur: 120 })
+      && D.poignees(r).map((q) => q.slice(0, 2).join()).join(' ')
+        === '100,80 300,80 100,200 300,200'
+      && D.poignees(r).map((q) => q[2]).join() === 'nw,ne,sw,se';
+    // Toute la zone se touche (centre compris) ; ovale : pas ses coins de boîte.
+    const b = D.touche(r, [200, 140], 0) && D.touche(r, [103, 83], 0) && !D.touche(r, [96, 140], 2)
+      && D.touche(ov, [500, 350], 0) && D.touche(ov, [599, 350], 2) && !D.touche(ov, [405, 305], 2)
+      && !D.touche(ov, [500, 410], 2);
+    // Une flèche dans la zone éclairée se prend avant le projecteur ; ailleurs, le projecteur.
+    D.modifier(h, (d) => D.ajouter(d, { type: 'fleche', x1: 150, y1: 140, x2: 250, y2: 140,
+      double: false, couleur: '#E5484D', epaisseur: 1, opacite: 1 }));
+    D.ordonner(doc, [id], true);
+    const c = D.objetSous(doc, [200, 140], 2)?.type === 'fleche'
+      && D.objetSous(doc, [200, 100], 2)?.id === id;
+    // Déplacer, redimensionner (coin nw tiré au-delà du coin se), dupliquer.
+    const q = JSON.parse(json(r));
+    D.modifier(h, () => D.deplacer(r, q, 10, 5), 'g1');
+    const d1 = r.x1 === 110 && r.y2 === 205;
+    const q2 = JSON.parse(json(r));
+    D.modifier(h, () => D.redimensionner(r, q2, 'nw', { x: 400, y: 300 }, 1), 'g2');
+    const d2 = r.x1 === 310 && r.y1 === 205 && r.x2 === 400 && r.y2 === 300;
+    let copies;
+    D.modifier(h, (d) => { copies = D.dupliquer(d, [idO]); });
+    const cp = doc.objets.find((o) => o.id === copies[0]);
+    const d3 = cp.type === 'projecteur' && cp.forme === 'ovale' && cp.x1 === 416 && cp.y2 === 416;
+    // Annuler jusqu'au début puis tout rétablir.
+    const fin = json(doc);
+    while (D.annuler(h));
+    const vide0 = doc.objets.length === 0;
+    while (D.retablir(h));
+    verifier(a && b && c && d1 && d2 && d3 && vide0 && json(doc) === fin,
+      'P1 projecteur : normalisé, boîte, poignées aux coins, zone pleine au toucher (ovale), '
+      + 'pris après les annotations, déplacé, redimensionné, copié, annulé, rétabli',
+      [a, b, c, d1, d2, d3, vide0].join());
+  }
   // (10) vide.
   {
     const doc = D.nouveauDocument(100, 100), h = D.creerHistorique(doc);
@@ -940,6 +986,144 @@ async function partieDessin(nav) {
   verifier(r.reduce((n, x) => n + x.temoin, 0) >= 12 && r.every((x) => x.essai <= 3),
     '23 Pixeliser, attaque par candidats sur un texte de 12 px : au plus 3 chiffres sur 8 '
     + 'retrouvés (témoin à graine connue : 12 sur 24 au moins)', JSON.stringify(r));
+
+  // (P) Projecteur : voile rgba(8, 10, 16, .55) sur toute l'image, percé de la réunion des
+  // projecteurs, peint après tous les objets, à l'export comme à l'écran.
+  r = await p.evaluate(async () => {
+    const im = await preparer(480, 320);
+    const L = 480, H = 320;
+    const px = (s, x, y) => Array.from(s.rgba.slice((y * L + x) * 4, (y * L + x) * 4 + 4));
+    const src = (x, y) => Array.from(im.src.slice((y * L + x) * 4, (y * L + x) * 4 + 4));
+    const voile = (c) => [8, 10, 16].map((v, i) => c[i] * 0.45 + v * 0.55);
+    const proche = (a, b, t = 2) => b.every((v, i) => Math.abs(a[i] - v) <= t);
+    const egal = (a, b) => a.every((v, i) => v === b[i]);
+    const A = { type: 'projecteur', forme: 'rectangle', x1: 100, y1: 80, x2: 300, y2: 200 };
+    const B = { type: 'projecteur', forme: 'rectangle', x1: 250, y1: 150, x2: 400, y2: 260 };
+    const O = { type: 'projecteur', forme: 'ovale', x1: 100, y1: 80, x2: 300, y2: 200 };
+    const dans = (o, x, y, m) => x >= o.x1 + m && x < o.x2 - m && y >= o.y1 + m && y < o.y2 - m;
+    // Classe chaque pixel loin des bords (2 px) : éclairé (= source), voilé une fois, autre.
+    const classer = (s, liste, pred) => {
+      let eclaire = 0, voile1 = 0, faux = 0;
+      for (let y = 0; y < H; y++) for (let x = 0; x < L; x++) {
+        const k = pred(x, y);
+        if (k === null) continue;
+        const v = px(s, x, y), o = src(x, y);
+        if (k) { if (egal(v, o)) eclaire++; else faux++; }
+        else if (proche(v, [...voile(o), 255])) voile1++; else faux++;
+      }
+      return { eclaire, voile1, faux };
+    };
+    // Prédicat : vrai (éclairé), faux (voilé), null (bord, ignoré).
+    const rect = (liste) => (x, y) => {
+      if (liste.some((o) => dans(o, x, y, 10))) return true;
+      if (liste.every((o) => !dans(o, x, y, -2))) return false;
+      return null;
+    };
+    const res = {};
+    res.seul = classer(exporter(im, docAvec(L, H, [A])), [A], rect([A]));
+    const sA = exporter(im, docAvec(L, H, [A]));
+    // Coin arrondi (rayon 8) : (101, 81) est voilé, (110, 90) éclairé.
+    res.coin = !egal(px(sA, 101, 81), src(101, 81)) && egal(px(sA, 110, 90), src(110, 90));
+    res.deux = classer(exporter(im, docAvec(L, H, [A, B])), [A, B], rect([A, B]));
+    // Ovale : centre éclairé, coins de sa boîte voilés.
+    const sO = exporter(im, docAvec(L, H, [O]));
+    res.ovale = egal(px(sO, 200, 140), src(200, 140)) && egal(px(sO, 150, 140), src(150, 140))
+      && proche(px(sO, 104, 84), [...voile(src(104, 84)), 255])
+      && proche(px(sO, 296, 196), [...voile(src(296, 196)), 255]);
+    // Ordre : un rectangle rouge plein rangé APRÈS le projecteur reste sous le voile, comme
+    // un masque.
+    const rouge = { type: 'rectangle', x1: 50, y1: 50, x2: 350, y2: 250, couleur: '#E5484D',
+      epaisseur: 1, plein: true, arrondi: 0, opacite: 1 };
+    const m = { type: 'masque', x1: 20, y1: 260, x2: 120, y2: 310, sorte: 'bloc', intensite: 1 };
+    const sR = exporter(im, docAvec(L, H, [A, rouge, m]));
+    res.ordre = egal(px(sR, 200, 140), [229, 72, 77, 255])
+      && proche(px(sR, 70, 60), [...voile([229, 72, 77]), 255])
+      && proche(px(sR, 60, 280), [...voile([17, 18, 20]), 255]);
+    // Recadrage : le voile reste celui de l'image entière (export recadré = son morceau).
+    const k = { x: 37, y: 21, largeur: 301, hauteur: 203 };
+    const tout = exporter(im, docAvec(L, H, [A, B, O, rouge]));
+    const sk = exporter(im, docAvec(L, H, [A, B, O, rouge], k));
+    let diffK = 0;
+    for (let y = 0; y < k.hauteur; y++) for (let x = 0; x < k.largeur; x++) {
+      for (let q = 0; q < 4; q++) {
+        if (sk.rgba[(y * k.largeur + x) * 4 + q] !== tout.rgba[((y + k.y) * L + x + k.x) * 4 + q]) {
+          diffK++;
+        }
+      }
+    }
+    res.cadre = diffK;
+    // Écran = export, à la taille réelle, recadré, décalé ; le projecteur B passé en cours
+    // de tracé (`ajout`) donne la même vue que B rangé dans le document.
+    const vue = document.createElement('canvas');
+    vue.width = 600; vue.height = 400;
+    const c = vue.getContext('2d', { willReadFrequently: true });
+    const docV = docAvec(L, H, [A, O, rouge], k);
+    M.peindreMasques(im.ctx, im.base, docV);
+    M.peindreVue(c, docV, im.fond, { x: 50, y: 40, echelle: 1, dpr: 1 }, [],
+      { ajout: { ...B, id: 999 } });
+    const v = c.getImageData(50 + k.x, 40 + k.y, k.largeur, k.hauteur).data;
+    let diffV = 0;
+    for (let i = 0; i < v.length; i++) if (v[i] !== sk.rgba[i]) diffV++;
+    res.ecran = diffV;
+    // Sans projecteur : un projecteur posé puis supprimé ne laisse rien, au bit près ; la
+    // vue sans projecteur est l'export.
+    const d0 = docAvec(L, H, [rouge, m]);
+    const s0 = exporter(im, d0);
+    const d1 = docAvec(L, H, [rouge, A, m]);
+    D.supprimer(d1, d1.objets.filter((o) => o.type === 'projecteur').map((o) => o.id));
+    const s1 = exporter(im, d1);
+    let horsBoite = 0;
+    const bR = D.boite(rouge), bM = D.boite(m);
+    for (let y = 0; y < H; y++) for (let x = 0; x < L; x++) {
+      const pris = [bR, bM].some((b) => x + 1 > b.x && x < b.x + b.largeur
+        && y + 1 > b.y && y < b.y + b.hauteur);
+      if (!pris && !egal(px(s0, x, y), src(x, y))) horsBoite++;
+    }
+    res.sans = s0.rgba.every((x, i) => x === s1.rgba[i]) && horsBoite === 0;
+    return res;
+  });
+  const okClasse = (x) => x.faux === 0 && x.eclaire > 1000 && x.voile1 > 1000;
+  verifier(okClasse(r.seul) && r.coin, 'P2 projecteur seul : éclairé au bit près, voilé une fois '
+    + '(± 2) ailleurs, coins arrondis', JSON.stringify(r.seul));
+  verifier(okClasse(r.deux), 'P3 deux projecteurs qui se chevauchent : la réunion n\'est voilée '
+    + 'nulle part, aucun double voile', JSON.stringify(r.deux));
+  verifier(r.ovale, 'P4 ovale : centre éclairé, coins de sa boîte voilés');
+  verifier(r.ordre, 'P5 voile après tous les objets : rectangle rouge rangé après, intact dans '
+    + 'la zone, voilé hors d\'elle ; masque voilé');
+  verifier(r.cadre === 0 && r.ecran === 0, 'P6 recadré : voile de l\'image entière ; écran (avec '
+    + 'le projecteur en cours de tracé) = export au bit près', JSON.stringify([r.cadre, r.ecran]));
+  verifier(r.sans, 'P7 sans projecteur : rien ne change d\'un bit');
+
+  // Option `rayon` : coins de l'image arrondis à l'écran seulement.
+  r = await p.evaluate(async () => {
+    const im = await preparer(200, 150);
+    const doc = docAvec(200, 150, [{ type: 'projecteur', forme: 'rectangle', x1: 20, y1: 20,
+      x2: 120, y2: 100 }]);
+    M.peindreMasques(im.ctx, im.base, doc);
+    const vue = document.createElement('canvas');
+    vue.width = 300; vue.height = 250;
+    const c = vue.getContext('2d', { willReadFrequently: true });
+    const peindre = (o) => {
+      M.peindreVue(c, doc, im.fond, { x: 30, y: 40, echelle: 1, dpr: 1 }, [], o);
+      return c.getImageData(0, 0, 300, 250).data;
+    };
+    const sans = peindre({}), zero = peindre({ rayon: 0 }), arrondi = peindre({ rayon: 10 });
+    let horsCoins = 0, coins = 0;
+    for (let y = 0; y < 250; y++) for (let x = 0; x < 300; x++) {
+      const i = (y * 300 + x) * 4;
+      const d = [0, 1, 2, 3].some((q) => arrondi[i + q] !== zero[i + q]);
+      const coin = (x < 40 || x >= 220) && (y < 50 || y >= 180);
+      if (d && coin) coins++;
+      if (d && !coin) horsCoins++;
+    }
+    const s = M.composer(doc, im.fond);
+    const export0 = s.rgba[3] === 255; // coin haut gauche de l'export : opaque
+    return { pareil: sans.every((v, i) => v === zero[i]), coins, horsCoins,
+      coinVide: arrondi[(40 * 300 + 30) * 4 + 3] === 0, export0 };
+  });
+  verifier(r.pareil && r.coins > 0 && r.horsCoins === 0 && r.coinVide && r.export0,
+    'P8 option rayon : coins de l\'image transparents à l\'écran, rien d\'autre ne change, '
+    + 'absente = 0, export sans arrondi', JSON.stringify(r));
 
   // (g) Temps : Pixeliser sur une grande image (toute l'image masquée) ; composer 5760 × 1080
   // avec 50 objets (borne du contrat : 1 000 ms).
