@@ -364,16 +364,28 @@ async function partieDocument() {
       && D.poignees(r).map((q) => q.slice(0, 2).join()).join(' ')
         === '100,80 300,80 100,200 300,200'
       && D.poignees(r).map((q) => q[2]).join() === 'nw,ne,sw,se';
-    // Toute la zone se touche (centre compris) ; ovale : pas ses coins de boîte.
-    const b = D.touche(r, [200, 140], 0) && D.touche(r, [103, 83], 0) && !D.touche(r, [96, 140], 2)
-      && D.touche(ov, [500, 350], 0) && D.touche(ov, [599, 350], 2) && !D.touche(ov, [405, 305], 2)
-      && !D.touche(ov, [500, 410], 2);
+    // Le bord seul se touche (bande de tolérance + 7 px) ; ovale : ni son centre ni les coins
+    // de sa boîte.
+    const b = !D.touche(r, [200, 140], 2) && D.touche(r, [103, 83], 0) && D.touche(r, [91, 140], 2)
+      && !D.touche(r, [89, 140], 2) && D.touche(r, [200, 208], 2) && !D.touche(r, [200, 190], 2)
+      && !D.touche(ov, [500, 350], 0) && D.touche(ov, [599, 350], 2) && D.touche(ov, [500, 395], 2)
+      && !D.touche(ov, [405, 305], 2) && !D.touche(ov, [500, 412], 2);
     // Une flèche dans la zone éclairée se prend avant le projecteur ; ailleurs, le projecteur.
     D.modifier(h, (d) => D.ajouter(d, { type: 'fleche', x1: 150, y1: 140, x2: 250, y2: 140,
       double: false, couleur: '#E5484D', epaisseur: 1, opacite: 1 }));
     D.ordonner(doc, [id], true);
-    const c = D.objetSous(doc, [200, 140], 2)?.type === 'fleche'
-      && D.objetSous(doc, [200, 100], 2)?.id === id;
+    // Dans la zone éclairée : un masque se prend en son centre ; l'intérieur d'un rectangle
+    // non plein, loin de tout bord, ne rend rien ; le bord du projecteur rend le projecteur.
+    let idM;
+    D.modifier(h, (d) => { idM = D.ajouter(d, { type: 'masque', x1: 120, y1: 150, x2: 180,
+      y2: 190, sorte: 'flouter', intensite: 1 }); });
+    D.modifier(h, (d) => D.ajouter(d, { type: 'rectangle', x1: 200, y1: 100, x2: 290, y2: 190,
+      couleur: '#E5484D', epaisseur: 1, plein: false, arrondi: 6, opacite: 1 }));
+    D.ordonner(doc, [id], true);
+    const c = D.objetSous(doc, [170, 140], 2)?.type === 'fleche'
+      && D.objetSous(doc, [150, 170], 2)?.id === idM
+      && D.objetSous(doc, [245, 160], 2) === null
+      && D.objetSous(doc, [150, 82], 2)?.id === id;
     // Déplacer, redimensionner (coin nw tiré au-delà du coin se), dupliquer.
     const q = JSON.parse(json(r));
     D.modifier(h, () => D.deplacer(r, q, 10, 5), 'g1');
@@ -384,15 +396,17 @@ async function partieDocument() {
     let copies;
     D.modifier(h, (d) => { copies = D.dupliquer(d, [idO]); });
     const cp = doc.objets.find((o) => o.id === copies[0]);
-    const d3 = cp.type === 'projecteur' && cp.forme === 'ovale' && cp.x1 === 416 && cp.y2 === 416;
+    const d3 = cp.type === 'projecteur' && cp.forme === 'ovale' && cp.x1 === 416 && cp.y2 === 416
+      && D.objetSous(doc, [500, 350], 2) === null;
     // Annuler jusqu'au début puis tout rétablir.
     const fin = json(doc);
     while (D.annuler(h));
     const vide0 = doc.objets.length === 0;
     while (D.retablir(h));
     verifier(a && b && c && d1 && d2 && d3 && vide0 && json(doc) === fin,
-      'P1 projecteur : normalisé, boîte, poignées aux coins, zone pleine au toucher (ovale), '
-      + 'pris après les annotations, déplacé, redimensionné, copié, annulé, rétabli',
+      'P1 projecteur : normalisé, boîte, poignées aux coins, touché par son bord seul (ovale '
+      + 'compris), ce qui est dans la zone se prend, déplacé, redimensionné, copié, annulé, '
+      + 'rétabli',
       [a, b, c, d1, d2, d3, vide0].join());
   }
   // (10) vide.
@@ -1093,6 +1107,69 @@ async function partieDessin(nav) {
   verifier(r.cadre === 0 && r.ecran === 0, 'P6 recadré : voile de l\'image entière ; écran (avec '
     + 'le projecteur en cours de tracé) = export au bit près', JSON.stringify([r.cadre, r.ecran]));
   verifier(r.sans, 'P7 sans projecteur : rien ne change d\'un bit');
+
+  // Image aux coins transparents (capture de fenêtre) : le voile n'assombrit que les pixels
+  // qui existent, à l'export comme à l'écran.
+  r = await p.evaluate(async () => {
+    const L = 200, H = 150, R = 20;
+    const coin = (i) => {
+      const x = i % L, y = Math.floor(i / L);
+      const dx = Math.max(R - x, x - (L - 1 - R), 0), dy = Math.max(R - y, y - (H - 1 - R), 0);
+      return Math.hypot(dx, dy) > R ? 0 : 255;
+    };
+    const im = await preparer(L, H, coin);
+    const doc = docAvec(L, H, [{ type: 'projecteur', forme: 'rectangle', x1: 60, y1: 40,
+      x2: 140, y2: 110 }]);
+    const s = exporter(im, doc);
+    const vue = document.createElement('canvas');
+    vue.width = L; vue.height = H;
+    const c = vue.getContext('2d', { willReadFrequently: true });
+    M.peindreVue(c, doc, im.fond, { x: 0, y: 0, echelle: 1, dpr: 1 }, []);
+    const v = c.getImageData(0, 0, L, H).data;
+    let transparents = 0, nonNuls = 0, voiles = 0, ecran = 0;
+    for (let i = 0; i < L * H; i++) {
+      if (coin(i) === 0) {
+        transparents++;
+        if (s.rgba[4 * i + 3] || s.rgba[4 * i] || v[4 * i + 3]) nonNuls++;
+      } else if (i === 75 * L + 30 && s.rgba[4 * i + 3] === 255
+        && s.rgba[4 * i] < im.src[4 * i] * 0.45 + 8 * 0.55 + 3) voiles++;
+      for (let q = 0; q < 4; q++) if (s.rgba[4 * i + q] !== v[4 * i + q]) ecran++;
+    }
+    return { transparents, nonNuls, voiles, ecran };
+  });
+  verifier(r.transparents > 100 && r.nonNuls === 0 && r.voiles === 1 && r.ecran === 0,
+    'P9 image aux coins transparents : ils restent transparents sous le voile (export et '
+    + 'écran), l\'opaque est voilé, écran = export', JSON.stringify(r));
+
+  // Coût du voile : vue 3840 × 2160 avec deux projecteurs, 20 peintures, chacune attendue
+  // (lecture d'un pixel), comparée à la même vue sans projecteur. Ici, la vue sans
+  // projecteur coûte déjà 9 à 12 ms (image de 8 Mpx et lecture) : la borne porte sur le
+  // surcoût du voile, 12 ms au plus par peinture.
+  r = await p.evaluate(async () => {
+    const L = 3840, H = 2160;
+    const im = await preparer(L, H);
+    const objets = [
+      { type: 'projecteur', forme: 'rectangle', x1: 400, y1: 300, x2: 1600, y2: 1200 },
+      { type: 'projecteur', forme: 'ovale', x1: 1200, y1: 900, x2: 2600, y2: 1900 }];
+    const vue = document.createElement('canvas');
+    vue.width = L; vue.height = H;
+    const c = vue.getContext('2d');
+    const mesurer = (doc) => {
+      M.peindreMasques(im.ctx, im.base, doc);
+      M.peindreVue(c, doc, im.fond, { x: 0, y: 0, echelle: 1, dpr: 1 }, []);
+      c.getImageData(0, 0, 1, 1);
+      const t0 = performance.now();
+      for (let i = 0; i < 20; i++) {
+        M.peindreVue(c, doc, im.fond, { x: 0, y: 0, echelle: 1, dpr: 1 }, []);
+        c.getImageData(0, 0, 1, 1); // attend la fin du dessin
+      }
+      return (performance.now() - t0) / 20;
+    };
+    const avec = mesurer(docAvec(L, H, objets)), sans = mesurer(docAvec(L, H, []));
+    return { avec: Math.round(avec * 10) / 10, sans: Math.round(sans * 10) / 10 };
+  });
+  verifier(r.avec - r.sans <= 12, `P10 vue 3840 × 2160, deux projecteurs : ${r.avec} ms par `
+    + `peinture, sans projecteur ${r.sans} ms (surcoût borné à 12 ms)`);
 
   // Option `rayon` : coins de l'image arrondis à l'écran seulement.
   r = await p.evaluate(async () => {
