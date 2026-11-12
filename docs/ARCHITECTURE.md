@@ -963,7 +963,8 @@ Windows 11), redimensionnable, taille minimale `TAILLE_MIN` 640 × 440. Ce que f
 0.37 (lu dans ses sources) : le style garde `WS_CAPTION`, `WS_SYSMENU` et `WS_SIZEBOX`
 (menu système, Alt+F4, redimensionnement) ; `WM_NCCALCSIZE` rend toute la fenêtre à la
 zone cliente, sauf, avec l'ombre, des bords invisibles (épaisseur du cadre à gauche, à
-droite et en bas ; 1 px en haut sous Windows 11, 0 sous Windows 10) qui portent le
+droite et en bas ; `round(dpi / 96)` en haut sous Windows 11, 2 px à 150 %, 0 sous Windows
+10) qui portent le
 redimensionnement ; le haut est pris par `WM_NCHITTEST` (`HTTOP`), et tauri-runtime-wry
 ajoute son propre gestionnaire de bords (`undecorated_resizing`) au-dessus de la webview.
 `placer` (pure) : l'image à la taille réelle plus `MARGES` 72 × 172 px logiques (36 de
@@ -979,25 +980,29 @@ WebView2 (`prefers-color-scheme`) et au mode sombre de DWM.
 
 **Ouverture et remplacement.** Annoter range un `EtatEditeur` (numéro de fenêtre), crée la
 fenêtre (`editeur fenetre <hwnd>`, `editeur ouvert …`) et arme le filet de la page : un
-fil attend `DELAI_PAGE` (20 s, WebView2 lent sur la machine GitHub) sur un canal que
+fil attend `DELAI_PAGE` (30 s, WebView2 lent sur la machine GitHub) sur un canal que
 `editeur_pret` ferme ; muette, la fenêtre est détruite, le document rendu, bandeau
 « Impossible d'ouvrir l'éditeur ». `arrivee` décide d'une capture qui arrive : pas
 d'éditeur → ouvrir ; page pas encore prête → remplacer (`editeur:charger`) ; page prête →
 toujours demander (`editeur:fermer_demande`, raison `remplacer`), la capture attend
 (une seule ; la précédente est abandonnée). Une capture arrivée entre `destroy()` et
-`Destroyed` est gardée (`editeur_suivant`) et ouverte après `Destroyed` (100 ms entre deux
+`Destroyed` est gardée (`editeur_suivant`) ; après `Destroyed`, `editeur::suivant` la fait
+passer par le chemin normal d'une capture qui arrive (aussi quand un autre Annoter a déjà
+ouvert un éditeur neuf), ou réessaie tant que l'ancienne fenêtre existe (100 ms entre deux
 essais, 20 au plus). `Destroyed` ne compte qu'une fois, pour sa fenêtre
 (`fenetre_editeur_vivante`).
 
 **Fermeture.** `CloseRequested` (croix de la barre des tâches, Alt+F4, `WM_CLOSE`) est
-empêché, puis `au_cadre` : page pas prête → fermer (`propre`) ; demande précédente restée
-sans réponse → fermer (`page muette`) ; sinon demander à la page, qui répond par
+empêché, puis `au_cadre` : page pas prête → fermer (`propre`) ; demande « cadre »
+précédente restée sans réponse → fermer (`page muette`) ; sinon demander à la page, qui répond par
 `editeur_fermer` (`reponse_fermer` : `"fermee"`, `"demander"`, ou image refusée si la page
 force avant d'avoir montré l'image) ou `editeur_garder` (« Continuer » : la capture en
 attente est abandonnée). Filet de `DELAI_FERMETURE` (2 s, `au_filet`) : seule une demande
 « cadre » sur un document connu comme propre (vide, ou exporté à sa version) est fermée
-d'office ; sinon rien n'est détruit (`sans reponse: gardee`) et c'est le CloseRequested
-suivant qui ferme ; « remplacer » ne ferme jamais sur le filet. L'arrêt ferme sans
+d'office ; sinon rien n'est détruit (`sans reponse: gardee`). Seule une demande « cadre »
+muette note la page sans réponse : la fermeture d'office n'arrive qu'au second
+CloseRequested resté sans réponse. « Remplacer » ne ferme jamais sur le filet et ne compte
+pas comme une croix : après lui, le premier CloseRequested redemande. L'arrêt ferme sans
 demander, avant les Réglages et les raccourcis (`ferme <id> (arret)`, capture en attente
 abandonnée). Une fermeture décidée avec une capture en attente la charge à la place.
 

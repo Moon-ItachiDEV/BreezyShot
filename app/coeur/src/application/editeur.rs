@@ -23,9 +23,9 @@ pub const COTE_MAX: u32 = 16_384;
 pub const PIXELS_MAX: u64 = 25_000_000;
 /// Délai donné à la page pour dire `editeur_pret` après la création de la fenêtre. Le
 /// contrat dit 5 s ; WebView2 a mis plus de 15 s à charger une page sur la machine lente
-/// des essais : 20 s, pour qu'un PC lent ne perde jamais l'éditeur (le filet ne sert qu'à
+/// des essais : 30 s, pour qu'un PC lent ne perde jamais l'éditeur (le filet ne sert qu'à
 /// une page cassée).
-pub const DELAI_PAGE: Duration = Duration::from_secs(20);
+pub const DELAI_PAGE: Duration = Duration::from_secs(30);
 /// Délai donné à la page pour répondre à `editeur:fermer_demande`.
 pub const DELAI_FERMETURE: Duration = Duration::from_secs(2);
 /// Taille maximale des préférences d'outil de la page (au-delà : ignorées).
@@ -483,7 +483,9 @@ pub enum Filet {
 }
 
 /// Décide le filet de la demande `numero` et met l'état à jour : la demande est effacée ;
-/// gardée, la page est notée sans réponse (un second `CloseRequested` fermera).
+/// une demande « cadre » gardée note la page sans réponse (le `CloseRequested` suivant
+/// fermera : c'est le second resté sans réponse). Un « remplacer » muet ne la note pas :
+/// le premier `CloseRequested` redemande à la page.
 pub fn au_filet(etat: &mut EtatEditeur, numero: u64) -> Filet {
     let Some((n, demande)) = etat.fermeture_demandee else {
         return Filet::Rien;
@@ -493,11 +495,13 @@ pub fn au_filet(etat: &mut EtatEditeur, numero: u64) -> Filet {
     }
     etat.fermeture_demandee = None;
     let propre = fermeture(etat.version, etat.vide, etat.exportee) == Fermeture::Directe;
-    if demande == Demande::Cadre && propre {
-        Filet::Fermer
-    } else {
-        etat.sans_reponse = true;
-        Filet::Garder
+    match demande {
+        Demande::Cadre if propre => Filet::Fermer,
+        Demande::Cadre => {
+            etat.sans_reponse = true;
+            Filet::Garder
+        }
+        Demande::Remplacer => Filet::Garder,
     }
 }
 
@@ -506,6 +510,28 @@ pub fn au_filet(etat: &mut EtatEditeur, numero: u64) -> Filet {
 pub fn reponse_recue(etat: &mut EtatEditeur) -> bool {
     etat.sans_reponse = false;
     etat.fermeture_demandee.take().is_some()
+}
+
+/// Ce que devient une capture rangée pour après un `Destroyed` (`ouvrir_suivant`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Suivant {
+    /// Le chemin normal d'une capture qui arrive (`recevoir_document`) : aucune fenêtre,
+    /// ou un éditeur vivant (ouvert par un autre Annoter entre-temps).
+    Recevoir,
+    /// L'ancienne fenêtre n'est pas encore détruite : réessayer un peu plus tard.
+    Attendre,
+    /// Toujours là après tous les essais : capture rendue, « Impossible d'ouvrir ».
+    Abandonner,
+}
+
+/// `editeur_vivant` : un `EtatEditeur` est rangé (il est retiré avant `destroy()`, donc
+/// c'est un éditeur neuf) ; `fenetre_existe` : la fenêtre `editeur` existe encore.
+pub fn suivant(editeur_vivant: bool, fenetre_existe: bool, essais: u32) -> Suivant {
+    match (editeur_vivant, fenetre_existe) {
+        (true, _) | (false, false) => Suivant::Recevoir,
+        (false, true) if essais > 0 => Suivant::Attendre,
+        (false, true) => Suivant::Abandonner,
+    }
 }
 
 /// Le filet de la page (`DELAI_PAGE`) tombe : la fenêtre `numero` n'a jamais dit prête.
@@ -1442,8 +1468,27 @@ mod tests {
         e.exportee = None;
         e.fermeture_demandee = Some((6, Demande::Remplacer));
         assert_eq!(au_filet(&mut e, 6), Filet::Garder);
+        // Un « remplacer » muet ne compte pas comme une croix sans réponse : la première
+        // croix redemande, seule la seconde restée sans réponse ferme d'office.
+        assert!(!e.sans_reponse);
+        assert_eq!(au_cadre(&e), Cadre::Demander);
+        e.fermeture_demandee = Some((7, Demande::Cadre));
+        assert_eq!(au_filet(&mut e, 7), Filet::Garder);
+        assert_eq!(au_cadre(&e), Cadre::FermerMuette);
         assert_eq!(Demande::Remplacer.nom(), "remplacer");
         assert_eq!(Demande::Cadre.nom(), "cadre");
+    }
+
+    #[test]
+    fn capture_rangee_apres_destroyed() {
+        // Plus de fenêtre : ouvrir. Éditeur neuf ouvert entre-temps : chemin normal
+        // (remplacer ou demander), jamais « Impossible d'ouvrir ».
+        assert_eq!(suivant(false, false, 20), Suivant::Recevoir);
+        assert_eq!(suivant(true, true, 20), Suivant::Recevoir);
+        assert_eq!(suivant(true, true, 0), Suivant::Recevoir);
+        // L'ancienne fenêtre se détruit encore : attendre, puis abandonner.
+        assert_eq!(suivant(false, true, 3), Suivant::Attendre);
+        assert_eq!(suivant(false, true, 0), Suivant::Abandonner);
     }
 
     #[test]

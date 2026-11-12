@@ -7,7 +7,8 @@
 //! Sans cadre, sous Windows (tao 0.37) : le style garde `WS_CAPTION` et `WS_SIZEBOX` (menu
 //! système, Alt+F4, redimensionnement) ; `WM_NCCALCSIZE` rend toute la fenêtre à la zone
 //! cliente, sauf, avec l'ombre, des bords invisibles (épaisseur du cadre à gauche, à
-//! droite et en bas, 1 px en haut sous Windows 11) qui portent le redimensionnement.
+//! droite et en bas ; en haut `round(dpi / 96)` sous Windows 11, soit 1 px à 100 % et
+//! 2 px à 150 %, et 0 sous Windows 10) qui portent le redimensionnement.
 //!
 //! Le module crée, place, montre et prévient la page ; il ne décide de rien : les
 //! commandes de la page et les décisions sont dans l'Application.

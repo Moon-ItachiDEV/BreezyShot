@@ -2711,36 +2711,37 @@ fn garder_suivant(app: &AppHandle, document: editeur::Document, demande_a: Insta
     log::info!("editeur ouverture differee {id}");
 }
 
-/// Ouvre la capture rangée par `garder_suivant`, si la fenêtre précédente est partie ;
-/// sinon réessaie un peu plus tard (au plus `essais` fois).
+/// La capture rangée par `garder_suivant` (`editeur::suivant`) : par le chemin normal
+/// d'une capture qui arrive si la fenêtre précédente est partie ou si un éditeur neuf est
+/// ouvert entre-temps ; sinon réessaie un peu plus tard (au plus `essais` fois).
 fn ouvrir_suivant(app: &AppHandle, essais: u32) {
-    if fenetres::editeur::existe(app) {
-        if essais > 0 {
-            plus_tard(app, Duration::from_millis(100), move |a| {
-                ouvrir_suivant(a, essais - 1)
-            });
-        } else if let Some((d, _)) = app
-            .state::<Application>()
-            .editeur_suivant
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .take()
-        {
-            log::warn!("editeur impossible {}: fenetre (encore ouverte)", d.id);
-            drop(d);
-            afficher(app, editeur::message_impossible());
-        }
+    let vivant = avec_editeur(app, None, |_| ()).is_some();
+    let decision = editeur::suivant(vivant, fenetres::editeur::existe(app), essais);
+    if decision == editeur::Suivant::Attendre {
+        plus_tard(app, Duration::from_millis(100), move |a| {
+            ouvrir_suivant(a, essais - 1)
+        });
         return;
     }
-    let suivant = app
+    let Some((document, demande_a)) = app
         .state::<Application>()
         .editeur_suivant
         .lock()
         .unwrap_or_else(|e| e.into_inner())
-        .take();
-    if let Some((document, demande_a)) = suivant {
-        recevoir_document(app, document, demande_a);
+        .take()
+    else {
+        return;
+    };
+    if decision == editeur::Suivant::Abandonner {
+        log::warn!(
+            "editeur impossible {}: fenetre (encore ouverte)",
+            document.id
+        );
+        drop(document);
+        afficher(app, editeur::message_impossible());
+        return;
     }
+    recevoir_document(app, document, demande_a);
 }
 
 /// Crée la fenêtre (cachée) pour `document` ; l'état est rangé avant la création, pour
