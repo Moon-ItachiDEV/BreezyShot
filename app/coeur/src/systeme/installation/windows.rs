@@ -1,5 +1,5 @@
-//! Gestes de l'installation propres à Windows. Seule écriture du registre de tout le
-//! programme : la clé de désinstallation de l'utilisateur (HKCU), voir `mod.rs`.
+//! Gestes de l'installation propres à Windows. Seule écriture du registre de
+//! l'installateur : la clé de désinstallation de l'utilisateur (HKCU), voir `mod.rs`.
 
 use std::io;
 use std::os::windows::ffi::OsStrExt;
@@ -33,9 +33,9 @@ use ::windows::Win32::UI::Shell::{
     SHGetKnownFolderPath, ShellLink, KF_FLAG_DONT_VERIFY,
 };
 use ::windows::Win32::UI::WindowsAndMessaging::{
-    AllowSetForegroundWindow, FindWindowExW, FindWindowW, GetCursorPos, GetWindowRect, MessageBoxW,
-    SetWindowPos, ASFW_ANY, MB_ICONERROR, MB_OK, MB_SETFOREGROUND, SWP_NOACTIVATE, SWP_NOSIZE,
-    SWP_NOZORDER,
+    AllowSetForegroundWindow, FindWindowExW, FindWindowW, GetCursorPos, GetWindowRect, IsIconic,
+    IsWindowVisible, MessageBoxW, SetForegroundWindow, SetWindowPos, ShowWindow, ASFW_ANY,
+    MB_ICONERROR, MB_OK, MB_SETFOREGROUND, SWP_NOACTIVATE, SWP_NOSIZE, SWP_NOZORDER, SW_RESTORE,
 };
 use webview2_com::Microsoft::Web::WebView2::Win32::GetAvailableCoreWebView2BrowserVersionString;
 
@@ -156,33 +156,37 @@ impl Drop for Com {
     }
 }
 
+/// HRESULT d'une erreur COM, en hexadécimal (jamais son message, qui peut citer un chemin).
+fn hresult(appel: &str, e: ::windows::core::Error) -> String {
+    format!("{appel} hresult {:#010x}", e.code().0 as u32)
+}
+
 pub fn creer_raccourci(lien: &Path, cible: &Path) -> Result<bool, String> {
     if let Some(parent) = lien.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| e.kind().to_string())?;
+        std::fs::create_dir_all(parent)
+            .map_err(|e| format!("dossier {}", super::diagnostic(&e)))?;
     }
     let _com = Com::ouvrir();
     // SAFETY : objets COM créés et utilisés sur ce fil ; chaînes HSTRING tenues pendant
     // les appels.
     unsafe {
         let lien_shell: IShellLinkW = CoCreateInstance(&ShellLink, None, CLSCTX_INPROC_SERVER)
-            .map_err(|e| format!("ShellLink: {e}"))?;
+            .map_err(|e| hresult("ShellLink", e))?;
         lien_shell
             .SetPath(&HSTRING::from(cible.as_os_str()))
-            .map_err(|e| format!("SetPath: {e}"))?;
+            .map_err(|e| hresult("SetPath", e))?;
         if let Some(dossier) = cible.parent() {
             lien_shell
                 .SetWorkingDirectory(&HSTRING::from(dossier.as_os_str()))
-                .map_err(|e| format!("SetWorkingDirectory: {e}"))?;
+                .map_err(|e| hresult("SetWorkingDirectory", e))?;
         }
         lien_shell
             .SetDescription(&HSTRING::from("BreezyShot"))
-            .map_err(|e| format!("SetDescription: {e}"))?;
-        let fichier: IPersistFile = lien_shell
-            .cast()
-            .map_err(|e| format!("IPersistFile: {e}"))?;
+            .map_err(|e| hresult("SetDescription", e))?;
+        let fichier: IPersistFile = lien_shell.cast().map_err(|e| hresult("IPersistFile", e))?;
         fichier
             .Save(&HSTRING::from(lien.as_os_str()), true)
-            .map_err(|e| format!("Save: {e}"))?;
+            .map_err(|e| hresult("Save", e))?;
     }
     Ok(true)
 }
@@ -239,7 +243,7 @@ pub fn ecrire_cle(cle: &str, valeurs: &[(&str, Valeur)]) -> Result<bool, String>
         )
     };
     if r != ERROR_SUCCESS {
-        return Err(format!("creation de la cle: {}", r.0));
+        return Err(format!("creation de la cle, code {}", r.0));
     }
     let h = Cle(h);
     for (nom_valeur, valeur) in valeurs {
@@ -257,7 +261,7 @@ pub fn ecrire_cle(cle: &str, valeurs: &[(&str, Valeur)]) -> Result<bool, String>
             }
         };
         if r != ERROR_SUCCESS {
-            return Err(format!("valeur {nom_valeur}: {}", r.0));
+            return Err(format!("valeur {nom_valeur}, code {}", r.0));
         }
     }
     Ok(true)
@@ -304,7 +308,7 @@ pub fn retirer_valeurs_et_cle(cle: &str, noms: &[&str]) -> Result<bool, String> 
         return Ok(false);
     }
     if r != ERROR_SUCCESS {
-        return Err(format!("ouverture de la cle: {}", r.0));
+        return Err(format!("ouverture de la cle, code {}", r.0));
     }
     let h = Cle(h);
     for nom in noms {
@@ -332,7 +336,7 @@ pub fn retirer_valeurs_et_cle(cle: &str, noms: &[&str]) -> Result<bool, String> 
     };
     drop(h);
     if r != ERROR_SUCCESS {
-        return Err(format!("lecture de la cle: {}", r.0));
+        return Err(format!("lecture de la cle, code {}", r.0));
     }
     if sous_cles > 0 || valeurs > 0 {
         return Err("la cle garde des valeurs qui ne sont pas a nous".into());
@@ -340,7 +344,7 @@ pub fn retirer_valeurs_et_cle(cle: &str, noms: &[&str]) -> Result<bool, String> 
     // SAFETY : chaîne terminée par zéro ; la clé est vide.
     let r = unsafe { RegDeleteKeyW(HKEY_CURRENT_USER, PCWSTR(c.as_ptr())) };
     if r != ERROR_SUCCESS {
-        return Err(format!("suppression de la cle: {}", r.0));
+        return Err(format!("suppression de la cle, code {}", r.0));
     }
     Ok(true)
 }
@@ -471,4 +475,32 @@ pub fn deplacer_fenetre(identifiant: isize, x: i32, y: i32) -> bool {
         )
     }
     .is_ok()
+}
+
+pub fn rect_fenetre(identifiant: isize) -> Option<Rect> {
+    if identifiant == 0 {
+        return None;
+    }
+    let h = HWND(identifiant as *mut core::ffi::c_void);
+    let mut r = RECT::default();
+    // SAFETY : rectangle lu dans une variable locale ; une poignée périmée fait échouer.
+    unsafe { GetWindowRect(h, &mut r) }.ok()?;
+    Some(rect_de(r))
+}
+
+pub fn ramener_fenetre(titre: &str) -> bool {
+    // SAFETY : recherche par titre ; une fenêtre disparue entre-temps fait échouer les appels.
+    unsafe {
+        let Ok(h) = FindWindowW(PCWSTR::null(), &HSTRING::from(titre)) else {
+            return false;
+        };
+        if !IsWindowVisible(h).as_bool() {
+            return false;
+        }
+        if IsIconic(h).as_bool() {
+            let _ = ShowWindow(h, SW_RESTORE);
+        }
+        let _ = SetForegroundWindow(h);
+        true
+    }
 }

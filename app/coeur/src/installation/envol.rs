@@ -1,5 +1,5 @@
-//! Place de la fenêtre et trajectoire de l'envol vers la zone de notification (contrat
-//! §4.1 et §4.5), en pixels réels.
+//! Place de la fenêtre et trajectoire de l'envol vers la zone de notification (ARCHITECTURE
+//! §12.3 et §12.4), en pixels réels.
 
 use std::time::Duration;
 
@@ -145,6 +145,31 @@ mod tests {
             assert!(u >= avant - 1e-9);
             avant = u;
         }
+    }
+
+    /// Valeur d'un jeton de `jetons.css`, en nombre (unité retirée).
+    fn jeton(nom: &str) -> f64 {
+        let css = include_str!("../../../interface/commun/jetons.css");
+        let debut = format!("--{nom}:");
+        let ligne = css
+            .lines()
+            .map(str::trim)
+            .find(|l| l.starts_with(&debut))
+            .unwrap_or_else(|| panic!("jeton {nom} absent"));
+        let valeur = ligne[debut.len()..].trim().trim_end_matches(';');
+        valeur
+            .trim_end_matches("ms")
+            .trim_end_matches("px")
+            .parse()
+            .unwrap_or_else(|_| panic!("jeton {nom}: {valeur}"))
+    }
+
+    #[test]
+    fn constantes_egales_aux_jetons() {
+        assert_eq!(DUREE_ENVOL.as_millis() as f64, jeton("duree-envol-fenetre"));
+        assert_eq!(MARGE, jeton("installateur-marge"));
+        assert_eq!(CARTE.0, jeton("installateur-carte-largeur"));
+        assert_eq!(CARTE.1, jeton("installateur-carte-hauteur"));
     }
 
     #[test]

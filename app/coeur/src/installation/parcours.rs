@@ -1,4 +1,4 @@
-//! Étapes, erreurs et table des réactions de l'installateur (contrat §3.2, §3.5, §4.4).
+//! Étapes, erreurs et table des réactions de l'installateur (ARCHITECTURE §12.3, §12.4).
 
 use std::time::Duration;
 
@@ -213,9 +213,15 @@ pub enum Geste {
     /// Fenêtre cachée tout de suite ; l'installation finit, l'app démarre, puis on sort.
     CacherPuisFinir,
     Reduire,
+    /// Fin des étapes réussie, fenêtre visible : écran « prêt ».
+    MontrerPret,
+    /// Fin des étapes en erreur, fenêtre visible : écran d'erreur.
+    MontrerErreur,
+    /// Fin des étapes après « Fermer » (fenêtre cachée) : sortir avec ce code.
+    Sortir(i32),
 }
 
-/// Table des réactions (contrat §4.4). `None` : action ignorée dans cet état.
+/// Table des réactions (ARCHITECTURE §12.4). `None` : action ignorée dans cet état.
 pub fn reagir(etat: EtatInstallateur, action: Action) -> Option<(EtatInstallateur, Geste)> {
     use Action as A;
     use EtatInstallateur as E;
@@ -230,6 +236,22 @@ pub fn reagir(etat: EtatInstallateur, action: Action) -> Option<(EtatInstallateu
         (E::Pret, A::Essayer) => Some((E::Pret, Geste::Capturer)),
         (E::Pret, A::Terminer | A::Fermer) => Some((E::Envol, Geste::Envol)),
         _ => None,
+    }
+}
+
+/// Ce qui suit les étapes, d'après l'état **au moment où elles finissent** (lu et écrit
+/// sous le même verrou que `reagir`). Fermée pendant l'installation, la fenêtre est cachée :
+/// on sort (0 si tout a réussi, l'app est alors lancée ; 1 sinon), sans rien montrer.
+pub fn apres_etapes<E>(
+    etat: EtatInstallateur,
+    resultat: &Result<(), E>,
+) -> (EtatInstallateur, Geste) {
+    use EtatInstallateur as Et;
+    match (etat, resultat.is_ok()) {
+        (Et::Fermeture, true) => (Et::Fermeture, Geste::Sortir(0)),
+        (Et::Fermeture, false) => (Et::Fermeture, Geste::Sortir(1)),
+        (_, true) => (Et::Pret, Geste::MontrerPret),
+        (_, false) => (Et::Erreur, Geste::MontrerErreur),
     }
 }
 
@@ -341,5 +363,33 @@ mod tests {
             Some((E::Installation, Geste::Reduire))
         );
         assert_eq!(Action::depuis_nom("<img>"), None);
+    }
+
+    #[test]
+    fn apres_les_etapes() {
+        use EtatInstallateur as E;
+        let ok: Result<(), ErreurInstallation> = Ok(());
+        let ko: Result<(), ErreurInstallation> = Err(ErreurInstallation::Copie);
+        assert_eq!(
+            apres_etapes(E::Installation, &ok),
+            (E::Pret, Geste::MontrerPret)
+        );
+        assert_eq!(
+            apres_etapes(E::Installation, &ko),
+            (E::Erreur, Geste::MontrerErreur)
+        );
+        // « Fermer » pendant l'installation : jamais d'écran, toujours une sortie.
+        assert_eq!(
+            apres_etapes(E::Fermeture, &ok),
+            (E::Fermeture, Geste::Sortir(0))
+        );
+        assert_eq!(
+            apres_etapes(E::Fermeture, &ko),
+            (E::Fermeture, Geste::Sortir(1))
+        );
+        // Et la fenêtre fermée ne se rouvre par aucune action.
+        for a in Action::TOUTES {
+            assert_eq!(reagir(E::Fermeture, a), None);
+        }
     }
 }

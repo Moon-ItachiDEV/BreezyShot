@@ -83,3 +83,11 @@ pub fn message_bloquant(titre: &str, texte: &str) {
 pub fn deplacer_fenetre(_identifiant: isize, _x: i32, _y: i32) -> bool {
     false
 }
+
+pub fn rect_fenetre(_identifiant: isize) -> Option<Rect> {
+    None
+}
+
+pub fn ramener_fenetre(_titre: &str) -> bool {
+    false
+}

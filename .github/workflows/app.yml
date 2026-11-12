@@ -202,10 +202,14 @@ jobs:
           test -n "$version"
           etiquette="v${version}-essai"
           fichier="exe/BreezyShot-${version}-essai.exe"
-          # Le fichier publié ne doit jamais s'appeler breezyshot.exe : ce nom ferait de
-          # l'exe l'app, pas l'installateur (arguments::lancement).
-          test "$(basename "$fichier")" != "breezyshot.exe"
           mv exe/breezyshot.exe "$fichier"
+          # Le fichier réellement envoyé : exactement un .exe, et il ne s'appelle pas
+          # breezyshot.exe (casse ignorée) : ce nom ferait de l'exe l'app, pas
+          # l'installateur (arguments::lancement).
+          envoyes=$(find exe -maxdepth 1 -type f -iname '*.exe')
+          test "$(printf '%s\n' "$envoyes" | grep -c .)" -eq 1
+          test "$envoyes" = "$fichier"
+          test "$(basename "$envoyes" | tr '[:upper:]' '[:lower:]')" != "breezyshot.exe"
           gh release delete "$etiquette" --yes --cleanup-tag || true
           # Tant que l'ancienne étiquette existe, gh ignore --target et la pré-version
           # pointerait l'ancien commit : on attend sa disparition (30 s au plus).

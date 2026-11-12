@@ -1,4 +1,4 @@
-//! La fenêtre de l'installateur (contrat §4.1). Sans cadre système, transparente (la page
+//! La fenêtre de l'installateur (ARCHITECTURE §12.3). Sans cadre système, transparente (la page
 //! dessine la carte, son ombre et ses coins), elle prend le focus et paraît dans la barre
 //! des tâches. Elle montre, elle rapporte ; le cœur (`application/installateur.rs`) décide.
 
@@ -13,6 +13,8 @@ use super::ARGUMENTS_NAVIGATEUR;
 use crate::systeme;
 
 pub const ETIQUETTE_INSTALLATEUR: &str = "installateur";
+/// Titre de la fenêtre (barre des tâches), par lequel une seconde ouverture la retrouve.
+pub const TITRE_INSTALLATEUR: &str = "Installer BreezyShot";
 const EVENEMENT_ETAT: &str = "installateur:etat";
 const EVENEMENT_PROGRESSION: &str = "installateur:progression";
 const EVENEMENT_ENVOL: &str = "installateur:envol";
@@ -86,7 +88,7 @@ impl Installateur {
             ETIQUETTE_INSTALLATEUR,
             WebviewUrl::App("installateur/installateur.html".into()),
         )
-        .title("Installer BreezyShot")
+        .title(TITRE_INSTALLATEUR)
         .inner_size(largeur, hauteur)
         .visible(false)
         .decorations(false)
@@ -132,6 +134,16 @@ impl Installateur {
     /// L'identifiant système (HWND), pour déplacer la fenêtre pendant l'envol.
     pub fn identifiant(&self) -> Option<isize> {
         self.interne.identifiant
+    }
+
+    /// Pose la fenêtre et sa taille (pixels réels), avant de la montrer.
+    pub fn poser(&self, x: i32, y: i32, largeur: i32, hauteur: i32) {
+        if let Some(f) = self.fenetre() {
+            if largeur > 0 && hauteur > 0 {
+                let _ = f.set_size(tauri::PhysicalSize::new(largeur as u32, hauteur as u32));
+            }
+            let _ = f.set_position(tauri::PhysicalPosition::new(x, y));
+        }
     }
 
     /// Montre la fenêtre et lui donne le focus (fil principal).

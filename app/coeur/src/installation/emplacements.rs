@@ -1,4 +1,4 @@
-//! Où l'installateur écrit, et ce que la désinstallation retire (contrat §2 et §3.6).
+//! Où l'installateur écrit, et ce que la désinstallation retire (ARCHITECTURE §12.2 et §12.5).
 //!
 //! Garantie : l'installateur n'écrit que ce que `ecritures` énumère, et la désinstallation
 //! ne retire que ce que `retraits` énumère : des fichiers nommés un par un, des valeurs de
@@ -27,7 +27,7 @@ pub const CLE_DESINSTALLATION: &str =
 /// Racine des clés d'essai, sous HKCU.
 pub const RACINE_CLES_ESSAI: &str = r"Software\BreezyShot-essais";
 
-/// Les valeurs de la clé de désinstallation, dans l'ordre d'écriture (contrat §3.8).
+/// Les valeurs de la clé de désinstallation, dans l'ordre d'écriture (ARCHITECTURE §12.3).
 pub const NOMS_VALEURS: [&str; 11] = [
     "DisplayName",
     "DisplayVersion",
@@ -56,6 +56,9 @@ pub struct Emplacements {
     pub cle_desinstallation: String,
     /// Où va l'exe désinstallé (il ne peut pas s'effacer lui-même).
     pub temporaire: PathBuf,
+    /// Repli de l'exe désinstallé quand `temporaire` est sur un autre volume : le parent du
+    /// dossier des programmes (`%LOCALAPPDATA%`), sur le même volume que l'exe.
+    pub secours: PathBuf,
     pub webview_installateur: PathBuf,
     /// Dossier du journal (`installation.log`).
     pub journal: PathBuf,
@@ -63,11 +66,15 @@ pub struct Emplacements {
 
 /// Emplacements d'après le dossier d'essai (`BREEZYSHOT_DOSSIER_ESSAI`) ou les dossiers
 /// connus. En essai, tout est sous ce dossier, la clé sous `RACINE_CLES_ESSAI\<son nom>`.
+/// Variable d'essai présente mais vide : refus (`Dossier`), jamais les emplacements réels.
 pub fn emplacements(
     essai: Option<&Path>,
     connus: &DossiersConnus,
 ) -> Result<Emplacements, ErreurInstallation> {
-    if let Some(e) = essai.filter(|p| !p.as_os_str().is_empty()) {
+    if let Some(e) = essai {
+        if e.as_os_str().is_empty() {
+            return Err(ErreurInstallation::Dossier);
+        }
         let nom = e
             .file_name()
             .and_then(|n| n.to_str())
@@ -83,6 +90,7 @@ pub fn emplacements(
             cle_desinstallation: format!(r"{RACINE_CLES_ESSAI}\{nom}\Uninstall\BreezyShot"),
             webview_installateur: temporaire.join(NOM_WEBVIEW),
             temporaire,
+            secours: e.to_path_buf(),
             journal: e.join("local").join("Journal"),
         });
     }
@@ -100,6 +108,7 @@ pub fn emplacements(
         raccourci: menu.join(NOM_RACCOURCI),
         cle_desinstallation: CLE_DESINSTALLATION.into(),
         temporaire: connus.temporaire.clone(),
+        secours: programmes.parent().unwrap_or(programmes).to_path_buf(),
         webview_installateur: connus.temporaire.join(NOM_WEBVIEW),
         journal: local.join(NOM_DOSSIER).join("Journal"),
     })
@@ -116,6 +125,8 @@ pub enum Ecriture {
     DossierWebview(PathBuf),
     /// `installation.log` et sa rotation, dans ce dossier.
     Journal(PathBuf),
+    /// L'exe désinstallé, déplacé dans ce dossier sous `nom_exe_deplace` (désinstallation).
+    ExeDesinstalle(PathBuf),
 }
 
 pub fn ecritures(e: &Emplacements) -> Vec<Ecriture> {
@@ -126,23 +137,33 @@ pub fn ecritures(e: &Emplacements) -> Vec<Ecriture> {
         Ecriture::Cle(e.cle_desinstallation.clone()),
         Ecriture::DossierWebview(e.webview_installateur.clone()),
         Ecriture::Journal(e.journal.clone()),
+        Ecriture::ExeDesinstalle(e.temporaire.clone()),
+        Ecriture::ExeDesinstalle(e.secours.clone()),
     ]
 }
 
-/// Ce que la désinstallation retire, dans l'ordre.
+/// Ce que la désinstallation retire, dans l'ordre : l'exe part d'abord ; le raccourci et la
+/// clé ne sont retirés que s'il est parti (`exige_exe_parti`), pour ne jamais laisser un
+/// exe installé sans moyen de le désinstaller.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Retrait {
-    Raccourci(PathBuf),
+    /// Le raccourci, seulement s'il pointe vers `exe` (`raccourci_vers`).
+    Raccourci {
+        lien: PathBuf,
+        exe: PathBuf,
+    },
     /// Les valeurs nommées, puis la clé si elle est vide.
     Cle {
         cle: String,
         valeurs: &'static [&'static str],
     },
     Fichier(PathBuf),
-    /// L'exe en cours, déplacé (un exe qui tourne ne s'efface pas).
+    /// L'exe en cours, déplacé (un exe qui tourne ne s'efface pas) dans `vers`, ou dans
+    /// `secours` si `vers` est sur un autre volume.
     ExeDeplace {
         de: PathBuf,
         vers: PathBuf,
+        secours: PathBuf,
     },
     /// Le dossier installé, seulement s'il est vide.
     DossierSiVide(PathBuf),
@@ -155,17 +176,29 @@ pub fn nom_exe_deplace(processus: u32) -> String {
     format!("BreezyShot-desinstalle-{processus}.exe")
 }
 
+impl Retrait {
+    /// Vrai pour ce qui ne se retire qu'une fois l'exe parti.
+    pub fn exige_exe_parti(&self) -> bool {
+        matches!(self, Retrait::Raccourci { .. } | Retrait::Cle { .. })
+    }
+}
+
 pub fn retraits(e: &Emplacements, processus: u32) -> Vec<Retrait> {
+    let nom = nom_exe_deplace(processus);
     vec![
-        Retrait::Raccourci(e.raccourci.clone()),
-        Retrait::Cle {
-            cle: e.cle_desinstallation.clone(),
-            valeurs: &NOMS_VALEURS,
-        },
         Retrait::Fichier(e.nouveau.clone()),
         Retrait::ExeDeplace {
             de: e.exe.clone(),
-            vers: e.temporaire.join(nom_exe_deplace(processus)),
+            vers: e.temporaire.join(&nom),
+            secours: e.secours.join(&nom),
+        },
+        Retrait::Raccourci {
+            lien: e.raccourci.clone(),
+            exe: e.exe.clone(),
+        },
+        Retrait::Cle {
+            cle: e.cle_desinstallation.clone(),
+            valeurs: &NOMS_VALEURS,
         },
         Retrait::DossierSiVide(e.dossier.clone()),
         Retrait::DossierWebview(e.webview_installateur.clone()),
@@ -181,12 +214,19 @@ pub fn dossier_webview_a_nous(entrees: &[String]) -> bool {
         .all(|n| CONTENU_WEBVIEW.contains(&n.as_str()))
 }
 
+/// Vrai si le raccourci (sa cible lue) pointe vers l'exe installé. Les chemins Windows ne
+/// distinguent ni la casse ni `/` de `\`. Cible illisible : ce n'est pas le nôtre.
+pub fn raccourci_vers(cible: Option<&Path>, exe: &Path) -> bool {
+    let normal = |p: &Path| p.to_string_lossy().replace('/', "\\").to_lowercase();
+    cible.is_some_and(|c| normal(c) == normal(exe))
+}
+
 /// Ligne de commande de désinstallation : `"<exe>" --desinstaller`.
 pub fn commande_desinstallation(exe: &Path) -> String {
     format!("\"{}\" {OPTION_DESINSTALLER}", exe.display())
 }
 
-/// Valeurs de la clé de désinstallation (contrat §3.8). `taille` en octets, `date` au
+/// Valeurs de la clé de désinstallation (ARCHITECTURE §12.3). `taille` en octets, `date` au
 /// format `AAAAMMJJ`.
 pub fn valeurs_desinstallation(
     e: &Emplacements,
@@ -237,6 +277,8 @@ mod tests {
             Path::new("/t/BreezyShot-installateur")
         );
         assert_eq!(e.journal, Path::new("/l/BreezyShot/Journal"));
+        // Repli de l'exe désinstallé : même volume que l'exe, hors des données de l'app.
+        assert_eq!(e.secours, Path::new("/l"));
         // Jamais dans le dossier des données de l'app.
         assert!(!e.dossier.starts_with("/l/BreezyShot"));
     }
@@ -262,13 +304,17 @@ mod tests {
         );
         assert_eq!(e.temporaire, Path::new("/tmp/essai-09 é/temp"));
         assert_eq!(e.journal, Path::new("/tmp/essai-09 é/local/Journal"));
+        assert_eq!(e.secours, Path::new("/tmp/essai-09 é"));
         for ecr in ecritures(&e) {
             match ecr {
                 Ecriture::Cle(c) => assert!(c.starts_with(RACINE_CLES_ESSAI)),
                 Ecriture::Fichier(p)
                 | Ecriture::Raccourci(p)
                 | Ecriture::DossierWebview(p)
-                | Ecriture::Journal(p) => assert!(p.starts_with("/tmp/essai-09 é"), "{p:?}"),
+                | Ecriture::Journal(p)
+                | Ecriture::ExeDesinstalle(p) => {
+                    assert!(p.starts_with("/tmp/essai-09 é"), "{p:?}")
+                }
             }
         }
     }
@@ -280,6 +326,11 @@ mod tests {
         assert_eq!(emplacements(None, &c), Err(ErreurInstallation::Dossier));
         assert_eq!(
             emplacements(Some(Path::new("/")), &connus()),
+            Err(ErreurInstallation::Dossier)
+        );
+        // Variable d'essai présente mais vide : refus, même avec des dossiers réels connus.
+        assert_eq!(
+            emplacements(Some(Path::new("")), &connus()),
             Err(ErreurInstallation::Dossier)
         );
     }
@@ -295,20 +346,38 @@ mod tests {
                 Ecriture::Cle(c) => assert_eq!(c, CLE_DESINSTALLATION),
                 Ecriture::DossierWebview(p) => assert_eq!(p, &e.webview_installateur),
                 Ecriture::Journal(p) => assert_eq!(p, &e.journal),
+                Ecriture::ExeDesinstalle(p) => {
+                    assert!(p == &e.temporaire || p == &e.secours, "{p:?}")
+                }
             }
         }
         // La désinstallation ne retire que ce qui a été écrit, et le dossier s'il est vide.
-        for r in retraits(&e, 42) {
+        let liste = retraits(&e, 42);
+        // L'exe part d'abord ; raccourci et clé seulement après lui.
+        let rang = |f: fn(&Retrait) -> bool| liste.iter().position(f).unwrap();
+        let exe = rang(|r| matches!(r, Retrait::ExeDeplace { .. }));
+        assert!(exe < rang(|r| matches!(r, Retrait::Raccourci { .. })));
+        assert!(exe < rang(|r| matches!(r, Retrait::Cle { .. })));
+        let exigeants: Vec<_> = liste.iter().filter(|r| r.exige_exe_parti()).collect();
+        assert_eq!(exigeants.len(), 2);
+        for r in liste {
             match r {
-                Retrait::Raccourci(p) => assert!(ecrits.contains(&Ecriture::Raccourci(p))),
+                Retrait::Raccourci { lien, exe } => {
+                    assert!(ecrits.contains(&Ecriture::Raccourci(lien)));
+                    assert_eq!(exe, e.exe);
+                }
                 Retrait::Cle { cle, valeurs } => {
                     assert!(ecrits.contains(&Ecriture::Cle(cle)));
                     assert_eq!(valeurs, NOMS_VALEURS);
                 }
                 Retrait::Fichier(p) => assert!(ecrits.contains(&Ecriture::Fichier(p))),
-                Retrait::ExeDeplace { de, vers } => {
+                Retrait::ExeDeplace { de, vers, secours } => {
                     assert!(ecrits.contains(&Ecriture::Fichier(de)));
                     assert_eq!(vers, Path::new("/t/BreezyShot-desinstalle-42.exe"));
+                    assert_eq!(secours, Path::new("/l/BreezyShot-desinstalle-42.exe"));
+                    for d in [vers.parent().unwrap(), secours.parent().unwrap()] {
+                        assert!(ecrits.contains(&Ecriture::ExeDesinstalle(d.to_path_buf())));
+                    }
                 }
                 Retrait::DossierSiVide(p) => assert_eq!(p, e.dossier),
                 Retrait::DossierWebview(p) => {
@@ -316,6 +385,19 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn raccourci_a_nous() {
+        let exe = Path::new(r"C:\Users\a\AppData\Local\Programs\BreezyShot\breezyshot.exe");
+        let meme = Path::new(r"c:\users\A\AppData\Local\Programs\BreezyShot\BreezyShot.EXE");
+        assert!(raccourci_vers(Some(meme), exe));
+        assert!(raccourci_vers(Some(exe), exe));
+        assert!(!raccourci_vers(None, exe));
+        assert!(!raccourci_vers(
+            Some(Path::new(r"C:\Autre\breezyshot.exe")),
+            exe
+        ));
     }
 
     #[test]

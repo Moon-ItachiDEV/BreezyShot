@@ -574,22 +574,23 @@ fn demarrer(app: &AppHandle, commande: Commande, inconnus: &[String]) {
 }
 
 /// Nom de mode pour le journal, ou `<vide>` / `<inconnu: …>`.
-fn mode_journal(mode: &str) -> String {
+fn mode_journal(mode: &str) -> &str {
     if mode.is_empty() {
-        "<vide>".into()
+        "<vide>"
     } else if Mode::depuis_nom(mode).is_some() {
-        mode.to_string()
+        mode
     } else {
-        format!("<inconnu: {mode}>")
+        // Jamais le texte brut d'une option au journal.
+        "<inconnu>"
     }
 }
 
 /// Lance la capture demandée par `--capturer`. Une valeur inconnue ne fait qu'une ligne au
-/// journal (contrat §4.4). Sans `ATTENTE_MENU` : la demande est directe.
+/// journal (ARCHITECTURE §3.4). Sans `ATTENTE_MENU` : la demande est directe.
 fn capturer_cli(app: &AppHandle, mode: &str) {
     match Mode::depuis_nom(mode) {
         Some(m) => lancer_capture(app, m),
-        None => log::warn!("--capturer: mode inconnu {}", mode_journal(mode)),
+        None => log::warn!("--capturer: mode inconnu"),
     }
 }
 
