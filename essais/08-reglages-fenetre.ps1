@@ -31,7 +31,7 @@
 # (9) Fichier changé de l'extérieur pendant que la fenêtre est ouverte : le changement
 #     suivant le relit et ne l'écrase pas.
 # (10) Thème Clair puis Sombre : le fond de la zone de contenu prend la couleur du jeton
-#     --page clair (#F3F3F3) puis sombre (#202020).
+#     --reglages-fond clair (#FAFAFA) puis sombre (#1C1C1C).
 # (11) Fermer : la fenêtre disparaît, l'app tourne ; mémoire notée ; arrêt propre.
 #
 # Ce que la machine GitHub ne prouve pas : le vrai démarrage de Windows avec la vraie clé,
@@ -224,12 +224,33 @@ public static IntPtr[] Visibles(string classe) {
 // Menus Win32 : les HMENU se lisent d'un autre processus.
 [DllImport("user32.dll")]
 public static extern IntPtr SendMessage(IntPtr h, uint msg, IntPtr w, IntPtr l);
-[DllImport("user32.dll", CharSet = CharSet.Unicode, EntryPoint = "SendMessageW")]
-static extern IntPtr SendMessageTexte(IntPtr h, uint msg, IntPtr w, string l);
 [DllImport("user32.dll")]
 public static extern IntPtr GetDlgItem(IntPtr dialogue, int id);
-// WM_SETTEXT au contrôle : vrai si le contrôle l'a accepté.
-public static bool EcrireTexte(IntPtr h, string texte) { return SendMessageTexte(h, 0x000C, IntPtr.Zero, texte) != IntPtr.Zero; }
+[DllImport("user32.dll")]
+public static extern bool SetForegroundWindow(IntPtr h);
+[StructLayout(LayoutKind.Sequential)]
+struct KEYBDINPUT { public ushort wVk; public ushort wScan; public uint dwFlags; public uint time; public IntPtr dwExtraInfo; }
+[StructLayout(LayoutKind.Sequential)]
+struct MOUSEINPUT { public int dx; public int dy; public uint mouseData; public uint dwFlags; public uint time; public IntPtr dwExtraInfo; }
+[StructLayout(LayoutKind.Explicit)]
+struct ENTREE_UNION { [FieldOffset(0)] public MOUSEINPUT mi; [FieldOffset(0)] public KEYBDINPUT ki; }
+[StructLayout(LayoutKind.Sequential)]
+struct ENTREE { public uint type; public ENTREE_UNION u; }
+[DllImport("user32.dll", SetLastError = true)]
+static extern uint SendInput(uint n, ENTREE[] entrees, int taille);
+// Texte tapé au clavier, caractère par caractère (KEYEVENTF_UNICODE : sans disposition de
+// clavier), dans le contrôle qui a le clavier. Rend le nombre de caractères acceptés.
+public static int Taper(string texte) {
+    int faits = 0;
+    foreach (char c in texte) {
+        var e = new ENTREE[2];
+        e[0].type = 1; e[0].u.ki.wScan = c; e[0].u.ki.dwFlags = 0x4;
+        e[1].type = 1; e[1].u.ki.wScan = c; e[1].u.ki.dwFlags = 0x4 | 0x2;
+        if (SendInput(2, e, Marshal.SizeOf(typeof(ENTREE))) == 2) faits++;
+        System.Threading.Thread.Sleep(4);
+    }
+    return faits;
+}
 [DllImport("user32.dll")]
 public static extern int GetMenuItemCount(IntPtr menu);
 [DllImport("user32.dll", CharSet = CharSet.Unicode, EntryPoint = "GetMenuStringW")]
@@ -640,24 +661,25 @@ public static string Titre(IntPtr h) {
     Verifier '(8) fichier : enregistrer_apres_capture true' ((Lire-Reglages $cas).enregistrer_apres_capture -eq $true) | Out-Null
     $dialoguesAvant = @([BreezyShotEssai.Reglages]::Fenetres($p.Id, '#32770') | Where-Object { [BreezyShotEssai.Reglages]::IsWindowVisible($_) }).Count
     Cliquer-Nom $fen 'Parcourir…' ([System.Windows.Automation.ControlType]::Button) '(8) Parcourir'
-    # Un clic parti pendant que les lignes Format et Nom se déplient peut tomber à côté :
-    # sans sélecteur au bout de 3 s, un second clic, sur le bouton relu. Le détail dit
-    # combien de clics il a fallu et où est le bouton.
+    # Le sélecteur de Windows met de 1 à plus de 13 s à s'ouvrir sur la machine de GitHub
+    # (mesuré). Un clic parti pendant que les lignes Format et Nom se déplient peut aussi
+    # tomber à côté : sans sélecteur au bout de 15 s, un second clic sur le bouton relu (sans
+    # effet si le premier a porté : l'app n'ouvre qu'un sélecteur à la fois).
     $dialogue = [IntPtr]::Zero
     $clics = 1
-    $limite = [DateTime]::UtcNow.AddSeconds(12)
-    $second = [DateTime]::UtcNow.AddSeconds(3)
+    $chronoDialogue = [System.Diagnostics.Stopwatch]::StartNew()
     do {
         $d = @([BreezyShotEssai.Reglages]::Fenetres($p.Id, '#32770') | Where-Object { [BreezyShotEssai.Reglages]::IsWindowVisible($_) })
         if ($d.Count -gt $dialoguesAvant) { $dialogue = $d[0]; break }
-        if ($clics -eq 1 -and [DateTime]::UtcNow -ge $second) {
+        if ($clics -eq 1 -and $chronoDialogue.Elapsed.TotalSeconds -ge 15) {
             Cliquer-Nom $fen 'Parcourir…' ([System.Windows.Automation.ControlType]::Button) '(8) Parcourir, second clic'
             $clics = 2
         }
         Start-Sleep -Milliseconds 100
-    } while ([DateTime]::UtcNow -lt $limite)
+    } while ($chronoDialogue.Elapsed.TotalSeconds -lt 45)
     $ouParcourir = Decrire (Element $fen 'Parcourir…' ([System.Windows.Automation.ControlType]::Button))
     if (-not (Verifier '(8) le sélecteur de dossier s''ouvre' ($dialogue -ne [IntPtr]::Zero) "$clics clic(s) ; $ouParcourir")) { throw '(8) pas de sélecteur' }
+    Noter-Mesure -Nom 'ouverture du sélecteur de dossier' -Valeur ([math]::Round($chronoDialogue.Elapsed.TotalSeconds, 1)) -Unite 's'
     # Champ « Dossier : » (1152) puis bouton de validation (1) du dialogue de Windows,
     # attendus. Introuvables : le message liste les identifiants (pas les noms, qui peuvent
     # être des noms de dossiers) des champs et boutons vus.
@@ -690,64 +712,65 @@ public static string Titre(IntPtr h) {
         Verifier "$Quoi : trouvé" $false $d | Out-Null
         throw "$Quoi : $d"
     }
-    # Le motif UI Automation d'abord ; s'il manque (« Unsupported Pattern » vu sur la
-    # machine de GitHub), le message Windows adressé au contrôle lui-même. Un échec dit le
-    # type, la classe et les motifs de l'élément trouvé.
-    function Motifs($e) {
-        try { return (@($e.GetSupportedPatterns() | ForEach-Object { $_.ProgrammaticName }) -join ', ') } catch { return "motifs illisibles : $($_.Exception.Message)" }
-    }
-    function Poignee($e) { try { return [IntPtr][int]$e.Current.NativeWindowHandle } catch { return [IntPtr]::Zero } }
+    # Comme une personne : clic dans le champ « Dossier : », tout sélectionner, taper le
+    # chemin, Entrée. (Un texte posé par WM_SETTEXT n'est pas pris par le sélecteur : il
+    # rend alors son dossier de départ, vu sur la machine de GitHub.) Selon Windows, Entrée
+    # valide le dossier tapé ou y entre seulement : si le sélecteur reste ouvert, son bouton
+    # de validation (contrôle 1, IDOK) est pressé, et le dossier courant est le bon.
     $champ = Par-Id $dialogue '1152' $null '(8) champ du dossier'
-    $ecrit = ''
-    try { $champ.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).SetValue($choisi); $ecrit = 'ValuePattern' }
-    catch {
-        # Le champ lui-même, ou le premier champ de saisie qu'il contient.
-        $cibles = @($champ)
-        try {
-            $cibles += @($champ.FindAll([System.Windows.Automation.TreeScope]::Descendants,
-                [System.Windows.Automation.PropertyCondition]::new($AE::ControlTypeProperty, [System.Windows.Automation.ControlType]::Edit)))
-        } catch { }
-        foreach ($x in $cibles) {
-            $h = Poignee $x
-            if ($h -ne [IntPtr]::Zero -and [BreezyShotEssai.Reglages]::EcrireTexte($h, $choisi)) { $ecrit = 'WM_SETTEXT'; break }
-        }
+    $null = [BreezyShotEssai.Reglages]::SetForegroundWindow($dialogue)
+    Start-Sleep -Milliseconds 200
+    $rc = $champ.Current.BoundingRectangle
+    [BreezyShotEssai.Reglages]::Cliquer([int]($rc.X + $rc.Width / 2), [int]($rc.Y + $rc.Height / 2))
+    Start-Sleep -Milliseconds 200
+    [BreezyShotEssai.Reglages]::Appuyer([byte[]]@(0x11), 0x41)
+    Start-Sleep -Milliseconds 100
+    $tapes = [BreezyShotEssai.Reglages]::Taper($choisi)
+    Start-Sleep -Milliseconds 400
+    $lu = ''
+    try { $lu = [string]$champ.Current.Name } catch { $lu = "illisible : $($_.Exception.Message)" }
+    if (-not (Verifier '(8) dossier tapé dans le champ du sélecteur' ($tapes -eq $choisi.Length -and $lu.StartsWith($choisi, [System.StringComparison]::OrdinalIgnoreCase)) "$tapes caractère(s) sur $($choisi.Length) ; champ : « $lu » ; $(Decrire $champ)")) {
+        [BreezyShotEssai.Reglages]::Appuyer([byte[]]@(), 0x1B)
+        throw '(8) champ du dossier non écrit'
     }
-    if (-not (Verifier '(8) dossier écrit dans le champ du sélecteur' ($ecrit -ne '') "$ecrit ; $(Decrire $champ) ; motifs : $(Motifs $champ)")) { throw '(8) champ du dossier non écrit' }
-    # Bouton de validation : sur la machine de GitHub, UI Automation ne montre pas les
-    # contrôles Win32 du dialogue comme des boutons. Le contrôle d'identifiant 1 (IDOK) est
-    # donc pris par GetDlgItem et pressé par BM_CLICK ; à défaut par UI Automation, puis par
-    # WM_COMMAND IDOK au dialogue (messages postés : le dialogue se ferme).
-    $presse = ''
-    $hOk = [BreezyShotEssai.Reglages]::GetDlgItem($dialogue, 1)
-    if ($hOk -ne [IntPtr]::Zero -and [BreezyShotEssai.Reglages]::PostMessage($hOk, 0x00F5, [IntPtr]::Zero, [IntPtr]::Zero)) { $presse = 'GetDlgItem + BM_CLICK' }
-    else {
-        $ok = $null
-        try {
-            $ok = $AE::FromHandle($dialogue).FindFirst([System.Windows.Automation.TreeScope]::Descendants,
-                [System.Windows.Automation.PropertyCondition]::new($AE::AutomationIdProperty, '1'))
-        } catch { }
-        if ($null -ne $ok) {
-            try { $ok.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke(); $presse = 'InvokePattern' }
-            catch {
-                $h = Poignee $ok
-                if ($h -ne [IntPtr]::Zero -and [BreezyShotEssai.Reglages]::PostMessage($h, 0x00F5, [IntPtr]::Zero, [IntPtr]::Zero)) { $presse = 'BM_CLICK' }
-            }
-        }
-        if ($presse -eq '' -and [BreezyShotEssai.Reglages]::PostMessage($dialogue, 0x0111, [IntPtr]1, [IntPtr]::Zero)) { $presse = 'WM_COMMAND IDOK' }
-    }
-    if (-not (Verifier '(8) bouton de validation pressé' ($presse -ne '') "$presse ; contrôle 1 : $hOk")) { throw '(8) bouton de validation non pressé' }
-    # Le dialogue doit se fermer : sinon le message dit ce qu'il montre encore.
-    $limite = [DateTime]::UtcNow.AddSeconds(10)
+    [BreezyShotEssai.Reglages]::Appuyer([byte[]]@(), 0x0D)
+    $valide = 'Entrée'
+    $limite = [DateTime]::UtcNow.AddSeconds(3)
     while ([BreezyShotEssai.Reglages]::IsWindowVisible($dialogue) -and [DateTime]::UtcNow -lt $limite) { Start-Sleep -Milliseconds 100 }
-    Verifier '(8) le sélecteur se ferme' (-not [BreezyShotEssai.Reglages]::IsWindowVisible($dialogue)) $presse | Out-Null
+    if ([BreezyShotEssai.Reglages]::IsWindowVisible($dialogue)) {
+        $hOk = [BreezyShotEssai.Reglages]::GetDlgItem($dialogue, 1)
+        if ($hOk -ne [IntPtr]::Zero -and [BreezyShotEssai.Reglages]::PostMessage($hOk, 0x00F5, [IntPtr]::Zero, [IntPtr]::Zero)) { $valide = 'Entrée puis bouton de validation (BM_CLICK)' }
+        elseif ([BreezyShotEssai.Reglages]::PostMessage($dialogue, 0x0111, [IntPtr]1, [IntPtr]::Zero)) { $valide = 'Entrée puis WM_COMMAND IDOK' }
+        $limite = [DateTime]::UtcNow.AddSeconds(10)
+        while ([BreezyShotEssai.Reglages]::IsWindowVisible($dialogue) -and [DateTime]::UtcNow -lt $limite) { Start-Sleep -Milliseconds 100 }
+    }
+    if (-not (Verifier '(8) le sélecteur se ferme' (-not [BreezyShotEssai.Reglages]::IsWindowVisible($dialogue)) $valide)) {
+        $null = [BreezyShotEssai.Reglages]::PostMessage($dialogue, 0x0010, [IntPtr]::Zero, [IntPtr]::Zero)
+        throw '(8) sélecteur resté ouvert'
+    }
     $null = Attendre-Motif -Motif 'reglage change: dossier$' -Dossier $cas -DelaiS 10 -Quoi '(8) dossier changé'
-    Verifier '(8) fichier : dossier choisi' ((Lire-Reglages $cas).dossier_enregistrement -eq $choisi) | Out-Null
+    # Le journal est écrit juste avant le fichier : le fichier est relu jusqu'à 5 s.
+    $ecritFichier = $null
+    $limite = [DateTime]::UtcNow.AddSeconds(5)
+    do {
+        $ecritFichier = (Lire-Reglages $cas).dossier_enregistrement
+        if ($ecritFichier -eq $choisi) { break }
+        Start-Sleep -Milliseconds 150
+    } while ([DateTime]::UtcNow -lt $limite)
+    Verifier '(8) fichier : dossier choisi' ($ecritFichier -eq $choisi) "fichier : « $ecritFichier » ; attendu : « $choisi » ; $valide" | Out-Null
     $n = Presses; $repos = Compter-Motif -Motif 'Decoupe -> Repos' -Dossier $cas
     [BreezyShotEssai.Reglages]::Appuyer($CTRL_MAJ, 0x37)
     $null = Attendre-Suivante 'raccourci presse: plein_ecran$' $cas $n '(8) capture'
     Attendre-Repos $repos
-    $pngs = @(Get-ChildItem -LiteralPath $choisi -Filter '*.png' -ErrorAction SilentlyContinue)
-    Verifier '(8) la capture est enregistrée dans le dossier choisi' ($pngs.Count -eq 1) "$($pngs.Count)" | Out-Null
+    $pngs = @()
+    $limite = [DateTime]::UtcNow.AddSeconds(5)
+    do {
+        $pngs = @(Get-ChildItem -LiteralPath $choisi -Filter '*.png' -ErrorAction SilentlyContinue)
+        if ($pngs.Count -ge 1) { break }
+        Start-Sleep -Milliseconds 150
+    } while ([DateTime]::UtcNow -lt $limite)
+    $ailleurs = @(Get-ChildItem -LiteralPath (Join-Path $cas 'images') -Recurse -Filter '*.png' -ErrorAction SilentlyContinue).Count
+    Verifier '(8) la capture est enregistrée dans le dossier choisi' ($pngs.Count -eq 1) "$($pngs.Count) dans le dossier choisi, $ailleurs dans Images" | Out-Null
     Verifier '(8) le chemin choisi n''est jamais au journal' ((Compter-Lignes -Texte $jeton -Dossier $cas) -eq 0) | Out-Null
 
     # (9) Fichier changé de l'extérieur pendant l'ouverture : jamais écrasé.
@@ -762,8 +785,8 @@ public static string Titre(IntPtr h) {
     Verifier '(9) changement extérieur gardé, nouveau changement écrit' (($r.modele_nom -eq 'Externe {date}') -and ($r.copier_apres_capture -eq $false)) "$($r.modele_nom) / $($r.copier_apres_capture)" | Out-Null
     Cliquer-Interrupteur $fen 'Copier automatiquement' '(9) Copier rallumé'
 
-    # (10) Thème : le fond de la page prend le jeton --page, clair (#F3F3F3) puis sombre
-    # (#202020). Pixel lu dans la zone de contenu (en bas à droite, sous les groupes),
+    # (10) Thème : le fond de la page prend le jeton --reglages-fond de l'habillage B, clair
+    # (#FAFAFA) puis sombre (#1C1C1C). Pixel lu dans la zone de contenu (en bas à droite, sous les groupes),
     # jamais dans la colonne des rubriques ; lu en Clair d'abord pour prouver le changement.
     function Pixel-Contenu {
         $rc = New-Object BreezyShotEssai.Reglages+RECT
@@ -783,12 +806,12 @@ public static string Titre(IntPtr h) {
     $null = Attendre-Motif -Motif 'theme interface: clair$' -Dossier $cas -DelaiS 5 -Quoi '(10) thème clair'
     Start-Sleep -Milliseconds 600
     $c = Pixel-Contenu
-    Verifier '(10) fond clair (#F3F3F3 ±6)' (Proche $c 0xF3) "$($c.R),$($c.G),$($c.B)" | Out-Null
+    Verifier '(10) fond clair (#FAFAFA ±6)' (Proche $c 0xFA) "$($c.R),$($c.G),$($c.B)" | Out-Null
     Cliquer-Nom $fen 'Sombre' $RADIO '(10) Sombre'
     $null = Attendre-Motif -Motif 'theme interface: sombre$' -Dossier $cas -DelaiS 5 -Quoi '(10) thème sombre'
     Start-Sleep -Milliseconds 600
     $c = Pixel-Contenu
-    Verifier '(10) fond sombre (#202020 ±6)' (Proche $c 0x20) "$($c.R),$($c.G),$($c.B)" | Out-Null
+    Verifier '(10) fond sombre (#1C1C1C ±6)' (Proche $c 0x1C) "$($c.R),$($c.G),$($c.B)" | Out-Null
     Cliquer-Nom $fen 'Système' $RADIO '(10) Système'
 
     # (11) Fermer : la fenêtre disparaît, l'app tourne.
