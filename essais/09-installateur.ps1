@@ -79,22 +79,23 @@ function Attendre-Installation {
     return $false
 }
 
-# Après un lancement : attend que l'installateur montre sa page (« installateur montre: »),
-# jusqu'à 60 s. Sur la machine de GitHub, un lancement fait juste après la fermeture d'un
-# autre installateur est resté plus de 15 s sur une page vide (WebView2), une fois : le
-# bouton n'est donc cherché qu'ensuite, et le lancement le plus lent est noté en mesure.
+# Après un lancement : attend que la page de l'installateur soit prête (« installateur
+# pret »), jusqu'à 60 s. Sur la machine de GitHub, WebView2 a mis plus de 15 s à charger la
+# page, deux fois (fenêtre montrée vide par le délai de 2 s) : un bouton n'est donc cherché
+# qu'ensuite, et le lancement le plus lent est noté en mesure. Rend vrai si la page est prête.
 $script:DemarrageMaxS = 0.0
 function Attendre-Page {
     param([int]$Depuis = 0, [Parameter(Mandatory)][string]$Quoi)
     $chrono = [System.Diagnostics.Stopwatch]::StartNew()
-    $vu = Attendre-Installation -Texte 'installateur montre: ' -Depuis $Depuis -DelaiS 60
+    $vu = Attendre-Installation -Texte 'installateur pret' -Depuis $Depuis -DelaiS 60
     $s = [math]::Round($chrono.Elapsed.TotalSeconds, 1)
     if ($s -gt $script:DemarrageMaxS) { $script:DemarrageMaxS = $s }
     if (-not $vu) {
         $lignes = @(Nouvelles-Lignes -Depuis $Depuis | Select-Object -Last 8) -join ' | '
-        Verifier "$Quoi : page montrée en moins de 60 s" $false "journal : $lignes" | Out-Null
+        Verifier "$Quoi : page prête en moins de 60 s" $false "journal : $lignes" | Out-Null
     }
-    elseif ($s -gt 10) { Write-Host "[lent]  $Quoi : page montrée après $s s" }
+    elseif ($s -gt 5) { Write-Host "[lent]  $Quoi : page prête après $s s" }
+    return $vu
 }
 
 # --- Processus ---------------------------------------------------------------------------
@@ -453,7 +454,12 @@ try {
     $inst = Lancer-Telecharge -Fichier $telecharge
     Verifier 'plan: installer' (Attendre-Installation -Texte 'plan: installer' -Depuis $m -DelaiS 25) | Out-Null
     Verifier 'installateur fenetre (hwnd)' (Attendre-Installation -Texte 'installateur fenetre ' -Depuis $m) | Out-Null
-    Verifier 'installateur montré à « page prete »' (Attendre-Installation -Texte 'installateur montre: page prete' -Depuis $m) | Out-Null
+    # La fenêtre est montrée une seule fois : quand la page est prête, ou vide au bout du
+    # délai de 2 s si la page tarde (machine lente). La raison lue est dite.
+    $null = Attendre-Page -Depuis $m -Quoi 'premier lancement'
+    $montrees = @(Nouvelles-Lignes -Depuis $m | Where-Object { $_.Contains('installateur montre: ') })
+    $raison = if ($montrees.Count -ge 1) { ($montrees[0] -replace '^.*installateur montre: ', '') } else { '' }
+    Verifier 'installateur montré une seule fois (page prête, ou délai de 2 s si elle tarde)' ($montrees.Count -eq 1 -and $raison -in @('page prete', 'delai')) "$($montrees.Count) fois ; raison : $raison" | Out-Null
     Verifier 'fenêtre « Installer BreezyShot » présente' ($null -ne (Attendre-Fenetre)) (Decrire-Fenetre) | Out-Null
     Verifier 'aucune app BreezyShot en cours' (@(Processus-App).Count -eq 0) | Out-Null
 
@@ -558,7 +564,7 @@ try {
     # Sous BREEZYSHOT_ESSAI_ANIMATIONS=1 : l'envol joue même si Windows coupe les animations.
     $inst2 = Lancer-Telecharge -Fichier $telecharge -Variables @{ BREEZYSHOT_ESSAI_ANIMATIONS = '1' }
     Verifier 'plan: reinstaller' (Attendre-Installation -Texte 'plan: reinstaller' -Depuis $m -DelaiS 20) | Out-Null
-    Attendre-Page -Depuis $m -Quoi 'réinstallation'
+    $null = Attendre-Page -Depuis $m -Quoi 'réinstallation'
     $null = Presser -Nom 'Installer' -Quoi 'bouton « Installer » (réinstallation) pressé'
     Verifier 'réinstallation : « etape arret: instance arretee »' (Attendre-Installation -Texte 'etape arret: instance arretee' -Depuis $m -DelaiS 20) | Out-Null
     Verifier 'réinstallation finie' (Attendre-Installation -Texte "installation finie $version" -Depuis $m -DelaiS 20) | Out-Null
@@ -571,12 +577,14 @@ try {
     $m = Marque
     $instMaj = Lancer-Telecharge -Fichier $telecharge
     Verifier 'plan: mettre a jour depuis 0.0.1' (Attendre-Installation -Texte 'plan: mettre a jour depuis 0.0.1' -Depuis $m -DelaiS 20) | Out-Null
+    $null = Attendre-Page -Depuis $m -Quoi 'mise à jour non lancée'
     Fermer-Installateur -Processus $instMaj -Bouton 'Fermer' -Quoi 'mise à jour non lancée' | Out-Null
     Set-ItemProperty -LiteralPath $cle -Name 'DisplayVersion' -Value '99.0.0'
     $ecritAvant = (Get-Item -LiteralPath $exeInstalle).LastWriteTimeUtc
     $m = Marque
     $instRecent = Lancer-Telecharge -Fichier $telecharge
     Verifier 'plan: plus recente installee 99.0.0' (Attendre-Installation -Texte 'plan: plus recente installee 99.0.0' -Depuis $m -DelaiS 20) | Out-Null
+    $null = Attendre-Page -Depuis $m -Quoi 'version plus récente'
     Verifier-Texte -Texte 'BreezyShot est prêt' -Quoi 'version plus récente : « prêt » direct' | Out-Null
     Start-Sleep -Milliseconds 500
     Verifier 'version plus récente : exe non réécrit' ((Get-Item -LiteralPath $exeInstalle).LastWriteTimeUtc -eq $ecritAvant) | Out-Null
@@ -590,7 +598,7 @@ try {
     $tenu = [System.IO.FileStream]::new($exeInstalle, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::None)
     $m = Marque
     $instErr = Lancer-Telecharge -Fichier $telecharge
-    Attendre-Page -Depuis $m -Quoi 'erreur d''écriture'
+    $null = Attendre-Page -Depuis $m -Quoi 'erreur d''écriture'
     $null = Presser -Nom 'Installer' -Quoi 'erreur d''écriture : « Installer » pressé' -DelaiS 15
     Verifier 'erreur : « installation erreur: ecriture »' (Attendre-Installation -Texte 'installation erreur: ecriture' -Depuis $m -DelaiS 25) | Out-Null
     Verifier 'erreur : diagnostic de fichier au journal' ($null -ne (Ligne-Installation -Texte 'erreur fichier: ' -Depuis $m)) | Out-Null
@@ -610,7 +618,7 @@ try {
     $tetu = Demarrer-Tetu
     $m = Marque
     $instOuvert = Lancer-Telecharge -Fichier $telecharge
-    Attendre-Page -Depuis $m -Quoi '« ouvert »'
+    $null = Attendre-Page -Depuis $m -Quoi '« ouvert »'
     $null = Presser -Nom 'Installer' -Quoi '« ouvert » : « Installer » pressé' -DelaiS 15
     Verifier '« ouvert » : « etape arret: instance toujours la »' (Attendre-Installation -Texte 'etape arret: instance toujours la' -Depuis $m -DelaiS 25) | Out-Null
     Verifier '« ouvert » : « installation erreur: ouvert »' (Attendre-Installation -Texte 'installation erreur: ouvert' -Depuis $m -DelaiS 5) | Out-Null
@@ -628,7 +636,7 @@ try {
     # 15. Erreur de place : place libre simulée à 1 octet.
     $m = Marque
     $instPlace = Lancer-Telecharge -Fichier $telecharge -Variables @{ BREEZYSHOT_ESSAI_LIBRE_OCTETS = '1' }
-    Attendre-Page -Depuis $m -Quoi 'place'
+    $null = Attendre-Page -Depuis $m -Quoi 'place'
     $null = Presser -Nom 'Installer' -Quoi 'place : « Installer » pressé' -DelaiS 15
     Verifier 'erreur de place journalisée' (Attendre-Installation -Texte 'installation erreur: place' -Depuis $m -DelaiS 15) | Out-Null
     $ligPlace = Ligne-Installation -Texte 'etape place: libre' -Depuis $m
@@ -638,8 +646,10 @@ try {
     Fermer-Installateur -Processus $instPlace -Bouton 'Fermer' -Quoi 'place' | Out-Null
 
     # 16. Second installateur : refusé, le premier est ramené au premier plan et reste.
+    $m = Marque
     $premier = Lancer-Telecharge -Fichier $telecharge
     $null = Attendre-Fenetre
+    $null = Attendre-Page -Depuis $m -Quoi 'premier installateur'
     $m = Marque
     $second = Lancer-Telecharge -Fichier $telecharge
     $secondSorti = $second.WaitForExit(8000)
@@ -656,7 +666,7 @@ try {
     $tetu = Demarrer-Tetu
     $m = Marque
     $instA = Lancer-Telecharge -Fichier $telecharge
-    Attendre-Page -Depuis $m -Quoi 'fermer pendant (réussite)'
+    $null = Attendre-Page -Depuis $m -Quoi 'fermer pendant (réussite)'
     $null = Presser -Nom 'Installer' -Quoi 'fermer pendant (réussite) : « Installer » pressé' -DelaiS 15
     Verifier 'fermer pendant (réussite) : étape arrêt en cours' (Attendre-Installation -Texte 'etape place: libre' -Depuis $m -DelaiS 10) | Out-Null
     $null = Presser -Nom 'Fermer' -Quoi 'fermer pendant (réussite) : « Fermer » pressé'
@@ -674,7 +684,7 @@ try {
     $tetu = Demarrer-Tetu
     $m = Marque
     $instB = Lancer-Telecharge -Fichier $telecharge
-    Attendre-Page -Depuis $m -Quoi 'fermer pendant (erreur)'
+    $null = Attendre-Page -Depuis $m -Quoi 'fermer pendant (erreur)'
     $null = Presser -Nom 'Installer' -Quoi 'fermer pendant (erreur) : « Installer » pressé' -DelaiS 15
     Verifier 'fermer pendant (erreur) : étape arrêt en cours' (Attendre-Installation -Texte 'etape place: libre' -Depuis $m -DelaiS 10) | Out-Null
     $null = Presser -Nom 'Fermer' -Quoi 'fermer pendant (erreur) : « Fermer » pressé'
