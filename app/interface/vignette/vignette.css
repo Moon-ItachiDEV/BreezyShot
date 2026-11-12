@@ -88,15 +88,15 @@ button {
   position: absolute;
   left: var(--space-2);
   right: var(--space-2);
-  bottom: 11px;
+  bottom: var(--vignette-principales-bas);
   display: flex;
   justify-content: center;
-  gap: 6px;
+  gap: var(--vignette-principales-ecart);
 }
 .secondaires {
   position: absolute;
-  top: 6px;
-  right: calc(6px + var(--vignette-rond) + var(--space-1));
+  top: var(--vignette-coin-ecart);
+  right: calc(var(--vignette-coin-ecart) + var(--vignette-rond) + var(--space-1));
   display: flex;
   gap: var(--space-1);
 }
@@ -106,7 +106,7 @@ button {
 .secondaires > *,
 .croix {
   opacity: 0;
-  transform: translateY(4px) scale(0.94);
+  transform: translateY(var(--vignette-revele-decalage)) scale(0.94);
   pointer-events: none;
   transition: opacity var(--duree-vignette-bouton) var(--courbe-douce),
     transform var(--duree-vent) var(--courbe-ressort),
@@ -138,7 +138,7 @@ button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 7px;
+  gap: var(--vignette-pilule-ecart);
   height: var(--vignette-pilule);
   padding: 0 var(--space-3);
   border-radius: var(--radius-pill);
@@ -185,12 +185,12 @@ button {
 }
 .croix {
   position: absolute;
-  top: 6px;
-  right: 6px;
+  top: var(--vignette-coin-ecart);
+  right: var(--vignette-coin-ecart);
 }
 .croix svg {
-  width: 10px;
-  height: 10px;
+  width: var(--vignette-croix-picto);
+  height: var(--vignette-croix-picto);
   stroke-width: 1.4;
   transition: transform var(--duree-ressort) var(--courbe-ressort);
 }
@@ -200,8 +200,8 @@ button {
 
 /* Pictogrammes animés de Copier et Enregistrer. */
 .pi {
-  width: 16px;
-  height: 16px;
+  width: var(--vignette-picto-anime);
+  height: var(--vignette-picto-anime);
   flex: none;
   fill: none;
   stroke: currentColor;
@@ -256,15 +256,15 @@ button {
 }
 .pilule.fait .ok {
   stroke-dashoffset: 0;
-  transition-delay: 120ms;
+  transition-delay: var(--duree-vignette-coche);
 }
 
 /* Libellé qui glisse (« Copier » → « Copié »). */
 .libelles {
   display: inline-grid;
   overflow: hidden;
-  height: 18px;
-  line-height: 18px;
+  height: var(--vignette-libelle-hauteur);
+  line-height: var(--vignette-libelle-hauteur);
 }
 .libelles span {
   grid-area: 1 / 1;
@@ -290,9 +290,9 @@ button {
   position: absolute;
   left: var(--rx, 50%);
   top: var(--ry, 50%);
-  width: 8px;
-  height: 8px;
-  margin: -4px 0 0 -4px;
+  width: var(--vignette-onde);
+  height: var(--vignette-onde);
+  margin: calc(var(--vignette-onde) / -2) 0 0 calc(var(--vignette-onde) / -2);
   border-radius: 50%;
   background: currentColor;
   opacity: 0;
@@ -329,7 +329,7 @@ button {
 }
 .carte.supprimee .apercu img {
   opacity: 0.18;
-  filter: grayscale(1) blur(2px);
+  filter: grayscale(1) blur(var(--vignette-grise-flou));
   transform: scale(0.96);
 }
 .carte.supprimee .principales > *,
@@ -341,11 +341,11 @@ button {
 .annuler {
   display: inline-flex;
   align-items: center;
-  gap: 7px;
-  height: 32px;
+  gap: var(--vignette-pilule-ecart);
+  height: var(--vignette-annuler-hauteur);
   padding: 0 var(--space-3);
-  border-radius: 6px;
-  font-size: 13px;
+  border-radius: var(--vignette-rayon-petit);
+  font-size: var(--vignette-annuler-texte-taille);
   font-weight: 600;
   background: var(--card-solid);
   color: var(--text);
@@ -354,8 +354,8 @@ button {
   animation: pop var(--duree-vignette) var(--courbe-ressort);
 }
 .annuler svg {
-  width: 16px;
-  height: 16px;
+  width: var(--vignette-picto-anime);
+  height: var(--vignette-picto-anime);
   fill: none;
   stroke: currentColor;
   stroke-width: 1.5;
@@ -395,7 +395,7 @@ button {
   left: 0;
   top: 0;
   padding: var(--space-1) var(--space-2);
-  border-radius: 6px;
+  border-radius: var(--vignette-rayon-petit);
   font-size: var(--texte-caption-taille);
   line-height: var(--texte-caption-interligne);
   background: var(--card-solid);

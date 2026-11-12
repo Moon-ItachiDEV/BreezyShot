@@ -7,7 +7,10 @@
 //   joue le flash et l'envol, puis `souffle_termine` { id }. La dernière image reste jusqu'à
 //   ce que le cœur cache la fenêtre. Sans image lisible : `souffle_termine` tout de suite.
 // - `souffle:effacer` { id } : la page se vide (fenêtre déjà cachée).
-// - `souffle_pret` {} une fois l'écoute en place.
+// - `souffle_pret` {} une fois l'écoute en place (thème compris : l'ombre de l'envol suit
+//   `interface:theme`, voir commun/theme.js).
+
+import { suivreTheme } from "../commun/theme.js";
 
 const tauri = window.__TAURI__;
 const flash = document.getElementById("flash");
@@ -141,6 +144,7 @@ if (tauri?.event?.listen) {
   Promise.all([
     tauri.event.listen("souffle:jouer", (e) => jouer(e?.payload)),
     tauri.event.listen("souffle:effacer", () => effacer()),
+    suivreTheme(),
   ]).then(
     () => appeler("souffle_pret", {}),
     (e) => console.warn("souffle : écoute impossible :", e),

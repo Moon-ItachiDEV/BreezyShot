@@ -191,6 +191,14 @@ const charge = (o = {}) => ({ id: 5, coin: 'bas_gauche', retrait: { haut: 0, bas
   r = await p.evaluate(() => carte.getAnimations().map(a => a.effect.getTiming().duration));
   verifier(r[0] === 120, '9 réduites : départ en fondu de 120 ms', JSON.stringify(r));
   await p.context().close();
+  // Le cœur décide seul : système « réduit » mais charge `reduites: false` → entrée complète.
+  p = await page({ reduit: true });
+  await prete(p, charge({ reduites: false }));
+  await emettre(p, 'vignette:entrer', { id: 5 });
+  await p.waitForTimeout(30);
+  r = await p.evaluate(() => carte.getAnimations().map(a => a.effect.getKeyframes().map(k => k.transform ?? '-').join()));
+  verifier(r.some(t => /translate/.test(t)), '9 la page suit le cœur, pas le système', JSON.stringify(r));
+  await p.context().close();
 
   // 10. Charges invalides refusées ; textes posés en texte ; image absente : pas de zone.
   p = await page();
