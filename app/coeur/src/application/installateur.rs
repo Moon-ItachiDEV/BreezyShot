@@ -1,19 +1,20 @@
-//! Câblage de l'installateur et de la désinstallation (contrat §3). Les décisions sont
+//! Câblage de l'installateur et de la désinstallation (ARCHITECTURE §12). Les décisions sont
 //! dans `crate::installation` (fonctions pures testées) ; ici, les gestes : Tauri, les
 //! fils, le journal, les appels à `systeme::installation`. Aucune décision n'est prise ici.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use tauri::{AppHandle, Manager, RunEvent};
 
-use crate::fenetres::installateur::{EtatPage, Installateur, Signal};
+use crate::fenetres::installateur::{EtatPage, Installateur, Signal, TITRE_INSTALLATEUR};
 use crate::installation::emplacements::Retrait;
 use crate::installation::parcours::{
-    besoin_octets, verifier_place, Action, ErreurInstallation, Etape, EtatInstallateur, Geste,
-    ATTENTE_REMPLACEMENT, DELAI_ARRET, DELAI_LANCEMENT, ETAPES, PAS_PROGRESSION,
+    apres_etapes, besoin_octets, verifier_place, Action, ErreurInstallation, Etape,
+    EtatInstallateur, Geste, ATTENTE_REMPLACEMENT, DELAI_ARRET, DELAI_LANCEMENT, ETAPES,
+    PAS_PROGRESSION,
 };
 use crate::installation::{
     self, emplacements, envol, nom_verrou_app, place_fenetre, reagir, Emplacements, Plan, Trouvee,
@@ -35,16 +36,23 @@ struct Etat {
     app_lancee: AtomicBool,
     /// Code de sortie, posé avant `app.exit`.
     code: AtomicI32,
+    /// Vrai une fois la fenêtre montrée (à `installateur_pret`, ou au plus tard après
+    /// `DELAI_MONTRER`).
+    montree: AtomicBool,
 }
 
-/// Lance l'installateur (contrat §3.2). Rend le code de sortie du processus.
+/// Délai au-delà duquel la fenêtre est montrée même si la page ne s'est pas annoncée.
+const DELAI_MONTRER: Duration = Duration::from_secs(2);
+
+/// Lance l'installateur (ARCHITECTURE §12). Rend le code de sortie du processus.
 pub fn lancer_installateur(contexte: tauri::Context) -> i32 {
     let essai = std::env::var_os(crate::systeme::VARIABLE_ESSAI).map(PathBuf::from);
     let connus = sys::dossiers_connus();
     let emplacements = match emplacements(essai.as_deref(), &connus) {
         Ok(e) => e,
-        Err(_) => {
-            eprintln!("BreezyShot : dossier des applications introuvable");
+        Err(e) => {
+            // Pas de journal possible (son dossier en dépend) : un message visible.
+            sys::message_bloquant(TITRE_INSTALLATEUR, &e.cause());
             return 1;
         }
     };
@@ -61,7 +69,12 @@ pub fn lancer_installateur(contexte: tauri::Context) -> i32 {
     let verrou = match sys::prendre_verrou(VERROU_INSTALLATEUR) {
         Some(v) => v,
         None => {
-            log::info!("seconde installation refusee");
+            // Une désinstallation tient aussi ce verrou : alors aucune fenêtre à ramener.
+            let ramenee = sys::ramener_fenetre(TITRE_INSTALLATEUR);
+            log::info!(
+                "seconde installation refusee: {}",
+                si(ramenee, "premier plan rendu", "aucune fenetre")
+            );
             return 0;
         }
     };
@@ -115,6 +128,7 @@ pub fn lancer_installateur(contexte: tauri::Context) -> i32 {
         etat: Mutex::new(depart),
         app_lancee: AtomicBool::new(false),
         code: AtomicI32::new(0),
+        montree: AtomicBool::new(false),
     });
 
     let (largeur, hauteur) = taille_fenetre();
@@ -139,7 +153,21 @@ pub fn lancer_installateur(contexte: tauri::Context) -> i32 {
             if let Some((rect, echelle)) = sys::zone_utile_sous_souris() {
                 placer(&handle, rect, echelle);
             }
-            app.state::<Installateur>().montrer();
+            // Montrée à `installateur_pret` (page prête, pas d'éclair vide), au plus tard
+            // après `DELAI_MONTRER`.
+            let pour_delai = handle.clone();
+            let _ = std::thread::Builder::new()
+                .name("montrer".into())
+                .spawn(move || {
+                    std::thread::sleep(DELAI_MONTRER);
+                    let pour = pour_delai.clone();
+                    let _ = pour_delai.run_on_main_thread(move || {
+                        if let Some(etat) = pour.try_state::<Arc<Etat>>() {
+                            let etat = Arc::clone(&etat);
+                            montrer(&pour, &etat, "delai");
+                        }
+                    });
+                });
             Ok(())
         })
         .build(contexte);
@@ -173,13 +201,26 @@ fn taille_fenetre() -> (f64, f64) {
     )
 }
 
-/// Place et redimensionne la fenêtre pour l'écran de la souris.
+/// Place et redimensionne la fenêtre pour l'écran de la souris (taille bornée à sa zone
+/// utile par `place_fenetre`).
 fn placer(app: &AppHandle, rect: crate::systeme::Rect, echelle: f64) {
     let voulu = place_fenetre(rect, echelle);
     if let Some(f) = app.try_state::<Installateur>() {
-        if let Some(id) = f.identifiant() {
-            sys::deplacer_fenetre(id, voulu.x, voulu.y);
-        }
+        f.poser(voulu.x, voulu.y, voulu.largeur, voulu.hauteur);
+    }
+}
+
+/// Montre la fenêtre une seule fois (fil principal), sauf si elle se ferme déjà.
+fn montrer(app: &AppHandle, etat: &Etat, pourquoi: &str) {
+    if matches!(etat_courant(etat), EtatInstallateur::Fermeture) {
+        return;
+    }
+    if etat.montree.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    log::info!("installateur montre: {pourquoi}");
+    if let Some(f) = app.try_state::<Installateur>() {
+        f.montrer();
     }
 }
 
@@ -212,8 +253,21 @@ fn etat_courant(etat: &Etat) -> EtatInstallateur {
     *etat.etat.lock().unwrap_or_else(|e| e.into_inner())
 }
 
-fn poser_etat(etat: &Etat, nouvel: EtatInstallateur) {
-    *etat.etat.lock().unwrap_or_else(|e| e.into_inner()) = nouvel;
+/// Lit l'état, décide et écrit **sous un seul verrou** (fil principal et fil
+/// d'installation). `Err(état)` : rien décidé, l'état est rendu tel quel.
+fn transition<T>(
+    etat: &Etat,
+    decider: impl FnOnce(EtatInstallateur) -> Option<(EtatInstallateur, T)>,
+) -> Result<T, EtatInstallateur> {
+    let mut garde = etat.etat.lock().unwrap_or_else(|e| e.into_inner());
+    let avant = *garde;
+    match decider(avant) {
+        Some((nouvel, suite)) => {
+            *garde = nouvel;
+            Ok(suite)
+        }
+        None => Err(avant),
+    }
 }
 
 /// Réagit à un signal de la page (fil principal).
@@ -226,10 +280,12 @@ fn traiter(app: &AppHandle, signal: Signal) {
         Signal::Pret => {
             log::info!("installateur pret");
             envoyer_etat(app, &etat);
+            montrer(app, &etat, "page prete");
         }
         Signal::Action(nom) => {
             let Some(action) = Action::depuis_nom(&nom) else {
-                log::warn!("installateur action inconnue: {nom}");
+                // Jamais le texte reçu de la page au journal.
+                log::warn!("installateur action inconnue");
                 return;
             };
             log::info!("installateur action {}", action.nom());
@@ -268,15 +324,13 @@ fn envoyer_etat(app: &AppHandle, etat: &Etat) {
 }
 
 fn agir(app: &AppHandle, etat: &Arc<Etat>, action: Action) {
-    let Some((nouvel, geste)) = reagir(etat_courant(etat), action) else {
-        log::info!(
-            "action ignoree: {} en {}",
-            action.nom(),
-            etat_courant(etat).nom()
-        );
-        return;
+    let geste = match transition(etat, |e| reagir(e, action)) {
+        Ok(g) => g,
+        Err(avant) => {
+            log::info!("action ignoree: {} en {}", action.nom(), avant.nom());
+            return;
+        }
     };
-    poser_etat(etat, nouvel);
     match geste {
         Geste::Installer => lancer_installation(app, etat),
         Geste::Capturer => essayer_capture(app, etat),
@@ -287,9 +341,9 @@ fn agir(app: &AppHandle, etat: &Arc<Etat>, action: Action) {
             if let Some(f) = app.try_state::<Installateur>() {
                 f.reduire();
             }
-            // `reduire` ne change pas l'état : on le remet.
-            poser_etat(etat, etat_courant(etat));
         }
+        // Gestes de fin des étapes : `reagir` ne les rend jamais.
+        Geste::MontrerPret | Geste::MontrerErreur | Geste::Sortir(_) => {}
     }
 }
 
@@ -301,34 +355,25 @@ fn lancer_installation(app: &AppHandle, etat: &Arc<Etat>) {
         .name("installation".into())
         .spawn(move || {
             let debut = Instant::now();
-            match installer(&app, &etat) {
-                Ok(()) => {
-                    log::info!(
-                        "installation finie {VERSION} en {} ms",
-                        debut.elapsed().as_millis()
-                    );
-                    finir(&app, &etat);
-                }
-                Err(e) => {
-                    log::info!("installation erreur: {}", e.code());
-                    poser_etat(&etat, EtatInstallateur::Erreur);
-                    if let Some(f) = app.try_state::<Installateur>() {
-                        f.envoyer(EtatPage {
-                            etat: "erreur",
-                            cause: e.cause(),
-                            total: etat.taille,
-                            direct: false,
-                        });
-                    }
-                }
+            let resultat = installer(&app, &etat);
+            match &resultat {
+                Ok(()) => log::info!(
+                    "installation finie {VERSION} en {} ms",
+                    debut.elapsed().as_millis()
+                ),
+                Err(e) => log::info!("installation erreur: {}", e.code()),
             }
+            // Décidé sous le verrou : un « Fermer » arrivé pendant les étapes est vu ici.
+            let geste = transition(&etat, |e| Some(apres_etapes(e, &resultat)))
+                .unwrap_or(Geste::MontrerErreur);
+            finir(&app, &etat, geste, resultat.err());
         });
     if let Err(e) = lance {
         log::error!("installation: fil impossible: {e}");
     }
 }
 
-/// Les étapes (contrat §3.2), chacune reportée au journal.
+/// Les étapes (ARCHITECTURE §12.3), chacune reportée au journal.
 fn installer(app: &AppHandle, etat: &Etat) -> Result<(), ErreurInstallation> {
     let e = &etat.emplacements;
     for etape in ETAPES {
@@ -347,7 +392,10 @@ fn installer(app: &AppHandle, etat: &Etat) -> Result<(), ErreurInstallation> {
             Etape::Arret => arreter_app(etat)?,
             Etape::Copie => copier(app, etat)?,
             Etape::Verification => {
-                let source = sys::exe_courant().map_err(|_| ErreurInstallation::Copie)?;
+                let source = sys::exe_courant().map_err(|e| {
+                    log::info!("etape verification: exe courant illisible ({e})");
+                    ErreurInstallation::Copie
+                })?;
                 let ok = sys::identiques(&source, &e.exe).map_err(de_fichier)?;
                 log::info!(
                     "etape verification: {}",
@@ -358,8 +406,10 @@ fn installer(app: &AppHandle, etat: &Etat) -> Result<(), ErreurInstallation> {
                 }
             }
             Etape::Raccourci => {
-                let fait = sys::creer_raccourci(&e.raccourci, &e.exe)
-                    .map_err(|_| ErreurInstallation::Raccourci)?;
+                let fait = sys::creer_raccourci(&e.raccourci, &e.exe).map_err(|d| {
+                    log::info!("etape raccourci: erreur {d}");
+                    ErreurInstallation::Raccourci
+                })?;
                 log::info!(
                     "etape raccourci: {}",
                     if fait { "fait" } else { "sans objet" }
@@ -405,7 +455,10 @@ fn arreter_app(etat: &Etat) -> Result<(), ErreurInstallation> {
 
 fn copier(app: &AppHandle, etat: &Etat) -> Result<(), ErreurInstallation> {
     let e = &etat.emplacements;
-    let source = sys::exe_courant().map_err(|_| ErreurInstallation::Ecriture)?;
+    let source = sys::exe_courant().map_err(|d| {
+        log::info!("etape copie: exe courant illisible ({d})");
+        ErreurInstallation::Ecriture
+    })?;
     let app = app.clone();
     let total = etat.taille;
     let mut dernier = Instant::now()
@@ -437,8 +490,10 @@ fn inscrire(etat: &Etat) -> Result<(), ErreurInstallation> {
     let date = chrono::Local::now().format("%Y%m%d").to_string();
     let valeurs = installation::valeurs_desinstallation(e, VERSION, etat.taille, &date);
     let refs: Vec<(&str, Valeur)> = valeurs.iter().map(|(n, v)| (*n, v.clone())).collect();
-    let fait = sys::ecrire_cle(&e.cle_desinstallation, &refs)
-        .map_err(|_| ErreurInstallation::Inscription)?;
+    let fait = sys::ecrire_cle(&e.cle_desinstallation, &refs).map_err(|d| {
+        log::info!("etape inscription: erreur {d}");
+        ErreurInstallation::Inscription
+    })?;
     log::info!(
         "etape inscription: {}",
         if fait { "faite" } else { "sans objet" }
@@ -448,7 +503,10 @@ fn inscrire(etat: &Etat) -> Result<(), ErreurInstallation> {
 
 fn lancer_etape(app: &AppHandle, etat: &Etat) -> Result<(), ErreurInstallation> {
     sys::permettre_premier_plan();
-    sys::lancer(&etat.emplacements.exe, &[]).map_err(|_| ErreurInstallation::Lancement)?;
+    sys::lancer(&etat.emplacements.exe, &[]).map_err(|d| {
+        log::info!("etape lancement: erreur {d}");
+        ErreurInstallation::Lancement
+    })?;
     let verrou = nom_verrou_app(IDENTIFIANT);
     let debut = Instant::now();
     while debut.elapsed() < DELAI_LANCEMENT {
@@ -463,24 +521,47 @@ fn lancer_etape(app: &AppHandle, etat: &Etat) -> Result<(), ErreurInstallation> 
         }
         std::thread::sleep(Duration::from_millis(100));
     }
+    log::info!("etape lancement: aucune instance");
     Err(ErreurInstallation::Lancement)
 }
 
-/// Après les étapes : montrer l'écran « prêt » ; si la fermeture a été demandée pendant
-/// l'installation, sortir.
-fn finir(app: &AppHandle, etat: &Etat) {
-    if matches!(etat_courant(etat), EtatInstallateur::Fermeture) {
-        sortir(app, etat, 0);
-        return;
-    }
-    poser_etat(etat, EtatInstallateur::Pret);
-    if let Some(f) = app.try_state::<Installateur>() {
-        f.envoyer(EtatPage {
+/// Après les étapes (fil d'installation), le geste décidé par `apres_etapes` : écran
+/// « prêt », écran d'erreur, ou sortie si « Fermer » a été pressé entre-temps.
+fn finir(app: &AppHandle, etat: &Etat, geste: Geste, erreur: Option<ErreurInstallation>) {
+    let page = match geste {
+        Geste::MontrerPret => EtatPage {
             etat: "pret",
             cause: String::new(),
             total: etat.taille,
             direct: false,
-        });
+        },
+        Geste::MontrerErreur => EtatPage {
+            etat: "erreur",
+            cause: erreur.map(|e| e.cause()).unwrap_or_default(),
+            total: etat.taille,
+            direct: false,
+        },
+        Geste::Sortir(code) => {
+            log::info!("installation fermee pendant les etapes: sortie {code}");
+            let pour = app.clone();
+            let secours = app.clone();
+            if app
+                .run_on_main_thread(move || {
+                    if let Some(etat) = pour.try_state::<Arc<Etat>>() {
+                        let etat = Arc::clone(&etat);
+                        sortir(&pour, &etat, code);
+                    }
+                })
+                .is_err()
+            {
+                sortir(&secours, etat, code);
+            }
+            return;
+        }
+        _ => return,
+    };
+    if let Some(f) = app.try_state::<Installateur>() {
+        f.envoyer(page);
     }
 }
 
@@ -519,7 +600,7 @@ fn fermer_en_fondu(app: &AppHandle, etat: &Etat) {
     attendre_puis_sortir(app, etat, Duration::from_millis(200), 0);
 }
 
-/// Envol de la fenêtre vers la zone de notification (contrat §4.5), puis sortie.
+/// Envol de la fenêtre vers la zone de notification (ARCHITECTURE §12.4), puis sortie.
 fn voler(app: &AppHandle, etat: &Etat) {
     let reduit = crate::systeme::animations_reduites();
     let (rect, echelle) = sys::zone_utile_sous_souris().unwrap_or((
@@ -531,7 +612,13 @@ fn voler(app: &AppHandle, etat: &Etat) {
         },
         1.0,
     ));
-    let depart = place_fenetre(rect, echelle);
+    let identifiant = app
+        .try_state::<Installateur>()
+        .and_then(|f| f.identifiant());
+    // Départ : là où la fenêtre est vraiment (l'utilisateur a pu la déplacer).
+    let depart = identifiant
+        .and_then(sys::rect_fenetre)
+        .unwrap_or_else(|| place_fenetre(rect, echelle));
     let cible = installation::cible_envol(sys::zone_de_notification(), rect, echelle);
     if reduit {
         if let Some(f) = app.try_state::<Installateur>() {
@@ -540,9 +627,6 @@ fn voler(app: &AppHandle, etat: &Etat) {
         attendre_puis_sortir(app, etat, Duration::from_millis(160), 0);
         return;
     }
-    let identifiant = app
-        .try_state::<Installateur>()
-        .and_then(|f| f.identifiant());
     if let Some(f) = app.try_state::<Installateur>() {
         f.envol(envol::DUREE_ENVOL.as_millis() as u64);
     }
@@ -614,20 +698,20 @@ fn mo(octets: u64) -> u64 {
     octets / (1 << 20)
 }
 
+/// Erreur de fichier vers erreur d'installation ; le diagnostic (type et code système,
+/// jamais de chemin) va au journal.
 fn de_fichier(e: ErreurFichier) -> ErreurInstallation {
-    match e {
-        ErreurFichier::Pris => ErreurInstallation::Ecriture,
-        ErreurFichier::Refuse(_) => ErreurInstallation::Ecriture,
-    }
+    log::info!("erreur fichier: {e}");
+    ErreurInstallation::Ecriture
 }
 
-// --- Désinstallation (contrat §3.6) -----------------------------------------------------
+// --- Désinstallation (ARCHITECTURE §12.5) -----------------------------------------------------
 
 /// Fermeture « retirer le démarrage avec Windows », injectée par l'Application à
 /// l'assemblage. Par défaut : rien (la valeur `Run` appartient au chantier des Réglages).
 pub type RetirerDemarrage = Box<dyn FnOnce() -> Result<(), String>>;
 
-/// Désinstalle BreezyShot, sans fenêtre ni question (contrat §3.6). Rend le code de sortie.
+/// Désinstalle BreezyShot, sans fenêtre ni question (ARCHITECTURE §12.5). Rend le code de sortie.
 pub fn desinstaller() -> i32 {
     desinstaller_avec(Box::new(|| {
         // Geste vide documenté : l'Application le remplace à l'assemblage par le retrait de
@@ -643,23 +727,33 @@ pub fn desinstaller_avec(retirer_demarrage: RetirerDemarrage) -> i32 {
     let connus = sys::dossiers_connus();
     let e = match emplacements(essai.as_deref(), &connus) {
         Ok(e) => e,
-        Err(_) => {
-            eprintln!("BreezyShot : dossier des applications introuvable");
+        Err(e) => {
+            sys::message_bloquant("Désinstaller BreezyShot", &e.cause());
             return 1;
         }
     };
     let _ = crate::application::journal::installer_installation(&e.journal);
     log::info!("desinstallation BreezyShot {VERSION}");
 
+    // Pas de désinstallation pendant une installation (ni l'inverse : l'installateur
+    // tient ce verrou toute sa vie).
+    let Some(_verrou) = sys::prendre_verrou(VERROU_INSTALLATEUR) else {
+        log::info!("desinstallation refusee: installateur en cours");
+        crate::application::journal::vider();
+        return 1;
+    };
+
     // Arrêt de l'app en cours (jamais tuée).
     let verrou = nom_verrou_app(IDENTIFIANT);
+    let mut ouverte = false;
     if sys::verrou_existe(&verrou) {
         let _ = sys::lancer(&e.exe, &["--quitter"]);
         let debut = Instant::now();
         while debut.elapsed() < DELAI_ARRET && sys::verrou_existe(&verrou) {
             std::thread::sleep(Duration::from_millis(100));
         }
-        if sys::verrou_existe(&verrou) {
+        ouverte = sys::verrou_existe(&verrou);
+        if ouverte {
             log::info!("desinstallation: instance toujours la");
         } else {
             log::info!("desinstallation: instance arretee");
@@ -668,9 +762,21 @@ pub fn desinstaller_avec(retirer_demarrage: RetirerDemarrage) -> i32 {
         log::info!("desinstallation: aucune instance");
     }
 
-    let processus = std::process::id();
-    for retrait in installation::retraits(&e, processus) {
-        appliquer_retrait(retrait);
+    // L'exe part d'abord ; raccourci et clé ne sont retirés que s'il est parti.
+    let mut exe_parti = true;
+    for retrait in installation::retraits(&e, std::process::id()) {
+        if retrait.exige_exe_parti() && !exe_parti {
+            log::info!(
+                "desinstallation {}: garde (exe reste)",
+                nom_retrait(&retrait)
+            );
+            continue;
+        }
+        if let Retrait::ExeDeplace { de, vers, secours } = &retrait {
+            exe_parti = deplacer_exe(de, vers, secours, ouverte);
+        } else {
+            appliquer_retrait(retrait);
+        }
     }
     // Démarrage avec Windows : la fermeture injectée écrit sa propre ligne
     // (`desinstallation demarrage: retire|absent`). Par défaut (geste vide, chantier des
@@ -678,20 +784,79 @@ pub fn desinstaller_avec(retirer_demarrage: RetirerDemarrage) -> i32 {
     if let Err(e) = retirer_demarrage() {
         log::warn!("desinstallation demarrage: {e}");
     }
-    log::info!("desinstallation finie");
+    log::info!(
+        "desinstallation finie: {}",
+        si(exe_parti, "complete", "incomplete")
+    );
     crate::application::journal::vider();
-    0
+    if exe_parti {
+        0
+    } else {
+        1
+    }
+}
+
+fn nom_retrait(r: &Retrait) -> &'static str {
+    match r {
+        Retrait::Raccourci { .. } => "raccourci",
+        Retrait::Cle { .. } => "inscription",
+        Retrait::Fichier(_) => "fichier",
+        Retrait::ExeDeplace { .. } => "exe",
+        Retrait::DossierSiVide(_) => "dossier",
+        Retrait::DossierWebview(_) => "cache webview",
+    }
+}
+
+/// Déplace l'exe installé hors de son dossier (il tourne peut-être : c'est souvent lui qui
+/// désinstalle). App encore ouverte : il reste. `%TEMP%` sur un autre volume : repli sur
+/// `secours`, sur le même volume. Rend vrai si l'exe n'est plus à sa place.
+fn deplacer_exe(de: &Path, vers: &Path, secours: &Path, app_ouverte: bool) -> bool {
+    if !de.is_file() {
+        log::info!("desinstallation exe: absent");
+        return true;
+    }
+    if app_ouverte {
+        log::info!("desinstallation exe: reste (app ouverte)");
+        return false;
+    }
+    match sys::deplacer(de, vers) {
+        Ok(()) => {
+            log::info!("desinstallation exe: deplace");
+            true
+        }
+        Err(ErreurFichier::AutreVolume) => match sys::deplacer(de, secours) {
+            Ok(()) => {
+                log::info!("desinstallation exe: deplace sur le meme volume");
+                true
+            }
+            Err(e) => {
+                log::info!("desinstallation exe: reste ({e})");
+                false
+            }
+        },
+        Err(e) => {
+            log::info!("desinstallation exe: reste ({e})");
+            false
+        }
+    }
 }
 
 fn appliquer_retrait(retrait: Retrait) {
     match retrait {
-        Retrait::Raccourci(lien) => {
-            let avait = sys::cible_raccourci(&lien).is_some();
-            let _ = sys::supprimer_fichier(&lien);
-            log::info!(
-                "desinstallation raccourci: {}",
-                si(avait, "retire", "absent")
-            );
+        Retrait::Raccourci { lien, exe } => {
+            if !lien.is_file() {
+                log::info!("desinstallation raccourci: absent");
+            } else if installation::emplacements::raccourci_vers(
+                sys::cible_raccourci(&lien).as_deref(),
+                &exe,
+            ) {
+                match sys::supprimer_fichier(&lien) {
+                    Ok(_) => log::info!("desinstallation raccourci: retire"),
+                    Err(e) => log::info!("desinstallation raccourci: reste ({e})"),
+                }
+            } else {
+                log::info!("desinstallation raccourci: garde (autre cible)");
+            }
         }
         Retrait::Cle { cle, valeurs } => match sys::retirer_valeurs_et_cle(&cle, valeurs) {
             Ok(true) => log::info!("desinstallation inscription: retiree"),
@@ -701,15 +866,8 @@ fn appliquer_retrait(retrait: Retrait) {
         Retrait::Fichier(p) => {
             let _ = sys::supprimer_fichier(&p);
         }
-        Retrait::ExeDeplace { de, vers } => {
-            if de.is_file() {
-                match sys::deplacer(&de, &vers) {
-                    Ok(()) => log::info!("desinstallation exe: deplace"),
-                    Err(_) => log::info!("desinstallation exe: reste"),
-                }
-            } else {
-                log::info!("desinstallation exe: reste");
-            }
+        Retrait::ExeDeplace { de, vers, secours } => {
+            deplacer_exe(&de, &vers, &secours, false);
         }
         Retrait::DossierSiVide(d) => {
             let _ = sys::retirer_dossier_vide(&d);

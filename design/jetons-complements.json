@@ -46,6 +46,69 @@
     },
     "usage": "Fond rouge du bouton Fermer survolé (barre de titre).",
     "origine": "Maquette validée de l'installateur (d-mix.html, « A + C »). Variable --close-hover ; même rouge que --danger clair."
+   },
+   {
+    "name": "installateur-croix-survol-texte",
+    "value": {
+     "light": "#FFFFFF",
+     "dark": "#FFFFFF"
+    },
+    "usage": "Croix blanche du bouton Fermer survolé.",
+    "origine": "Maquette validée de l'installateur (d-mix.html, « A + C »). .cap.x:hover{color:#fff}."
+   },
+   {
+    "name": "installateur-reflet",
+    "value": {
+     "light": "rgba(255,255,255,.55)",
+     "dark": "rgba(255,255,255,.55)"
+    },
+    "usage": "Reflet qui court sur la barre de progression.",
+    "origine": "Maquette validée de l'installateur (d-mix.html, « A + C »). .pbar .fill::after, linear-gradient(…,rgba(255,255,255,.55),…)."
+   },
+   {
+    "name": "installateur-bord-primaire",
+    "value": {
+     "light": "rgba(0,0,0,.2)",
+     "dark": "rgba(0,0,0,.2)"
+    },
+    "usage": "Bord bas d'un bouton principal.",
+    "origine": "Maquette validée de l'installateur (d-mix.html, « A + C »). .btn.primary border-bottom-color:rgba(0,0,0,.2)."
+   },
+   {
+    "name": "logo-degrade-1",
+    "value": {
+     "light": "#FFC06B",
+     "dark": "#FFC06B"
+    },
+    "usage": "Premier arrêt du dégradé du Moulinet.",
+    "origine": "Maquette validée de l'installateur (d-mix.html, « A + C »). logo(), stop offset 0."
+   },
+   {
+    "name": "logo-degrade-2",
+    "value": {
+     "light": "#FF7E6B",
+     "dark": "#FF7E6B"
+    },
+    "usage": "Arrêt médian du dégradé du Moulinet.",
+    "origine": "Maquette validée de l'installateur (d-mix.html, « A + C »). logo(), stop offset .55."
+   },
+   {
+    "name": "logo-degrade-3",
+    "value": {
+     "light": "#F0509A",
+     "dark": "#F0509A"
+    },
+    "usage": "Dernier arrêt du dégradé du Moulinet.",
+    "origine": "Maquette validée de l'installateur (d-mix.html, « A + C »). logo(), stop offset 1."
+   },
+   {
+    "name": "logo-lumiere",
+    "value": {
+     "light": "#FFFFFF",
+     "dark": "#FFFFFF"
+    },
+    "usage": "Lumière et pales blanches du Moulinet.",
+    "origine": "Maquette validée de l'installateur (d-mix.html, « A + C »). logo(), radialGradient et pales fill #fff."
    }
   ]
  },
@@ -74,6 +137,96 @@
     "value": "460ms",
     "usage": "Durée de l'envol de la fenêtre de l'installateur vers la zone de notification.",
     "origine": "Maquette validée de l'installateur (d-mix.html, « A + C »). win.animate(..., duration:460)."
+   },
+   {
+    "name": "duree-installateur-fondu",
+    "value": "200ms",
+    "usage": "Fondus de la ligne « Mo », de la barre, de la cause et de la couleur du remplissage.",
+    "origine": "Maquette validée de l'installateur (d-mix.html, « A + C »). .prow/.pbar opacity 200ms, .fill background-color 200ms, .cause opacity 200ms, closing-ring .prow 200ms."
+   },
+   {
+    "name": "duree-installateur-montee",
+    "value": "380ms",
+    "usage": "Montée de la ligne « Mo » et de la barre à l'entrée de l'écran 2.",
+    "origine": "Maquette validée de l'installateur (d-mix.html, « A + C »). .prow/.pbar transform 380ms var(--ressort)."
+   },
+   {
+    "name": "duree-installateur-retard",
+    "value": "160ms",
+    "usage": "Retard de la ligne « Mo », de la barre, du disque de la coche et du fondu du bouton Installer.",
+    "origine": "Maquette validée de l'installateur (d-mix.html, « A + C »). .prow/.pbar … 160ms, .check .disc 160ms, #install opacity 160ms linear 160ms."
+   },
+   {
+    "name": "duree-installateur-retard-cause",
+    "value": "120ms",
+    "usage": "Retard de la cause d'erreur et du fondu de la barre qui se referme.",
+    "origine": "Maquette validée de l'installateur (d-mix.html, « A + C »). .cause transition-delay:120ms ; closing-ring .pbar opacity 220ms linear 120ms."
+   },
+   {
+    "name": "duree-installateur-anneau-barre",
+    "value": "220ms",
+    "usage": "Fondu de la barre qui se referme (anneau) et réduction du bouton Installer.",
+    "origine": "Maquette validée de l'installateur (d-mix.html, « A + C »). closing-ring .pbar opacity 220ms ; #install transform 220ms var(--vent)."
+   },
+   {
+    "name": "duree-installateur-retard-texte",
+    "value": "80ms",
+    "usage": "Retard du titre de l'accueil ; fondu du texte du bouton Installer.",
+    "origine": "Maquette validée de l'installateur (d-mix.html, « A + C »). .welcome.in-r h1 … 80ms ; #install color 80ms linear."
+   },
+   {
+    "name": "duree-installateur-retard-trait",
+    "value": "360ms",
+    "usage": "Retard du tracé de la coche.",
+    "origine": "Maquette validée de l'installateur (d-mix.html, « A + C »). .ready.in-r .check path … 360ms."
+   },
+   {
+    "name": "duree-installateur-retard-reduction",
+    "value": "140ms",
+    "usage": "Retard de la réduction du bouton Installer.",
+    "origine": "Maquette validée de l'installateur (d-mix.html, « A + C »). #install transform 220ms var(--vent) 140ms."
+   },
+   {
+    "name": "duree-installateur-reflet",
+    "value": "1600ms",
+    "usage": "Tour du reflet sur la barre de progression.",
+    "origine": "Maquette validée de l'installateur (d-mix.html, « A + C »). .pbar .fill::after animation:shine 1.6s."
+   },
+   {
+    "name": "duree-installateur-vers-progression",
+    "value": "260ms",
+    "usage": "Du clic sur Installer au passage à l'écran 2.",
+    "origine": "Maquette validée de l'installateur (d-mix.html, « A + C »). later(() => { go(1); … }, rm() ? 120 : 260)."
+   },
+   {
+    "name": "duree-installateur-vers-barre",
+    "value": "300ms",
+    "usage": "Du passage à l'écran 2 au départ de la barre.",
+    "origine": "Maquette validée de l'installateur (d-mix.html, « A + C »). later(run, rm() ? 120 : 300)."
+   },
+   {
+    "name": "duree-installateur-anneau",
+    "value": "520ms",
+    "usage": "Barre refermée en anneau avant l'écran 3.",
+    "origine": "Maquette validée de l'installateur (d-mix.html, « A + C »). later(() => { go(2); set('done'); … }, rm() ? 200 : 520)."
+   },
+   {
+    "name": "duree-installateur-anneau-reduit",
+    "value": "200ms",
+    "usage": "Même attente, animations réduites.",
+    "origine": "Maquette validée de l'installateur (d-mix.html, « A + C »). rm() ? 200 : 520."
+   },
+   {
+    "name": "duree-installateur-focus",
+    "value": "200ms",
+    "usage": "Délai avant le focus sur Terminer.",
+    "origine": "Maquette validée de l'installateur (d-mix.html, « A + C »). later(() => $('#done').focus(), 200)."
+   },
+   {
+    "name": "duree-installateur-moulinet-arret",
+    "value": "420ms",
+    "usage": "Arrêt en douceur du Moulinet sur un quart de tour.",
+    "origine": "Maquette validée de l'installateur (d-mix.html, « A + C »). settle = { …, d: 420, … }."
    }
   ]
  },
@@ -265,6 +418,136 @@
     "value": "52px",
     "usage": "Interligne du titre de l'accueil.",
     "origine": "Maquette validée de l'installateur (d-mix.html, « A + C »). h1 line 52."
+   },
+   {
+    "name": "installateur-icone",
+    "value": "16px",
+    "usage": "Icône de la barre de titre.",
+    "origine": "Maquette validée de l'installateur (d-mix.html, « A + C »). .titlebar .ico 16px."
+   },
+   {
+    "name": "installateur-bouton-titre",
+    "value": "46px",
+    "usage": "Largeur des boutons Réduire et Fermer.",
+    "origine": "Maquette validée de l'installateur (d-mix.html, « A + C »). .cap width:46px."
+   },
+   {
+    "name": "installateur-picto-titre",
+    "value": "10px",
+    "usage": "Pictogrammes Réduire et Fermer.",
+    "origine": "Maquette validée de l'installateur (d-mix.html, « A + C »). .cap svg 10px."
+   },
+   {
+    "name": "installateur-etape-marge",
+    "value": "32px 40px",
+    "usage": "Marge intérieure d'un écran.",
+    "origine": "Maquette validée de l'installateur (d-mix.html, « A + C »). .step padding:32px 40px."
+   },
+   {
+    "name": "installateur-glisse",
+    "value": "28px",
+    "usage": "Glissement d'un écran à l'autre.",
+    "origine": "Maquette validée de l'installateur (d-mix.html, « A + C »). @keyframes outL/inR translateX(28px)."
+   },
+   {
+    "name": "installateur-monte",
+    "value": "14px",
+    "usage": "Montée de la carte et du titre à l'entrée.",
+    "origine": "Maquette validée de l'installateur (d-mix.html, « A + C »). @keyframes winIn/rise translateY(14px)."
+   },
+   {
+    "name": "installateur-decalage",
+    "value": "6px",
+    "usage": "Décalage d'entrée de la ligne « Mo », de la barre, de la cause et des boutons.",
+    "origine": "Maquette validée de l'installateur (d-mix.html, « A + C »). .prow/.pbar/.cause translateY(6px), btnIn."
+   },
+   {
+    "name": "installateur-ligne-haut",
+    "value": "28px",
+    "usage": "Espace au-dessus de la ligne « Mo ».",
+    "origine": "Maquette validée de l'installateur (d-mix.html, « A + C »). .prow margin-top:28px."
+   },
+   {
+    "name": "installateur-barre-hauteur",
+    "value": "4px",
+    "usage": "Épaisseur de la barre de progression.",
+    "origine": "Maquette validée de l'installateur (d-mix.html, « A + C »). .pbar height:4px."
+   },
+   {
+    "name": "installateur-barre-rayon",
+    "value": "2px",
+    "usage": "Rayon de la barre et de son remplissage.",
+    "origine": "Maquette validée de l'installateur (d-mix.html, « A + C »). .pbar/.fill border-radius:2px."
+   },
+   {
+    "name": "installateur-reflet-largeur",
+    "value": "72px",
+    "usage": "Largeur du reflet de la barre.",
+    "origine": "Maquette validée de l'installateur (d-mix.html, « A + C »). .fill::after width:72px."
+   },
+   {
+    "name": "installateur-cause-largeur",
+    "value": "320px",
+    "usage": "Largeur maximale de la cause d'erreur.",
+    "origine": "Maquette validée de l'installateur (d-mix.html, « A + C »). .cause max-width:320px."
+   },
+   {
+    "name": "installateur-coche-anneau",
+    "value": "2.5",
+    "usage": "Épaisseur de l'anneau de la coche (unités du dessin).",
+    "origine": "Maquette validée de l'installateur (d-mix.html, « A + C »). .check .full stroke-width:2.5."
+   },
+   {
+    "name": "installateur-coche-trait",
+    "value": "5",
+    "usage": "Épaisseur du trait de la coche (unités du dessin).",
+    "origine": "Maquette validée de l'installateur (d-mix.html, « A + C »). .check path stroke-width:5."
+   },
+   {
+    "name": "installateur-bouton-hauteur",
+    "value": "32px",
+    "usage": "Hauteur d'un bouton du pied (et diamètre d'Installer réduit).",
+    "origine": "Maquette validée de l'installateur (d-mix.html, « A + C »). .btn height:32px ; starting #install width:32px."
+   },
+   {
+    "name": "installateur-bouton-largeur",
+    "value": "96px",
+    "usage": "Largeur minimale d'un bouton du pied.",
+    "origine": "Maquette validée de l'installateur (d-mix.html, « A + C »). .btn min-width:96px."
+   },
+   {
+    "name": "installateur-bouton-rond",
+    "value": "16px",
+    "usage": "Rayon d'Installer réduit en rond.",
+    "origine": "Maquette validée de l'installateur (d-mix.html, « A + C »). starting #install border-radius:16px."
+   },
+   {
+    "name": "installateur-installer-largeur",
+    "value": "120px",
+    "usage": "Largeur du bouton Installer.",
+    "origine": "Maquette validée de l'installateur (d-mix.html, « A + C »). #install width:120px."
+   },
+   {
+    "name": "installateur-trait",
+    "value": "1px",
+    "usage": "Filets : bords de la carte, des boutons, séparateurs ; levée au survol.",
+    "origine": "Maquette validée de l'installateur (d-mix.html, « A + C »). border:1px, translateY(-1px)."
+   },
+   {
+    "name": "installateur-focus",
+    "value": "2px",
+    "usage": "Contour du focus clavier.",
+    "origine": "Maquette validée de l'installateur (d-mix.html, « A + C »). :focus-visible outline 2px, offset 2px."
+   }
+  ]
+ },
+ "courbe": {
+  "tokens": [
+   {
+    "name": "courbe-reflet",
+    "value": "cubic-bezier(0.4, 0, 0.2, 1)",
+    "usage": "Course du reflet sur la barre de progression.",
+    "origine": "Maquette validée de l'installateur (d-mix.html, « A + C »). animation:shine 1.6s cubic-bezier(.4,0,.2,1)."
    }
   ]
  }

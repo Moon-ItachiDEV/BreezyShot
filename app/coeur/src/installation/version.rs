@@ -1,4 +1,4 @@
-//! Versions et choix du plan quand on relance le fichier téléchargé (contrat §3.4).
+//! Versions et choix du plan quand on relance le fichier téléchargé (ARCHITECTURE §12.3).
 
 use std::fmt;
 
@@ -109,7 +109,7 @@ impl Plan {
     }
 }
 
-/// Le plan, d'après la version qui tourne et ce qu'on a trouvé (contrat §3.4) :
+/// Le plan, d'après la version qui tourne et ce qu'on a trouvé (ARCHITECTURE §12.3) :
 /// installation incomplète (clé sans exe, exe sans clé) → `Installer` ; même version →
 /// `Reinstaller` ; plus ancienne ou illisible → `MettreAJour` ; plus récente → rien.
 pub fn decider_plan(courante: Version, trouvee: &Trouvee) -> Plan {

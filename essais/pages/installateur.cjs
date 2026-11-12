@@ -105,12 +105,77 @@ const TOTAL = 15519744; // 14,8 Mo
     `dernier=${dernier}`);
   // La ligne « Mo » suit le total.
   const moTexte = await p.$eval('#mo', e => e.textContent);
-  verifier(/sur\s14,8 Mo/.test(moTexte.replace(/ /g, ' ').replace(/ /g, ' ')) || moTexte.includes('14,8'), '4 « sur 14,8 Mo »', moTexte);
+  const pctTexte = await p.$eval('#pct', e => e.textContent);
+  verifier(/^\d+,\d\u00a0Mo sur 14,8\u00a0Mo$/.test(moTexte) && /^\d+\u00a0%$/.test(pctTexte),
+    '4 « … Mo sur 14,8 Mo » et « … % » avec espaces insécables', JSON.stringify([moTexte, pctTexte]));
   // « prêt » : la barre finit à 100 %, l'écran 3 arrive.
   await emettre(p, 'installateur:progression', { octets: TOTAL, total: TOTAL });
   await emettre(p, 'installateur:etat', { etat: 'pret', cause: '', total: TOTAL, direct: false });
   await p.waitForFunction(() => document.getElementById('win').dataset.s === 'done', null, { timeout: 3000 });
-  verifier(await p.$eval('#pct', e => e.textContent).then(t => t.includes('100')), '4 barre à 100 % après prêt');
+  verifier(await p.$eval('#pct', e => e.textContent).then(t => t === '100\u00a0%'), '4 barre à 100 % après prêt');
+  await p.context().close();
+
+  // 4 bis. « prêt » : la barre se referme en anneau (closing-ring) avant l'écran 3.
+  p = await page();
+  await emettre(p, 'installateur:etat', { etat: 'accueil', cause: '', total: TOTAL, direct: false });
+  await p.click('#install');
+  await p.waitForFunction(() => document.getElementById('win').dataset.s === 'installing');
+  await emettre(p, 'installateur:progression', { octets: TOTAL, total: TOTAL });
+  await emettre(p, 'installateur:etat', { etat: 'pret', cause: '', total: TOTAL, direct: false });
+  await p.waitForFunction(() => document.getElementById('win').dataset.s === 'closing-ring', null, { timeout: 3000 });
+  await p.waitForTimeout(450);
+  const e4b = await p.evaluate(() => {
+    const b = getComputedStyle(document.getElementById('pbar')), l = getComputedStyle(document.querySelector('.prow'));
+    return { etat: document.getElementById('win').dataset.s, barre: Number(b.opacity), ligne: Number(l.opacity), tr: b.transform };
+  });
+  const echelle4b = (() => { const m = /^matrix\(([^,]+),/.exec(e4b.tr); return m ? Math.abs(Number(m[1])) : NaN; })();
+  verifier(e4b.etat === 'closing-ring' && e4b.barre < 0.2 && e4b.ligne < 0.2 && echelle4b < 0.1,
+    '4 bis anneau : ligne et barre s\'effacent, barre réduite à rien', JSON.stringify({ ...e4b, echelle4b }));
+  await p.waitForFunction(() => document.getElementById('win').dataset.s === 'done', null, { timeout: 2000 });
+  await p.context().close();
+
+  // 4 ter. Erreur reçue dans les 50 ms après « Installer » : la page ne reste pas figée en
+  // « installation » ; relue après 1 s, elle montre toujours l'erreur et « Réessayer ».
+  p = await page();
+  await emettre(p, 'installateur:etat', { etat: 'accueil', cause: '', total: TOTAL, direct: false });
+  await p.click('#install');
+  await p.waitForTimeout(20);
+  await emettre(p, 'installateur:etat', { etat: 'erreur', cause: 'BreezyShot est encore ouvert. Quittez-le, puis réessayez.', total: TOTAL, direct: false });
+  const lire4t = () => p.evaluate(() => {
+    const r = document.getElementById('retry'), etapes = [...document.querySelectorAll('[data-step]')];
+    return {
+      etat: document.getElementById('win').dataset.s,
+      ecran: etapes.findIndex(e => !e.hidden),
+      cause: getComputedStyle(document.getElementById('cause')).opacity,
+      reessayer: getComputedStyle(r).display !== 'none' && !r.disabled,
+    };
+  });
+  const tot = await lire4t();
+  await p.waitForTimeout(1000);
+  const tard = await lire4t();
+  verifier(tot.etat === 'error' && tard.etat === 'error' && tard.ecran === 1 && Number(tard.cause) > 0.9 && tard.reessayer,
+    '4 ter erreur immédiate : toujours l\'erreur après 1 s', JSON.stringify({ tot, tard }));
+  // Réessayer repart de zéro : la part copiée d'avant ne compte plus.
+  await emettre(p, 'installateur:progression', { octets: Math.round(TOTAL * 0.6), total: TOTAL });
+  await p.click('#retry');
+  await p.waitForTimeout(400);
+  const e4r = await p.evaluate(() => ({ etat: document.getElementById('win').dataset.s, now: Number(document.getElementById('pbar').getAttribute('aria-valuenow')) }));
+  verifier(e4r.etat === 'installing' && e4r.now === 0, '4 ter Réessayer : barre repartie de 0', JSON.stringify(e4r));
+  await p.context().close();
+
+  // 4 quater. Durées du script : celles des jetons (jetons.css), une à une.
+  p = await page();
+  const css = fs.readFileSync(path.join(RACINE, 'commun', 'jetons.css'), 'utf8');
+  const jeton = (n) => { const m = css.match(new RegExp('--' + n + ':\\s*([0-9.]+)ms;')); return m ? Number(m[1]) : NaN; };
+  const noms = { reduite: 'duree-reduite', sortie: 'duree-sortie', versProgression: 'duree-installateur-vers-progression',
+    versBarre: 'duree-installateur-vers-barre', anneau: 'duree-installateur-anneau', anneauReduit: 'duree-installateur-anneau-reduit',
+    focus: 'duree-installateur-focus', arretMoulinet: 'duree-installateur-moulinet-arret', envol: 'duree-envol-fenetre' };
+  const lues = await p.evaluate(() => window.__dureesInstallateur);
+  const ecarts = Object.entries(noms).filter(([k, n]) => !(lues[k] === jeton(n) && jeton(n) > 0));
+  const source = fs.readFileSync(path.join(RACINE, 'installateur', 'installateur.js'), 'utf8');
+  const enDur = source.split('\n').filter(l => /(later|laterEn|setTimeout)\([^;]*\b\d{2,}\b/.test(l) || /duration:\s*\d/.test(l));
+  verifier(ecarts.length === 0 && Object.keys(lues).length === Object.keys(noms).length && enDur.length === 0,
+    '4 quater durées du script = jetons, aucune en dur', JSON.stringify({ ecarts, enDur }));
   await p.context().close();
 
   // 5. erreur : cause posée comme texte (injection inerte), danger, « Réessayer » seul.
@@ -178,7 +243,8 @@ const TOTAL = 15519744; // 14,8 Mo
   await emettre(p, 'installateur:envol', { duree: 460 });
   await p.waitForTimeout(650);
   const e9 = await p.evaluate(() => { const s = getComputedStyle(document.getElementById('win')); return { op: Number(s.opacity), tr: s.transform }; });
-  verifier(e9.op < 0.05, '9 envol : opacité nulle à la fin', JSON.stringify(e9));
+  const echelle9 = (() => { const m = /^matrix\(([^,]+),/.exec(e9.tr); return m ? Math.abs(Number(m[1])) : NaN; })();
+  verifier(e9.op < 0.05 && echelle9 < 0.1, '9 envol : opacité nulle et échelle réduite à la fin', JSON.stringify({ ...e9, echelle9 }));
   await p.context().close();
 
   // 10. « réduire les animations » : entrées en 120 ms.
@@ -186,6 +252,12 @@ const TOTAL = 15519744; // 14,8 Mo
   await emettre(p, 'installateur:etat', { etat: 'accueil', cause: '', total: TOTAL, direct: false });
   const dur = await p.evaluate(() => getComputedStyle(document.querySelector('.welcome')).animationDuration);
   verifier(dur === '0.12s', '10 animations réduites à 120 ms', dur);
+  // Le reflet de la barre disparaît ; hors réduction, il court (animation « shine »).
+  const eclat = await p.evaluate(() => getComputedStyle(document.getElementById('fill'), '::after').display);
+  const p10 = await page();
+  const court = await p10.evaluate(() => getComputedStyle(document.getElementById('fill'), '::after').animationName);
+  verifier(eclat === 'none' && court === 'shine', '10 reflet : absent en réduit, présent sinon', JSON.stringify({ eclat, court }));
+  await p10.context().close();
   await p.context().close();
 
   // 11. hauteur bornée : fenêtre de 600 px, la carte tient (aucun défilement).

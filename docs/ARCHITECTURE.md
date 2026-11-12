@@ -121,10 +121,6 @@ privé. Trois précautions suffisent, dès maintenant :
 
 - tous les chemins passent par `systeme::dossiers()`, et l'app n'écrit jamais à côté du .exe ;
 - l'app lit le registre de l'utilisateur mais n'y écrit jamais d'état à elle ;
-  **exception (version 0.3, installateur)** : l'installateur et la désinstallation écrivent et
-  retirent la seule clé de désinstallation de l'utilisateur
-  (`HKCU\…\Uninstall\BreezyShot`), pour le chemin d'installation ; aucun autre état, et
-  jamais depuis l'app elle-même. Voir `docs/contrat-installateur.md` ;
 - « démarrer avec le système » (étape 10) restera derrière une seule fonction de `systeme`,
   pour pouvoir choisir plus tard entre l'entrée de démarrage classique et celle d'un paquet.
 
@@ -190,13 +186,13 @@ dans le dossier temporaire du système (`systeme::dossier_secours()`), sous le n
   sort tout de suite avec le code 0. C'est le moyen qu'utilisent les essais pour fermer l'app.
 - `breezyshot.exe --capturer <mode>` (`zone`, `plein_ecran`, `fenetre`) : lance cette capture
   (seconde instance qui confie l'ordre à la première, ou au démarrage, où l'ordre attend
-  `pret`). Un mode inconnu ne fait qu'une ligne au journal. Sert à « Essayer une capture » de
-  l'installateur. Lignes : `--capturer recu: <mode>`, `--capturer: mode inconnu <…>`,
-  `--capturer: en attente du demarrage`.
+  `pret`). Un mode inconnu ne fait qu'une ligne au journal, sans la valeur reçue. Sert à
+  « Essayer une capture » de l'installateur. Lignes : `--capturer recu: <mode>` (ou `<vide>`,
+  `<inconnu>`), `--capturer: mode inconnu`, `--capturer: en attente du demarrage`.
 - **Ce que l'exe est (version 0.3)** : lancé sous le nom `breezyshot.exe` (casse ignorée), il
   est l'app ; sous tout autre nom (le fichier téléchargé `BreezyShot-<v>-essai.exe`), il est
   l'installateur ; `--desinstaller` le fait désinstaller. Décision pure `arguments::lancement`.
-  Le contexte Tauri n'est engendré qu'une fois. Détails : `docs/contrat-installateur.md`.
+  Le contexte Tauri n'est engendré qu'une fois. Détails : §12.
 - Aucune autre option pour l'instant.
 - Au démarrage, après `icone installee`, l'app vérifie que l'icône est réellement dans la
   zone de notification (son rectangle est connu du système) et écrit `icone visible` ou
@@ -915,39 +911,199 @@ son `Bilan`, et `annonce(&Bilan, &Demande)` dit quoi montrer.
   annoncée, l'échec va au journal (par l'Application).
 - `sortie` n'importe que `crate::systeme` (`Pixels` vient de `systeme::gel`).
 
-## 11. Installation (version 0.3)
+## 12. Installation (version 0.3)
 
 L'utilisateur télécharge un seul `BreezyShot-<version>-essai.exe`. Ouvert, il montre l'écran
-validé (`interface/installateur/`, « A + C »), s'installe pour l'utilisateur courant sans
-droits d'administrateur, lance l'app, puis « BreezyShot est prêt ». Le même fichier est l'app,
-l'installateur ou la désinstallation selon son nom et sa ligne de commande (§3.4). Le contrat
-complet (voie retenue, séquences, signatures, erreurs, essais) est `docs/contrat-installateur.md`.
+validé (`interface/installateur/`, « A + C » de `d-mix.html`), s'installe pour l'utilisateur
+courant sans droits d'administrateur, lance l'app, puis dit « BreezyShot est prêt ».
 
-- **Décisions pures** (`installation/`, testées, n'utilisent que `systeme`) : `version.rs`
-  (lecture et comparaison, `decider_plan`), `emplacements.rs` (où écrire, ce que la
-  désinstallation retire ; garantie : rien hors des emplacements, aucun dossier supprimé par
-  son nom), `parcours.rs` (étapes, erreurs d'une ligne, table `reagir`), `envol.rs` (place de
-  la fenêtre, trajectoire).
-- **Gestes système** (`systeme/installation/`) : copie du flux principal seulement (aucun
-  `Zone.Identifier`), remplacement, raccourci (IShellLinkW), clé de désinstallation de
-  l'utilisateur (seule écriture du registre, §2), mutex d'instance, WebView2, zone de
-  notification. `autre.rs` : fichiers réels, le reste « sans objet » (parcours jouable sous
-  Linux).
-- **Câblage** (`application/installateur.rs`) : fenêtre, fil d'installation, envol,
-  désinstallation. La fermeture « retirer le démarrage avec Windows » est injectée par
-  l'Application à l'assemblage (`RetirerDemarrage`, `impl FnOnce() -> Result<(), String>`) ;
-  par défaut, un geste vide (`desinstallation demarrage: pas a nous`). L'installateur ne
-  touche jamais la valeur `Run` lui-même (chantier Réglages).
-- **Emplacements** réels : app sous `%LOCALAPPDATA%\Programs\BreezyShot\`, raccourci au menu
-  Démarrer de l'utilisateur, clé `HKCU\…\Uninstall\BreezyShot`. Essais : tout sous
-  `BREEZYSHOT_DOSSIER_ESSAI`, clés sous `HKCU\Software\BreezyShot-essais\<dossier>` ; jamais
-  les vrais. Réglages, Récents, journal et captures gardent leurs dossiers (§3.3) : une mise
-  à jour ou une désinstallation ne les touche jamais.
-- **Journal** `installation.log` (jamais de chemin d'utilisateur) : lignes listées au §6 du
-  contrat. Le dossier temporaire WebView2 de l'installateur est nettoyé au lancement et à la
-  désinstallation (quand WebView2 ne le tient plus).
-- **Essais** : `essais/pages/installateur.cjs` (page, tâche `pages`), `essais/09-installateur.ps1`
-  (Windows, boutons par UI Automation, fichier lancé sans `ShellExecute` avec une marque du
-  Web). La tâche `publier` garde un seul fichier et refuse qu'il s'appelle `breezyshot.exe`.
-- **Hors périmètre** : signature du code, mise à jour automatique, installation pour tous les
-  utilisateurs, MSIX, macOS, installation de WebView2, démarrage avec Windows (Réglages).
+### 12.1 Ce que l'exe est
+
+Un seul exe, trois rôles, décidés par `arguments::lancement` (pur, testé) :
+
+- nom de fichier `breezyshot.exe` (casse ignorée, rien d'autre de toléré) : l'app ;
+- tout autre nom (le fichier téléchargé) : l'installateur ;
+- `--desinstaller`, quel que soit le nom : la désinstallation, sans fenêtre ni question.
+
+La désinstallation ne construit pas Tauri ; les deux autres reçoivent le contexte Tauri,
+engendré une seule fois dans `application::lancer`.
+
+### 12.2 Où, et rien d'autre
+
+`installation::emplacements` (pur) rend tous les emplacements ; `ecritures` énumère tout ce que
+l'installateur et la désinstallation écrivent, `retraits` tout ce que la désinstallation retire.
+
+Réel (`<P>` = `%LOCALAPPDATA%\Programs`) ; en essai (`BREEZYSHOT_DOSSIER_ESSAI=<E>`), tout est
+sous `<E>`, entre parenthèses :
+
+- exe : `<P>\BreezyShot\breezyshot.exe` (`<E>\programmes\BreezyShot\…`) ; copie en cours :
+  `breezyshot.exe.nouveau` à côté ;
+- raccourci : `BreezyShot.lnk` au menu Démarrer de l'utilisateur (`<E>\menu\`) ;
+- clé (HKCU) : `Software\Microsoft\Windows\CurrentVersion\Uninstall\BreezyShot`
+  (`Software\BreezyShot-essais\<nom de E>\Uninstall\BreezyShot`) ;
+- WebView2 de l'installateur : `%TEMP%\BreezyShot-installateur` (`<E>\temp\…`) ;
+- journal : `%LOCALAPPDATA%\BreezyShot\Journal\installation.log` (`<E>\local\Journal\…`) ;
+- exe désinstallé : `%TEMP%\BreezyShot-desinstalle-<pid>.exe` (`<E>\temp\…`), repli sur le
+  même volume : `%LOCALAPPDATA%\…` (`<E>\…`).
+
+- Variable d'essai présente mais **vide** : refus (erreur `Dossier`, message système), jamais les
+  emplacements réels.
+- Le dossier installé n'est retiré que **vide** ; aucun dossier n'est supprimé par son nom, sauf
+  le dossier WebView2 de l'installateur, et seulement s'il ne contient que `EBWebView`.
+- Réglages, Récents, journal de l'app et captures gardent leurs dossiers (§3.3) : ni une mise à
+  jour ni une désinstallation n'y touchent. Le cache WebView2 de l'app
+  (`%LOCALAPPDATA%\BreezyShot\EBWebView`) reste aussi à la désinstallation (accepté).
+- Registre : `systeme/installation` est la seule écriture du registre de l'installateur, et
+  seulement la clé de désinstallation. La valeur `Run` (démarrage avec Windows) appartient aux
+  Réglages ; l'installateur ne l'écrit jamais.
+
+### 12.3 Installation
+
+Au lancement : journal ouvert, verrou `BreezyShotInstallateur` pris (sinon : la fenêtre du
+premier installateur est ramenée au premier plan, puis sortie 0), WebView2 vérifié (absent :
+message, sortie 1), dossier WebView2 d'une installation précédente nettoyé, état trouvé, plan.
+
+`decider_plan(version courante, trouvée)` : rien (ou clé sans exe, ou exe sans clé) →
+`installer` ; même version → `reinstaller` ; plus ancienne ou illisible → `mettre a jour depuis
+<v>` ; plus récente → `plus recente installee <v>` (écran « prêt » direct, l'exe n'est pas
+réécrit, l'app est lancée si elle ne tourne pas).
+
+La fenêtre (sans cadre, transparente, carte + marge d'ombre) est posée et dimensionnée par
+`place_fenetre` (bornée à la zone utile de l'écran de la souris), puis montrée à
+`installateur_pret` (page prête), au plus tard 2 s après sa création.
+
+« Installer » lance le fil d'installation, étapes dans l'ordre :
+
+1. `place` : place libre ≥ taille de l'exe + 64 Mo (inconnue : on essaie) ;
+2. `arret` : une app en cours (0.1, 0.2 ou 0.3 : même mutex `dev.breezyshot.desktop-sim`) reçoit
+   `--quitter` et a 10 s pour se fermer ; elle n'est **jamais tuée** (sinon erreur `ouvert`) ;
+3. `copie` : flux principal seulement (aucun `Zone.Identifier`) vers `.nouveau`, par blocs,
+   avancement réel envoyé à la page ; puis renommage sur `breezyshot.exe` (retenté 5 s si pris) ;
+4. `verification` : octet à octet ;
+5. `raccourci` (IShellLinkW) ; 6. `inscription` (onze valeurs, ci-dessous) ;
+7. `lancement` : l'app installée démarre et tient son instance en 10 s.
+
+Les onze valeurs de la clé : `DisplayName`, `DisplayVersion`, `Publisher`, `DisplayIcon`
+(`"<exe>",0`), `InstallLocation`, `UninstallString` et `QuietUninstallString`
+(`"<exe>" --desinstaller`), `NoModify` = 1, `NoRepair` = 1, `EstimatedSize` (Kio),
+`InstallDate` (`AAAAMMJJ`).
+
+### 12.4 Réactions (`reagir`, `apres_etapes`)
+
+État et décision sont lus et écrits **sous un seul verrou** (fil principal et fil
+d'installation).
+
+| État | Action | Nouvel état, geste |
+|---|---|---|
+| accueil | installer | installation, lance les étapes |
+| erreur | réessayer | installation, relance les étapes |
+| accueil, erreur | fermer | fermeture, fondu puis sortie 0 |
+| installation | fermer | fermeture, fenêtre cachée, les étapes continuent |
+| prêt | essayer | prêt, `--capturer zone` à l'app installée |
+| prêt | terminer, fermer | envol, puis sortie 0 |
+| tout sauf envol, fermeture | réduire | inchangé, fenêtre réduite |
+| envol, fermeture | tout | ignoré |
+
+Fin des étapes (`apres_etapes`) : en `installation`, réussite → `pret` (écran 3), erreur →
+`erreur` (cause d'une ligne, « Réessayer ») ; en `fermeture` (fenêtre cachée), réussite →
+sortie 0 (l'app tourne), erreur → sortie 1. Jamais d'installateur caché qui reste.
+
+Envol : la fenêtre part de sa place **réelle** (`GetWindowRect`), suit un arc vers la zone de
+notification (sinon le coin bas droit) en 460 ms (jeton `duree-envol-fenetre`, égal à
+`envol::DUREE_ENVOL`, vérifié par un test) pendant que la page réduit la carte ; animations
+réduites : fondu de 120 ms sans déplacement.
+
+Page : elle montre et rapporte ; chaque minuteur posé dans un état ne fait rien si la page en est
+sortie (une erreur reçue pendant le départ s'affiche et y reste). La barre suit le rythme du
+design sans jamais dépasser la part réellement copiée, ni 100 % avant « prêt » ; « Réessayer »
+repart de zéro. Durées, couleurs, courbes et mesures viennent des jetons.
+
+### 12.5 Désinstallation
+
+`breezyshot.exe --desinstaller` (« Applications installées ») : journal, verrou de
+l'installateur (pas de désinstallation pendant une installation, ni l'inverse), puis :
+
+1. app en cours : `--quitter`, 10 s, jamais tuée ; toujours là → l'exe reste ;
+2. `.nouveau` éventuel supprimé ;
+3. l'exe (souvent celui qui tourne) est **déplacé** dans `%TEMP%` ; autre volume → repli sur le
+   parent du dossier des programmes, même volume ; échec → il reste ;
+4. seulement si l'exe est parti : raccourci (seulement s'il pointe vers l'exe installé), puis
+   valeurs de la clé et la clé si elle est vide ;
+5. dossier installé s'il est vide, dossier WebView2 de l'installateur s'il est reconnu ;
+6. démarrage avec Windows : fermeture injectée par l'Application (`RetirerDemarrage`), qui lit
+   puis retire la valeur `BreezyShot` de `Run` (en essai : `HKCU\Software\BreezyShot\Essais\Run`).
+
+Sortie 0 si l'exe est parti, 1 sinon.
+
+### 12.6 Journal `installation.log`
+
+Jamais de chemin d'utilisateur, de titre de fenêtre ni de texte reçu (option, action de la
+page) ; une erreur système donne son type et son code (Win32, HRESULT), pas son chemin.
+
+```
+installateur BreezyShot <v> | systeme windows build <n>
+installateur: webview2 <version> | installateur: webview2 absent
+installateur: taille de l'exe inconnue
+seconde installation refusee: premier plan rendu | seconde installation refusee: aucune fenetre
+installation trouvee: aucune | <v|sans cle|illisible> <exe present|exe absent>
+plan: installer | reinstaller | mettre a jour depuis <v|illisible> | plus recente installee <v>
+installateur fenetre <hwnd>
+installateur montre: page prete | installateur montre: delai
+installateur pret | installateur action <nom> | installateur action inconnue
+action ignoree: <action> en <etat>
+etape place: libre <n> Mo besoin <n> Mo
+etape arret: aucune instance | instance arretee en <n> ms | instance toujours la
+etape copie: <n> octets en <n> ms | etape copie: exe courant illisible (<diag>)
+etape verification: ok | differente | exe courant illisible (<diag>)
+etape raccourci: fait | sans objet | erreur <appel> hresult 0x<…> | erreur dossier <diag>
+etape inscription: faite | sans objet | erreur <geste>, code <n>
+etape lancement: instance en <n> ms | aucune instance | erreur <diag>
+erreur fichier: fichier pris | autre volume | <type>, code <n>
+installation finie <v> en <n> ms | installation erreur: <code>
+installation fermee pendant les etapes: sortie <0|1>
+essayer: capture zone demandee
+envol cible <notification|coin> en <n> ms | envol impossible (<e>): fermeture directe
+installateur ferme en <etat>
+desinstallation BreezyShot <v> | desinstallation refusee: installateur en cours
+desinstallation: aucune instance | instance arretee | instance toujours la
+desinstallation exe: deplace | deplace sur le meme volume | absent | reste (app ouverte)
+desinstallation exe: reste (<diag>)
+desinstallation raccourci: retire | absent | garde (autre cible) | reste (<diag>)
+desinstallation raccourci: garde (exe reste) | desinstallation inscription: garde (exe reste)
+desinstallation inscription: retiree | absente | <geste>, code <n>
+desinstallation inscription: la cle garde des valeurs qui ne sont pas a nous
+desinstallation cache webview: supprime | sans objet | absent
+desinstallation demarrage: retire | absent   (fermeture des Réglages)
+desinstallation demarrage: pas a nous         (geste vide par défaut)
+desinstallation finie: complete | incomplete
+```
+
+Codes d'erreur (`installation erreur: <code>`) et causes affichées : `place` (« Il manque de la
+place sur le disque C:. Libérez N Mo, puis réessayez. »), `ouvert`, `ecriture`, `copie`,
+`raccourci`, `inscription`, `lancement`, `dossier` (`ErreurInstallation::cause`).
+
+### 12.7 Modules
+
+- `installation/` (pur, n'utilise que `systeme`) : `version.rs`, `emplacements.rs`,
+  `parcours.rs` (étapes, erreurs, `reagir`, `apres_etapes`), `envol.rs`.
+- `systeme/installation/` : copie, remplacement, déplacement, raccourci, clé, mutex, WebView2,
+  zone de notification, place de fenêtre ; `autre.rs` : fichiers réels, le reste « sans
+  objet » (parcours jouable sous Linux).
+- `fenetres/installateur.rs` : la fenêtre (crée, pose, montre, cache, émet).
+- `application/installateur.rs` : le câblage ; aucune décision.
+
+### 12.8 Essais
+
+- `essais/pages/installateur.cjs` (tâche `pages`) : la page seule, cœur simulé (états, erreur
+  immédiate relue après 1 s, anneau, durées égales aux jetons, espaces insécables, envol).
+- `essais/09-installateur.ps1` (Windows) : le parcours réel sous un dossier d'essai, boutons
+  trouvés par UI Automation (nom et type), fichier lancé sans `ShellExecute` avec une marque
+  du Web ; chaque attente ne lit que les lignes nouvelles du journal ; un installateur se
+  ferme par son interface, le tuer est un échec ; une « app qui ne se ferme pas » (mutex tenu)
+  n'est jamais tuée ; « Fermer » pendant l'installation, en réussite et en erreur ;
+  désinstallation (démarrage d'essai retiré, données gardées) ; état réel inchangé à la fin.
+- La tâche `publier` vérifie qu'elle envoie exactement un `.exe`, qui ne s'appelle pas
+  `breezyshot.exe` (sinon il serait l'app, pas l'installateur).
+
+Hors périmètre : signature du code, mise à jour automatique, installation pour tous les
+utilisateurs, MSIX, macOS, installation de WebView2.

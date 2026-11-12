@@ -1,5 +1,7 @@
 /* Installateur BreezyShot. Toutes les couleurs, durées, courbes et mesures viennent de
-   jetons.css (commun/), généré depuis le design system. Rien n'est recopié à la main.
+   jetons.css (commun/), généré depuis le design system et ses compléments. Rien n'est
+   recopié à la main ; seuls restent la géométrie des dessins (centre de la coche, longueur
+   de son tracé) et les rapports sans unité (échelles, opacités).
    La fenêtre est transparente : la page dessine la carte, son ombre et ses coins. */
 
 *{box-sizing:border-box}
@@ -8,7 +10,7 @@ body{background:transparent;color:var(--text);
   font:var(--texte-body-graisse) var(--texte-body-taille)/var(--texte-body-interligne) var(--police-ui);
   overflow:hidden;-webkit-font-smoothing:antialiased}
 button{font:inherit;color:inherit}
-:focus-visible{outline:2px solid var(--text);outline-offset:2px}
+:focus-visible{outline:var(--installateur-focus) solid var(--text);outline-offset:var(--installateur-focus)}
 
 .scene{position:fixed;inset:0;display:grid;place-items:center}
 
@@ -16,106 +18,134 @@ button{font:inherit;color:inherit}
   width:var(--installateur-carte-largeur);
   height:min(var(--installateur-carte-hauteur), calc(100vh - 2 * var(--installateur-marge)));
   max-width:calc(100vw - 2 * var(--installateur-marge));
-  border-radius:var(--radius-md);border:1px solid var(--stroke);box-shadow:var(--shadow-28);
+  border-radius:var(--radius-md);border:var(--installateur-trait) solid var(--stroke);box-shadow:var(--shadow-28);
   background:linear-gradient(180deg,var(--fenetre-fond-haut),var(--fenetre-fond-bas));
   display:flex;flex-direction:column;overflow:hidden;
   animation:winIn var(--duree-vignette) var(--courbe-ressort)}
 .win.gone{visibility:hidden}
-@keyframes winIn{from{opacity:0;transform:translateY(14px) scale(.96)}}
+@keyframes winIn{from{opacity:0;transform:translateY(var(--installateur-monte)) scale(.96)}}
 
 .titlebar{height:var(--installateur-titre-hauteur);display:flex;align-items:center;flex:none;user-select:none}
-.titlebar .ico{width:16px;height:16px;margin:0 12px 0 16px;display:block}
-.titlebar .name{font-size:12px;line-height:16px;flex:1}
-.cap{width:46px;height:var(--installateur-titre-hauteur);border:0;background:transparent;
+.titlebar .ico{width:var(--installateur-icone);height:var(--installateur-icone);
+  margin:0 var(--space-3) 0 var(--space-4);display:block}
+.titlebar .name{font-size:var(--texte-caption-taille);line-height:var(--texte-caption-interligne);flex:1}
+.cap{width:var(--installateur-bouton-titre);height:var(--installateur-titre-hauteur);border:0;background:transparent;
   display:grid;place-items:center;cursor:pointer;transition:background-color var(--duree-couleur) linear}
 .cap:hover{background:var(--subtle-hover)}
-.cap.x:hover{background:var(--fermer-survol);color:#fff}
-.cap svg{width:10px;height:10px}
+.cap.x:hover{background:var(--fermer-survol);color:var(--installateur-croix-survol-texte)}
+.cap svg{width:var(--installateur-picto-titre);height:var(--installateur-picto-titre)}
 
-.body{flex:1;position:relative;background:var(--layer);border-top:1px solid var(--stroke);overflow:hidden}
-.step{position:absolute;inset:0;padding:32px 40px;display:flex;flex-direction:column;
+.body{flex:1;position:relative;background:var(--layer);border-top:var(--installateur-trait) solid var(--stroke);overflow:hidden}
+.step{position:absolute;inset:0;padding:var(--installateur-etape-marge);display:flex;flex-direction:column;
   align-items:center;justify-content:center;text-align:center}
 .step[hidden]{display:none}
 .step.out-l{animation:outL var(--duree-sortie) var(--courbe-vent) forwards}
 .step.in-r{animation:inR var(--duree-glissiere) var(--courbe-ressort) both}
-@keyframes outL{to{opacity:0;transform:translateX(-28px)}}
-@keyframes inR{from{opacity:0;transform:translateX(28px)}}
+@keyframes outL{to{opacity:0;transform:translateX(calc(-1 * var(--installateur-glisse)))}}
+@keyframes inR{from{opacity:0;transform:translateX(var(--installateur-glisse))}}
 
 h1{font:var(--texte-title-large-graisse) var(--installateur-titre-taille)/var(--installateur-titre-interligne) var(--police-display);margin:0}
 h2{font:var(--texte-subtitle-graisse) var(--texte-subtitle-taille)/var(--texte-subtitle-interligne) var(--police-display);margin:0}
 
 /* Accueil */
-.welcome .logo{width:var(--installateur-logo);height:var(--installateur-logo);margin-bottom:24px;display:block}
+.welcome .logo{width:var(--installateur-logo);height:var(--installateur-logo);margin-bottom:var(--space-6);display:block}
 .welcome.in-r .logo{animation:spin1 var(--duree-envol) var(--courbe-ressort) both}
-.welcome.in-r h1{animation:rise var(--duree-glissiere) var(--courbe-ressort) 80ms both}
+.welcome.in-r h1{animation:rise var(--duree-glissiere) var(--courbe-ressort) var(--duree-installateur-retard-texte) both}
 @keyframes spin1{from{transform:rotate(-360deg) scale(.7);opacity:0}}
-@keyframes rise{from{transform:translateY(14px);opacity:0}}
+@keyframes rise{from{transform:translateY(var(--installateur-monte));opacity:0}}
+
+/* Moulinet : couleurs du dégradé et de la lumière */
+.moulinet .ga0{stop-color:var(--logo-degrade-1)}
+.moulinet .ga1{stop-color:var(--logo-degrade-2)}
+.moulinet .ga2{stop-color:var(--logo-degrade-3)}
+.moulinet .gh{stop-color:var(--logo-lumiere)}
+.moulinet .pales{fill:var(--logo-lumiere)}
 
 /* Installation */
 .mark{position:relative;width:var(--installateur-marque);height:var(--installateur-marque);display:grid;place-items:center}
 .mark .logo{width:var(--installateur-logo);height:var(--installateur-logo);display:block}
 .prow{width:var(--installateur-barre);max-width:100%;display:flex;justify-content:space-between;
-  align-items:baseline;margin-top:28px;margin-bottom:8px;font-size:12px;line-height:16px;
-  font-variant-numeric:tabular-nums;color:var(--text-2);opacity:0;transform:translateY(6px);
-  transition:opacity var(--duree-onde) linear 160ms,transform var(--duree-envol) var(--courbe-ressort) 160ms}
-.prow b{font-size:14px;line-height:20px;font-weight:600;color:var(--text)}
+  align-items:baseline;margin-top:var(--installateur-ligne-haut);margin-bottom:var(--space-2);
+  font-size:var(--texte-caption-taille);line-height:var(--texte-caption-interligne);
+  font-variant-numeric:tabular-nums;color:var(--text-2);opacity:0;transform:translateY(var(--installateur-decalage));
+  transition:opacity var(--duree-installateur-fondu) linear var(--duree-installateur-retard),
+    transform var(--duree-installateur-montee) var(--courbe-ressort) var(--duree-installateur-retard)}
+.prow b{font-size:var(--texte-body-strong-taille);line-height:var(--texte-body-strong-interligne);
+  font-weight:var(--texte-body-strong-graisse);color:var(--text)}
 .in-r .prow,.step:not(.in-r) .prow{opacity:1;transform:none}
 .win[data-s="error"] .prow b{color:var(--danger)}
-.pbar{position:relative;width:var(--installateur-barre);max-width:100%;height:4px;border-radius:2px;
-  background:var(--ctrl-alt);box-shadow:inset 0 0 0 1px var(--stroke);overflow:hidden;
-  opacity:0;transform:translateY(6px) scaleX(.94);transform-origin:left center;
-  transition:opacity var(--duree-onde) linear 160ms,transform var(--duree-envol) var(--courbe-ressort) 160ms}
+.win[data-s="closing-ring"] .prow{opacity:0;transition:opacity var(--duree-installateur-fondu) linear}
+.pbar{position:relative;width:var(--installateur-barre);max-width:100%;height:var(--installateur-barre-hauteur);
+  border-radius:var(--installateur-barre-rayon);
+  background:var(--ctrl-alt);box-shadow:inset 0 0 0 var(--installateur-trait) var(--stroke);overflow:hidden;
+  opacity:0;transform:translateY(var(--installateur-decalage)) scaleX(.94);transform-origin:left center;
+  transition:opacity var(--duree-installateur-fondu) linear var(--duree-installateur-retard),
+    transform var(--duree-installateur-montee) var(--courbe-ressort) var(--duree-installateur-retard)}
 .in-r .pbar,.step:not(.in-r) .pbar{opacity:1;transform:none}
-.pbar .fill{position:absolute;left:0;top:0;bottom:0;width:0;border-radius:2px;background:var(--accent);
-  overflow:hidden;transition:background-color var(--duree-onde) linear,width var(--duree-couleur) linear}
-.pbar .fill::after{content:"";position:absolute;top:0;bottom:0;left:0;width:72px;
-  background:linear-gradient(90deg,transparent,rgba(255,255,255,.55),transparent);
-  transform:translateX(-72px);animation:shine 1.6s var(--courbe-douce) infinite}
-@keyframes shine{to{transform:translateX(280px)}}
+.pbar .fill{position:absolute;left:0;top:0;bottom:0;width:0;border-radius:var(--installateur-barre-rayon);
+  background:var(--accent);overflow:hidden;transition:background-color var(--duree-installateur-fondu) linear}
+.pbar .fill::after{content:"";position:absolute;top:0;bottom:0;left:0;width:var(--installateur-reflet-largeur);
+  background:linear-gradient(90deg,transparent,var(--installateur-reflet),transparent);
+  transform:translateX(calc(-1 * var(--installateur-reflet-largeur)));
+  animation:shine var(--duree-installateur-reflet) var(--courbe-reflet) infinite}
+@keyframes shine{to{transform:translateX(var(--installateur-barre))}}
 .win[data-s="error"] .pbar .fill{background:var(--danger)}
-.win[data-s="error"] .pbar .fill::after{animation:none;opacity:0}
-.cause{margin-top:24px;max-width:320px;color:var(--text-2);opacity:0;transform:translateY(6px);
-  transition:opacity var(--duree-onde) linear,transform var(--duree-vignette) var(--courbe-ressort)}
-.win[data-s="error"] .cause{opacity:1;transform:none;transition-delay:120ms}
+.win[data-s="error"] .pbar .fill::after,
+.win[data-s="closing-ring"] .pbar .fill::after{animation:none;opacity:0}
+/* La barre se referme en anneau avant l'écran 3 (d-mix.html, état closing-ring). */
+.win[data-s="closing-ring"] .pbar{opacity:0;transform:scaleX(0);transform-origin:center;
+  transition:opacity var(--duree-installateur-anneau-barre) linear var(--duree-installateur-retard-cause),
+    transform var(--duree-glissiere) var(--courbe-douce)}
+.cause{margin-top:var(--space-6);max-width:var(--installateur-cause-largeur);color:var(--text-2);opacity:0;
+  transform:translateY(var(--installateur-decalage));
+  transition:opacity var(--duree-installateur-fondu) linear,transform var(--duree-vignette) var(--courbe-ressort)}
+.win[data-s="error"] .cause{opacity:1;transform:none;transition-delay:var(--duree-installateur-retard-cause)}
 
 /* Prêt */
-.check{width:var(--installateur-marque);height:var(--installateur-marque);margin-bottom:16px;display:block}
-.check .full{fill:none;stroke:var(--accent);stroke-width:2.5}
+.check{width:var(--installateur-marque);height:var(--installateur-marque);margin-bottom:var(--space-4);display:block}
+.check .full{fill:none;stroke:var(--accent);stroke-width:var(--installateur-coche-anneau)}
 .check .disc{fill:var(--accent);transform-origin:64px 64px}
-.check path{fill:none;stroke:var(--on-accent);stroke-width:5;stroke-linecap:round;stroke-linejoin:round;
-  stroke-dasharray:60;stroke-dashoffset:60}
+.check path{fill:none;stroke:var(--on-accent);stroke-width:var(--installateur-coche-trait);
+  stroke-linecap:round;stroke-linejoin:round;stroke-dasharray:60;stroke-dashoffset:60}
 .ready.in-r .check .full{animation:close var(--duree-ressort) var(--courbe-douce) both}
-.ready.in-r .check .disc{animation:disc var(--duree-glissiere) var(--courbe-ressort) 160ms both}
-.ready.in-r .check path{animation:draw var(--duree-glissiere) var(--courbe-douce) 360ms forwards}
+.ready.in-r .check .disc{animation:disc var(--duree-glissiere) var(--courbe-ressort) var(--duree-installateur-retard) both}
+.ready.in-r .check path{animation:draw var(--duree-glissiere) var(--courbe-douce) var(--duree-installateur-retard-trait) forwards}
 .ready:not(.in-r) .check path{stroke-dashoffset:0}
 @keyframes close{from{transform:scale(1.04);opacity:.6}}
 @keyframes disc{from{transform:scale(0)}}
 @keyframes draw{to{stroke-dashoffset:0}}
 
 /* Pied */
-.foot{height:var(--installateur-pied-hauteur);flex:none;display:flex;align-items:center;gap:8px;
-  padding:0 24px;border-top:1px solid var(--divider);background:var(--ctrl-alt)}
+.foot{height:var(--installateur-pied-hauteur);flex:none;display:flex;align-items:center;gap:var(--space-2);
+  padding:0 var(--space-6);border-top:var(--installateur-trait) solid var(--divider);background:var(--ctrl-alt)}
 .grow{flex:1}
-.btn{height:32px;min-width:96px;padding:0 12px;border-radius:var(--radius-sm);border:1px solid var(--stroke);
+.btn{height:var(--installateur-bouton-hauteur);min-width:var(--installateur-bouton-largeur);padding:0 var(--space-3);
+  border-radius:var(--radius-sm);border:var(--installateur-trait) solid var(--stroke);
   border-bottom-color:var(--stroke-strong);background:var(--ctrl);cursor:pointer;white-space:nowrap;overflow:hidden;
   transition:transform var(--duree-ressort) var(--courbe-ressort),box-shadow var(--duree-survol) var(--courbe-douce),
     background-color var(--duree-couleur) linear,opacity var(--duree-reduite) linear}
-.btn:hover{background:var(--ctrl-hover);transform:translateY(-1px);box-shadow:var(--shadow-2)}
-.btn:active{background:var(--ctrl-press);transform:scale(.97)}
-.btn.primary{background:var(--accent);color:var(--on-accent);border-color:transparent;border-bottom-color:rgba(0,0,0,.2)}
+.btn:hover{background:var(--ctrl-hover);transform:translateY(calc(-1 * var(--installateur-trait)));box-shadow:var(--shadow-2)}
+.btn:active{background:var(--ctrl-press);transform:scale(.97);
+  transition-duration:var(--duree-appui),var(--duree-survol),var(--duree-couleur);transition-timing-function:var(--courbe-douce)}
+.btn.primary{background:var(--accent);color:var(--on-accent);border-color:transparent;
+  border-bottom-color:var(--installateur-bord-primaire)}
 .btn.primary:hover{background:var(--accent-hover)}
 .btn.primary:active{background:var(--accent-press)}
 .foot .btn{display:none}
 .win[data-s="idle"] #install,.win[data-s="starting"] #install,.win[data-s="error"] #retry,
 .win[data-s="done"] #try,.win[data-s="done"] #done{display:inline-block}
 .win[data-s="error"] #retry,.win[data-s="done"] .btn{animation:btnIn var(--duree-vignette) var(--courbe-ressort) both}
-@keyframes btnIn{from{opacity:0;transform:translateY(6px)}}
-.win[data-s="starting"] #install{min-width:0;width:32px;border-radius:16px;color:transparent;opacity:0;
+@keyframes btnIn{from{opacity:0;transform:translateY(var(--installateur-decalage))}}
+.win[data-s="starting"] #install{min-width:0;width:var(--installateur-bouton-hauteur);
+  border-radius:var(--installateur-bouton-rond);color:transparent;opacity:0;
   transform:scale(.6);pointer-events:none;
   transition:width var(--duree-vent) var(--courbe-douce),border-radius var(--duree-vent) var(--courbe-douce),
-    color 80ms linear,opacity var(--duree-onde) linear 160ms,transform var(--duree-vent) var(--courbe-vent) 140ms}
-#install{width:120px;transition:width var(--duree-vent) var(--courbe-douce),transform var(--duree-ressort) var(--courbe-ressort),
-  background-color var(--duree-couleur) linear,box-shadow var(--duree-survol) var(--courbe-douce)}
+    color var(--duree-installateur-retard-texte) linear,
+    opacity var(--duree-installateur-retard) linear var(--duree-installateur-retard),
+    transform var(--duree-installateur-anneau-barre) var(--courbe-vent) var(--duree-installateur-retard-reduction)}
+#install{width:var(--installateur-installer-largeur);
+  transition:width var(--duree-vent) var(--courbe-douce),transform var(--duree-ressort) var(--courbe-ressort),
+    background-color var(--duree-couleur) linear,box-shadow var(--duree-survol) var(--courbe-douce)}
 
 @media (prefers-reduced-motion:reduce){
   *,*::before,*::after{animation-name:fadeOnly!important;animation-duration:var(--duree-reduite)!important;

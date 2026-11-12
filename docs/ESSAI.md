@@ -1,8 +1,7 @@
 Version d'essai, non signée : Windows peut demander une confirmation au premier lancement.
 
 Ouvrez le fichier téléchargé, puis Installer. Pour désinstaller : Paramètres › Applications
-installées. Lancé depuis son dossier, `breezyshot.exe` est l'app ; sous tout autre nom, il est
-l'installateur.
+installées.
 
 - Zone : Impr. écran (ou Ctrl + Maj + 1), glisser, relâcher : la zone est dans le presse-papiers.
 - Écran : Ctrl + Maj + 2 : tout l'écran sous la souris est dans le presse-papiers.
