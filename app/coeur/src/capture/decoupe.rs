@@ -93,7 +93,8 @@ fn couverture(i: u32, j: u32, rayon: f64) -> u8 {
 /// Arrondit les coins demandés (haut gauche, haut droit, bas gauche, bas droit) : hors du
 /// quart de cercle de rayon `rayon`, l'alpha tombe à 0 ; sur le bord, il vaut la part du
 /// pixel couverte (bord adouci), multipliée par l'alpha déjà là. Les couleurs ne changent
-/// pas. Rayon nul ou négatif : rien. Des pixels incohérents ou plus petits que le rayon :
+/// pas. Le pixel même du coin n'est à 0 qu'à partir d'un rayon de 4 : en dessous, le
+/// cercle en couvre vraiment une part (π/4 pour un rayon de 1), qui est gardée. Rayon nul ou négatif : rien. Des pixels incohérents ou plus petits que le rayon :
 /// jamais de panique.
 pub fn arrondir(pixels: &mut Pixels, rayon: i32, coins: [bool; 4]) {
     let (largeur, hauteur) = (pixels.largeur as usize, pixels.hauteur as usize);
@@ -277,6 +278,24 @@ mod tests {
                     assert_eq!(alpha(&p, x, y), 255, "({x}, {y})");
                 }
             }
+        }
+    }
+
+    #[test]
+    fn arrondir_petits_rayons_pixel_du_coin() {
+        let coin = |rayon| {
+            let mut p = unie(20, 20, 255);
+            arrondir(&mut p, rayon, [true; 4]);
+            alpha(&p, 0, 0)
+        };
+        // Rayon 1 : le quart de cercle couvre π/4 du pixel (≈ 200 sur 255).
+        assert!((195..=206).contains(&coin(1)), "rayon 1 : {}", coin(1));
+        // Rayons 2 et 3 : encore une part, de plus en plus petite.
+        assert!(coin(2) > 0 && coin(2) < coin(1), "rayon 2 : {}", coin(2));
+        assert!(coin(3) > 0 && coin(3) < coin(2), "rayon 3 : {}", coin(3));
+        // À partir de 4 : transparent.
+        for rayon in 4..=20 {
+            assert_eq!(coin(rayon), 0, "rayon {rayon}");
         }
     }
 
