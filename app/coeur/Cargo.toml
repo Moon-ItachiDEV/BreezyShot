@@ -1,6 +1,6 @@
 [package]
 name = "breezyshot"
-version = "0.2.0"
+version = "0.3.0"
 description = "Outil de capture d'écran pour Windows 11, puis macOS"
 edition = "2021"
 license = "FSL-1.1-MIT"
@@ -36,18 +36,23 @@ windows = { version = "0.62", features = [
   "Win32_Graphics_Dwm",
   "Win32_Graphics_Gdi",
   "Win32_Security",
+  "Win32_Storage_FileSystem",
   "Win32_System_Com",
   "Win32_System_DataExchange",
   "Win32_System_LibraryLoader",
   "Win32_System_Memory",
+  "Win32_System_Ole",
   "Win32_System_Registry",
   "Win32_System_RemoteDesktop",
   "Win32_System_Threading",
   "Win32_UI_HiDpi",
+  "Win32_UI_Input_KeyboardAndMouse",
   "Win32_UI_Shell",
   "Win32_UI_Shell_Common",
   "Win32_UI_WindowsAndMessaging",
 ] }
+# Savoir si WebView2 est là avant de montrer l'installateur (déjà tiré par wry).
+webview2-com = "0.39"
 
 [profile.release]
 opt-level = 3

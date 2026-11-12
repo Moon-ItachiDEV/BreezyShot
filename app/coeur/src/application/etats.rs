@@ -78,6 +78,10 @@ pub enum Declencheur {
     DelaiEcoule,
     /// Glisser-déposer réussi depuis la vignette.
     GlisserReussi,
+    /// La vignette n'a pas pu se montrer (filet : sa page n'a pas posé la carte à temps).
+    VignetteImpossible,
+    /// Fin du délai d'annulation de Supprimer : la capture est effacée.
+    CaptureSupprimee,
 }
 
 impl Declencheur {
@@ -122,10 +126,13 @@ pub const PASSAGES: &[(Etat, Declencheur, Etat)] = &[
     (E::Decoupe, D::ImagePreteSansVignette, E::Repos),
     // Souffle.
     (E::Souffle, D::SouffleTermine, E::Vignette),
+    (E::Souffle, D::VignetteImpossible, E::Repos),
     // Vignette : un raccourci la ferme et relance une capture.
     (E::Vignette, D::VignetteFermee, E::Repos),
     (E::Vignette, D::DelaiEcoule, E::Repos),
     (E::Vignette, D::GlisserReussi, E::Repos),
+    (E::Vignette, D::VignetteImpossible, E::Repos),
+    (E::Vignette, D::CaptureSupprimee, E::Repos),
     (E::Vignette, D::DemandeCapture(Mode::Zone), E::Gel),
     (E::Vignette, D::DemandeCapture(Mode::PleinEcran), E::Gel),
     (E::Vignette, D::DemandeCapture(Mode::Fenetre), E::Gel),
@@ -313,9 +320,18 @@ mod tests {
 
     #[test]
     fn sorties_de_la_vignette() {
-        for d in [D::VignetteFermee, D::DelaiEcoule, D::GlisserReussi] {
+        for d in [
+            D::VignetteFermee,
+            D::DelaiEcoule,
+            D::GlisserReussi,
+            D::VignetteImpossible,
+            D::CaptureSupprimee,
+        ] {
             assert_eq!(suivant(E::Vignette, d), Some(E::Repos));
         }
+        // Filet pendant le souffle ; Supprimer n'existe qu'une fois la carte montrée.
+        assert_eq!(suivant(E::Souffle, D::VignetteImpossible), Some(E::Repos));
+        assert_eq!(suivant(E::Souffle, D::CaptureSupprimee), None);
     }
 
     #[test]

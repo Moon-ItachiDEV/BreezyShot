@@ -167,18 +167,30 @@ impl Reservations {
             tenir(app, r, &self.bilan, &self.rappel)
         });
         let Some(nouveau) = choix.retenu else {
+            if candidats.is_empty() {
+                // Liste vide : « pas de raccourci voulu ». L'ancien est rendu au système.
+                self.poser(&choix);
+                if let Some(ancien) = actuel {
+                    lacher(app, &ancien);
+                }
+            }
             return choix;
         };
-        if let Ok(mut b) = self.bilan.lock() {
-            match b.actions.iter_mut().find(|a| a.action == action) {
-                Some(a) => *a = choix.clone(),
-                None => b.actions.push(choix.clone()),
-            }
-        }
+        self.poser(&choix);
         if let Some(ancien) = actuel.filter(|a| *a != nouveau) {
             lacher(app, &ancien);
         }
         choix
+    }
+
+    /// Remplace, dans le bilan, la ligne de l'action de `choix`.
+    fn poser(&self, choix: &ChoixAction) {
+        if let Ok(mut b) = self.bilan.lock() {
+            match b.actions.iter_mut().find(|a| a.action == choix.action) {
+                Some(a) => *a = choix.clone(),
+                None => b.actions.push(choix.clone()),
+            }
+        }
     }
 
     /// Rend au système tous les raccourcis tenus, le temps d'une saisie : sans cela,

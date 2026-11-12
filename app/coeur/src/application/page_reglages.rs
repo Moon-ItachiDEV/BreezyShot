@@ -116,19 +116,51 @@ pub fn ligne_changement(c: &Changement) -> String {
     format!("reglage change: {} {valeur}", c.ligne())
 }
 
+/// Refus de la dernière sortie active (texte du contrat, une ligne).
+pub const REFUS_AUCUNE_SORTIE: &str = "Gardez au moins la copie, l'enregistrement ou la vignette";
+
 /// Le texte d'un refus de `reglages::valider`.
-fn refus_validation(ligne: &str, e: &ErreurEcriture) -> Refus {
+fn refus_validation(ligne: &str, e: &ErreurEcriture, n: &Reglages) -> Refus {
     match e {
-        ErreurEcriture::AucuneSortie => Refus::nouveau(
-            ligne,
-            "Gardez la copie, l'enregistrement ou la vignette",
-            "aucune_sortie",
-        ),
+        ErreurEcriture::AucuneSortie => Refus::nouveau(ligne, REFUS_AUCUNE_SORTIE, "aucune_sortie"),
         ErreurEcriture::ValeurInvalide {
             champ: "modele_nom",
-        } => Refus::nouveau(ligne, "Nom vide", "nom_vide"),
+        } if n.modele_nom.trim().is_empty() => Refus::nouveau(ligne, "Nom vide", "nom_vide"),
+        ErreurEcriture::ValeurInvalide {
+            champ: "modele_nom",
+        } => Refus::nouveau(ligne, "Nom trop long", "nom_trop_long"),
         _ => Refus::nouveau(ligne, "", "invalide"),
     }
+}
+
+/// Que faire du fichier relu avant un changement.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Relecture {
+    /// Rien n'a changé dehors, ou le fichier n'a pas pu être lu (valeurs protégées, qui ne
+    /// disent rien de lui) : la mémoire reste la base, `derniere_lecture` et les raccourcis
+    /// ne bougent pas.
+    Garder,
+    /// Le fichier a été changé dehors : il devient la base.
+    Adopter,
+}
+
+/// Décide de la relecture. Fonction pure.
+pub fn relecture(relu: &Reglages, derniere: Option<&Reglages>) -> Relecture {
+    if relu.protege() || derniere == Some(relu) {
+        Relecture::Garder
+    } else {
+        Relecture::Adopter
+    }
+}
+
+/// Un texte venu de la page, rendu sûr pour le journal : ASCII imprimable seulement (le
+/// reste devient « ? »), 24 caractères au plus. Fonction pure.
+pub fn code_pour_journal(texte: &str) -> String {
+    texte
+        .chars()
+        .take(24)
+        .map(|c| if c.is_ascii_graphic() { c } else { '?' })
+        .collect()
 }
 
 /// Applique un changement à une copie des réglages et la valide par le module `reglages`.
@@ -148,7 +180,7 @@ pub fn appliquer(r: &Reglages, c: &Changement) -> Result<Reglages, Refus> {
         Changement::Theme(t) => n.theme = Theme::depuis_texte(t).ok_or_else(invalide)?,
         Changement::Demarrage(b) => n.demarrer_avec_systeme = *b,
     }
-    reglages::valider(&n).map_err(|e| refus_validation(c.ligne(), &e))?;
+    reglages::valider(&n).map_err(|e| refus_validation(c.ligne(), &e, &n))?;
     Ok(n)
 }
 
@@ -351,6 +383,9 @@ pub struct VueReglages {
     pub raccourcis: Vec<VueRaccourci>,
     pub version: &'static str,
     pub alerte: Option<String>,
+    /// Vrai pendant la saisie d'un raccourci : faux, la page sort de « Appuyez… » (filet
+    /// des 15 s, fenêtre refermée).
+    pub saisie_en_cours: bool,
 }
 
 /// Ce que la vue prend ailleurs que dans les réglages.
@@ -366,6 +401,7 @@ pub struct Contexte<'a> {
     pub version: &'static str,
     pub alerte: Option<String>,
     pub maintenant: DateTime<Local>,
+    pub saisie_en_cours: bool,
 }
 
 /// L'état de « Lancer au démarrage » pour la page.
@@ -425,6 +461,7 @@ pub fn vue(r: &Reglages, c: &Contexte<'_>) -> VueReglages {
         raccourcis,
         version: c.version,
         alerte: c.alerte.clone(),
+        saisie_en_cours: c.saisie_en_cours,
     }
 }
 
@@ -539,7 +576,46 @@ mod tests {
         let e = appliquer(&seule_copie, &Changement::Copier(false)).unwrap_err();
         assert_eq!(e.ligne, "copier");
         assert_eq!(e.code, "aucune_sortie");
-        assert!(!e.texte.is_empty());
+        assert_eq!(e.texte, REFUS_AUCUNE_SORTIE);
+        // Nom vide, nom trop long.
+        let e = appliquer(&r, &Changement::ModeleNom("  ".into())).unwrap_err();
+        assert_eq!((e.texte.as_str(), e.code), ("Nom vide", "nom_vide"));
+        let long = "a".repeat(reglages::MODELE_NOM_MAX + 1);
+        let e = appliquer(&r, &Changement::ModeleNom(long)).unwrap_err();
+        assert_eq!(
+            (e.texte.as_str(), e.code),
+            ("Nom trop long", "nom_trop_long")
+        );
+        let juste = "a".repeat(reglages::MODELE_NOM_MAX);
+        assert!(appliquer(&r, &Changement::ModeleNom(juste)).is_ok());
+    }
+
+    #[test]
+    fn relecture_du_fichier() {
+        let derniere = defaut();
+        // Relu sain, égal : rien.
+        assert_eq!(relecture(&derniere, Some(&derniere)), Relecture::Garder);
+        // Relu sain, différent : adopté.
+        let mut change = derniere.clone();
+        change.modele_nom = "Externe {date}".into();
+        assert_eq!(relecture(&change, Some(&derniere)), Relecture::Adopter);
+        assert_eq!(relecture(&change, None), Relecture::Adopter);
+        // Relu protégé (fichier verrouillé un instant) : la mémoire est gardée.
+        let dossier = tempfile::tempdir().unwrap();
+        let chemin = dossier.path().join("reglages.json");
+        std::fs::create_dir_all(&chemin).unwrap(); // un dossier à la place : illisible
+        let (protege, _) = reglages::charger(dossier.path(), Plateforme::Windows);
+        assert!(protege.protege());
+        assert_eq!(relecture(&protege, Some(&derniere)), Relecture::Garder);
+        assert_eq!(relecture(&protege, None), Relecture::Garder);
+    }
+
+    #[test]
+    fn code_sur_pour_le_journal() {
+        assert_eq!(code_pour_journal("KeyA"), "KeyA");
+        assert_eq!(code_pour_journal("a\nfaux"), "a?faux");
+        assert_eq!(code_pour_journal("é"), "?");
+        assert_eq!(code_pour_journal(&"x".repeat(100)).len(), 24);
     }
 
     #[test]
@@ -687,6 +763,7 @@ mod tests {
             version: "9.9.9",
             alerte: None,
             maintenant: Local.with_ymd_and_hms(2026, 11, 12, 10, 42, 8).unwrap(),
+            saisie_en_cours: false,
         };
         let v = vue(&r2, &c);
         assert_eq!(v.version, "9.9.9");

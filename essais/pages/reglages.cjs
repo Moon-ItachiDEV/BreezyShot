@@ -30,7 +30,7 @@ const VUE = {
     { action: 'plein_ecran', libelle: 'Plein écran', touches: ['Ctrl', 'Maj', '2'], modifie: false, refus: null },
     { action: 'fenetre', libelle: 'Fenêtre', touches: [], modifie: true, refus: 'Aucun raccourci' },
   ],
-  version: '7.8.9-essai', alerte: null,
+  version: '7.8.9-essai', alerte: null, saisie_en_cours: false,
 };
 const SANS_VIGNETTE = { ...VUE, lignes: ['copier', 'dossier', 'modele_nom', 'theme', 'demarrage', 'version'] };
 
@@ -205,6 +205,17 @@ const SANS_VIGNETTE = { ...VUE, lignes: ['copier', 'dossier', 'modele_nom', 'the
     a = await appels(p);
     verifier(a.length === 2 && a[1][1].active === false && !a.some(x => x[0] === 'reglages_raccourci'), '7 perte du focus : fin de saisie', JSON.stringify(a));
     await onglet(p, 'Raccourcis');
+    // Filet des 15 s : la vue poussée dit la saisie finie, la page sort de « Appuyez… ».
+    await vider(p);
+    await bouton().click(); await p.waitForTimeout(50);
+    const avantFilet = await p.$eval('[data-action="plein_ecran"]', l => [l.dataset.saisie, l.querySelector('[data-controle="saisie"]').textContent]);
+    await p.evaluate(() => __emettre('reglages:etat', { ...__vue, saisie_en_cours: false }));
+    await p.waitForTimeout(50);
+    const apresFilet = await p.$eval('[data-action="plein_ecran"]', l => [l.dataset.saisie ?? null, l.querySelector('[data-controle="saisie"]').textContent, l.querySelector('[data-controle="saisie"]').getAttribute('aria-pressed')]);
+    a = await appels(p);
+    verifier(avantFilet[0] === 'oui' && apresFilet[0] === null && !apresFilet[1].includes('Appuyez') && apresFilet[2] === 'false' && a.length === 1,
+      '7 filet : vue poussée sans saisie → « Appuyez… » retiré, cœur non rappelé', JSON.stringify([avantFilet, apresFilet, a]));
+    await bouton().click(); await p.keyboard.press('Escape'); await p.waitForTimeout(50);
     // Impr. écran : seulement au relâchement.
     await vider(p);
     await bouton().click();

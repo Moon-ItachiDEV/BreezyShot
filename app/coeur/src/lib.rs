@@ -5,6 +5,7 @@
 pub mod application;
 pub mod capture;
 pub mod fenetres;
+pub mod installation;
 pub mod raccourcis;
 pub mod reglages;
 pub mod sortie;

@@ -19,6 +19,99 @@
     },
     "usage": "Pastille d'erreur du bandeau.",
     "origine": "Maquette complète, variable --danger (le #C42B1C clair est aussi celui de ARCHITECTURE.md §6 et de « Choix 2 »)."
+   },
+   {
+    "name": "vignette-voile",
+    "value": "linear-gradient(to top, rgba(8,10,14,0.62), rgba(8,10,14,0.18) 45%, transparent 70%)",
+    "usage": "Voile de la carte au survol (sous les boutons).",
+    "origine": "design/vignette5 (disposition A « Au survol »), .la .veil."
+   },
+   {
+    "name": "vignette-voile-supprimee",
+    "value": "rgba(8,10,14,0.40)",
+    "usage": "Voile de la carte « supprimée ».",
+    "origine": "design/vignette5 (disposition A « Au survol »), .la.deleted .veil."
+   },
+   {
+    "name": "vignette-rond-fond",
+    "value": "rgba(20,20,22,0.58)",
+    "usage": "Fond des boutons ronds et de la croix.",
+    "origine": "design/vignette5 (disposition A « Au survol »), .la .rb."
+   },
+   {
+    "name": "vignette-rond-fond-survol",
+    "value": "rgba(20,20,22,0.82)",
+    "usage": "Fond des boutons ronds au survol.",
+    "origine": "design/vignette5 (disposition A « Au survol »), .la .rb:hover."
+   },
+   {
+    "name": "vignette-rond-bord",
+    "value": "rgba(255,255,255,0.16)",
+    "usage": "Bord des boutons ronds.",
+    "origine": "design/vignette5 (disposition A « Au survol »), .la .rb."
+   },
+   {
+    "name": "vignette-rond-texte",
+    "value": "#FFFFFF",
+    "usage": "Pictogramme des boutons ronds.",
+    "origine": "design/vignette5 (disposition A « Au survol »), .la .rb."
+   },
+   {
+    "name": "vignette-pilule-fond",
+    "value": "rgba(255,255,255,0.94)",
+    "usage": "Fond de la pilule secondaire (Enregistrer).",
+    "origine": "design/vignette5 (disposition A « Au survol »), .la .main .vb:not(.accent)."
+   },
+   {
+    "name": "vignette-pilule-texte",
+    "value": "#1A1A1A",
+    "usage": "Texte de la pilule secondaire.",
+    "origine": "design/vignette5 (disposition A « Au survol »), .la .main .vb:not(.accent)."
+   },
+   {
+    "name": "vignette-pilule-fait",
+    "value": "#0F7B0F",
+    "usage": "Texte de la pilule secondaire après réussite.",
+    "origine": "design/vignette5 (disposition A « Au survol »), .vb.done."
+   },
+   {
+    "name": "vignette-barre-fond",
+    "value": "rgba(0,0,0,0.14)",
+    "usage": "Fond de la barre du temps restant.",
+    "origine": "design/vignette5 (disposition A « Au survol »), .prog."
+   },
+   {
+    "name": "souffle-flash",
+    "value": "#FFFFFF",
+    "usage": "Flash sur la zone capturée.",
+    "origine": "design/vignette5 (disposition A « Au survol »), .flash."
+   },
+   {
+    "name": "fenetre-fond-haut",
+    "value": {
+     "light": "rgba(246,246,248,.93)",
+     "dark": "rgba(36,36,38,.93)"
+    },
+    "usage": "Haut du dégradé de la fenêtre de l'installateur.",
+    "origine": "Maquette validée de l'installateur (d-mix.html, « A + C »). Variable --win-a."
+   },
+   {
+    "name": "fenetre-fond-bas",
+    "value": {
+     "light": "rgba(238,240,245,.96)",
+     "dark": "rgba(30,31,34,.96)"
+    },
+    "usage": "Bas du dégradé de la fenêtre de l'installateur.",
+    "origine": "Maquette validée de l'installateur (d-mix.html, « A + C »). Variable --win-b."
+   },
+   {
+    "name": "fermer-survol",
+    "value": {
+     "light": "#C42B1C",
+     "dark": "#C42B1C"
+    },
+    "usage": "Fond rouge du bouton Fermer survolé (barre de titre).",
+    "origine": "Maquette validée de l'installateur (d-mix.html, « A + C »). Variable --close-hover ; même rouge que --danger clair."
    }
   ]
  },
@@ -41,6 +134,48 @@
     "value": "300ms",
     "usage": "Entrée en ressort de la pilule du bandeau (courbe-ressort).",
     "origine": "ARCHITECTURE.md §6 ; maquette complète (duration:300). Même valeur que duree-vignette, mais jeton propre au bandeau (relecture de l'étape 3)."
+   },
+   {
+    "name": "duree-souffle-flash",
+    "value": "180ms",
+    "usage": "Flash sur la zone capturée (opacité 0,55 → 0, courbe-douce).",
+    "origine": "Contrat de l'étape 9, décision D8 ; design/vignette5 (disposition A « Au survol »), animate 180."
+   },
+   {
+    "name": "duree-vignette-confirmation",
+    "value": "1800ms",
+    "usage": "« Copié » / « Enregistré » restent ce temps avant de revenir.",
+    "origine": "design/vignette5 (disposition A « Au survol »), setTimeout 1800."
+   },
+   {
+    "name": "duree-vignette-voile",
+    "value": "180ms",
+    "usage": "Fondu du voile au survol.",
+    "origine": "design/vignette5 (disposition A « Au survol »), .la .veil."
+   },
+   {
+    "name": "duree-vignette-bouton",
+    "value": "160ms",
+    "usage": "Fondu d'apparition d'un bouton au survol.",
+    "origine": "design/vignette5 (disposition A « Au survol »), .la .main>*."
+   },
+   {
+    "name": "duree-vignette-decalage",
+    "value": "60ms",
+    "usage": "Décalage entre deux boutons qui apparaissent.",
+    "origine": "design/vignette5 (disposition A « Au survol »), transition-delay 60/120 ms."
+   },
+   {
+    "name": "duree-vignette-grise",
+    "value": "220ms",
+    "usage": "Image grisée de la carte « supprimée ».",
+    "origine": "design/vignette5 (disposition A « Au survol »), .prev img."
+   },
+   {
+    "name": "duree-envol-fenetre",
+    "value": "460ms",
+    "usage": "Durée de l'envol de la fenêtre de l'installateur vers la zone de notification.",
+    "origine": "Maquette validée de l'installateur (d-mix.html, « A + C »). win.animate(..., duration:460)."
    }
   ]
  },
@@ -172,6 +307,156 @@
     "value": "160px",
     "usage": "Largeur maximale d'un bouton d'action en texte, au-delà : « … ». Garde la place du texte et de la croix.",
     "origine": "À valider par le fil design : choix de l'agent pour que les boutons restent à droite sans passer à la ligne."
+   },
+   {
+    "name": "vignette-largeur",
+    "value": "260px",
+    "usage": "Largeur de la carte.",
+    "origine": "design/vignette5 (disposition A « Au survol »), .thumb width (max)."
+   },
+   {
+    "name": "vignette-ratio",
+    "value": "16 / 10",
+    "usage": "Proportions de l'image de la carte.",
+    "origine": "design/vignette5 (disposition A « Au survol »), .la .prev."
+   },
+   {
+    "name": "vignette-marge",
+    "value": "12px",
+    "usage": "Écart entre la carte et les bords de la zone utile.",
+    "origine": "design/vignette5 (disposition A « Au survol »), .thumb left:12px."
+   },
+   {
+    "name": "vignette-rayon",
+    "value": "8px",
+    "usage": "Coins de la carte.",
+    "origine": "design/vignette5 (disposition A « Au survol »), .thumb."
+   },
+   {
+    "name": "vignette-barre",
+    "value": "3px",
+    "usage": "Hauteur de la barre du temps restant.",
+    "origine": "design/vignette5 (disposition A « Au survol »), .prog."
+   },
+   {
+    "name": "vignette-pilule",
+    "value": "28px",
+    "usage": "Hauteur des pilules (Copier, Enregistrer).",
+    "origine": "design/vignette5 (disposition A « Au survol »), .la .main .vb."
+   },
+   {
+    "name": "vignette-pilule-texte-taille",
+    "value": "12.5px",
+    "usage": "Taille du texte des pilules.",
+    "origine": "design/vignette5 (disposition A « Au survol »), .la .main .vb."
+   },
+   {
+    "name": "vignette-rond",
+    "value": "26px",
+    "usage": "Côté des boutons ronds et de la croix.",
+    "origine": "design/vignette5 (disposition A « Au survol »), .la .rb."
+   },
+   {
+    "name": "vignette-picto",
+    "value": "14px",
+    "usage": "Pictogrammes des boutons ronds.",
+    "origine": "design/vignette5 (disposition A « Au survol »), .la .rb .ico."
+   },
+   {
+    "name": "vignette-arc",
+    "value": "40px",
+    "usage": "Hauteur de l'arc de l'envol (à mi-chemin).",
+    "origine": "design/vignette5 (disposition A « Au survol »), envol dy*.5-40."
+   },
+   {
+    "name": "vignette-entree-decalage",
+    "value": "14px",
+    "usage": "Départ vertical de l'entrée (−14 px pour un coin du haut).",
+    "origine": "design/vignette5 (disposition A « Au survol »), translateY(14px)."
+   },
+   {
+    "name": "vignette-vent-recul",
+    "value": "6px",
+    "usage": "Petit recul au début du coup de vent.",
+    "origine": "design/vignette5 (disposition A « Au survol »), translateX(6px) rotate(1deg)."
+   },
+   {
+    "name": "vignette-vent-decalage",
+    "value": "125%",
+    "usage": "Distance du coup de vent (vers le bord le plus proche).",
+    "origine": "design/vignette5 (disposition A « Au survol »), translate(-125%,-14px)."
+   },
+   {
+    "name": "vignette-vent-angle",
+    "value": "6deg",
+    "usage": "Rotation finale du coup de vent.",
+    "origine": "design/vignette5 (disposition A « Au survol »), rotate(-6deg)."
+   },
+   {
+    "name": "vignette-vent-flou",
+    "value": "6px",
+    "usage": "Flou final du coup de vent.",
+    "origine": "design/vignette5 (disposition A « Au survol »), blur(6px)."
+   },
+   {
+    "name": "installateur-carte-largeur",
+    "value": "720px",
+    "usage": "Largeur de la carte de l'installateur.",
+    "origine": "Maquette validée de l'installateur (d-mix.html, « A + C »). .win width min(720px,…)."
+   },
+   {
+    "name": "installateur-carte-hauteur",
+    "value": "480px",
+    "usage": "Hauteur de la carte de l'installateur.",
+    "origine": "Maquette validée de l'installateur (d-mix.html, « A + C »). .win height min(480px,…)."
+   },
+   {
+    "name": "installateur-marge",
+    "value": "40px",
+    "usage": "Marge transparente autour de la carte (place de l'ombre).",
+    "origine": "Maquette validée de l'installateur (d-mix.html, « A + C »). écart carte/fenêtre."
+   },
+   {
+    "name": "installateur-titre-hauteur",
+    "value": "32px",
+    "usage": "Hauteur de la barre de titre.",
+    "origine": "Maquette validée de l'installateur (d-mix.html, « A + C »). .titlebar height:32px."
+   },
+   {
+    "name": "installateur-pied-hauteur",
+    "value": "64px",
+    "usage": "Hauteur du pied de la carte.",
+    "origine": "Maquette validée de l'installateur (d-mix.html, « A + C »). .foot height:64px."
+   },
+   {
+    "name": "installateur-logo",
+    "value": "96px",
+    "usage": "Taille du Moulinet de l'accueil et de l'installation.",
+    "origine": "Maquette validée de l'installateur (d-mix.html, « A + C »). .logo width:96px."
+   },
+   {
+    "name": "installateur-marque",
+    "value": "128px",
+    "usage": "Taille de la marque (moulinet) et de la coche.",
+    "origine": "Maquette validée de l'installateur (d-mix.html, « A + C »). .mark/.check 128px."
+   },
+   {
+    "name": "installateur-barre",
+    "value": "280px",
+    "usage": "Largeur de la barre de progression.",
+    "origine": "Maquette validée de l'installateur (d-mix.html, « A + C »). .pbar width:280px."
+   },
+   {
+    "name": "installateur-titre-taille",
+    "value": "40px",
+    "usage": "Taille du titre « BreezyShot » de l'accueil.",
+    "origine": "Maquette validée de l'installateur (d-mix.html, « A + C »). h1 font 40/52."
+   },
+   {
+    "name": "installateur-titre-interligne",
+    "value": "52px",
+    "usage": "Interligne du titre de l'accueil.",
+    "origine": "Maquette validée de l'installateur (d-mix.html, « A + C »). h1 line 52."
    }
   ]
  }

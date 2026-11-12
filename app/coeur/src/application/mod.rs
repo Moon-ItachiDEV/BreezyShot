@@ -17,8 +17,10 @@ pub mod etat;
 pub mod etats;
 pub mod fenetre_reglages;
 pub mod icone;
+pub mod installateur;
 pub mod journal;
 pub mod page_reglages;
+pub mod vignette;
 pub mod zone;
 
 use std::collections::BTreeMap;
@@ -32,15 +34,17 @@ use tauri::{AppHandle, Manager, RunEvent};
 
 use crate::capture;
 use crate::fenetres::selection::{self, Selection};
+use crate::fenetres::vignette::{self as carte, Vignette};
 use crate::fenetres::{self, Bandeau, Genre, Message};
 use crate::raccourcis::{self, Bilan, Decision};
 use crate::reglages::{self, Constat, Plateforme, Reglages};
-use crate::sortie;
+use crate::sortie::{self, Annonce};
 use crate::systeme::gel::{self, Changement};
 use crate::systeme::{self, Dossiers, Systeme, Theme};
 use arguments::Commande;
 use etats::{Automate, Declencheur, Etat, Mode};
 use icone::EntreeMenu;
+use vignette::{CaptureMontree, EtatSuppression};
 use zone::{Arrivee, Geste, Probleme, Vue};
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -62,9 +66,9 @@ pub const ATTENTE_COMPOSITION: Duration = Duration::from_millis(100);
 /// disparaît en fondu, ne doit pas être sur la photo. Un raccourci n'attend jamais.
 pub const ATTENTE_MENU: Duration = Duration::from_millis(350);
 
-/// Vrai quand la vignette existe (étape 9). D'ici là, chaque capture est enregistrée,
-/// sans que le réglage soit modifié ni écrit (`zone::doit_enregistrer`).
-pub const VIGNETTE_CONSTRUITE: bool = false;
+/// Vrai depuis que la vignette existe (étape 9) : l'enregistrement automatique ne dépend
+/// plus que du réglage (`zone::doit_enregistrer`) ; sinon, le bouton Enregistrer.
+pub const VIGNETTE_CONSTRUITE: bool = true;
 
 /// Les actions dont la capture existe : seules celles-ci reçoivent un raccourci (§5) et
 /// une entrée au menu.
@@ -97,7 +101,32 @@ pub enum Evenement {
     SortieEchue(u64),
     /// Annonce du démarrage, postée par `demarrer` pour un tour de la boucle déjà lancée.
     AnnonceDemarrage { local: PathBuf, bilan: Bilan },
+    /// Signal de la vignette ou de son souffle.
+    Vignette(carte::Signal),
+    /// Copier ou Enregistrer de la vignette est fini (rendu par son fil).
+    ActionFaite(Box<FinAction>),
+    /// Les fichiers d'une capture supprimée sont effacés (rendu par son fil).
+    SuppressionFaite {
+        id: u64,
+        suppression: sortie::Suppression,
+        resultats: Vec<(PathBuf, Result<(), String>)>,
+    },
+    /// Le glisser de la carte `id`, reposté hors du gestionnaire de la page.
+    LancerGlisser { id: u64, chemin: PathBuf },
+    /// Capture demandée par la ligne de commande (`--capturer <mode>`, l'installateur).
+    CaptureCli(String),
 }
+
+/// Ce que le fil d'une action de la vignette rend au fil principal.
+#[derive(Debug, Clone, PartialEq)]
+pub struct FinAction {
+    pub id: u64,
+    pub action: String,
+    pub bilan: sortie::Bilan,
+}
+
+/// L'aperçu de la vignette : le PNG et sa taille.
+pub type Apercu = (Arc<Vec<u8>>, (u32, u32));
 
 /// Ce que le fil de sortie rend au fil principal.
 #[derive(Debug, Clone, PartialEq)]
@@ -110,6 +139,14 @@ pub struct FinSortie {
     pub duree_sortie: Duration,
     /// Réception du signal `Zone` (en plein écran : de la demande de capture).
     pub relache: Instant,
+    /// Les pixels, gardés pour la vignette (Copier, Enregistrer).
+    pub pixels: Arc<gel::Pixels>,
+    /// Le rectangle capturé, pixels réels du bureau.
+    pub capture: systeme::Rect,
+    /// La vignette était voulue au lancement de la sortie ; l'aperçu (`None` s'il n'a pas
+    /// pu être fait, ou pas voulu).
+    pub vignette: bool,
+    pub apercu: Option<Apercu>,
 }
 
 /// Une capture de zone en cours, de `montrer_ecran_fige` jusqu'au découpage ou à
@@ -209,6 +246,13 @@ pub struct Application {
     /// Nombre de captures démarrées (demandes acceptées par la table). Une demande du
     /// menu, différée de `ATTENTE_MENU`, est caduque si ce nombre a changé depuis le clic.
     demandes: AtomicU64,
+    /// La capture que montre la vignette (fil principal ; verrou jamais tenu pendant un
+    /// appel à un module).
+    montree: Mutex<Option<CaptureMontree>>,
+    /// Vrai pendant la boucle d'un glisser.
+    glisser: AtomicBool,
+    /// Capture demandée par `--capturer` avant la fin du démarrage : jouée à `pret`.
+    capture_en_attente: Mutex<Option<String>>,
 }
 
 /// Une annonce envoyée au bandeau, dont la situation attend d'être retenue.
@@ -219,9 +263,55 @@ struct AnnonceEnAttente {
     situation: Option<raccourcis::Situation>,
 }
 
-/// Point d'entrée de l'app (appelé par `main.rs`).
+/// Point d'entrée de l'exe (appelé par `main.rs`). Le même fichier est l'app, l'installateur
+/// ou la désinstallation, selon son nom et la ligne de commande (§3.1). Le contexte Tauri
+/// (qui embarque les pages) n'est engendré qu'une fois, puis donné à l'un des deux parcours.
 pub fn lancer() {
     let (commande, inconnus) = arguments::lire(std::env::args().skip(1));
+    let nom_exe = std::env::current_exe()
+        .ok()
+        .as_deref()
+        .and_then(arguments::nom_de_fichier);
+    // La désinstallation ne construit pas Tauri (pas de fenêtre) ; les deux autres parcours
+    // reçoivent le contexte, engendré une seule fois ici (un seul `generate_context!`).
+    if let arguments::Lancement::Desinstallation =
+        arguments::lancement(nom_exe.as_deref(), &commande)
+    {
+        std::process::exit(desinstaller());
+    }
+    let contexte = tauri::generate_context!();
+    match arguments::lancement(nom_exe.as_deref(), &commande) {
+        arguments::Lancement::App(commande) => lancer_app(contexte, commande, inconnus),
+        arguments::Lancement::Installateur => {
+            std::process::exit(installateur::lancer_installateur(contexte))
+        }
+        arguments::Lancement::Desinstallation => std::process::exit(desinstaller()),
+    }
+}
+
+/// Désinstalle, en donnant à l'installateur le retrait du démarrage avec Windows (la valeur
+/// `Run` appartient aux Réglages : l'installateur ne la connaît pas).
+fn desinstaller() -> i32 {
+    installateur::desinstaller_avec(Box::new(|| {
+        let avant = systeme::demarrage_avec_systeme(None)?;
+        systeme::demarrage_avec_systeme(Some(false))?;
+        log::info!("{}", ligne_demarrage_retire(avant));
+        Ok(())
+    }))
+}
+
+/// Ligne du journal de la désinstallation pour le démarrage avec Windows, d'après l'état lu
+/// avant le retrait. Fonction pure.
+pub fn ligne_demarrage_retire(avant: systeme::EtatDemarrage) -> &'static str {
+    use systeme::EtatDemarrage as E;
+    match avant {
+        E::Actif | E::DesactiveParWindows => "desinstallation demarrage: retire",
+        E::Inactif | E::Indisponible => "desinstallation demarrage: absent",
+    }
+}
+
+/// Démarre l'app elle-même (la commande n'est jamais `Desinstaller` ici).
+fn lancer_app(contexte: tauri::Context, commande: Commande, inconnus: Vec<String>) {
     let construction = tauri::Builder::default()
         // L'instance unique en premier : une seconde instance confie ses arguments à la
         // première et sort avec le code 0 avant d'aller plus loin.
@@ -246,13 +336,22 @@ pub fn lancer() {
             fenetre_reglages::reglages_parcourir,
             fenetre_reglages::reglages_saisie,
             fenetre_reglages::reglages_raccourci,
-            fenetre_reglages::reglages_retablir
+            fenetre_reglages::reglages_retablir,
+            carte::vignette_pret,
+            carte::vignette_image,
+            carte::vignette_zone,
+            carte::vignette_entree,
+            carte::vignette_action,
+            carte::vignette_glisser,
+            carte::vignette_terminee,
+            carte::souffle_pret,
+            carte::souffle_termine
         ])
         .setup(move |app| {
             demarrer(app.handle(), commande, &inconnus);
             Ok(())
         })
-        .build(tauri::generate_context!());
+        .build(contexte);
     match construction {
         Ok(app) => app.run(|app, evenement| match evenement {
             // L'app vit sans fenêtre : fermer la dernière fenêtre ne la quitte pas.
@@ -326,6 +425,13 @@ fn demarrer(app: &AppHandle, commande: Commande, inconnus: &[String]) {
         app.exit(0);
         return;
     }
+    // `--capturer <mode>` au démarrage (l'exe lancé directement) : la demande attend `pret`.
+    if let Commande::Capturer(mode) = &commande {
+        log::info!("--capturer recu: {}", mode_journal(mode));
+        if let Ok(mut attente) = app.state::<Application>().capture_en_attente.lock() {
+            *attente = Some(mode.clone());
+        }
+    }
 
     match systeme::version_windows() {
         Some(build) => log::info!("systeme windows build {build}"),
@@ -377,6 +483,17 @@ fn demarrer(app: &AppHandle, commande: Commande, inconnus: &[String]) {
             app.manage(bandeau);
         }
         Err(e) => log::warn!("bandeau indisponible: {e}"),
+    }
+
+    // Vignette et souffle, cachés jusqu'à la première capture.
+    let pour_vignette = app.clone();
+    match Vignette::creer(app, move |s| {
+        traiter(&pour_vignette, Evenement::Vignette(s))
+    }) {
+        Ok(v) => {
+            app.manage(v);
+        }
+        Err(e) => log::warn!("vignette indisponible: {e}"),
     }
 
     // Écran figé et sélection (capture de zone).
@@ -442,6 +559,38 @@ fn demarrer(app: &AppHandle, commande: Commande, inconnus: &[String]) {
         .demarree
         .store(true, Ordering::SeqCst);
     log::info!("pret");
+
+    // Capture demandée avant `pret` (`--capturer` au démarrage) : postée pour le tour
+    // suivant, maintenant que tout est en place.
+    let en_attente = app
+        .state::<Application>()
+        .capture_en_attente
+        .lock()
+        .ok()
+        .and_then(|mut a| a.take());
+    if let Some(mode) = en_attente {
+        poster_plus_tard(app, Evenement::CaptureCli(mode));
+    }
+}
+
+/// Nom de mode pour le journal, ou `<vide>` / `<inconnu: …>`.
+fn mode_journal(mode: &str) -> String {
+    if mode.is_empty() {
+        "<vide>".into()
+    } else if Mode::depuis_nom(mode).is_some() {
+        mode.to_string()
+    } else {
+        format!("<inconnu: {mode}>")
+    }
+}
+
+/// Lance la capture demandée par `--capturer`. Une valeur inconnue ne fait qu'une ligne au
+/// journal (contrat §4.4). Sans `ATTENTE_MENU` : la demande est directe.
+fn capturer_cli(app: &AppHandle, mode: &str) {
+    match Mode::depuis_nom(mode) {
+        Some(m) => lancer_capture(app, m),
+        None => log::warn!("--capturer: mode inconnu {}", mode_journal(mode)),
+    }
 }
 
 /// Prépare l'écran figé, ses filets de sécurité et la sélection (fil principal). Un échec
@@ -691,6 +840,10 @@ pub fn traiter(app: &AppHandle, evenement: Evenement) {
             | Evenement::SortieFaite(_)
             | Evenement::SortieEchue(_)
             | Evenement::Raccourci(raccourcis::Signal::Echap)
+            | Evenement::Vignette(_)
+            | Evenement::ActionFaite(_)
+            | Evenement::SuppressionFaite { .. }
+            | Evenement::LancerGlisser { .. }
     );
     if de_capture && hors_fil_principal(app) {
         let pour = app.clone();
@@ -708,7 +861,19 @@ pub fn traiter(app: &AppHandle, evenement: Evenement) {
                     log::info!("--quitter recu: fermeture demandee");
                     app.exit(0);
                 }
-                Commande::Demarrer => log::info!("seconde instance refusee"),
+                Commande::Capturer(mode) => {
+                    log::info!("--capturer recu: {}", mode_journal(&mode));
+                    if app.state::<Application>().demarree.load(Ordering::SeqCst) {
+                        capturer_cli(app, &mode);
+                    } else if let Ok(mut a) = app.state::<Application>().capture_en_attente.lock() {
+                        log::info!("--capturer: en attente du demarrage");
+                        *a = Some(mode);
+                    }
+                }
+                // Désinstaller via une seconde instance n'aurait pas de sens : ignoré.
+                Commande::Desinstaller | Commande::Demarrer => {
+                    log::info!("seconde instance refusee")
+                }
             }
         }
         Evenement::ThemeBarre(theme) => {
@@ -753,6 +918,7 @@ pub fn traiter(app: &AppHandle, evenement: Evenement) {
             }
         }
         Evenement::AnnonceDemarrage { local, bilan } => annoncer_raccourcis(app, &local, &bilan),
+        Evenement::CaptureCli(mode) => capturer_cli(app, &mode),
         Evenement::SortieEchue(numero) => {
             if prendre_sortie_attendue(app, numero) {
                 log::warn!("sortie sans bilan");
@@ -781,6 +947,20 @@ pub fn traiter(app: &AppHandle, evenement: Evenement) {
             // La page ferme le message elle-même ; aucune action n'existe encore.
             log::info!("bandeau action {id} {action}");
         }
+        Evenement::Vignette(signal) => traiter_vignette(app, signal),
+        Evenement::ActionFaite(fin) => action_faite(app, *fin),
+        Evenement::SuppressionFaite {
+            id,
+            suppression,
+            resultats,
+        } => {
+            let (ligne, message) = vignette::bilan_suppression(id, &suppression, &resultats);
+            log::info!("{ligne}");
+            if let Some(m) = message {
+                afficher(app, m);
+            }
+        }
+        Evenement::LancerGlisser { id, chemin } => lancer_glisser(app, id, &chemin),
     }
 }
 
@@ -863,6 +1043,11 @@ pub fn lancer_capture(app: &AppHandle, mode: Mode) {
 /// séquence : zone (§3.6), plein écran (§3.7).
 fn demarrer_capture(app: &AppHandle, mode: Mode) {
     let recu_a = Instant::now();
+    let glisser = app.state::<Application>().glisser.load(Ordering::SeqCst);
+    if !vignette::capture_acceptee(glisser) {
+        log::info!("capture ignoree: glisser en cours");
+        return;
+    }
     if appliquer(app, Declencheur::DemandeCapture(mode)).is_none() {
         log::info!("capture deja en cours: appui ignore");
         return;
@@ -875,13 +1060,14 @@ fn demarrer_capture(app: &AppHandle, mode: Mode) {
     }
 }
 
-/// Début commun à tous les modes, une fois en Gel : le bandeau est caché s'il montre un
-/// message (il ne doit ni figurer sur la photo ni rester au-dessus de l'écran figé), le
-/// compositeur attendu (borné), puis la photo. Erreur → `GelImpossible` (Repos) et bandeau
-/// d'erreur ; rend `None`.
+/// Début commun à tous les modes, une fois en Gel : la vignette (suppression en attente
+/// validée) et le bandeau sont cachés sans animation (ni l'un ni l'autre ne doit figurer
+/// sur la photo ni rester au-dessus de l'écran figé), le compositeur attendu (borné), puis
+/// la photo. Erreur → `GelImpossible` (Repos) et bandeau d'erreur ; rend `None`.
 fn photographier(app: &AppHandle) -> Option<capture::Gel> {
+    let vignette_cachee = fermer_vignette(app, "capture");
     let bandeau_cache = app.try_state::<Bandeau>().is_some_and(|b| b.cacher());
-    if bandeau_cache && !systeme::attendre_composition(ATTENTE_COMPOSITION) {
+    if (bandeau_cache || vignette_cachee) && !systeme::attendre_composition(ATTENTE_COMPOSITION) {
         log::warn!(
             "composition non attendue ({} ms): photo prise quand meme",
             ATTENTE_COMPOSITION.as_millis()
@@ -933,7 +1119,7 @@ fn capturer_plein_ecran(app: &AppHandle, recu_a: Instant) {
     let duree_decoupe = debut.elapsed();
     drop(gel_pris);
     match pixels {
-        Ok(pixels) => lancer_sortie(app, pixels, duree_decoupe, recu_a, false),
+        Ok(pixels) => lancer_sortie(app, pixels, ecran.rect, duree_decoupe, recu_a, false),
         Err(e) => {
             log::warn!("decoupe impossible: {e}");
             appliquer(app, Declencheur::DecoupeImpossible);
@@ -1185,7 +1371,7 @@ fn decouper(app: &AppHandle, zone: systeme::Rect, fenetre: Option<(i32, [bool; 4
     drop(capture);
     let transparence = fenetre.is_some_and(|(rayon, coins)| zone::avec_transparence(rayon, coins));
     match pixels {
-        Ok(pixels) => lancer_sortie(app, pixels, duree_decoupe, relache, transparence),
+        Ok(pixels) => lancer_sortie(app, pixels, zone, duree_decoupe, relache, transparence),
         Err(e) => {
             log::warn!("decoupe impossible: {e}");
             appliquer(app, Declencheur::DecoupeImpossible);
@@ -1197,14 +1383,8 @@ fn decouper(app: &AppHandle, zone: systeme::Rect, fenetre: Option<(i32, [bool; 4
 /// Ce que la sortie doit faire, d'après les réglages en vigueur ; `transparence` :
 /// garder l'alpha (fenêtre aux coins arrondis).
 fn demande_sortie(app: &AppHandle, transparence: bool) -> sortie::Demande {
-    let etat = app.state::<Application>();
-    let reglages = etat
-        .reglages
-        .lock()
-        .ok()
-        .and_then(|r| r.clone())
-        .unwrap_or_else(|| Reglages::par_defaut(plateforme_reglages(systeme::systeme())));
-    let dossiers = etat.dossiers.lock().ok().and_then(|d| d.clone());
+    let reglages = reglages_lus(app);
+    let dossiers = dossiers_lus(app);
     let images = dossiers.as_ref().and_then(|d| d.images.clone());
     let (dossier_enregistrement, dossier_affiche) = zone::dossier_enregistrement(
         reglages.dossier_enregistrement.as_deref(),
@@ -1212,7 +1392,7 @@ fn demande_sortie(app: &AppHandle, transparence: bool) -> sortie::Demande {
     );
     let dossier_recents = dossiers
         .map(|d| d.local.join(zone::SOUS_DOSSIER_RECENTS))
-        .unwrap_or_else(PathBuf::new);
+        .unwrap_or_default();
     sortie::Demande {
         copier: reglages.copier_apres_capture,
         // Jamais écrit dans les réglages : la valeur lue reste telle quelle.
@@ -1224,10 +1404,30 @@ fn demande_sortie(app: &AppHandle, transparence: bool) -> sortie::Demande {
         dossier_enregistrement,
         dossier_affiche,
         dossier_recents,
+        ranger_recents: true,
         modele_nom: reglages.modele_nom,
         maintenant: chrono::Local::now(),
         transparence,
     }
+}
+
+/// Les réglages lus au démarrage (ceux par défaut s'ils manquent).
+fn reglages_lus(app: &AppHandle) -> Reglages {
+    app.state::<Application>()
+        .reglages
+        .lock()
+        .ok()
+        .and_then(|r| r.clone())
+        .unwrap_or_else(|| Reglages::par_defaut(plateforme_reglages(systeme::systeme())))
+}
+
+/// Les dossiers résolus au démarrage.
+fn dossiers_lus(app: &AppHandle) -> Option<Dossiers> {
+    app.state::<Application>()
+        .dossiers
+        .lock()
+        .ok()
+        .and_then(|d| d.clone())
 }
 
 /// Vrai (et plus rien d'attendu ensuite) si `numero` est la sortie dont on attend le
@@ -1248,30 +1448,65 @@ fn prendre_sortie_attendue(app: &AppHandle, numero: u64) -> bool {
 }
 
 /// Sort une capture et mesure la durée (fil de sortie). Une panique de `sortir` donne un
-/// bilan d'échec : le fil rend toujours un bilan.
+/// bilan d'échec : le fil rend toujours un bilan. Avec `vignette`, l'aperçu est fait en
+/// même temps, dans un fil à part.
 fn sortir_et_mesurer(
     numero: u64,
-    pixels: &gel::Pixels,
+    pixels: &Arc<gel::Pixels>,
     demande: sortie::Demande,
     duree_decoupe: Duration,
     relache: Instant,
+    (capture, vignette): (systeme::Rect, bool),
 ) -> Box<FinSortie> {
     let debut = Instant::now();
-    let bilan = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        sortie::sortir(pixels, &demande)
-    }))
-    .unwrap_or_else(|_| {
-        log::error!("sortie {numero}: fil interrompu (panique)");
-        zone::bilan_d_echec(&demande, zone::CAUSE_SORTIE_INTERROMPUE)
+    let (bilan, duree_sortie, apercu) = std::thread::scope(|portee| {
+        let fil = vignette
+            .then(|| {
+                std::thread::Builder::new()
+                    .name("apercu".into())
+                    .spawn_scoped(portee, || faire_apercu(pixels))
+                    .ok()
+            })
+            .flatten();
+        let bilan = sortir_ou_echec(numero, pixels, &demande);
+        let duree = debut.elapsed();
+        let apercu = match fil {
+            Some(f) => f.join().ok().flatten(),
+            None if vignette => faire_apercu(pixels),
+            None => None,
+        };
+        (bilan, duree, apercu)
     });
     Box::new(FinSortie {
         numero,
         bilan,
         demande,
         duree_decoupe,
-        duree_sortie: debut.elapsed(),
+        duree_sortie,
         relache,
+        pixels: Arc::clone(pixels),
+        capture,
+        vignette,
+        apercu,
     })
+}
+
+/// `sortie::sortir`, et un bilan d'échec si elle panique.
+fn sortir_ou_echec(numero: u64, pixels: &gel::Pixels, demande: &sortie::Demande) -> sortie::Bilan {
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        sortie::sortir(pixels, demande)
+    }))
+    .unwrap_or_else(|_| {
+        log::error!("sortie {numero}: fil interrompu (panique)");
+        zone::bilan_d_echec(demande, zone::CAUSE_SORTIE_INTERROMPUE)
+    })
+}
+
+/// L'aperçu de la vignette : pixels réduits, en PNG.
+fn faire_apercu(pixels: &gel::Pixels) -> Option<Apercu> {
+    let petit = capture::reduire(pixels, vignette::APERCU_COTE_MAX);
+    let png = sortie::encoder_png(&petit).ok()?;
+    Some((Arc::new(png), (petit.largeur, petit.hauteur)))
 }
 
 /// La sortie dans un fil à part (le fil principal n'attend jamais le disque ni le
@@ -1281,6 +1516,7 @@ fn sortir_et_mesurer(
 fn lancer_sortie(
     app: &AppHandle,
     pixels: gel::Pixels,
+    capture: systeme::Rect,
     duree_decoupe: Duration,
     relache: Instant,
     transparence: bool,
@@ -1293,6 +1529,11 @@ fn lancer_sortie(
         .lock()
         .unwrap_or_else(|e| e.into_inner()) = Some(numero);
     let demande = demande_sortie(app, transparence);
+    let voulue = vignette::doit_montrer(
+        reglages_lus(app).vignette.afficher,
+        app.try_state::<Vignette>().is_some(),
+    );
+    let quoi = (capture, voulue);
     let pixels = Arc::new(pixels);
     let (fini, attente) = std::sync::mpsc::channel::<()>();
     let pour_fil = app.clone();
@@ -1300,7 +1541,14 @@ fn lancer_sortie(
     let lance = std::thread::Builder::new()
         .name("sortie".into())
         .spawn(move || {
-            let fin = sortir_et_mesurer(numero, &pixels_fil, demande_fil, duree_decoupe, relache);
+            let fin = sortir_et_mesurer(
+                numero,
+                &pixels_fil,
+                demande_fil,
+                duree_decoupe,
+                relache,
+                quoi,
+            );
             let pour_traiter = pour_fil.clone();
             let rendu = pour_fil
                 .run_on_main_thread(move || traiter(&pour_traiter, Evenement::SortieFaite(fin)));
@@ -1313,7 +1561,7 @@ fn lancer_sortie(
         // Sans fil, la capture n'est pas perdue : la sortie se fait ici (l'écran est déjà
         // libre, la garde ne surveille plus).
         log::warn!("fil de sortie impossible ({e}): sortie sur le fil principal");
-        let fin = sortir_et_mesurer(numero, &pixels, demande, duree_decoupe, relache);
+        let fin = sortir_et_mesurer(numero, &pixels, demande, duree_decoupe, relache, quoi);
         traiter(app, Evenement::SortieFaite(fin));
         return;
     }
@@ -1336,20 +1584,480 @@ fn lancer_sortie(
     }
 }
 
-/// Bilan de la sortie (fil principal) : journal, retour au Repos, annonce.
+/// Bilan de la sortie (fil principal) : journal, puis la vignette (souffle d'abord) ou,
+/// sans elle, retour au Repos et annonce au bandeau.
 fn finir_sortie(app: &AppHandle, fin: FinSortie) {
     log::info!("{}", zone::ligne_sortie(&fin.bilan));
-    if let Err(cause) = &fin.bilan.recent {
+    if let Some(Err(cause)) = &fin.bilan.recent {
         log::warn!("recents: echec ({cause})");
     }
     let annonce = sortie::annonce(&fin.bilan, &fin.demande);
     log::info!("{}", zone::ligne_annonce(&annonce));
-    appliquer(app, Declencheur::ImagePreteSansVignette);
-    afficher(app, zone::message_annonce(&annonce));
+    if fin.vignette && fin.apercu.is_none() {
+        log::warn!("vignette: apercu impossible");
+    }
+    let chrono =
+        zone::ligne_chrono_sortie(fin.duree_decoupe, fin.duree_sortie, fin.relache.elapsed());
+    let montrer = fin.vignette && app.try_state::<Vignette>().is_some();
+    let declencheur = vignette::issue(montrer, fin.apercu.is_some());
+    appliquer(app, declencheur);
+    match (declencheur, fin.apercu.clone()) {
+        (Declencheur::ImagePrete, Some(apercu)) => montrer_vignette(app, fin, annonce, apercu),
+        _ => {
+            afficher(app, zone::message_annonce(&annonce));
+        }
+    }
+    log::info!("{chrono}");
+}
+
+/// Prépare la vignette de la capture `fin` ; le souffle partira quand la carte sera posée.
+fn montrer_vignette(app: &AppHandle, fin: FinSortie, annonce: Annonce, apercu: Apercu) {
+    if let Some(m) = vignette::message_bandeau(&annonce, true) {
+        afficher(app, m);
+    }
+    let reglages = reglages_lus(app);
+    let reduites =
+        vignette::animations_reduites(reglages.animations, systeme::animations_reduites());
+    let recent = match &fin.bilan.recent {
+        Some(Ok(p)) => Some(p.clone()),
+        _ => None,
+    };
+    let enregistre = match &fin.bilan.enregistrement {
+        sortie::EtapeFichier::Fait(p) => Some(p.clone()),
+        _ => None,
+    };
+    let demande = carte::Demande {
+        id: fin.numero,
+        capture: vignette::rect_fenetres(fin.capture),
+        coin: vignette::coin(reglages.vignette.coin),
+        actions: vignette::actions(),
+        duree: vignette::duree_affichage(reglages.vignette.duree_s),
+        duree_annulation: vignette::DELAI_ANNULATION,
+        glisser: recent.is_some(),
+        reduites,
+        apercu: apercu.0,
+        apercu_taille: apercu.1,
+    };
+    let ancienne = montree(app).replace(CaptureMontree {
+        id: fin.numero,
+        pixels: fin.pixels,
+        transparence: fin.demande.transparence,
+        maintenant: fin.demande.maintenant,
+        recent,
+        enregistre,
+        liens: Vec::new(),
+        suppression: EtatSuppression::Aucune,
+        copie: None,
+        enregistrement: None,
+        glisser: false,
+        reduites,
+        partie: false,
+        annonce,
+        relache: fin.relache,
+        souffle_a: None,
+    });
+    if let Some(a) = ancienne {
+        // Jamais attendu (la photo ferme la vignette) : la suppression en attente est faite.
+        if a.suppression == EtatSuppression::EnAttente {
+            lancer_suppression(app, a.id, vignette::a_supprimer(&a));
+        }
+    }
+    if let Some(v) = app.try_state::<Vignette>() {
+        v.preparer(demande);
+    }
+}
+
+/// La capture montrée, sous son verrou (repris s'il est empoisonné).
+fn montree(app: &AppHandle) -> std::sync::MutexGuard<'_, Option<CaptureMontree>> {
+    app.state::<Application>()
+        .inner()
+        .montree
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+}
+
+/// `f` sur la capture montrée si c'est la carte `id`.
+fn avec_montree<R>(
+    app: &AppHandle,
+    id: u64,
+    f: impl FnOnce(&mut CaptureMontree) -> R,
+) -> Option<R> {
+    montree(app).as_mut().filter(|c| c.id == id).map(f)
+}
+
+/// Retire la capture montrée si c'est la carte `id`.
+fn retirer_montree(app: &AppHandle, id: u64) -> Option<CaptureMontree> {
+    montree(app).take_if(|c| c.id == id)
+}
+
+/// Un signal de la vignette (fil principal).
+fn traiter_vignette(app: &AppHandle, signal: carte::Signal) {
+    let Some(v) = app.try_state::<Vignette>() else {
+        return;
+    };
+    match signal {
+        carte::Signal::Prete { id } => {
+            let Some(reduites) = avec_montree(app, id, |c| {
+                c.souffle_a = Some(Instant::now());
+                c.reduites
+            }) else {
+                return;
+            };
+            if reduites {
+                log::info!("souffle saute {id}: animations reduites");
+            } else if v.jouer_souffle(id) {
+                return;
+            } else {
+                log::info!("souffle saute {id}: fenetre absente");
+            }
+            avec_montree(app, id, |c| c.souffle_a = None);
+            appliquer(app, Declencheur::SouffleTermine);
+            v.entrer(id);
+        }
+        carte::Signal::SouffleFini { id, .. } => {
+            if avec_montree(app, id, |_| ()).is_some() {
+                appliquer(app, Declencheur::SouffleTermine);
+                v.entrer(id);
+            }
+        }
+        carte::Signal::Entree { id } => {
+            if let Some((relache, souffle)) = avec_montree(app, id, |c| (c.relache, c.souffle_a)) {
+                let souffle = souffle.map(|s| s.saturating_duration_since(relache));
+                log::info!("{}", vignette::ligne_chrono(souffle, relache.elapsed()));
+            }
+        }
+        carte::Signal::Action { id, action } => action_vignette(app, &v, id, &action),
+        carte::Signal::Glisser { id } => demander_glisser(app, id),
+        carte::Signal::DelaiEcoule { id } => {
+            let Some(suppression) = avec_montree(app, id, |c| {
+                c.partie = true;
+                let attente = c.suppression == EtatSuppression::EnAttente;
+                if attente {
+                    c.suppression = EtatSuppression::Lancee;
+                }
+                attente.then(|| vignette::a_supprimer(c))
+            }) else {
+                return;
+            };
+            match suppression {
+                Some(s) => {
+                    appliquer(app, Declencheur::CaptureSupprimee);
+                    log::info!("vignette fermee {id} supprimer");
+                    v.partir(id, true);
+                    lancer_suppression(app, id, s);
+                }
+                None => {
+                    appliquer(app, Declencheur::DelaiEcoule);
+                    log::info!("vignette fermee {id} delai");
+                    v.partir(id, true);
+                }
+            }
+        }
+        // Carte partie : les pixels et l'aperçu sont rendus.
+        carte::Signal::Terminee { id } => drop(retirer_montree(app, id)),
+        carte::Signal::Impossible { id, cause } => {
+            log::warn!("vignette impossible {id}: {cause}");
+            let Some(c) = retirer_montree(app, id) else {
+                return;
+            };
+            v.cacher();
+            appliquer(app, Declencheur::VignetteImpossible);
+            // L'annonce que la vignette devait remplacer passe au bandeau.
+            if vignette::message_bandeau(&c.annonce, true).is_none() {
+                afficher(app, zone::message_annonce(&c.annonce));
+            }
+        }
+    }
+}
+
+/// Un clic sur un bouton de la carte `id` (décision pure, puis gestes).
+fn action_vignette(app: &AppHandle, v: &Vignette, id: u64, action: &str) {
+    let nom: String = action
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric() || *c == '_')
+        .take(32)
+        .collect();
+    let Some(geste) = avec_montree(app, id, |c| vignette::decider(c, action, Instant::now()))
+    else {
+        return;
+    };
+    if geste == vignette::Geste::Ignorer {
+        log::info!("vignette action {id} {nom} ignoree");
+        return;
+    }
+    log::info!("vignette action {id} {nom}");
+    match geste {
+        vignette::Geste::Copier => lancer_action(app, id, true),
+        vignette::Geste::Enregistrer => lancer_action(app, id, false),
+        vignette::Geste::DejaEnregistree => {
+            log::info!("vignette enregistrement {id} deja fait");
+            v.confirmer(id, vignette::ENREGISTRER, true);
+        }
+        vignette::Geste::Supprimer => {
+            avec_montree(app, id, |c| c.suppression = EtatSuppression::EnAttente);
+            log::info!("vignette suppression {id} en attente");
+            v.marquer_supprimee(id, true);
+        }
+        vignette::Geste::Annuler => {
+            avec_montree(app, id, |c| c.suppression = EtatSuppression::Aucune);
+            log::info!("vignette suppression {id} annulee");
+            v.marquer_supprimee(id, false);
+        }
+        vignette::Geste::Fermer => {
+            avec_montree(app, id, |c| c.partie = true);
+            appliquer(app, Declencheur::VignetteFermee);
+            log::info!("vignette fermee {id} fermer");
+            v.partir(id, true);
+        }
+        vignette::Geste::Ignorer => {}
+    }
+}
+
+/// Copier (`copier`) ou Enregistrer depuis la vignette : `sortir` dans un fil, sur les
+/// pixels gardés, puis `ActionFaite`.
+fn lancer_action(app: &AppHandle, id: u64, copier: bool) {
+    let base = demande_sortie(app, false);
+    let Some((pixels, demande)) = avec_montree(app, id, |c| {
+        let maintenant = Some(Instant::now());
+        if copier {
+            c.copie = maintenant;
+        } else {
+            c.enregistrement = maintenant;
+        }
+        (
+            Arc::clone(&c.pixels),
+            vignette::demande_action(&base, copier, c),
+        )
+    }) else {
+        return;
+    };
+    let action = if copier {
+        vignette::COPIER
+    } else {
+        vignette::ENREGISTRER
+    };
+    let pour_fil = app.clone();
+    let (pixels_fil, demande_fil) = (Arc::clone(&pixels), demande.clone());
+    let lance = std::thread::Builder::new()
+        .name("vignette-action".into())
+        .spawn(move || {
+            let bilan = sortir_ou_echec(id, &pixels_fil, &demande_fil);
+            let fin = Box::new(FinAction {
+                id,
+                action: action.into(),
+                bilan,
+            });
+            let pour_traiter = pour_fil.clone();
+            let rendu = pour_fil
+                .run_on_main_thread(move || traiter(&pour_traiter, Evenement::ActionFaite(fin)));
+            if let Err(e) = rendu {
+                log::warn!("resultat de l'action non rendu: {e}");
+            }
+        });
+    if let Err(e) = lance {
+        log::warn!("fil de l'action impossible ({e}): action sur le fil principal");
+        let bilan = sortir_ou_echec(id, &pixels, &demande);
+        action_faite(
+            app,
+            FinAction {
+                id,
+                action: action.into(),
+                bilan,
+            },
+        );
+    }
+}
+
+/// Résultat de Copier ou Enregistrer : journal, page, et l'erreur au bandeau. Arrivé
+/// après le départ de la carte : journal seulement.
+fn action_faite(app: &AppHandle, fin: FinAction) {
+    let (reussi, message, fichier) = vignette::apres_action(&fin.action, &fin.bilan);
     log::info!(
         "{}",
-        zone::ligne_chrono_sortie(fin.duree_decoupe, fin.duree_sortie, fin.relache.elapsed())
+        vignette::ligne_action_faite(fin.id, &fin.action, reussi)
     );
+    let copie = fin.action == vignette::COPIER;
+    let present = avec_montree(app, fin.id, |c| {
+        if copie {
+            c.copie = None;
+        } else {
+            c.enregistrement = None;
+            if fichier.is_some() {
+                c.enregistre = fichier;
+            }
+        }
+        !c.partie
+    });
+    if present != Some(true) {
+        return;
+    }
+    if let Some(v) = app.try_state::<Vignette>() {
+        v.confirmer(fin.id, &fin.action, reussi);
+    }
+    if let Some(m) = message {
+        afficher(app, m);
+    }
+}
+
+/// Efface les fichiers de la capture `id` dans un fil, puis `SuppressionFaite`.
+fn lancer_suppression(app: &AppHandle, id: u64, suppression: sortie::Suppression) {
+    let (recents, glisser) = dossiers_vignette(app);
+    let pour_fil = app.clone();
+    let copie = suppression.clone();
+    let lance = std::thread::Builder::new()
+        .name("suppression".into())
+        .spawn(move || {
+            let resultats = sortie::supprimer(&suppression, &recents, &glisser);
+            let pour_traiter = pour_fil.clone();
+            let rendu = pour_fil.run_on_main_thread(move || {
+                traiter(
+                    &pour_traiter,
+                    Evenement::SuppressionFaite {
+                        id,
+                        suppression,
+                        resultats,
+                    },
+                )
+            });
+            if let Err(e) = rendu {
+                log::warn!("suppression {id}: bilan non rendu: {e}");
+            }
+        });
+    if let Err(e) = lance {
+        log::warn!("fil de suppression impossible ({e}): suppression sur le fil principal");
+        supprimer_tout_de_suite(app, id, &copie);
+    }
+}
+
+/// Efface sur ce fil (arrêt) et écrit le bilan au journal.
+fn supprimer_tout_de_suite(app: &AppHandle, id: u64, suppression: &sortie::Suppression) {
+    let (recents, glisser) = dossiers_vignette(app);
+    let resultats = sortie::supprimer(suppression, &recents, &glisser);
+    let (ligne, _) = vignette::bilan_suppression(id, suppression, &resultats);
+    log::info!("{ligne}");
+}
+
+/// `<local>/Recents` et `<local>/Glisser` ; vides sans dossier local (rien n'est alors
+/// effacé ni posé).
+fn dossiers_vignette(app: &AppHandle) -> (PathBuf, PathBuf) {
+    match dossiers_lus(app) {
+        Some(d) => (
+            d.local.join(zone::SOUS_DOSSIER_RECENTS),
+            d.local.join(vignette::SOUS_DOSSIER_GLISSER),
+        ),
+        None => (PathBuf::new(), PathBuf::new()),
+    }
+}
+
+/// Retire la vignette sans animation (nouvelle capture, arrêt) : une suppression en
+/// attente est faite tout de suite (sur ce fil à l'arrêt). Rend vrai si une carte était là.
+fn fermer_vignette(app: &AppHandle, raison: &str) -> bool {
+    let capture = montree(app).take();
+    let cachee = app.try_state::<Vignette>().is_some_and(|v| v.cacher());
+    if let Some(c) = capture {
+        if !c.partie {
+            log::info!("vignette fermee {} {raison}", c.id);
+        }
+        if c.suppression == EtatSuppression::EnAttente {
+            let s = vignette::a_supprimer(&c);
+            if raison == "arret" {
+                supprimer_tout_de_suite(app, c.id, &s);
+            } else {
+                lancer_suppression(app, c.id, s);
+            }
+        }
+    }
+    cachee
+}
+
+/// Appui sur l'image puis déplacement : le fichier à donner est posé, puis le glisser est
+/// reposté (jamais lancé dans le gestionnaire de la page).
+fn demander_glisser(app: &AppHandle, id: u64) {
+    let Some(prete) = avec_montree(app, id, |c| {
+        vignette::glisser_possible(c).map(|r| (r.to_path_buf(), c.maintenant))
+    }) else {
+        return;
+    };
+    let glisser = app.state::<Application>().glisser.load(Ordering::SeqCst);
+    let Some((recent, maintenant)) = prete.filter(|_| !glisser) else {
+        log::info!("vignette glisser {id} indisponible");
+        return;
+    };
+    let chemin = match dossiers_lus(app) {
+        Some(d) => {
+            let nom = sortie::nom_fichier(&reglages_lus(app).modele_nom, maintenant);
+            let dossier = d.local.join(vignette::SOUS_DOSSIER_GLISSER);
+            sortie::fichier_a_glisser(&recent, &dossier, &nom)
+        }
+        None => Ok(recent),
+    };
+    match chemin {
+        Ok(chemin) => {
+            avec_montree(app, id, |c| c.liens.push(chemin.clone()));
+            poster_plus_tard(app, Evenement::LancerGlisser { id, chemin });
+        }
+        Err(e) => log::info!("vignette glisser {id} refuse ({e})"),
+    }
+}
+
+/// Les fenêtres de BreezyShot sur lesquelles un dépôt ne compte pas.
+fn nos_fenetres(app: &AppHandle) -> Vec<isize> {
+    let mut liste: Vec<isize> = app
+        .try_state::<Vignette>()
+        .map(|v| v.identifiants().into_iter().flatten().collect())
+        .unwrap_or_default();
+    liste.extend(app.try_state::<Bandeau>().and_then(|b| b.identifiant()));
+    liste
+}
+
+/// Le glisser lui-même (fil principal, bloquant : boucle du système). Minuterie en pause
+/// pendant toute la boucle ; un dépôt ailleurs que sur BreezyShot ferme la vignette.
+fn lancer_glisser(app: &AppHandle, id: u64, chemin: &std::path::Path) {
+    let Some(v) = app.try_state::<Vignette>() else {
+        return;
+    };
+    let Some(possible) = avec_montree(app, id, |c| {
+        let possible = vignette::glisser_possible(c).is_some();
+        c.glisser = possible;
+        possible
+    }) else {
+        return;
+    };
+    let fenetre = v.identifiants()[0];
+    let pret = match (possible, fenetre) {
+        (false, _) => Err("indisponible"),
+        (true, None) => Err("refuse (fenetre absente)"),
+        (true, Some(_)) if !systeme::glisser::bouton_gauche_enfonce() => {
+            Err("annule (bouton relache)")
+        }
+        (true, Some(f)) => Ok(f),
+    };
+    let fenetre = match pret {
+        Ok(f) => f,
+        Err(raison) => {
+            avec_montree(app, id, |c| c.glisser = false);
+            log::info!("vignette glisser {id} {raison}");
+            return;
+        }
+    };
+    let etat = app.state::<Application>();
+    etat.glisser.store(true, Ordering::SeqCst);
+    v.glisser_en_cours(id, true);
+    log::info!("vignette glisser {id} debut");
+    let resultat = systeme::glisser::glisser_fichier(fenetre, chemin);
+    etat.glisser.store(false, Ordering::SeqCst);
+    let sous = souris_bureau(app).and_then(systeme::glisser::fenetre_sous);
+    let a_nous = sous.is_some_and(|h| nos_fenetres(app).contains(&h));
+    let issue = vignette::depot(&resultat, a_nous);
+    avec_montree(app, id, |c| c.glisser = false);
+    v.glisser_en_cours(id, false);
+    log::info!("{}", vignette::ligne_glisser(id, &issue));
+    if let Some(d) = issue.declencheur() {
+        avec_montree(app, id, |c| c.partie = true);
+        appliquer(app, d);
+        log::info!("vignette fermee {id} glisser");
+        v.partir(id, true);
+    }
 }
 
 /// Arrêt : libère ce qui est tenu, retire l'icône, écrit `arret propre`.
@@ -1368,7 +2076,14 @@ fn arreter(app: &AppHandle) {
     }
     gel::detruire_ecran_fige();
     gel::liberer_image();
-    // Modules : libérer les raccourcis, fermer les fenêtres.
+    // Vignette : suppression en attente faite, fenêtres cachées puis détruites.
+    fermer_vignette(app, "arret");
+    if let Some(v) = app.try_state::<Vignette>() {
+        v.fermer();
+    }
+    // Réglages fermés d'abord : la fin d'une saisie ne doit pas reprendre des raccourcis
+    // après leur libération. Puis libérer les raccourcis, fermer les autres fenêtres.
+    fenetres::reglages::fermer(app);
     if app
         .state::<Application>()
         .raccourcis_reserves
@@ -1382,7 +2097,6 @@ fn arreter(app: &AppHandle) {
     if let Some(bandeau) = app.try_state::<Bandeau>() {
         bandeau.fermer();
     }
-    fenetres::reglages::fermer(app);
     if icone::retirer(app) {
         log::info!("icone retiree");
     }
@@ -1393,6 +2107,17 @@ fn arreter(app: &AppHandle) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn desinstallation_ligne_du_demarrage() {
+        use systeme::EtatDemarrage as E;
+        let retire = "desinstallation demarrage: retire";
+        let absent = "desinstallation demarrage: absent";
+        assert_eq!(ligne_demarrage_retire(E::Actif), retire);
+        assert_eq!(ligne_demarrage_retire(E::DesactiveParWindows), retire);
+        assert_eq!(ligne_demarrage_retire(E::Inactif), absent);
+        assert_eq!(ligne_demarrage_retire(E::Indisponible), absent);
+    }
     use crate::raccourcis::{choisir, decider_annonce, Situation};
 
     fn action(id: &str, texte: &str) -> EntreeMenu {

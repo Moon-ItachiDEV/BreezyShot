@@ -53,9 +53,15 @@ impl EtatDemarrage {
     }
 }
 
-/// Vrai si la clé d'essai remplace la vraie (essais seulement).
+/// Vrai si la clé d'essai remplace la vraie (essais seulement). Même règle que les
+/// dossiers (`resoudre_dossiers`) : une variable vide ne compte pas.
 pub fn cle_d_essai() -> bool {
-    std::env::var_os(super::VARIABLE_ESSAI).is_some()
+    essai_demande(std::env::var_os(super::VARIABLE_ESSAI).as_deref())
+}
+
+/// La valeur de la variable d'essai demande-t-elle la clé d'essai ? Fonction pure.
+pub fn essai_demande(valeur: Option<&std::ffi::OsStr>) -> bool {
+    valeur.is_some_and(|v| !v.is_empty())
 }
 
 /// Les deux clés à utiliser : (`Run`, `StartupApproved\Run`).
@@ -133,6 +139,13 @@ mod tests {
     fn commande_entre_guillemets() {
         let exe = Path::new("/opt/Breezy Shot/breezyshot");
         assert_eq!(commande(exe), "\"/opt/Breezy Shot/breezyshot\"");
+    }
+
+    #[test]
+    fn variable_vide_pas_d_essai() {
+        assert!(!essai_demande(None));
+        assert!(!essai_demande(Some(std::ffi::OsStr::new(""))));
+        assert!(essai_demande(Some(std::ffi::OsStr::new("x"))));
     }
 
     #[test]

@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Installer BreezyShot</title>
+<link rel="stylesheet" href="../commun/jetons.css">
+<link rel="stylesheet" href="installateur.css">
+<script type="module" src="installateur.js"></script>
+</head>
+<body>
+<div class="scene">
+  <section class="win" id="win" role="dialog" aria-label="Installer BreezyShot" data-s="idle">
+    <header class="titlebar" data-tauri-drag-region>
+      <span class="ico" id="icoLogo" aria-hidden="true"></span>
+      <span class="name" data-tauri-drag-region>Installer BreezyShot</span>
+      <button class="cap" id="min" aria-label="Réduire" title="Réduire">
+        <svg viewBox="0 0 10 10" aria-hidden="true"><path d="M0 5.5h10" stroke="currentColor"/></svg>
+      </button>
+      <button class="cap x" id="close" aria-label="Fermer" title="Fermer">
+        <svg viewBox="0 0 10 10" aria-hidden="true"><path d="M.5.5l9 9M9.5.5l-9 9" stroke="currentColor"/></svg>
+      </button>
+    </header>
+
+    <div class="body">
+      <div class="step welcome" data-step>
+        <span class="logo" id="welLogo" aria-hidden="true"></span>
+        <h1>BreezyShot</h1>
+      </div>
+
+      <div class="step" data-step hidden>
+        <div class="mark"><span class="logo" id="spinLogo" aria-hidden="true"></span></div>
+        <div class="prow" aria-hidden="true"><span id="mo">0,0 Mo sur 0,0 Mo</span><b id="pct">0 %</b></div>
+        <div class="pbar" id="pbar" role="progressbar" aria-label="Installation"
+             aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><i class="fill" id="fill"></i></div>
+        <p class="cause" id="cause" role="alert"></p>
+      </div>
+
+      <div class="step ready" data-step hidden>
+        <svg class="check" viewBox="0 0 128 128" aria-hidden="true">
+          <circle class="full" cx="64" cy="64" r="60"/>
+          <circle class="disc" cx="64" cy="64" r="48"/>
+          <path d="M44 66l14 14 27-30"/>
+        </svg>
+        <h2>BreezyShot est prêt</h2>
+      </div>
+    </div>
+
+    <footer class="foot">
+      <span class="grow"></span>
+      <button class="btn" id="try">Essayer une capture</button>
+      <button class="btn primary" id="done">Terminer</button>
+      <button class="btn primary" id="retry">Réessayer</button>
+      <button class="btn primary" id="install">Installer</button>
+    </footer>
+  </section>
+</div>
+</body>
+</html>

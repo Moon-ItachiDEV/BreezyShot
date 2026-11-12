@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-vignette-action"
+description = "Enables the vignette_action command without any pre-configured scope."
+commands.allow = ["vignette_action"]
+
+[[permission]]
+identifier = "deny-vignette-action"
+description = "Denies the vignette_action command without any pre-configured scope."
+commands.deny = ["vignette_action"]

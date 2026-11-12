@@ -1,0 +1,38 @@
+/* Souffle : flash sur la zone capturée puis envol de l'image vers la carte (design/vignette5).
+   Toutes les valeurs viennent de ../commun/jetons.css. */
+
+html,
+body {
+  height: 100%;
+  margin: 0;
+  background: transparent;
+  overflow: hidden;
+  pointer-events: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.flash,
+.envol {
+  position: absolute;
+  left: 0;
+  top: 0;
+  box-sizing: border-box;
+}
+.flash[hidden],
+.envol[hidden] {
+  display: none;
+}
+
+.flash {
+  border-radius: var(--radius-md);
+  background: var(--souffle-flash);
+  opacity: 0;
+}
+
+.envol {
+  transform-origin: 0 0;
+  object-fit: cover;
+  box-shadow: var(--shadow-28);
+  border-radius: 2px;
+}

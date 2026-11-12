@@ -68,6 +68,7 @@ fn demande(racine: &Path) -> Demande {
         dossier_enregistrement: racine.join("Images").join("BreezyShot"),
         dossier_affiche: "Images › BreezyShot".to_string(),
         dossier_recents: racine.join("local").join("Recents"),
+        ranger_recents: true,
         modele_nom: "BreezyShot {date} à {heure}".to_string(),
         maintenant: instant(),
         transparence: false,
@@ -264,7 +265,7 @@ fn sortir_pixels_invalides_tout_en_echec() {
     };
     let bilan = sortir(&pixels, &d);
     assert_eq!(bilan.copie, Etape::Echec(png::CAUSE_PIXELS.to_string()));
-    assert_eq!(bilan.recent, Err(png::CAUSE_PIXELS.to_string()));
+    assert_eq!(bilan.recent, Some(Err(png::CAUSE_PIXELS.to_string())));
     assert_eq!(
         bilan.enregistrement,
         EtapeFichier::Echec {
@@ -380,7 +381,7 @@ fn recents_fichier_neuf_protege() {
 fn bilan(copie: Etape, enregistrement: EtapeFichier) -> Bilan {
     Bilan {
         copie,
-        recent: Ok(PathBuf::from("r.png")),
+        recent: Some(Ok(PathBuf::from("r.png"))),
         enregistrement,
     }
 }
@@ -463,13 +464,13 @@ fn annonce_copie_en_echec() {
 #[test]
 fn annonce_seul_recents_en_echec_reste_une_reussite() {
     let mut b = bilan(Etape::Faite, fait());
-    b.recent = Err("disque plein".to_string());
+    b.recent = Some(Err("disque plein".to_string()));
     assert_eq!(
         annonce(&b, &demande_annonce()),
         reussite("Copié et enregistré")
     );
     let mut b = bilan(Etape::Faite, EtapeFichier::NonDemande);
-    b.recent = Err("disque plein".to_string());
+    b.recent = Some(Err("disque plein".to_string()));
     assert_eq!(
         annonce(&b, &demande_annonce()),
         reussite("Copié dans le presse-papiers")
@@ -494,7 +495,7 @@ fn annonce_cas_hors_contrat() {
     let b = bilan(Etape::NonDemandee, EtapeFichier::NonDemande);
     assert_eq!(annonce(&b, &demande_annonce()), reussite("Capture prise"));
     let mut b = b;
-    b.recent = Err("Plein.".to_string());
+    b.recent = Some(Err("Plein.".to_string()));
     assert_eq!(
         annonce(&b, &demande_annonce()),
         erreur("Impossible de garder la capture", "Plein.")
@@ -851,7 +852,7 @@ fn recents_ecrit_et_relu() {
     let entree = image(5, 3);
     let base = base_recent(instant());
     let bilan = sortir(&entree, &d);
-    let chemin = bilan.recent.expect("recent ecrit");
+    let chemin = bilan.recent.expect("demande").expect("recent ecrit");
     assert_eq!(chemin, d.dossier_recents.join(format!("{base}.png")));
     assert_eq!(decoder(&fs::read(&chemin).expect("lecture")), entree);
     assert_eq!(bilan.copie, Etape::NonDemandee);
@@ -861,7 +862,7 @@ fn recents_ecrit_et_relu() {
     let bilan = sortir(&entree, &d);
     assert_eq!(
         bilan.recent,
-        Ok(d.dossier_recents.join(format!("{base}_2.png")))
+        Some(Ok(d.dossier_recents.join(format!("{base}_2.png"))))
     );
     sans_temporaire(&d.dossier_recents);
 }
@@ -884,7 +885,7 @@ fn recents_nettoyage_a_50() {
     }
 
     let bilan = sortir(&image(2, 2), &d);
-    let neuf = bilan.recent.expect("recent ecrit");
+    let neuf = bilan.recent.expect("demande").expect("recent ecrit");
     assert!(neuf.exists());
 
     let restants = noms_du_dossier(&d.dossier_recents);
@@ -934,7 +935,7 @@ fn enregistrement_dossier_impossible_a_creer() {
         }
     );
     // Les autres etapes ont continue.
-    assert!(bilan.recent.is_ok());
+    assert!(matches!(bilan.recent, Some(Ok(_))));
     assert_eq!(
         annonce(&bilan, &d),
         erreur(
@@ -983,13 +984,13 @@ fn dossier_vide_ou_relatif_refuse_sans_rien_ecrire() {
                 cause: "Le dossier Images › BreezyShot est introuvable.".to_string()
             }
         );
-        assert!(bilan.recent.is_ok());
+        assert!(matches!(bilan.recent, Some(Ok(_))));
 
         let mut d = demande(racine.path());
         d.enregistrer = false;
         d.dossier_recents = dossier.clone();
         let bilan = sortir(&image(2, 2), &d);
-        let cause = bilan.recent.expect_err("recents refuse");
+        let cause = bilan.recent.expect("demande").expect_err("recents refuse");
         assert!(cause.ends_with("est introuvable."), "{cause}");
     }
     assert_eq!(noms_du_dossier(&courant), avant);
@@ -1089,7 +1090,7 @@ fn sorties_concurrentes_meme_milliseconde() {
         };
         assert_eq!(decoder(&fs::read(p).expect("lecture")).rgba[0], i);
         assert!(enregistres.insert(p.clone()));
-        let r = b.recent.clone().expect("recent");
+        let r = b.recent.clone().expect("demande").expect("recent");
         assert_eq!(decoder(&fs::read(&r).expect("lecture")).rgba[0], i);
         assert!(recents.insert(r));
     }
@@ -1179,7 +1180,7 @@ fn sortir_avec_transparence_garde_l_alpha() {
     d.transparence = true;
     let bilan = sortir(&entree, &d);
     assert_eq!(bilan.copie, Etape::NonDemandee);
-    let recent = bilan.recent.expect("recent ecrit");
+    let recent = bilan.recent.expect("demande").expect("recent ecrit");
     let EtapeFichier::Fait(chemin) = bilan.enregistrement else {
         panic!("enregistrement {:?}", bilan.enregistrement);
     };
@@ -1216,10 +1217,14 @@ fn sortir_sans_transparence_reste_opaque() {
     assert_eq!(
         bilan
             .recent
+            .clone()
+            .expect("demande")
             .as_ref()
             .map(|c| c.file_name().map(|n| n.to_owned())),
         bilan_t
             .recent
+            .clone()
+            .expect("demande")
             .as_ref()
             .map(|c| c.file_name().map(|n| n.to_owned()))
     );
@@ -1239,7 +1244,7 @@ fn sortir_avec_transparence_pixels_invalides_tout_en_echec() {
     };
     let bilan = sortir(&abimee, &d);
     assert!(matches!(bilan.copie, Etape::Echec(_)));
-    assert!(bilan.recent.is_err());
+    assert!(matches!(bilan.recent, Some(Err(_))));
     assert!(matches!(bilan.enregistrement, EtapeFichier::Echec { .. }));
 }
 
@@ -1475,7 +1480,7 @@ fn mesure_sortir_avec_copie() {
         let debut = Instant::now();
         let bilan = sortir(&pixels, &d);
         let duree = debut.elapsed();
-        assert!(bilan.recent.is_ok());
+        assert!(matches!(bilan.recent, Some(Ok(_))));
         println!(
             "Mesure ({profil}) sortir {l}x{h} {} + Recents + enregistrement : {:.0} ms ({:?})",
             if copie {
