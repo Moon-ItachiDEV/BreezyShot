@@ -1290,12 +1290,13 @@ contenu d'une image) :
   propre`. Cas B : (15) ouvert ≤ repos + 90 Mo ; 20 ouvertures et fermetures ; 10 s après :
   le processus de rendu de l'éditeur est parti (même nombre qu'au repos), le processus de
   l'app n'a pas pris plus de 8 Mo depuis la première fermeture (une image gardée par
-  ouverture en ferait 60), app et WebView2 ensemble ≤ repos chaud + 40 Mo (une page gardée
-  en ferait 50) ; fils et poignées stables ; mémoire notée par sorte de processus, puis
-  après 40 captures sans éditeur. Le seuil d'abord écrit (tout l'arbre ≤ repos + 8 Mo après
-  10 fermetures) ne mesurait pas l'éditeur : le repos varie de 177 à 188 Mo d'une mesure à
-  l'autre, et les pages permanentes prennent environ 10 Mo en 10 captures sans éditeur
-  (essai 07). Plusieurs
+  ouverture en ferait 60), le navigateur et le GPU de WebView2 pas plus de 6 Mo chacun
+  depuis la première fermeture, app et WebView2 ensemble ≤ repos chaud + 40 Mo (une page
+  gardée en ferait 50) ; fils et poignées stables ; mémoire notée par sorte de processus,
+  puis après 40 captures sans éditeur. Le seuil d'abord écrit (tout l'arbre ≤ repos + 8 Mo
+  après 10 fermetures) ne mesurait pas l'éditeur : le repos varie de 177 à 188 Mo d'une
+  mesure à l'autre, et tout l'arbre (l'app et WebView2) prend environ 10 Mo en 10 captures
+  sans éditeur (essai 07). Plusieurs
   écrans, 125 à 200 %, captures de 3 × 1080p ou 2K, Enregistrer sous… jusqu'au fichier
   (chemin tapé dans le dialogue), le glisser vers l'Explorateur, Word ou Teams, le
   redimensionnement par les bords et le déplacement par la barre de la page ne s'y
@@ -1317,9 +1318,12 @@ contenu d'une image) :
   `08-reglages-fenetre.ps1`, `09-installateur.ps1`, `10-confort.ps1`,
   `11-pointeur.ps1`, `12-editeur.ps1`), tous les `NN-*.ps1` pris dans l'ordre sans liste écrite,
   lancés par `essais/lancer.ps1` sur le .exe de release (un essai pas fini en 600 s est
-  arrêté, avec ce qu'il a lancé, et compte comme échoué ; après chaque essai, une app ou
-  une aide restée ouverte est arrêtée et nommée, sinon elle retient la sortie de l'étape
-  jusqu'à sa limite de temps). Chaque essai démarre l'app avec
+  arrêté, avec ce qu'il a lancé, et compte comme échoué, les journaux de l'app qu'il
+  laisse rangés avec les autres ; un bilan resté d'un passage d'avant est effacé avant
+  l'essai ; après chaque essai, une app ou une aide restée ouverte est arrêtée et nommée,
+  sinon elle retient la sortie de l'étape jusqu'à sa limite de temps, et de WebView2
+  seuls les processus de l'app le sont). `Terminer-Essai` range les journaux de l'app, ceux
+  des cas d'un essai (`a/`, `b/`) compris (`Ranger-Journaux`). Chaque essai démarre l'app avec
   `BREEZYSHOT_DOSSIER_ESSAI`, agit (lancer une seconde instance, simuler une touche, abîmer un
   fichier), puis lit le journal et les fichiers. Un essai qui échoue fait échouer GitHub.
 - Chaque exécution note la mémoire privée au repos (l'app et ses processus de moteur web) dans

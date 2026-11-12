@@ -10,7 +10,7 @@
 # premier plan est à l'app, un appui de souris que si le point visé est sur une fenêtre de
 # l'app ; sinon le point échoue en nommant la fenêtre trouvée, et rien n'est envoyé (un
 # Ctrl+C ou un Alt+F4 reçu par une console de la machine d'essai l'arrêterait). Sans
-# éditeur après (2), la suite du cas A n'est pas jouée.
+# éditeur après (2), la suite de l'essai n'est pas jouée (ni le cas A, ni le cas B).
 #
 # Cas A :
 # (1) mémoire au repos notée ; aucune fenêtre « Annoter la capture », aucun `editeur
@@ -64,11 +64,11 @@
 # (15) éditeur ouvert ≤ repos + 90 Mo ; 20 ouvertures et fermetures ; 10 s après : le
 #     processus de rendu de l'éditeur est parti (même nombre qu'au repos), le processus de
 #     l'app n'a pas pris plus de 8 Mo depuis la première fermeture (une image gardée par
-#     ouverture en ferait 60), app et WebView2 ensemble ≤ repos chaud + 40 Mo (une page
-#     gardée en ferait 50 ; le repos varie de quelques Mo et les pages permanentes
-#     grossissent avec les captures, éditeur ou non) ; fenêtres et fils stables ; la
-#     mémoire par sorte de processus est notée à chaque étape, puis après 40 captures sans
-#     éditeur (sans seuil).
+#     ouverture en ferait 60), le navigateur et le GPU de WebView2 pas plus de 6 Mo chacun
+#     (une vue Web mal rendue y laisserait de l'ordre de 1 Mo par ouverture), l'ensemble
+#     ≤ repos chaud + 40 Mo (filet large : les quatre pages permanentes grossissent avec
+#     les captures, éditeur ou non) ; fenêtres et fils stables ; la mémoire par sorte de
+#     processus est notée à chaque étape, puis après 40 captures sans éditeur (sans seuil).
 #
 # Non vérifiable sur GitHub (un écran 1024 × 768 à 100 %) : plusieurs écrans, 125, 150 et
 # 200 %, captures de 3 × 1080p et 2K, Enregistrer sous… jusqu'au bout (le chemin tapé dans
@@ -182,7 +182,7 @@ function Fermer-Cas($Processus, [string]$Dossier, [string]$Quoi) {
 
 # La mémoire privée par sorte de processus : l'app, puis les processus WebView2 d'après
 # leur `--type` (sans type : le navigateur). Rien d'autre de la ligne de commande n'est lu.
-# Rend { Texte, App (Mo), Rendus (nombre de processus de rendu) }.
+# Rend { Texte, App, Navigateur, Gpu (Mo), Rendus (nombre de processus de rendu) }.
 function Detail-Memoire($Processus) {
     $enfants = @{}
     foreach ($c in @(Get-CimInstance Win32_Process -Property ProcessId, ParentProcessId, CommandLine -ErrorAction SilentlyContinue)) {
@@ -212,9 +212,11 @@ function Detail-Memoire($Processus) {
     }
     $texte = (@($sommes.Keys) | ForEach-Object { "$_ x$($nombres[$_]) $([math]::Round($sommes[$_], 1))" }) -join ' ; '
     return [pscustomobject]@{
-        Texte  = $texte
-        App    = [math]::Round([double]$sommes['app'], 1)
-        Rendus = $(if ($nombres.ContainsKey('renderer')) { [int]$nombres['renderer'] } else { 0 })
+        Texte      = $texte
+        App        = [math]::Round([double]$sommes['app'], 1)
+        Navigateur = [math]::Round([double]$sommes['navigateur'], 1)
+        Gpu        = [math]::Round([double]$sommes['gpu-process'], 1)
+        Rendus     = $(if ($nombres.ContainsKey('renderer')) { [int]$nombres['renderer'] } else { 0 })
     }
 }
 
@@ -990,15 +992,20 @@ public static int Pixel(byte[] a, int l, int x, int y) {
                 Verifier '(15) le processus de rendu de l''éditeur part à la fermeture' (($d0.Rendus -ge 1) -and ($dOuvert.Rendus -gt $d0.Rendus) -and ($d1.Rendus -eq $d0.Rendus) -and ($d20.Rendus -eq $d0.Rendus)) $rendus | Out-Null
                 # Le processus de l'app tient les pixels des captures : une image gardée par
                 # ouverture ferait 3 Mo de plus à chaque fois (60 Mo ici).
-                Verifier '(15) processus de l''app : après 20 fermetures ≤ après la première + 8 Mo' ($d20.App -le $d1.App + 8) "$($d20.App) Mo, après la première $($d1.App) Mo" | Out-Null
-                # Tout l'arbre (app et WebView2) : le repos varie de quelques Mo d'une mesure à
-                # l'autre et les pages permanentes grossissent avec les captures, éditeur ou
-                # non ; une page d'éditeur gardée ferait 50 Mo de plus.
+                Verifier '(15) processus de l''app : après 20 fermetures ≤ après la première + 8 Mo' (($d1.App -gt 0) -and ($d20.App -le $d1.App + 8)) "$($d20.App) Mo, après la première $($d1.App) Mo" | Out-Null
+                # Le navigateur et le GPU de WebView2 servent toutes les pages : une vue Web
+                # mal rendue y laisserait de l'ordre de 1 Mo par ouverture (20 Mo ici).
+                Verifier '(15) navigateur WebView2 : après 20 fermetures ≤ après la première + 6 Mo' (($d1.Navigateur -gt 0) -and ($d20.Navigateur -le $d1.Navigateur + 6)) "$($d20.Navigateur) Mo, après la première $($d1.Navigateur) Mo" | Out-Null
+                Verifier '(15) GPU WebView2 : après 20 fermetures ≤ après la première + 6 Mo' (($d1.Gpu -gt 0) -and ($d20.Gpu -le $d1.Gpu + 6)) "$($d20.Gpu) Mo, après la première $($d1.Gpu) Mo" | Out-Null
+                # L'ensemble, filet large : les quatre pages permanentes grossissent avec les
+                # captures, éditeur ou non (elles sont notées, et comparées plus bas à 40
+                # captures sans éditeur).
                 Verifier '(15) app et WebView2 : 10 s après 20 fermetures ≤ repos chaud + 40 Mo' ($apres -le $chaud + 40) "$apres Mo, repos chaud $chaud Mo" | Out-Null
                 $script:proc.Refresh()
                 $filsApres = $script:proc.Threads.Count
                 $poignees = (Get-Process -Id $script:proc.Id).HandleCount
                 Noter-Mesure -Nom 'fils apres 20 fermetures' -Valeur "$fils -> $filsApres" -Unite ''
+                Noter-Mesure -Nom 'poignees apres 20 fermetures' -Valeur "$fenetres -> $poignees" -Unite ''
                 Verifier '(15) fils et poignées stables' (($filsApres -le $fils + 3) -and ($poignees -le $fenetres + 60)) "fils $fils -> $filsApres, poignées $fenetres -> $poignees" | Out-Null
                 Verifier '(15) aucune fenêtre « Annoter la capture » restante' (($E::FenetresTitre($script:proc.Id, $TITRE)).Count -eq 0) | Out-Null
             }

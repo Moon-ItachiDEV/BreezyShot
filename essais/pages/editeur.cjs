@@ -274,19 +274,20 @@ const CHARGE = {
     const vue = await appels(p, 'editeur_vue');
     verifier(vue.length === 1 && vue[0][1].id === 7, '1 editeur_vue à la fin du placement');
     // Le rectangle envoyé est en pixels de la page : l'image est sous la barre du haut
-    // (52 px) et sa réserve (14 px), là où la toile la peint.
+    // (52 px) et sa réserve (14 px). Témoin : l'ombre de l'image, que la page place par un
+    // autre chemin (une boîte CSS sous l'image).
     const place = await p.evaluate(() => {
-      const t = document.querySelector('#vue').getBoundingClientRect();
-      const v = __ed.vue;
-      return { x: t.left + v.x / v.dpr, y: t.top + v.y / v.dpr, haut: t.top };
+      const o = document.querySelector('#ombre-image').getBoundingClientRect();
+      return { x: o.left, y: o.top, largeur: o.width, hauteur: o.height };
     });
-    const envoye = vue.length === 1 ? vue[0][1] : { x: NaN, y: NaN };
+    const envoye = vue.length === 1 ? vue[0][1] : { x: NaN, y: NaN, largeur: NaN, hauteur: NaN };
     verifier(
-      place.haut >= 52 &&
-        envoye.y >= 66 &&
-        Math.abs(envoye.x - place.x) < 0.01 &&
-        Math.abs(envoye.y - place.y) < 0.01,
-      'editeur_vue : la place de l’image dans la page, pas dans la toile',
+      envoye.y >= 66 &&
+        Math.abs(envoye.x - place.x) < 0.05 &&
+        Math.abs(envoye.y - place.y) < 0.05 &&
+        Math.abs(envoye.largeur - place.largeur) < 0.05 &&
+        Math.abs(envoye.hauteur - place.hauteur) < 0.05,
+      'editeur_vue : la place de l’image dans la page (celle de son ombre), pas dans la toile',
       JSON.stringify([envoye, place]),
     );
     await fin(p, '1');

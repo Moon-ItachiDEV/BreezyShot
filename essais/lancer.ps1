@@ -31,6 +31,8 @@ foreach ($fichier in $essais) {
     $nom = [System.IO.Path]::GetFileNameWithoutExtension($fichier.Name)
     $chrono = [System.Diagnostics.Stopwatch]::StartNew()
     $avant = @(Get-Process | ForEach-Object { $_.Id })
+    $json = Join-Path $sortieComplete "$nom.json"
+    Remove-Item -LiteralPath $json -Force -ErrorAction SilentlyContinue   # jamais un vieux bilan
     $arguments = @('-NoProfile', '-File', "`"$($fichier.FullName)`"",
         '-Exe', "`"$exeComplet`"", '-Sortie', "`"$sortieComplete`"")
     $processus = Start-Process -FilePath $pwsh -ArgumentList $arguments -NoNewWindow -PassThru
@@ -42,20 +44,38 @@ foreach ($fichier in $essais) {
         Write-Host "$nom : pas fini en $LimiteS s, arrêté."
         try { $processus.Kill($true) } catch { Write-Host "$nom : arrêt impossible ($_)" }
         $code = -1
+        # L'essai arrêté n'a pas rangé les journaux de l'app : ils sont pris dans son dossier.
+        $temp = [System.IO.Path]::GetTempPath()
+        foreach ($d in @(Get-ChildItem -LiteralPath $temp -Directory -Filter "breezyshot-$nom-*" -ErrorAction SilentlyContinue)) {
+            $journaux = @(Get-ChildItem -LiteralPath $d.FullName -Directory -Recurse -Depth 3 -Filter 'Journal' -ErrorAction SilentlyContinue |
+                Where-Object { $_.Parent.Name -eq 'local' })
+            foreach ($j in $journaux) {
+                $cas = [System.IO.Path]::GetRelativePath($d.FullName, $j.Parent.Parent.FullName)
+                $ici = Join-Path $sortieComplete "journaux/$nom"
+                if ($cas -ne '.') { $ici = Join-Path $ici $cas }
+                New-Item -ItemType Directory -Force -Path $ici | Out-Null
+                Copy-Item -Path (Join-Path $j.FullName '*') -Destination $ici -Force -ErrorAction SilentlyContinue
+            }
+        }
     }
     $chrono.Stop()
-    # Rien de ce qu'un essai a lancé ne doit lui survivre : une app ou une aide restée
-    # ouverte garde la sortie de l'étape et la bloque jusqu'à sa limite de temps.
+    # Rien de ce qu'un essai a lancé ne doit lui survivre : l'app, une aide, ou les vues Web
+    # de l'app (WebView2 dit pour qui il tourne dans sa ligne de commande ; celui d'un autre
+    # programme n'est pas touché). L'essai suivant attend qu'ils soient partis.
     $restes = @(Get-Process | Where-Object {
             $_.Id -ne $PID -and $_.Id -notin $avant -and
             $_.ProcessName -match '^(breezyshot.*|pwsh|msedgewebview2)$'
+        } | Where-Object {
+            if ($_.ProcessName -ne 'msedgewebview2') { return $true }
+            $ligne = ''
+            try { $ligne = "$((Get-CimInstance Win32_Process -Filter "ProcessId = $($_.Id)" -ErrorAction Stop).CommandLine)" } catch { }
+            return $ligne -match '--webview-exe-name=breezyshot'
         })
     if ($restes.Count -gt 0) {
         $noms = ($restes | ForEach-Object { "$($_.ProcessName) ($($_.Id))" }) -join ', '
         Write-Host "$nom : processus restés ouverts, arrêtés : $noms"
-        $restes | ForEach-Object { try { $_.Kill() } catch { } }
+        $restes | ForEach-Object { try { $_.Kill(); $null = $_.WaitForExit(5000) } catch { } }
     }
-    $json = Join-Path $sortieComplete "$nom.json"
     $bilan = $null
     if (Test-Path -LiteralPath $json) { $bilan = Get-Content -LiteralPath $json -Raw | ConvertFrom-Json }
     $bilans.Add([pscustomobject]@{

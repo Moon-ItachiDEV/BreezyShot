@@ -218,6 +218,19 @@ function Noter-Mesure {
     Write-Host "[mesure] $Nom : $Valeur $Unite"
 }
 
+# Copie dans $Cible les journaux de l'app trouvés sous $Dossier : celui de l'essai
+# (`local/Journal`), et ceux de ses cas (`<cas>/local/Journal`, rangés sous `<cas>`).
+function Ranger-Journaux([string]$Dossier, [string]$Cible) {
+    $journaux = @(Get-ChildItem -LiteralPath $Dossier -Directory -Recurse -Depth 3 -Filter 'Journal' -ErrorAction SilentlyContinue |
+        Where-Object { $_.Parent.Name -eq 'local' })
+    foreach ($j in $journaux) {
+        $cas = [System.IO.Path]::GetRelativePath($Dossier, $j.Parent.Parent.FullName)
+        $ici = if ($cas -eq '.') { $Cible } else { Join-Path $Cible $cas }
+        New-Item -ItemType Directory -Force -Path $ici | Out-Null
+        Copy-Item -Path (Join-Path $j.FullName '*') -Destination $ici -Force -ErrorAction SilentlyContinue
+    }
+}
+
 # Range le journal et le bilan dans $Sortie, ferme ce qui reste, sort avec 0 ou 1.
 function Terminer-Essai {
     Arreter-Tout
@@ -226,10 +239,7 @@ function Terminer-Essai {
     if ($null -ne $e) {
         $dossierJournaux = Join-Path $e.Sortie "journaux/$($e.Nom)"
         New-Item -ItemType Directory -Force -Path $dossierJournaux | Out-Null
-        $journaux = Join-Path $e.Dossier 'local/Journal'
-        if (Test-Path -LiteralPath $journaux) {
-            Copy-Item -Path (Join-Path $journaux '*') -Destination $dossierJournaux -Force
-        }
+        Ranger-Journaux -Dossier $e.Dossier -Cible $dossierJournaux
         $echecs = @($script:Verifications | Where-Object { -not $_.Reussi }).Count
         $reussi = ($script:Verifications.Count -gt 0) -and ($echecs -eq 0)
         $bilan = [pscustomobject]@{
