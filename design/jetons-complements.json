@@ -19,15 +19,6 @@
     },
     "usage": "Pastille d'erreur du bandeau.",
     "origine": "Maquette complète, variable --danger (le #C42B1C clair est aussi celui de ARCHITECTURE.md §6 et de « Choix 2 »)."
-   },
-   {
-    "name": "selection-fenetre",
-    "value": {
-     "light": "#4CC2FF",
-     "dark": "#4CC2FF"
-    },
-    "usage": "Trait de 2 px (× l'échelle) autour de la fenêtre survolée en mode fenêtre. Identique dans les deux thèmes, comme selection-stroke.",
-    "origine": "Contrat de l'étape 8, partie B1 ; même valeur que window-highlight de jetons.json."
    }
   ]
  },

@@ -747,7 +747,7 @@ construite (le réglage existe, sans effet).
 ### Mode fenêtre (étape 8)
 
 Ce que voit l'utilisateur : les écrans figés et assombris ; la fenêtre sous la souris
-redevient claire, entourée d'un trait bleu (`--selection-fenetre`, 2 px × l'échelle arrondi,
+redevient claire, entourée d'un trait bleu (`--window-highlight`, 2 px × l'échelle arrondi,
 au moins 2 pixels réels, à l'intérieur) ; le voile épouse ses coins arrondis. Le contour
 suit la souris, sans animation ; sur le bureau ou sur rien, rien n'est entouré. Clic
 gauche sur une fenêtre entourée : tout disparaît. Échap ou clic droit : annuler. Curseur :
@@ -767,8 +767,10 @@ un clic ne fait toujours rien.
   pixels réels de la scène, avec `border-radius`, une ombre intérieure sans flou (le trait)
   et une ombre extérieure sans flou qui couvre toute la scène (le voile) : les bords droits
   tombent sur des pixels entiers, seuls les pixels coupés par un arc sont mêlés.
-- Clic : appui puis relâchement du bouton gauche, déplacé de moins de `cote_min` pixels
-  réels sur chaque axe ; si une fenêtre est entourée sous le pixel du relâchement, la page
+- Clic : appui puis relâchement du bouton gauche, déplacé de moins de `max(cote_min,
+  round(4 × k))` pixels réels sur chaque axe (4 pixels logiques, comme le rectangle de
+  glisser de Windows ; au-delà, c'est un glisser, et rien ne part) ; chaque appui gauche
+  remplace le précédent ; si une fenêtre est entourée sous le pixel du relâchement, la page
   envoie `selection_cliquee { id, numero, x, y }` (même règle de pixel et même attente que
   `selection_terminee`).
 - Le cœur ne croit pas la page : `decider_fenetre(point, fenetre_selection, fenetres,
