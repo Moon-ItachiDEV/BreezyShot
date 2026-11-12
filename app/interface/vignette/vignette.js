@@ -17,11 +17,14 @@
 //   `vignette_terminee` { id }. `vignette:cachee` { id } : tout s'arrête, sans réponse.
 // - `vignette_action` { id, action } au clic ; `vignette_glisser` { id } après un appui sur
 //   l'image et 4 px de déplacement, une fois par appui.
-// - `vignette_pret` {} une fois l'écoute en place.
+// - `vignette_pret` {} une fois l'écoute en place (événements de la carte et thème,
+//   `interface:theme`, voir commun/theme.js).
 // Sans window.__TAURI__ (aperçu dans un navigateur) : ?demo=bas_gauche|haut_droite…
 //
 // Aucune donnée de la charge ne passe par innerHTML : textes par textContent, pictogrammes
 // tirés de constantes.
+
+import { suivreTheme } from "../commun/theme.js";
 
 const tauri = window.__TAURI__;
 const carte = document.getElementById("carte");
@@ -573,7 +576,10 @@ const ECOUTES = {
 };
 
 if (tauri?.event?.listen) {
-  Promise.all(Object.entries(ECOUTES).map(([nom, f]) => tauri.event.listen(nom, f))).then(
+  Promise.all([
+    ...Object.entries(ECOUTES).map(([nom, f]) => tauri.event.listen(nom, f)),
+    suivreTheme(),
+  ]).then(
     () => appeler("vignette_pret", {}),
     (e) => console.warn("vignette : écoute impossible :", e),
   );

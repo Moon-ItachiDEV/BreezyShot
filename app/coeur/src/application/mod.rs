@@ -277,7 +277,7 @@ pub fn lancer() {
     if let arguments::Lancement::Desinstallation =
         arguments::lancement(nom_exe.as_deref(), &commande)
     {
-        std::process::exit(installateur::desinstaller());
+        std::process::exit(desinstaller());
     }
     let contexte = tauri::generate_context!();
     match arguments::lancement(nom_exe.as_deref(), &commande) {
@@ -285,7 +285,28 @@ pub fn lancer() {
         arguments::Lancement::Installateur => {
             std::process::exit(installateur::lancer_installateur(contexte))
         }
-        arguments::Lancement::Desinstallation => std::process::exit(installateur::desinstaller()),
+        arguments::Lancement::Desinstallation => std::process::exit(desinstaller()),
+    }
+}
+
+/// Désinstalle, en donnant à l'installateur le retrait du démarrage avec Windows (la valeur
+/// `Run` appartient aux Réglages : l'installateur ne la connaît pas).
+fn desinstaller() -> i32 {
+    installateur::desinstaller_avec(Box::new(|| {
+        let avant = systeme::demarrage_avec_systeme(None)?;
+        systeme::demarrage_avec_systeme(Some(false))?;
+        log::info!("{}", ligne_demarrage_retire(avant));
+        Ok(())
+    }))
+}
+
+/// Ligne du journal de la désinstallation pour le démarrage avec Windows, d'après l'état lu
+/// avant le retrait. Fonction pure.
+pub fn ligne_demarrage_retire(avant: systeme::EtatDemarrage) -> &'static str {
+    use systeme::EtatDemarrage as E;
+    match avant {
+        E::Actif | E::DesactiveParWindows => "desinstallation demarrage: retire",
+        E::Inactif | E::Indisponible => "desinstallation demarrage: absent",
     }
 }
 
@@ -2085,6 +2106,17 @@ fn arreter(app: &AppHandle) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn desinstallation_ligne_du_demarrage() {
+        use systeme::EtatDemarrage as E;
+        let retire = "desinstallation demarrage: retire";
+        let absent = "desinstallation demarrage: absent";
+        assert_eq!(ligne_demarrage_retire(E::Actif), retire);
+        assert_eq!(ligne_demarrage_retire(E::DesactiveParWindows), retire);
+        assert_eq!(ligne_demarrage_retire(E::Inactif), absent);
+        assert_eq!(ligne_demarrage_retire(E::Indisponible), absent);
+    }
     use crate::raccourcis::{choisir, decider_annonce, Situation};
 
     fn action(id: &str, texte: &str) -> EntreeMenu {

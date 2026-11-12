@@ -22,7 +22,7 @@ use tauri::{AppHandle, Emitter, Manager, State, WebviewWindow};
 use super::place::{self, cliquable, intervalle, zone_ecran};
 use super::{
     borner_zone_dans, cacher, creer_fenetre_outil, ecran_sous, ecrans, place_reelle, poser, souris,
-    traverser, Ecran, Rect, ZoneCss,
+    theme, traverser, Ecran, Rect, ZoneCss,
 };
 use crate::systeme;
 
@@ -1062,6 +1062,7 @@ fn montrer(fenetre: &WebviewWindow) {
 /// La page de la vignette écoute ses événements.
 #[tauri::command]
 pub fn vignette_pret(vignette: State<'_, Vignette>) {
+    theme::envoyer_a(&vignette.app, ETIQUETTE_VIGNETTE);
     vignette.page_prete();
 }
 
