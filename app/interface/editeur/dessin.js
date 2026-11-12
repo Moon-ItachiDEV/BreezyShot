@@ -6,7 +6,11 @@
 
 import {
   boiteForme, cadre, longueurPointe, mesureTexte, numeroAffiche, policeTexte, POLICE,
+  TRAITS, TRAITS_SURLIGNEUR,
 } from "./document.js";
+
+// Épaisseurs : valeurs tenues par `document.js` (qui ne dépend pas de ce module).
+export { TRAITS, TRAITS_SURLIGNEUR };
 
 export const COULEURS = [
   ["#E5484D", "Rouge"],
@@ -18,8 +22,6 @@ export const COULEURS = [
   ["#1A1A1A", "Noir"],
   ["#FFFFFF", "Blanc"],
 ];
-export const TRAITS = [3, 5, 8]; // Fin, Moyen, Épais (px de l'image)
-export const TRAITS_SURLIGNEUR = [16, 24, 34];
 export const RAYONS_NUMERO = [12, 16, 21]; // P, M, G
 export const BLOCS = [8, 13, 20]; // Pixeliser : côté du bloc
 export const FLOUS = [6, 10, 16]; // Flouter : facteur de réduction
@@ -264,40 +266,70 @@ export function dessinerObjet(ctx, doc, objet) {
 
 // ---------- masques ----------
 
-// La zone d'un masque bornée à l'image, en entiers ; null si moins de 2 px (design `clip`).
+// La zone d'un masque bornée à l'image, en entiers, arrondie vers l'extérieur : aucun pixel
+// en partie couvert ne reste d'origine. null si la part dans l'image fait moins de 1 px.
 function zone(o, l, h) {
   const n = boiteForme(o);
-  const x = Math.round(Math.max(0, n.x)), y = Math.round(Math.max(0, n.y));
-  const x2 = Math.round(Math.min(l, n.x + n.largeur));
-  const y2 = Math.round(Math.min(h, n.y + n.hauteur));
-  if (x2 - x < 2 || y2 - y < 2) return null;
-  return { x, y, w: x2 - x, h: y2 - y };
+  const a = Math.max(0, n.x), b = Math.max(0, n.y);
+  const a2 = Math.min(l, n.x + n.largeur), b2 = Math.min(h, n.y + n.hauteur);
+  if (a2 - a < 1 || b2 - b < 1) return null;
+  const x = Math.floor(a), y = Math.floor(b);
+  return { x, y, w: Math.ceil(a2) - x, h: Math.ceil(b2) - y };
+}
+
+// Blocs sur un axe : coupes aux multiples de `bs` (grille de l'image) ; un reste de bord de
+// moins d'un demi-bloc est fondu dans le bloc voisin (un bloc de 1 px s'inverserait), et une
+// zone plus petite qu'un bloc en fait un seul. Rend [[début, fin, rang], …], en px de l'image.
+function blocs(debut, taille, bs) {
+  const fin = debut + taille, c = [debut];
+  for (let m = (Math.floor(debut / bs) + 1) * bs; m < fin; m += bs) c.push(m);
+  c.push(fin);
+  const s = [];
+  for (let i = 1; i < c.length; i++) s.push([c[i - 1], c[i]]);
+  if (s.length > 1 && s[0][1] - s[0][0] < bs / 2) s.splice(0, 2, [s[0][0], s[1][1]]);
+  const z = s.length - 1;
+  if (z > 0 && s[z][1] - s[z][0] < bs / 2) s.splice(z - 1, 2, [s[z - 1][0], s[z][1]]);
+  return s.map(([a, b]) => [a, b, Math.floor((a + b) / 2 / bs)]);
+}
+
+// Grain de Pixeliser : écart de luminosité de chaque bloc, de ±GRAINS[i] niveaux, tiré de la
+// graine de l'objet et de la place du bloc. Sans lui, la moyenne d'un bloc se compare à celle
+// de candidats rendus pareil (un texte se relit chiffre par chiffre) ; avec lui, l'écart entre
+// deux candidats se perd dans le grain.
+const GRAINS = [24, 18, 14];
+function grain(graine, i, j) {
+  let h = Math.imul((graine | 0) ^ 0x9E3779B9, 0x85EBCA6B);
+  h = Math.imul(h ^ Math.imul(i, 0xC2B2AE35) ^ Math.imul(j, 0x27D4EB2F), 0x165667B1);
+  h ^= h >>> 15; h = Math.imul(h, 0x2C1B3C6D); h ^= h >>> 12; h = Math.imul(h, 0x297A2D39);
+  h ^= h >>> 15;
+  return (h >>> 0) / 4294967296 * 2 - 1;
 }
 
 // Chaque bloc de `bs` px aligné sur la grille de l'image devient sa moyenne mêlée de gris
-// (k 0,82 ou 0,86 en damier ; gris 132, 140, 154), opaque. `c` : toile dont le pixel (0, 0)
-// est le pixel (ox, oy) de l'image.
-function pixeliser(c, n, bs, ox, oy) {
-  const img = c.getImageData(n.x - ox, n.y - oy, n.w, n.h), d = img.data, W = n.w, H = n.h;
-  const dx0 = n.x % bs, dy0 = n.y % bs;
-  for (let by = -dy0; by < H; by += bs) {
-    const y0 = Math.max(0, by), y1 = Math.min(H, by + bs);
-    for (let bx = -dx0; bx < W; bx += bs) {
-      const x0 = Math.max(0, bx), x1 = Math.min(W, bx + bs);
+// (formule du design : k 0,82 ou 0,86 en damier ; gris 132, 140, 154), plus son grain,
+// opaque. `c` : toile dont le pixel (0, 0) est le pixel (ox, oy) de l'image.
+function pixeliser(c, n, intensite, graine, ox, oy) {
+  const bs = BLOCS[intensite] ?? BLOCS[1], ampleur = GRAINS[intensite] ?? GRAINS[1];
+  const img = c.getImageData(n.x - ox, n.y - oy, n.w, n.h), d = img.data, W = n.w;
+  const lignes = blocs(n.y, n.h, bs), colonnes = blocs(n.x, n.w, bs);
+  for (const [ya, yb, j] of lignes) {
+    const y0 = ya - n.y, y1 = yb - n.y;
+    for (const [xa, xb, i] of colonnes) {
+      const x0 = xa - n.x, x1 = xb - n.x;
       let r = 0, g = 0, b = 0;
       for (let y = y0; y < y1; y++) {
-        for (let i = (y * W + x0) * 4, f = (y * W + x1) * 4; i < f; i += 4) {
-          r += d[i]; g += d[i + 1]; b += d[i + 2];
+        for (let p = (y * W + x0) * 4, f = (y * W + x1) * 4; p < f; p += 4) {
+          r += d[p]; g += d[p + 1]; b += d[p + 2];
         }
       }
       const cnt = (x1 - x0) * (y1 - y0);
-      const k = ((Math.round((bx + n.x) / bs) + Math.round((by + n.y) / bs)) & 1) ? 0.86 : 0.82;
-      r = (r / cnt) * k + 132 * (1 - k);
-      g = (g / cnt) * k + 140 * (1 - k);
-      b = (b / cnt) * k + 154 * (1 - k);
+      const k = ((i + j) & 1) ? 0.86 : 0.82, e = ampleur * grain(graine, i, j);
+      r = (r / cnt) * k + 132 * (1 - k) + e;
+      g = (g / cnt) * k + 140 * (1 - k) + e;
+      b = (b / cnt) * k + 154 * (1 - k) + e;
       for (let y = y0; y < y1; y++) {
-        for (let i = (y * W + x0) * 4, f = (y * W + x1) * 4; i < f; i += 4) {
-          d[i] = r; d[i + 1] = g; d[i + 2] = b; d[i + 3] = 255;
+        for (let p = (y * W + x0) * 4, f = (y * W + x1) * 4; p < f; p += 4) {
+          d[p] = r; d[p + 1] = g; d[p + 2] = b; d[p + 3] = 255;
         }
       }
     }
@@ -334,6 +366,9 @@ function flouter(c, n, amt, ox, oy) {
   c.clip();
   c.imageSmoothingEnabled = true;
   c.imageSmoothingQuality = "high";
+  // La zone est effacée d'abord : sur une image à alpha, un flou en partie transparent
+  // posé par-dessus laisserait voir les pixels d'origine.
+  c.clearRect(n.x, n.y, n.w, n.h);
   c.drawImage(t, 0, 0, tw, th, n.x, n.y, n.w, n.h);
   c.fillStyle = "rgba(240,242,246,.18)";
   c.fillRect(n.x, n.y, n.w, n.h);
@@ -343,20 +378,22 @@ function flouter(c, n, amt, ox, oy) {
 
 // Applique un masque à la toile `c`, dont le pixel (0, 0) est le pixel (ox, oy) de l'image
 // et qui couvre `l` × `h` pixels de l'image entière.
+// Bloc noir : la zone en rectangle plein (écart au design, rayon 3 : les pixels des coins
+// arrondis restaient en partie d'origine).
 function masquer(c, o, l, h, ox = 0, oy = 0) {
+  const n = zone(o, l, h);
+  if (!n) return;
   if (o.sorte === "bloc") {
-    const n = boiteForme(o);
     c.save();
-    c.setTransform(1, 0, 0, 1, -ox, -oy);
+    c.setTransform(1, 0, 0, 1, 0, 0);
+    c.globalAlpha = 1;
+    c.globalCompositeOperation = "source-over";
     c.fillStyle = NOIR_BLOC;
-    rectArrondi(c, n.x, n.y, n.largeur, n.hauteur, 3);
-    c.fill();
+    c.fillRect(n.x - ox, n.y - oy, n.w, n.h);
     c.restore();
     return;
   }
-  const n = zone(o, l, h);
-  if (!n) return;
-  if (o.sorte === "pixeliser") pixeliser(c, n, BLOCS[o.intensite] ?? BLOCS[1], ox, oy);
+  if (o.sorte === "pixeliser") pixeliser(c, n, o.intensite, o.graine ?? 0, ox, oy);
   else if (o.sorte === "flouter") flouter(c, n, FLOUS[o.intensite] ?? FLOUS[1], ox, oy);
 }
 

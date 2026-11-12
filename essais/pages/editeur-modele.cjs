@@ -132,6 +132,54 @@ async function partieDocument() {
     } catch { leve = true; }
     verifier(leve && doc.objets.length === 0 && !D.peutAnnuler(h) && h.version === 0,
       '4b erreur dans la modification : rien ne change');
+    // Même marque que le pas précédent : le document revient à l'état d'avant l'appel.
+    D.modifier(h, (d) => D.ajouter(d, exemples()[2]));
+    D.modifier(h, (d) => { d.objets[0].opacite = 0.5; }, 'op');
+    const v = h.version, avant = json(doc), pas = h.passe.length;
+    leve = false;
+    try {
+      D.modifier(h, (d) => { d.objets[0].opacite = 0.2; throw new Error('voulu'); }, 'op');
+    } catch { leve = true; }
+    verifier(leve && json(doc) === avant && h.version === v && h.passe.length === pas,
+      '4c erreur avec la même marque : document d\'avant l\'appel, version cohérente',
+      `${doc.objets[0].opacite} ${v} ${h.version}`);
+  }
+  // Mémoire de l'historique : 40 traits de 1000 points, 200 pas ; points au 1/100 px.
+  {
+    let g = 1;
+    const hasard = () => { g = (g * 16807) % 2147483647; return g / 2147483647; };
+    const doc = D.nouveauDocument(1920, 1080), h = D.creerHistorique(doc);
+    for (let i = 0; i < 40; i++) {
+      const pts = [];
+      let x = 100 + hasard() * 1000, y = 100 + hasard() * 600;
+      for (let j = 0; j < 1000; j++) {
+        x += hasard() * 6 - 3; y += hasard() * 6 - 3;
+        pts.push([x, y]);
+      }
+      D.modifier(h, (d) => D.ajouter(d, { type: 'crayon', points: D.lisser(pts),
+        couleur: '#E5484D', epaisseur: 1, opacite: 1 }));
+    }
+    const o = doc.objets[0], q = JSON.parse(json(o));
+    D.deplacer(o, q, 1 / 3, 2 / 3);
+    const centiemes = (t) => t.every(([x, y]) => Math.round(x * 100) / 100 === x
+      && Math.round(y * 100) / 100 === y);
+    const arrondis = centiemes(o.points);
+    D.redimensionner(o, q, 'se', { x: 1700.123, y: 900.456 }, 1);
+    const arrondis2 = centiemes(o.points);
+    for (let i = 0; i < 200; i++) D.modifier(h, (d) => { d.objets[i % 40].opacite = 0.5; });
+    const octets = D.octetsHistorique(h), document = json(doc).length;
+    verifier(arrondis && arrondis2 && octets <= 32 * 1024 * 1024 && D.peutAnnuler(h)
+      && h.passe.length >= 1, '4d historique borné à 32 Mo de JSON (au moins un pas), points '
+      + 'au 1/100 px', `${(octets / 1e6).toFixed(1)} Mo, ${h.passe.length} pas, document `
+      + `${(document / 1e6).toFixed(2)} Mo`);
+    // Un document plus gros que la borne garde encore un pas annulable.
+    const gros = D.nouveauDocument(10, 10), hg = D.creerHistorique(gros);
+    const pts = Array.from({ length: 2e6 }, (_, i) => [i, i]);
+    D.modifier(hg, (d) => D.ajouter(d, { type: 'crayon', points: pts, epaisseur: 1 }));
+    D.modifier(hg, (d) => { d.objets[0].opacite = 0.5; });
+    verifier(D.octetsHistorique(hg) > 32 * 1024 * 1024 && hg.passe.length === 1 && D.annuler(hg)
+      && gros.objets[0].opacite === undefined, '4d document plus gros que la borne : un pas '
+      + 'annulable reste');
   }
   // (6) numéros 1, 2, 3 ; le 2 supprimé → 1, 2 ; dupliquer → ordre suivant.
   {
@@ -151,6 +199,22 @@ async function partieDocument() {
       && c.ordre > Math.max(...doc.objets.filter((o) => o !== c).map((o) => o.ordre))
       && c.x === orig.x + 16 && c.y === orig.y + 16 && c.id > ids[2],
     '6 numéros 1,2,3 ; 2 supprimé → 1,2 ; copie : ordre suivant, décalée de 16', `${a} ${b}`);
+  }
+  // Graine des masques : tirée par `ajouter`, gardée par annuler et rétablir, neuve à la copie.
+  {
+    const doc = D.nouveauDocument(100, 100), h = D.creerHistorique(doc);
+    let id;
+    D.modifier(h, (d) => { id = D.ajouter(d, { type: 'masque', x1: 0, y1: 0, x2: 50, y2: 50,
+      sorte: 'pixeliser', intensite: 1 }); });
+    const g = doc.objets[0].graine;
+    D.modifier(h, (d) => { d.objets[0].intensite = 2; });
+    D.annuler(h); D.retablir(h);
+    const [copie] = D.dupliquer(doc, [id]);
+    const g2 = doc.objets.find((o) => o.id === copie).graine;
+    const fixe = { type: 'masque', x1: 0, y1: 0, x2: 5, y2: 5, sorte: 'bloc', graine: 3 };
+    D.ajouter(doc, fixe);
+    verifier(Number.isInteger(g) && g >= 0 && doc.objets[0].graine === g && Number.isInteger(g2)
+      && g2 !== g && fixe.graine === 3, '6b graine des masques tirée, gardée, neuve à la copie');
   }
   // (7) ordonner ; dupliquer plusieurs ; les masques entre eux, sous les autres pour le toucher.
   {
@@ -253,13 +317,14 @@ async function partieDocument() {
   // (9) recadrage borné, entier, annulé ; cadre ; « Image entière ».
   {
     const doc = D.nouveauDocument(800, 600), h = D.creerHistorique(doc);
+    // Qui dépasse : ramené dans l'image, taille gardée.
     D.modifier(h, (d) => D.recadrer(d, { x: 700.4, y: -20, largeur: 200, hauteur: 100.6 }));
-    const a = json(D.cadre(doc)) === json({ x: 700, y: 0, largeur: 100, hauteur: 81 })
+    const a = json(D.cadre(doc)) === json({ x: 600, y: 0, largeur: 200, hauteur: 101 })
       && json(doc.recadrage) === json(D.cadre(doc));
     D.modifier(h, (d) => D.recadrer(d, { x: 300, y: 200, largeur: -100, hauteur: -50 }));
     const b = json(D.cadre(doc)) === json({ x: 200, y: 150, largeur: 100, hauteur: 50 });
     D.annuler(h);
-    const c = json(D.cadre(doc)) === json({ x: 700, y: 0, largeur: 100, hauteur: 81 });
+    const c = json(D.cadre(doc)) === json({ x: 600, y: 0, largeur: 200, hauteur: 101 });
     D.annuler(h);
     const d = doc.recadrage === null && json(D.cadre(doc)) === json({ x: 0, y: 0, largeur: 800,
       hauteur: 600 });
@@ -267,12 +332,21 @@ async function partieDocument() {
     D.modifier(h, (x) => D.recadrer(x, null));
     const e = doc.recadrage === null;
     D.modifier(h, (x) => D.recadrer(x, { x: 900, y: 0, largeur: 50, hauteur: 50 }));
+    const f1 = json(doc.recadrage) === json({ x: 750, y: 0, largeur: 50, hauteur: 50 });
     D.modifier(h, (x) => D.recadrer(x, { x: 0, y: 0, largeur: 800, hauteur: 600 }));
-    const f = doc.recadrage === null;
+    const f2 = doc.recadrage === null;
+    // Plus grand que l'image : coupé, donc l'image entière.
+    D.modifier(h, (x) => D.recadrer(x, { x: -10, y: -10, largeur: 1000, hauteur: 300 }));
+    const f3 = json(doc.recadrage) === json({ x: 0, y: 0, largeur: 800, hauteur: 300 });
+    // Un carré (rapport 1:1) reste carré : position puis taille arrondies.
+    D.modifier(h, (x) => D.recadrer(x, { x: 10.4, y: 20.6, largeur: 100.6, hauteur: 100.6 }));
+    const f4 = json(doc.recadrage) === json({ x: 10, y: 21, largeur: 101, hauteur: 101 });
+    const f = f1 && f2 && f3 && f4;
     // Un recadrage écrit à la main hors de l'image est borné par `cadre`.
     doc.recadrage = { x: -10, y: 590, largeur: 30, hauteur: 30 };
     const g = json(D.cadre(doc)) === json({ x: 0, y: 590, largeur: 20, hauteur: 10 });
-    verifier(a && b && c && d && e && f && g, '9 recadrage borné, entier, annulé, Image entière',
+    verifier(a && b && c && d && e && f && g, '9 recadrage entier (carré gardé), ramené dans '
+      + 'l\'image ou coupé, annulé, Image entière',
       [a, b, c, d, e, f, g].join());
   }
   // (10) vide.
@@ -293,7 +367,7 @@ async function partieDocument() {
     D.normaliser(o);
     const l = D.lisser([[0, 0], [10, 0], [10, 10]]);
     verifier(o.x1 === 5 && o.x2 === 10 && o.y1 === 2 && o.y2 === 30 && l.length === 12
-      && l[0][0] === 0 && l[11][1] === 10 && l[1][0] === 0.625, '11 normaliser, lisser',
+      && l[0][0] === 0 && l[11][1] === 10 && l[1][0] === 0.63, '11 normaliser, lisser',
     JSON.stringify(l));
   }
 }
@@ -323,13 +397,33 @@ function outilsPage() {
     const ctx = fond.getContext('2d', { willReadFrequently: true });
     return { l, h, src, base, fond, ctx };
   };
+  // Blocs de Pixeliser sur un axe (règle du contrat, réécrite ici) : coupes sur la grille de
+  // l'image, reste de bord de moins d'un demi-bloc fondu dans son voisin.
+  window.blocs = (debut, taille, bs) => {
+    const fin = debut + taille, c = [debut];
+    for (let m = (Math.floor(debut / bs) + 1) * bs; m < fin; m += bs) c.push(m);
+    c.push(fin);
+    let s = c.slice(1).map((v, i) => [c[i], v]);
+    if (s.length > 1 && s[0][1] - s[0][0] < bs / 2) s = [[s[0][0], s[1][1]], ...s.slice(2)];
+    const z = s.length - 1;
+    if (z > 0 && s[z][1] - s[z][0] < bs / 2) s = [...s.slice(0, z - 1), [s[z - 1][0], s[z][1]]];
+    return s;
+  };
+  // Début du bloc qui contient v.
+  window.debutBloc = (segments, v) => segments.find(([a, b]) => v >= a && v < b)[0];
   window.exporter = (im, doc) => {
     window.M.peindreMasques(im.ctx, im.base, doc);
     return window.M.composer(doc, im.fond);
   };
   window.docAvec = (l, h, objets, recadrage = null) => {
     const doc = window.D.nouveauDocument(l, h);
-    for (const o of objets) window.D.ajouter(doc, JSON.parse(JSON.stringify(o)));
+    // Graine du grain de Pixeliser fixée ici (la page la tire au hasard) : rien n'y dépend
+    // du hasard.
+    for (const o of objets) {
+      const q = JSON.parse(JSON.stringify(o));
+      if (q.type === 'masque' && q.graine == null) q.graine = 7919;
+      window.D.ajouter(doc, q);
+    }
     doc.recadrage = recadrage;
     return doc;
   };
@@ -480,15 +574,17 @@ async function partieDessin(nav) {
     const im = await preparer(640, 480);
     const res = {};
     for (const [i, bs] of M.BLOCS.entries()) {
+      // Zone arrondie vers l'extérieur : x de 101 à 334, y de 57 à 271.
       const zoneM = { type: 'masque', x1: 101.4, y1: 57.6, x2: 333.2, y2: 270.3,
         sorte: 'pixeliser', intensite: i };
       const s = exporter(im, docAvec(640, 480, [zoneM]));
+      const bx = blocs(101, 233, bs), by = blocs(57, 214, bs);
       let unis = true, origine = 0, total = 0;
-      for (let y = 58; y < 270; y++) {
-        for (let x = 101; x < 333; x++) {
+      for (let y = 57; y < 271; y++) {
+        for (let x = 101; x < 334; x++) {
           const k = (y * 640 + x) * 4;
           // Premier pixel de son bloc, sur la grille de l'image, bornée à la zone.
-          const x0 = Math.max(101, x - (x % bs)), y0 = Math.max(58, y - (y % bs));
+          const x0 = debutBloc(bx, x), y0 = debutBloc(by, y);
           const k0 = (y0 * 640 + x0) * 4;
           for (let c = 0; c < 4; c++) if (s.rgba[k + c] !== s.rgba[k0 + c]) unis = false;
           let meme = true;
@@ -499,7 +595,9 @@ async function partieDessin(nav) {
       }
       // Deux blocs voisins diffèrent (la grille n'est pas d'un seul bloc).
       const a = (y, x) => s.rgba[(y * 640 + x) * 4];
-      res['pixeliser' + bs] = { unis, origine, total,
+      // Aucun bloc de moins d'un demi-bloc.
+      const petits = [...bx, ...by].filter(([a, b]) => b - a < bs / 2).length;
+      res['pixeliser' + bs] = { unis, origine, total, petits,
         voisins: a(130, 130) !== a(130, 130 + bs) || a(130, 130) !== a(130 + bs, 130) };
     }
     const zoneF = { type: 'masque', x1: 100, y1: 60, x2: 340, y2: 260, sorte: 'flouter',
@@ -531,9 +629,101 @@ async function partieDessin(nav) {
   });
   for (const bs of [8, 13, 20]) {
     const x = r['pixeliser' + bs];
-    verifier(x.unis && x.voisins && x.origine === 0, `15 Pixeliser ${bs} px : blocs unis alignés `
-      + 'sur la grille, aucun pixel d\'origine dans la zone', JSON.stringify(x));
+    verifier(x.unis && x.voisins && x.origine * 10000 <= x.total && x.petits === 0,
+      `15 Pixeliser ${bs} px : blocs unis alignés sur la grille (restes de bord fondus), pixels `
+      + 'd\'origine au niveau du hasard (au plus 1 sur 10 000)',
+    JSON.stringify(x));
   }
+
+  // (d bis) Bords et petites zones : bloc de coin de 1 px fondu, zone plus petite qu'un bloc
+  // = un bloc, zones de 1 à 2 px masquées, bords fractionnaires couverts, Bloc noir plein ;
+  // Flouter sur une image à alpha : rien d'origine sous le flou.
+  const rb = await p.evaluate(async () => {
+    const im = await preparer(200, 120);
+    const px = (s, x, y) => Array.from(s.rgba.slice((y * 200 + x) * 4, (y * 200 + x) * 4 + 4));
+    const egal = (a, b) => a.every((v, i) => v === b[i]);
+    const orig = (x, y) => Array.from(im.src.slice((y * 200 + x) * 4, (y * 200 + x) * 4 + 4));
+    const res = {};
+    // Zone qui commence en (12, 12), blocs de 13 : le pixel (12, 12) est dans le bloc 12..26.
+    let s = exporter(im, docAvec(200, 120, [{ type: 'masque', x1: 12, y1: 12, x2: 60, y2: 60,
+      sorte: 'pixeliser', intensite: 1 }]));
+    res.coin = egal(px(s, 12, 12), px(s, 25, 25)) && egal(px(s, 12, 12), px(s, 12, 25))
+      && !egal(px(s, 12, 12), px(s, 26, 12));
+    // Zone de 8 × 7 à cheval sur la ligne 52 de la grille : un seul bloc.
+    s = exporter(im, docAvec(200, 120, [{ type: 'masque', x1: 50, y1: 50, x2: 58, y2: 57,
+      sorte: 'pixeliser', intensite: 1 }]));
+    let un = true;
+    for (let y = 50; y < 57; y++) for (let x = 50; x < 58; x++) {
+      if (!egal(px(s, x, y), px(s, 50, 50))) un = false;
+    }
+    res.petiteUnBloc = un;
+    // Zones de 1 à 2 px, à cheval sur le bord, bords fractionnaires : aucun pixel d'origine.
+    const restes = [];
+    const compter = (o, x0, x1, y0, y1) => {
+      const t = exporter(im, docAvec(200, 120, [o]));
+      let n = 0;
+      for (let y = y0; y < y1; y++) {
+        for (let x = x0; x < x1; x++) if (egal(px(t, x, y), orig(x, y))) n++;
+      }
+      return n;
+    };
+    for (const sorte of ['pixeliser', 'flouter', 'bloc']) {
+      for (const w of [1, 1.4, 1.9]) {
+        const n = compter({ type: 'masque', x1: 50, y1: 50, x2: 50 + w, y2: 80, sorte,
+          intensite: 1 }, 50, Math.ceil(50 + w), 50, 80);
+        if (n) restes.push(`${sorte} ${w} px : ${n}`);
+      }
+      let n = compter({ type: 'masque', x1: -30, y1: 50, x2: 1, y2: 80, sorte, intensite: 1 },
+        0, 1, 50, 80);
+      if (n) restes.push(`${sorte} au bord : ${n}`);
+      n = compter({ type: 'masque', x1: 40.45, y1: 40.45, x2: 90.55, y2: 90.55, sorte,
+        intensite: 1 }, 40, 91, 40, 91);
+      if (n) restes.push(`${sorte} bords fractionnaires : ${n}`);
+    }
+    res.restes = restes;
+    // Bloc noir : coins compris, tout à #111214.
+    s = exporter(im, docAvec(200, 120, [{ type: 'masque', x1: 100, y1: 20, x2: 150, y2: 60,
+      sorte: 'bloc', intensite: 1 }]));
+    let noir = true;
+    for (let y = 20; y < 60; y++) for (let x = 100; x < 150; x++) {
+      if (!egal(px(s, x, y), [17, 18, 20, 255])) noir = false;
+    }
+    res.noir = noir;
+    // Flouter, image à alpha 0 sur sa moitié gauche, puis à alpha 128 : corrélation de la
+    // sortie avec l'origine (canal vert), au niveau de celle d'une image opaque.
+    const correlation = (a, b, l, x0, x1, y0, y1) => {
+      let sa = 0, sb = 0, saa = 0, sbb = 0, sab = 0, n = 0;
+      for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) {
+        const i = (y * l + x) * 4 + 1;
+        sa += a[i]; sb += b[i]; saa += a[i] * a[i]; sbb += b[i] * b[i]; sab += a[i] * b[i]; n++;
+      }
+      const cov = sab / n - (sa / n) * (sb / n);
+      return cov / Math.sqrt((saa / n - (sa / n) ** 2) * (sbb / n - (sb / n) ** 2));
+    };
+    const moitie = await preparer(240, 120, (i) => (i % 240 < 120 ? 0 : 255));
+    const moyen = await preparer(240, 120, () => 128);
+    const opaque = await preparer(240, 120);
+    res.alpha = [];
+    for (const intensite of [0, 1, 2]) {
+      const o = { type: 'masque', x1: 20, y1: 10, x2: 220, y2: 110, sorte: 'flouter', intensite };
+      const r0 = correlation(exporter(opaque, docAvec(240, 120, [o])).rgba, opaque.src, 240,
+        120, 132, 20, 100);
+      const r1 = correlation(exporter(moitie, docAvec(240, 120, [o])).rgba, moitie.src, 240,
+        120, 132, 20, 100);
+      const r2 = correlation(exporter(moyen, docAvec(240, 120, [o])).rgba, moyen.src, 240,
+        30, 210, 20, 100);
+      res.alpha.push([r0, r1, r2].map((v) => Math.round(v * 100) / 100));
+    }
+    return res;
+  });
+  verifier(rb.coin, '15b Pixeliser : le bloc de coin de 1 px est fondu dans son voisin');
+  verifier(rb.petiteUnBloc, '15b Pixeliser : une zone plus petite qu\'un bloc est un seul bloc');
+  verifier(rb.restes.length === 0, '15c masques de 1 à 2 px, au bord, à bords fractionnaires : '
+    + 'aucun pixel d\'origine', JSON.stringify(rb.restes));
+  verifier(rb.noir, '15d Bloc noir plein, coins compris');
+  verifier(rb.alpha.every(([r0, r1, r2]) => r1 < Math.max(0.4, r0 + 0.15) && Math.abs(r2) < 0.2),
+    '16b Flouter sur alpha 0 et 128, trois intensités : corrélation avec l\'origine au niveau '
+    + 'du bruit [opaque, moitié alpha 0, alpha 128]', JSON.stringify(rb.alpha));
   verifier(r.flouter.rapport < 0.05 && r.flouter.origine < 48 && r.flouter.voile < 48,
     '16 Flouter Moyenne : variance < 5 % de l\'origine, pixels d\'origine (même sous le voile) '
     + '< 0,1 %',
@@ -641,11 +831,6 @@ async function partieDessin(nav) {
         if (d && dans) dans2++;
       }
     }
-    // Sélection : contour dessiné dans la vue, jamais dans l'export.
-    M.peindreVue(g, doc2, im.fond, { x: 0, y: 0, echelle: 2, dpr: 2 }, [doc2.objets[0].id]);
-    const sel = g.getImageData(0, 0, 600, 400).data;
-    let contour = 0;
-    for (let i = 0; i < sel.length; i++) if (sel[i] !== avec[i]) contour++;
     // Objets à cheval sur le bord de l'image, sans recadrage : vue = export aussi.
     const doc3 = docAvec(300, 200, [
       { type: 'fleche', x1: -60, y1: -30, x2: 150, y2: 100, double: true, couleur: '#E5484D',
@@ -660,9 +845,7 @@ async function partieDessin(nav) {
     let bord = 0;
     for (let i = 0; i < v4.length; i++) if (v4[i] !== s4.rgba[i]) bord++;
     M.peindreMasques(im.ctx, im.base, doc0);
-    const s2 = M.composer(doc2, im.fond), s3 = M.composer(doc2, im.fond);
-    const memeExport = s2.rgba.every((x, i) => x === s3.rgba[i]);
-    return { diff, max, dehors, hors2, dans2, contour, memeExport, bord };
+    return { diff, max, dehors, hors2, dans2, bord };
   });
   verifier(r.diff === 0, '19 vue à la taille réelle (image décalée, recadrée) = export au bit près',
     JSON.stringify(r));
@@ -671,8 +854,92 @@ async function partieDessin(nav) {
   verifier(r.dehors === 0, '19 la vue ne peint que le cadre', r.dehors);
   verifier(r.hors2 === 0 && r.dans2 > 0, '19 vue à l\'échelle 2 : ombre à l\'échelle, dans 2 × '
     + 'la boîte', JSON.stringify(r));
-  verifier(r.contour > 0 && r.memeExport, '19 contour de sélection dans la vue seulement',
-    r.contour);
+
+  // Contour de sélection : sur un fond gris uni, accent magenta (jeton --accent posé par
+  // l'essai) : sa teinte est dans la vue avec sélection, ni sans sélection ni dans l'export.
+  r = await p.evaluate(async () => {
+    document.documentElement.style.setProperty('--accent', '#FF00FF');
+    const gris = new Uint8ClampedArray(300 * 200 * 4).fill(128);
+    const im = { l: 300, h: 200, src: gris, base: await createImageBitmap(
+      new ImageData(gris, 300, 200), { premultiplyAlpha: 'none', colorSpaceConversion: 'none' }) };
+    im.fond = document.createElement('canvas');
+    im.fond.width = 300; im.fond.height = 200;
+    im.ctx = im.fond.getContext('2d', { willReadFrequently: true });
+    const doc = docAvec(300, 200, [{ type: 'rectangle', x1: 60, y1: 50, x2: 200, y2: 150,
+      couleur: '#0090FF', epaisseur: 1, plein: false, arrondi: 10, opacite: 1 }]);
+    const s = exporter(im, doc);
+    const vue = document.createElement('canvas');
+    vue.width = 600; vue.height = 400;
+    const c = vue.getContext('2d', { willReadFrequently: true });
+    const compter = (d) => {
+      let n = 0;
+      for (let i = 0; i < d.length; i += 4) {
+        // Teinte de l'accent (rouge et bleu bien au-dessus du vert) : ni le gris, ni le
+        // bleu du rectangle, ni son ombre.
+        if (d[i] - d[i + 1] > 40 && d[i + 2] - d[i + 1] > 40) n++;
+      }
+      return n;
+    };
+    M.peindreVue(c, doc, im.fond, { x: 0, y: 0, echelle: 2, dpr: 2 }, [doc.objets[0].id]);
+    const avec = compter(c.getImageData(0, 0, 600, 400).data);
+    M.peindreVue(c, doc, im.fond, { x: 0, y: 0, echelle: 2, dpr: 2 }, []);
+    const sans = compter(c.getImageData(0, 0, 600, 400).data);
+    return { avec, sans, exportes: compter(s.rgba) };
+  });
+  verifier(r.avec > 200 && r.sans === 0 && r.exportes === 0,
+    '19 contour de sélection (couleur de l\'accent) dans la vue sélectionnée seulement',
+    JSON.stringify(r));
+
+  // (h) Pixeliser ne se relit pas par comparaison de candidats. Un code de 8 chiffres (12 px)
+  // est masqué ; chaque chiffre est cherché en masquant les 10 variantes de la même façon et
+  // en gardant la plus proche. Témoin : candidats masqués avec la graine du secret (le grain
+  // s'annule, comme sans grain) : l'attaque marche. Essai : graines différentes (la page en
+  // tire une par objet) : l'attaque retombe près du hasard (0,8 chiffre sur 8 en moyenne).
+  r = await p.evaluate(async () => {
+    const L = 160, H = 40, X = 20, Y = 12;
+    const rendre = async (texte, dx = 0) => {
+      const c = new OffscreenCanvas(L, H), x = c.getContext('2d');
+      x.fillStyle = '#FFFFFF'; x.fillRect(0, 0, L, H);
+      x.fillStyle = '#1A1A1A'; x.font = '400 12px "Segoe UI", system-ui, sans-serif';
+      x.textBaseline = 'top'; x.fillText(texte, X + dx, Y);
+      const b = await createImageBitmap(c);
+      const fond = document.createElement('canvas');
+      fond.width = L; fond.height = H;
+      return { base: b, fond, ctx: fond.getContext('2d', { willReadFrequently: true }) };
+    };
+    const zone = { type: 'masque', x1: X - 6, y1: Y - 6, x2: X + 110, y2: Y + 20,
+      sorte: 'pixeliser' };
+    const masquer = (im, intensite, graine) =>
+      exporter(im, docAvec(L, H, [{ ...zone, intensite, graine }])).rgba;
+    const dist = (a, b) => {
+      let d = 0;
+      for (let i = 0; i < a.length; i++) if ((i & 3) !== 3) d += (a[i] - b[i]) ** 2;
+      return d;
+    };
+    const secret = '64861526';
+    const res = [];
+    for (const intensite of [0, 1, 2]) {
+      const cible = masquer(await rendre(secret, 0.3), intensite, 1);
+      const trouves = { temoin: 0, essai: 0 };
+      for (let pos = 0; pos < 8; pos++) {
+        for (const cas of ['temoin', 'essai']) {
+          let meilleur = -1, dm = Infinity;
+          for (let d = 0; d < 10; d++) {
+            const t = secret.slice(0, pos) + d + secret.slice(pos + 1);
+            const graine = cas === 'temoin' ? 1 : 1000 + pos * 10 + d;
+            const dd = dist(cible, masquer(await rendre(t), intensite, graine));
+            if (dd < dm) { dm = dd; meilleur = d; }
+          }
+          if (String(meilleur) === secret[pos]) trouves[cas]++;
+        }
+      }
+      res.push(trouves);
+    }
+    return res;
+  });
+  verifier(r.reduce((n, x) => n + x.temoin, 0) >= 12 && r.every((x) => x.essai <= 3),
+    '23 Pixeliser, attaque par candidats sur un texte de 12 px : au plus 3 chiffres sur 8 '
+    + 'retrouvés (témoin à graine connue : 12 sur 24 au moins)', JSON.stringify(r));
 
   // (g) Temps : Pixeliser sur une grande image (toute l'image masquée) ; composer 5760 × 1080
   // avec 50 objets (borne du contrat : 1 000 ms).

@@ -16,15 +16,21 @@
 //   texte      { x, y, texte, couleur, taille, gras, style, opacite }
 //              style : "simple" | "contour" | "etiquette"
 //   numero     { x, y, rayon, couleur, ordre, opacite }
-//   masque     { x1, y1, x2, y2, sorte, intensite }   sorte : "pixeliser"|"flouter"|"bloc"
+//   masque     { x1, y1, x2, y2, sorte, intensite, graine }
+//              sorte : "pixeliser"|"flouter"|"bloc" ; graine : entier tiré par `ajouter`
 // epaisseur et intensite : 0 | 1 | 2. opacite : de 0 à 1 (1 : opaque ; absente : 1 ; une
 // valeur au-dessus de 1 est lue en pour cent).
-// Historique : { doc, passe, futur, version, marque }.
-
-import { TRAITS, TRAITS_SURLIGNEUR } from "./dessin.js";
+// Historique : { doc, passe, futur, version, marque }. Annuler et rétablir remplacent les
+// objets du document par des copies : la page les cherche par `id`, jamais par référence
+// gardée d'un pas à l'autre.
 
 export const POLICE = '"Segoe UI Variable Text","Segoe UI",system-ui,-apple-system,sans-serif';
+// Épaisseurs (px de l'image), réexportées par `dessin.js` : ici pour que `document.js` ne
+// dépende pas de `dessin.js`.
+export const TRAITS = [3, 5, 8]; // Fin, Moyen, Épais
+export const TRAITS_SURLIGNEUR = [16, 24, 34];
 const PAS_MAX = 200;
+const OCTETS_MAX = 32 * 1024 * 1024; // JSON de l'historique (passé et futur) au plus
 const DECALAGE_COPIE = 16;
 const RECTANGULAIRES = { rectangle: 1, ellipse: 1, masque: 1 };
 
@@ -48,23 +54,41 @@ export function creerHistorique(doc) {
 }
 
 // `fn(doc)` ; même `marque` (non nulle) que la modification précédente : un seul pas
-// d'annulation (glissière tirée, flèches du clavier).
+// d'annulation (une glissière tirée, un geste : une marque neuve par geste). Si `fn` lève
+// une erreur, le document revient à son état d'avant l'appel, l'historique et `version`
+// sont inchangés, et l'erreur repart.
 export function modifier(h, fn, marque = null) {
   const suite = marque !== null && marque !== undefined && h.marque === marque;
-  const avant = suite ? null : JSON.stringify(h.doc);
+  const avant = JSON.stringify(h.doc);
   try {
     fn(h.doc);
   } catch (e) {
-    if (avant !== null) remettre(h.doc, avant);
+    remettre(h.doc, avant);
     throw e;
   }
-  if (avant !== null) {
+  if (!suite) {
     h.passe.push(avant);
     if (h.passe.length > PAS_MAX) h.passe.shift();
     h.futur = [];
+    borner(h);
   }
   h.marque = marque ?? null;
   h.version += 1;
+}
+
+// Octets de JSON gardés par l'historique.
+export function octetsHistorique(h) {
+  let n = 0;
+  for (const t of h.passe) n += t.length;
+  for (const t of h.futur) n += t.length;
+  return n;
+}
+
+// Au-delà d'OCTETS_MAX, les pas les plus anciens tombent ; il en reste toujours un.
+function borner(h) {
+  let n = octetsHistorique(h);
+  while (n > OCTETS_MAX && h.futur.length) n -= h.futur.shift().length;
+  while (n > OCTETS_MAX && h.passe.length > 1) n -= h.passe.shift().length;
 }
 
 // Le document garde son identité : les champs sont remplacés en place.
@@ -78,6 +102,7 @@ function remettre(doc, instantane) {
 export function annuler(h) {
   if (!h.passe.length) return false;
   h.futur.push(JSON.stringify(h.doc));
+  borner(h);
   remettre(h.doc, h.passe.pop());
   h.marque = null;
   h.version += 1;
@@ -87,6 +112,7 @@ export function annuler(h) {
 export function retablir(h) {
   if (!h.futur.length) return false;
   h.passe.push(JSON.stringify(h.doc));
+  borner(h);
   remettre(h.doc, h.futur.pop());
   h.marque = null;
   h.version += 1;
@@ -104,12 +130,20 @@ export function peutRetablir(h) {
 // ---------- ajouts (exports en plus du contrat) ----------
 
 // Range `objet` au-dessus des autres avec un `id` neuf (et un `ordre` neuf pour un numéro
-// qui n'en a pas) ; rend l'`id`. À appeler dans `modifier`.
+// qui n'en a pas, une `graine` neuve pour un masque qui n'en a pas) ; rend l'`id`. À appeler
+// dans `modifier`.
 export function ajouter(doc, objet) {
   objet.id = doc.suivant++;
   if (objet.type === "numero" && objet.ordre == null) objet.ordre = ordreSuivant(doc);
+  if (objet.type === "masque" && objet.graine == null) objet.graine = graineNeuve();
   doc.objets.push(objet);
   return objet.id;
+}
+
+// Graine du grain de Pixeliser : tirée une fois, gardée dans l'objet (l'écran, annuler,
+// rétablir et l'export donnent les mêmes pixels), jamais devinable d'une capture à l'autre.
+function graineNeuve() {
+  return globalThis.crypto.getRandomValues(new Uint32Array(1))[0];
 }
 
 function ordreSuivant(doc) {
@@ -128,8 +162,12 @@ export function normaliser(objet) {
 
 // Lissage du crayon à la fin du trait : Chaikin deux fois (design).
 export function lisser(points) {
-  return chaikin(chaikin(points));
+  return chaikin(chaikin(points)).map(arrondirPoint);
 }
+
+// Points au 1/100 px : l'historique garde des instantanés JSON, chaque chiffre compte.
+const centieme = (v) => Math.round(v * 100) / 100;
+const arrondirPoint = (a) => [centieme(a[0]), centieme(a[1])];
 
 function chaikin(p) {
   if (p.length < 3) return p;
@@ -143,18 +181,23 @@ function chaikin(p) {
   return r;
 }
 
-// Pose le recadrage (null : « Image entière »), en entiers, borné à l'image ; un cadre vide
-// ou égal à l'image entière le retire. À appeler dans `modifier`.
+// Pose le recadrage (null : « Image entière ») ; un cadre vide ou égal à l'image entière le
+// retire. La position puis la taille sont arrondies (un carré reste carré) ; un cadre qui
+// dépasse l'image y est ramené en gardant sa taille quand elle tient, sinon coupé. La page
+// passe le cadre entier tracé, pas un cadre déjà coupé. À appeler dans `modifier`.
 export function recadrer(doc, rect) {
   doc.recadrage = null;
   if (!rect) return;
-  const x = borne(Math.round(Math.min(rect.x, rect.x + rect.largeur)), 0, doc.largeur);
-  const y = borne(Math.round(Math.min(rect.y, rect.y + rect.hauteur)), 0, doc.hauteur);
-  const x2 = borne(Math.round(Math.max(rect.x, rect.x + rect.largeur)), 0, doc.largeur);
-  const y2 = borne(Math.round(Math.max(rect.y, rect.y + rect.hauteur)), 0, doc.hauteur);
-  if (x2 - x < 1 || y2 - y < 1) return;
-  if (x === 0 && y === 0 && x2 === doc.largeur && y2 === doc.hauteur) return;
-  doc.recadrage = { x, y, largeur: x2 - x, hauteur: y2 - y };
+  const axe = (debut, taille, max) => {
+    const t = Math.min(Math.round(Math.abs(taille)), max);
+    const d = Math.round(taille < 0 ? debut + taille : debut);
+    return [borne(d, 0, max - t), t];
+  };
+  const [x, l] = axe(rect.x, rect.largeur, doc.largeur);
+  const [y, h] = axe(rect.y, rect.hauteur, doc.hauteur);
+  if (l < 1 || h < 1) return;
+  if (l === doc.largeur && h === doc.hauteur) return;
+  doc.recadrage = { x, y, largeur: l, hauteur: h };
 }
 
 // Police et boîte d'un texte : { largeur, hauteur, px, py, lignes } (design `tbox`).
@@ -388,7 +431,7 @@ export function poignees(o) {
 // `origine` : copie de l'objet au début du geste.
 export function deplacer(objet, origine, dx, dy) {
   const q = origine;
-  if (q.points) objet.points = q.points.map((a) => [a[0] + dx, a[1] + dy]);
+  if (q.points) objet.points = q.points.map((a) => arrondirPoint([a[0] + dx, a[1] + dy]));
   if ("x1" in q) {
     objet.x1 = q.x1 + dx; objet.y1 = q.y1 + dy; objet.x2 = q.x2 + dx; objet.y2 = q.y2 + dy;
   }
@@ -446,7 +489,8 @@ export function redimensionner(objet, origine, poignee, point, echelleVue) {
   if (q.points) {
     const nx = Math.min(ax, p.x), ny = Math.min(ay, p.y);
     sx = Math.max(sx, 0.15); sy = Math.max(sy, 0.15);
-    o.points = q.points.map((a) => [nx + (a[0] - b.x) * sx, ny + (a[1] - b.y) * sy]);
+    o.points = q.points.map((a) => arrondirPoint([nx + (a[0] - b.x) * sx,
+      ny + (a[1] - b.y) * sy]));
   }
 }
 
@@ -459,6 +503,7 @@ export function dupliquer(doc, ids) {
     const c = copie(o);
     deplacer(c, o, DECALAGE_COPIE, DECALAGE_COPIE);
     if (c.type === "numero") c.ordre = null;
+    if (c.type === "masque") c.graine = null;
     nouveaux.push(ajouter(doc, c));
   }
   return nouveaux;
