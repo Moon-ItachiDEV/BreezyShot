@@ -3,11 +3,13 @@
 #
 # Cas A (réglage d'enregistrement par défaut, faux : tant que la vignette n'existe pas,
 # l'app enregistre quand même, « Copié et enregistré », sans toucher au réglage) :
-# (1) raccourci → chronos et lignes du journal ; (2) fenêtres pendant la sélection (couverture, ordre, premier plan, styles étendus, bandeau caché,
-# pas de focus_perdu parasite en 3 s) ; (3) glisser exact sur les quatre carrés du témoin
+# (1) raccourci → chronos et lignes du journal ; (2) fenêtres pendant la sélection
+# (couverture, ordre, premier plan, styles étendus, bandeau caché, pas de focus_perdu
+# parasite en 3 s) ; (3) glisser exact sur les quatre carrés du témoin
 # → presse-papiers et « Récents » identiques pixel par pixel, Repos, premier plan rendu ;
 # (4) Échap puis clic droit annulent ; (5) clic sans glisser et glisser de 1 px (zone 2×2) :
-# la sélection reste, puis Échap ; glisser de 2 px (3×3, COTE_MIN) : zone acceptée ; (6) second raccourci pendant la sélection ignoré ;
+# la sélection reste, puis Échap ; glisser de 2 px (3×3, COTE_MIN) : zone acceptée ;
+# (6) second raccourci pendant la sélection ignoré ;
 # (7) glisser dans les autres sens : même image ; (9) deux captures rapprochées : le
 # bandeau de la première n'est ni dans l'image ni au-dessus de la sélection ; et, demandé
 # par la relecture de l'étape 5 : F5 et Ctrl+P sans effet, Alt+F4 annule proprement,
