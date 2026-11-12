@@ -301,7 +301,7 @@ annulation n'affiche rien.
   `detruire_ecran_fige`, `liberer_image`.
 
 **Démarrage**, après le bandeau : `preparer_ecran_fige`, la garde, `quand_bureau_change`,
-`Selection::creer` puis `app.manage`. Les quatre commandes de la sélection sont dans
+`Selection::creer` puis `app.manage`. Les cinq commandes de la sélection sont dans
 `invoke_handler`. Un échec est écrit au journal ; une capture répond alors « Impossible de
 capturer ».
 

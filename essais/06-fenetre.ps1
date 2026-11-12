@@ -646,6 +646,12 @@ public static int NonOpaques(byte[] o, int stride, int l, int h) {
                 Verifier '(3) etat Decoupe -> Repos (ImagePreteSansVignette)' ($t3.Contains('etat Decoupe -> Repos (ImagePreteSansVignette)')) | Out-Null
                 Verifier '(3) echap global libere' ($t3.Contains('echap global libere')) | Out-Null
                 Noter-Mesure -Nom 'rayon' -Valeur $rayon -Unite 'px'
+                # Windows 11 et suivants (build ≥ 22000) arrondissent une fenêtre à cadre : un
+                # rayon de 0 y cacherait une règle des coins cassée (tout opaque passerait).
+                $build = [Environment]::OSVersion.Version.Build
+                if ($build -ge 22000) {
+                    Verifier '(3) Windows arrondit les fenêtres à cadre : rayon > 0' ($rayon -gt 0) "build $build, rayon $rayon" | Out-Null
+                }
                 if ($rayon -ge 4) { Write-Host "cas joué : coins arrondis (rayon $rayon)" }
                 elseif ($rayon -gt 0) { Write-Host "cas joué : petits arrondis (rayon $rayon < 4)" }
                 elseif ($rayon -eq 0) { Write-Host 'cas joué : coins droits (rayon 0)' }

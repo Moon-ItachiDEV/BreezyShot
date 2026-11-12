@@ -581,6 +581,24 @@ mod tests {
             point: (150, 150),
         };
         assert_eq!(decider(Some(v), Arrivee::Selection(&autre)), Geste::Rien);
+        // Une zone d'un autre affichage : rien non plus (l'`id` passe avant le mode).
+        let autre_zone = SignalSelection::Zone {
+            id: 3,
+            depart: (0, 0),
+            arrivee: (50, 50),
+        };
+        assert_eq!(
+            decider(Some(v), Arrivee::Selection(&autre_zone)),
+            Geste::Rien
+        );
+    }
+
+    #[test]
+    fn fenetre_trop_peu_visible_sur_l_ecran_du_clic() {
+        // Il ne reste que 2 px de la fenêtre sur le principal : moins que le côté minimal.
+        let e = ecrans();
+        let f = vec![proposee(r(1918, 100, 400, 300), 8)];
+        assert_eq!(fenetre_choisie(0, (1919, 150), &f, &e), Choix::Rien);
     }
 
     #[test]
