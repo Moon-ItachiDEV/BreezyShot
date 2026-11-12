@@ -1258,7 +1258,11 @@ contenu d'une image) :
   200 %, plusieurs écrans, pointeur agrandi ou animé ne s'y vérifient pas.
 - Essai 12 sous Windows (`12-editeur.ps1`, 0.4), avec la variable capturable, le témoin,
   plein écran sur `Ctrl + Maj + 2`, vignette « toujours », animations réduites, noms et
-  rôles de l'avenant « Éditeur épuré » (§4) lus par UI Automation. Cas A : (1) au repos,
+  rôles de l'avenant « Éditeur épuré » (§4) lus par UI Automation. Hors le raccourci
+  global, une touche ne part que si le premier plan est à l'app, un appui de souris que si
+  le point visé est sur une de ses fenêtres ; sinon le point échoue, rien n'est envoyé (un
+  `Ctrl+C` ou un `Alt+F4` reçu par une console de la machine d'essai l'arrêterait).
+  Cas A : (1) au repos,
   aucune fenêtre « Annoter la capture » ni `editeur fenetre` ; (2) vignette préparée avec
   `annoter` avant `supprimer`, clic réel sur Annoter : `vignette fermee <id> annoter`,
   `editeur fenetre` du même HWND ; (3) visible, titre exact, premier plan, barre des
