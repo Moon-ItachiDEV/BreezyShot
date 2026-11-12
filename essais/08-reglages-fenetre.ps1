@@ -9,8 +9,11 @@
 #     s'ouvre pas, la vérification ÉCHOUE (jamais sautée). Fenêtre ordinaire : visible,
 #     dans la barre des tâches (pas WS_EX_TOOLWINDOW).
 # (3) Rouvrir : une seule fenêtre, ramenée devant.
-# (4) Copier éteint : journal, fichier, puis Ctrl+Maj+2 : « sortie copie non demandee » et
-#     presse-papiers inchangé ; rallumé.
+# (4) Copie seule sortie : l'éteindre est refusé (« Gardez au moins… », reste allumée).
+#     Vignette allumée par la fenêtre, copie éteinte : Ctrl+Maj+2 : « sortie copie non
+#     demandee », presse-papiers inchangé, vignette préparée au coin et à la durée du
+#     réglage, partie au bout de 3 s ; vignette éteinte, copie rallumée. (5) vérifie
+#     ensuite qu'aucune vignette n'est plus préparée.
 # (5) Raccourci du plein écran changé au clavier en Ctrl+Maj+7 : raccourcis suspendus puis
 #     repris, fichier, Ctrl+Maj+7 capture, Ctrl+Maj+2 ne fait plus rien et est rendu à
 #     Windows (une autre application peut le tenir).
@@ -20,8 +23,9 @@
 # (7) Lancer au démarrage sur la clé d'essai : écrit, retiré par l'essai, fenêtre rouverte
 #     → éteint (état lu dans le système) ; allumé puis éteint → valeur absente. La vraie
 #     clé Run est identique avant et après.
-# (8) Parcourir… : le sélecteur de dossier du système, un dossier d'essai choisi, une
-#     capture y est enregistrée ; le chemin n'apparaît jamais dans le journal.
+# (8) Enregistrement éteint : rien dans Images ; allumé par la fenêtre. Parcourir… : le
+#     sélecteur de dossier du système, un dossier d'essai choisi, une capture y est
+#     enregistrée ; le chemin n'apparaît jamais dans le journal.
 # (9) Fichier changé de l'extérieur pendant que la fenêtre est ouverte : le changement
 #     suivant le relit et ne l'écrase pas.
 # (10) Thème Clair puis Sombre : le fond de la zone de contenu prend la couleur du jeton
@@ -95,15 +99,17 @@ function Ecrire-Reglages([string]$Dossier, $Objet) {
     [System.IO.File]::WriteAllText((Join-Path $d 'reglages.json'), $texte, [System.Text.UTF8Encoding]::new($false))
 }
 
-# Réglages du cas : un raccourci par action, sans Impr. écran (pas d'annonce), copie et
-# enregistrement allumés (l'enregistrement prouve le dossier choisi au point 8, vignette
-# construite ou non).
+# Réglages du cas : un raccourci par action, sans Impr. écran (pas d'annonce), la copie
+# seule allumée : pas de vignette (elle couvrirait un coin et garderait l'état Vignette
+# entre deux points), pas d'enregistrement. Le point 4 allume la vignette par la fenêtre
+# le temps d'une capture, le point 8 allume l'enregistrement.
 function Reglages-Du-Cas {
     return [ordered]@{
         version                   = 2
         raccourcis                = [ordered]@{ zone = @('Ctrl+Maj+1'); plein_ecran = @('Ctrl+Maj+2'); fenetre = @('Ctrl+Maj+3') }
         copier_apres_capture      = $true
-        enregistrer_apres_capture = $true
+        enregistrer_apres_capture = $false
+        vignette                  = [ordered]@{ afficher = $false; duree_s = 3; coin = 'bas_gauche' }
         dossier_enregistrement    = $null
     }
 }
@@ -454,6 +460,21 @@ public static string Titre(IntPtr h) {
         return $lu
     }
 
+    # (4) La copie est la seule sortie : l'éteindre est refusé, pour de vrai.
+    $refuses = Compter-Motif -Motif 'reglage refuse: copier \(aucune_sortie\)$' -Dossier $cas
+    Cliquer-Nom $fen 'Copier automatiquement' $INTERRUPTEUR '(4) Copier, seule sortie'
+    $null = Attendre-Suivante 'reglage refuse: copier \(aucune_sortie\)$' $cas $refuses '(4) refus de la dernière sortie'
+    $texte = Element $fen 'Gardez au moins la copie, l''enregistrement ou la vignette'
+    Verifier '(4) « Gardez au moins la copie, l''enregistrement ou la vignette » sur la ligne' ($null -ne $texte) $(if ($null -eq $texte) { Introuvable $fen 'Gardez au moins la copie, l''enregistrement ou la vignette' $null } else { '' }) | Out-Null
+    Start-Sleep -Milliseconds 300
+    $etat = Etat-Interrupteur $fen 'Copier automatiquement'
+    Verifier '(4) refus : Copier reste allumé (interface et fichier)' (($etat -eq 'On') -and ((Lire-Reglages $cas).copier_apres_capture -eq $true)) $etat | Out-Null
+
+    # (4) Vignette allumée par la fenêtre : la capture suivante la prépare (durée 3 s du
+    # fichier) et elle part seule au bout du délai.
+    Cliquer-Interrupteur $fen 'Vignette' '(4) interrupteur Vignette'
+    $null = Attendre-Motif -Motif 'reglage change: vignette oui$' -Dossier $cas -DelaiS 5 -Quoi '(4) vignette oui'
+
     # (4) Copier éteint, capture sans copie, rallumé.
     $ecrits = Compter-Motif -Motif 'reglages ecrits$' -Dossier $cas
     Cliquer-Interrupteur $fen 'Copier automatiquement' '(4) interrupteur Copier'
@@ -462,12 +483,19 @@ public static string Titre(IntPtr h) {
     Verifier '(4) fichier : copier_apres_capture false' ((Lire-Reglages $cas).copier_apres_capture -eq $false) | Out-Null
     Set-Clipboard -Value 'temoin-08'
     $sorties = Compter-Motif -Motif 'sortie copie ' -Dossier $cas
-    $repos = Compter-Motif -Motif 'Decoupe -> Repos' -Dossier $cas
+    $preparees = Compter-Motif -Motif 'vignette preparee \d+ ' -Dossier $cas
+    $delais = Compter-Motif -Motif 'vignette fermee \d+ delai$' -Dossier $cas
+    $finVignette = Compter-Motif -Motif 'Vignette -> Repos' -Dossier $cas
     [BreezyShotEssai.Reglages]::Appuyer($CTRL_MAJ, 0x32)
     $ls = Attendre-Suivante 'sortie copie ' $cas $sorties '(4) capture' 10
     Verifier '(4) Ctrl+Maj+2 : copie non demandée' ($ls -match 'sortie copie non demandee') $ls | Out-Null
     Verifier '(4) presse-papiers inchangé' ((Get-Clipboard -Raw) -eq 'temoin-08') | Out-Null
-    Attendre-Repos $repos
+    $lv = Attendre-Suivante 'vignette preparee \d+ ' $cas $preparees '(4) vignette préparée (réglage allumé dans la fenêtre)' 10
+    Verifier '(4) vignette au coin et à la durée du réglage' (($lv -match ' coin bas_gauche ') -and ($lv -match ' duree 3 ')) $lv | Out-Null
+    $null = Attendre-Suivante 'vignette fermee \d+ delai$' $cas $delais '(4) vignette partie au bout de 3 s' 15
+    $null = Attendre-Suivante 'Vignette -> Repos' $cas $finVignette '(4) retour au repos' 10
+    Cliquer-Interrupteur $fen 'Vignette' '(4) interrupteur Vignette (éteindre)'
+    $null = Attendre-Motif -Motif 'reglage change: vignette non$' -Dossier $cas -DelaiS 5 -Quoi '(4) vignette non'
     Cliquer-Interrupteur $fen 'Copier automatiquement' '(4) interrupteur Copier (rallumer)'
     $null = Attendre-Motif -Motif 'reglage change: copier oui$' -Dossier $cas -DelaiS 5 -Quoi '(4) copier oui'
 
@@ -484,10 +512,13 @@ public static string Titre(IntPtr h) {
     $lu = @((Lire-Reglages $cas).raccourcis.plein_ecran)
     Verifier '(5) fichier : plein_ecran = [Ctrl+Maj+7]' (($lu.Count -eq 1) -and ($lu[0] -eq 'Ctrl+Maj+7')) ($lu -join ',') | Out-Null
     $n = Presses; $repos = Compter-Motif -Motif 'Decoupe -> Repos' -Dossier $cas
+    $preparees = Compter-Motif -Motif 'vignette preparee \d+ ' -Dossier $cas
     [BreezyShotEssai.Reglages]::Appuyer($CTRL_MAJ, 0x37)
     $null = Attendre-Suivante 'raccourci presse: plein_ecran$' $cas $n '(5) Ctrl+Maj+7 capture'
     Attendre-Repos $repos
     Verifier '(5) Ctrl+Maj+7 lance la capture de l''écran' $true | Out-Null
+    # Vignette éteinte dans la fenêtre au point 4 : plus de vignette, sans redémarrer.
+    Verifier '(5) vignette éteinte : aucune « vignette preparee »' ((Compter-Motif -Motif 'vignette preparee \d+ ' -Dossier $cas) -eq $preparees) | Out-Null
     $n = Presses
     [BreezyShotEssai.Reglages]::Appuyer($CTRL_MAJ, 0x32)
     Start-Sleep -Milliseconds 1500
@@ -566,6 +597,13 @@ public static string Titre(IntPtr h) {
     $choisi = Join-Path $script:Essai.Dossier $jeton
     New-Item -ItemType Directory -Force -Path $choisi | Out-Null
     Cliquer-Nom $fen 'Après la capture' ([System.Windows.Automation.ControlType]::TabItem) '(8) rubrique'
+    # Enregistrement éteint jusqu'ici (fichier du cas) : aucune capture dans Images. Puis
+    # allumé par la fenêtre : la capture suivante est enregistrée, sans redémarrer.
+    $images = @(Get-ChildItem -LiteralPath (Join-Path $cas 'images') -Recurse -Filter '*.png' -ErrorAction SilentlyContinue)
+    Verifier '(8) enregistrement éteint : aucune capture dans Images' ($images.Count -eq 0) "$($images.Count)" | Out-Null
+    Cliquer-Interrupteur $fen 'Enregistrer automatiquement' '(8) interrupteur Enregistrer'
+    $null = Attendre-Motif -Motif 'reglage change: enregistrer oui$' -Dossier $cas -DelaiS 5 -Quoi '(8) enregistrer oui'
+    Verifier '(8) fichier : enregistrer_apres_capture true' ((Lire-Reglages $cas).enregistrer_apres_capture -eq $true) | Out-Null
     $dialoguesAvant = @([BreezyShotEssai.Reglages]::Fenetres($p.Id, '#32770') | Where-Object { [BreezyShotEssai.Reglages]::IsWindowVisible($_) }).Count
     Cliquer-Nom $fen 'Parcourir…' ([System.Windows.Automation.ControlType]::Button) '(8) Parcourir'
     $dialogue = [IntPtr]::Zero

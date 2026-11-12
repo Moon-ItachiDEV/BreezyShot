@@ -1,0 +1,76 @@
+{
+  "vue": {
+    "lignes": [
+      "copier",
+      "vignette",
+      "vignette_duree",
+      "vignette_coin",
+      "dossier",
+      "enregistrer",
+      "modele_nom",
+      "theme",
+      "demarrage",
+      "version"
+    ],
+    "copier": true,
+    "enregistrer": false,
+    "vignette": {
+      "afficher": true,
+      "duree_s": 6,
+      "coin": "bas_gauche"
+    },
+    "durees": [
+      3,
+      6,
+      10,
+      0
+    ],
+    "dossier": "Images › BreezyShot",
+    "modele_nom": "BreezyShot {date} à {heure}",
+    "apercu_nom": "BreezyShot 2026-11-12 à 10.42.08.png",
+    "theme": "systeme",
+    "demarrage": "non",
+    "raccourcis": [
+      {
+        "action": "zone",
+        "libelle": "Zone",
+        "touches": [
+          "Ctrl",
+          "Maj",
+          "1"
+        ],
+        "modifie": false,
+        "refus": null
+      },
+      {
+        "action": "plein_ecran",
+        "libelle": "Plein écran",
+        "touches": [
+          "Ctrl",
+          "Maj",
+          "2"
+        ],
+        "modifie": false,
+        "refus": null
+      },
+      {
+        "action": "fenetre",
+        "libelle": "Fenêtre",
+        "touches": [
+          "Ctrl",
+          "Maj",
+          "3"
+        ],
+        "modifie": false,
+        "refus": null
+      }
+    ],
+    "version": "7.8.9-essai",
+    "alerte": null,
+    "saisie_en_cours": false
+  },
+  "refus_copier": {
+    "ligne": "copier",
+    "texte": "Gardez au moins la copie, l'enregistrement ou la vignette"
+  }
+}
