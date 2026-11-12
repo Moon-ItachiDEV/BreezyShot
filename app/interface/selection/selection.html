@@ -10,8 +10,9 @@
 </head>
 <body>
   <!-- Au repos : le voile plein. Pendant un glisser : quatre panneaux autour de la zone,
-       et le trait de la zone. Rien d'autre (ARCHITECTURE.md, étape 5). La scène est en
-       pixels réels, réduite par une transformation : tous les bords tombent juste. -->
+       et le trait de la zone. En mode fenêtre : la fenêtre sous la souris, entourée, et le
+       voile autour d'elle. Rien d'autre (ARCHITECTURE.md §9). La scène est en pixels
+       réels, réduite par une transformation : tous les bords tombent juste. -->
   <div id="scene">
     <div class="voile" id="plein"></div>
     <div class="voile panneau" id="haut"></div>
@@ -19,6 +20,7 @@
     <div class="voile panneau" id="gauche"></div>
     <div class="voile panneau" id="droite"></div>
     <div id="zone"></div>
+    <div id="fenetre"></div>
   </div>
 </body>
 </html>

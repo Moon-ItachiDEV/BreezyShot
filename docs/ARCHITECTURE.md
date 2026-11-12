@@ -614,19 +614,23 @@ construite (le réglage existe, sans effet).
   (sauf essai). Contrairement au bandeau, **elle prend le focus** : il faut le clavier pour
   Maj et Espace. Journal : `selection fenetre <hwnd>`.
 - **Interface** : `Selection::creer(app, rappel)`, `montrer(Demande { bureau, ecrans,
-  dessous, cote_min }) -> Result<id>` (fil principal), `cacher()` (sûr de partout, sans
-  signal), `visible()`, `fermer()`. `Signal` : `Prete { id, duree }`, `Zone { id, depart,
-  arrivee }` (pixels réels du bureau), `Annulee { id, cause }`, `Muette { id }`,
-  `Impossible { id, cause }`. Quatre commandes, permises à la seule fenêtre `selection`
-  (`capabilities/selection.json`) : `selection_chargee`, `selection_prete`,
-  `selection_terminee`, `selection_annulee`.
+  dessous, cote_min, mode, fenetres }) -> Result<id>` (fil principal), `cacher()` (sûr de
+  partout, sans signal), `visible()`, `fermer()`. `Signal` : `Prete { id, duree }`, `Zone {
+  id, depart, arrivee }`, `Fenetre { id, indice, point }` (pixels réels du bureau),
+  `Annulee { id, cause }`, `Muette { id }`, `Impossible { id, cause }`. Cinq commandes,
+  permises à la seule fenêtre `selection` (`capabilities/selection.json`) :
+  `selection_chargee`, `selection_prete`, `selection_terminee`, `selection_cliquee`,
+  `selection_annulee`.
 - **Montrer**, sans rien attendre de la page : noter la fenêtre au premier plan ; poser la
   fenêtre sur le bureau, la montrer, lui donner le premier plan (par `systeme` sous Windows,
   jamais par tao, qui réécrirait les styles) ; placer l'écran figé juste en dessous ;
   relire le rectangle réel et le reposer tant qu'il diffère, deux fois au plus
   (`PLACEMENTS_MAX = 3` poses en tout ; `selection montree <id>
-  voulu <x,y,l,h> reel <x,y,l,h> echelle <e>`) ; envoyer la charge `selection:montrer { id,
-  numero, largeur, hauteur, ecrans, cote_min }`, tout en pixels réels relatifs à la fenêtre ;
+  voulu <x,y,l,h> reel <x,y,l,h> echelle <e> placements <n> mode <zone|fenetre> fenetres
+  <n>`) ; envoyer la charge `selection:montrer { id, numero, largeur, hauteur, ecrans,
+  cote_min, mode, fenetres, souris }`, tout en pixels réels relatifs à la fenêtre (la souris
+  est relue par `systeme::position_souris` à chaque envoi de charge, `null` hors de la
+  fenêtre) ;
   armer le délai de 2 s (`DELAI_PRETE`).
 - **Une seule échelle, celle de la page.** Rust ne parle à la page qu'en pixels réels. La
   page retient `devicePixelRatio` s'il explique la taille réelle à 1 pixel CSS près, sinon
@@ -646,12 +650,45 @@ construite (le réglage existe, sans effet).
   `selection_prete` en 2 s : `Muette`. Donnée invalide de la page : `Impossible`.
 - **Données de la page jamais crues** : `vers_bureau` (pixel de la fenêtre → pixel du
   bureau, `None` si non fini ou hors de la fenêtre), `vers_page`, `controler_page`,
-  `decider_zone`, `cause_depuis_nom`, testées.
+  `decider_zone`, `decider_fenetre`, `cause_depuis_nom`, testées.
 - Journal : `selection chargee`, `selection montree …`, `chrono selection prete <ms> page
   <l>x<h> echelle <kx> page-dpr <d> tao <s>`, `selection fin <id> zone|annulee
-  <cause>|muette|impossible <cause>`.
+  <cause>|muette|impossible <cause>` (et `fenetre`). Jamais de titre de fenêtre.
 - L'Application réserve Échap en global pendant la sélection (§3.6) : la page n'a pas
   besoin du focus pour être annulable.
+
+### Mode fenêtre (étape 8)
+
+Ce que voit l'utilisateur : les écrans figés et assombris ; la fenêtre sous la souris
+redevient claire, entourée d'un trait bleu (`--selection-fenetre`, 2 px × l'échelle arrondi,
+au moins 2 pixels réels, à l'intérieur) ; le voile épouse ses coins arrondis. Le contour
+suit la souris, sans animation ; sur le bureau ou sur rien, rien n'est entouré. Clic
+gauche sur une fenêtre entourée : tout disparaît. Échap ou clic droit : annuler. Curseur :
+la flèche. Glisser ne trace rien et n'envoie rien. Maj et Espace ne font rien. En mode zone,
+un clic ne fait toujours rien.
+
+- `Demande::mode` (`selection::Mode::{Zone, Fenetre}`, sans lien avec les modes de
+  l'Application) et `Demande::fenetres` (`FenetreProposee { rect, rayon }`, pixels réels du
+  bureau, du premier plan vers le fond ; vide en mode zone, tronquée à `FENETRES_MAX` = 512).
+  La charge porte `mode`, `fenetres: [{ x, y, largeur, hauteur, rayon }]` (relatives à la
+  fenêtre de sélection, débordements et coordonnées négatives permis) et `souris`.
+- La page : à chaque mouvement (au plus un dessin par image ; avant tout mouvement, la
+  `souris` de la charge), le pixel sous la pointe → la première fenêtre qui le contient →
+  coupée à l'écran de ce pixel → entourée si elle garde `cote_min` de côté. Un coin n'est
+  arrondi (rayon du cœur, au plus la moitié du petit côté de la partie coupée) que si c'est
+  un vrai coin de la fenêtre. Dessin : un seul élément aux bords de la partie coupée, en
+  pixels réels de la scène, avec `border-radius`, une ombre intérieure sans flou (le trait)
+  et une ombre extérieure sans flou qui couvre toute la scène (le voile) : les bords droits
+  tombent sur des pixels entiers, seuls les pixels coupés par un arc sont mêlés.
+- Clic : appui puis relâchement du bouton gauche, déplacé de moins de `cote_min` pixels
+  réels sur chaque axe ; si une fenêtre est entourée sous le pixel du relâchement, la page
+  envoie `selection_cliquee { id, numero, x, y }` (même règle de pixel et même attente que
+  `selection_terminee`).
+- Le cœur ne croit pas la page : `decider_fenetre(point, fenetre_selection, fenetres,
+  ecrans, cote_min)` refait le choix sur le point (`Fenetre { indice, point }`, `Rien` : la
+  page est remise au repos par la même charge, la sélection continue ; `Invalide` :
+  `Impossible`). `selection_cliquee` en mode zone ou `selection_terminee` en mode fenêtre :
+  `Impossible`. Numéro de charge, signal de fin unique, premier plan rendu : comme la zone.
 
 ## 10. Sortie (`sortie/`, étape 6)
 
