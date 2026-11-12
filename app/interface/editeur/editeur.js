@@ -358,10 +358,12 @@ function envoyerVue() {
     if (!ed.charge || !ed.h) return;
     const c = modele.cadre(ed.h.doc);
     const { x, y, echelle, dpr } = ed.vue;
+    // `ed.vue` est dans la toile ; la toile commence sous la barre du haut.
+    const t = toile.getBoundingClientRect();
     appeler("editeur_vue", {
       id: ed.charge.id,
-      x: (x + c.x * echelle) / dpr,
-      y: (y + c.y * echelle) / dpr,
+      x: t.left + (x + c.x * echelle) / dpr,
+      y: t.top + (y + c.y * echelle) / dpr,
       largeur: (c.largeur * echelle) / dpr,
       hauteur: (c.hauteur * echelle) / dpr,
       zoom: echelle,

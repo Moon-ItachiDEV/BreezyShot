@@ -273,6 +273,22 @@ const CHARGE = {
     await attendreAppel(p, 'editeur_vue');
     const vue = await appels(p, 'editeur_vue');
     verifier(vue.length === 1 && vue[0][1].id === 7, '1 editeur_vue à la fin du placement');
+    // Le rectangle envoyé est en pixels de la page : l'image est sous la barre du haut
+    // (52 px) et sa réserve (14 px), là où la toile la peint.
+    const place = await p.evaluate(() => {
+      const t = document.querySelector('#vue').getBoundingClientRect();
+      const v = __ed.vue;
+      return { x: t.left + v.x / v.dpr, y: t.top + v.y / v.dpr, haut: t.top };
+    });
+    const envoye = vue.length === 1 ? vue[0][1] : { x: NaN, y: NaN };
+    verifier(
+      place.haut >= 52 &&
+        envoye.y >= 66 &&
+        Math.abs(envoye.x - place.x) < 0.01 &&
+        Math.abs(envoye.y - place.y) < 0.01,
+      'editeur_vue : la place de l’image dans la page, pas dans la toile',
+      JSON.stringify([envoye, place]),
+    );
     await fin(p, '1');
   }
 
