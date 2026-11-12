@@ -175,6 +175,84 @@
     },
     "usage": "Lumière et pales blanches du Moulinet.",
     "origine": "Maquette validée de l'installateur (d-mix.html, « A + C »). logo(), radialGradient et pales fill #fff."
+   },
+   {
+    "name": "reglages-fond",
+    "value": {
+     "light": "#FAFAFA",
+     "dark": "#1C1C1C"
+    },
+    "usage": "Fond de la fenêtre des Réglages.",
+    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), --micaB."
+   },
+   {
+    "name": "reglages-reflet",
+    "value": {
+     "light": "rgba(255,255,255,0.75)",
+     "dark": "rgba(255,255,255,0.07)"
+    },
+    "usage": "Reflet du haut des touches de raccourci.",
+    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), --hi."
+   },
+   {
+    "name": "reglages-segment-fond",
+    "value": {
+     "light": "rgba(0,0,0,0.05)",
+     "dark": "rgba(255,255,255,0.06)"
+    },
+    "usage": "Fond des contrôles segmentés (durée, thème).",
+    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), --segbg."
+   },
+   {
+    "name": "reglages-touche-haut",
+    "value": {
+     "light": "#FFFFFF",
+     "dark": "#3D3D3F"
+    },
+    "usage": "Haut du dégradé d'une touche de raccourci (kbd).",
+    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), --keytop."
+   },
+   {
+    "name": "reglages-touche-bas",
+    "value": {
+     "light": "#F1F1F3",
+     "dark": "#2F2F31"
+    },
+    "usage": "Bas du dégradé d'une touche de raccourci.",
+    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), --keybot."
+   },
+   {
+    "name": "reglages-touche-bord",
+    "value": {
+     "light": "rgba(0,0,0,0.16)",
+     "dark": "rgba(0,0,0,0.55)"
+    },
+    "usage": "Bord d'une touche de raccourci.",
+    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), --keyedge."
+   },
+   {
+    "name": "reglages-touche-ombre",
+    "value": "0 1px 1.5px rgba(0,0,0,0.08)",
+    "usage": "Ombre portée d'une touche de raccourci.",
+    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), [data-dir] kbd."
+   },
+   {
+    "name": "reglages-segment-ombre",
+    "value": "0 0 0 0.5px var(--stroke-strong), 0 1px 2px rgba(0,0,0,0.10), 0 2px 6px -2px rgba(0,0,0,0.10)",
+    "usage": "Ombre de la pastille d'un contrôle segmenté.",
+    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), [data-dir=b] .seg::before."
+   },
+   {
+    "name": "reglages-halo",
+    "value": "color-mix(in srgb, var(--accent) 18%, transparent)",
+    "usage": "Halo autour du bouton d'un interrupteur au survol.",
+    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), .sw:hover .k."
+   },
+   {
+    "name": "reglages-logo-ombre",
+    "value": "drop-shadow(0 2px 6px rgba(240,80,154,0.25))",
+    "usage": "Ombre du logo en haut de Général.",
+    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), [data-dir=b] .alogo."
    }
   ]
  },
@@ -335,6 +413,66 @@
     "value": "420ms",
     "usage": "Arrêt en douceur du Moulinet sur un quart de tour.",
     "origine": "Maquette validée de l'installateur (d-mix.html, « A + C »). settle = { …, d: 420, … }."
+   },
+   {
+    "name": "duree-reglages-trait",
+    "value": "380ms",
+    "usage": "Fenêtre des Réglages.",
+    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), .npill transition."
+   },
+   {
+    "name": "duree-reglages-repli",
+    "value": "300ms",
+    "usage": "Fenêtre des Réglages.",
+    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), .sub transition."
+   },
+   {
+    "name": "duree-reglages-entree",
+    "value": "260ms",
+    "usage": "Fenêtre des Réglages.",
+    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), section animation bIn."
+   },
+   {
+    "name": "duree-reglages-glissiere",
+    "value": "340ms",
+    "usage": "Fenêtre des Réglages.",
+    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), .sw .k, .seg::before, .cp .th."
+   },
+   {
+    "name": "duree-reglages-interrupteur-couleur",
+    "value": "220ms",
+    "usage": "Fenêtre des Réglages.",
+    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), .sw transition."
+   },
+   {
+    "name": "duree-reglages-coche",
+    "value": "220ms",
+    "usage": "Fenêtre des Réglages.",
+    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), .sw .k .chk."
+   },
+   {
+    "name": "duree-reglages-coche-retard",
+    "value": "120ms",
+    "usage": "Fenêtre des Réglages.",
+    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), .sw .k .chk delay."
+   },
+   {
+    "name": "duree-reglages-secousse",
+    "value": "300ms",
+    "usage": "Fenêtre des Réglages.",
+    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), .kc.bad."
+   },
+   {
+    "name": "duree-reglages-menu",
+    "value": "200ms",
+    "usage": "Fenêtre des Réglages.",
+    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), .menu mIn."
+   },
+   {
+    "name": "duree-reglages-clignote",
+    "value": "1s",
+    "usage": "Fenêtre des Réglages.",
+    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), .kc.rec .ph::after."
    }
   ]
  },
@@ -814,6 +952,426 @@
     "value": "2px",
     "usage": "Contour du focus clavier.",
     "origine": "Maquette validée de l'installateur (d-mix.html, « A + C »). :focus-visible outline 2px, offset 2px."
+   },
+   {
+    "name": "reglages-onglet-hauteur",
+    "value": "46px",
+    "usage": "Fenêtre des Réglages.",
+    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), .nv height."
+   },
+   {
+    "name": "reglages-onglet-marge",
+    "value": "14px",
+    "usage": "Fenêtre des Réglages.",
+    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), .nv padding."
+   },
+   {
+    "name": "reglages-onglet-texte",
+    "value": "13.5px",
+    "usage": "Fenêtre des Réglages.",
+    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), .nv font-size."
+   },
+   {
+    "name": "reglages-onglet-ecart",
+    "value": "2px",
+    "usage": "Fenêtre des Réglages.",
+    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), .snav gap."
+   },
+   {
+    "name": "reglages-trait",
+    "value": "2px",
+    "usage": "Fenêtre des Réglages.",
+    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), .npill height."
+   },
+   {
+    "name": "reglages-trait-retrait",
+    "value": "12px",
+    "usage": "Fenêtre des Réglages.",
+    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), .npill left/width."
+   },
+   {
+    "name": "reglages-contenu-largeur",
+    "value": "540px",
+    "usage": "Fenêtre des Réglages.",
+    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), .spane section max-width."
+   },
+   {
+    "name": "reglages-contenu-marge",
+    "value": "28px",
+    "usage": "Fenêtre des Réglages.",
+    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), .spane padding."
+   },
+   {
+    "name": "reglages-contenu-marge-bas",
+    "value": "12px",
+    "usage": "Fenêtre des Réglages.",
+    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), .spane padding-bottom."
+   },
+   {
+    "name": "reglages-ligne-hauteur",
+    "value": "60px",
+    "usage": "Fenêtre des Réglages.",
+    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), .row min-height."
+   },
+   {
+    "name": "reglages-ligne-marge-v",
+    "value": "10px",
+    "usage": "Fenêtre des Réglages.",
+    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), .row padding."
+   },
+   {
+    "name": "reglages-ligne-marge-h",
+    "value": "12px",
+    "usage": "Fenêtre des Réglages.",
+    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), .row padding / margin."
+   },
+   {
+    "name": "reglages-ligne-ecart",
+    "value": "12px",
+    "usage": "Fenêtre des Réglages.",
+    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), .row gap."
+   },
+   {
+    "name": "reglages-sous-retrait",
+    "value": "28px",
+    "usage": "Fenêtre des Réglages.",
+    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), .sub .row padding-left."
+   },
+   {
+    "name": "reglages-groupe-ecart",
+    "value": "28px",
+    "usage": "Fenêtre des Réglages.",
+    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), .card margin-bottom."
+   },
+   {
+    "name": "reglages-libelle-taille",
+    "value": "14.5px",
+    "usage": "Fenêtre des Réglages.",
+    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), .lb font-size."
+   },
+   {
+    "name": "reglages-libelle-approche",
+    "value": "-0.003em",
+    "usage": "Fenêtre des Réglages.",
+    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), .lb letter-spacing."
+   },
+   {
+    "name": "reglages-interrupteur-largeur",
+    "value": "60px",
+    "usage": "Fenêtre des Réglages.",
+    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), .sw width."
+   },
+   {
+    "name": "reglages-interrupteur-hauteur",
+    "value": "28px",
+    "usage": "Fenêtre des Réglages.",
+    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), .sw height."
+   },
+   {
+    "name": "reglages-interrupteur-bouton",
+    "value": "20px",
+    "usage": "Fenêtre des Réglages.",
+    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), .sw .k."
+   },
+   {
+    "name": "reglages-interrupteur-marge",
+    "value": "3px",
+    "usage": "Fenêtre des Réglages.",
+    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), .sw .k top/left."
+   },
+   {
+    "name": "reglages-interrupteur-picto",
+    "value": "14px",
+    "usage": "Fenêtre des Réglages.",
+    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), .sw .ico2."
+   },
+   {
+    "name": "reglages-interrupteur-picto-marge",
+    "value": "7px",
+    "usage": "Fenêtre des Réglages.",
+    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), .sw .off/.on."
+   },
+   {
+    "name": "reglages-interrupteur-coche",
+    "value": "12px",
+    "usage": "Fenêtre des Réglages.",
+    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), .sw .k svg."
+   },
+   {
+    "name": "reglages-halo-largeur",
+    "value": "4px",
+    "usage": "Fenêtre des Réglages.",
+    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), .sw:hover .k."
+   },
+   {
+    "name": "reglages-segment-marge",
+    "value": "3px",
+    "usage": "Fenêtre des Réglages.",
+    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), .seg padding."
+   },
+   {
+    "name": "reglages-segment-hauteur",
+    "value": "26px",
+    "usage": "Fenêtre des Réglages.",
+    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), .seg button height."
+   },
+   {
+    "name": "reglages-segment-texte",
+    "value": "12.5px",
+    "usage": "Fenêtre des Réglages.",
+    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), .seg button font-size."
+   },
+   {
+    "name": "reglages-segment-rayon",
+    "value": "8px",
+    "usage": "Fenêtre des Réglages.",
+    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), .seg border-radius."
+   },
+   {
+    "name": "reglages-segment-rayon-pastille",
+    "value": "6px",
+    "usage": "Fenêtre des Réglages.",
+    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), .seg::before border-radius."
+   },
+   {
+    "name": "reglages-segment-bouton-marge",
+    "value": "11px",
+    "usage": "Fenêtre des Réglages.",
+    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), .seg button padding."
+   },
+   {
+    "name": "reglages-coin-largeur",
+    "value": "80px",
+    "usage": "Fenêtre des Réglages.",
+    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), .cp width."
+   },
+   {
+    "name": "reglages-coin-hauteur",
+    "value": "50px",
+    "usage": "Fenêtre des Réglages.",
+    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), .cp height."
+   },
+   {
+    "name": "reglages-coin-bord",
+    "value": "1.5px",
+    "usage": "Fenêtre des Réglages.",
+    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), .cp border."
+   },
+   {
+    "name": "reglages-coin-rayon",
+    "value": "6px",
+    "usage": "Fenêtre des Réglages.",
+    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), .cp border-radius."
+   },
+   {
+    "name": "reglages-coin-barre",
+    "value": "5px",
+    "usage": "Fenêtre des Réglages.",
+    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), .cp::after height."
+   },
+   {
+    "name": "reglages-coin-pouce-largeur",
+    "value": "20px",
+    "usage": "Fenêtre des Réglages.",
+    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), .cp .th width."
+   },
+   {
+    "name": "reglages-coin-pouce-hauteur",
+    "value": "13px",
+    "usage": "Fenêtre des Réglages.",
+    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), .cp .th height."
+   },
+   {
+    "name": "reglages-coin-pouce-marge",
+    "value": "4px",
+    "usage": "Fenêtre des Réglages.",
+    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), place du pouce dans l'écran."
+   },
+   {
+    "name": "reglages-touche-hauteur",
+    "value": "24px",
+    "usage": "Fenêtre des Réglages.",
+    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), kbd height."
+   },
+   {
+    "name": "reglages-touche-marge",
+    "value": "7px",
+    "usage": "Fenêtre des Réglages.",
+    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), kbd padding."
+   },
+   {
+    "name": "reglages-touche-rayon",
+    "value": "5px",
+    "usage": "Fenêtre des Réglages.",
+    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), kbd border-radius."
+   },
+   {
+    "name": "reglages-touche-texte",
+    "value": "11px",
+    "usage": "Fenêtre des Réglages.",
+    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), kbd font-size."
+   },
+   {
+    "name": "reglages-touche-bord-bas",
+    "value": "2px",
+    "usage": "Fenêtre des Réglages.",
+    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), kbd border-bottom-width."
+   },
+   {
+    "name": "reglages-touches-largeur",
+    "value": "120px",
+    "usage": "Fenêtre des Réglages.",
+    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), .kc min-width."
+   },
+   {
+    "name": "reglages-touches-ecart",
+    "value": "4px",
+    "usage": "Fenêtre des Réglages.",
+    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), .kc gap."
+   },
+   {
+    "name": "reglages-bouton-hauteur",
+    "value": "32px",
+    "usage": "Fenêtre des Réglages.",
+    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), .btn height."
+   },
+   {
+    "name": "reglages-retablir",
+    "value": "28px",
+    "usage": "Fenêtre des Réglages.",
+    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), .rst."
+   },
+   {
+    "name": "reglages-champ-largeur",
+    "value": "250px",
+    "usage": "Fenêtre des Réglages.",
+    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), .fld width."
+   },
+   {
+    "name": "reglages-champ-texte",
+    "value": "13px",
+    "usage": "Fenêtre des Réglages.",
+    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), .fld input font-size."
+   },
+   {
+    "name": "reglages-champ-bouton",
+    "value": "26px",
+    "usage": "Fenêtre des Réglages.",
+    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), .fld .ib."
+   },
+   {
+    "name": "reglages-apercu-texte",
+    "value": "12px",
+    "usage": "Fenêtre des Réglages.",
+    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), .prev font-size."
+   },
+   {
+    "name": "reglages-apercu-interligne",
+    "value": "16px",
+    "usage": "Fenêtre des Réglages.",
+    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), .prev line-height."
+   },
+   {
+    "name": "reglages-logo",
+    "value": "44px",
+    "usage": "Fenêtre des Réglages.",
+    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), .alogo."
+   },
+   {
+    "name": "reglages-apropos-hauteur",
+    "value": "72px",
+    "usage": "Fenêtre des Réglages.",
+    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), .about .row min-height."
+   },
+   {
+    "name": "reglages-apropos-ecart",
+    "value": "14px",
+    "usage": "Fenêtre des Réglages.",
+    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), .about .row gap."
+   },
+   {
+    "name": "reglages-apropos-marge",
+    "value": "20px",
+    "usage": "Fenêtre des Réglages.",
+    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), .about margin-bottom."
+   },
+   {
+    "name": "reglages-nom-interligne",
+    "value": "26px",
+    "usage": "Fenêtre des Réglages.",
+    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), .about .an line-height."
+   },
+   {
+    "name": "reglages-nom-approche",
+    "value": "-0.015em",
+    "usage": "Fenêtre des Réglages.",
+    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), .about .an letter-spacing."
+   },
+   {
+    "name": "reglages-version-texte",
+    "value": "12.5px",
+    "usage": "Fenêtre des Réglages.",
+    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), .about .av font-size."
+   },
+   {
+    "name": "reglages-entree-decalage",
+    "value": "4px",
+    "usage": "Fenêtre des Réglages.",
+    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), @keyframes bIn."
+   },
+   {
+    "name": "reglages-menu-largeur",
+    "value": "140px",
+    "usage": "Fenêtre des Réglages.",
+    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), .menu min-width."
+   },
+   {
+    "name": "reglages-saisie-curseur",
+    "value": "14px",
+    "usage": "Fenêtre des Réglages.",
+    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), .kc.rec .ph::after."
+   },
+   {
+    "name": "reglages-secousse",
+    "value": "3px",
+    "usage": "Fenêtre des Réglages.",
+    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), @keyframes shake."
+   },
+   {
+    "name": "reglages-filet",
+    "value": "1px",
+    "usage": "Fenêtre des Réglages : épaisseur des bords et filets.",
+    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), bords 1px des contrôles (base commune, gardée par B)."
+   },
+   {
+    "name": "reglages-focus",
+    "value": "2px",
+    "usage": "Fenêtre des Réglages : épaisseur et retrait du contour de focus clavier.",
+    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), :focus-visible outline 2px (base commune, gardée par B)."
+   },
+   {
+    "name": "reglages-segment-ecart",
+    "value": "2px",
+    "usage": "Fenêtre des Réglages : écart entre les choix d'un contrôle segmenté.",
+    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), .seg gap (base commune, gardée par B)."
+   },
+   {
+    "name": "reglages-pouce-rayon",
+    "value": "2px",
+    "usage": "Fenêtre des Réglages : rayon du pouce du choix du coin.",
+    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), .cp .th border-radius (base commune, gardée par B)."
+   },
+   {
+    "name": "reglages-champ-bouton-retrait",
+    "value": "2px",
+    "usage": "Fenêtre des Réglages : retrait du bouton Insérer dans le champ.",
+    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), .fld .ib margin-right (base commune, gardée par B)."
+   },
+   {
+    "name": "reglages-curseur-ecart",
+    "value": "3px",
+    "usage": "Fenêtre des Réglages : écart du curseur de saisie d'un raccourci.",
+    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), .kc.rec .ph::after margin-left (base commune, gardée par B)."
    }
   ]
  },

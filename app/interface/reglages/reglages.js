@@ -159,7 +159,14 @@ function afficher(v) {
   const champ = $('[data-controle="modele_nom"]');
   if (document.activeElement !== champ && attenteNom === null) champ.value = v.modele_nom;
   $('[data-valeur="apercu_nom"]').textContent = v.apercu_nom;
-  $('[data-valeur="version"]').textContent = `BreezyShot ${v.version}`;
+  // « BreezyShot » et le numéro en deux morceaux (habillage) ; le texte reste
+  // « BreezyShot <version> ».
+  const nomApp = document.createElement("span");
+  nomApp.textContent = "BreezyShot";
+  const numero = document.createElement("span");
+  numero.className = "numero";
+  numero.textContent = v.version;
+  $('[data-valeur="version"]').replaceChildren(nomApp, " ", numero);
   poserRaccourcis(v.raccourcis);
   const alerte = $("[data-alerte]");
   alerte.textContent = v.alerte || "";
