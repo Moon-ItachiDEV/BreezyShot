@@ -3,7 +3,6 @@
 use std::cell::Cell;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
 use std::time::{Duration, Instant, SystemTime};
 
 use chrono::{DateTime, Local, TimeDelta, TimeZone, Utc};
@@ -14,7 +13,7 @@ use super::recents::{
     a_supprimer_apres_ecriture, base_recent, chemin_recent_libre, cle_recent, recents_a_supprimer,
     RECENTS_GARDES,
 };
-use super::{fichier, png, presse_papiers, sortir, Bilan, Demande, Etape, EtapeFichier};
+use super::{fichier, png, presse_papiers, sortir, sur_blanc, Bilan, Demande, Etape, EtapeFichier};
 use crate::systeme::gel::Pixels;
 
 // ---------- Aides ----------
@@ -71,6 +70,7 @@ fn demande(racine: &Path) -> Demande {
         dossier_recents: racine.join("local").join("Recents"),
         modele_nom: "BreezyShot {date} à {heure}".to_string(),
         maintenant: instant(),
+        transparence: false,
     }
 }
 
@@ -1137,10 +1137,166 @@ fn nettoyage_de_nos_temporaires_oublies() {
     }
 }
 
+// ---------- Transparence ----------
+
+/// 4 × 3, coins transparents, alphas varies, couleurs qui disent leur place.
+fn image_transparente() -> Pixels {
+    let mut p = image(4, 3);
+    let alphas = [0u8, 1, 64, 128, 200, 254, 255, 255, 17, 128, 255, 0];
+    for (pixel, a) in p.rgba.chunks_exact_mut(4).zip(alphas) {
+        pixel[3] = a;
+    }
+    p
+}
+
+#[test]
+fn sur_blanc_compose_sur_un_fond_blanc() {
+    let entree = [
+        10, 20, 30, 0, // transparent : blanc
+        10, 20, 30, 255, // opaque : intact
+        0, 100, 255, 128, // moitie : melange arrondi
+        200, 0, 50, 1,
+    ];
+    assert_eq!(
+        sur_blanc(&entree),
+        vec![
+            255, 255, 255, 255, //
+            10, 20, 30, 255, //
+            127, 177, 255, 255, //
+            255, 254, 254, 255,
+        ]
+    );
+    // Un reste d'octets ignore, sans panique.
+    assert_eq!(sur_blanc(&[1, 2, 3, 0, 9, 9]), vec![255, 255, 255, 255]);
+    assert!(sur_blanc(&[]).is_empty());
+}
+
+#[test]
+fn sortir_avec_transparence_garde_l_alpha() {
+    let entree = image_transparente();
+    let racine = tempfile::tempdir().expect("dossier temporaire");
+    let mut d = demande(racine.path());
+    d.transparence = true;
+    let bilan = sortir(&entree, &d);
+    assert_eq!(bilan.copie, Etape::NonDemandee);
+    let recent = bilan.recent.expect("recent ecrit");
+    let EtapeFichier::Fait(chemin) = bilan.enregistrement else {
+        panic!("enregistrement {:?}", bilan.enregistrement);
+    };
+    let octets = fs::read(&chemin).expect("fichier");
+    // Les memes octets pour « Recents » et le fichier, encodes avec l'alpha.
+    assert_eq!(fs::read(&recent).expect("recent"), octets);
+    assert_eq!(decoder(&octets), entree);
+    assert_eq!(
+        png::encoder_rgba(4, 3, &entree.rgba).expect("encodage"),
+        octets
+    );
+}
+
+#[test]
+fn sortir_sans_transparence_reste_opaque() {
+    let entree = image_transparente();
+    let racine = tempfile::tempdir().expect("dossier temporaire");
+    let d = demande(racine.path());
+    assert!(!d.transparence);
+    let bilan = sortir(&entree, &d);
+    let EtapeFichier::Fait(chemin) = &bilan.enregistrement else {
+        panic!("enregistrement {:?}", bilan.enregistrement);
+    };
+    let octets = fs::read(chemin).expect("fichier");
+    // Au bit pres ce que donne l'encodage opaque.
+    assert_eq!(octets, super::encoder_png(&entree).expect("encodage"));
+    assert!(decoder(&octets).rgba.chunks_exact(4).all(|p| p[3] == 255));
+    // Meme forme de bilan que la meme sortie avec transparence.
+    let racine_t = tempfile::tempdir().expect("dossier temporaire");
+    let mut t = demande(racine_t.path());
+    t.transparence = true;
+    let bilan_t = sortir(&entree, &t);
+    assert_eq!(bilan.copie, bilan_t.copie);
+    assert_eq!(
+        bilan
+            .recent
+            .as_ref()
+            .map(|c| c.file_name().map(|n| n.to_owned())),
+        bilan_t
+            .recent
+            .as_ref()
+            .map(|c| c.file_name().map(|n| n.to_owned()))
+    );
+    assert!(matches!(bilan_t.enregistrement, EtapeFichier::Fait(_)));
+}
+
+#[test]
+fn sortir_avec_transparence_pixels_invalides_tout_en_echec() {
+    let racine = tempfile::tempdir().expect("dossier temporaire");
+    let mut d = demande(racine.path());
+    d.transparence = true;
+    d.copier = true;
+    let abimee = Pixels {
+        largeur: 2,
+        hauteur: 2,
+        rgba: vec![0; 15],
+    };
+    let bilan = sortir(&abimee, &d);
+    assert!(matches!(bilan.copie, Etape::Echec(_)));
+    assert!(bilan.recent.is_err());
+    assert!(matches!(bilan.enregistrement, EtapeFichier::Echec { .. }));
+}
+
+#[test]
+fn presse_papiers_natif_causes_et_reessai() {
+    use crate::systeme::presse_papiers::ErreurPressePapiers as E;
+    use presse_papiers::Reessayable;
+    assert_eq!(
+        presse_papiers::cause_native(E::Occupe),
+        presse_papiers::cause(&arboard::Error::ClipboardOccupied)
+    );
+    assert_eq!(
+        presse_papiers::cause_native(E::NonDisponible),
+        presse_papiers::cause(&arboard::Error::ClipboardNotSupported)
+    );
+    assert_eq!(
+        presse_papiers::cause_native(E::Refuse),
+        "Le presse-papiers a refusé l'image."
+    );
+    assert!(E::Occupe.vaut_reessai());
+    assert!(!E::Refuse.vaut_reessai());
+    assert!(!E::NonDisponible.vaut_reessai());
+
+    // La meme echeance que pour arboard.
+    let h = Horloge::new();
+    let essais = Cell::new(0);
+    let r: Result<(), E> = presse_papiers::avec_echeance(
+        presse_papiers::ECHEANCE,
+        || h.maintenant(),
+        |d| h.avancer(d),
+        || {
+            essais.set(essais.get() + 1);
+            Err(E::Occupe)
+        },
+    );
+    assert_eq!(r, Err(E::Occupe));
+    assert!(h.ecoule.get() <= presse_papiers::ECHEANCE);
+    assert!(essais.get() >= 2);
+    let essais = Cell::new(0);
+    let r: Result<(), E> = presse_papiers::avec_echeance(
+        presse_papiers::ECHEANCE,
+        || h.maintenant(),
+        |d| h.avancer(d),
+        || {
+            essais.set(essais.get() + 1);
+            Err(E::Refuse)
+        },
+    );
+    assert_eq!(r, Err(E::Refuse));
+    assert_eq!(essais.get(), 1);
+}
+
 // ---------- Presse-papiers (reel) ----------
 
-/// Un seul test a la fois touche au vrai presse-papiers.
-static PRESSE_PAPIERS_TESTS: Mutex<()> = Mutex::new(());
+/// Un seul test a la fois touche au vrai presse-papiers (verrou partage avec
+/// les tests de `systeme::presse_papiers`).
+use crate::systeme::presse_papiers::VERROU_ESSAIS as PRESSE_PAPIERS_TESTS;
 
 /// Vrai si un presse-papiers existe. Sans lui : saute, ou echec si
 /// `BREEZYSHOT_PRESSE_PAPIERS_OBLIGATOIRE=1`.
@@ -1216,6 +1372,71 @@ fn presse_papiers_pose_et_relit_quatre_carres() {
     assert_eq!((relu.width, relu.height), (l as usize, h as usize));
     assert_eq!(relu.bytes.as_ref(), attendu.as_slice());
     println!("Presse-papiers : image 8x8 posee et relue pixel par pixel, alpha a 255.");
+}
+
+#[test]
+fn presse_papiers_pose_et_relit_avec_transparence() {
+    let _seul = PRESSE_PAPIERS_TESTS
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    if !presse_papiers_present("presse_papiers_pose_et_relit_avec_transparence") {
+        return;
+    }
+    let entree = image_transparente();
+    let racine = tempfile::tempdir().expect("dossier temporaire");
+    let mut d = demande(racine.path());
+    d.copier = true;
+    d.enregistrer = false;
+    d.transparence = true;
+    let bilan = sortir(&entree, &d);
+    assert_eq!(bilan.copie, Etape::Faite);
+
+    // Relu par arboard : il lit d'abord le format PNG (Windows) ou l'image
+    // servie par notre processus (X11) ; l'alpha doit y etre.
+    let debut = Instant::now();
+    let relu = loop {
+        match presse_papiers::relire() {
+            Ok(image) => break image,
+            Err(e) if debut.elapsed() >= Duration::from_secs(1) => {
+                panic!("image non relue en 1 s : {e}")
+            }
+            Err(_) => std::thread::sleep(Duration::from_millis(50)),
+        }
+    };
+    assert_eq!((relu.width, relu.height), (4, 3));
+    assert_eq!(relu.bytes.as_ref(), entree.rgba.as_slice());
+    println!("Presse-papiers : image 4x3 posee et relue avec son alpha.");
+}
+
+/// La chaine entiere, la ou le presse-papiers natif existe (Windows) : `sortir`
+/// en mode transparent, puis le `CF_DIB` relu directement, sur fond blanc.
+#[test]
+fn presse_papiers_natif_dib_sur_blanc_depuis_sortir() {
+    use crate::systeme::presse_papiers as natif;
+    let _seul = PRESSE_PAPIERS_TESTS
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    if !natif::disponible() {
+        println!("presse-papiers natif absent ici : chaine prouvee sous Windows seulement.");
+        return;
+    }
+    // 6 x 6 d'une couleur, coin haut gauche transparent.
+    let mut entree = Pixels {
+        largeur: 6,
+        hauteur: 6,
+        rgba: [10u8, 20, 30, 255].repeat(36),
+    };
+    entree.rgba[3] = 0;
+    let racine = tempfile::tempdir().expect("dossier temporaire");
+    let mut d = demande(racine.path());
+    d.copier = true;
+    d.enregistrer = false;
+    d.transparence = true;
+    assert_eq!(sortir(&entree, &d).copie, Etape::Faite);
+    let dib = natif::lire_dib().expect("CF_DIB relu");
+    assert_eq!(natif::pixel_dib(&dib, 0, 0), Some([255, 255, 255]), "coin");
+    assert_eq!(natif::pixel_dib(&dib, 3, 3), Some([10, 20, 30]), "centre");
+    assert_eq!(natif::pixel_dib(&dib, 5, 0), Some([10, 20, 30]));
 }
 
 // ---------- Mesures ----------

@@ -28,8 +28,9 @@ pub struct Situation {
     pub action: String,
     /// Le premier candidat de l'action, tel qu'écrit dans les réglages (coupé à 40 caractères).
     pub candidat: String,
-    /// `invalide`, `reserve_par_le_systeme`, `deja_pris`, `refuse_par_le_systeme`, ou
-    /// `aucun_raccourci` quand l'action n'a rien obtenu.
+    /// `invalide`, `reserve_par_le_systeme`, `deja_pris`, `refuse_par_le_systeme` ;
+    /// `action_sans_raccourci` quand cette action n'a rien obtenu mais une autre si ;
+    /// `aucun_raccourci` quand aucune action n'a rien obtenu.
     pub raison: String,
 }
 
@@ -61,26 +62,64 @@ fn code_raison(raison: &Raison) -> &'static str {
     }
 }
 
-/// L'annonce d'une action et sa situation, si son premier candidat n'a pas été retenu.
+/// Le nom d'une action dans « Aucun raccourci pour … ».
+fn nom_dans_annonce(action: &str) -> String {
+    match action {
+        "zone" => "la zone".into(),
+        "plein_ecran" => "l'écran".into(),
+        "fenetre" => "la fenêtre".into(),
+        autre => autre.into(),
+    }
+}
+
+/// L'annonce d'une action qui avait des candidats et n'a rien obtenu. `aucune_autre` :
+/// aucune action n'a obtenu de raccourci (erreur « Aucun raccourci disponible ») ; sinon
+/// une info qui nomme l'action, pas la touche.
+fn annonce_sans_raccourci(choix: &ChoixAction, aucune_autre: bool) -> (Annonce, Situation) {
+    let candidat = choix
+        .ecartes
+        .first()
+        .map(|e| couper(&e.candidat))
+        .unwrap_or_default();
+    let (erreur, titre, raison) = if aucune_autre {
+        (
+            true,
+            "Aucun raccourci disponible".to_string(),
+            "aucun_raccourci",
+        )
+    } else {
+        (
+            false,
+            format!("Aucun raccourci pour {}", nom_dans_annonce(&choix.action)),
+            "action_sans_raccourci",
+        )
+    };
+    let annonce = Annonce {
+        erreur,
+        titre,
+        detail: String::new(),
+    };
+    let situation = Situation {
+        action: choix.action.clone(),
+        candidat,
+        raison: raison.into(),
+    };
+    (annonce, situation)
+}
+
+/// L'annonce d'une action et sa situation, si son premier candidat n'a pas été retenu
+/// et qu'un repli l'a été.
 fn annonce_action(choix: &ChoixAction) -> Option<(Annonce, Situation)> {
     if !choix.premier_ecarte() {
         return None;
     }
     let premier = &choix.ecartes[0];
-    let mut situation = Situation {
+    let situation = Situation {
         action: choix.action.clone(),
         candidat: couper(&premier.candidat),
         raison: code_raison(&premier.raison).to_string(),
     };
-    let Some(retenu) = choix.retenu.as_ref() else {
-        situation.raison = "aucun_raccourci".into();
-        let annonce = Annonce {
-            erreur: true,
-            titre: "Aucun raccourci disponible".into(),
-            detail: String::new(),
-        };
-        return Some((annonce, situation));
-    };
+    let retenu = choix.retenu.as_ref()?;
     // Un message tient en une ligne de titre, sans astuce ; la raison précise reste dans
     // la situation (et le journal).
     let y = retenu.affichage();
@@ -112,15 +151,20 @@ fn annonce_action(choix: &ChoixAction) -> Option<(Annonce, Situation)> {
 
 impl Bilan {
     /// L'annonce du démarrage et sa situation : au plus une. D'abord une action qui avait
-    /// des candidats et n'a rien obtenu (erreur) ; sinon la première action, dans l'ordre
-    /// de traitement, dont le premier candidat n'a pas été retenu (info).
+    /// des candidats et n'a rien obtenu : erreur « Aucun raccourci disponible » si aucune
+    /// action n'a de raccourci, sinon info « Aucun raccourci pour … » ; sinon la première
+    /// action, dans l'ordre de traitement, dont le premier candidat n'a pas été retenu
+    /// (info).
     fn annonce_et_situation(&self) -> Option<(Annonce, Situation)> {
         let sans_rien = self
             .actions
             .iter()
             .find(|a| a.nb_candidats > 0 && a.retenu.is_none());
         match sans_rien {
-            Some(a) => annonce_action(a),
+            Some(a) => {
+                let aucune_autre = self.actions.iter().all(|x| x.retenu.is_none());
+                Some(annonce_sans_raccourci(a, aucune_autre))
+            }
             None => self.actions.iter().find_map(annonce_action),
         }
     }
@@ -228,8 +272,8 @@ mod tests {
     }
 
     #[test]
-    fn une_seule_annonce_l_erreur_d_abord() {
-        // zone : info (réservée) ; plein_ecran : rien obtenu (erreur) ; fenetre : info.
+    fn une_seule_annonce_l_action_sans_raccourci_d_abord() {
+        // zone : info (réservée) ; plein_ecran : rien obtenu ; fenetre : info.
         let t = table(&[
             ("fenetre", &["Ctrl+Maj+3", "Ctrl+Maj+4"]),
             ("zone", &["ImprEcran", "Ctrl+Maj+1"]),
@@ -238,9 +282,64 @@ mod tests {
         let b = choisir(&t, true, |r| {
             r.canonique() != "Ctrl+Maj+3" && r.canonique() != "Ctrl+Maj+2"
         });
+        assert_eq!(
+            b.annonce(),
+            Some(Annonce {
+                erreur: false,
+                titre: "Aucun raccourci pour l'écran".into(),
+                detail: String::new(),
+            })
+        );
+        assert_eq!(
+            decider_annonce(None, &b).a_retenir,
+            Some(Situation {
+                action: "plein_ecran".into(),
+                candidat: "Ctrl+Maj+2".into(),
+                raison: "action_sans_raccourci".into(),
+            })
+        );
+    }
+
+    #[test]
+    fn action_sans_raccourci_nommee() {
+        // La zone n'obtient rien, le plein écran garde le sien.
+        let b = choisir(&defaut(), true, |r| r.canonique() != "Ctrl+Maj+1");
         let a = b.annonce().unwrap();
+        assert!(!a.erreur);
+        assert_eq!(a.titre, "Aucun raccourci pour la zone");
+        assert_eq!(a.detail, "");
+        let t = table(&[("zone", &["Ctrl+Maj+1"]), ("fenetre", &["Ctrl+Maj+3"])]);
+        let b = choisir(&t, false, |r| r.canonique() != "Ctrl+Maj+3");
+        assert_eq!(
+            b.annonce().unwrap().titre,
+            "Aucun raccourci pour la fenêtre"
+        );
+        // Une action sans candidat (aucun raccourci voulu) ne compte pas comme privée,
+        // mais n'a pas de raccourci non plus : si la seule autre échoue, c'est l'erreur.
+        let t = table(&[("zone", &[]), ("plein_ecran", &["Ctrl+Maj+2"])]);
+        let a = choisir(&t, false, |_| false).annonce().unwrap();
         assert!(a.erreur);
         assert_eq!(a.titre, "Aucun raccourci disponible");
+    }
+
+    /// D'« une action sans raccourci » à « plus aucune » : situation différente, l'erreur
+    /// est réaffichée ; et retour.
+    #[test]
+    fn passage_d_une_action_a_aucune() {
+        let une = choisir(&defaut(), false, |r| r.canonique() != "Ctrl+Maj+3");
+        let d1 = decider_annonce(None, &une);
+        assert_eq!(
+            d1.a_retenir.as_ref().unwrap().raison,
+            "action_sans_raccourci"
+        );
+        let aucune = choisir(&defaut(), false, |_| false);
+        let d2 = decider_annonce(d1.a_retenir.as_ref(), &aucune);
+        assert!(d2.annonce.unwrap().erreur);
+        assert_eq!(d2.a_retenir.as_ref().unwrap().raison, "aucun_raccourci");
+        let d3 = decider_annonce(d2.a_retenir.as_ref(), &une);
+        assert_eq!(d3.annonce.unwrap().titre, "Aucun raccourci pour la fenêtre");
+        // Même situation au démarrage suivant : silence.
+        assert_eq!(decider_annonce(d3.a_retenir.as_ref(), &une).annonce, None);
     }
 
     #[test]

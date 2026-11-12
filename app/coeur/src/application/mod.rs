@@ -8,8 +8,9 @@
 //! 4. ajouter ses entrées de menu dans `entrees_menu`.
 //!
 //! Capture d'une zone (§3.6) : `lancer_capture` puis `traiter_zone` font les gestes,
-//! `zone.rs` dit lesquels (fonctions pures). Tout ce qui montre ou cache se fait sur le fil
-//! principal ; la sortie (disque, presse-papiers) part dans un fil à part.
+//! `zone.rs` dit lesquels (fonctions pures). Plein écran (§3.7) : `lancer_capture` puis
+//! `capturer_plein_ecran`, sans écran figé ni sélection. Tout ce qui montre ou cache se
+//! fait sur le fil principal ; la sortie (disque, presse-papiers) part dans un fil à part.
 
 pub mod arguments;
 pub mod etat;
@@ -44,8 +45,6 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// Identifiant de l'entrée « Quitter BreezyShot ».
 pub const MENU_QUITTER: &str = "quitter";
-/// Identifiant de l'entrée « Capturer une zone ».
-pub const MENU_CAPTURER_ZONE: &str = "capturer_zone";
 
 /// Si le fil principal ne répond plus pendant ce délai alors que l'écran figé est montré,
 /// l'app s'arrête d'elle-même : l'écran ne doit jamais rester couvert.
@@ -54,9 +53,21 @@ pub const DELAI_BLOCAGE: Duration = Duration::from_secs(5);
 /// Attente maximale du compositeur après avoir caché le bandeau, avant la photo.
 pub const ATTENTE_COMPOSITION: Duration = Duration::from_millis(100);
 
-/// Les actions dont la capture existe : seules celles-ci reçoivent un raccourci (§5).
-/// `plein_ecran` et `fenetre` s'ajouteront avec leur étape.
-pub const ACTIONS_CONSTRUITES: [&str; 1] = ["zone"];
+/// Une capture demandée depuis le menu de l'icône part après ce délai : le menu, qui
+/// disparaît en fondu, ne doit pas être sur la photo. Un raccourci n'attend jamais.
+pub const ATTENTE_MENU: Duration = Duration::from_millis(350);
+
+/// Vrai quand la vignette existe (étape 9). D'ici là, chaque capture est enregistrée,
+/// sans que le réglage soit modifié ni écrit (`zone::doit_enregistrer`).
+pub const VIGNETTE_CONSTRUITE: bool = false;
+
+/// Les actions dont la capture existe : seules celles-ci reçoivent un raccourci (§5) et
+/// une entrée au menu.
+pub const ACTIONS_CONSTRUITES: [&str; 3] = ["zone", "plein_ecran", "fenetre"];
+
+/// L'ordre des entrées de capture dans le menu de l'icône (celui des raccourcis 1, 2, 3).
+/// Seuls les modes construits (`ACTIONS_CONSTRUITES`) y paraissent.
+pub const ORDRE_MENU: [Mode; 3] = [Mode::Zone, Mode::PleinEcran, Mode::Fenetre];
 
 /// Tout ce qui arrive à l'Application : signaux des modules, du système, du menu.
 #[derive(Debug, Clone, PartialEq)]
@@ -92,7 +103,7 @@ pub struct FinSortie {
     pub demande: sortie::Demande,
     pub duree_decoupe: Duration,
     pub duree_sortie: Duration,
-    /// Réception du signal `Zone`.
+    /// Réception du signal `Zone` (en plein écran : de la demande de capture).
     pub relache: Instant,
 }
 
@@ -102,6 +113,11 @@ struct CaptureEnCours {
     gel: capture::Gel,
     /// L'affichage de sélection ; `None` pendant `Selection::montrer`.
     selection: Option<u64>,
+    /// Le mode de la sélection montrée.
+    mode: selection::Mode,
+    /// Mode fenêtre : la liste envoyée à la Sélection (rectangles et rayons), dont
+    /// `Signal::Fenetre::indice` est un indice. Vide en mode zone.
+    fenetres: Vec<selection::FenetreProposee>,
     garde: GardeEcran,
 }
 
@@ -171,6 +187,9 @@ pub struct Application {
     /// La sortie dont on attend le bilan ; `None` une fois le bilan reçu ou l'échéance
     /// tombée.
     sortie_attendue: Mutex<Option<u64>>,
+    /// Nombre de captures démarrées (demandes acceptées par la table). Une demande du
+    /// menu, différée de `ATTENTE_MENU`, est caduque si ce nombre a changé depuis le clic.
+    demandes: AtomicU64,
 }
 
 /// Une annonce envoyée au bandeau, dont la situation attend d'être retenue.
@@ -200,6 +219,7 @@ pub fn lancer() {
             fenetres::selection::selection_chargee,
             fenetres::selection::selection_prete,
             fenetres::selection::selection_terminee,
+            fenetres::selection::selection_cliquee,
             fenetres::selection::selection_annulee
         ])
         .setup(move |app| {
@@ -347,12 +367,11 @@ fn demarrer(app: &AppHandle, commande: Commande, inconnus: &[String]) {
     app.state::<Application>()
         .taille_icone
         .store(taille, Ordering::Relaxed);
-    let libelle_zone = bilan.libelle_menu("zone");
     match icone::installer(
         app,
         theme,
         taille,
-        &entrees_menu(libelle_zone.as_deref()),
+        &entrees_menu(|mode| bilan.libelle_menu(mode.nom())),
         |app, id| traiter(app, Evenement::Menu(id)),
     ) {
         Ok(()) => log::info!(
@@ -565,28 +584,59 @@ fn afficher(app: &AppHandle, message: Message) -> Option<u64> {
     }
 }
 
-/// Texte de l'entrée « Capturer une zone », avec le raccourci actif à droite (tabulation :
-/// alignée à droite par les menus Windows).
-pub fn texte_capturer_zone(raccourci: Option<&str>) -> String {
-    match raccourci {
-        Some(r) => format!("Capturer une zone\t{r}"),
-        None => "Capturer une zone".into(),
+/// Les modes de capture au menu, dans l'ordre du menu : ceux qui sont construits.
+pub fn modes_au_menu() -> Vec<Mode> {
+    ORDRE_MENU
+        .into_iter()
+        .filter(|m| ACTIONS_CONSTRUITES.contains(&m.nom()))
+        .collect()
+}
+
+/// Identifiant de l'entrée de menu d'un mode (reçu dans `Evenement::Menu`).
+pub fn id_menu(mode: Mode) -> String {
+    format!("capturer_{}", mode.nom())
+}
+
+/// Le mode d'une entrée de menu de capture, `None` pour une autre entrée.
+pub fn mode_du_menu(id: &str) -> Option<Mode> {
+    Mode::TOUS.into_iter().find(|m| id_menu(*m) == id)
+}
+
+/// Texte de l'entrée de menu d'un mode, sans raccourci.
+pub fn libelle_menu(mode: Mode) -> &'static str {
+    match mode {
+        Mode::Zone => "Capturer une zone",
+        Mode::PleinEcran => "Capturer l'écran",
+        Mode::Fenetre => "Capturer une fenêtre",
     }
 }
 
-/// Les entrées du menu de l'icône, dans l'ordre. Seulement ce qui marche.
-pub fn entrees_menu(raccourci_zone: Option<&str>) -> Vec<EntreeMenu> {
-    vec![
-        EntreeMenu::Action {
-            id: MENU_CAPTURER_ZONE.into(),
-            texte: texte_capturer_zone(raccourci_zone),
-        },
-        EntreeMenu::Separateur,
-        EntreeMenu::Action {
-            id: MENU_QUITTER.into(),
-            texte: "Quitter BreezyShot".into(),
-        },
-    ]
+/// Texte de l'entrée d'un mode, avec le raccourci actif à droite (tabulation : aligné à
+/// droite par les menus Windows) ; sans raccourci retenu, le libellé seul.
+pub fn texte_capturer(mode: Mode, raccourci: Option<&str>) -> String {
+    match raccourci {
+        Some(r) => format!("{}\t{r}", libelle_menu(mode)),
+        None => libelle_menu(mode).into(),
+    }
+}
+
+/// Les entrées du menu de l'icône, dans l'ordre : les modes construits (`raccourci` donne
+/// le raccourci actif d'un mode), un séparateur, « Quitter BreezyShot ». Seulement ce qui
+/// marche.
+pub fn entrees_menu(raccourci: impl Fn(Mode) -> Option<String>) -> Vec<EntreeMenu> {
+    let mut entrees: Vec<EntreeMenu> = modes_au_menu()
+        .into_iter()
+        .map(|mode| EntreeMenu::Action {
+            id: id_menu(mode),
+            texte: texte_capturer(mode, raccourci(mode).as_deref()),
+        })
+        .collect();
+    entrees.push(EntreeMenu::Separateur);
+    entrees.push(EntreeMenu::Action {
+        id: MENU_QUITTER.into(),
+        texte: "Quitter BreezyShot".into(),
+    });
+    entrees
 }
 
 /// Le seul endroit où l'Application réagit à ce qui lui arrive.
@@ -629,16 +679,16 @@ pub fn traiter(app: &AppHandle, evenement: Evenement) {
                 Err(e) => log::warn!("icone non mise a jour: {e}"),
             }
         }
-        Evenement::Menu(id) => match id.as_str() {
-            MENU_QUITTER => {
+        Evenement::Menu(id) => match (id.as_str(), mode_du_menu(&id)) {
+            (MENU_QUITTER, _) => {
                 log::info!("menu: quitter");
                 app.exit(0);
             }
-            MENU_CAPTURER_ZONE => {
-                log::info!("menu: capturer une zone");
-                lancer_capture(app, Mode::Zone);
+            (_, Some(mode)) => {
+                log::info!("menu: capturer {}", mode.nom());
+                lancer_capture_apres(app, mode, ATTENTE_MENU);
             }
-            autre => log::warn!("menu: entree inconnue {autre}"),
+            (autre, None) => log::warn!("menu: entree inconnue {autre}"),
         },
         Evenement::Raccourci(raccourcis::Signal::Echap) => {
             log::info!("echap global presse");
@@ -705,9 +755,51 @@ fn afficher_probleme(app: &AppHandle, probleme: Probleme) {
     afficher(app, zone::message_capture_impossible());
 }
 
-/// Demande une capture (raccourci, menu). Fil principal (sinon postée). Séquence du §3.6 :
-/// bandeau caché, photo, écran figé, sélection, Échap réservé. Toute erreur après
-/// `montrer_ecran_fige` cache tout (garde) et revient au Repos.
+/// Le nombre de captures démarrées jusqu'ici.
+fn captures_demarrees(app: &AppHandle) -> u64 {
+    app.state::<Application>().demandes.load(Ordering::SeqCst)
+}
+
+/// Note une capture démarrée (demande acceptée par la table).
+fn noter_demande(app: &AppHandle) {
+    app.state::<Application>()
+        .demandes
+        .fetch_add(1, Ordering::SeqCst);
+}
+
+/// Lance la capture `mode` après `attente` (menu de l'icône) : le nombre de captures
+/// démarrées est pris au clic, un petit fil dort, puis la demande est postée sur le fil
+/// principal. Une capture démarrée entre-temps (raccourci, autre clic arrivé à échéance)
+/// la rend caduque (`zone::demande_menu_a_jour`) ; un appui ignoré par la table, non. Si
+/// l'état n'est plus Repos ni Vignette à l'échéance, la table ignore la demande.
+fn lancer_capture_apres(app: &AppHandle, mode: Mode, attente: Duration) {
+    let numero = captures_demarrees(app);
+    let pour_fil = app.clone();
+    let lance = std::thread::Builder::new()
+        .name("menu-attente".into())
+        .spawn(move || {
+            std::thread::sleep(attente);
+            let pour_traiter = pour_fil.clone();
+            let poste = pour_fil.run_on_main_thread(move || {
+                let actuelle = captures_demarrees(&pour_traiter);
+                if zone::demande_menu_a_jour(numero, actuelle) {
+                    demarrer_capture(&pour_traiter, mode);
+                } else {
+                    log::info!("menu: demande perimee");
+                }
+            });
+            if let Err(e) = poste {
+                log::warn!("capture non postee: {e}");
+            }
+        });
+    if let Err(e) = lance {
+        log::warn!("attente du menu impossible ({e}): capture tout de suite");
+        demarrer_capture(app, mode);
+    }
+}
+
+/// Demande une capture par raccourci. Fil principal (sinon postée), puis
+/// `demarrer_capture`.
 pub fn lancer_capture(app: &AppHandle, mode: Mode) {
     if hors_fil_principal(app) {
         let pour = app.clone();
@@ -716,19 +808,98 @@ pub fn lancer_capture(app: &AppHandle, mode: Mode) {
         }
         return;
     }
+    demarrer_capture(app, mode);
+}
+
+/// Démarre une capture (fil principal). La table ignore la demande hors Repos et
+/// Vignette (aucun second `figer` tant qu'une capture est en cours) ; acceptée, elle est
+/// comptée (une demande du menu en attente devient caduque), puis chaque mode suit sa
+/// séquence : zone (§3.6), plein écran (§3.7).
+fn demarrer_capture(app: &AppHandle, mode: Mode) {
     let recu_a = Instant::now();
-    // 1. Un appui pendant Gel, Sélection ou Découpe est ignoré par la table : aucun
-    // second `figer` tant qu'une capture est en cours.
     if appliquer(app, Declencheur::DemandeCapture(mode)).is_none() {
         log::info!("capture deja en cours: appui ignore");
         return;
     }
-    if mode != Mode::Zone {
-        // Seule la zone est construite : aucun raccourci ni menu ne mène ici.
-        log::warn!("capture {} pas encore construite", mode.nom());
-        appliquer(app, Declencheur::GelImpossible);
-        return;
+    noter_demande(app);
+    match mode {
+        Mode::Zone => capturer_avec_selection(app, recu_a, Mode::Zone),
+        Mode::Fenetre => capturer_avec_selection(app, recu_a, Mode::Fenetre),
+        Mode::PleinEcran => capturer_plein_ecran(app, recu_a),
     }
+}
+
+/// Début commun à tous les modes, une fois en Gel : le bandeau est caché s'il montre un
+/// message (il ne doit ni figurer sur la photo ni rester au-dessus de l'écran figé), le
+/// compositeur attendu (borné), puis la photo. Erreur → `GelImpossible` (Repos) et bandeau
+/// d'erreur ; rend `None`.
+fn photographier(app: &AppHandle) -> Option<capture::Gel> {
+    let bandeau_cache = app.try_state::<Bandeau>().is_some_and(|b| b.cacher());
+    if bandeau_cache && !systeme::attendre_composition(ATTENTE_COMPOSITION) {
+        log::warn!(
+            "composition non attendue ({} ms): photo prise quand meme",
+            ATTENTE_COMPOSITION.as_millis()
+        );
+    }
+    match capture::figer() {
+        Ok(g) => Some(g),
+        Err(e) => {
+            log::warn!("gel impossible: {e}");
+            appliquer(app, Declencheur::GelImpossible);
+            let probleme = match e {
+                capture::Erreur::NonDisponible => Probleme::NonDisponible,
+                _ => Probleme::Photo,
+            };
+            afficher_probleme(app, probleme);
+            None
+        }
+    }
+}
+
+/// La souris en pixels réels du bureau, lue tout de suite (`fenetres::souris` : le seul
+/// repli de l'app).
+fn souris_bureau(app: &AppHandle) -> Option<(i32, i32)> {
+    zone::point_souris(fenetres::souris(app))
+}
+
+/// Plein écran (§3.7), en Gel, sur le fil principal : souris lue avant tout, photo,
+/// écran choisi (`capture::ecran_de_capture`), Découpe, puis la sortie. Rien n'est
+/// montré : ni écran figé, ni sélection, ni Échap réservé, ni garde.
+fn capturer_plein_ecran(app: &AppHandle, recu_a: Instant) {
+    let souris = souris_bureau(app);
+    let Some(gel_pris) = photographier(app) else {
+        return;
+    };
+    let Some((ecran, origine)) = capture::ecran_de_capture(souris, &gel_pris.ecrans) else {
+        log::warn!("plein ecran: aucun ecran");
+        appliquer(app, Declencheur::GelImpossible);
+        afficher_probleme(app, Probleme::Photo);
+        return;
+    };
+    log::info!("{}", zone::ligne_plein_ecran(ecran.rect, origine));
+    log::info!(
+        "{}",
+        zone::ligne_chrono_photo(gel_pris.duree_photo, gel_pris.duree_totale)
+    );
+    appliquer(app, Declencheur::PhotoPrise(Mode::PleinEcran));
+    let debut = Instant::now();
+    let pixels = capture::decouper(&gel_pris, ecran.rect);
+    let duree_decoupe = debut.elapsed();
+    drop(gel_pris);
+    match pixels {
+        Ok(pixels) => lancer_sortie(app, pixels, duree_decoupe, recu_a, false),
+        Err(e) => {
+            log::warn!("decoupe impossible: {e}");
+            appliquer(app, Declencheur::DecoupeImpossible);
+            afficher_probleme(app, Probleme::Lecture);
+        }
+    }
+}
+
+/// Zone et fenêtre (§3.6), en Gel : photo, écran figé, (en mode fenêtre, la liste des
+/// fenêtres), sélection, Échap réservé. Même code pour les deux modes. Toute erreur après
+/// `montrer_ecran_fige` cache tout (garde) et revient au Repos.
+fn capturer_avec_selection(app: &AppHandle, recu_a: Instant, mode: Mode) {
     // Avant toute photo : aucune capture ne doit rester rangée (sa garde, détruite plus
     // tard, cacherait le nouvel écran figé), et la Sélection doit exister (sinon l'écran
     // figé ne serait jamais montré pour rien).
@@ -742,27 +913,9 @@ pub fn lancer_capture(app: &AppHandle, mode: Mode) {
         afficher_probleme(app, Probleme::Selection);
         return;
     }
-    // 2. Le bandeau ne doit ni figurer sur la photo ni rester au-dessus de l'écran figé.
-    let bandeau_cache = app.try_state::<Bandeau>().is_some_and(|b| b.cacher());
-    if bandeau_cache && !systeme::attendre_composition(ATTENTE_COMPOSITION) {
-        log::warn!(
-            "composition non attendue ({} ms): photo prise quand meme",
-            ATTENTE_COMPOSITION.as_millis()
-        );
-    }
-    // 3. La photo.
-    let gel_pris = match capture::figer() {
-        Ok(g) => g,
-        Err(e) => {
-            log::warn!("gel impossible: {e}");
-            appliquer(app, Declencheur::GelImpossible);
-            let probleme = match e {
-                capture::Erreur::NonDisponible => Probleme::NonDisponible,
-                _ => Probleme::Photo,
-            };
-            afficher_probleme(app, probleme);
-            return;
-        }
+    // 2 et 3. Bandeau caché, compositeur attendu, la photo.
+    let Some(gel_pris) = photographier(app) else {
+        return;
     };
     // 4. L'écran figé. La garde vit dès maintenant : toute sortie le cache.
     let garde = GardeEcran::new(app);
@@ -781,13 +934,31 @@ pub fn lancer_capture(app: &AppHandle, mode: Mode) {
             recu_a.elapsed()
         )
     );
-    appliquer(app, Declencheur::PhotoPrise(Mode::Zone));
+    // Mode fenêtre : la liste des fenêtres, après l'écran figé (elle coûte plus que la
+    // photo) ; jamais demandée en mode zone.
+    let (mode_selection, fenetres) = if mode == Mode::Fenetre {
+        let debut = Instant::now();
+        let liste = capture::fenetres();
+        log::info!(
+            "{}",
+            zone::ligne_chrono_fenetres(debut.elapsed(), liste.len())
+        );
+        (
+            selection::Mode::Fenetre,
+            zone::fenetres_proposees(&liste, &gel_pris.ecrans),
+        )
+    } else {
+        (selection::Mode::Zone, Vec::new())
+    };
+    appliquer(app, Declencheur::PhotoPrise(mode));
     // 5. La sélection, juste au-dessus de l'écran figé.
     let demande = selection::Demande {
         bureau: gel_pris.bureau,
         ecrans: gel_pris.ecrans.iter().map(|e| e.rect).collect(),
         dessous: gel::poignee_ecran_fige(),
         cote_min: capture::COTE_MIN,
+        mode: mode_selection,
+        fenetres: fenetres.clone(),
     };
     // La capture est notée avant `montrer` : un signal de fin arrivé pendant `montrer`
     // la trouve et la termine. La place est vide : vidée avant la photo, sur ce même fil,
@@ -797,6 +968,8 @@ pub fn lancer_capture(app: &AppHandle, mode: Mode) {
         Some(CaptureEnCours {
             gel: gel_pris,
             selection: None,
+            mode: mode_selection,
+            fenetres,
             garde,
         }),
     );
@@ -917,6 +1090,8 @@ fn traiter_zone(app: &AppHandle, arrivee: Arrivee<'_>) {
             c.as_ref().map(|c| Vue {
                 selection: c.selection,
                 ecrans: &c.gel.ecrans,
+                mode: c.mode,
+                fenetres: &c.fenetres,
             }),
             arrivee,
         )
@@ -927,32 +1102,44 @@ fn traiter_zone(app: &AppHandle, arrivee: Arrivee<'_>) {
             declencheur,
             probleme,
         } => abandonner(app, declencheur, probleme),
-        Geste::Decouper(zone) => decouper(app, zone),
+        Geste::Decouper(zone) => decouper(app, zone, None),
+        Geste::DecouperFenetre { zone, rayon, coins } => decouper(app, zone, Some((rayon, coins))),
     }
 }
 
-/// Zone choisie : l'écran figé disparaît dans le même tour que la sélection, puis la
-/// découpe (écran déjà libre, garde au repos) et la sortie dans son fil.
-fn decouper(app: &AppHandle, zone: systeme::Rect) {
+/// Zone ou fenêtre choisie : l'écran figé disparaît dans le même tour que la sélection,
+/// puis la découpe (écran déjà libre, garde au repos) et la sortie dans son fil. En mode
+/// fenêtre (`fenetre` : rayon et coins), les coins sont arrondis et la sortie garde la
+/// transparence si un coin l'est.
+fn decouper(app: &AppHandle, zone: systeme::Rect, fenetre: Option<(i32, [bool; 4])>) {
     let relache = Instant::now();
     let Some(mut capture) = ranger_capture(app, None) else {
         return;
     };
     capture.garde.cacher_tout();
     appliquer(app, Declencheur::ZoneChoisie);
-    log::info!(
-        "zone choisie {},{} {}x{}",
-        zone.x,
-        zone.y,
-        zone.largeur,
-        zone.hauteur
-    );
+    match fenetre {
+        Some((rayon, coins)) => log::info!("{}", zone::ligne_fenetre_choisie(zone, rayon, coins)),
+        None => log::info!(
+            "zone choisie {},{} {}x{}",
+            zone.x,
+            zone.y,
+            zone.largeur,
+            zone.hauteur
+        ),
+    }
     let debut = Instant::now();
-    let pixels = capture::decouper(&capture.gel, zone);
+    let pixels = capture::decouper(&capture.gel, zone).map(|mut p| {
+        if let Some((rayon, coins)) = fenetre.filter(|(rayon, _)| *rayon > 0) {
+            capture::arrondir(&mut p, rayon, coins);
+        }
+        p
+    });
     let duree_decoupe = debut.elapsed();
     drop(capture);
+    let transparence = fenetre.is_some_and(|(rayon, coins)| zone::avec_transparence(rayon, coins));
     match pixels {
-        Ok(pixels) => lancer_sortie(app, pixels, duree_decoupe, relache),
+        Ok(pixels) => lancer_sortie(app, pixels, duree_decoupe, relache, transparence),
         Err(e) => {
             log::warn!("decoupe impossible: {e}");
             appliquer(app, Declencheur::DecoupeImpossible);
@@ -961,8 +1148,9 @@ fn decouper(app: &AppHandle, zone: systeme::Rect) {
     }
 }
 
-/// Ce que la sortie doit faire, d'après les réglages lus au démarrage.
-fn demande_sortie(app: &AppHandle) -> sortie::Demande {
+/// Ce que la sortie doit faire, d'après les réglages lus au démarrage ; `transparence` :
+/// garder l'alpha (fenêtre aux coins arrondis).
+fn demande_sortie(app: &AppHandle, transparence: bool) -> sortie::Demande {
     let etat = app.state::<Application>();
     let reglages = etat
         .reglages
@@ -981,12 +1169,18 @@ fn demande_sortie(app: &AppHandle) -> sortie::Demande {
         .unwrap_or_else(PathBuf::new);
     sortie::Demande {
         copier: reglages.copier_apres_capture,
-        enregistrer: reglages.enregistrer_apres_capture,
+        // Jamais écrit dans les réglages : la valeur lue reste telle quelle.
+        enregistrer: zone::doit_enregistrer(
+            reglages.enregistrer_apres_capture,
+            VIGNETTE_CONSTRUITE,
+            !dossier_enregistrement.as_os_str().is_empty(),
+        ),
         dossier_enregistrement,
         dossier_affiche,
         dossier_recents,
         modele_nom: reglages.modele_nom,
         maintenant: chrono::Local::now(),
+        transparence,
     }
 }
 
@@ -1038,7 +1232,13 @@ fn sortir_et_mesurer(
 /// presse-papiers), puis le bilan revient au fil principal (`SortieFaite`). Un second
 /// petit fil tient l'échéance (`zone::DELAI_SORTIE`) : sans nouvelles du fil de sortie à
 /// temps, il poste `SortieEchue`, et l'automate ne reste jamais en Découpe.
-fn lancer_sortie(app: &AppHandle, pixels: gel::Pixels, duree_decoupe: Duration, relache: Instant) {
+fn lancer_sortie(
+    app: &AppHandle,
+    pixels: gel::Pixels,
+    duree_decoupe: Duration,
+    relache: Instant,
+    transparence: bool,
+) {
     let etat = app.state::<Application>();
     let numero = etat.derniere_sortie.fetch_add(1, Ordering::SeqCst) + 1;
     *etat
@@ -1046,7 +1246,7 @@ fn lancer_sortie(app: &AppHandle, pixels: gel::Pixels, duree_decoupe: Duration, 
         .sortie_attendue
         .lock()
         .unwrap_or_else(|e| e.into_inner()) = Some(numero);
-    let demande = demande_sortie(app);
+    let demande = demande_sortie(app, transparence);
     let pixels = Arc::new(pixels);
     let (fini, attente) = std::sync::mpsc::channel::<()>();
     let pour_fil = app.clone();
@@ -1148,33 +1348,125 @@ mod tests {
     use super::*;
     use crate::raccourcis::{choisir, decider_annonce, Situation};
 
+    fn action(id: &str, texte: &str) -> EntreeMenu {
+        EntreeMenu::Action {
+            id: id.into(),
+            texte: texte.into(),
+        }
+    }
+
     #[test]
-    fn menu_avec_et_sans_raccourci() {
-        let m = entrees_menu(Some("Ctrl + Maj + 1"));
+    fn menu_avec_les_trois_raccourcis() {
+        let m = entrees_menu(|mode| match mode {
+            Mode::Zone => Some("Ctrl + Maj + 1".into()),
+            Mode::PleinEcran => Some("Ctrl + Maj + 2".into()),
+            Mode::Fenetre => Some("Ctrl + Maj + 3".into()),
+        });
+        assert_eq!(
+            m,
+            [
+                action("capturer_zone", "Capturer une zone\tCtrl + Maj + 1"),
+                action("capturer_plein_ecran", "Capturer l'écran\tCtrl + Maj + 2"),
+                action("capturer_fenetre", "Capturer une fenêtre\tCtrl + Maj + 3"),
+                EntreeMenu::Separateur,
+                action(MENU_QUITTER, "Quitter BreezyShot"),
+            ]
+        );
+    }
+
+    #[test]
+    fn menu_sans_raccourci() {
+        let m = entrees_menu(|_| None);
+        assert_eq!(
+            m,
+            [
+                action("capturer_zone", "Capturer une zone"),
+                action("capturer_plein_ecran", "Capturer l'écran"),
+                action("capturer_fenetre", "Capturer une fenêtre"),
+                EntreeMenu::Separateur,
+                action(MENU_QUITTER, "Quitter BreezyShot"),
+            ]
+        );
+        // Un seul raccourci retenu : les autres entrées restent, sans raccourci.
+        let m = entrees_menu(|mode| (mode == Mode::Zone).then(|| "Impr. écran".to_string()));
         assert_eq!(
             m[0],
-            EntreeMenu::Action {
-                id: MENU_CAPTURER_ZONE.into(),
-                texte: "Capturer une zone\tCtrl + Maj + 1".into()
-            }
+            action("capturer_zone", "Capturer une zone\tImpr. écran")
         );
-        assert_eq!(m[1], EntreeMenu::Separateur);
+        assert_eq!(m[1], action("capturer_plein_ecran", "Capturer l'écran"));
+        assert_eq!(m[2], action("capturer_fenetre", "Capturer une fenêtre"));
+    }
+
+    #[test]
+    fn identifiants_du_menu() {
+        for mode in Mode::TOUS {
+            assert_eq!(mode_du_menu(&id_menu(mode)), Some(mode));
+        }
+        assert_eq!(mode_du_menu(MENU_QUITTER), None);
+        assert_eq!(mode_du_menu("capturer_autre"), None);
         assert_eq!(
-            m[2],
-            EntreeMenu::Action {
-                id: MENU_QUITTER.into(),
-                texte: "Quitter BreezyShot".into()
-            }
+            modes_au_menu(),
+            [Mode::Zone, Mode::PleinEcran, Mode::Fenetre]
         );
-        assert_eq!(texte_capturer_zone(None), "Capturer une zone");
+        assert_eq!(texte_capturer(Mode::Fenetre, None), "Capturer une fenêtre");
+    }
+
+    #[test]
+    fn actions_construites() {
+        assert_eq!(ACTIONS_CONSTRUITES, ["zone", "plein_ecran", "fenetre"]);
+        for a in ACTIONS_CONSTRUITES {
+            assert!(Mode::depuis_nom(a).is_some(), "{a}");
+        }
     }
 
     #[test]
     fn seules_les_actions_construites_sont_proposees() {
         let r = Reglages::par_defaut(Plateforme::Windows);
         let t = table_candidats(&r);
-        assert_eq!(t.len(), 1);
+        assert_eq!(t.len(), 3);
         assert_eq!(t["zone"], ["ImprEcran", "Ctrl+Maj+1"]);
+        assert_eq!(t["plein_ecran"], ["Ctrl+Maj+2"]);
+        assert_eq!(t["fenetre"], ["Ctrl+Maj+3"]);
+    }
+
+    /// Ctrl + Maj + 4, T et H ne sont pris pour rien, sur aucune plateforme.
+    #[test]
+    fn raccourcis_reserves_a_plus_tard_jamais_pris() {
+        for p in [Plateforme::Windows, Plateforme::Mac, Plateforme::Autre] {
+            let t = table_candidats(&Reglages::par_defaut(p));
+            let b = choisir(&t, false, |_| true);
+            for a in &b.actions {
+                let retenu = a.retenu.as_ref().map(|r| r.canonique());
+                for interdit in ["Ctrl+Maj+4", "Ctrl+Maj+T", "Ctrl+Maj+H"] {
+                    assert_ne!(retenu.as_deref(), Some(interdit), "{p:?} {}", a.action);
+                }
+            }
+        }
+    }
+
+    /// Ctrl + Maj + 2 pris par une autre application : la zone garde son raccourci, le
+    /// plein écran n'en a aucun et reste au menu sans raccourci affiché.
+    #[test]
+    fn plein_ecran_sans_raccourci() {
+        let t = table_candidats(&Reglages::par_defaut(Plateforme::Windows));
+        let b = choisir(&t, false, |r| r.canonique() != "Ctrl+Maj+2");
+        assert_eq!(b.libelle_menu("zone").as_deref(), Some("Impr. écran"));
+        assert_eq!(b.libelle_menu("plein_ecran"), None);
+        let m = entrees_menu(|mode| b.libelle_menu(mode.nom()));
+        assert_eq!(
+            m[0],
+            action("capturer_zone", "Capturer une zone\tImpr. écran")
+        );
+        assert_eq!(m[1], action("capturer_plein_ecran", "Capturer l'écran"));
+        // L'annonce du démarrage (§5) : une info qui nomme l'action, pas une erreur.
+        assert_eq!(
+            b.annonce().map(|a| (a.erreur, a.titre)),
+            Some((false, "Aucun raccourci pour l'écran".to_string()))
+        );
+        assert_eq!(
+            ligne_annonce(&decider_annonce(None, &b)).as_deref(),
+            Some("annonce raccourci: action_sans_raccourci")
+        );
     }
 
     #[test]

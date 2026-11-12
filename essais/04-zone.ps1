@@ -1,12 +1,15 @@
 # Étapes 4 à 6 assemblées : la capture d'une zone, de bout en bout (ARCHITECTURE.md §3.6,
 # §8, §9, §10), sur le vrai .exe, avec de vraies entrées clavier et souris.
 #
-# Cas A (copie seule) : (1) raccourci → chronos et lignes du journal ; (2) fenêtres
-# pendant la sélection (couverture, ordre, premier plan, styles étendus, bandeau caché,
-# pas de focus_perdu parasite en 3 s) ; (3) glisser exact sur les quatre carrés du témoin
+# Cas A (réglage d'enregistrement par défaut, faux : tant que la vignette n'existe pas,
+# l'app enregistre quand même, « Copié et enregistré », sans toucher au réglage) :
+# (1) raccourci → chronos et lignes du journal ; (2) fenêtres pendant la sélection
+# (couverture, ordre, premier plan, styles étendus, bandeau caché, pas de focus_perdu
+# parasite en 3 s) ; (3) glisser exact sur les quatre carrés du témoin
 # → presse-papiers et « Récents » identiques pixel par pixel, Repos, premier plan rendu ;
 # (4) Échap puis clic droit annulent ; (5) clic sans glisser et glisser de 1 px (zone 2×2) :
-# la sélection reste, puis Échap ; glisser de 2 px (3×3, COTE_MIN) : zone acceptée ; (6) second raccourci pendant la sélection ignoré ;
+# la sélection reste, puis Échap ; glisser de 2 px (3×3, COTE_MIN) : zone acceptée ;
+# (6) second raccourci pendant la sélection ignoré ;
 # (7) glisser dans les autres sens : même image ; (9) deux captures rapprochées : le
 # bandeau de la première n'est ni dans l'image ni au-dessus de la sélection ; et, demandé
 # par la relecture de l'étape 5 : F5 et Ctrl+P sans effet, Alt+F4 annule proprement,
@@ -115,7 +118,8 @@ function Attendre-Motif([string]$Motif, [string]$Dossier, [double]$DelaiS, [stri
 }
 
 # Réglages du cas : raccourci Ctrl+Maj+1 seul (pas d'Impr. écran, pas d'annonce au
-# démarrage), copie, enregistrement et dossier au choix.
+# démarrage), copie, enregistrement et dossier au choix. Version 0.2 : un réglage
+# d'enregistrement faux n'empêche pas l'enregistrement (vignette pas encore construite).
 function Ecrire-Reglages([string]$Dossier, [bool]$Enregistrer, $DossierEnregistrement) {
     $r = [ordered]@{
         version                   = 1
@@ -379,8 +383,14 @@ public static string[] Ecarts(byte[] o, int stride, int l, int h, int[] c, int m
 
         # Compare une image aux quatre carrés : taille exacte, puis chaque pixel. En cas
         # d'écart, les premiers pixels fautifs dans le détail.
+        # L'image est libérée à la fin (chaque appel lui passe une image à lui).
         function Verifier-Image([string]$Nom, $Image) {
             if ($null -eq $Image) { Verifier $Nom $false 'aucune image' | Out-Null; return }
+            try { Verifier-Image-Tenue $Nom $Image }
+            finally { $Image.Dispose() }
+        }
+
+        function Verifier-Image-Tenue([string]$Nom, $Image) {
             $taille = "$($Image.Width)x$($Image.Height)"
             if (-not (Verifier "$Nom : taille ${COTE}x$COTE" (($Image.Width -eq $COTE) -and ($Image.Height -eq $COTE)) "obtenu $taille")) {
                 $Image.Save((Join-Path $script:Essai.Sortie ("04-" + ($Nom -replace '[^\w]+', '-') + '.png')), [System.Drawing.Imaging.ImageFormat]::Png)
@@ -575,8 +585,12 @@ function Fichiers-Png([string]$Dossier) {
                 Verifier '(3) Découpe -> Repos (ImagePreteSansVignette)' ((Compter-Lignes -Texte 'etat Decoupe -> Repos (ImagePreteSansVignette)' -Dossier $da) -eq 1) | Out-Null
                 $zone = Derniere-Ligne -Motif 'zone choisie ' -Dossier $da
                 Verifier '(3) zone choisie = le témoin' ($zone -match "zone choisie $TX,$TY ${COTE}x$COTE$") $zone | Out-Null
-                Verifier '(3) le journal dit « Copié dans le presse-papiers »' ((Compter-Lignes -Texte 'sortie annonce reussite: Copié dans le presse-papiers' -Dossier $da) -eq 1) | Out-Null
-                Verifier '(3) sortie copie faite recent ok fichier non demande' ((Compter-Lignes -Texte 'sortie copie faite recent ok fichier non demande' -Dossier $da) -eq 1) | Out-Null
+                # Réglage faux, vignette absente : enregistré quand même (version 0.2).
+                Verifier '(3) le journal dit « Copié et enregistré »' ((Compter-Lignes -Texte 'sortie annonce reussite: Copié et enregistré' -Dossier $da) -eq 1) | Out-Null
+                Verifier '(3) sortie copie faite recent ok fichier fait' ((Compter-Lignes -Texte 'sortie copie faite recent ok fichier fait' -Dossier $da) -eq 1) | Out-Null
+                $imagesA = @(Fichiers-Png (Join-Path $da 'images'))
+                Verifier '(3) un PNG dans le dossier Images › BreezyShot de l''essai' ($imagesA.Count -eq 1) "$($imagesA.Count) fichier(s)" | Out-Null
+                if ($imagesA.Count -ge 1) { Verifier-Image '(3) fichier enregistré' (Lire-Png $imagesA[-1].FullName) }
                 Verifier '(3) echap global libere' ((Compter-Lignes -Texte 'echap global libere' -Dossier $da) -ge 1) | Out-Null
                 Verifier '(3) le presse-papiers a changé' ([BreezyShotEssai.Zone]::GetClipboardSequenceNumber() -ne $seqAvant) | Out-Null
                 Verifier-Image '(3) presse-papiers' (Lire-PressePapiers)

@@ -3,6 +3,9 @@
 # pixels réels, $Cote × $Cote pixels : quatre carrés de couleurs connues (haut gauche,
 # haut droite, bas gauche, bas droite, dans l'ordre de -Couleurs, « r,v,b » chacune).
 # Écrit son HWND dans $Fichier (temporaire puis renommage), puis tourne jusqu'à être tuée.
+# Avec -Cadre (essai 06) : une vraie fenêtre à cadre (FormBorderStyle Sizable, titre,
+# toujours au-dessus), posée en ($X, $Y) par son coin extérieur ; les carrés remplissent
+# sa zone cliente de $Cote × $Cote pixels.
 #   pwsh -NoProfile -File essais/temoin.ps1 -X 400 -Y 40 -Cote 200 -Couleurs '220,40,40;...' -Fichier t.txt
 
 param(
@@ -10,7 +13,8 @@ param(
     [Parameter(Mandatory)][int]$Y,
     [Parameter(Mandatory)][int]$Cote,
     [Parameter(Mandatory)][string]$Couleurs,
-    [Parameter(Mandatory)][string]$Fichier
+    [Parameter(Mandatory)][string]$Fichier,
+    [switch]$Cadre
 )
 
 Set-StrictMode -Version Latest
@@ -36,7 +40,12 @@ if ($teintes.Count -ne 4) { throw "il faut quatre couleurs, reçu : $Couleurs" }
 $moitie = [int]($Cote / 2)
 $fenetre = [System.Windows.Forms.Form]::new()
 $fenetre.AutoScaleMode = [System.Windows.Forms.AutoScaleMode]::None
-$fenetre.FormBorderStyle = [System.Windows.Forms.FormBorderStyle]::None
+if ($Cadre) {
+    $fenetre.FormBorderStyle = [System.Windows.Forms.FormBorderStyle]::Sizable
+    $fenetre.Text = 'Témoin BreezyShot'
+    $fenetre.MaximizeBox = $false
+}
+else { $fenetre.FormBorderStyle = [System.Windows.Forms.FormBorderStyle]::None }
 $fenetre.ShowInTaskbar = $false
 $fenetre.TopMost = $true
 $fenetre.StartPosition = [System.Windows.Forms.FormStartPosition]::Manual

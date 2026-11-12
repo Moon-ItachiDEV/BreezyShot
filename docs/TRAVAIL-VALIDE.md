@@ -85,8 +85,8 @@ Vérifications GitHub sur `6982c83` (exécution n° 6), toutes vertes :
 
 ## MVP, version 0.1 « Zone », suite : capturer une zone de bout en bout
 
-Les étapes 4, 5 et 6 et leur assemblage entrent ensemble dans `main` par la demande
-d'intégration n° 2 (le commit d'entrée sera noté ici par la demande suivante).
+Les étapes 4, 5 et 6 et leur assemblage sont entrés ensemble dans `main` le 2026-11-11 par
+le commit `860806e` (demande d'intégration n° 2, tête `981e262`, verte elle aussi).
 
 Vérifications GitHub sur `442da12` (exécution n° 18, 2026-11-11), toutes vertes :
 
@@ -184,3 +184,83 @@ Vérifications GitHub sur `442da12` (exécution n° 18, 2026-11-11), toutes vert
   chargée avant que l'app soit prête à l'entendre (supposé ; l'essai `04-zone` le verrait).
 - Ajouté à la fabrication : quand `main` est verte, le `.exe` essayé est publié en
   pré-version « v0.1.0-essai ».
+
+## MVP, version 0.2 « Trois modes » : l'écran et la fenêtre
+
+Les étapes 7 et 8 entrent ensemble dans `main` le 2026-11-12 par la demande d'intégration
+n° 3 (le commit d'entrée sera noté ici au début de la version suivante). La version passe à
+0.2.0 : la pré-version publiée devient « v0.2.0-essai », et les anciennes pré-versions
+d'essai sont supprimées à chaque publication.
+
+Vérifications GitHub sur `de1427b` (2026-11-12), toutes vertes :
+
+- Windows : `cargo fmt`, `cargo clippy -D warnings`, les tests (323 et 2 tests
+  d'architecture sous Linux ; le nombre sous Windows n'a pas été relevé), construction du
+  `.exe`, puis essais sur le vrai `.exe` : `01-socle` 19 points, `02-reglages` 16,
+  `03-raccourci` 40, `04-zone` 95, `05-plein-ecran` 41, `06-fenetre` 46, aucun échec.
+- macOS : `cargo check` et `cargo test`.
+- Pages : le bandeau et la sélection dans Chromium (sélection : 214 points, dont 55 pour
+  le mode fenêtre).
+- Machine de l'essai : un écran 1024×768 à 100 %, Windows build 26100 (coins arrondis).
+- Mémoire privée au repos : 126,6 Mo.
+
+### Étape 7, capturer l'écran
+
+- Écrite par un agent, effort moyen. Relue par un agent distinct, effort moyen ;
+  corrections contre-vérifiées par le même relecteur.
+- Corrigé après relecture : une demande venue du menu est abandonnée si une autre capture
+  a démarré pendant son attente ; l'enregistrement automatique ne vaut que si le dossier
+  Images est connu ; deux points de l'essai qui pouvaient réussir sans rien prouver
+  (second appui pendant une capture, bandeau absent de la photo suivante) sont devenus
+  déterministes.
+- Décidé en route : tant que la vignette n'existe pas, chaque capture est enregistrée dans
+  Images › BreezyShot sans toucher au fichier des réglages (« Copié et enregistré ») ; une
+  capture lancée depuis le menu de l'icône attend 350 ms que le menu s'efface ; au
+  démarrage, une action sans raccourci est annoncée par son nom.
+- Trouvé par l'essai sur Windows, erreurs de l'essai et non de l'app : une pilule de
+  réussite n'écrit jamais de ligne `bandeau zone` ; un presse-papiers ouvert sans fenêtre
+  ne bloque pas une autre application qui l'ouvre de la même façon (l'essai le tient
+  maintenant au nom d'une fenêtre à lui).
+- Prouvé sur la machine Windows de GitHub (`05-plein-ecran`) : `Ctrl + Maj + 2` donne
+  l'écran sous la souris, 1024×768, dans le presse-papiers et en PNG, la fenêtre témoin à
+  sa place ; ni écran figé ni sélection ne se montrent ; le bandeau de la capture
+  précédente n'est pas sur la suivante ; un second appui pendant la capture est ignoré ;
+  presse-papiers tenu par une autre application : « Impossible de copier », le fichier
+  est enregistré quand même, et la capture suivante remarche.
+- Non contrôlé : le choix de l'écran avec plusieurs écrans ; une capture lancée depuis le
+  menu de l'icône (le délai et l'absence du menu sur l'image) ; l'absence de raccourci.
+
+### Étape 8, capturer une fenêtre
+
+- Trois parties écrites par des agents, effort moyen : la liste des fenêtres, les coins et
+  le presse-papiers à deux versions (A), la sélection en mode fenêtre (B), l'assemblage.
+  Relues par des agents distincts : A effort élevé, B effort moyen, assemblage effort
+  élevé ; corrections de A et de B contre-vérifiées par leur relecteur.
+- Corrigé après relecture de A : l'image du presse-papiers est préparée une seule fois et
+  non à chaque nouvel essai ; chaque essai retente l'ouverture six fois à 5 ms, comme pour
+  une zone ; les fenêtres à la fois en calque et transparentes aux clics sont écartées.
+- Corrigé après relecture de B : le seuil entre clic et glisser se compte en pixels
+  logiques (il était trop strict à 200 %) ; un appui resté en suspens ne fait plus perdre
+  le clic suivant.
+- Relecture de l'assemblage : aucun défaut de comportement trouvé ; l'Échap est libéré et
+  l'écran découvert sur tous les chemins ; rien ne passe d'une capture à la suivante.
+  Reprises faites : deux tests de décision, un ménage raté des pré-versions n'échoue plus
+  une publication déjà faite, l'essai exige un rayon supérieur à 0 sur Windows 11.
+- Trouvé par l'essai sur Windows, erreur de l'essai : deux variables qui ne différaient
+  que par la casse.
+- Décidé en route : en mode zone, un clic sans glisser ne capture pas la fenêtre sous la
+  souris (le plan le prévoyait) ; la fenêtre a son propre mode, `Ctrl + Maj + 3`. Une
+  fenêtre à cheval sur deux écrans est coupée à l'écran du clic.
+- Prouvé sur la machine Windows de GitHub (`06-fenetre`) : la fenêtre choisie a exactement
+  le vrai bord de la fenêtre témoin (242×272) ; PNG à coins transparents (rayon 8), centre
+  et bords opaques, contenu à sa place ; presse-papiers en deux versions, le format PNG
+  transparent et l'image à coins blancs ; glisser sans effet, clic droit et Échap
+  annulent ; premier plan rendu, rien ne reste à l'écran, arrêt propre.
+- Non contrôlé : que le rayon de 8 px corresponde au vrai rendu de Windows (il est lu au
+  journal, pas comparé à la photo) ; le contour bleu lui-même ; coller dans Paint, un
+  navigateur ou un document ; fenêtre agrandie, ancrée, sans cadre, à cheval sur deux
+  écrans ; échelles autres que 100 % ; Windows 10 ; le clic sur le bureau (sauté par
+  l'essai : aucun point libre de fenêtre garanti sur cette machine).
+- Noté, non corrigé : comme la bibliothèque du presse-papiers, l'app ouvre le
+  presse-papiers sans fenêtre ; une application qui l'a ouvert de la même façon ne la
+  bloque pas, et les deux écritures peuvent se croiser.

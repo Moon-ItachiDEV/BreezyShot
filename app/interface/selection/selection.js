@@ -1,6 +1,6 @@
-// Sélection d'une zone (étape 5). La page montre et rapporte, le cœur décide
-// (ARCHITECTURE.md §2.5). Elle ne dessine que le voile et le rectangle : ni texte, ni viseur,
-// ni taille, ni poignée, ni animation.
+// Sélection d'une zone (étape 5) ou d'une fenêtre (étape 8). La page montre et rapporte, le
+// cœur décide (ARCHITECTURE.md §2.5). Elle ne dessine que le voile et le rectangle, ou le
+// contour de la fenêtre survolée : ni texte, ni viseur, ni taille, ni poignée, ni animation.
 //
 // Échelle k (pixels réels par pixel CSS) : devicePixelRatio, l'échelle de rendu vraie, quand
 // il explique la taille réelle de la fenêtre (envoyée par le cœur) à 1 px CSS près sur chaque
@@ -9,8 +9,10 @@
 //
 // Contrat avec le cœur (fenetres/selection.rs) :
 // - écoute `selection:montrer` { id, numero, largeur, hauteur, ecrans: [{ x, y, largeur,
-//   hauteur }], cote_min } : tout en pixels réels entiers, relatifs au coin haut gauche de la
-//   fenêtre (`largeur`, `hauteur` : rectangle réel de la fenêtre ; `numero` : celui de la
+//   hauteur }], cote_min, mode: "zone" | "fenetre", fenetres: [{ x, y, largeur, hauteur,
+//   rayon }], souris: { x, y } | null } : tout en pixels réels entiers, relatifs au coin haut
+//   gauche de la fenêtre (une fenêtre proposée peut en déborder ; `mode` absent vaut "zone",
+//   `fenetres` absent vaut []) (`largeur`, `hauteur` : rectangle réel de la fenêtre ; `numero` : celui de la
 //   charge, renvoyé avec chaque message). Retour au repos (voile plein). Dès que
 //   innerWidth/innerHeight sont non nuls et identiques deux images de suite, la page retient
 //   son échelle (kx, ky), règle son dessin, puis envoie `selection_prete` { id, numero,
@@ -27,6 +29,9 @@
 // - `selection_terminee` { id, numero, depart: { x, y }, arrivee: { x, y } } au relâchement :
 //   les deux pixels finals, inclus (après carré, déplacement et bornage), en pixels réels entiers
 //   relatifs à la fenêtre. Rien n'est redessiné ensuite : le cœur cache la fenêtre.
+// - `selection_cliquee` { id, numero, x, y } (mode fenêtre) au relâchement d'un clic sur une
+//   fenêtre entourée : le pixel réel sous la pointe, relatif à la fenêtre. Même attente que
+//   `selection_terminee`.
 // - `selection_annulee` { id, numero, cause: "echap" | "clic_droit" }, une seule fois par
 //   affichage.
 // - `selection_chargee` {} une fois, quand les deux écoutes sont en place.
@@ -34,6 +39,14 @@
 // Échap ou clic droit : annuler. Une zone reste sur l'écran où le glisser a commencé.
 // Sous `cote_min` de côté, ce n'est pas une zone : le rectangle s'efface et on continue.
 // Toute touche est neutralisée (F5, Ctrl+R, Ctrl+P, F12… ne font rien).
+// Mode fenêtre : le pixel sous la pointe (à défaut, `souris` de la charge, tant qu'aucun
+// mouvement n'est arrivé) → la première fenêtre de la liste qui le contient → coupée à
+// l'écran de ce pixel → entourée si elle garde `cote_min` de côté. Un coin n'est arrondi
+// que si c'est un vrai coin de la fenêtre. Clic gauche (appui puis relâchement presque au
+// même endroit) sur une fenêtre entourée : `selection_cliquee`. Glisser : rien. Le seuil est
+// en pixels logiques, comme le rectangle de glisser de Windows : c'est un glisser si le
+// pointeur a bougé de max(cote_min, round(4 × k)) pixels réels ou plus sur un axe (4 à
+// 100 %, 5 à 125 %, 8 à 200 %). Maj et Espace : rien. Échap, clic droit : annuler.
 // Filet : si `selection:cachee` n'arrive pas dans FILET_MS après un envoi (ou si l'envoi
 // est refusé), la page redevient utilisable.
 
@@ -46,6 +59,7 @@ const morceaux = {
   gauche: document.getElementById("gauche"),
   droite: document.getElementById("droite"),
   zone: document.getElementById("zone"),
+  fenetre: document.getElementById("fenetre"),
 };
 
 // Toute la géométrie est en pixels réels entiers, relatifs au coin de la fenêtre.
@@ -68,6 +82,12 @@ let envoi = 0; // numéro de la dernière demande reçue
 let mesure = 0; // numéro de la dernière mesure lancée
 let filet = 0; // minuterie du filet après un envoi
 const FILET_MS = 1500;
+// Mode fenêtre.
+let mode = "zone";
+let fenetres = []; // { x, y, largeur, hauteur, rayon }, du premier plan vers le fond
+let souris = null; // pixel de la souris donné par la charge
+let survol = null; // { cx, cy } : dernière position du pointeur (pixels CSS) depuis la charge
+let appui = null; // { pointeur, p } : bouton gauche appuyé
 
 function appeler(commande, args, siEchec) {
   if (!tauri?.core?.invoke) return;
@@ -100,6 +120,9 @@ function scene_reelle() {
   s.height = `${hauteur}px`;
   s.transform = `scale(${1 / kx}, ${1 / ky})`;
   document.documentElement.style.setProperty("--trait", `${Math.max(1, Math.round((kx + ky) / 2))}px`);
+  const racine = document.documentElement.style;
+  racine.setProperty("--trait-fenetre", `${Math.max(2, Math.round(kx + ky))}px`);
+  racine.setProperty("--etendue", `${largeur + hauteur}px`);
 }
 
 /** Vérifie une demande `selection:montrer` ; null si elle doit être ignorée. */
@@ -123,7 +146,23 @@ function valider(m) {
     liste.push({ x: e.x, y: e.y, largeur: e.largeur, hauteur: e.hauteur });
   }
   if (!entier(m.cote_min) || m.cote_min < 0) return rejeter("cote_min invalide");
-  return { id: m.id, numero: m.numero, largeur: m.largeur, hauteur: m.hauteur, ecrans: liste, coteMin: m.cote_min };
+  const md = m.mode === undefined ? "zone" : m.mode;
+  if (md !== "zone" && md !== "fenetre") return rejeter("mode inconnu");
+  const brutes = m.fenetres === undefined ? [] : m.fenetres;
+  if (!Array.isArray(brutes)) return rejeter("fenetres invalides");
+  const fen = [];
+  for (const f of brutes) {
+    if (!f || ![f.x, f.y, f.largeur, f.hauteur, f.rayon].every(entier) || f.largeur < 0 || f.hauteur < 0 || f.rayon < 0) {
+      return rejeter("fenetre invalide");
+    }
+    fen.push({ x: f.x, y: f.y, largeur: f.largeur, hauteur: f.hauteur, rayon: f.rayon });
+  }
+  let sr = null;
+  if (m.souris !== undefined && m.souris !== null) {
+    if (typeof m.souris !== "object" || !entier(m.souris.x) || !entier(m.souris.y)) return rejeter("souris invalide");
+    sr = { x: m.souris.x, y: m.souris.y };
+  }
+  return { id: m.id, numero: m.numero, largeur: m.largeur, hauteur: m.hauteur, ecrans: liste, coteMin: m.cote_min, mode: md, fenetres: fen, souris: sr };
 }
 
 /** Voile plein, sans rectangle. */
@@ -131,7 +170,9 @@ function repos() {
   if (image) cancelAnimationFrame(image);
   image = 0;
   glisser = null;
+  appui = null;
   corps.classList.remove("glisse");
+  corps.classList.remove("entoure");
 }
 
 /** Attend que la page ait une taille stable (non nulle, identique deux images de suite),
@@ -165,6 +206,7 @@ function mesurer() {
     }
     scene_reelle();
     prete = !redimensionnee;
+    planifier(); // mode fenêtre : entourer la fenêtre sous la souris
     appeler("selection_prete", { id, numero, largeur: css.l, hauteur: css.h, echelle: dpr, kx, ky, attente: redimensionnee });
   };
   requestAnimationFrame(verifier);
@@ -183,6 +225,11 @@ export function montrer(brut) {
   hauteur = m.hauteur;
   ecrans = m.ecrans;
   coteMin = m.coteMin;
+  mode = m.mode;
+  fenetres = m.fenetres;
+  souris = m.souris;
+  survol = null;
+  document.documentElement.classList.toggle("mode-fenetre", mode === "fenetre");
   attente = false;
   espace = false;
   maj = false;
@@ -211,6 +258,7 @@ function envoyer(commande, args) {
     clearTimeout(filet);
     attente = false;
     repos();
+    planifier(); // mode fenêtre : de nouveau entourer la fenêtre sous la souris
   };
   clearTimeout(filet);
   filet = setTimeout(liberer, FILET_MS);
@@ -278,8 +326,58 @@ function poserPanneau(n, x, y, l, h) {
   n.style.transform = `translate(${x}px, ${y}px) scale(${Math.max(0, l)}, ${Math.max(0, h)})`;
 }
 
+/** Mode fenêtre : ce qu'il faut entourer pour le pixel `p` (pixels réels de la fenêtre), ou
+ *  null. La première fenêtre de la liste qui contient `p`, coupée à l'écran de `p` ; null si
+ *  `p` n'est sur aucune fenêtre ou aucun écran, ou si elle garde moins de `cote_min` de côté
+ *  (même règle que `decider_fenetre` du cœur). Rayon de chaque coin (haut gauche, haut droit,
+ *  bas gauche, bas droit) : celui de la fenêtre si ce coin de la partie coupée est un vrai
+ *  coin de la fenêtre, sinon 0 ; jamais plus de la moitié du petit côté. */
+function cible(p) {
+  const f = fenetres.find((w) => dedans(p, w));
+  const e = f && ecrans.find((w) => dedans(p, w));
+  if (!e) return null;
+  const x0 = Math.max(f.x, e.x);
+  const y0 = Math.max(f.y, e.y);
+  const x1 = Math.min(f.x + f.largeur, e.x + e.largeur);
+  const y1 = Math.min(f.y + f.hauteur, e.y + e.hauteur);
+  const l = x1 - x0;
+  const h = y1 - y0;
+  if (l <= 0 || h <= 0 || l < coteMin || h < coteMin) return null;
+  const r = Math.min(f.rayon, Math.floor(Math.min(l, h) / 2));
+  const g = x0 === f.x, d = x1 === f.x + f.largeur, hh = y0 === f.y, b = y1 === f.y + f.hauteur;
+  return { x: x0, y: y0, l, h, coins: [g && hh, d && hh, g && b, d && b].map((v) => (v ? r : 0)) };
+}
+
+/** Pose le contour (ou l'efface si `c` est null). */
+function entourer(c) {
+  if (!c) {
+    corps.classList.remove("entoure");
+    return;
+  }
+  poser(morceaux.fenetre, c.x, c.y, c.l, c.h);
+  const [hg, hd, bg, bd] = c.coins;
+  morceaux.fenetre.style.borderRadius = `${hg}px ${hd}px ${bd}px ${bg}px`;
+  corps.classList.add("entoure");
+}
+
+/** Mode fenêtre : déplacement (pixels réels, sur un axe) à partir duquel l'appui est un
+ *  glisser et non un clic : 4 pixels logiques, au moins `cote_min`. */
+const seuilGlisser = () => Math.max(coteMin, Math.round(4 * Math.max(kx, ky)));
+
+/** Le pixel réel d'une position CSS du pointeur (même règle que `point`). */
+const pixel = (cx, cy) => ({
+  x: borne(Math.floor(cx * kx + PRES), 0, largeur - 1),
+  y: borne(Math.floor(cy * ky + PRES), 0, hauteur - 1),
+});
+
 function dessiner() {
   image = 0;
+  if (mode === "fenetre") {
+    if (attente || !prete || id === null) return;
+    const p = survol ? pixel(survol.cx, survol.cy) : souris;
+    entourer(p ? cible(p) : null);
+    return;
+  }
   if (!glisser || attente) return;
   const [a, b] = coins(glisser);
   // Un seul pixel (pas encore bougé) : rien. Sinon `[min, max + 1[` : les deux pixels des
@@ -302,7 +400,8 @@ function dessiner() {
 
 /** Au plus un dessin par image. */
 function planifier() {
-  if (!image && glisser && !attente) image = requestAnimationFrame(dessiner);
+  const voulu = mode === "fenetre" ? prete && id !== null : glisser;
+  if (!image && voulu && !attente) image = requestAnimationFrame(dessiner);
 }
 
 function annuler(cause) {
@@ -317,6 +416,11 @@ addEventListener(
     if (id === null || attente) return;
     if (e.button === 2) {
       annuler("clic_droit");
+      return;
+    }
+    if (mode === "fenetre") {
+      // Chaque appui gauche remplace le précédent : un relâchement perdu ne laisse rien.
+      if (e.button === 0) appui = prete ? { pointeur: e.pointerId, p: point(e) } : null;
       return;
     }
     if (e.button !== 0 || glisser || !prete) return;
@@ -337,6 +441,16 @@ addEventListener(
 addEventListener(
   "pointermove",
   (e) => {
+    if (mode === "fenetre") {
+      if (id === null || attente) return;
+      if (e.button === 2) {
+        annuler("clic_droit");
+        return;
+      }
+      survol = { cx: e.clientX, cy: e.clientY };
+      planifier();
+      return;
+    }
     const g = glisser;
     if (!g || attente || e.pointerId !== g.pointeur) return;
     // Bouton droit appuyé pendant le glisser : un `pointermove` (pas de `pointerdown`).
@@ -354,6 +468,31 @@ addEventListener(
 addEventListener(
   "pointerup",
   (e) => {
+    if (mode === "fenetre") {
+      const a = appui;
+      if (!a || attente || id === null || e.pointerId !== a.pointeur || e.button !== 0) return;
+      appui = null;
+      survol = { cx: e.clientX, cy: e.clientY };
+      const p = point(e);
+      // Un glisser n'est pas un clic : rien (seul le clic compte).
+      const dx = Math.abs(p.x - a.p.x);
+      const dy = Math.abs(p.y - a.p.y);
+      if (Math.max(dx, dy) >= seuilGlisser()) {
+        planifier();
+        return;
+      }
+      const c = cible(p);
+      if (!c) {
+        planifier();
+        return;
+      }
+      // Le contour montré est celui du pixel cliqué ; plus rien ne change ensuite.
+      if (image) cancelAnimationFrame(image);
+      image = 0;
+      entourer(c);
+      envoyer("selection_cliquee", { id, numero, x: p.x, y: p.y });
+      return;
+    }
     const g = glisser;
     if (!g || attente || e.pointerId !== g.pointeur || e.button !== 0) return;
     maj = e.shiftKey;
@@ -371,6 +510,7 @@ addEventListener(
 );
 
 const perdu = (e) => {
+  if (appui && e.pointerId === appui.pointeur) appui = null;
   if (glisser && !attente && e.pointerId === glisser.pointeur) repos();
 };
 addEventListener("pointercancel", perdu, true);
@@ -383,6 +523,8 @@ addEventListener(
     e.preventDefault();
     if (e.key === "Escape") {
       annuler("echap");
+    } else if (mode === "fenetre") {
+      // Maj et Espace ne font rien dans ce mode.
     } else if (e.code === "Space" || e.key === " ") {
       espace = true;
     } else if (e.key === "Shift") {
@@ -399,6 +541,8 @@ addEventListener(
     if (e.code === "Space" || e.key === " ") {
       e.preventDefault();
       espace = false;
+    } else if (mode === "fenetre") {
+      // Rien.
     } else if (e.key === "Shift") {
       maj = false;
       planifier();

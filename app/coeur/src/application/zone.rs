@@ -1,4 +1,5 @@
-//! Capture d'une zone : les décisions de l'Application, en fonctions pures (§3.6).
+//! Capture d'une zone, d'une fenêtre et du plein écran : les décisions de l'Application,
+//! en fonctions pures (§3.6, §3.7).
 //!
 //! `mod.rs` fait les gestes (montrer, cacher, réserver Échap, lancer la sortie) ; ce
 //! fichier dit lesquels, sans toucher à aucune fenêtre : que faire de chaque signal
@@ -8,8 +9,10 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use super::etats::Declencheur;
-use crate::capture;
-use crate::fenetres::selection::Signal as SignalSelection;
+use crate::capture::{self, Origine};
+use crate::fenetres::selection::{
+    FenetreProposee, Mode as ModeSelection, Signal as SignalSelection,
+};
 use crate::fenetres::{Genre, Message};
 use crate::sortie::{self, Annonce, Bilan, Demande, Etape, EtapeFichier};
 use crate::systeme::gel::{Changement, EcranInfo};
@@ -72,6 +75,14 @@ pub enum Geste {
     /// Cacher l'écran figé tout de suite, libérer Échap, `ZoneChoisie`, découper cette zone
     /// (déjà bornée à un écran et assez grande), puis la sortie.
     Decouper(Rect),
+    /// Mode fenêtre : comme `Decouper`, puis arrondir les `coins` (haut gauche, haut droit,
+    /// bas gauche, bas droit) de `rayon` (déjà plafonné à la partie coupée) si `rayon > 0`,
+    /// et une sortie avec transparence si un coin est arrondi.
+    DecouperFenetre {
+        zone: Rect,
+        rayon: i32,
+        coins: [bool; 4],
+    },
 }
 
 /// Ce que l'Application sait de la capture en cours, pour décider.
@@ -82,6 +93,11 @@ pub struct Vue<'a> {
     pub selection: Option<u64>,
     /// Les écrans de la photo.
     pub ecrans: &'a [EcranInfo],
+    /// Le mode de la sélection montrée.
+    pub mode: ModeSelection,
+    /// Mode fenêtre : la liste envoyée à la Sélection (du premier plan vers le fond),
+    /// gardée telle quelle ; `Signal::Fenetre::indice` en est un indice. Vide en mode zone.
+    pub fenetres: &'a [FenetreProposee],
 }
 
 /// Décide d'une arrivée (fonction pure). `capture` : `None` hors capture.
@@ -106,12 +122,30 @@ pub fn decider(capture: Option<Vue<'_>>, arrivee: Arrivee<'_>) -> Geste {
             }
             match signal {
                 SignalSelection::Prete { .. } => Geste::Rien,
+                // Un signal de l'autre mode ne doit pas arriver (la Sélection le refuse
+                // déjà) : abandon avec le bandeau d'erreur.
+                SignalSelection::Zone { .. } | SignalSelection::Fenetre { .. }
+                    if !signal_du_mode(signal, vue.mode) =>
+                {
+                    abandon(Declencheur::SelectionImpossible, Some(Probleme::Selection))
+                }
                 SignalSelection::Zone {
                     depart, arrivee, ..
                 } => match zone_choisie(*depart, *arrivee, vue.ecrans) {
                     Some(zone) => Geste::Decouper(zone),
                     None => abandon(Declencheur::SelectionAnnulee, None),
                 },
+                SignalSelection::Fenetre { indice, point, .. } => {
+                    match fenetre_choisie(*indice, *point, vue.fenetres, vue.ecrans) {
+                        Choix::Fenetre { zone, rayon, coins } => {
+                            Geste::DecouperFenetre { zone, rayon, coins }
+                        }
+                        Choix::Rien => abandon(Declencheur::SelectionAnnulee, None),
+                        Choix::HorsListe => {
+                            abandon(Declencheur::SelectionImpossible, Some(Probleme::Selection))
+                        }
+                    }
+                }
                 SignalSelection::Annulee { .. } => abandon(Declencheur::SelectionAnnulee, None),
                 SignalSelection::Muette { .. } => {
                     abandon(Declencheur::SelectionMuette, Some(Probleme::Muette))
@@ -122,6 +156,89 @@ pub fn decider(capture: Option<Vue<'_>>, arrivee: Arrivee<'_>) -> Geste {
             }
         }
     }
+}
+
+/// Vrai si le signal de choix (`Zone` ou `Fenetre`) est celui du mode montré.
+fn signal_du_mode(signal: &SignalSelection, mode: ModeSelection) -> bool {
+    match signal {
+        SignalSelection::Zone { .. } => mode == ModeSelection::Zone,
+        SignalSelection::Fenetre { .. } => mode == ModeSelection::Fenetre,
+        _ => true,
+    }
+}
+
+/// Ce que vaut le clic sur une fenêtre.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Choix {
+    /// La partie à découper (la fenêtre coupée à l'écran du point), son rayon plafonné et
+    /// les coins à arrondir.
+    Fenetre {
+        zone: Rect,
+        rayon: i32,
+        coins: [bool; 4],
+    },
+    /// Le point n'est sur aucun écran, ou la partie coupée est trop petite.
+    Rien,
+    /// `indice` hors de la liste gardée.
+    HorsListe,
+}
+
+/// La fenêtre `indice` de la liste, cliquée au pixel `point` (fonction pure) :
+/// `capture::zone_fenetre`, le rayon plafonné à la partie coupée
+/// (`capture::rayon_plafonne`), les coins qui sont de vrais coins de la fenêtre
+/// (`capture::coins_a_arrondir`).
+pub fn fenetre_choisie(
+    indice: usize,
+    point: (i32, i32),
+    fenetres: &[FenetreProposee],
+    ecrans: &[EcranInfo],
+) -> Choix {
+    let Some(f) = fenetres.get(indice) else {
+        return Choix::HorsListe;
+    };
+    match capture::zone_fenetre(f.rect, point, ecrans) {
+        Some(zone) => Choix::Fenetre {
+            zone,
+            rayon: capture::rayon_plafonne(f.rayon, zone),
+            coins: capture::coins_a_arrondir(f.rect, zone),
+        },
+        None => Choix::Rien,
+    }
+}
+
+/// Transparence de la sortie : seulement si un coin est vraiment arrondi.
+pub fn avec_transparence(rayon: i32, coins: [bool; 4]) -> bool {
+    rayon > 0 && coins.iter().any(|c| *c)
+}
+
+/// `fenetre choisie <x>,<y> <l>x<h> rayon <r> coins <hg><hd><bg><bd>` (chiffres 0 ou 1) :
+/// jamais de titre.
+pub fn ligne_fenetre_choisie(zone: Rect, rayon: i32, coins: [bool; 4]) -> String {
+    let c: String = coins.iter().map(|b| if *b { '1' } else { '0' }).collect();
+    format!(
+        "fenetre choisie {},{} {}x{} rayon {rayon} coins {c}",
+        zone.x, zone.y, zone.largeur, zone.hauteur
+    )
+}
+
+/// `chrono fenetres <ms> nombre <n>` : la liste des fenêtres, après l'écran figé.
+pub fn ligne_chrono_fenetres(duree: Duration, nombre: usize) -> String {
+    format!("chrono fenetres {} nombre {nombre}", ms(duree))
+}
+
+/// Les fenêtres proposées à la Sélection : chaque rectangle et le rayon de ses coins
+/// (`capture::rayon_coins`), dans l'ordre de la liste.
+pub fn fenetres_proposees(
+    fenetres: &[crate::systeme::gel::FenetreInfo],
+    ecrans: &[EcranInfo],
+) -> Vec<FenetreProposee> {
+    fenetres
+        .iter()
+        .map(|f| FenetreProposee {
+            rect: f.rect,
+            rayon: capture::rayon_coins(f.coins, f.rect, ecrans),
+        })
+        .collect()
 }
 
 /// La zone à découper : le rectangle des deux coins (inclus), coupé à l'écran du départ.
@@ -257,8 +374,61 @@ pub fn ligne_chrono_gel(photo: Duration, total: Duration, visible: Duration) -> 
     )
 }
 
+/// Enregistrer ou non le fichier : d'après le réglage, et toujours tant que la vignette
+/// n'existe pas (versions 0.1 et 0.2, sans l'écrire dans les réglages), mais seulement si
+/// un dossier est connu : sans dossier Images, forcer l'enregistrement ferait annoncer
+/// « Impossible d'enregistrer » à chaque capture.
+pub fn doit_enregistrer(reglage: bool, vignette_construite: bool, dossier_connu: bool) -> bool {
+    reglage || (!vignette_construite && dossier_connu)
+}
+
+/// Une demande du menu, différée, part seulement si aucune capture n'a démarré depuis le
+/// clic : `prise` est le nombre de captures démarrées au clic, `actuelle` ce nombre à
+/// l'échéance. Un appui ignoré par la table ne compte pas.
+pub fn demande_menu_a_jour(prise: u64, actuelle: u64) -> bool {
+    prise == actuelle
+}
+
+/// La souris en pixels réels entiers ; `None` si elle est inconnue ou illisible.
+pub fn point_souris(souris: Option<(f64, f64)>) -> Option<(i32, i32)> {
+    let (x, y) = souris?;
+    let entier = |v: f64| {
+        let v = v.floor();
+        (v.is_finite() && v >= f64::from(i32::MIN) && v <= f64::from(i32::MAX)).then_some(v as i32)
+    };
+    Some((entier(x)?, entier(y)?))
+}
+
+/// Nom de l'origine de l'écran pour le journal.
+pub fn nom_origine(origine: Origine) -> &'static str {
+    match origine {
+        Origine::Souris => "souris",
+        Origine::Principal => "principal",
+        Origine::Premier => "premier",
+    }
+}
+
+/// `plein ecran <x>,<y> <l>x<h> <souris|principal|premier>`.
+pub fn ligne_plein_ecran(ecran: Rect, origine: Origine) -> String {
+    format!(
+        "plein ecran {},{} {}x{} {}",
+        ecran.x,
+        ecran.y,
+        ecran.largeur,
+        ecran.hauteur,
+        nom_origine(origine)
+    )
+}
+
+/// `chrono gel photo <ms> total <ms>` : en plein écran, rien n'est montré, donc pas de
+/// `visible`.
+pub fn ligne_chrono_photo(photo: Duration, total: Duration) -> String {
+    format!("chrono gel photo {} total {}", ms(photo), ms(total))
+}
+
 /// `chrono decoupe <ms> sortie <ms> relache-annonce <ms>` (`relache-annonce` : du signal
-/// `Zone` à la demande d'affichage du bandeau).
+/// `Zone` à la demande d'affichage du bandeau ; en plein écran, de la réception de la
+/// demande).
 pub fn ligne_chrono_sortie(
     decoupe: Duration,
     sortie: Duration,
@@ -301,7 +471,12 @@ mod tests {
     }
 
     fn vue(selection: Option<u64>, ecrans: &[EcranInfo]) -> Vue<'_> {
-        Vue { selection, ecrans }
+        Vue {
+            selection,
+            ecrans,
+            mode: ModeSelection::Zone,
+            fenetres: &[],
+        }
     }
 
     fn abandon(declencheur: Declencheur, probleme: Option<Probleme>) -> Geste {
@@ -309,6 +484,193 @@ mod tests {
             declencheur,
             probleme,
         }
+    }
+
+    fn proposee(rect: Rect, rayon: i32) -> FenetreProposee {
+        FenetreProposee { rect, rayon }
+    }
+
+    /// Mode fenêtre : une fenêtre à cheval sur les deux écrans (gauche et principal), une
+    /// petite sur le principal, au premier plan.
+    fn fenetres_d_essai() -> Vec<FenetreProposee> {
+        vec![
+            proposee(r(100, 100, 400, 300), 8),
+            proposee(r(-200, 50, 600, 400), 8),
+        ]
+    }
+
+    #[test]
+    fn mode_fenetre_clic_sur_une_fenetre() {
+        let e = ecrans();
+        let f = fenetres_d_essai();
+        let v = Vue {
+            selection: Some(4),
+            ecrans: &e,
+            mode: ModeSelection::Fenetre,
+            fenetres: &f,
+        };
+        let clic = |indice, point| SignalSelection::Fenetre {
+            id: 4,
+            indice,
+            point,
+        };
+        // Entière sur le principal : quatre coins, rayon gardé.
+        assert_eq!(
+            decider(Some(v), Arrivee::Selection(&clic(0, (150, 150)))),
+            Geste::DecouperFenetre {
+                zone: r(100, 100, 400, 300),
+                rayon: 8,
+                coins: [true; 4]
+            }
+        );
+        // À cheval, cliquée sur le principal : coupée au bord, coins de gauche droits.
+        assert_eq!(
+            decider(Some(v), Arrivee::Selection(&clic(1, (10, 60)))),
+            Geste::DecouperFenetre {
+                zone: r(0, 50, 400, 400),
+                rayon: 8,
+                coins: [false, true, false, true]
+            }
+        );
+        // Cliquée sur l'écran de gauche : l'autre partie.
+        assert_eq!(
+            decider(Some(v), Arrivee::Selection(&clic(1, (-10, 60)))),
+            Geste::DecouperFenetre {
+                zone: r(-200, 50, 200, 400),
+                rayon: 8,
+                coins: [true, false, true, false]
+            }
+        );
+        // Indice hors de la liste : abandon avec bandeau.
+        assert_eq!(
+            decider(Some(v), Arrivee::Selection(&clic(2, (150, 150)))),
+            abandon(Declencheur::SelectionImpossible, Some(Probleme::Selection))
+        );
+        // Point sur aucun écran : annulée sans message.
+        assert_eq!(
+            decider(Some(v), Arrivee::Selection(&clic(0, (5000, 5000)))),
+            abandon(Declencheur::SelectionAnnulee, None)
+        );
+        // Une zone en mode fenêtre : abandon avec bandeau.
+        let zone = SignalSelection::Zone {
+            id: 4,
+            depart: (0, 0),
+            arrivee: (50, 50),
+        };
+        assert_eq!(
+            decider(Some(v), Arrivee::Selection(&zone)),
+            abandon(Declencheur::SelectionImpossible, Some(Probleme::Selection))
+        );
+        // Le reste comme en zone.
+        assert_eq!(
+            decider(Some(v), Arrivee::Echap),
+            abandon(Declencheur::SelectionAnnulee, None)
+        );
+        let annulee = SignalSelection::Annulee {
+            id: 4,
+            cause: Cause::ClicDroit,
+        };
+        assert_eq!(
+            decider(Some(v), Arrivee::Selection(&annulee)),
+            abandon(Declencheur::SelectionAnnulee, None)
+        );
+        // Un clic d'un autre affichage : rien.
+        let autre = SignalSelection::Fenetre {
+            id: 3,
+            indice: 0,
+            point: (150, 150),
+        };
+        assert_eq!(decider(Some(v), Arrivee::Selection(&autre)), Geste::Rien);
+        // Une zone d'un autre affichage : rien non plus (l'`id` passe avant le mode).
+        let autre_zone = SignalSelection::Zone {
+            id: 3,
+            depart: (0, 0),
+            arrivee: (50, 50),
+        };
+        assert_eq!(
+            decider(Some(v), Arrivee::Selection(&autre_zone)),
+            Geste::Rien
+        );
+    }
+
+    #[test]
+    fn fenetre_trop_peu_visible_sur_l_ecran_du_clic() {
+        // Il ne reste que 2 px de la fenêtre sur le principal : moins que le côté minimal.
+        let e = ecrans();
+        let f = vec![proposee(r(1918, 100, 400, 300), 8)];
+        assert_eq!(fenetre_choisie(0, (1919, 150), &f, &e), Choix::Rien);
+    }
+
+    #[test]
+    fn mode_zone_refuse_un_clic_de_fenetre() {
+        let e = ecrans();
+        let clic = SignalSelection::Fenetre {
+            id: 1,
+            indice: 0,
+            point: (10, 10),
+        };
+        assert_eq!(
+            decider(Some(vue(Some(1), &e)), Arrivee::Selection(&clic)),
+            abandon(Declencheur::SelectionImpossible, Some(Probleme::Selection))
+        );
+    }
+
+    #[test]
+    fn rayon_plafonne_a_la_partie_coupee_au_choix() {
+        // Une fenêtre qui dépasse le bas du principal de presque tout : il reste 10 px.
+        let e = ecrans();
+        let f = vec![proposee(r(100, 1070, 400, 300), 8)];
+        assert_eq!(
+            fenetre_choisie(0, (150, 1075), &f, &e),
+            Choix::Fenetre {
+                zone: r(100, 1070, 400, 10),
+                rayon: 5,
+                coins: [true, true, false, false]
+            }
+        );
+    }
+
+    #[test]
+    fn transparence_et_lignes_du_mode_fenetre() {
+        assert!(avec_transparence(8, [true, false, false, false]));
+        assert!(!avec_transparence(0, [true; 4]));
+        assert!(!avec_transparence(8, [false; 4]));
+        assert_eq!(
+            ligne_fenetre_choisie(r(-200, 50, 200, 400), 8, [true, false, true, false]),
+            "fenetre choisie -200,50 200x400 rayon 8 coins 1010"
+        );
+        assert_eq!(
+            ligne_fenetre_choisie(r(0, 0, 10, 10), 0, [false; 4]),
+            "fenetre choisie 0,0 10x10 rayon 0 coins 0000"
+        );
+        assert_eq!(
+            ligne_chrono_fenetres(Duration::from_micros(3_900), 12),
+            "chrono fenetres 3 nombre 12"
+        );
+    }
+
+    #[test]
+    fn fenetres_proposees_avec_leur_rayon() {
+        use crate::systeme::gel::{Coins, FenetreInfo};
+        let e = ecrans();
+        let info = |rect, coins| FenetreInfo {
+            rect,
+            titre: "secret".into(),
+            coins,
+        };
+        let liste = [
+            info(r(100, 100, 400, 300), Coins::Arrondis),
+            info(r(100, 100, 400, 300), Coins::Droits),
+            info(r(0, 0, 1920, 1080), Coins::Arrondis),
+        ];
+        assert_eq!(
+            fenetres_proposees(&liste, &e),
+            [
+                proposee(r(100, 100, 400, 300), 8),
+                proposee(r(100, 100, 400, 300), 0),
+                proposee(r(0, 0, 1920, 1080), 0),
+            ]
+        );
     }
 
     #[test]
@@ -560,6 +922,7 @@ mod tests {
             dossier_recents: PathBuf::from("/u/Recents"),
             modele_nom: "BreezyShot {date} à {heure}".into(),
             maintenant: chrono::Local::now(),
+            transparence: false,
         };
         let b = bilan_d_echec(&demande, CAUSE_SORTIE_INTERROMPUE);
         assert_eq!(b.copie, Etape::Echec(CAUSE_SORTIE_INTERROMPUE.into()));
@@ -594,6 +957,86 @@ mod tests {
         assert_eq!(
             ligne_chrono_sortie(d(3_000), d(180_400), d(200_000)),
             "chrono decoupe 3 sortie 180 relache-annonce 200"
+        );
+    }
+
+    #[test]
+    fn enregistrer_tant_que_la_vignette_n_existe_pas() {
+        assert!(doit_enregistrer(false, false, true));
+        assert!(doit_enregistrer(true, false, true));
+        assert!(doit_enregistrer(true, true, true));
+        assert!(!doit_enregistrer(false, true, true));
+        // Sans dossier connu, on ne force pas ; un réglage vrai reste demandé (et son
+        // échec annoncé).
+        assert!(!doit_enregistrer(false, false, false));
+        assert!(doit_enregistrer(true, false, false));
+        assert!(!doit_enregistrer(false, true, false));
+        // Aujourd'hui (pas de vignette) : enregistré dès qu'un dossier est connu.
+        let v = crate::application::VIGNETTE_CONSTRUITE;
+        assert!(doit_enregistrer(false, v, true));
+        assert!(!doit_enregistrer(false, v, false));
+    }
+
+    #[test]
+    fn demande_du_menu_caduque() {
+        // Rien n'a démarré depuis le clic (un raccourci ignoré par la table n'est pas
+        // compté) : la demande part.
+        assert!(demande_menu_a_jour(7, 7));
+        // Une capture a démarré entre-temps (raccourci, ou un clic précédent arrivé à
+        // échéance) : caduque.
+        assert!(!demande_menu_a_jour(7, 8));
+        assert!(!demande_menu_a_jour(7, 9));
+    }
+
+    /// Le compte suit l'automate : seule une demande acceptée par la table le change.
+    #[test]
+    fn seule_une_capture_demarree_rend_le_menu_caduc() {
+        use crate::application::etats::{Automate, Mode};
+        // Comme `demarrer_capture` : compter seulement une demande acceptée.
+        fn demander(a: &mut Automate, demarrees: &mut u64, mode: Mode) {
+            if a.traiter(Declencheur::DemandeCapture(mode)).is_some() {
+                *demarrees += 1;
+            }
+        }
+        let mut a = Automate::default();
+        let mut demarrees = 0;
+        // Une capture en cours, puis un clic au menu.
+        demander(&mut a, &mut demarrees, Mode::Zone);
+        let au_clic = demarrees;
+        // Un raccourci arrive pendant la capture : ignoré, non compté.
+        demander(&mut a, &mut demarrees, Mode::PleinEcran);
+        assert!(demande_menu_a_jour(au_clic, demarrees));
+        // Revenu au Repos, un raccourci démarre une capture : le clic est caduc.
+        a.traiter(Declencheur::GelImpossible);
+        demander(&mut a, &mut demarrees, Mode::PleinEcran);
+        assert_eq!(demarrees, 2);
+        assert!(!demande_menu_a_jour(au_clic, demarrees));
+    }
+
+    #[test]
+    fn souris_en_pixels_entiers() {
+        assert_eq!(point_souris(None), None);
+        assert_eq!(point_souris(Some((10.0, -20.0))), Some((10, -20)));
+        assert_eq!(point_souris(Some((-0.5, 1079.9))), Some((-1, 1079)));
+        assert_eq!(point_souris(Some((f64::NAN, 0.0))), None);
+        assert_eq!(point_souris(Some((0.0, f64::INFINITY))), None);
+        assert_eq!(point_souris(Some((1e12, 0.0))), None);
+    }
+
+    #[test]
+    fn lignes_du_plein_ecran() {
+        assert_eq!(
+            ligne_plein_ecran(r(-2560, -300, 2560, 1440), Origine::Souris),
+            "plein ecran -2560,-300 2560x1440 souris"
+        );
+        assert_eq!(
+            ligne_plein_ecran(r(0, 0, 1920, 1080), Origine::Principal),
+            "plein ecran 0,0 1920x1080 principal"
+        );
+        assert_eq!(nom_origine(Origine::Premier), "premier");
+        assert_eq!(
+            ligne_chrono_photo(Duration::from_micros(12_900), Duration::from_micros(14_100)),
+            "chrono gel photo 12 total 14"
         );
     }
 }

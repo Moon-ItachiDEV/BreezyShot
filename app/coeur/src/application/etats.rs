@@ -214,6 +214,37 @@ mod tests {
         );
     }
 
+    /// Plein écran de bout en bout (étape 7) : Repos → Gel → Découpe → Repos, sans
+    /// Sélection ; un appui (tout mode) pendant Gel ou Découpe est ignoré ; après, une
+    /// capture repart.
+    #[test]
+    fn parcours_plein_ecran_et_appui_ignore() {
+        let mut a = Automate::default();
+        assert_eq!(a.traiter(D::DemandeCapture(Mode::PleinEcran)), Some(E::Gel));
+        for m in Mode::TOUS {
+            assert_eq!(a.traiter(D::DemandeCapture(m)), None);
+        }
+        assert_eq!(a.traiter(D::PhotoPrise(Mode::PleinEcran)), Some(E::Decoupe));
+        for m in Mode::TOUS {
+            assert_eq!(a.traiter(D::DemandeCapture(m)), None, "{m:?} en Découpe");
+        }
+        assert_eq!(a.etat(), E::Decoupe);
+        assert_eq!(a.traiter(D::ImagePreteSansVignette), Some(E::Repos));
+        assert_eq!(a.traiter(D::DemandeCapture(Mode::PleinEcran)), Some(E::Gel));
+        // Erreurs : pas d'écran ou photo refusée, pixels illisibles, sortie muette.
+        assert_eq!(a.traiter(D::GelImpossible), Some(E::Repos));
+        a.traiter(D::DemandeCapture(Mode::PleinEcran));
+        a.traiter(D::PhotoPrise(Mode::PleinEcran));
+        assert_eq!(a.traiter(D::DecoupeImpossible), Some(E::Repos));
+        a.traiter(D::DemandeCapture(Mode::PleinEcran));
+        a.traiter(D::PhotoPrise(Mode::PleinEcran));
+        assert_eq!(a.traiter(D::SortieSansBilan), Some(E::Repos));
+        assert_eq!(
+            D::PhotoPrise(Mode::PleinEcran).libelle(),
+            "PhotoPrise plein_ecran"
+        );
+    }
+
     #[test]
     fn sans_capture_le_gel_redescend_au_repos() {
         let mut a = Automate::default();

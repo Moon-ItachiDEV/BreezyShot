@@ -195,3 +195,19 @@ jobs:
           # Et on le prouve : l'étiquette doit pointer le commit qui vient d'être essayé.
           pointe=$(gh api "repos/$GITHUB_REPOSITORY/git/refs/tags/$etiquette" --jq .object.sha)
           test "$pointe" = "$GITHUB_SHA"
+          # Une seule pré-version d'essai : les autres « v*-essai » (d'anciennes versions)
+          # sont supprimées avec leur étiquette. Seules les pré-versions dont l'étiquette
+          # finit par -essai sont touchées, jamais une vraie version.
+          # La publication est faite : un ménage raté s'annonce sans faire échouer la tâche.
+          anciennes=$(gh api "repos/$GITHUB_REPOSITORY/releases" --paginate \
+            --jq '.[] | select(.prerelease and (.tag_name | test("^v.+-essai$"))) | .tag_name') ||
+            { echo "::warning::liste des pré-versions illisible, aucune suppression"; anciennes=""; }
+          for autre in $anciennes; do
+            if [ "$autre" != "$etiquette" ]; then
+              if gh release delete "$autre" --yes --cleanup-tag; then
+                echo "ancienne pré-version d'essai supprimée : $autre"
+              else
+                echo "::warning::pré-version $autre non supprimée"
+              fi
+            fi
+          done

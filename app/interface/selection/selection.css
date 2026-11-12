@@ -1,4 +1,4 @@
-/* Sélection d'une zone (étape 5). Toutes les couleurs viennent de ../commun/jetons.css ;
+/* Sélection d'une zone (étape 5) ou d'une fenêtre (étape 8). Toutes les couleurs viennent de ../commun/jetons.css ;
    la page force le thème clair (le voile ne dépend pas du thème). */
 
 html,
@@ -76,5 +76,38 @@ body.glisse #zone {
 }
 
 body.glisse #plein {
+  display: none;
+}
+
+/* Mode fenêtre : la flèche normale, pas la croix. */
+html.mode-fenetre,
+html.mode-fenetre body {
+  cursor: default;
+}
+
+/* La fenêtre entourée (partie coupée à l'écran de la souris), en pixels réels de la scène.
+   Le trait (`--trait-fenetre`) est une ombre intérieure sans flou, à l'intérieur du bord ;
+   le voile est une ombre extérieure sans flou dont l'étendue (`--etendue`) couvre toute la
+   scène. Les deux suivent `border-radius` : le voile épouse les coins arrondis, et seuls
+   les pixels coupés par l'arc sont mêlés. Pas de `contain` ici : il couperait l'ombre. */
+#fenetre {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 0;
+  height: 0;
+  display: none;
+  pointer-events: none;
+  background: transparent;
+  box-shadow:
+    inset 0 0 0 var(--trait-fenetre, 2px) var(--window-highlight),
+    0 0 0 var(--etendue, 100000px) var(--scrim);
+}
+
+body.entoure #fenetre {
+  display: block;
+}
+
+body.entoure #plein {
   display: none;
 }
