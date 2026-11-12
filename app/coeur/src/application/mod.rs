@@ -1352,11 +1352,8 @@ fn poser_pointeur(gel_pris: &capture::Gel, pixels: &mut gel::Pixels, zone: syste
     };
     // Les pixels sont ceux de la zone coupée au bureau (`capture::decouper`).
     let lue = zone.intersection(gel_pris.bureau).unwrap_or(zone);
-    if capture::poser_pointeur(pixels, lue, p) {
-        log::info!("pointeur pose");
-    } else {
-        log::info!("pointeur hors zone");
-    }
+    let pose = capture::poser_pointeur(pixels, lue, p);
+    log::info!("{}", capture::ligne_pose(pose));
 }
 
 /// Plein écran (§3.7), en Gel, sur le fil principal : souris lue avant tout, photo,

@@ -30,10 +30,13 @@ const BLANC: [u8; 3] = [255, 255, 255];
 /// La couche d'un pixel, d'après sa couleur sur noir et sur blanc :
 /// - égales → opaque ;
 /// - noir sur noir et blanc sur blanc → rien ;
-/// - chaque canal inversé de l'un à l'autre (`noir ^ blanc == 255`, dont 255 sur noir et 0
-///   sur blanc) → inverse (un curseur XOR coloré est approché par l'inversion) ;
-/// - plus clair sur blanc dans chaque canal → mêlé : opacité `255 - écart` (le plus grand
-///   écart des trois canaux), couleur `noir × 255 / opacité` ; une opacité nulle → rien ;
+/// - plus clair (ou égal) sur blanc dans chaque canal → mêlé : opacité `255 - écart` (le
+///   plus grand écart des trois canaux), couleur `noir × 255 / opacité` ; une opacité nulle
+///   → rien. C'est le cas d'un gris semi-transparent (50 sur noir, 205 sur blanc), même si
+///   `noir ^ blanc` vaut 255 ;
+/// - un canal plus sombre sur blanc que sur noir, et chaque canal inversé de l'un à l'autre
+///   (`noir ^ blanc == 255`, dont 255 sur noir et 0 sur blanc) → inverse (un curseur XOR
+///   coloré est approché par l'inversion) ;
 /// - tout autre cas (impossible pour un pointeur peint par Windows) → opaque, couleur sur
 ///   noir.
 pub fn couche(noir: [u8; 3], blanc: [u8; 3]) -> Couche {
@@ -42,9 +45,6 @@ pub fn couche(noir: [u8; 3], blanc: [u8; 3]) -> Couche {
     }
     if noir == NOIR && blanc == BLANC {
         return Couche::Transparent;
-    }
-    if (0..3).all(|c| noir[c] ^ blanc[c] == 255) {
-        return Couche::Inverse;
     }
     if (0..3).all(|c| blanc[c] >= noir[c]) {
         let ecart = (0..3).map(|c| blanc[c] - noir[c]).max().unwrap_or(0);
@@ -58,6 +58,9 @@ pub fn couche(noir: [u8; 3], blanc: [u8; 3]) -> Couche {
             rgb[c] = v.min(255) as u8;
         }
         return Couche::Mele { rgb, alpha };
+    }
+    if (0..3).all(|c| noir[c] ^ blanc[c] == 255) {
+        return Couche::Inverse;
     }
     Couche::Opaque(noir)
 }
@@ -236,6 +239,31 @@ mod tests {
             Couche::Mele {
                 rgb: BLANC,
                 alpha: 51
+            }
+        );
+        // Gris moyen semi-transparent (couleur 128, opacité 100) : 50 sur noir, 205 sur
+        // blanc. `50 ^ 205 == 255`, mais c'est un mélange, pas une inversion.
+        assert_eq!(
+            couche([50, 50, 50], [205, 205, 205]),
+            Couche::Mele {
+                rgb: [128, 128, 128],
+                alpha: 100
+            }
+        );
+        // Bords adoucis d'une flèche ordinaire : contour noir à opacité 180, corps blanc à
+        // opacité 120.
+        assert_eq!(
+            couche(NOIR, [75, 75, 75]),
+            Couche::Mele {
+                rgb: NOIR,
+                alpha: 180
+            }
+        );
+        assert_eq!(
+            couche([120, 120, 120], BLANC),
+            Couche::Mele {
+                rgb: BLANC,
+                alpha: 120
             }
         );
         // Cas impossible pour Windows (plus sombre sur blanc, sans inversion) : opaque.

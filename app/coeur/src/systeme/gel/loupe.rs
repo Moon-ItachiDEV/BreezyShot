@@ -133,14 +133,25 @@ pub fn couverture_ronde(cote: i32) -> Vec<u8> {
 /// cote`, couleur prémultipliée par l'opacité (`UpdateLayeredWindow`). `source` : les
 /// `PIXELS_VUS × PIXELS_VUS` pixels vus, 4 octets chacun, dont seuls les trois premiers
 /// comptent (l'ordre des couleurs est gardé tel quel). `None` si `source` n'a pas la taille.
+/// Pratique pour les tests ; la loupe écrit, elle, dans son image par `composer_dans`.
 pub fn composer(source: &[u8], echelle: f64) -> Option<Vec<u8>> {
+    let c = cote(echelle);
+    let couverture = couverture_ronde(c);
+    let mut sortie = vec![0u8; (c * c * 4) as usize];
+    composer_dans(source, echelle, &couverture, &mut sortie).then_some(sortie)
+}
+
+/// Comme `composer`, sans allocation : écrit tous les octets de `sortie` (`cote × cote ×
+/// 4`), avec `couverture` = `couverture_ronde(cote(echelle))`, calculée une fois par côté
+/// par l'appelant. Faux, sans rien écrire, si une taille ne va pas.
+pub fn composer_dans(source: &[u8], echelle: f64, couverture: &[u8], sortie: &mut [u8]) -> bool {
     let vus = PIXELS_VUS as usize;
-    if source.len() != vus * vus * 4 {
-        return None;
-    }
     let t = case(echelle);
     let c = PIXELS_VUS * t;
-    let couverture = couverture_ronde(c);
+    let n = (c * c) as usize;
+    if source.len() != vus * vus * 4 || couverture.len() != n || sortie.len() != n * 4 {
+        return false;
+    }
     // La case du pixel visé et ses deux filets, posés dehors.
     let filet = reel(CASE_FILET, echelle);
     let debut_case = (PIXELS_VUS / 2) * t;
@@ -150,12 +161,13 @@ pub fn composer(source: &[u8], echelle: f64) -> Option<Vec<u8>> {
     let rayon = c as f64 / 2.0;
     let sombre = TRAIT_SOMBRE * sure(echelle);
     let anneau = sombre + ANNEAU_CLAIR * sure(echelle);
-    let mut sortie = vec![0u8; (c * c * 4) as usize];
     for y in 0..c {
         for x in 0..c {
             let i = (y * c + x) as usize;
+            let o = i * 4;
             let a = couverture[i];
             if a == 0 {
+                sortie[o..o + 4].fill(0);
                 continue;
             }
             let d = rayon - distance(x, y, c);
@@ -179,14 +191,13 @@ pub fn composer(source: &[u8], echelle: f64) -> Option<Vec<u8>> {
                     [source[j], source[j + 1], source[j + 2]]
                 }
             };
-            let o = i * 4;
             for k in 0..3 {
                 sortie[o + k] = ((rgb[k] as u32 * a as u32 + 127) / 255) as u8;
             }
             sortie[o + 3] = a;
         }
     }
-    Some(sortie)
+    true
 }
 
 #[cfg(test)]
@@ -390,5 +401,30 @@ mod tests {
     fn source_de_mauvaise_taille_refusee() {
         assert!(composer(&[0u8; 10], 1.0).is_none());
         assert!(composer(&[], 1.0).is_none());
+        // Mauvaise couverture ou mauvaise sortie : rien n'est écrit.
+        let source = source_deux_carres();
+        let mut sortie = vec![7u8; 120 * 120 * 4];
+        assert!(!composer_dans(
+            &source,
+            1.0,
+            &couverture_ronde(150),
+            &mut sortie
+        ));
+        assert!(sortie.iter().all(|&v| v == 7));
+        let mut courte = vec![7u8; 10];
+        assert!(!composer_dans(
+            &source,
+            1.0,
+            &couverture_ronde(120),
+            &mut courte
+        ));
+        // Sortie réutilisée (pleine d'anciens octets) : tous réécrits, comme une neuve.
+        assert!(composer_dans(
+            &source,
+            1.0,
+            &couverture_ronde(120),
+            &mut sortie
+        ));
+        assert_eq!(Some(sortie), composer(&source, 1.0));
     }
 }

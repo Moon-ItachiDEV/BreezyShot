@@ -168,6 +168,78 @@ delegate bool Rappel(IntPtr h, IntPtr p);
 [DllImport("user32.dll")]
 static extern bool EnumWindows(Rappel f, IntPtr p);
 
+[DllImport("user32.dll")]
+static extern IntPtr GetDC(IntPtr h);
+[DllImport("user32.dll")]
+static extern int ReleaseDC(IntPtr h, IntPtr dc);
+[DllImport("gdi32.dll")]
+static extern IntPtr CreateCompatibleDC(IntPtr dc);
+[DllImport("gdi32.dll")]
+static extern IntPtr CreateCompatibleBitmap(IntPtr dc, int l, int h);
+[DllImport("gdi32.dll")]
+static extern IntPtr SelectObject(IntPtr dc, IntPtr o);
+[DllImport("gdi32.dll")]
+static extern bool BitBlt(IntPtr d, int x, int y, int l, int h, IntPtr s, int sx, int sy, uint op);
+[DllImport("gdi32.dll")]
+static extern uint GetPixel(IntPtr dc, int x, int y);
+[DllImport("gdi32.dll")]
+static extern bool DeleteObject(IntPtr o);
+[DllImport("gdi32.dll")]
+static extern bool DeleteDC(IntPtr dc);
+// Couleur d'un point de l'écran, fenêtres en calque comprises (BitBlt depuis l'écran,
+// SRCCOPY | CAPTUREBLT) : { r, v, b }, ou { -1, -1, -1 } si la lecture échoue.
+public static int[] CouleurEcran(int x, int y) {
+    IntPtr ecran = GetDC(IntPtr.Zero);
+    if (ecran == IntPtr.Zero) return new int[] { -1, -1, -1 };
+    IntPtr dc = CreateCompatibleDC(ecran);
+    IntPtr bm = CreateCompatibleBitmap(ecran, 1, 1);
+    IntPtr ancien = SelectObject(dc, bm);
+    bool ok = BitBlt(dc, 0, 0, 1, 1, ecran, x, y, 0x40CC0020);
+    uint c = GetPixel(dc, 0, 0);
+    SelectObject(dc, ancien);
+    DeleteObject(bm);
+    DeleteDC(dc);
+    ReleaseDC(IntPtr.Zero, ecran);
+    if (!ok || c == 0xFFFFFFFF) return new int[] { -1, -1, -1 };
+    return new int[] { (int)(c & 0xFF), (int)((c >> 8) & 0xFF), (int)((c >> 16) & 0xFF) };
+}
+[StructLayout(LayoutKind.Sequential)]
+struct MOUSEINPUT { public int dx; public int dy; public uint data; public uint flags; public uint time; public IntPtr extra; }
+[StructLayout(LayoutKind.Sequential)]
+struct INPUT { public int type; public MOUSEINPUT mi; }
+[DllImport("user32.dll", SetLastError = true)]
+static extern uint SendInput(uint n, INPUT[] entrees, int taille);
+// Un vrai mouvement de souris (1 px puis retour) : rend le nombre d'entrées acceptées.
+public static uint Bouger() {
+    var e = new INPUT[2];
+    e[0].type = 0; e[0].mi.dx = 1; e[0].mi.flags = 0x1;
+    e[1].type = 0; e[1].mi.dx = -1; e[1].mi.flags = 0x1;
+    uint n = SendInput(2, e, Marshal.SizeOf(typeof(INPUT)));
+    System.Threading.Thread.Sleep(50);
+    return n;
+}
+[StructLayout(LayoutKind.Sequential)]
+struct MOUSEKEYS { public uint cbSize; public uint flags; public uint maxSpeed; public uint timeToMax; public uint ctrlSpeed; public uint r1; public uint r2; }
+[DllImport("user32.dll", SetLastError = true)]
+static extern bool SystemParametersInfo(uint action, uint param, ref MOUSEKEYS v, uint winIni);
+static bool mouseKeysLu = false;
+static MOUSEKEYS mouseKeysOrigine;
+// Allume MouseKeys (MKF_MOUSEKEYSON | MKF_AVAILABLE), en gardant le réglage d'origine.
+public static bool AllumerMouseKeys() {
+    var m = new MOUSEKEYS(); m.cbSize = (uint)Marshal.SizeOf(typeof(MOUSEKEYS));
+    if (!SystemParametersInfo(0x36, m.cbSize, ref m, 0)) return false;   // SPI_GETMOUSEKEYS
+    if (!mouseKeysLu) { mouseKeysOrigine = m; mouseKeysLu = true; }
+    m.flags |= 0x3;
+    return SystemParametersInfo(0x37, m.cbSize, ref m, 0);               // SPI_SETMOUSEKEYS
+}
+// Remet MouseKeys comme avant AllumerMouseKeys (rien si jamais allumé).
+public static bool RemettreMouseKeys() {
+    if (!mouseKeysLu) return true;
+    var m = mouseKeysOrigine;
+    bool ok = SystemParametersInfo(0x37, m.cbSize, ref m, 0);
+    if (ok) mouseKeysLu = false;
+    return ok;
+}
 // Drapeaux de GetCursorInfo (-1 si l'appel échoue). 1 : montré ; 2 : supprimé.
 public static int DrapeauxPointeur() {
     var i = new CURSORINFO();
@@ -374,17 +446,9 @@ public static int[] EcartsTemoin(byte[] o, int stride, int il, int ih, int tx, i
             finally { $Image.UnlockBits($d) }
         }
 
-        # Couleur d'un point de l'écran (copie d'écran de l'essai).
+        # Couleur d'un point de l'écran, loupe en calque comprise (BitBlt avec CAPTUREBLT).
         function Couleur-Ecran([int]$X, [int]$Y) {
-            $b = [System.Drawing.Bitmap]::new(1, 1)
-            try {
-                $g = [System.Drawing.Graphics]::FromImage($b)
-                try { $g.CopyFromScreen($X, $Y, 0, 0, [System.Drawing.Size]::new(1, 1)) }
-                finally { $g.Dispose() }
-                $c = $b.GetPixel(0, 0)
-                return @($c.R, $c.G, $c.B)
-            }
-            finally { $b.Dispose() }
+            return [int[]][BreezyShotEssai.Loupe]::CouleurEcran($X, $Y)
         }
 
         function Proche([int[]]$A, [int[]]$B, [int]$Seuil) {
@@ -409,10 +473,21 @@ public static int[] EcartsTemoin(byte[] o, int stride, int il, int ih, int tx, i
             return [pscustomobject]@{ Image = (Lire-Png $pngs[-1].FullName); OX = [int]$Matches[1]; OY = [int]$Matches[2] }
         }
 
-        # (1) Le pointeur est-il montré par Windows ici ?
+        # (1) Le pointeur est-il montré par Windows ici ? D'abord un vrai mouvement ; s'il
+        # reste caché (session sans souris), MouseKeys est allumé (remis à la fin).
+        function Pointeur-Montre([int]$D) { return ($D -ge 0) -and (($D -band 1) -ne 0) -and (($D -band 2) -eq 0) }
+        [BreezyShotEssai.Loupe]::Poser($LOIN[0], $LOIN[1])
+        $entrees = [BreezyShotEssai.Loupe]::Bouger()
         $drapeaux = [BreezyShotEssai.Loupe]::DrapeauxPointeur()
-        $pointeurMontre = ($drapeaux -ge 0) -and (($drapeaux -band 1) -ne 0) -and (($drapeaux -band 2) -eq 0)
-        Verifier '(1) Windows montre le pointeur sur cette machine (sinon les points du pointeur ne prouvent rien)' $pointeurMontre "GetCursorInfo : drapeaux $drapeaux" | Out-Null
+        $detail = "après SetCursorPos et SendInput ($entrees entrées) : drapeaux $drapeaux"
+        if (-not (Pointeur-Montre $drapeaux)) {
+            $allume = [BreezyShotEssai.Loupe]::AllumerMouseKeys()
+            Start-Sleep -Milliseconds 200
+            $null = [BreezyShotEssai.Loupe]::Bouger()
+            $drapeaux = [BreezyShotEssai.Loupe]::DrapeauxPointeur()
+            $detail += " ; MouseKeys allumé : $allume, drapeaux $drapeaux"
+        }
+        Verifier '(1) Windows montre le pointeur sur cette machine (sinon les points du pointeur ne prouvent rien)' (Pointeur-Montre $drapeaux) $detail | Out-Null
 
         $temoin = Lancer-Temoin
 
@@ -558,6 +633,9 @@ catch {
     Verifier "déroulement de l'essai" $false "$_" | Out-Null
 }
 finally {
+    if ($IsWindows -and ('BreezyShotEssai.Loupe' -as [type])) {
+        if (-not [BreezyShotEssai.Loupe]::RemettreMouseKeys()) { Write-Host '[attention] MouseKeys non remis comme avant' }
+    }
     foreach ($a in $script:Auxiliaires) { try { if (-not $a.HasExited) { $a.Kill() } } catch { } }
     Terminer-Essai
 }
