@@ -1042,9 +1042,10 @@ Module pur : il reçoit le dossier où écrire, ne connaît ni Tauri ni les autr
   toujours avant la fin) : (7) Échap : `annule (echap)`, `echap global libere`, aucune
   photo 11 s après le début, puis une capture normale ; (8) clic réel au centre de `bandeau
   zone` : `bandeau action <id> annuler`, `annule (croix)`, aucune photo 11 s après le
-  début ; (11) `--quitter` pendant un décompte : `annule (arret)`, aucune photo. Cas C (vignette allumée) : (10) `vignette
-  fermee <id> capture` à l'entrée du décompte. (12) Mémoire et chrono notés. Plusieurs
-  écrans, échelles, menu d'une autre application et vrai verrouillage ne s'y vérifient pas.
+  début ; (11) `--quitter` pendant un décompte : `annule (arret)`, aucune photo. Cas C
+  (vignette allumée) : (10) `vignette fermee <id> capture` à l'entrée du décompte. (12)
+  Mémoire et chrono notés. Plusieurs écrans, échelles, menu d'une autre application et vrai
+  verrouillage ne s'y vérifient pas.
 - Essai 11 sous Windows (`11-pointeur.ps1`, 0.4), avec la variable capturable et le
   témoin : (1) un vrai mouvement (`SendInput`), puis MouseKeys si besoin (remis à la fin) ;
   si `GetCursorInfo` dit toujours le pointeur caché, les points du pointeur échouent en le
