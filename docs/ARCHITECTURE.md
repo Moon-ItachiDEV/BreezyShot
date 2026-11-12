@@ -74,8 +74,11 @@ app/
                             habillage.js (affichage seulement)
     editeur/                éditeur d'annotation (0.4, §6.2) : document.js (modèle pur,
                             sans DOM) et dessin.js (rendu de la vue et composition de
-                            l'export) ; la page (editeur.html, .css, .js, barre.js,
-                            outils.js) arrive avec la refonte « Éditeur épuré »
+                            l'export) ; la page : editeur.html (structure, rôles,
+                            noms), editeur.css (habillage, jetons seulement),
+                            editeur.js (entrée : charge, image, vue, sorties,
+                            fermeture), barre.js (barre, palette, menus, bulle de
+                            l'outil), outils.js (gestes sur la scène)
     barre/                  barre de capture (plus tard)
 design/                     jetons et icônes Moulinet, copiés du design system
 docs/                       ce fichier, TRAVAIL-VALIDE.md, notices d'essai
@@ -86,7 +89,7 @@ essais/                     scénarios PowerShell joués sur la machine Windows 
                             10, 11 et 12)
   pages/                    essais des pages dans Chromium (Playwright), sur Linux ;
                             editeur-modele.cjs : le modèle et le dessin de l'éditeur
-                            sous Node (0.4)
+                            sous Node (0.4) ; editeur.cjs : sa page
 outils/                     petits scripts Node sans dépendance (generer-jetons.mjs)
 ```
 
@@ -1057,9 +1060,31 @@ l'écran comme à l'export. `COULEURS` : les six de la maquette. Limite connue :
 en « Léger » laisse encore retrouver une partie d'un petit texte à qui connaît la
 formule ; pour un secret, l'outil sûr est Bloc noir.
 
-**Page**
+**Page** (`app/interface/editeur/`, design « Éditeur épuré », piste B « Fenêtre », qui
+remplace la v2 depuis le 12/11/2026)
 
-(à écrire à l'assemblage, après la refonte)
+- La barre du haut (52 px) est la barre de la fenêtre sans cadre : `data-tauri-drag-region`
+  partout sauf sur les boutons. À gauche « Fermer » ; à droite « Enregistrer » et « Copier »
+  (copier PUIS fermer : coche, puis le chemin « copier et fermer » ; en échec la fenêtre
+  reste). `Ctrl + C` copie sans fermer.
+- Palette flottante du bas : « Annuler », « Rétablir », les instruments dessinés (« Flèche »,
+  « Stylo », « Surligneur », « Gomme », puis l'emplacement de l'outil pris dans
+  « Ajouter » : « Texte », « Forme », « Numéro », « Flou », « Projecteur »), six pastilles
+  et « Autre couleur », « Plus » (« Enregistrer sous », « Glisser vers une appli »).
+  Recliquer l'instrument choisi ouvre la bulle « Réglages de l'outil » (variantes, trois
+  tailles, opacité).
+- Gestes : un appui sur un objet le sélectionne et le déplace (sauf Stylo, Surligneur,
+  Gomme) ; la Gomme supprime ce qu'elle touche, un geste = un pas d'annulation ; le
+  recadrage se fait aux quatre équerres des coins de l'image (`recadrer`, `null` à l'image
+  entière) ; le Projecteur se prend par son bord.
+- Fermeture : `editeur:fermer_demande` valide le texte en saisie, envoie `editeur_etat`,
+  puis répond ; « demander » ouvre le menu « Fermer » (« Copier et fermer », « Fermer sans
+  copier » = `force`) ; le refermer vaut `editeur_garder`.
+- « Glisser vers une appli » montre une vignette de prise d'où part le glisser natif
+  (appui puis 4 px) ; aucun `draggable` HTML.
+- Absents en 0.4, pas grisés : Copier le texte, Fond, Épingler. Zoom au clavier et à la
+  molette seulement. Couleurs et mesures par les jetons `editeur-*` ; un seul export à la
+  fois ; aucune ligne de journal nouvelle.
 
 **Journal** (rien sur un chemin, un nom de fichier, un texte tapé, une couleur ni le
 contenu d'une image) :
@@ -1262,12 +1287,17 @@ contenu d'une image) :
   redimensionnement par les bords et le déplacement par la barre de la page ne s'y
   vérifient pas. Hors Windows : démarrage et arrêt seulement.
 - `essais/pages/editeur-modele.cjs` (0.4) : `document.js` et `dessin.js` sous Node 22.15
-  ou plus (`module.registerHooks` pour charger les modules), 51 points : chaque type,
+  ou plus (`module.registerHooks` pour charger les modules), 53 points : chaque type,
   historique (200 pas, borne en octets), touche, boîtes et poignées, alpha exact, masques
   (Pixeliser aligné sur la grille, petits masques, attaque par candidats sur un texte),
-  vue à la taille réelle égale à l'export, temps sur 25 Mpx, Projecteur (P1 à P8) ;
-  `ECHECS : 0` attendu. Pas encore une étape du job `pages` de `app.yml` (à ajouter à
-  l'assemblage).
+  vue à la taille réelle égale à l'export, temps sur 25 Mpx, Projecteur (P1 à P10 : prise
+  par le bord, réunion, alpha, coût du voile) ; `ECHECS : 0` attendu. Étape du job `pages`.
+- `essais/pages/editeur.cjs` (0.4) : la page de l'éditeur dans Chromium, cœur simulé et
+  vrai modèle, 129 points : noms et rôles accessibles (contrat de l'essai 12), chaque
+  outil, Gomme, Projecteur, recadrage par chaque coin, sélection, bulle de l'outil,
+  couleurs, menu « Fermer » et ses issues, « Copier » qui ferme, vignette de prise, règle
+  de `fermer_demande`, un seul export à la fois, clair, sombre, fenêtre étroite, aucune
+  erreur ni violation de CSP. Étape du job `pages`.
 - `essais/` : un script par étape (`01-socle.ps1`, `02-reglages.ps1`, `03-raccourci.ps1`,
   `04-zone.ps1`, `05-plein-ecran.ps1`, `06-fenetre.ps1`, `07-vignette.ps1`,
   `08-reglages-fenetre.ps1`, `09-installateur.ps1`, `10-confort.ps1`,
