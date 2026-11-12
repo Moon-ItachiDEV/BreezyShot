@@ -1033,9 +1033,12 @@ impl Vignette {
     }
 
     fn page_prete(&self) {
+        // Une carte partie ne reçoit plus sa charge (la page rechargée reste vide).
         let en_cours = self.etat().is_some_and(|mut e| {
             e.page_prete = true;
-            e.en_cours.is_some()
+            e.en_cours
+                .as_ref()
+                .is_some_and(|c| c.phase != Phase::Partie)
         });
         log::info!("vignette prete");
         if en_cours {

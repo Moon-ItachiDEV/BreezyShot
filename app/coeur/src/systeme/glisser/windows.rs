@@ -3,7 +3,7 @@
 //! Aucune interface COM n'est écrite ici : l'objet de données vient du Shell
 //! (`SHCreateItemFromParsingName` puis `BindToHandler(BHID_DataObject)`), la source est
 //! celle que `SHDoDragDrop` fournit quand on ne lui en donne pas (elle suit le bouton
-//! gauche et Échap), et l'image du glisser est celle du Shell. OLE est déjà initialisé sur
+//! principal et Échap), et l'image du glisser est celle du Shell. OLE est déjà initialisé sur
 //! le fil principal (tao, à la création des fenêtres).
 
 use std::os::windows::ffi::OsStrExt;
@@ -13,13 +13,15 @@ use ::windows::core::PCWSTR;
 use ::windows::Win32::Foundation::{HWND, POINT};
 use ::windows::Win32::System::Com::{IBindCtx, IDataObject};
 use ::windows::Win32::System::Ole::{IDropSource, DROPEFFECT_COPY, DROPEFFECT_NONE};
-use ::windows::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, VK_LBUTTON};
+use ::windows::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, VK_LBUTTON, VK_RBUTTON};
 use ::windows::Win32::UI::Shell::{
     BHID_DataObject, IShellItem, SHCreateItemFromParsingName, SHDoDragDrop,
 };
-use ::windows::Win32::UI::WindowsAndMessaging::{GetAncestor, WindowFromPoint, GA_ROOT};
+use ::windows::Win32::UI::WindowsAndMessaging::{
+    GetAncestor, GetSystemMetrics, WindowFromPoint, GA_ROOT, SM_SWAPBUTTON,
+};
 
-use super::Depot;
+use super::{BoutonPhysique, Depot};
 
 pub fn glisser_fichier(fenetre: isize, chemin: &Path) -> Result<Depot, String> {
     let large: Vec<u16> = chemin
@@ -49,9 +51,19 @@ pub fn glisser_fichier(fenetre: isize, chemin: &Path) -> Result<Depot, String> {
     })
 }
 
-pub fn bouton_gauche_enfonce() -> bool {
+pub fn boutons_inverses() -> bool {
+    // SAFETY : aucun tampon ; non nul veut dire « boutons inversés ».
+    unsafe { GetSystemMetrics(SM_SWAPBUTTON) != 0 }
+}
+
+pub fn bouton_enfonce(bouton: BoutonPhysique) -> bool {
+    // `GetAsyncKeyState` lit le bouton physique, sans tenir compte de l'inversion.
+    let touche = match bouton {
+        BoutonPhysique::Gauche => VK_LBUTTON,
+        BoutonPhysique::Droit => VK_RBUTTON,
+    };
     // SAFETY : aucun tampon ; le bit de poids fort dit « enfoncé maintenant ».
-    let etat = unsafe { GetAsyncKeyState(i32::from(VK_LBUTTON.0)) };
+    let etat = unsafe { GetAsyncKeyState(i32::from(touche.0)) };
     etat < 0
 }
 

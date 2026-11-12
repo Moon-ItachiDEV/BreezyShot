@@ -105,12 +105,9 @@ pub enum Evenement {
     Vignette(carte::Signal),
     /// Copier ou Enregistrer de la vignette est fini (rendu par son fil).
     ActionFaite(Box<FinAction>),
-    /// Les fichiers d'une capture supprimée sont effacés (rendu par son fil).
-    SuppressionFaite {
-        id: u64,
-        suppression: sortie::Suppression,
-        resultats: Vec<(PathBuf, Result<(), String>)>,
-    },
+    /// Un fichier d'une capture supprimée n'a pas pu être effacé (rendu par le fil de la
+    /// suppression, qui a déjà écrit son bilan au journal).
+    SuppressionFaite { message: Message },
     /// Le glisser de la carte `id`, reposté hors du gestionnaire de la page.
     LancerGlisser { id: u64, chemin: PathBuf },
     /// Capture demandée par la ligne de commande (`--capturer <mode>`, l'installateur).
@@ -251,6 +248,11 @@ pub struct Application {
     montree: Mutex<Option<CaptureMontree>>,
     /// Vrai pendant la boucle d'un glisser.
     glisser: AtomicBool,
+    /// Captures parties dont l'effacement est lancé alors qu'un Enregistrer tournait :
+    /// son fichier, arrivé en retard, est effacé aussi.
+    retenues: Mutex<Vec<u64>>,
+    /// Fils de suppression en cours, attendus (bornés) à l'arrêt.
+    suppressions: (Mutex<u32>, std::sync::Condvar),
     /// Capture demandée par `--capturer` avant la fin du démarrage : jouée à `pret`.
     capture_en_attente: Mutex<Option<String>>,
 }
@@ -949,16 +951,8 @@ pub fn traiter(app: &AppHandle, evenement: Evenement) {
         }
         Evenement::Vignette(signal) => traiter_vignette(app, signal),
         Evenement::ActionFaite(fin) => action_faite(app, *fin),
-        Evenement::SuppressionFaite {
-            id,
-            suppression,
-            resultats,
-        } => {
-            let (ligne, message) = vignette::bilan_suppression(id, &suppression, &resultats);
-            log::info!("{ligne}");
-            if let Some(m) = message {
-                afficher(app, m);
-            }
+        Evenement::SuppressionFaite { message } => {
+            afficher(app, message);
         }
         Evenement::LancerGlisser { id, chemin } => lancer_glisser(app, id, &chemin),
     }
@@ -973,6 +967,15 @@ fn appliquer(app: &AppHandle, declencheur: Declencheur) -> Option<Etat> {
             None
         }
     }
+}
+
+/// L'état de l'automate, `None` s'il est inaccessible.
+fn etat_automate(app: &AppHandle) -> Option<Etat> {
+    app.state::<Application>()
+        .automate
+        .lock()
+        .ok()
+        .map(|a| a.etat())
 }
 
 /// Montre le bandeau d'erreur d'une capture qui n'a pas pu se faire.
@@ -1658,9 +1661,7 @@ fn montrer_vignette(app: &AppHandle, fin: FinSortie, annonce: Annonce, apercu: A
     });
     if let Some(a) = ancienne {
         // Jamais attendu (la photo ferme la vignette) : la suppression en attente est faite.
-        if a.suppression == EtatSuppression::EnAttente {
-            lancer_suppression(app, a.id, vignette::a_supprimer(&a));
-        }
+        quitter(app, a, false);
     }
     if let Some(v) = app.try_state::<Vignette>() {
         v.preparer(demande);
@@ -1697,10 +1698,16 @@ fn traiter_vignette(app: &AppHandle, signal: carte::Signal) {
     };
     match signal {
         carte::Signal::Prete { id } => {
+            // Une page qui redit prête plus tard ne rejoue pas le souffle.
+            let etat = etat_automate(app);
             let Some(reduites) = avec_montree(app, id, |c| {
-                c.souffle_a = Some(Instant::now());
-                c.reduites
-            }) else {
+                vignette::prete_acceptee(etat, c.partie).then(|| {
+                    c.souffle_a = Some(Instant::now());
+                    c.reduites
+                })
+            })
+            .flatten() else {
+                log::info!("vignette prete {id} ignoree");
                 return;
             };
             if reduites {
@@ -1729,42 +1736,41 @@ fn traiter_vignette(app: &AppHandle, signal: carte::Signal) {
         carte::Signal::Action { id, action } => action_vignette(app, &v, id, &action),
         carte::Signal::Glisser { id } => demander_glisser(app, id),
         carte::Signal::DelaiEcoule { id } => {
-            let Some(suppression) = avec_montree(app, id, |c| {
+            let Some((declencheur, raison, suppression)) = avec_montree(app, id, |c| {
                 c.partie = true;
-                let attente = c.suppression == EtatSuppression::EnAttente;
-                if attente {
+                let (d, raison, supprimer) = vignette::au_delai(c.suppression);
+                if supprimer {
                     c.suppression = EtatSuppression::Lancee;
                 }
-                attente.then(|| vignette::a_supprimer(c))
+                (d, raison, supprimer.then(|| vignette::a_supprimer(c)))
             }) else {
                 return;
             };
-            match suppression {
-                Some(s) => {
-                    appliquer(app, Declencheur::CaptureSupprimee);
-                    log::info!("vignette fermee {id} supprimer");
-                    v.partir(id, true);
-                    lancer_suppression(app, id, s);
-                }
-                None => {
-                    appliquer(app, Declencheur::DelaiEcoule);
-                    log::info!("vignette fermee {id} delai");
-                    v.partir(id, true);
-                }
+            appliquer(app, declencheur);
+            log::info!("vignette fermee {id} {raison}");
+            v.partir(id, true);
+            if let Some(s) = suppression {
+                lancer_suppression(app, id, s, false);
             }
         }
         // Carte partie : les pixels et l'aperçu sont rendus.
-        carte::Signal::Terminee { id } => drop(retirer_montree(app, id)),
+        carte::Signal::Terminee { id } => {
+            if let Some(c) = retirer_montree(app, id) {
+                quitter(app, c, false);
+            }
+        }
         carte::Signal::Impossible { id, cause } => {
             log::warn!("vignette impossible {id}: {cause}");
             let Some(c) = retirer_montree(app, id) else {
                 return;
             };
+            let annonce = c.annonce.clone();
+            quitter(app, c, false);
             v.cacher();
             appliquer(app, Declencheur::VignetteImpossible);
             // L'annonce que la vignette devait remplacer passe au bandeau.
-            if vignette::message_bandeau(&c.annonce, true).is_none() {
-                afficher(app, zone::message_annonce(&c.annonce));
+            if vignette::message_bandeau(&annonce, true).is_none() {
+                afficher(app, zone::message_annonce(&annonce));
             }
         }
     }
@@ -1869,7 +1875,8 @@ fn lancer_action(app: &AppHandle, id: u64, copier: bool) {
 }
 
 /// Résultat de Copier ou Enregistrer : journal, page, et l'erreur au bandeau. Arrivé
-/// après le départ de la carte : journal seulement.
+/// après le départ de la carte : journal seulement. Le fichier d'un Enregistrer arrivé
+/// après l'effacement de sa capture est effacé à son tour (ARCHITECTURE §11).
 fn action_faite(app: &AppHandle, fin: FinAction) {
     let (reussi, message, fichier) = vignette::apres_action(&fin.action, &fin.bilan);
     log::info!(
@@ -1877,18 +1884,33 @@ fn action_faite(app: &AppHandle, fin: FinAction) {
         vignette::ligne_action_faite(fin.id, &fin.action, reussi)
     );
     let copie = fin.action == vignette::COPIER;
-    let present = avec_montree(app, fin.id, |c| {
+    let etat = avec_montree(app, fin.id, |c| {
         if copie {
             c.copie = None;
         } else {
             c.enregistrement = None;
-            if fichier.is_some() {
-                c.enregistre = fichier;
+            if fichier.is_some() && c.suppression != EtatSuppression::Lancee {
+                c.enregistre = fichier.clone();
             }
         }
-        !c.partie
+        (c.suppression, !c.partie)
     });
-    if present != Some(true) {
+    if !copie {
+        let retenue = etat.is_none() && {
+            let etat_app = app.state::<Application>();
+            let mut retenues = etat_app.retenues.lock().unwrap_or_else(|e| e.into_inner());
+            let avant = retenues.len();
+            retenues.retain(|i| *i != fin.id);
+            retenues.len() != avant
+        };
+        let tardif =
+            vignette::enregistrement_tardif(etat.map(|e| e.0), retenue, fichier.as_deref());
+        if let Some(s) = tardif {
+            lancer_suppression(app, fin.id, s, true);
+            return;
+        }
+    }
+    if etat.map(|e| e.1) != Some(true) {
         return;
     }
     if let Some(v) = app.try_state::<Vignette>() {
@@ -1899,42 +1921,97 @@ fn action_faite(app: &AppHandle, fin: FinAction) {
     }
 }
 
-/// Efface les fichiers de la capture `id` dans un fil, puis `SuppressionFaite`.
-fn lancer_suppression(app: &AppHandle, id: u64, suppression: sortie::Suppression) {
+/// Combien de temps l'arrêt attend les fils de suppression encore en cours.
+const ATTENTE_SUPPRESSIONS: Duration = Duration::from_secs(2);
+
+/// Efface les fichiers de la capture `id` dans un fil, qui écrit le bilan au journal
+/// (`tardive` : le fichier d'un Enregistrer en retard), puis `SuppressionFaite` en cas
+/// d'échec. Le fil est compté : l'arrêt l'attend.
+fn lancer_suppression(app: &AppHandle, id: u64, suppression: sortie::Suppression, tardive: bool) {
     let (recents, glisser) = dossiers_vignette(app);
     let pour_fil = app.clone();
     let copie = suppression.clone();
+    compter_suppression(app, true);
     let lance = std::thread::Builder::new()
         .name("suppression".into())
         .spawn(move || {
             let resultats = sortie::supprimer(&suppression, &recents, &glisser);
+            let (ligne, message) =
+                vignette::bilan_suppression(id, &suppression, &resultats, tardive);
+            log::info!("{ligne}");
+            compter_suppression(&pour_fil, false);
+            let Some(message) = message else {
+                return;
+            };
             let pour_traiter = pour_fil.clone();
             let rendu = pour_fil.run_on_main_thread(move || {
-                traiter(
-                    &pour_traiter,
-                    Evenement::SuppressionFaite {
-                        id,
-                        suppression,
-                        resultats,
-                    },
-                )
+                traiter(&pour_traiter, Evenement::SuppressionFaite { message })
             });
             if let Err(e) = rendu {
-                log::warn!("suppression {id}: bilan non rendu: {e}");
+                log::warn!("suppression {id}: message non rendu: {e}");
             }
         });
     if let Err(e) = lance {
+        compter_suppression(app, false);
         log::warn!("fil de suppression impossible ({e}): suppression sur le fil principal");
-        supprimer_tout_de_suite(app, id, &copie);
+        supprimer_tout_de_suite(app, id, &copie, tardive);
+    }
+}
+
+/// Un fil de suppression commence (`plus`) ou finit.
+fn compter_suppression(app: &AppHandle, plus: bool) {
+    let etat = app.state::<Application>();
+    let (compte, signal) = &etat.suppressions;
+    let mut n = compte.lock().unwrap_or_else(|e| e.into_inner());
+    *n = if plus { *n + 1 } else { n.saturating_sub(1) };
+    signal.notify_all();
+}
+
+/// Arrêt : attend (au plus `ATTENTE_SUPPRESSIONS`) les fils de suppression en cours.
+fn attendre_suppressions(app: &AppHandle) {
+    let etat = app.state::<Application>();
+    let (compte, signal) = &etat.suppressions;
+    let n = compte.lock().unwrap_or_else(|e| e.into_inner());
+    let (n, _) = signal
+        .wait_timeout_while(n, ATTENTE_SUPPRESSIONS, |n| *n > 0)
+        .unwrap_or_else(|e| e.into_inner());
+    if *n > 0 {
+        log::warn!("suppression non attendue ({} fil(s) encore en cours)", *n);
     }
 }
 
 /// Efface sur ce fil (arrêt) et écrit le bilan au journal.
-fn supprimer_tout_de_suite(app: &AppHandle, id: u64, suppression: &sortie::Suppression) {
+fn supprimer_tout_de_suite(
+    app: &AppHandle,
+    id: u64,
+    suppression: &sortie::Suppression,
+    tardive: bool,
+) {
     let (recents, glisser) = dossiers_vignette(app);
     let resultats = sortie::supprimer(suppression, &recents, &glisser);
-    let (ligne, _) = vignette::bilan_suppression(id, suppression, &resultats);
+    let (ligne, _) = vignette::bilan_suppression(id, suppression, &resultats, tardive);
     log::info!("{ligne}");
+}
+
+/// La capture `c` quitte l'Application : sa suppression en attente est faite (sur ce fil
+/// à l'arrêt), et elle est retenue si un Enregistrer tourne encore.
+fn quitter(app: &AppHandle, mut c: CaptureMontree, arret: bool) {
+    match vignette::suppression_au_depart(c.suppression, arret) {
+        vignette::SuppressionAuDepart::Aucune => {}
+        vignette::SuppressionAuDepart::DansUnFil => {
+            c.suppression = EtatSuppression::Lancee;
+            lancer_suppression(app, c.id, vignette::a_supprimer(&c), false);
+        }
+        vignette::SuppressionAuDepart::SurCeFil => {
+            c.suppression = EtatSuppression::Lancee;
+            supprimer_tout_de_suite(app, c.id, &vignette::a_supprimer(&c), false);
+        }
+    }
+    if vignette::a_retenir(&c) {
+        let etat = app.state::<Application>();
+        let mut retenues = etat.retenues.lock().unwrap_or_else(|e| e.into_inner());
+        vignette::retenir(&mut retenues, c.id);
+    }
 }
 
 /// `<local>/Recents` et `<local>/Glisser` ; vides sans dossier local (rien n'est alors
@@ -1951,6 +2028,9 @@ fn dossiers_vignette(app: &AppHandle) -> (PathBuf, PathBuf) {
 
 /// Retire la vignette sans animation (nouvelle capture, arrêt) : une suppression en
 /// attente est faite tout de suite (sur ce fil à l'arrêt). Rend vrai si une carte était là.
+/// La raison de fermeture de l'arrêt de l'app.
+const RAISON_ARRET: &str = "arret";
+
 fn fermer_vignette(app: &AppHandle, raison: &str) -> bool {
     let capture = montree(app).take();
     let cachee = app.try_state::<Vignette>().is_some_and(|v| v.cacher());
@@ -1958,14 +2038,7 @@ fn fermer_vignette(app: &AppHandle, raison: &str) -> bool {
         if !c.partie {
             log::info!("vignette fermee {} {raison}", c.id);
         }
-        if c.suppression == EtatSuppression::EnAttente {
-            let s = vignette::a_supprimer(&c);
-            if raison == "arret" {
-                supprimer_tout_de_suite(app, c.id, &s);
-            } else {
-                lancer_suppression(app, c.id, s);
-            }
-        }
+        quitter(app, c, raison == RAISON_ARRET);
     }
     cachee
 }
@@ -2023,15 +2096,11 @@ fn lancer_glisser(app: &AppHandle, id: u64, chemin: &std::path::Path) {
     }) else {
         return;
     };
-    let fenetre = v.identifiants()[0];
-    let pret = match (possible, fenetre) {
-        (false, _) => Err("indisponible"),
-        (true, None) => Err("refuse (fenetre absente)"),
-        (true, Some(_)) if !systeme::glisser::bouton_gauche_enfonce() => {
-            Err("annule (bouton relache)")
-        }
-        (true, Some(f)) => Ok(f),
-    };
+    let pret = vignette::glisser_pret(
+        possible,
+        v.identifiants()[0],
+        systeme::glisser::bouton_principal_enfonce(),
+    );
     let fenetre = match pret {
         Ok(f) => f,
         Err(raison) => {
@@ -2077,7 +2146,8 @@ fn arreter(app: &AppHandle) {
     gel::detruire_ecran_fige();
     gel::liberer_image();
     // Vignette : suppression en attente faite, fenêtres cachées puis détruites.
-    fermer_vignette(app, "arret");
+    fermer_vignette(app, RAISON_ARRET);
+    attendre_suppressions(app);
     if let Some(v) = app.try_state::<Vignette>() {
         v.fermer();
     }
