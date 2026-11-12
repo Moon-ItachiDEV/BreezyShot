@@ -6,15 +6,13 @@
 //! procédure de la fenêtre prend `IMAGE` pour peindre : un verrou gardé à ce moment-là
 //! bloquerait le fil. Un verrou empoisonné (fil qui a paniqué) est repris, jamais déballé.
 
-use std::cell::RefCell;
-use std::sync::atomic::{AtomicBool, AtomicIsize, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicIsize, Ordering};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
 use ::windows::core::{w, BOOL, PCWSTR};
 use ::windows::Win32::Foundation::{
-    GetLastError, COLORREF, ERROR_CLASS_ALREADY_EXISTS, HINSTANCE, HWND, LPARAM, LRESULT, POINT,
-    RECT, SIZE, WPARAM,
+    GetLastError, ERROR_CLASS_ALREADY_EXISTS, HINSTANCE, HWND, LPARAM, LRESULT, RECT, WPARAM,
 };
 use ::windows::Win32::Graphics::Dwm::{
     DwmGetWindowAttribute, DwmSetWindowAttribute, DWMWA_CLOAKED, DWMWA_EXTENDED_FRAME_BOUNDS,
@@ -23,9 +21,9 @@ use ::windows::Win32::Graphics::Dwm::{
 use ::windows::Win32::Graphics::Gdi::{
     BeginPaint, BitBlt, CreateCompatibleBitmap, CreateCompatibleDC, CreateDIBSection, DeleteDC,
     DeleteObject, EndPaint, EnumDisplayMonitors, GdiFlush, GetDC, GetDIBits, GetMonitorInfoW,
-    GetObjectW, ReleaseDC, SelectObject, ValidateRect, AC_SRC_ALPHA, AC_SRC_OVER, BITMAP,
-    BITMAPINFO, BITMAPINFOHEADER, BI_RGB, BLENDFUNCTION, CAPTUREBLT, DIB_RGB_COLORS, HBITMAP, HDC,
-    HGDIOBJ, HMONITOR, MONITORINFO, PAINTSTRUCT, SRCCOPY,
+    GetObjectW, ReleaseDC, SelectObject, ValidateRect, BITMAP, BITMAPINFO, BITMAPINFOHEADER,
+    BI_RGB, CAPTUREBLT, DIB_RGB_COLORS, HBITMAP, HDC, HGDIOBJ, HMONITOR, MONITORINFO, PAINTSTRUCT,
+    SRCCOPY,
 };
 use ::windows::Win32::System::LibraryLoader::{GetModuleHandleW, GetProcAddress};
 use ::windows::Win32::System::RemoteDesktop::{
@@ -35,23 +33,20 @@ use ::windows::Win32::System::Threading::{GetCurrentProcessId, GetCurrentThreadI
 use ::windows::Win32::UI::HiDpi::{GetDpiForMonitor, MDT_EFFECTIVE_DPI};
 use ::windows::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DefWindowProcW, DestroyWindow, DrawIconEx, EnumWindows, GetClassNameW,
-    GetCursorInfo, GetCursorPos, GetIconInfo, GetSystemMetrics, GetWindow,
-    GetWindowDisplayAffinity, GetWindowLongW, GetWindowRect, GetWindowTextW,
-    GetWindowThreadProcessId, IsIconic, IsWindow, IsWindowVisible, IsZoomed, KillTimer,
-    LoadCursorW, PostMessageW, RegisterClassW, SendMessageTimeoutW, SetTimer,
-    SetWindowDisplayAffinity, SetWindowPos, ShowWindow, ShowWindowAsync, UpdateLayeredWindow,
-    CURSORINFO, DI_NORMAL, GWL_EXSTYLE, GWL_STYLE, GW_HWNDPREV, HICON, HWND_TOPMOST, ICONINFO,
-    IDC_CROSS, MA_NOACTIVATE, MONITORINFOF_PRIMARY, SMTO_ABORTIFHUNG, SM_CXVIRTUALSCREEN,
-    SM_CYVIRTUALSCREEN, SM_XVIRTUALSCREEN, SM_YVIRTUALSCREEN, SWP_NOACTIVATE, SWP_NOMOVE,
-    SWP_NOOWNERZORDER, SWP_NOSIZE, SWP_SHOWWINDOW, SW_HIDE, ULW_ALPHA, WDA_EXCLUDEFROMCAPTURE,
-    WM_APP, WM_CLOSE, WM_DESTROY, WM_DISPLAYCHANGE, WM_DPICHANGED, WM_ERASEBKGND, WM_MOUSEACTIVATE,
-    WM_NULL, WM_PAINT, WM_TIMER, WM_WTSSESSION_CHANGE, WNDCLASSW, WNDPROC, WS_CAPTION,
-    WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_EX_TRANSPARENT, WS_POPUP,
-    WS_THICKFRAME, WTS_SESSION_LOCK,
+    GetCursorInfo, GetIconInfo, GetSystemMetrics, GetWindowLongW, GetWindowRect, GetWindowTextW,
+    GetWindowThreadProcessId, IsIconic, IsWindow, IsWindowVisible, IsZoomed, LoadCursorW,
+    PostMessageW, RegisterClassW, SendMessageTimeoutW, SetWindowPos, ShowWindow, ShowWindowAsync,
+    CURSORINFO, DI_NORMAL, GWL_EXSTYLE, GWL_STYLE, HICON, HWND_TOPMOST, ICONINFO, IDC_CROSS,
+    MA_NOACTIVATE, MONITORINFOF_PRIMARY, SMTO_ABORTIFHUNG, SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN,
+    SM_XVIRTUALSCREEN, SM_YVIRTUALSCREEN, SWP_NOACTIVATE, SWP_SHOWWINDOW, SW_HIDE, WM_CLOSE,
+    WM_DESTROY, WM_DISPLAYCHANGE, WM_DPICHANGED, WM_ERASEBKGND, WM_MOUSEACTIVATE, WM_NULL,
+    WM_PAINT, WM_WTSSESSION_CHANGE, WNDCLASSW, WNDPROC, WS_CAPTION, WS_EX_LAYERED,
+    WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_EX_TRANSPARENT, WS_POPUP, WS_THICKFRAME,
+    WTS_SESSION_LOCK,
 };
 
 use super::{
-    bgra_en_rgba, coins_de, echelle_depuis_dpi, est_classe_du_bureau, garder_fenetre, loupe,
+    bgra_en_rgba, coins_de, echelle_depuis_dpi, est_classe_du_bureau, garder_fenetre,
     pointeur_montre, taille_pointeur, Changement, Coins, EcranInfo, EtatCoins, EtatFenetre,
     FenetreInfo, Pixels, Pointeur, Rect,
 };
@@ -826,7 +821,6 @@ unsafe extern "system" fn procedure_ecran_fige(
             if !peinte {
                 // Plus d'image à montrer : jamais un écran figé vide ou faux.
                 retirer_marque();
-                cacher_loupe();
                 // SAFETY : notre fenêtre, sur son fil.
                 unsafe {
                     let _ = ShowWindow(hwnd, SW_HIDE);
@@ -859,7 +853,6 @@ pub fn surveillance_session() -> bool {
 /// Cache l'écran figé et, s'il était montré, prévient l'Application (sans verrou tenu).
 fn cacher_et_prevenir(hwnd: HWND, changement: Changement) {
     retirer_marque();
-    cacher_loupe();
     // SAFETY : notre fenêtre, sur son fil.
     let etait_visible = unsafe {
         let visible = IsWindowVisible(hwnd).as_bool();
@@ -916,8 +909,6 @@ pub fn preparer_ecran_fige() -> Result<(), String> {
             // SAFETY : simple vérification, aucun message envoyé.
             if unsafe { IsWindow(Some(f.hwnd)) }.as_bool() {
                 return if f.fil == fil {
-                    drop(garde);
-                    preparer_loupe_ou_le_dire(fil);
                     Ok(())
                 } else {
                     Err("ecran fige deja cree sur un autre fil".into())
@@ -964,15 +955,7 @@ pub fn preparer_ecran_fige() -> Result<(), String> {
     // Course improbable (deux appels en même temps) : l'autre fenêtre est détruite ici,
     // hors du verrou.
     drop(ancienne);
-    preparer_loupe_ou_le_dire(fil);
     Ok(())
-}
-
-/// La loupe est créée avec l'écran figé ; sans elle, l'écran figé marche quand même.
-fn preparer_loupe_ou_le_dire(fil: u32) {
-    if let Err(e) = preparer_loupe(fil) {
-        log::warn!("loupe impossible: {e}");
-    }
 }
 
 pub fn montrer_ecran_fige(image: &Image) -> Result<(), String> {
@@ -1035,9 +1018,8 @@ pub fn montrer_ecran_fige(image: &Image) -> Result<(), String> {
 
 pub fn cacher_ecran_fige() {
     // La marque est retirée dès la demande, même postée : la fenêtre ne peindra plus
-    // cette photo (une peinture sans marque cache la fenêtre). La loupe part avec.
+    // cette photo (une peinture sans marque cache la fenêtre).
     retirer_marque();
-    cacher_loupe();
     let Some((hwnd, fil)) = fenetre_figee() else {
         return;
     };
@@ -1054,7 +1036,6 @@ pub fn cacher_ecran_fige() {
 
 pub fn detruire_ecran_fige() {
     retirer_marque();
-    detruire_loupe();
     let fenetre = verrouiller(&ECRAN).take();
     // Hors du verrou : `DestroyWindow` envoie des messages.
     drop(fenetre);
@@ -1066,7 +1047,7 @@ pub fn poignee_ecran_fige() -> Option<isize> {
 
 // ---------------------------------------------------------------------------------------
 // Une section DIB 32 bits, de haut en bas, sélectionnée dans un DC en mémoire : ses octets
-// (BGRA) se lisent et s'écrivent directement. Pointeur et loupe (0.4).
+// (BGRA) se lisent et s'écrivent directement. Pointeur (0.4).
 
 struct Dib {
     dc: DcMemoire,
@@ -1246,389 +1227,6 @@ pub fn lire_pointeur() -> Result<Option<Pointeur>, String> {
 }
 
 // ---------------------------------------------------------------------------------------
-// La loupe (0.4) : une petite fenêtre native en calque, au-dessus de la sélection, que les
-// clics traversent, dessinée depuis l'image figée. Son état de dessin vit sur le fil de sa
-// fenêtre (le fil principal) ; seuls la poignée et le drapeau « voulue » sont partagés.
-
-const CLASSE_LOUPE: PCWSTR = w!("BreezyShotLoupe");
-/// Identifiant de la minuterie de la loupe.
-const MINUTERIE_LOUPE: usize = 1;
-/// Cadence de la minuterie, en millisecondes.
-const CADENCE_LOUPE_MS: u32 = 16;
-/// Message posté pour cacher la loupe depuis un autre fil.
-const WM_CACHER_LOUPE: u32 = WM_APP + 1;
-
-static LOUPE: Mutex<Option<FenetreNative>> = Mutex::new(None);
-/// Vrai entre `montrer_loupe` et `cacher_loupe` : la minuterie ne dessine que si c'est vrai.
-static LOUPE_VOULUE: AtomicBool = AtomicBool::new(false);
-/// Numéro de la loupe montrée, augmenté à chaque `montrer_loupe` : un `cacher_loupe` posté
-/// depuis un autre fil ne cache que la loupe de son numéro, pas une montrée entre-temps.
-static LOUPE_GENERATION: AtomicUsize = AtomicUsize::new(0);
-
-/// Ce que la loupe garde entre deux tours, sur son fil.
-struct Dessin {
-    /// Les écrans au moment où la loupe a été montrée (l'écran figé ne change pas).
-    ecrans: Vec<EcranInfo>,
-    /// La pointe du dernier dessin ; `None` : rien n'est encore dessiné.
-    pointe: Option<(i32, i32)>,
-    /// La fenêtre a été montrée (pour écrire `loupe cachee` une fois).
-    montree: bool,
-    /// Les pixels vus (`PIXELS_VUS` de côté) et l'image de la loupe, gardés d'un tour à
-    /// l'autre, rendus quand la loupe se cache.
-    vus: Option<Dib>,
-    image: Option<Dib>,
-    /// L'opacité du rond pour le côté de `image`, calculée une fois par côté.
-    couverture: Vec<u8>,
-}
-
-thread_local! {
-    static DESSIN: RefCell<Option<Dessin>> = const { RefCell::new(None) };
-}
-
-/// Poignée et fil de la fenêtre de la loupe, copiés hors du verrou.
-fn fenetre_loupe() -> Option<(HWND, u32)> {
-    verrouiller(&LOUPE).as_ref().map(|f| (f.hwnd, f.fil))
-}
-
-/// Procédure de la fenêtre de la loupe. Ne panique jamais.
-unsafe extern "system" fn procedure_loupe(
-    hwnd: HWND,
-    message: u32,
-    wparam: WPARAM,
-    lparam: LPARAM,
-) -> LRESULT {
-    match message {
-        WM_MOUSEACTIVATE => LRESULT(MA_NOACTIVATE as isize),
-        WM_TIMER if wparam.0 == MINUTERIE_LOUPE => {
-            tour_loupe(hwnd);
-            LRESULT(0)
-        }
-        WM_CACHER_LOUPE => {
-            // Seulement la loupe que l'appelant voulait cacher.
-            if wparam.0 == LOUPE_GENERATION.load(Ordering::SeqCst) {
-                arreter_loupe(hwnd);
-            }
-            LRESULT(0)
-        }
-        // La fenêtre est placée en pixels réels à chaque dessin.
-        WM_DPICHANGED => LRESULT(0),
-        // SAFETY : traitement par défaut de Windows.
-        _ => unsafe { DefWindowProcW(hwnd, message, wparam, lparam) },
-    }
-}
-
-/// Crée la fenêtre de la loupe, cachée, sur ce fil (appelée par `preparer_ecran_fige`). Un
-/// second appel sur le même fil ne fait rien.
-fn preparer_loupe(fil: u32) -> Result<(), String> {
-    {
-        let mut garde = verrouiller(&LOUPE);
-        if let Some(f) = garde.as_ref() {
-            // SAFETY : simple vérification, aucun message envoyé.
-            if unsafe { IsWindow(Some(f.hwnd)) }.as_bool() {
-                return if f.fil == fil {
-                    Ok(())
-                } else {
-                    Err("loupe deja creee sur un autre fil".into())
-                };
-            }
-        }
-        // Fenêtre disparue : sa poignée est oubliée sans rien lui envoyer.
-        if let Some(morte) = garde.take() {
-            std::mem::forget(morte);
-        }
-    }
-    let instance = enregistrer_classe(CLASSE_LOUPE, Some(procedure_loupe))?;
-    // SAFETY : classe inscrite ci-dessus ; fenêtre sans parent, créée sur ce fil.
-    let hwnd = unsafe {
-        CreateWindowExW(
-            WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | WS_EX_TRANSPARENT | WS_EX_LAYERED,
-            CLASSE_LOUPE,
-            w!("BreezyShot"),
-            WS_POPUP,
-            0,
-            0,
-            1,
-            1,
-            None,
-            None,
-            Some(instance),
-            None,
-        )
-    }
-    .map_err(|e| format!("CreateWindowExW de la loupe: {e}"))?;
-    log::info!("loupe fenetre {}", hwnd.0 as isize);
-    if let Err(e) = sans_fondu(hwnd) {
-        log::warn!("loupe: {e}");
-    }
-    if crate::systeme::essai_capturable() {
-        log::info!("loupe exclue des captures: non (essai)");
-    } else {
-        let mut affinite = 0u32;
-        // SAFETY : notre fenêtre ; `affinite` reçoit un DWORD.
-        let exclue = unsafe {
-            let _ = SetWindowDisplayAffinity(hwnd, WDA_EXCLUDEFROMCAPTURE);
-            GetWindowDisplayAffinity(hwnd, &mut affinite).is_ok()
-                && affinite == WDA_EXCLUDEFROMCAPTURE.0
-        };
-        log::info!(
-            "loupe exclue des captures: {}",
-            if exclue { "oui" } else { "non" }
-        );
-    }
-    let ancienne = verrouiller(&LOUPE).replace(FenetreNative { hwnd, fil });
-    drop(ancienne);
-    Ok(())
-}
-
-pub fn loupe_disponible() -> bool {
-    // La fenêtre de la loupe existe (créée par `preparer_ecran_fige`, au démarrage).
-    fenetre_loupe().is_some()
-}
-
-pub fn montrer_loupe() -> Result<(), String> {
-    let (hwnd, fil) = fenetre_loupe().ok_or("loupe non preparee")?;
-    // SAFETY : sans paramètre.
-    if unsafe { GetCurrentThreadId() } != fil {
-        return Err("montrer_loupe appele hors du fil de la loupe".into());
-    }
-    let marque = verrouiller(&IMAGE).montre.is_some();
-    if !marque || !ecran_fige_visible() {
-        return Err("ecran fige non montre".into());
-    }
-    let ecrans = ecrans();
-    if ecrans.is_empty() {
-        return Err("aucun ecran".into());
-    }
-    let pris = DESSIN
-        .try_with(|d| match d.try_borrow_mut() {
-            Ok(mut d) => {
-                *d = Some(Dessin {
-                    ecrans,
-                    pointe: None,
-                    montree: false,
-                    vus: None,
-                    image: None,
-                    couverture: Vec::new(),
-                });
-                true
-            }
-            Err(_) => false,
-        })
-        .unwrap_or(false);
-    if !pris {
-        return Err("loupe occupee".into());
-    }
-    LOUPE_GENERATION.fetch_add(1, Ordering::SeqCst);
-    LOUPE_VOULUE.store(true, Ordering::SeqCst);
-    // SAFETY : notre fenêtre, sur son fil ; la minuterie poste WM_TIMER à sa procédure.
-    if unsafe { SetTimer(Some(hwnd), MINUTERIE_LOUPE, CADENCE_LOUPE_MS, None) } == 0 {
-        arreter_loupe(hwnd);
-        return Err("SetTimer de la loupe a echoue".into());
-    }
-    Ok(())
-}
-
-/// Arrête la minuterie, cache la fenêtre, rend les images. Sur le fil de la loupe.
-fn arreter_loupe(hwnd: HWND) {
-    LOUPE_VOULUE.store(false, Ordering::SeqCst);
-    // SAFETY : notre fenêtre, sur son fil.
-    unsafe {
-        let _ = KillTimer(Some(hwnd), MINUTERIE_LOUPE);
-        let _ = ShowWindow(hwnd, SW_HIDE);
-    }
-    let dessin = DESSIN
-        .try_with(|d| d.try_borrow_mut().ok().and_then(|mut d| d.take()))
-        .ok()
-        .flatten();
-    if dessin.as_ref().is_some_and(|d| d.montree) {
-        log::info!("loupe cachee");
-    }
-    // Les images sont rendues ici, hors de tout emprunt.
-    drop(dessin);
-}
-
-pub fn cacher_loupe() {
-    LOUPE_VOULUE.store(false, Ordering::SeqCst);
-    let Some((hwnd, fil)) = fenetre_loupe() else {
-        return;
-    };
-    // SAFETY : sans paramètre.
-    if unsafe { GetCurrentThreadId() } == fil {
-        arreter_loupe(hwnd);
-    } else {
-        // Ailleurs que sur son fil : cachée tout de suite sans attendre ; la minuterie et
-        // les images sont rendues par le message posté.
-        // SAFETY : notre fenêtre ; deux appels permis depuis n'importe quel fil.
-        unsafe {
-            let _ = ShowWindowAsync(hwnd, SW_HIDE);
-            let generation = LOUPE_GENERATION.load(Ordering::SeqCst);
-            let _ = PostMessageW(Some(hwnd), WM_CACHER_LOUPE, WPARAM(generation), LPARAM(0));
-        }
-    }
-}
-
-/// Détruit la fenêtre de la loupe (avec celle de l'écran figé).
-fn detruire_loupe() {
-    LOUPE_VOULUE.store(false, Ordering::SeqCst);
-    let fenetre = verrouiller(&LOUPE).take();
-    if let Some(f) = fenetre.as_ref() {
-        // SAFETY : sans paramètre.
-        if unsafe { GetCurrentThreadId() } == f.fil {
-            arreter_loupe(f.hwnd);
-        }
-    }
-    // Hors du verrou : `DestroyWindow` envoie des messages.
-    drop(fenetre);
-}
-
-/// Un tour de minuterie : la loupe suit la pointe et reste au-dessus de la sélection.
-fn tour_loupe(hwnd: HWND) {
-    let marque = verrouiller(&IMAGE).montre.is_some();
-    if !LOUPE_VOULUE.load(Ordering::SeqCst) || !marque {
-        // Écran figé caché par un autre chemin : la loupe ne lui survit jamais.
-        arreter_loupe(hwnd);
-        return;
-    }
-    let mut point = POINT::default();
-    // SAFETY : un POINT en sortie.
-    if unsafe { GetCursorPos(&mut point) }.is_err() {
-        // Pointe illisible un instant : on réessaie au tour suivant.
-        return;
-    }
-    let pointe = (point.x, point.y);
-    let resultat = DESSIN
-        .try_with(|d| {
-            let Ok(mut d) = d.try_borrow_mut() else {
-                return Ok(false);
-            };
-            let Some(d) = d.as_mut() else {
-                return Err("loupe sans etat".to_string());
-            };
-            if d.pointe != Some(pointe) {
-                dessiner_loupe(hwnd, d, pointe)?;
-                d.pointe = Some(pointe);
-            }
-            Ok(!std::mem::replace(&mut d.montree, true))
-        })
-        .unwrap_or_else(|_| Err("loupe sans etat (fil en fin de vie)".to_string()));
-    match resultat {
-        Ok(premiere) => {
-            // SAFETY : lectures sur notre fenêtre, sur son fil.
-            let a_replacer = premiere
-                || unsafe { !IsWindowVisible(hwnd).as_bool() }
-                || unsafe { GetWindow(hwnd, GW_HWNDPREV) }.is_ok_and(|h| !h.is_invalid());
-            if !a_replacer {
-                return;
-            }
-            // SAFETY : notre fenêtre, sur son fil ; remise au-dessus de la sélection, sans
-            // activation, montrée au premier tour (ou de nouveau si un masquage posté depuis
-            // un autre fil pour une loupe précédente est arrivé après).
-            let place = unsafe {
-                SetWindowPos(
-                    hwnd,
-                    Some(HWND_TOPMOST),
-                    0,
-                    0,
-                    0,
-                    0,
-                    SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER | SWP_SHOWWINDOW,
-                )
-            };
-            if premiere {
-                match place {
-                    Ok(()) => log::info!("loupe montree"),
-                    Err(e) => log::warn!("loupe impossible: SetWindowPos: {e}"),
-                }
-            }
-        }
-        Err(e) => {
-            log::warn!("loupe impossible: {e}");
-            arreter_loupe(hwnd);
-        }
-    }
-}
-
-/// Dessine la loupe pour `pointe` : les pixels vus lus dans l'image figée (sous le verrou,
-/// sans message), l'image composée (fonction pure), puis la fenêtre posée et peinte d'un
-/// coup (`UpdateLayeredWindow`).
-fn dessiner_loupe(hwnd: HWND, d: &mut Dessin, pointe: (i32, i32)) -> Result<(), String> {
-    let ecran = *loupe::ecran_de(pointe, &d.ecrans).ok_or("aucun ecran")?;
-    let place = loupe::placer(pointe, &ecran);
-    let vus_rect = loupe::source(pointe);
-    if d.vus.is_none() {
-        d.vus = Some(Dib::nouvelle(loupe::PIXELS_VUS, loupe::PIXELS_VUS)?);
-    }
-    let vus = d.vus.as_mut().ok_or("image de la loupe absente")?;
-    // Hors du bureau : noir.
-    vus.octets().fill(0);
-    {
-        let etat = verrouiller(&IMAGE);
-        let photo = etat
-            .photo
-            .as_ref()
-            .filter(|p| etat.montre == Some(p.numero))
-            .ok_or("image de l'ecran fige absente")?;
-        if let Some(commun) = vus_rect.intersection(photo.rect) {
-            // SAFETY : DC valides ; la copie tient dans les deux images (coupée au bureau
-            // et au carré vu).
-            unsafe {
-                BitBlt(
-                    vus.dc.0,
-                    commun.x - vus_rect.x,
-                    commun.y - vus_rect.y,
-                    commun.largeur,
-                    commun.hauteur,
-                    Some(photo.gdi.dc.0),
-                    commun.x - photo.rect.x,
-                    commun.y - photo.rect.y,
-                    SRCCOPY,
-                )
-            }
-            .map_err(|e| format!("BitBlt de la loupe: {e}"))?;
-        }
-    }
-    let cote = place.largeur;
-    if d.image.as_ref().is_none_or(|i| i.largeur != cote) {
-        d.image = None;
-        d.image = Some(Dib::nouvelle(cote, cote)?);
-        d.couverture = loupe::couverture_ronde(cote);
-    }
-    let image = d.image.as_mut().ok_or("image de la loupe absente")?;
-    // Composée directement dans les octets de la section DIB, sans copie.
-    if !loupe::composer_dans(vus.octets(), ecran.echelle, &d.couverture, image.octets()) {
-        return Err("image de la loupe de mauvaise taille".into());
-    }
-    let position = POINT {
-        x: place.x,
-        y: place.y,
-    };
-    let taille = SIZE { cx: cote, cy: cote };
-    let origine = POINT::default();
-    let melange = BLENDFUNCTION {
-        BlendOp: AC_SRC_OVER as u8,
-        BlendFlags: 0,
-        SourceConstantAlpha: 255,
-        AlphaFormat: AC_SRC_ALPHA as u8,
-    };
-    // SAFETY : notre fenêtre en calque, sur son fil ; l'image a la taille donnée et sa
-    // couleur est prémultipliée (`loupe::composer`).
-    unsafe {
-        UpdateLayeredWindow(
-            hwnd,
-            None,
-            Some(&position),
-            Some(&taille),
-            Some(image.dc.0),
-            Some(&origine),
-            COLORREF(0),
-            Some(&melange),
-            ULW_ALPHA,
-        )
-    }
-    .map_err(|e| format!("UpdateLayeredWindow: {e}"))
-}
-
-// ---------------------------------------------------------------------------------------
 // Fil de garde : si le fil de l'écran figé ne répond plus, prévenir l'Application.
 
 /// Cadence des vérifications pendant que l'écran figé est montré.
@@ -1786,7 +1384,7 @@ mod tests {
     use std::sync::Once;
     use std::time::{Duration, Instant};
 
-    use ::windows::Win32::Foundation::COLORREF;
+    use ::windows::Win32::Foundation::{COLORREF, POINT};
     use ::windows::Win32::Graphics::Dwm::{
         DwmFlush, DWMWA_BORDER_COLOR, DWMWA_COLOR_NONE, DWMWCP_DEFAULT, DWMWCP_DONOTROUND,
         DWMWCP_ROUNDSMALL, DWM_WINDOW_CORNER_PREFERENCE,
@@ -1797,9 +1395,9 @@ mod tests {
         SetProcessDpiAwarenessContext, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2,
     };
     use ::windows::Win32::UI::WindowsAndMessaging::{
-        DispatchMessageW, FindWindowW, GetForegroundWindow, PeekMessageW, SendMessageW,
-        SetCursorPos, SetLayeredWindowAttributes, TranslateMessage, LWA_ALPHA, MSG, PM_REMOVE,
-        SWP_NOMOVE, SWP_NOSIZE, SW_SHOWMINNOACTIVE, WINDOW_EX_STYLE, WINDOW_STYLE,
+        DispatchMessageW, FindWindowW, GetCursorPos, GetForegroundWindow, PeekMessageW,
+        SendMessageW, SetCursorPos, SetLayeredWindowAttributes, TranslateMessage, LWA_ALPHA, MSG,
+        PM_REMOVE, SWP_NOMOVE, SWP_NOSIZE, SW_SHOWMINNOACTIVE, WINDOW_EX_STYLE, WINDOW_STYLE,
         WS_OVERLAPPEDWINDOW, WTS_SESSION_UNLOCK,
     };
 
@@ -2625,7 +2223,7 @@ mod tests {
         assert_eq!(verrouiller(&recus).len(), 2);
     }
 
-    // --- Pointeur et loupe (0.4) ---
+    // --- Pointeur (0.4) ---
 
     fn objets_gdi() -> u32 {
         // SAFETY : pseudo-poignée du processus courant.
@@ -2737,111 +2335,5 @@ mod tests {
         println!("objets GDI : avant {avant}, apres 200 pointeurs {apres}");
         assert!(avant > 0, "GetGuiResources a echoue");
         assert!(apres <= avant + 4, "fuite GDI : {avant} -> {apres}");
-    }
-
-    fn rect_fenetre(hwnd: HWND) -> Rect {
-        let mut r = RECT::default();
-        // SAFETY : notre fenêtre ; un RECT en sortie.
-        unsafe { GetWindowRect(hwnd, &mut r) }.unwrap();
-        rect_de(r)
-    }
-
-    #[test]
-    fn loupe_refusee_sans_ecran_fige() {
-        let _s = Seance::ouvrir();
-        preparer_ecran_fige().unwrap();
-        assert!(fenetre_loupe().is_some(), "loupe creee avec l'ecran fige");
-        assert!(montrer_loupe().is_err());
-        cacher_loupe();
-    }
-
-    #[test]
-    fn loupe_suit_la_pointe_et_se_cache_sans_fuite_gdi() {
-        let _s = Seance::ouvrir();
-        let (_fige, _image) = montrer_un_ecran_fige();
-        let (loupe_hwnd, _) = fenetre_loupe().unwrap();
-        // SAFETY : lecture du style de notre fenêtre.
-        let style = unsafe { GetWindowLongW(loupe_hwnd, GWL_EXSTYLE) } as u32;
-        for attendu in [
-            WS_EX_TOPMOST,
-            WS_EX_TOOLWINDOW,
-            WS_EX_NOACTIVATE,
-            WS_EX_TRANSPARENT,
-            WS_EX_LAYERED,
-        ] {
-            assert_ne!(
-                style & attendu.0,
-                0,
-                "style {style:#x} sans {:#x}",
-                attendu.0
-            );
-        }
-        let visible = || {
-            pomper();
-            // SAFETY : lecture sur notre fenêtre.
-            unsafe { IsWindowVisible(loupe_hwnd) }.as_bool()
-        };
-        assert!(!visible());
-        let e = ecrans();
-        let principal = *e.iter().find(|e| e.principal).unwrap();
-        let milieu = (
-            principal.rect.x + principal.rect.largeur / 2,
-            principal.rect.y + principal.rect.hauteur / 2,
-        );
-        let coin = (
-            principal.rect.x + principal.rect.largeur - 2,
-            principal.rect.y + principal.rect.hauteur - 2,
-        );
-        // SAFETY : sans tampon.
-        unsafe { SetCursorPos(milieu.0, milieu.1) }.unwrap();
-        montrer_loupe().unwrap();
-        assert!(attendre(visible), "loupe jamais montree");
-        assert!(attendre(|| {
-            pomper();
-            rect_fenetre(loupe_hwnd) == loupe::placer(milieu, &principal)
-        }));
-        // Près du coin bas droit : de l'autre côté, dans l'écran.
-        // SAFETY : sans tampon.
-        unsafe { SetCursorPos(coin.0, coin.1) }.unwrap();
-        assert!(attendre(|| {
-            pomper();
-            rect_fenetre(loupe_hwnd) == loupe::placer(coin, &principal)
-        }));
-        assert!(principal.rect.englobe(rect_fenetre(loupe_hwnd)));
-        cacher_loupe();
-        assert!(!visible());
-        // L'écran figé caché par un autre chemin : la loupe ne lui survit pas.
-        montrer_loupe().unwrap();
-        assert!(attendre(visible));
-        retirer_marque();
-        assert!(attendre(|| !visible()));
-        cacher_ecran_fige();
-
-        let (_fige, _image) = montrer_un_ecran_fige();
-        for _ in 0..3 {
-            montrer_loupe().unwrap();
-            assert!(attendre(visible));
-            cacher_loupe();
-        }
-        let avant = objets_gdi();
-        for i in 0..200 {
-            montrer_loupe().unwrap();
-            assert!(attendre(visible), "tour {i}");
-            if i % 2 == 0 {
-                cacher_loupe();
-            } else {
-                // Depuis un autre fil : la demande est postée.
-                std::thread::spawn(cacher_loupe).join().unwrap();
-                assert!(attendre(|| !visible()));
-                pomper();
-            }
-        }
-        pomper();
-        let apres = objets_gdi();
-        println!("objets GDI : avant {avant}, apres 200 loupes {apres}");
-        assert!(avant > 0, "GetGuiResources a echoue");
-        assert!(apres <= avant + 4, "fuite GDI : {avant} -> {apres}");
-        // SAFETY : sans tampon.
-        unsafe { SetCursorPos(milieu.0, milieu.1) }.unwrap();
     }
 }

@@ -19,8 +19,6 @@ mod plateforme;
 #[path = "autre.rs"]
 mod plateforme;
 
-pub mod loupe;
-
 /// Rectangle en pixels réels. `x`, `y` : coin haut gauche ; le bord droit et le bord bas
 /// sont exclus (`x + largeur` est le premier pixel dehors).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -290,26 +288,6 @@ pub struct Pointeur {
 /// ni titre. N'importe quel fil. Hors Windows : `Ok(None)`.
 pub fn lire_pointeur() -> Result<Option<Pointeur>, String> {
     plateforme::lire_pointeur()
-}
-
-/// Vrai si la loupe de la sélection de zone existe sur ce système (Windows).
-pub fn loupe_disponible() -> bool {
-    plateforme::loupe_disponible()
-}
-
-/// Montre la loupe au-dessus de la sélection de zone. Fil principal (celui de
-/// `preparer_ecran_fige`, qui crée la fenêtre de la loupe, cachée), écran figé montré,
-/// sinon erreur. Ne dessine rien tout de suite : arme une minuterie de 16 ms dont le premier
-/// tour dessine et montre la loupe (`loupe montree`), puis la fait suivre la pointe.
-pub fn montrer_loupe() -> Result<(), String> {
-    plateforme::montrer_loupe()
-}
-
-/// Cache la loupe (`loupe cachee` si elle était montrée) et rend ses images. Sûr à tout
-/// moment, de partout : hors du fil principal, la demande est postée. `cacher_ecran_fige`
-/// l'appelle, et la loupe se cache seule si l'écran figé n'est plus montré.
-pub fn cacher_loupe() {
-    plateforme::cacher_loupe()
 }
 
 /// Valeurs de `CURSORINFO.flags` (winuser.h), recopiées pour la règle pure ; un test

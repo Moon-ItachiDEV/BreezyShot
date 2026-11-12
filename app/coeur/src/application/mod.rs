@@ -1468,7 +1468,7 @@ fn capturer_derniere_zone(app: &AppHandle, recu_a: Instant, bandeau_cache: bool)
 }
 
 /// La photo prise, en Gel (zone, fenêtre, repli de la dernière zone) : écran figé, (en
-/// mode fenêtre, la liste des fenêtres), sélection, Échap réservé, loupe si voulue. Toute
+/// mode fenêtre, la liste des fenêtres), sélection, Échap réservé. Toute
 /// erreur après `montrer_ecran_fige` cache tout (garde) et revient au Repos.
 fn montrer_selection(app: &AppHandle, recu_a: Instant, mode: Mode, gel_pris: capture::Gel) {
     // 4. L'écran figé. La garde vit dès maintenant : toute sortie le cache.
@@ -1555,16 +1555,6 @@ fn montrer_selection(app: &AppHandle, recu_a: Instant, mode: Mode, gel_pris: cap
     }
     // 6. Échap global, le temps de la sélection.
     reserver_echap(app);
-    // 7. La loupe (mode zone, réglage allumé), après tout le reste : le chrono `selection
-    // prete` ne change pas. Cachée avec l'écran figé, par tous les chemins.
-    if mode_selection == selection::Mode::Zone
-        && reglages_lus(app).selection.loupe
-        && gel::loupe_disponible()
-    {
-        if let Err(e) = gel::montrer_loupe() {
-            log::warn!("loupe impossible: {e}");
-        }
-    }
 }
 
 /// La capture en cours, sous son verrou. Un verrou empoisonné (panique pendant qu'il

@@ -64,13 +64,3 @@ pub fn poignee_ecran_fige() -> Option<isize> {
 pub fn lire_pointeur() -> Result<Option<Pointeur>, String> {
     Ok(None)
 }
-
-pub fn loupe_disponible() -> bool {
-    false
-}
-
-pub fn montrer_loupe() -> Result<(), String> {
-    Err("loupe non disponible sur ce systeme".into())
-}
-
-pub fn cacher_loupe() {}

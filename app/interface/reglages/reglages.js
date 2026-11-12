@@ -155,7 +155,6 @@ function afficher(v) {
     const premier = $$('[role="tab"]').find((o) => !o.hidden);
     if (premier) montrerRubrique(premier.dataset.rubrique);
   }
-  poserInterrupteur("loupe", v.capture.loupe);
   poserInterrupteur("pointeur", v.capture.pointeur);
   poserSegments("retardateur", v.retardateurs, texteRetardateur);
   poserChoix("retardateur", v.capture.retardateur_s);
@@ -437,9 +436,9 @@ if (tauri?.event?.listen) {
   });
 } else {
   afficher({
-    lignes: ["retardateur", "loupe", "pointeur", "copier", "vignette", "vignette_duree",
+    lignes: ["retardateur", "pointeur", "copier", "vignette", "vignette_duree",
       "vignette_coin", "dossier", "enregistrer", "modele_nom", "theme", "demarrage", "version"],
-    capture: { retardateur_s: 0, loupe: false, pointeur: false },
+    capture: { retardateur_s: 0, pointeur: false },
     retardateurs: [0, 3, 5, 10],
     copier: true,
     enregistrer: false,

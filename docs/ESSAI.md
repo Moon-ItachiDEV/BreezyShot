@@ -13,8 +13,8 @@ Enregistrer dans Images › BreezyShot : bouton « Enregistrer » de la vignette
 
 Échap ou clic droit annule. Pour quitter : clic droit sur l'icône, près de l'horloge.
 
-Réglages › Capture : retardateur (3, 5 ou 10 s ; Échap ou la croix l'annule), loupe pendant la
-sélection, Inclure le pointeur dans l'image.
+Réglages › Capture : retardateur (3, 5 ou 10 s ; Échap ou la croix l'annule), Inclure le
+pointeur dans l'image.
 
 Réglages : clic droit sur l'icône, « Réglages » : copie, dossier, nom des fichiers, raccourcis (cliquer puis taper le nouveau), thème, lancement au démarrage de Windows. Tout s'applique tout de suite.
 

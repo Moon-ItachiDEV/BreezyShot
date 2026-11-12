@@ -2,7 +2,6 @@
   "vue": {
     "lignes": [
       "retardateur",
-      "loupe",
       "pointeur",
       "copier",
       "vignette",
@@ -17,7 +16,6 @@
     ],
     "capture": {
       "retardateur_s": 0,
-      "loupe": false,
       "pointeur": false
     },
     "retardateurs": [

@@ -206,7 +206,6 @@ fn vue(app: &AppHandle) -> VueReglages {
     let contexte = Contexte {
         vignette_construite: VIGNETTE_CONSTRUITE,
         capture_disponible: gel::disponible(),
-        loupe_disponible: gel::loupe_disponible(),
         actions: &ACTIONS_CONSTRUITES,
         bilan: &bilan,
         defaut: &defaut,

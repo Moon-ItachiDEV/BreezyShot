@@ -33,9 +33,6 @@ const VUE = {
 };
 // Sans Gel (autre système) ni vignette : aucune ligne de la rubrique Capture.
 const SANS_VIGNETTE = { ...VUE, lignes: ['copier', 'dossier', 'modele_nom', 'theme', 'demarrage', 'version'] };
-// La vue réelle est celle de Windows, loupe comprise ; sans loupe (`gel::loupe_disponible`
-// faux), le cœur retire seulement cette ligne.
-const SANS_LOUPE = { ...VUE, lignes: VUE.lignes.filter(l => l !== 'loupe') };
 
 (async () => {
   await new Promise(ok => serveur.listen(0, ok));
@@ -317,7 +314,7 @@ const SANS_LOUPE = { ...VUE, lignes: VUE.lignes.filter(l => l !== 'loupe') };
     await p.context().close();
   }
 
-  // 10. Rubrique Capture : premier onglet, ouvert au départ ; retardateur, loupe, pointeur.
+  // 10. Rubrique Capture : premier onglet, ouvert au départ ; retardateur, pointeur.
   {
     const p = await page();
     const onglets = await p.$$eval('[role="tab"]', os => os.filter(o => !o.hidden).map(o => [o.textContent.trim(), o.getAttribute('aria-selected')]));
@@ -326,14 +323,14 @@ const SANS_LOUPE = { ...VUE, lignes: VUE.lignes.filter(l => l !== 'loupe') };
     const sections = await p.$$eval('section[role="tabpanel"]', ss => ss.filter(s => !s.hidden).map(s => s.dataset.rubrique));
     verifier(JSON.stringify(sections) === '["capture"]', '10 seule la rubrique Capture est montrée', JSON.stringify(sections));
     const lignes = await p.$$eval('[data-rubrique="capture"] [data-reglage]', ls => ls.filter(l => !l.hidden && l.offsetParent).map(l => l.dataset.reglage));
-    verifier(JSON.stringify(lignes) === '["retardateur","loupe","pointeur"]', '10 trois lignes d’après la vue, dans l’ordre', JSON.stringify(lignes));
+    verifier(JSON.stringify(lignes) === '["retardateur","pointeur"]', '10 deux lignes d’après la vue, dans l’ordre', JSON.stringify(lignes));
     const libelles = await p.$$eval('[data-rubrique="capture"] .ligne .libelle', ls => ls.map(l => l.textContent));
-    verifier(JSON.stringify(libelles) === JSON.stringify(['Retardateur', 'Loupe', 'Inclure le pointeur']), '10 libellés du design', JSON.stringify(libelles));
+    verifier(JSON.stringify(libelles) === JSON.stringify(['Retardateur', 'Inclure le pointeur']), '10 libellés du design', JSON.stringify(libelles));
     const segments = () => p.$$eval('[data-controle="retardateur"] [role="radio"]', bs => bs.map(b => [b.textContent, b.getAttribute('aria-checked')]));
     verifier(JSON.stringify(await segments()) === JSON.stringify([['Aucun', 'true'], ['3 s', 'false'], ['5 s', 'false'], ['10 s', 'false']]),
       '10 segments de vue.retardateurs, « Aucun » coché', JSON.stringify(await segments()));
     const inter = await p.$$eval('[data-rubrique="capture"] [role="switch"]', bs => bs.map(b => [b.dataset.controle, b.getAttribute('aria-checked')]));
-    verifier(JSON.stringify(inter) === JSON.stringify([['loupe', 'false'], ['pointeur', 'false']]), '10 loupe et pointeur éteints d’après la vue', JSON.stringify(inter));
+    verifier(JSON.stringify(inter) === JSON.stringify([['pointeur', 'false']]), '10 pointeur éteint d’après la vue', JSON.stringify(inter));
     await vider(p);
     await p.getByRole('radio', { name: '5 s' }).click(); await p.waitForTimeout(50);
     verifier(JSON.stringify((await dernier(p, 'reglages_changer'))?.[1]) === JSON.stringify({ changement: { cle: 'retardateur', valeur: 5 } }), '10 « 5 s » → retardateur 5 (un nombre)');
@@ -358,12 +355,12 @@ const SANS_LOUPE = { ...VUE, lignes: VUE.lignes.filter(l => l !== 'loupe') };
     verifier(JSON.stringify([droite, gauche]) === JSON.stringify([{ changement: { cle: 'retardateur', valeur: 3 } }, { changement: { cle: 'retardateur', valeur: 10 } }]),
       '10 retardateur 7 : flèche droite → 3, flèche gauche → 10', JSON.stringify([droite, gauche]));
     await p.evaluate(() => { __vue = window.__vueAvant7; });
-    await p.evaluate(() => __emettre('reglages:etat', { ...__vue, capture: { retardateur_s: 10, loupe: true, pointeur: true } })); await p.waitForTimeout(50);
+    await p.evaluate(() => __emettre('reglages:etat', { ...__vue, capture: { retardateur_s: 10, pointeur: true } })); await p.waitForTimeout(50);
     const allume = [await segments(), await p.$$eval('[data-rubrique="capture"] [role="switch"]', bs => bs.map(b => b.getAttribute('aria-checked')))];
-    verifier(allume[0][3][1] === 'true' && JSON.stringify(allume[1]) === '["true","true"]', '10 vue poussée : « 10 s », loupe et pointeur allumés', JSON.stringify(allume));
+    verifier(allume[0][3][1] === 'true' && JSON.stringify(allume[1]) === '["true"]', '10 vue poussée : « 10 s », pointeur allumé', JSON.stringify(allume));
     await p.evaluate(() => __emettre('reglages:etat', __vue)); await p.waitForTimeout(50);
     // Interrupteurs : bons appels ; refusés (sans texte), la vue les remet éteints.
-    for (const [nom, cle] of [['Loupe', 'loupe'], ['Inclure le pointeur', 'pointeur']]) {
+    for (const [nom, cle] of [['Inclure le pointeur', 'pointeur']]) {
       await vider(p);
       await p.evaluate((l) => { window.__refus = { ligne: l, texte: '' }; }, cle);
       await p.getByRole('switch', { name: nom }).click(); await p.waitForTimeout(50);
@@ -404,13 +401,6 @@ const SANS_LOUPE = { ...VUE, lignes: VUE.lignes.filter(l => l !== 'loupe') };
     const d3 = await ouvert();
     verifier(JSON.stringify([g3, d3]) === JSON.stringify([['general', 'general', 'general'], ['apres', 'apres', 'apres']]),
       '10 Capture cachée : les flèches la sautent (Après ↔ Général)', JSON.stringify([g3, d3]));
-    await p.context().close();
-  }
-  {
-    const p = await page({ vue: SANS_LOUPE });
-    const lignes = await p.$$eval('[data-rubrique="capture"] [data-reglage]', ls => ls.filter(l => !l.hidden).map(l => l.dataset.reglage));
-    const ouvert = await p.$eval('[role="tab"][aria-selected="true"]', o => o.dataset.rubrique);
-    verifier(JSON.stringify(lignes) === '["retardateur","pointeur"]' && ouvert === 'capture', '10 sans loupe : retardateur et pointeur, Capture ouverte', JSON.stringify([lignes, ouvert]));
     await p.context().close();
   }
   {

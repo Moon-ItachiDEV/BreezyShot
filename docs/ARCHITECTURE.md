@@ -46,8 +46,8 @@ app/
       systeme/              tous les gestes propres à un système : mod.rs (façade commune),
                             windows.rs, autre.rs (Linux pour le développement, macos.rs ensuite),
                             composition.rs (attendre le compositeur),
-                            gel/ (photo du bureau, écran figé et loupe natifs : mod.rs,
-                            windows.rs, autre.rs, loupe.rs),
+                            gel/ (photo du bureau, écran figé natif, pointeur : mod.rs,
+                            windows.rs, autre.rs),
                             presse_papiers/ (image avec transparence : format
                             « PNG » puis CF_DIB sur blanc ; mod.rs, windows.rs, autre.rs),
                             glisser/ (glisser-déposer d'un fichier, étape 9),
@@ -456,7 +456,7 @@ l'image figée : aucune seconde photo, aucun appel à la fenêtre capturée. Sé
 mode fenetre fenetres <n>`, `selection fin <id> fenetre`, `fenetre choisie <x>,<y> <l>x<h>
 rayon <r> coins <hg><hd><bg><bd>` (quatre chiffres 0 ou 1), puis les lignes de §3.6.
 
-### 3.9 Retardateur, dernière zone, pointeur et loupe (0.4)
+### 3.9 Retardateur, dernière zone et pointeur (0.4)
 
 Décisions pures dans `application/decompte.rs` (retardateur) et `application/zone.rs`
 (dernière zone) ; câblage dans `application/mod.rs`.
@@ -489,19 +489,17 @@ d'échelle, qui contient la zone → découpe immédiate, rien n'est montré
 (`PhotoPrise(DerniereZone)`, `decouper_sans_selection` commun avec le plein écran) ; sinon
 la sélection de zone s'ouvre sur la même photo (`PhotoPrise(Zone)`), sans message.
 
-**Pointeur et loupe (côté Application).** Le pointeur est lu par
+**Pointeur (côté Application).** Le pointeur est lu par
 `capture::figer(reglages.capture.pointeur)` et posé dans les pixels découpés (zone, fenêtre
-avant l'arrondi, écran, dernière zone) ; le journal reçoit `capture::ligne_pose(pose)`. La
-loupe est montrée après la réservation d'Échap, en mode zone, réglage `selection.loupe`
-allumé et `gel::loupe_disponible()` ; elle est cachée avec l'écran figé (§8).
+avant l'arrondi, écran, dernière zone) ; le journal reçoit `capture::ligne_pose(pose)`.
 
 **Journal** (contrat de l'essai 10) : `decompte <n> debut <s> s <mode>`, `decompte <n> sans
 affichage`, `decompte <n> fini en <ms> ms`, `decompte <n>: fin perimee ignoree`,
 `decompte <n> annule (echap|croix|session|arret)`,
 `decompte impossible (<e>): capture tout de suite`, `derniere zone <x>,<y> <l>x<h>`,
 `derniere zone: aucune, selection`, `derniere zone: ecran change, selection`,
-`derniere zone retenue <x>,<y> <l>x<h>`, `pointeur pose`, `pointeur hors zone`,
-`loupe impossible: <e>`. Ne doivent jamais paraître : `decompte <n> encore range: remplace`,
+`derniere zone retenue <x>,<y> <l>x<h>`, `pointeur pose`, `pointeur hors zone`. Ne doivent
+jamais paraître : `decompte <n> encore range: remplace`,
 `decompte <n>: fin refusee par la table`. Lignes existantes qui reçoivent la nouvelle action
 sans changer de forme : `raccourci derniere_zone: …`, `raccourci presse: derniere_zone`,
 `menu: capturer derniere_zone`, `--capturer recu: derniere_zone`.
@@ -545,7 +543,9 @@ Module pur : il reçoit le dossier où écrire, ne connaît ni Tauri ni les autr
 - `capture` (version 3) : `retardateur_s` vaut 0 (aucun) ou 1 à 10 s entières
   (`RETARDATEUR_MAX_S`) ; la page propose 0, 3, 5, 10 ; une autre valeur valide (7) reste
   telle quelle ; invalide (11, -1, `"3"`, 2,5) → 0 avec un avertissement. `pointeur` :
-  booléen, le pointeur dessiné dans l'image. `selection.loupe` ne bouge pas.
+  booléen, le pointeur dessiné dans l'image. `selection.loupe` existait en 0.3 : il est
+  toujours lu et réécrit tel quel pour ne casser aucun fichier, mais n'a aucun effet et
+  n'est montré nulle part.
 - `dossier_enregistrement: null` = Images › BreezyShot. `coin` : `bas_gauche`, `bas_droite`,
   `haut_gauche`, `haut_droite`. `animations` : `systeme`, `normales`, `reduites`.
   `theme` : `systeme`, `clair`, `sombre`.
@@ -846,15 +846,13 @@ Module pur : il reçoit le dossier où écrire, ne connaît ni Tauri ni les autr
 - **Rubrique Capture (0.4).** Premier onglet, ouvert au départ ; si elle est cachée, le
   premier onglet visible s'ouvre. Lignes : `retardateur` (segments rendus depuis
   `vue.retardateurs = [0, 3, 5, 10]`, « Aucun » pour 0 ; une valeur du fichier hors de la
-  liste, 7, s'affiche sans segment coché et reste telle quelle), `loupe` (interrupteur écrit
-  dans `selection.loupe`) et `pointeur` (« Inclure le pointeur », `capture.pointeur`).
-  `lignes_montrees(vignette_construite, capture_disponible, loupe_disponible)` (trois
-  arguments, écart au §9.2 du contrat, accepté) les met en tête quand `gel::disponible()` est
-  vrai, et la loupe seulement si `gel::loupe_disponible()` l'est aussi ; sans elles, la
-  rubrique se cache. Changements : `retardateur` (u32 ; au-delà de `RETARDATEUR_MAX_S`, refus
-  sans texte, code `invalide`), `loupe` (bool), `pointeur` (bool). Ils prennent effet à la
-  capture suivante, qui relit les réglages en mémoire.
-  `VueReglages.capture = { retardateur_s, loupe, pointeur }`. Aucune ligne Barre, Format ou
+  liste, 7, s'affiche sans segment coché et reste telle quelle) et `pointeur` (« Inclure le
+  pointeur », `capture.pointeur`). `lignes_montrees(vignette_construite, capture_disponible)`
+  les met en tête quand `gel::disponible()` est vrai ; sans elles, la rubrique se cache.
+  Changements : `retardateur` (u32 ; au-delà de `RETARDATEUR_MAX_S`, refus sans texte, code
+  `invalide`), `pointeur` (bool). Ils prennent effet à la capture suivante, qui relit les
+  réglages en mémoire. `VueReglages.capture = { retardateur_s, pointeur }`. Aucune ligne
+  Barre, Format ou
   Mise à jour. Raccourcis : quatre lignes, « Refaire la dernière zone » en quatrième.
 - **Application immédiate** : chaque changement est validé (`reglages::valider`), appliqué,
   écrit. Si l'écriture échoue, il reste appliqué pour la session et l'alerte « Réglages non
@@ -909,7 +907,7 @@ Module pur : il reçoit le dossier où écrire, ne connaît ni Tauri ni les autr
   `reglages fermes`, `demarrage avec le systeme: actif|inactif|desactive par windows|indisponible`,
   `demarrage avec le systeme: echec (<erreur>)`, `reglages relus: <code du constat>`,
   `reglage change: <ligne> <valeur>` (`reglage change: modele_nom`, `reglage change: dossier`
-  sans valeur ; depuis la 0.4 `retardateur <n>`, `loupe oui|non`, `pointeur oui|non`),
+  sans valeur ; depuis la 0.4 `retardateur <n>`, `pointeur oui|non`),
   `reglage refuse: <ligne> (<code>)` (`reglage refuse: retardateur (invalide)`), `reglages ecrits`,
   `reglages non ecrits: <code>`, `reglages relus: changes exterieurs`,
   `theme interface: systeme|clair|sombre`, `demarrage avec le systeme ecrit: oui|non`,
@@ -934,13 +932,13 @@ Module pur : il reçoit le dossier où écrire, ne connaît ni Tauri ni les autr
   `vue_de_l_essai_de_page_a_jour` échoue si ce fichier n'est plus à jour ;
   `BREEZYSHOT_ECRIRE_VUE=1` le réécrit). Seuls les raccourcis y sont remplacés. Point 10
   (0.4) : rubrique Capture en premier et ouverte, seule montrée quand la vue n'a qu'elle ;
-  trois lignes d'après `vue.lignes` (« Retardateur », « Loupe », « Inclure le pointeur ») ;
+  deux lignes d'après `vue.lignes` (« Retardateur », « Inclure le pointeur ») ;
   segments de `vue.retardateurs`, « Aucun » coché ; « 5 s » et les flèches →
   `reglages_changer { cle: "retardateur", valeur }` en nombre ; valeur 7 : aucun segment
-  coché, flèches vers 3 et 10 ; vue poussée appliquée ; loupe et pointeur → un appel chacun,
-  refus remis par la vue sans texte ; rubrique vidée : onglet caché, « Après la capture »
-  ouverte ; flèches des onglets qui sautent un onglet caché ; sans loupe : retardateur et
-  pointeur ; quatre raccourcis, « Refaire la dernière zone » en `Ctrl+Maj+4` ; copies
+  coché, flèches vers 3 et 10 ; vue poussée appliquée ; pointeur → un appel, refus remis par
+  la vue sans texte ; rubrique vidée : onglet caché, « Après la capture » ouverte ; flèches
+  des onglets qui sautent un onglet caché ; quatre raccourcis, « Refaire la dernière zone »
+  en `Ctrl+Maj+4` ; copies
   claire et sombre à 680 × 512.
 - `essais/pages/decompte.cjs` (0.4) : le décompte dans `bandeau.html`, sous la CSP de l'app,
   `__TAURI__` simulé, temps avancé par l'horloge de Playwright (aucune attente fixe) :
@@ -965,8 +963,8 @@ Module pur : il reçoit le dossier où écrire, ne connaît ni Tauri ni les autr
   sombre peint, fermeture, arrêt propre. Le cas part de la copie seule (ni vignette, ni
   enregistrement) : la vignette ne gêne aucun autre point. Depuis la 0.4 : (3b) rubrique
   Capture ouverte sans clic d'onglet, retardateur 3 s écrit dans le fichier puis remis à
-  Aucun, Inclure le pointeur allumé puis éteint, `loupe fenetre <hwnd>` exigé au démarrage
-  puis Loupe allumée puis éteinte (lignes `reglage change: …`) ; (5b) « Refaire la dernière
+  Aucun, Inclure le pointeur allumé puis éteint (lignes `reglage change: …`), aucun
+  interrupteur de loupe dans la page ; (5b) « Refaire la dernière
   zone » changée au clavier en `Ctrl + Maj + 9`, fichier, puis le menu de l'icône lu en
   entier par l'API des menus : l'entrée vaut « Refaire la dernière zone<tab>Ctrl + Maj + 9 »,
   menu fermé par Échap.
@@ -1046,23 +1044,19 @@ Module pur : il reçoit le dossier où écrire, ne connaît ni Tauri ni les autr
   décompte : `annule (arret)`, aucune photo. Cas C (vignette allumée) : (10) `vignette
   fermee <id> capture` à l'entrée du décompte. (12) Mémoire et chrono notés. Plusieurs
   écrans, échelles, menu d'une autre application et vrai verrouillage ne s'y vérifient pas.
-- Essai 11 sous Windows (`11-pointeur-loupe.ps1`, 0.4), avec la variable capturable et le
-  témoin : (1) si `GetCursorInfo` dit le pointeur caché, les points du pointeur échouent en
-  le disant. Éteints : (2) `Ctrl + Maj + 2` pointe sur un carré, aucune ligne `pointeur`, le
-  carré de 32 × 32 sous la pointe à la couleur du témoin ; (4) `Ctrl + Maj + 1` : aucune
-  `loupe montree`, `BreezyShotLoupe` jamais visible (guettée 1 s). Allumés : (3) `pointeur
-  pris`, `pointeur pose`, au moins 20 pixels changés dont un presque noir et un presque
-  blanc, témoin intact autour ; (5) loupe visible en moins de 200 ms, styles, au-dessus de
-  la sélection, `WindowFromPoint` en son centre rend la sélection, à 24 px en bas à droite,
-  suit la pointe en moins de 100 ms, passe de l'autre côté près du coin bas droit, case
-  centrale à la couleur du pixel visé (± 6) et case voisine à celle du carré voisin ;
-  glisser : `zone choisie` exacte, `pointeur hors zone`, pixels du témoin ; Échap : `loupe
-  cachee`, fenêtre cachée ; (6) fenêtres stables, arrêt propre. 125, 150 et 200 %,
-  plusieurs écrans, pointeur agrandi ou animé ne s'y vérifient pas.
+- Essai 11 sous Windows (`11-pointeur.ps1`, 0.4), avec la variable capturable et le
+  témoin : (1) un vrai mouvement (`SendInput`), puis MouseKeys si besoin (remis à la fin) ;
+  si `GetCursorInfo` dit toujours le pointeur caché, les points du pointeur échouent en le
+  disant. Éteint : (2) `Ctrl + Maj + 2` pointe sur un carré, aucune ligne `pointeur`, le
+  carré de 32 × 32 sous la pointe à la couleur du témoin. Allumé : (3) `pointeur pris`,
+  `pointeur pose`, au moins 20 pixels changés dont un presque noir et un presque blanc,
+  témoin intact autour ; (4) zone tracée loin de la pointe : `zone choisie` exacte,
+  `pointeur hors zone`, pixels du témoin ; (5) fenêtres stables, arrêt propre. 125, 150 et
+  200 %, plusieurs écrans, pointeur agrandi ou animé ne s'y vérifient pas.
 - `essais/` : un script par étape (`01-socle.ps1`, `02-reglages.ps1`, `03-raccourci.ps1`,
   `04-zone.ps1`, `05-plein-ecran.ps1`, `06-fenetre.ps1`, `07-vignette.ps1`,
   `08-reglages-fenetre.ps1`, `09-installateur.ps1`, `10-confort.ps1`,
-  `11-pointeur-loupe.ps1`), tous les `NN-*.ps1` pris dans l'ordre sans liste écrite,
+  `11-pointeur.ps1`), tous les `NN-*.ps1` pris dans l'ordre sans liste écrite,
   lancés par `essais/lancer.ps1` sur le .exe de release. Chaque essai démarre l'app avec
   `BREEZYSHOT_DOSSIER_ESSAI`, agit (lancer une seconde instance, simuler une touche, abîmer un
   fichier), puis lit le journal et les fichiers. Un essai qui échoue fait échouer GitHub.
@@ -1087,9 +1081,8 @@ web. Donc l'écran figé ne passe jamais par le moteur web.
   `preparer_ecran_fige`, `montrer_ecran_fige`, `cacher_ecran_fige`, `detruire_ecran_fige`,
   `poignee_ecran_fige`, `liberer_image`, `garder_ecran_fige`, `quand_bureau_change`
   (`Changement::Ecrans | SessionVerrouillee`), `surveillance_session` ; depuis la 0.4
-  `Pointeur`, `lire_pointeur`, `loupe_disponible`, `montrer_loupe`, `cacher_loupe`. Hors
-  Windows : réponses neutres (`figer_bureau` dit « non disponible », pas de pointeur, pas
-  de loupe).
+  `Pointeur`, `lire_pointeur`. Hors Windows : réponses neutres (`figer_bureau` dit « non
+  disponible », pas de pointeur).
 - **Une seule image à la fois** : une `ImageFigee` dépassée par une photo plus récente
   refuse de se lire ou de se montrer. `figer_bureau` refuse tant que l'écran figé est
   montré (ou encore visible après un masquage posté) : on ne remplace jamais l'image
@@ -1120,8 +1113,7 @@ web. Donc l'écran figé ne passe jamais par le moteur web.
   GDI ; depuis la 0.4 `pointeur_lu_sans_fuite_gdi` (taille non nulle, point chaud dans
   l'image, 200 lectures sans fuite ; si Windows ne montre pas le pointeur sur la machine, le
   test le dit et ne vérifie que `Ok(None)` et l'absence de fuite : la preuve du pointeur
-  appartient à l'essai 11), `loupe_refusee_sans_ecran_fige`,
-  `loupe_suit_la_pointe_et_se_cache_sans_fuite_gdi`.
+  appartient à l'essai 11).
 - **Pointeur (0.4).** Si le réglage Inclure le pointeur est allumé, `capture::figer(true)` lit
   le pointeur juste après la photo (`gel::lire_pointeur` : `GetCursorInfo`, `GetIconInfo`,
   puis `DrawIconEx` sur noir et sur blanc ; un pointeur animé donne sa première image) et
@@ -1132,31 +1124,10 @@ web. Donc l'écran figé ne passe jamais par le moteur web.
   `Opaque`, `Mele` testé avant l'inversion, `Inverse` seulement si un canal est plus sombre
   sur blanc) ; l'alpha de l'image est gardé. L'Application écrit `pointeur pose` ou
   `pointeur hors zone` (§3.9). Réglage éteint : rien n'est lu, aucune ligne `pointeur`.
-- **Loupe (0.4).** Une fenêtre native `BreezyShotLoupe` (popup en calque, toujours
-  au-dessus, outil, sans activation, traversée par les clics, exclue des captures sauf
-  `BREEZYSHOT_ESSAI_CAPTURABLE=1`). Elle est créée cachée avec l'écran figé
-  (`loupe fenetre <hwnd>`, `loupe exclue des captures: oui|non|non (essai)`) ;
-  `loupe_disponible()` est vrai seulement si cette fenêtre a été créée.
-  `gel::montrer_loupe` (fil principal, écran figé montré, sinon refus) arme une minuterie de
-  16 ms (`CADENCE_LOUPE_MS`). À chaque tour, si la pointe a bougé, elle lit 15 × 15 pixels de
-  l'image figée (`BitBlt` sous le verrou, aucun message), les agrandit
-  (`gel::loupe::composer_dans`, directement dans la section DIB ; la couverture ronde est
-  gardée par côté) et pose la fenêtre à `gel::loupe::placer` (24 px logiques en bas à
-  droite, de l'autre côté près d'un bord, toujours sur l'écran de la pointe) par
-  `UpdateLayeredWindow`. Elle n'est remise au-dessus de la sélection que si elle ne l'est
-  plus. Premier dessin : `loupe montree`. Elle se cache avec l'écran figé, ou seule si
-  l'écran figé n'est plus montré (`loupe cachee`, ses images sont rendues) ; un numéro de
-  génération (`LOUPE_GENERATION`) écarte un masquage périmé posté depuis un autre fil. Toutes
-  ses mesures et couleurs sont les constantes en tête de `systeme/gel/loupe.rs`
-  (`PIXELS_VUS`, `GROSSISSEMENT`, `DECALAGE`, `ANNEAU_CLAIR`, `TRAIT_SOMBRE`,
-  `COULEUR_ANNEAU`, `COULEUR_TRAIT`, `CASE_FILET`, `COULEUR_CASE_CLAIRE`,
-  `COULEUR_CASE_SOMBRE`), à reprendre du dessin à venir (§14 du contrat 0.4). Aucune photo
-  n'est prise pendant qu'elle est montrée. Écart au contrat accepté (§7) : pas de
-  `StretchBlt`, l'agrandissement est fait en Rust pur et testé.
-- Journal (contrat des essais 08 et 11) : `pointeur pris <l>x<h> en <ms> ms`,
-  `pointeur absent (cache|<erreur>)`, `loupe fenetre <hwnd>`,
-  `loupe exclue des captures: oui|non|non (essai)`, `loupe montree`, `loupe cachee`,
-  `loupe impossible: <e>`, `loupe: <e>` (fondu non coupé, sans effet sur la suite).
+- La loupe de la sélection a été écartée à la demande de l'utilisateur (12/11/2026) : elle
+  n'est pas construite.
+- Journal (contrat de l'essai 11) : `pointeur pris <l>x<h> en <ms> ms`,
+  `pointeur absent (cache|<erreur>)`.
 - **Fenêtres** (étape 8) : `fenetres_visibles` (`EnumWindows`, du premier plan vers le
   fond) rend des `FenetreInfo { rect, titre, coins }` ; `rect` est le vrai bord sans
   l'ombre (`DWMWA_EXTENDED_FRAME_BOUNDS`). Règle pure `garder_fenetre` : visible, non
@@ -1191,8 +1162,7 @@ Ce que voit l'utilisateur : tous les écrans figés et assombris ; il glisse, la
 claire, entourée d'un trait fin ; il relâche, tout disparaît d'un coup. Rien d'autre : ni
 viseur, ni taille, ni poignées, ni texte, ni animation d'entrée. Curseur en croix. Maj :
 carré. Espace tenue : la zone se déplace. Échap ou clic droit : annuler. Un clic, ou moins de
-3 pixels réels de côté, n'est pas une zone : la sélection continue. La loupe n'est pas
-construite (le réglage existe, sans effet).
+3 pixels réels de côté, n'est pas une zone : la sélection continue.
 
 - **Une fenêtre Tauri transparente**, préparée au démarrage et cachée, posée juste au-dessus
   de l'écran figé et couvrant tout le bureau virtuel. Elle ne dessine que le voile (jeton
