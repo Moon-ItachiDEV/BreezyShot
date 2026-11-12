@@ -505,11 +505,13 @@ export function installerBarre(ed) {
         row.appendChild(b);
       }
       const autre = el("label", "cl-sw arc");
+      const arc = D.COULEURS.slice(0, 6).map((c) => c[0]);
+      autre.style.setProperty("--arc", `conic-gradient(${[...arc, arc[0]].join(", ")})`);
       autre.dataset.tip = "Autre couleur";
       autre.appendChild(el("i"));
       const champ = el("input");
       champ.type = "color";
-      champ.value = /^#[0-9A-F]{6}$/.test(cc) ? cc.toLowerCase() : "#e5484d";
+      champ.value = (/^#[0-9A-F]{6}$/.test(cc) ? cc : D.COULEURS[0][0]).toLowerCase();
       champ.setAttribute("aria-label", "Autre couleur");
       champ.addEventListener("change", () => {
         regler("couleur", champ.value.toUpperCase());
@@ -651,7 +653,14 @@ export function installerBarre(ed) {
     const h = ed.h;
     $('[data-act="annuler"]').disabled =
       !h || (!ed.modele.peutAnnuler(h) && !ed.outils?.saisieOuverte());
-    $('[data-act="retablir"]').disabled = !h || !ed.modele.peutRetablir(h);
+    $('[data-act="retablir"]').disabled =
+      !h || !ed.modele.peutRetablir(h) || !!ed.outils?.saisieOuverte();
+  }
+  // Annuler et Rétablir ne prennent pas le focus : une saisie ouverte n'est pas validée par
+  // le clic (Annuler l'abandonne, §3.3).
+  for (const b of $$('[data-act="annuler"], [data-act="retablir"]')) {
+    b.addEventListener("pointerdown", (e) => e.preventDefault());
+    b.addEventListener("mousedown", (e) => e.preventDefault());
   }
   // L'onde au clic ; « Copié », « Enregistré » au résultat (§7.2).
   function onde(bouton, e) {
@@ -694,9 +703,11 @@ export function installerBarre(ed) {
       m.textContent = "";
     }, jetonNombre("duree-editeur-message"));
   }
+  // L'onde au clic, et au clavier (au centre du bouton) ; un export à la fois (editeur.js).
   const exporter = (but, e) => {
+    if (ed.exportEnCours()) return;
     const b = $(`[data-act="${but === "copier" ? "copier" : "enregistrer"}"]`);
-    if (but !== "enregistrer_sous" && e !== undefined) onde(b, e);
+    if (but !== "enregistrer_sous") onde(b, e);
     ed.exporter(but);
   };
   ed.actions = {
@@ -996,7 +1007,8 @@ export function installerBarre(ed) {
     }
     const ctl = e.ctrlKey || e.metaKey;
     const k = e.key.toLowerCase();
-    if (e.key === " " && !ctl) {
+    // Espace : déplacer la vue si le focus n'est pas sur un bouton (qu'il activerait).
+    if (e.key === " " && !ctl && !t.closest?.("button, [role='menuitem']")) {
       e.preventDefault();
       ed.outils.espace(true);
       return;
@@ -1005,6 +1017,7 @@ export function installerBarre(ed) {
       if (e.altKey) return;
       if (k === "z" && !e.shiftKey) ed.annuler();
       else if (k === "y" || (k === "z" && e.shiftKey)) ed.retablir();
+      else if (["c", "s", "d"].includes(k) && e.repeat) e.preventDefault();
       else if (k === "c" && !e.shiftKey) ed.actions.copier();
       else if (k === "s") (e.shiftKey ? ed.actions.enregistrerSous : ed.actions.enregistrer)();
       else if (k === "d") ed.outils.dupliquer();

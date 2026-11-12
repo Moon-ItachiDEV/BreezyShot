@@ -69,12 +69,14 @@ const ed = {
 
 // ---------- préférences de l'outil (session, R9) ----------
 
+// Couleurs de contenu : celles de dessin.js, par leur nom.
+const couleurDessin = (nom) => dessin.COULEURS.find((c) => c[1] === nom)[0];
 export const DEFAUTS = {
   outil: "fleche",
   variantes: { fleche: "droite", formes: "rectangle", dessin: "crayon", masquer: "pixeliser" },
   ratio: 0,
-  couleur: "#E5484D",
-  couleurSurligneur: "#FFD43B",
+  couleur: couleurDessin("Rouge"),
+  couleurSurligneur: couleurDessin("Jaune"),
   epaisseur: 1,
   plein: false,
   arrondi: 10,
@@ -123,18 +125,18 @@ ed.annuler = () => {
   if (ed.outils?.annulerSaisie()) return;
   if (!modele.peutAnnuler(ed.h)) return;
   modele.annuler(ed.h);
-  apresChangement(true);
+  apresChangement();
 };
 ed.retablir = () => {
   if (!ed.h || ed.outils?.gesteEnCours() || ed.outils?.saisieOuverte()) return;
   if (!modele.peutRetablir(ed.h)) return;
   modele.retablir(ed.h);
-  apresChangement(true);
+  apresChangement();
 };
 
 let cleMasques = "";
 let cleCadre = "";
-function apresChangement(historique = false) {
+function apresChangement() {
   const doc = ed.h.doc;
   ed.selection = ed.selection.filter((id) => doc.objets.some((o) => o.id === id));
   const c = modele.cadre(doc);
@@ -144,11 +146,30 @@ function apresChangement(historique = false) {
     ed.cadrage = { mode: "ajuster" };
     placer();
     envoyerVue();
+    animerRecadrage();
   }
-  repeindreFond(historique);
+  repeindreFond();
   ed.barre?.synchroniser();
   planifierEtat();
   ed.dessiner();
+}
+
+// Recadrer, Image entière, l'annulation d'un recadrage : la vue arrive de 0.97 et 0.6
+// d'opacité, en ressort ; jamais avec les animations réduites.
+function animerRecadrage() {
+  if ("reduites" in racine.dataset) return;
+  if (matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+  const depart = {
+    transform: `scale(${jetonNombre("editeur-recadrage-echelle")})`,
+    opacity: jetonNombre("editeur-recadrage-opacite"),
+  };
+  const options = {
+    duration: jetonNombre("duree-editeur-recadrage"),
+    easing: jeton("courbe-ressort"),
+  };
+  for (const el of [toile, $("#ombre-image")]) {
+    el.animate([depart, { transform: "none", opacity: 1 }], options);
+  }
 }
 
 // Le fond (base + masques) n'est repeint que si un masque a changé.
@@ -165,20 +186,27 @@ function repeindreFond(force = false) {
 ed.repeindreFond = repeindreFond;
 
 let minuterieEtat = null;
-let dernierEtat = 0;
+let dernierEtat = -Infinity;
 function planifierEtat() {
   if (minuterieEtat) return;
   const attente = Math.max(0, dernierEtat + ETAT_MS - performance.now());
   minuterieEtat = setTimeout(() => {
     minuterieEtat = null;
-    dernierEtat = performance.now();
-    if (!ed.charge) return;
-    appeler("editeur_etat", {
-      id: ed.charge.id,
-      version: ed.h.version,
-      vide: modele.vide(ed.h.doc),
-    }).catch(signaler("editeur_etat"));
+    envoyerEtat();
   }, attente);
+}
+// L'état à jour, sans attendre : avant chaque réponse à `editeur:fermer_demande`, chaque
+// « Copier et fermer » et chaque export (décision du responsable, rapport de A).
+function envoyerEtat() {
+  clearTimeout(minuterieEtat);
+  minuterieEtat = null;
+  dernierEtat = performance.now();
+  if (!ed.charge || !ed.h) return Promise.resolve();
+  return appeler("editeur_etat", {
+    id: ed.charge.id,
+    version: ed.h.version,
+    vide: modele.vide(ed.h.doc),
+  }).catch(signaler("editeur_etat"));
 }
 
 // ---------- toile de la vue ----------
@@ -332,18 +360,32 @@ ed.dessiner = () => {
   if (demande) return;
   demande = requestAnimationFrame(peindre);
 };
+function optionsVue() {
+  // L'objet en cours de tracé ou le texte en saisie (`ajout`), et le texte existant en saisie
+  // (`cacher`) : options de B.
+  const options = {};
+  const ajout = ed.enCours || ed.outils?.texteEnSaisie();
+  if (ajout) options.ajout = ajout;
+  const enEdition = ed.outils?.idEnEdition();
+  if (enEdition) options.cacher = enEdition;
+  return options;
+}
+// La pipette lit un point de la vue peint à part (toile 1 × 1), jamais la toile `vue`.
+const point = document.createElement("canvas");
+point.width = point.height = 1;
+const ctxPoint = point.getContext("2d", { willReadFrequently: true });
+ed.couleurPoint = (x, y) => {
+  const v = { ...ed.vue, x: ed.vue.x - x, y: ed.vue.y - y };
+  dessin.peindreVue(ctxPoint, ed.h.doc, ed.fond, v, [], optionsVue());
+  return ctxPoint.getImageData(0, 0, 1, 1).data;
+};
 function peindre() {
   demande = 0;
   const ctx = ed.ctx;
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.clearRect(0, 0, toile.width, toile.height);
   if (!ed.h || !ed.fond) return;
-  // L'objet en cours de tracé (`ajout`) et le texte en saisie (`cacher`) : options de B.
-  const options = {};
-  if (ed.enCours) options.ajout = ed.enCours;
-  const enEdition = ed.outils?.idEnEdition();
-  if (enEdition) options.cacher = enEdition;
-  dessin.peindreVue(ctx, ed.h.doc, ed.fond, ed.vue, ed.selection, options);
+  dessin.peindreVue(ctx, ed.h.doc, ed.fond, ed.vue, ed.selection, optionsVue());
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   ed.surcouche?.(ctx);
   if (!ed.affiche && ed.charge) {
@@ -438,9 +480,18 @@ function preferencesTexte() {
 }
 
 // Export : l'image composée part en corps brut, les en-têtes disent quoi en faire.
+// Un export à la fois : le drapeau tombe au résultat ou à l'échec de l'appel.
+let exportEnCours = false;
+ed.exportEnCours = () => exportEnCours;
 ed.exporter = async (but) => {
-  if (!ed.charge || !ed.h || !ed.fond) return null;
+  if (!ed.charge || !ed.h || !ed.fond || exportEnCours) return null;
+  exportEnCours = true;
   ed.outils?.validerSaisie();
+  await envoyerEtat();
+  if (!ed.charge || !ed.fond) {
+    exportEnCours = false;
+    return null;
+  }
   const version = ed.h.version;
   const image = dessin.composer(ed.h.doc, ed.fond);
   const rgba = image.rgba;
@@ -457,6 +508,7 @@ ed.exporter = async (but) => {
     ed.exports.set(numero, { but, version });
     return numero;
   } catch (e) {
+    exportEnCours = false;
     console.info("editeur_exporter :", e);
     return null;
   }
@@ -464,6 +516,7 @@ ed.exporter = async (but) => {
 
 function resultat(r) {
   if (!r || !ed.charge || r.id !== ed.charge.id) return;
+  exportEnCours = false;
   const e = ed.exports.get(r.numero);
   ed.exports.delete(r.numero);
   const reussi = r.etat === "fait" || r.etat === "deja_fait";
@@ -471,22 +524,22 @@ function resultat(r) {
   if (reussi) ed.barre?.fait(r.but);
   else if (r.etat === "echec" && r.message) ed.barre?.message(r.message);
   if (r.but === "copier_fermer") {
-    if (reussi) fermer(false, true);
+    if (reussi) fermer(false);
     else ed.barre?.fermerDialogue();
   }
 }
 
 // ---------- fermeture (§4.5) ----------
 
-// `force` : « Ne pas garder » ; `apresCopie` : « Copier et fermer » réussi.
-async function fermer(force = false, apresCopie = false) {
+// `force` : « Ne pas garder ».
+async function fermer(force = false) {
   if (!ed.charge) return;
   ed.outils?.validerSaisie();
+  await envoyerEtat();
+  if (!ed.charge) return;
   const id = ed.charge.id;
   const version = ed.h?.version ?? 0;
   const vide = ed.h ? modele.vide(ed.h.doc) : true;
-  const directe = force || apresCopie || vide || ed.exportee === version;
-  if (directe) relacherToiles();
   let reponse = null;
   try {
     reponse = await appeler("editeur_fermer", {
@@ -503,8 +556,8 @@ async function fermer(force = false, apresCopie = false) {
     ed.barre?.ouvrirDialogue();
     return;
   }
-  // « fermee » peut être suivie d'un `editeur:charger` (capture en attente) : seules les
-  // toiles de CE document sont relâchées.
+  // Toiles relâchées après « fermee » seulement. « fermee » peut être suivie d'un
+  // `editeur:charger` (capture en attente) : seules les toiles de CE document le sont.
   if (ed.charge?.id !== id) return;
   ed.barre?.fermerDialogue();
   if (reponse === "fermee") relacherToiles();
@@ -517,8 +570,9 @@ ed.garder = () => {
 // ---------- démarrage ----------
 
 ed.barre = installerBarre(ed);
-// Lu par l'essai de la page (essais/pages/editeur.cjs) ; rien d'autre ne s'en sert.
-Object.defineProperty(window, "__ed", { value: ed });
+// Lu par l'essai de la page (essais/pages/editeur.cjs), qui pose le drapeau avant le
+// chargement ; rien en production.
+if (window.__essaiEditeur === true) Object.defineProperty(window, "__ed", { value: ed });
 ed.outils = installerOutils(ed);
 
 async function demarrer() {

@@ -19,10 +19,6 @@ const MIN_BOITE = 6; // autre : ≤ 6 px
 const ANGLE = Math.PI / 12; // Maj : 15°
 
 const copie = (o) => JSON.parse(JSON.stringify(o));
-const luminance = (hex) => {
-  const n = parseInt(hex.slice(1), 16);
-  return (0.299 * ((n >> 16) & 255) + 0.587 * ((n >> 8) & 255) + 0.114 * (n & 255)) / 255;
-};
 
 export function installerOutils(ed) {
   const toile = ed.toile;
@@ -131,12 +127,12 @@ export function installerOutils(ed) {
     if (e.button === 2) return;
     if (e.button !== 0 && e.button !== 1) return;
     e.preventDefault();
+    // Une saisie ouverte : le clic ailleurs la valide seulement (lu avant le focus, qui la
+    // validerait aussi).
+    const enEdition = !!edition;
+    if (enEdition) validerSaisie();
     scene.focus({ preventScroll: true });
-    if (!ed.h || !ed.fond) return;
-    if (edition) {
-      validerSaisie();
-      return;
-    }
+    if (enEdition || !ed.h || !ed.fond) return;
     if (ed.barre.menuOuvert() && !espace) ed.barre.fermerMenus();
     toile.setPointerCapture?.(e.pointerId);
     const p = versImage(e);
@@ -189,6 +185,14 @@ export function installerOutils(ed) {
       }
     }
     if (!e.shiftKey) ed.selection = [];
+    if (s !== "selection" && !dansCadre(p)) {
+      // Hors de l'image : rien n'est créé, la sélection seulement est vidée (design). Un
+      // geste commencé dans l'image peut finir dehors.
+      ed.selection = [];
+      ed.barre.synchroniser();
+      ed.dessiner();
+      return;
+    }
     if (s === "selection") {
       geste = {
         mode: "cadre",
@@ -241,6 +245,11 @@ export function installerOutils(ed) {
     }
     ed.barre.tracer(true);
     ed.dessiner();
+  }
+
+  function dansCadre(p) {
+    const k = ed.modele.cadre(ed.h.doc);
+    return p.x >= k.x && p.y >= k.y && p.x <= k.x + k.largeur && p.y <= k.y + k.hauteur;
   }
 
   function mouvement(e) {
@@ -471,6 +480,13 @@ export function installerOutils(ed) {
   });
   window.addEventListener("pointerup", relache);
   window.addEventListener("pointercancel", relache);
+  // Capture perdue ou fenêtre quittée : le geste finit (gardé s'il a une taille).
+  toile.addEventListener("lostpointercapture", () => {
+    if (geste) relache();
+  });
+  window.addEventListener("blur", () => {
+    if (geste) relache();
+  });
   toile.addEventListener("dblclick", (e) => {
     if (!ed.h) return;
     const o = ed.modele.objetSous(ed.h.doc, versImage(e), tolerance(), "texte");
@@ -514,7 +530,7 @@ export function installerOutils(ed) {
     const k = ed.modele.cadre(ed.h.doc);
     if (p.x < k.x || p.y < k.y || p.x >= k.x + k.largeur || p.y >= k.y + k.hauteur) return null;
     if (x < 0 || y < 0 || x >= toile.width || y >= toile.height) return null;
-    const d = ed.ctx.getImageData(x, y, 1, 1).data;
+    const d = ed.couleurPoint(x, y);
     const hex = [d[0], d[1], d[2]].map((v) => v.toString(16).padStart(2, "0")).join("");
     return `#${hex}`.toUpperCase();
   }
@@ -537,7 +553,9 @@ export function installerOutils(ed) {
   }
 
   // ---------- texte en place ----------
-  // La zone de saisie a la place, la police et la boîte du texte dessiné (mesureTexte).
+  // La zone de saisie a la place, la police et la boîte du texte dessiné (mesureTexte). Son
+  // texte est transparent : la vue dessine le texte en saisie (`ajout` de peindreVue), avec
+  // les couleurs de dessin.js ; la zone ne montre que le curseur et la sélection.
   function placerSaisie() {
     if (!edition) return;
     const o = edition.objet;
@@ -551,25 +569,15 @@ export function installerOutils(ed) {
     saisie.style.font = ed.modele.policeTexte({ ...o, taille: t });
     const etiquette = o.style === "etiquette";
     saisie.style.padding = `${m.py * s}px ${m.px * s}px`;
-    saisie.style.width = `${m.largeur * s + (etiquette ? 0 : 8)}px`;
+    const marge = etiquette ? 0 : jetonNombre("editeur-saisie-marge");
+    saisie.style.width = `${m.largeur * s + marge}px`;
     saisie.style.height = `${m.hauteur * s}px`;
-    const clair = luminance(o.couleur) > 0.62;
-    if (etiquette) {
-      saisie.style.background = o.couleur;
-      saisie.style.color = clair ? "#1A1A1A" : "#FFFFFF";
-      saisie.style.borderRadius = `${t * 0.32}px`;
-      saisie.style.textShadow = "none";
-    } else {
-      saisie.style.background = "transparent";
-      saisie.style.color = o.couleur;
-      saisie.style.borderRadius = "";
-      saisie.style.textShadow =
-        o.style === "contour"
-          ? clair
-            ? "0 0 2px #222, 0 0 2px #222"
-            : "0 0 2px #fff, 0 0 2px #fff, 0 0 3px #fff"
-          : "0 1px 3px rgba(0,0,0,.3)";
-    }
+    ed.dessiner();
+  }
+  // Le texte en saisie tel que la vue le dessine (null : rien à dessiner).
+  function texteEnSaisie() {
+    if (!edition || !saisie.value) return null;
+    return { ...edition.objet, texte: saisie.value };
   }
   function ouvrirSaisie(o, existant) {
     ed.selection = [];
@@ -677,6 +685,8 @@ export function installerOutils(ed) {
   // pixels de la toile (mesures d'écran × dpr), couleurs des jetons.
   ed.surcouche = (ctx) => {
     const dpr = ed.vue.dpr;
+    // Une mesure de jeton (px d'écran) en pixels de la toile.
+    const n = (nom) => jetonNombre(nom) * dpr;
     const acc = jeton("accent");
     ctx.save();
     if (geste?.mode === "recadrage") {
@@ -692,7 +702,7 @@ export function installerOutils(ed) {
       ctx.rect(ax, ay, bx - ax, by - ay);
       ctx.fill("evenodd");
       ctx.strokeStyle = jeton("editeur-recadrage-tiers");
-      ctx.lineWidth = dpr;
+      ctx.lineWidth = n("editeur-trait");
       for (let i = 1; i < 3; i++) {
         ctx.beginPath();
         ctx.moveTo(ax + ((bx - ax) * i) / 3, ay);
@@ -702,17 +712,20 @@ export function installerOutils(ed) {
         ctx.stroke();
       }
       ctx.strokeStyle = jeton("editeur-recadrage-bord");
-      ctx.lineWidth = 1.5 * dpr;
+      ctx.lineWidth = n("editeur-recadrage-trait");
       ctx.strokeRect(ax, ay, bx - ax, by - ay);
       const texte = `${Math.round(Math.abs(g.x2 - g.x1))} × ${Math.round(Math.abs(g.y2 - g.y1))}`;
-      ctx.font = `600 ${11 * dpr}px ${ed.modele.POLICE}`;
-      const lw = ctx.measureText(texte).width + 12 * dpr;
-      const hh = 18 * dpr;
-      let ey = by + 8 * dpr;
-      if (ey + hh + 2 * dpr > ed.toile.height) ey = by - 26 * dpr;
+      const graisse = jetonNombre("editeur-etiquette-graisse");
+      ctx.font = `${graisse} ${n("editeur-etiquette-police")}px ${ed.modele.POLICE}`;
+      const lw = ctx.measureText(texte).width + n("editeur-etiquette-marge");
+      const hh = n("editeur-etiquette-hauteur");
+      let ey = by + n("editeur-etiquette-ecart");
+      if (ey + hh + n("editeur-etiquette-bord") > ed.toile.height) {
+        ey = by - n("editeur-etiquette-dessus");
+      }
       const ex = (ax + bx) / 2 - lw / 2;
       ctx.beginPath();
-      ctx.roundRect(ex, ey, lw, hh, 5 * dpr);
+      ctx.roundRect(ex, ey, lw, hh, n("editeur-etiquette-rayon"));
       ctx.fillStyle = jeton("editeur-etiquette-fond");
       ctx.fill();
       ctx.fillStyle = jeton("editeur-etiquette-texte");
@@ -725,43 +738,43 @@ export function installerOutils(ed) {
       const [ax, ay] = versToile(Math.min(g.x0, g.x1), Math.min(g.y0, g.y1));
       const [bx, by] = versToile(Math.max(g.x0, g.x1), Math.max(g.y0, g.y1));
       ctx.fillStyle = acc;
-      ctx.globalAlpha = 0.1;
+      ctx.globalAlpha = jetonNombre("editeur-cadre-opacite");
       ctx.fillRect(ax, ay, bx - ax, by - ay);
-      ctx.globalAlpha = 0.9;
+      ctx.globalAlpha = jetonNombre("editeur-cadre-opacite-trait");
       ctx.strokeStyle = acc;
-      ctx.lineWidth = dpr;
+      ctx.lineWidth = n("editeur-trait");
       ctx.strokeRect(Math.round(ax) + 0.5, Math.round(ay) + 0.5, bx - ax, by - ay);
       ctx.globalAlpha = 1;
     }
     if (!edition && sorte() !== "recadrer" && ed.selection.length === 1) {
       const o = ed.objet(ed.selection[0]);
-      const rayon = jetonNombre("editeur-poignee-rayon") * dpr;
+      const rayon = n("editeur-poignee-rayon");
       for (const [x, y, nom] of o ? ed.modele.poignees(o) : []) {
         const [px, py] = versToile(x, y);
         const milieu = nom === "pc";
         ctx.beginPath();
-        ctx.arc(px, py, milieu ? rayon - 0.5 * dpr : rayon, 0, 2 * Math.PI);
+        ctx.arc(px, py, milieu ? rayon - n("editeur-poignee-retrait") : rayon, 0, 2 * Math.PI);
         ctx.shadowColor = jeton("editeur-ombre-poignee");
-        ctx.shadowBlur = 3 * dpr;
+        ctx.shadowBlur = n("editeur-poignee-ombre");
         ctx.fillStyle = milieu ? acc : jeton("editeur-poignee");
         ctx.fill();
         ctx.shadowColor = "transparent";
-        ctx.lineWidth = 1.5 * dpr;
+        ctx.lineWidth = n("editeur-poignee-trait");
         ctx.strokeStyle = milieu ? jeton("editeur-poignee") : acc;
         ctx.stroke();
       }
     }
     if (pipette && survolPipette) {
       const d = jetonNombre("editeur-pipette-decalage");
-      const r = jetonNombre("editeur-pipette-rayon") * dpr;
+      const r = n("editeur-pipette-rayon");
       ctx.beginPath();
       ctx.arc((survolPipette.x + d) * dpr, (survolPipette.y - d) * dpr, r, 0, 2 * Math.PI);
       ctx.fillStyle = survolPipette.c;
       ctx.shadowColor = jeton("editeur-ombre-pipette");
-      ctx.shadowBlur = 6 * dpr;
+      ctx.shadowBlur = n("editeur-pipette-ombre");
       ctx.fill();
       ctx.shadowColor = "transparent";
-      ctx.lineWidth = 2.5 * dpr;
+      ctx.lineWidth = n("editeur-pipette-trait");
       ctx.strokeStyle = jeton("editeur-recadrage-bord");
       ctx.stroke();
     }
@@ -775,6 +788,7 @@ export function installerOutils(ed) {
     // Un geste en cours (bouton enfoncé) : ni annuler ni rétablir.
     gesteEnCours: () => !!geste,
     idEnEdition: () => (edition?.existant ? edition.objet.id : null),
+    texteEnSaisie,
     placerSaisie,
     pipette: () => pipette,
     basculerPipette,

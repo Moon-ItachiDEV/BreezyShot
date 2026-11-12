@@ -248,6 +248,7 @@ function serveur(doubles) {
 // Le cœur simulé : `__appels` (commande, arguments, en-têtes), `__exports` (corps gardés),
 // `__emettre(nom, charge)`. L'image : octets connus, d'après une graine.
 function simulerCoeur({ charge, graine, alpha, reponseFermer }) {
+  window.__essaiEditeur = true;
   window.__appels = [];
   window.__exports = [];
   window.__ecouteurs = {};
@@ -365,6 +366,22 @@ const CHARGE = {
   const modele = (p, nom) =>
     p.evaluate((n) => (window.__modele || []).filter((a) => a[0] === n), nom);
   const docu = (p) => p.evaluate(() => window.__ed.h.doc);
+  // Deux images d'animation : la page a peint ce que l'événement a changé.
+  const uneImage = (p) =>
+    p.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
+  // Attend un appel au cœur dont les champs valent `egal` ; jamais une durée fixe. Pas
+  // d'appel dans les 3 s : la vérification qui suit échoue.
+  const attendreAppel = (p, nom, egal = {}) =>
+    p
+      .waitForFunction(
+        ([n, e]) =>
+          __appels.some(
+            (a) => a[0] === n && Object.entries(e).every(([k, v]) => a[1] && a[1][k] === v),
+          ),
+        [nom, egal],
+        { timeout: 3000 },
+      )
+      .catch(() => {});
   const image = (p) =>
     p.evaluate(() => {
       const v = window.__ed.vue;
@@ -385,12 +402,12 @@ const CHARGE = {
       await p.mouse.move(x1 + ((x2 - x1) * i) / 6, y1 + ((y2 - y1) * i) / 6);
     await p.mouse.up();
     if (opt.maj) await p.keyboard.up('Shift');
-    await p.waitForTimeout(30);
+    await uneImage(p);
   };
   const cliquer = async (p, x, y) => {
     const [a, b] = await point(p, x, y);
     await p.mouse.click(a, b);
-    await p.waitForTimeout(30);
+    await uneImage(p);
   };
 
   // ---------- 1. chargement ----------
@@ -415,7 +432,7 @@ const CHARGE = {
       '1 editeur_affiche une fois, après le premier dessin',
       JSON.stringify(affiches),
     );
-    await p.waitForTimeout(250);
+    await attendreAppel(p, 'editeur_vue');
     const vue = await appels(p, 'editeur_vue');
     verifier(
       vue.length === 1 && vue[0][1].id === 7,
@@ -428,7 +445,7 @@ const CHARGE = {
   // Raccourci d'outil puis attente d'une image.
   const touche = async (p, k) => {
     await p.keyboard.press(k);
-    await p.waitForTimeout(20);
+    await uneImage(p);
   };
   const outilChoisi = (p) =>
     p.$$eval('#outils [aria-pressed="true"]', (bs) => bs.map((b) => b.getAttribute('aria-label')));
@@ -583,7 +600,7 @@ const CHARGE = {
   {
     const p = await page();
     await p.keyboard.press('Control+1');
-    await p.waitForTimeout(30);
+    await uneImage(p);
     verifier((await image(p)).echelle === 1, '4 Ctrl+1 : taille réelle');
     await touche(p, 'r');
     await vider(p);
@@ -713,7 +730,7 @@ const CHARGE = {
     );
     await vider(p);
     await p.evaluate(() => __ed.dessiner());
-    await p.waitForTimeout(40);
+    await uneImage(p);
     const repeint = await p.evaluate(
       () => (window.__dessin || []).filter((d) => d[0] === 'peindreMasques').length,
     );
@@ -759,7 +776,7 @@ const CHARGE = {
       JSON.stringify(await p.evaluate(() => __ed.selection)) === JSON.stringify([r1.id]),
       '6 clic : sélection',
     );
-    await p.waitForTimeout(30);
+    await uneImage(p);
     const pv = await p.evaluate(() => window.__dessin.filter((x) => x[0] === 'peindreVue').pop());
     verifier(
       JSON.stringify(pv[1][1]) === JSON.stringify([r1.id]) &&
@@ -823,7 +840,7 @@ const CHARGE = {
     );
     const [cx, cy] = await point(p, 150, 130);
     await p.mouse.click(cx, cy, { button: 'right' });
-    await p.waitForTimeout(30);
+    await uneImage(p);
     verifier(
       await p.$eval('#menu-objet', (m) => m.classList.contains('ouvert')),
       '6 menu Forme ouvert',
@@ -883,9 +900,9 @@ const CHARGE = {
     verifier((await derniers(p, 'rectangle')).length === 0, '7 bouton Annuler');
     await p.click('[data-act="retablir"]');
     verifier((await derniers(p, 'rectangle')).length === 1, '7 bouton Rétablir');
-    await p.waitForTimeout(300);
-    const et = (await appels(p, 'editeur_etat')).pop();
     const v = await p.evaluate(() => __ed.h.version);
+    await attendreAppel(p, 'editeur_etat', { version: v });
+    const et = (await appels(p, 'editeur_etat')).pop();
     verifier(
       et && et[1].id === 7 && et[1].version === v && et[1].vide === false,
       '7 editeur_etat : dernière version, non vide',
@@ -928,7 +945,7 @@ const CHARGE = {
     await vider(p);
     await p.keyboard.press('Control+z');
     await p.keyboard.press('Control+y');
-    await p.waitForTimeout(30);
+    await uneImage(p);
     const fonds = await p.evaluate(
       () => (window.__dessin || []).filter((d) => d[0] === 'peindreMasques').length,
     );
@@ -1004,7 +1021,7 @@ const CHARGE = {
     await touche(p, 'v');
     const [dx, dy] = await point(p, t[0].x + 5, t[0].y + 5);
     await p.mouse.dblclick(dx, dy);
-    await p.waitForTimeout(30);
+    await uneImage(p);
     verifier(
       await p.$eval('#saisie', (s) => !s.hidden && s.value === 'Ab rv\nx'),
       '8 double-clic rouvre',
@@ -1227,7 +1244,7 @@ const CHARGE = {
     await p.keyboard.down('Control');
     await p.mouse.wheel(0, -200);
     await p.keyboard.up('Control');
-    await p.waitForTimeout(50);
+    await uneImage(p);
     const v1 = await image(p);
     const [nx, ny] = await point(p, 200, 150);
     verifier(
@@ -1279,19 +1296,21 @@ const CHARGE = {
     verifier((await image(p)).echelle === v.echelle, '11 Ctrl+0 : Ajuster');
     await vider(p);
     await p.keyboard.press('Control+1');
-    await p.waitForTimeout(250);
+    await attendreAppel(p, 'editeur_vue', { zoom: 1 });
     const v1 = (await appels(p, 'editeur_vue')).pop();
     verifier(v1 && v1[1].zoom === 1, '11 Ctrl+1 : editeur_vue zoom 1', JSON.stringify(v1));
+    await vider(p);
     await p.keyboard.press('Control+0');
-    await p.waitForTimeout(250);
+    await attendreAppel(p, 'editeur_vue');
     const ev = (await appels(p, 'editeur_vue')).pop();
     verifier(
       ev && Math.abs(ev[1].zoom - v.echelle) < 1e-9 && ev[1].largeur > 0,
       '11 editeur_vue après le zoom',
       JSON.stringify(ev),
     );
-    // Espace tenu : déplacer la vue.
+    // Espace tenu, le focus sur la scène : déplacer la vue.
     await p.keyboard.press('Control+1');
+    await p.focus('#scene');
     const a = await image(p);
     await p.keyboard.down(' ');
     await p.mouse.move(500, 400);
@@ -1317,7 +1336,7 @@ const CHARGE = {
   for (const echelle of [1, 1.25, 1.5, 2]) {
     const p = await page({ echelle, charge: { largeur: 301, hauteur: 203 }, graine: 5 });
     await p.keyboard.press('Control+1');
-    await p.waitForTimeout(60);
+    await uneImage(p);
     const r = await p.evaluate(() => {
       const ed = window.__ed;
       const t = ed.toile;
@@ -1361,7 +1380,7 @@ const CHARGE = {
     await glisser(p, [50, 50], [150, 150]);
     await p.keyboard.press('Escape');
     await p.keyboard.press('Escape');
-    await p.waitForTimeout(30);
+    await uneImage(p);
     const f = (await appels(p, 'editeur_fermer')).pop();
     const prefs = JSON.parse(f[1].preferences);
     verifier(
@@ -1406,21 +1425,21 @@ const CHARGE = {
       '13 aucune touche d’outil sous le dialogue',
     );
     await p.keyboard.press('Escape');
-    await p.waitForTimeout(30);
+    await uneImage(p);
     verifier(
       (await p.$eval('#voile', (v) => !v.classList.contains('ouvert'))) &&
         (await appels(p, 'editeur_garder')).length === 1,
       '13 Échap = Continuer (editeur_garder)',
     );
     await p.evaluate(() => __emettre('editeur:fermer_demande', { id: 7, raison: 'cadre' }));
-    await p.waitForTimeout(30);
+    await uneImage(p);
     verifier(
       (await appels(p, 'editeur_fermer')).length === 2 &&
         (await p.$eval('#voile', (v) => v.classList.contains('ouvert'))),
       '13 fermer_demande (cadre) : dialogue',
     );
     await p.getByRole('button', { name: 'Ne pas garder' }).click();
-    await p.waitForTimeout(30);
+    await uneImage(p);
     const g = (await appels(p, 'editeur_fermer')).pop();
     verifier(
       g[1].force === true && (await p.evaluate(() => __ed.fond === null)),
@@ -1435,7 +1454,7 @@ const CHARGE = {
     await glisser(p, [50, 50], [150, 150]);
     await p.keyboard.press('Escape');
     await p.keyboard.press('Escape');
-    await p.waitForTimeout(30);
+    await uneImage(p);
     await vider(p);
     await p.getByRole('button', { name: 'Copier et fermer' }).click();
     await p.waitForFunction(() => window.__exports.length === 1);
@@ -1449,7 +1468,7 @@ const CHARGE = {
         message: 'Impossible de copier',
       }),
     );
-    await p.waitForTimeout(30);
+    await uneImage(p);
     verifier(
       e === 'copier_fermer' &&
         (await p.$eval('#message', (m) => m.textContent)) === 'Impossible de copier' &&
@@ -1457,7 +1476,7 @@ const CHARGE = {
       '13 Copier et fermer en échec : la fenêtre reste, message',
     );
     await p.keyboard.press('Escape');
-    await p.waitForTimeout(30);
+    await uneImage(p);
     await p.getByRole('button', { name: 'Copier et fermer' }).click();
     await p.waitForFunction(() => window.__exports.length === 2);
     await p.evaluate(() =>
@@ -1469,7 +1488,7 @@ const CHARGE = {
         message: null,
       }),
     );
-    await p.waitForTimeout(30);
+    await uneImage(p);
     const f = (await appels(p, 'editeur_fermer')).pop();
     verifier(
       f && f[1].force === false,
@@ -1481,7 +1500,7 @@ const CHARGE = {
   {
     const p = await page({ reponseFermer: 'fermee' });
     await p.keyboard.press('Escape');
-    await p.waitForTimeout(30);
+    await uneImage(p);
     const f = (await appels(p, 'editeur_fermer')).pop();
     verifier(
       f &&
@@ -1686,7 +1705,7 @@ const CHARGE = {
   {
     const p = await page();
     await p.click('#bouton-plus');
-    await p.waitForTimeout(30);
+    await uneImage(p);
     const src = await p.$eval('#glisser-image', (i) => i.src);
     const b = await (await p.$('#glisser')).boundingBox();
     const x = b.x + b.width / 2;
@@ -1700,7 +1719,7 @@ const CHARGE = {
     await p.mouse.down();
     await p.mouse.move(x + 4, y);
     await p.mouse.up();
-    await p.waitForTimeout(30);
+    await uneImage(p);
     const e = await p.evaluate(() => window.__exports.map((x) => x.entetes['x-editeur-but']));
     verifier(
       n3 === 0 &&
@@ -1864,6 +1883,17 @@ const CHARGE = {
       const n = await p.evaluate(() => window.__exports.length);
       await p.keyboard.press('Control+c');
       await p.waitForFunction((k) => window.__exports.length === k + 1, n);
+      // Le résultat du cœur : un export à la fois, le suivant est alors permis.
+      await p.evaluate(() => {
+        const e = window.__exports[window.__exports.length - 1];
+        __emettre('editeur:resultat', {
+          id: +e.entetes['x-editeur-id'],
+          numero: e.numero,
+          but: e.entetes['x-editeur-but'],
+          etat: 'fait',
+          message: null,
+        });
+      });
       return p.evaluate(() => {
         window.__corps = (window.__corps || []).concat([window.__dernierCorps]);
         const e = window.__exports[window.__exports.length - 1].entetes;
@@ -2042,7 +2072,7 @@ const CHARGE = {
         graine: 5,
       });
       await p.keyboard.press('Control+1');
-      await p.waitForTimeout(60);
+      await uneImage(p);
       const ecarts = await p.evaluate(() => {
         const v = __ed.vue;
         const d = __ed.ctx.getImageData(v.x, v.y, 301, 203).data;
@@ -2115,6 +2145,351 @@ const CHARGE = {
         ms[1] === 5760 && ms[0] <= 1000,
         '19 réel : composer 5760 × 1080, 50 objets ≤ 1 000 ms',
         String(ms[0]),
+      );
+      await p.context().close();
+    }
+    // ---------- 20. reprises de la relecture, avec le vrai modèle ----------
+    const objs = async (p) => (await docu(p)).objets;
+    const saisieOuverte = (p) => p.evaluate(() => !document.querySelector('#saisie').hidden);
+    // Ordre des appels au cœur (noms), depuis le dernier `vider`.
+    const noms = async (p) => (await appels(p)).map((a) => a[0]);
+    {
+      const p = await page({ reel: true });
+      await p.keyboard.press('Control+1');
+      await uneImage(p);
+      const v = await image(p);
+      // Hors de l'image : la scène autour (5, 5) CSS est hors du cadre en Taille réelle.
+      verifier(v.x / v.dpr > 20 && v.y / v.dpr > 20, '20 préalable : marge autour de l’image');
+      await touche(p, 'r');
+      await glisser(p, [100, 100], [200, 150]);
+      const avant = await p.evaluate(() => __ed.selection.length);
+      await p.mouse.move(5, 5);
+      await p.mouse.down();
+      await p.mouse.move(25, 25, { steps: 4 });
+      await p.mouse.up();
+      await uneImage(p);
+      verifier(
+        (await objs(p)).length === 1 &&
+          avant === 1 &&
+          (await p.evaluate(() => __ed.selection.length)) === 0,
+        '20 cas 1 : appui hors de l’image : rien de créé, sélection vidée',
+        JSON.stringify([avant, (await objs(p)).length]),
+      );
+      await touche(p, 'n');
+      await p.mouse.click(5, 5);
+      await uneImage(p);
+      verifier((await objs(p)).length === 1, '20 cas 1 : Numéros hors de l’image : rien');
+      // Commencé dans l'image, fini hors de la fenêtre : créé.
+      await touche(p, 'r');
+      const [hx, hy] = await point(p, 350, 250);
+      await p.mouse.move(hx, hy);
+      await p.mouse.down();
+      await p.mouse.move(1199, 799, { steps: 5 });
+      await p.mouse.up();
+      await uneImage(p);
+      const dehors = (await objs(p)).at(-1);
+      verifier(
+        (await objs(p)).length === 2 &&
+          dehors.type === 'rectangle' &&
+          Math.abs(dehors.x1 - 350) < 1 &&
+          !(await p.evaluate(() => __ed.outils.gesteEnCours())),
+        '20 cas 1 : geste commencé dans l’image, fini dehors : créé',
+        JSON.stringify(dehors),
+      );
+      // Normaliser : un rectangle tiré vers le haut à gauche.
+      await glisser(p, [300, 200], [250, 160]);
+      const n = (await objs(p)).at(-1);
+      verifier(
+        n.x1 === 250 && n.x2 === 300 && n.y1 === 160 && n.y2 === 200,
+        '20 normaliser : tiré vers le haut à gauche',
+        JSON.stringify(n),
+      );
+      // Lisser : le sommet d'un V tracé au crayon est arrondi (Chaikin) et au 1/100.
+      await touche(p, 'p');
+      const [a1, b1] = await point(p, 40, 200);
+      await p.mouse.move(a1, b1);
+      await p.mouse.down();
+      await p.mouse.move(a1 + 30, b1 + 60, { steps: 6 });
+      await p.mouse.move(a1 + 60, b1, { steps: 6 });
+      await p.mouse.up();
+      await uneImage(p);
+      const c = (await objs(p)).at(-1);
+      const ys = c.points.map((q) => q[1]);
+      verifier(
+        c.type === 'crayon' &&
+          Math.max(...ys) < 259 &&
+          c.points.every((q) => q.every((k) => Math.round(k * 100) === k * 100)),
+        '20 lisser : sommet du crayon adouci, points au 1/100',
+        JSON.stringify([c.type, Math.max(...ys)]),
+      );
+      // Poignée « se » : redimensionner.
+      await touche(p, 'v');
+      await p.keyboard.press('Escape');
+      await cliquer(p, 100, 125);
+      const sel = await p.evaluate(() => __ed.selection.slice());
+      const r0 = (await objs(p))[0];
+      await glisser(p, [r0.x2, r0.y2], [r0.x2 + 40, r0.y2 + 30]);
+      const r1 = (await objs(p))[0];
+      verifier(
+        sel.length === 1 &&
+          sel[0] === r0.id &&
+          r1.x1 === r0.x1 &&
+          r1.y1 === r0.y1 &&
+          Math.abs(r1.x2 - (r0.x2 + 40)) < 1 &&
+          Math.abs(r1.y2 - (r0.y2 + 30)) < 1,
+        '20 poignée se : redimensionner',
+        JSON.stringify([sel, r0, r1]),
+      );
+      await p.context().close();
+    }
+    // Texte : place de la saisie, texte dessiné par la vue (`ajout`), clic ailleurs, Annuler.
+    {
+      const p = await page({ reel: true });
+      await p.keyboard.press('Control+1');
+      await uneImage(p);
+      await touche(p, 'r');
+      await glisser(p, [20, 20], [60, 60]);
+      await touche(p, 't');
+      await cliquer(p, 100, 100);
+      const t = await p.evaluate(() => {
+        const s = document.querySelector('#saisie');
+        const r = s.getBoundingClientRect();
+        return { x: r.left, y: r.top, couleur: getComputedStyle(s).color };
+      });
+      const ouverte = await saisieOuverte(p);
+      const zone = () =>
+        p.evaluate(() => {
+          const v = __ed.vue;
+          const d = __ed.ctx.getImageData(v.x + 100, v.y + 100, 80, 30).data;
+          let s = 0;
+          for (let i = 0; i < d.length; i++) s = (s + d[i] * (i + 1)) % 1000000007;
+          return s;
+        });
+      const vide = await zone();
+      await p.keyboard.type('MMM');
+      await uneImage(p);
+      verifier((await zone()) !== vide, '20 le texte en saisie est dessiné par la vue (ajout)');
+      // Cas 2 : un clic ailleurs valide seulement (pas de nouvelle saisie).
+      await cliquer(p, 300, 250);
+      const o2 = await objs(p);
+      verifier(
+        o2.length === 2 && o2[1].texte === 'MMM' && !(await saisieOuverte(p)),
+        '20 cas 2 : clic ailleurs pendant la saisie : validé, rien d’autre',
+        JSON.stringify(o2.map((o) => o.texte || o.type)),
+      );
+      // La zone de saisie était au coin du texte posé (x, y de l'objet).
+      const [ex, ey] = await point(p, o2[1].x, o2[1].y);
+      verifier(
+        ouverte &&
+          Math.abs(t.x - ex) < 1 &&
+          Math.abs(t.y - ey) < 1 &&
+          t.couleur === 'rgba(0, 0, 0, 0)',
+        '20 saisie à la place du texte, texte de la zone transparent',
+        JSON.stringify([t, ex, ey]),
+      );
+      // Texte existant rouvert : `cacher` le retire de la vue, `ajout` le redessine une fois.
+      // Sans sélection (son contour changerait la zone).
+      await p.evaluate(() => {
+        __ed.selection = [];
+        __ed.dessiner();
+      });
+      await uneImage(p);
+      const avec = await zone();
+      await touche(p, 'v');
+      const [dx, dy] = await point(p, 110, 110);
+      await p.mouse.dblclick(dx, dy);
+      await uneImage(p);
+      verifier(
+        (await saisieOuverte(p)) && (await zone()) === avec,
+        '20 texte rouvert : dessiné une fois (cacher + ajout)',
+        JSON.stringify([
+          await saisieOuverte(p),
+          avec,
+          await zone(),
+          await p.evaluate(() => [
+            __ed.selection,
+            __ed.outils.idEnEdition(),
+            document.querySelector('#saisie').value,
+          ]),
+        ]),
+      );
+      await p.keyboard.press('Escape');
+      // Cas 3 : Annuler pendant une saisie l'abandonne ; Rétablir ne fait rien.
+      await p.keyboard.press('Control+z');
+      await uneImage(p);
+      verifier((await objs(p)).length === 1, '20 préalable : un pas à rétablir');
+      await touche(p, 't');
+      await cliquer(p, 200, 200);
+      await p.keyboard.type('zz');
+      const retablir = await p.$eval('[data-act="retablir"]', (b) => b.disabled);
+      await p.evaluate(() => __ed.retablir());
+      const apresRetablir = [(await objs(p)).length, await saisieOuverte(p)];
+      await p.click('[data-act="annuler"]');
+      await uneImage(p);
+      verifier(
+        retablir &&
+          JSON.stringify(apresRetablir) === '[1,true]' &&
+          (await objs(p)).length === 1 &&
+          !(await saisieOuverte(p)) &&
+          (await p.evaluate(() => __ed.h.futur.length)) === 1,
+        '20 cas 3 : Annuler abandonne la saisie, Rétablir sans effet',
+        JSON.stringify([retablir, apresRetablir]),
+      );
+      // L'avertissement de Chromium vient des lectures de cet essai (getImageData).
+      const erreurs = p.erreurs.filter((x) => !x.includes('willReadFrequently'));
+      verifier(erreurs.length === 0, '20 texte : console vide', JSON.stringify(erreurs));
+      await p.context().close();
+    }
+    // Numéros : un numéro supprimé, les suivants renumérotés ; le suivant prend la suite.
+    {
+      const p = await page({ reel: true });
+      await p.keyboard.press('Control+1');
+      await uneImage(p);
+      await touche(p, 'n');
+      for (const x of [60, 120, 180]) await cliquer(p, x, 60);
+      await touche(p, 'v');
+      await cliquer(p, 120, 60);
+      await p.keyboard.press('Delete');
+      await touche(p, 'n');
+      await cliquer(p, 240, 60);
+      const rangs = await p.evaluate(() =>
+        __ed.h.doc.objets.map((o) => __ed.modele.numeroAffiche(__ed.h.doc, o)),
+      );
+      verifier(
+        JSON.stringify(rangs) === '[1,2,3]',
+        '20 numéros : renumérotés après suppression',
+        JSON.stringify(rangs),
+      );
+      await p.context().close();
+    }
+    // Cas 4 : un export à la fois ; Ctrl+C répété ; double clic.
+    {
+      const p = await page({ reel: true });
+      await touche(p, 'r');
+      await glisser(p, [20, 20], [60, 60]);
+      const nb = () => p.evaluate(() => window.__exports.length);
+      await p.keyboard.down('Control');
+      await p.keyboard.down('c');
+      await p.keyboard.down('c');
+      await p.keyboard.down('c');
+      await p.keyboard.up('c');
+      await p.keyboard.up('Control');
+      await p.dblclick('[data-act="copier"]');
+      await p.keyboard.press('Control+s');
+      await attendreAppel(p, 'editeur_exporter');
+      await uneImage(p);
+      await uneImage(p);
+      verifier((await nb()) === 1, '20 cas 4 : un export à la fois', String(await nb()));
+      await p.evaluate(() =>
+        __emettre('editeur:resultat', { id: 7, numero: 1, but: 'copier', etat: 'fait' }),
+      );
+      await p.keyboard.press('Control+s');
+      await p.waitForFunction(() => window.__exports.length === 2, null, { timeout: 3000 });
+      verifier((await nb()) === 2, '20 cas 4 : après le résultat, l’export suivant');
+      // Échec de l'appel : le verrou tombe aussi.
+      await p.evaluate(() => {
+        const i = window.__TAURI__.core.invoke;
+        window.__TAURI__.core.invoke = (c, ...r) => {
+          if (c !== 'editeur_exporter') return i(c, ...r);
+          window.__TAURI__.core.invoke = i;
+          return Promise.reject(new Error('refus'));
+        };
+        __emettre('editeur:resultat', { id: 7, numero: 2, but: 'enregistrer', etat: 'fait' });
+      });
+      await p.keyboard.press('Control+c');
+      await p.waitForFunction(() => !__ed.exportEnCours(), null, { timeout: 3000 });
+      await p.keyboard.press('Control+c');
+      await p.waitForFunction(() => window.__exports.length === 3, null, { timeout: 3000 });
+      verifier((await nb()) === 3, '20 cas 4 : échec de l’appel, le verrou tombe');
+      await p.evaluate(() =>
+        __emettre('editeur:resultat', { id: 7, numero: 3, but: 'copier', etat: 'fait' }),
+      );
+      // « Copier et fermer » cliqué deux fois : un export.
+      await p.evaluate(() => __emettre('editeur:fermer_demande', { id: 7, raison: 'cadre' }));
+      await p.waitForSelector('#voile.ouvert', { timeout: 3000 });
+      await p.dblclick('[data-act="copier_fermer"]');
+      await attendreAppel(p, 'editeur_exporter');
+      await uneImage(p);
+      await uneImage(p);
+      const buts = await p.evaluate(() => __exports.map((e) => e.entetes['x-editeur-but']));
+      verifier(
+        buts.filter((b) => b === 'copier_fermer').length === 1 && buts.length === 4,
+        '20 cas 4 : « Copier et fermer » deux fois : un export',
+        JSON.stringify(buts),
+      );
+      await p.context().close();
+    }
+    // Décision : à chaque fermer_demande et avant tout export, le texte en saisie validé,
+    // `editeur_etat` aussitôt, puis la réponse ou l'export.
+    {
+      const p = await page({ reel: true });
+      await touche(p, 't');
+      await cliquer(p, 100, 100);
+      await p.keyboard.type('bonjour');
+      await vider(p);
+      await p.evaluate(() => __emettre('editeur:fermer_demande', { id: 7, raison: 'cadre' }));
+      await attendreAppel(p, 'editeur_fermer');
+      await p.waitForSelector('#voile.ouvert', { timeout: 3000 });
+      const a = await appels(p);
+      const v = await p.evaluate(() => __ed.h.version);
+      const iE = a.findIndex((x) => x[0] === 'editeur_etat');
+      const iF = a.findIndex((x) => x[0] === 'editeur_fermer');
+      verifier(
+        (await objs(p)).some((o) => o.texte === 'bonjour') &&
+          iE >= 0 &&
+          iE < iF &&
+          a[iE][1].version === v &&
+          a[iE][1].vide === false &&
+          a[iF][1].version === v,
+        '20 fermer_demande : texte validé, editeur_etat puis editeur_fermer',
+        JSON.stringify(a.map((x) => x[0])),
+      );
+      await p.click('[data-act="continuer"]');
+      // Le voile ne prend plus les clics : la scène est sous la pointe.
+      const [sx, sy] = await point(p, 200, 200);
+      await p.waitForFunction(
+        ([x, y]) => document.elementFromPoint(x, y) === __ed.toile,
+        [sx, sy],
+        {
+          timeout: 3000,
+        },
+      );
+      await cliquer(p, 200, 200);
+      await p.keyboard.type('encore');
+      await vider(p);
+      await p.click('[data-act="copier"]');
+      await attendreAppel(p, 'editeur_exporter');
+      const b = await appels(p);
+      const w = await p.evaluate(() => __ed.h.version);
+      const jE = b.findIndex((x) => x[0] === 'editeur_etat');
+      const jX = b.findIndex((x) => x[0] === 'editeur_exporter');
+      verifier(
+        (await objs(p)).some((o) => o.texte === 'encore') &&
+          jE >= 0 &&
+          jE < jX &&
+          b[jE][1].version === w &&
+          b[jX][2]['x-editeur-version'] === String(w),
+        '20 export : texte validé, editeur_etat puis editeur_exporter',
+        JSON.stringify([
+          b.map((x) => x[0]),
+          await p.evaluate(() => [
+            __ed.h.doc.objets.map((o) => o.texte),
+            document.activeElement.id,
+            document.activeElement.dataset.act,
+            __ed.exportEnCours(),
+            !!__ed.charge,
+            !!__ed.h,
+            !!__ed.fond,
+            document.querySelector('[data-act="copier"]').disabled,
+            document.querySelector('#voile').className,
+            !document.querySelector('#saisie').hidden,
+            __ed.prefs.outil,
+          ]),
+        ]),
+      );
+      verifier(
+        (await noms(p)).filter((x) => x === 'editeur_exporter').length === 1,
+        '20 export : un seul appel',
       );
       await p.context().close();
     }
