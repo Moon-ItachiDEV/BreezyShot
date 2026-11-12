@@ -187,8 +187,8 @@ Vérifications GitHub sur `442da12` (exécution n° 18, 2026-11-11), toutes vert
 
 ## MVP, version 0.2 « Trois modes » : l'écran et la fenêtre
 
-Les étapes 7 et 8 entrent ensemble dans `main` le 2026-11-12 par la demande d'intégration
-n° 3 (le commit d'entrée sera noté ici au début de la version suivante). La version passe à
+Les étapes 7 et 8 sont entrées ensemble dans `main` le 2026-11-12 par le commit `8429ab4`
+(demande d'intégration n° 3, tête `36a5d44`, verte elle aussi). La version passe à
 0.2.0 : la pré-version publiée devient « v0.2.0-essai », et les anciennes pré-versions
 d'essai sont supprimées à chaque publication.
 
