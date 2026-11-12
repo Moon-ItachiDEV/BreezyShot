@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-reglages-raccourci"
+description = "Enables the reglages_raccourci command without any pre-configured scope."
+commands.allow = ["reglages_raccourci"]
+
+[[permission]]
+identifier = "deny-reglages-raccourci"
+description = "Denies the reglages_raccourci command without any pre-configured scope."
+commands.deny = ["reglages_raccourci"]

@@ -5,14 +5,19 @@
 //! (Linux pour le développement ; `macos.rs` viendra ensuite).
 //! Ce module ne connaît aucun autre module de l'app.
 //!
-//! Règle du Microsoft Store : on lit le registre, on n'y écrit jamais.
+//! Règle du Microsoft Store : on lit le registre, on n'y écrit jamais d'état à l'app. Seule
+//! exception, derrière une seule fonction : le démarrage avec le système (`demarrage/`).
 
 use std::path::{Path, PathBuf};
 
 mod composition;
+pub mod demarrage;
+mod dossier;
 pub mod gel;
 pub mod presse_papiers;
 pub use composition::attendre_composition;
+pub use demarrage::{demarrage_avec_systeme, EtatDemarrage};
+pub use dossier::choisir_dossier;
 pub use gel::Rect;
 
 #[cfg(windows)]

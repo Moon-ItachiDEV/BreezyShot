@@ -125,6 +125,15 @@ pub fn changer_image(app: &AppHandle, theme: Theme, taille: u32) -> Result<(), S
     icone.set_icon(Some(image)).map_err(|e| e.to_string())
 }
 
+/// Refait le menu de l'icône (un raccourci a changé dans les Réglages).
+pub fn changer_menu(app: &AppHandle, entrees: &[EntreeMenu]) -> Result<(), String> {
+    let Some(icone) = app.tray_by_id(ID_ICONE) else {
+        return Err("icone absente".into());
+    };
+    let menu = construire_menu(app, entrees).map_err(|e| format!("menu: {e}"))?;
+    icone.set_menu(Some(menu)).map_err(|e| e.to_string())
+}
+
 /// Retire l'icône de la zone de notification. Rend vrai si elle y était.
 pub fn retirer(app: &AppHandle) -> bool {
     app.remove_tray_by_id(ID_ICONE).is_some()

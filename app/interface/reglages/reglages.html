@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Réglages de BreezyShot</title>
+<link rel="stylesheet" href="../commun/jetons.css">
+<link rel="stylesheet" href="reglages.css">
+<script type="module" src="reglages.js"></script>
+</head>
+<body>
+  <!--
+    Structure seulement : les rubriques, les lignes et leurs contrôles. Le comportement
+    (reglages.js) et les essais ne s'appuient que sur les attributs data-*, les rôles et les
+    noms accessibles ; l'habillage est tout entier dans reglages.css.
+    Une ligne n'est montrée que si le cœur la nomme dans `vue.lignes`.
+  -->
+  <div class="cadre">
+    <nav class="rubriques" role="tablist" aria-orientation="vertical" aria-label="Rubriques">
+      <button role="tab" id="onglet-apres" data-rubrique="apres" aria-controls="rubrique-apres"
+        aria-selected="true">Après la capture</button>
+      <button role="tab" id="onglet-raccourcis" data-rubrique="raccourcis"
+        aria-controls="rubrique-raccourcis" aria-selected="false" tabindex="-1">Raccourcis</button>
+      <button role="tab" id="onglet-general" data-rubrique="general" aria-controls="rubrique-general"
+        aria-selected="false" tabindex="-1">Général</button>
+    </nav>
+
+    <main class="contenu">
+      <p class="alerte" data-alerte role="status" hidden></p>
+
+      <section id="rubrique-apres" role="tabpanel" data-rubrique="apres" aria-labelledby="onglet-apres">
+        <div class="groupe">
+          <div class="ligne" data-reglage="copier" hidden>
+            <span class="libelle" id="l-copier">Copier automatiquement</span>
+            <button role="switch" data-controle="copier" aria-labelledby="l-copier"
+              aria-checked="false"></button>
+            <p class="refus" data-refus role="status" hidden></p>
+          </div>
+        </div>
+
+        <div class="groupe">
+          <div class="ligne" data-reglage="vignette" hidden>
+            <span class="libelle" id="l-vignette">Vignette</span>
+            <button role="switch" data-controle="vignette" aria-labelledby="l-vignette"
+              aria-checked="false"></button>
+            <p class="refus" data-refus role="status" hidden></p>
+          </div>
+          <div class="ligne sous" data-reglage="vignette_duree" hidden>
+            <span class="libelle" id="l-duree">Durée</span>
+            <div class="choix" role="radiogroup" data-controle="vignette_duree" aria-labelledby="l-duree"></div>
+            <p class="refus" data-refus role="status" hidden></p>
+          </div>
+          <div class="ligne sous" data-reglage="vignette_coin" hidden>
+            <span class="libelle" id="l-coin">Coin</span>
+            <div class="coins" role="radiogroup" data-controle="vignette_coin" aria-labelledby="l-coin">
+              <button role="radio" data-valeur="haut_gauche" aria-label="En haut à gauche"></button>
+              <button role="radio" data-valeur="haut_droite" aria-label="En haut à droite"></button>
+              <button role="radio" data-valeur="bas_gauche" aria-label="En bas à gauche"></button>
+              <button role="radio" data-valeur="bas_droite" aria-label="En bas à droite"></button>
+            </div>
+            <p class="refus" data-refus role="status" hidden></p>
+          </div>
+        </div>
+
+        <div class="groupe">
+          <div class="ligne" data-reglage="dossier" hidden>
+            <span class="libelle" id="l-dossier">Dossier</span>
+            <span class="valeur" data-valeur="dossier"></span>
+            <button class="bouton" data-controle="parcourir" aria-describedby="l-dossier">Parcourir…</button>
+            <p class="refus" data-refus role="status" hidden></p>
+          </div>
+          <div class="ligne" data-reglage="enregistrer" hidden>
+            <span class="libelle" id="l-enregistrer">Enregistrer automatiquement</span>
+            <button role="switch" data-controle="enregistrer" aria-labelledby="l-enregistrer"
+              aria-checked="false"></button>
+            <p class="refus" data-refus role="status" hidden></p>
+          </div>
+          <div class="ligne large" data-reglage="modele_nom" hidden>
+            <label class="libelle" id="l-nom" for="modele-nom">Nom des fichiers</label>
+            <div class="champ">
+              <input id="modele-nom" type="text" data-controle="modele_nom" spellcheck="false"
+                autocomplete="off" aria-describedby="apercu-nom">
+              <button class="bouton-icone" data-controle="inserer" aria-label="Insérer" aria-haspopup="menu"
+                aria-expanded="false">+</button>
+              <div class="menu" role="menu" data-menu="inserer" aria-label="Insérer" hidden>
+                <button role="menuitem" data-jeton="{date}">Date</button>
+                <button role="menuitem" data-jeton="{heure}">Heure</button>
+              </div>
+            </div>
+            <span class="apercu" id="apercu-nom" data-valeur="apercu_nom"></span>
+            <p class="refus" data-refus role="status" hidden></p>
+          </div>
+        </div>
+      </section>
+
+      <section id="rubrique-raccourcis" role="tabpanel" data-rubrique="raccourcis"
+        aria-labelledby="onglet-raccourcis" hidden>
+        <div class="groupe" data-liste="raccourcis"></div>
+        <template data-modele="raccourci">
+          <div class="ligne" data-reglage="raccourci">
+            <span class="libelle" data-valeur="libelle"></span>
+            <button class="bouton-icone retablir" data-controle="retablir" aria-label="Rétablir" hidden>↺</button>
+            <button class="touches" data-controle="saisie" aria-pressed="false"></button>
+            <p class="refus" data-refus role="status" hidden></p>
+          </div>
+        </template>
+      </section>
+
+      <section id="rubrique-general" role="tabpanel" data-rubrique="general" aria-labelledby="onglet-general"
+        hidden>
+        <div class="groupe">
+          <div class="ligne" data-reglage="theme" hidden>
+            <span class="libelle" id="l-theme">Thème</span>
+            <div class="choix" role="radiogroup" data-controle="theme" aria-labelledby="l-theme">
+              <button role="radio" data-valeur="systeme">Système</button>
+              <button role="radio" data-valeur="clair">Clair</button>
+              <button role="radio" data-valeur="sombre">Sombre</button>
+            </div>
+            <p class="refus" data-refus role="status" hidden></p>
+          </div>
+          <div class="ligne" data-reglage="demarrage" hidden>
+            <span class="libelle" id="l-demarrage">Lancer au démarrage</span>
+            <button role="switch" data-controle="demarrage" aria-labelledby="l-demarrage"
+              aria-checked="false"></button>
+            <p class="refus" data-refus role="status" hidden></p>
+          </div>
+        </div>
+        <div class="groupe">
+          <div class="ligne" data-reglage="version" hidden>
+            <span class="libelle" data-valeur="version"></span>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+</body>
+</html>

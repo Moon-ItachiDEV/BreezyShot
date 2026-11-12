@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-reglages-parcourir"
+description = "Enables the reglages_parcourir command without any pre-configured scope."
+commands.allow = ["reglages_parcourir"]
+
+[[permission]]
+identifier = "deny-reglages-parcourir"
+description = "Denies the reglages_parcourir command without any pre-configured scope."
+commands.deny = ["reglages_parcourir"]

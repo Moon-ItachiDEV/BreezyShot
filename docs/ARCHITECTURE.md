@@ -19,7 +19,9 @@ app/
       application/          chef d'orchestre : démarrage, table des états, icône et menu,
                             journal, chrono, arguments de la ligne de commande ;
                             zone.rs : décisions de la capture d'une zone, d'une fenêtre et
-                            du plein écran (fonctions pures)
+                            du plein écran (fonctions pures) ; page_reglages.rs : décisions
+                            de la fenêtre Réglages (pures), fenetre_reglages.rs : ses
+                            commandes (étape 10)
       raccourcis/           raccourcis globaux (étape 3), Échap global de la sélection
       capture/              figer (appelle systeme::gel), géométrie de la sélection, découpe
                             (étape 4) ; fenetre.rs : liste des fenêtres, partie à découper,
@@ -28,18 +30,24 @@ app/
       sortie/               presse-papiers, PNG, « Récents », enregistrement (étape 6)
       reglages/             fichier de réglages (étape 2)
       fenetres/             crée, place, montre et cache les fenêtres de l'interface :
-                            mod.rs (bandeau), place.rs, selection.rs (étape 5)
+                            mod.rs (bandeau), place.rs, selection.rs (étape 5),
+                            reglages.rs (fenêtre Réglages), theme.rs (thème des pages)
       systeme/              tous les gestes propres à un système : mod.rs (façade commune),
                             windows.rs, autre.rs (Linux pour le développement, macos.rs ensuite),
                             composition.rs (attendre le compositeur),
                             gel/ (photo du bureau et écran figé natif : mod.rs, windows.rs,
                             autre.rs), presse_papiers/ (image avec transparence : format
-                            « PNG » puis CF_DIB sur blanc ; mod.rs, windows.rs, autre.rs)
+                            « PNG » puis CF_DIB sur blanc ; mod.rs, windows.rs, autre.rs),
+                            demarrage/ (démarrer avec le système), dossier/ (sélecteur de
+                            dossier natif) (étape 10)
   interface/                ce qu'on voit (web), partagé entre Windows et Mac
-    commun/                 jetons du design system (jetons.css), composants partagés
+    commun/                 jetons du design system (jetons.css), theme.js (data-theme),
+                            composants partagés
     vignette/               vignette, souffle et bandeau de messages (bandeau.* dès l'étape 3)
     selection/              page de la sélection (étape 5)
-    barre/  reglages/       (étape 10)
+    reglages/               fenêtre des Réglages (étape 10) : html (structure), css
+                            (habillage, jetons seulement), js (comportement)
+    barre/                  barre de capture (plus tard)
 design/                     jetons et icônes Moulinet, copiés du design system
 docs/                       ce fichier, TRAVAIL-VALIDE.md, notices d'essai
 essais/                     scénarios PowerShell joués sur la machine Windows de GitHub
@@ -113,8 +121,11 @@ empaquetée voit ses écritures dans AppData et dans le registre redirigées ver
 privé. Trois précautions suffisent, dès maintenant :
 
 - tous les chemins passent par `systeme::dossiers()`, et l'app n'écrit jamais à côté du .exe ;
-- l'app lit le registre de l'utilisateur mais n'y écrit jamais d'état à elle ;
-- « démarrer avec le système » (étape 10) restera derrière une seule fonction de `systeme`,
+- l'app lit le registre de l'utilisateur mais n'y écrit jamais d'état à elle ; seule
+  exception, la valeur `BreezyShot` de `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`,
+  écrite à la demande de l'utilisateur ;
+- « démarrer avec le système » (étape 10) est derrière une seule fonction de `systeme`,
+  `demarrage_avec_systeme(voulu: Option<bool>) -> Result<EtatDemarrage, String>` (§6.1),
   pour pouvoir choisir plus tard entre l'entrée de démarrage classique et celle d'un paquet.
 
 ## 3. Application
@@ -209,8 +220,10 @@ dans le dossier temporaire du système (`systeme::dossier_secours()`), sous le n
   un mode construit y entre sans autre code. Identifiants `capturer_<mode>`.
   Le raccourci suit une tabulation dans le texte de l'entrée (aligné à droite par les menus
   Windows) ; sans raccourci retenu, l'entrée reste, sans raccourci affiché.
-  Les entrées « Captures récentes », « Vider les récentes », « Réglages » arrivent avec leurs
-  étapes.
+  Depuis l'étape 10 : captures, séparateur, « Réglages » (identifiant `reglages`, journal
+  `menu: reglages`, ouvre la fenêtre ou la ramène devant, §6.1), séparateur, « Quitter
+  BreezyShot ». Le menu est refait (`icone::changer_menu`) quand un raccourci change.
+  Les entrées « Captures récentes », « Vider les récentes » arrivent avec leurs étapes.
 - Info-bulle : « BreezyShot ».
 
 ### 3.6 Capture d'une zone (assemblage des étapes 4 à 6)
@@ -387,7 +400,7 @@ Module pur : il reçoit le dossier où écrire, ne connaît ni Tauri ni les autr
 
 ```json
 {
-  "version": 1,
+  "version": 2,
   "raccourcis": {
     "zone": ["ImprEcran", "Ctrl+Maj+1"],
     "plein_ecran": ["Ctrl+Maj+2"],
@@ -409,6 +422,8 @@ Module pur : il reçoit le dossier où écrire, ne connaît ni Tauri ni les autr
   premier qui peut être réservé est utilisé : le repli n'est pas un cas particulier. Les
   réglages gardent des chaînes sans les interpréter (c'est le module `raccourcis` qui les lit).
   Les valeurs par défaut dépendent du système (`ImprEcran` n'existe pas sur Mac).
+- `duree_s` : 1 à 60 s, ou `0` = toujours (`DUREE_TOUJOURS`, version 2 ; la page propose
+  3, 6, 10 et Toujours).
 - `dossier_enregistrement: null` = Images › BreezyShot. `coin` : `bas_gauche`, `bas_droite`,
   `haut_gauche`, `haut_droite`. `animations` : `systeme`, `normales`, `reduites`.
   `theme` : `systeme`, `clair`, `sombre`.
@@ -416,16 +431,22 @@ Module pur : il reçoit le dossier où écrire, ne connaît ni Tauri ni les autr
 - **Fichier illisible** (pas du JSON, ou pas un objet) : renommé `reglages.abime-<horodatage>.json`
   (on ne détruit jamais ce que l'utilisateur avait), puis recréé par défaut. On garde au plus
   3 fichiers abîmés.
-- **Valeur invalide dans un fichier lisible** (mauvais type, valeur inconnue, durée hors de
-  1 à 60 s) : la valeur par défaut remplace cette valeur seulement, avec un avertissement.
+- **Valeur invalide dans un fichier lisible** (mauvais type, valeur inconnue, durée ni 0 ni
+  de 1 à 60 s) : la valeur par défaut remplace cette valeur seulement, avec un avertissement.
 - **Champ inconnu** : conservé tel quel à la réécriture.
 - **Version plus ancienne** : mise à niveau pas à pas par une liste de fonctions
-  (`v0 -> v1`, puis `v1 -> v2` un jour) qui complète sans rien effacer, puis réécriture.
+  (`v0 -> v1`, `v1 -> v2`) qui complète sans rien effacer, puis réécriture. `v1 -> v2` ne
+  change rien à la forme : il permet seulement `duree_s: 0`, qu'une app de version 1 aurait
+  remplacé par 6.
   Un fichier sans champ `version` est une version 0.
 - **Version plus récente que l'app** : on lit ce qu'on comprend et on ne réécrit pas le fichier.
 - **Au moins une sortie active** : si copie, enregistrement et vignette sont tous éteints, la
   copie est rallumée à la lecture, et `ecrire` refuse cette combinaison.
 - Écriture atomique (fichier temporaire puis renommage), JSON indenté, UTF-8, fin de ligne finale.
+- `valider(&Reglages)` dit sans toucher au disque ce que `ecrire` refuserait (aucune sortie
+  active, durée invalide, modèle de nom vide, dossier vide) : la fenêtre Réglages refuse un
+  changement avant de l'appliquer. `ErreurEcriture::code()` et `Constat::code()` donnent un
+  code court sans chemin, pour les nouvelles lignes du journal.
 - Interface : `charger(dossier, plateforme) -> (Reglages, Vec<Constat>)`, `ecrire(dossier,
   &Reglages) -> Result`, `Reglages::par_defaut(plateforme)`. La `Plateforme` (Windows, Mac,
   Autre) vient de `systeme` par l'Application : elle ne change que les raccourcis par défaut
@@ -515,6 +536,17 @@ Module pur : il reçoit le dossier où écrire, ne connaît ni Tauri ni les autr
   `annonce raccourci: deja faite`, rien si tout est normal. `etat.json` :
   `{ "annonce_raccourci": { "action", "candidat", "raison" } }`, les autres champs gardés.
 - À l'appui, l'Application appelle `lancer_capture(mode)` (§3.6).
+- **Changement à chaud** (étape 10) : `reserver` rend des `Reservations` (bilan partagé avec
+  le rappel). `Reservations::changer(app, action, candidats, impr)` choisit par la fonction
+  pure `choisir_action` (le raccourci actuel de l'action est gardé sans redemander au
+  système ; ceux des autres actions sont « déjà pris ») ; l'ancien raccourci n'est libéré
+  qu'une fois le nouveau tenu. Un raccourci refusé laisse l'ancien en place.
+- **Saisie** : pendant qu'on tape un raccourci dans les Réglages, tous les raccourcis sont
+  libérés (`suspendre`), sinon le système avalerait les touches ; `reprendre` les reprend et
+  une perte (prise entre-temps par une autre application) devient `refuse_par_le_systeme`
+  dans le bilan. Filet : la saisie est reprise d'office au bout de 15 s.
+  Ctrl+Maj+4, T et H tapés par l'utilisateur sont acceptés ; ils ne sont jamais proposés par
+  défaut.
 
 ## 6. Fenêtres et bandeau (`fenetres/`, `interface/vignette/bandeau.*`)
 
@@ -617,13 +649,71 @@ Module pur : il reçoit le dossier où écrire, ne connaît ni Tauri ni les autr
   généré à partir de `design/jetons.json` ; aucune valeur du design system n'est recopiée à
   la main dans une page.
 
+### 6.1 Fenêtre des Réglages (étape 10)
+
+- Fenêtre ordinaire unique (étiquette `reglages`, « Réglages de BreezyShot », 780 × 540,
+  560 × 420 au moins, redimensionnable, dans la barre des tâches), créée à la demande par le
+  menu de l'icône et détruite à la fermeture ; une seconde demande la ramène devant.
+  `fenetres::reglages` la crée et l'envoie ; `application::fenetre_reglages` tient les
+  commandes ; `application::page_reglages` prend toutes les décisions (fonctions pures).
+- **La page ne décide rien.** Elle appelle `reglages_lire` (à l'ouverture et à chaque retour
+  du focus), `reglages_changer { changement: { cle, valeur } }`, `reglages_apercu_nom`,
+  `reglages_parcourir`, `reglages_saisie`, `reglages_raccourci`, `reglages_retablir`. Chaque
+  commande rend `{ vue, refus }` : la vue entière (lignes montrées, valeurs, raccourcis,
+  alerte, version du programme) et au plus un refus d'une ligne pour la ligne concernée.
+  Le cœur peut aussi pousser la vue (`reglages:etat`). Droits : `capabilities/reglages.json`
+  (fenêtre `reglages`, écoute et les sept commandes).
+- **Lignes montrées** : seulement ce qui marche (`lignes_montrees`) ; la vignette, sa durée,
+  son coin et « Enregistrer automatiquement » n'apparaissent que si
+  `VIGNETTE_CONSTRUITE` est vrai (sans vignette, chaque capture est enregistrée).
+- **Application immédiate** : chaque changement est validé (`reglages::valider`), appliqué,
+  écrit. Si l'écriture échoue, il reste appliqué pour la session et l'alerte « Réglages non
+  enregistrés » s'affiche. Avant d'écrire, le fichier est relu : s'il a changé depuis la
+  dernière lecture (main de l'utilisateur), il est adopté puis le changement appliqué
+  dessus ; un changement extérieur n'est jamais écrasé. Le disque n'est pas surveillé.
+- **Dossier** : « Parcourir… » ouvre le sélecteur de dossier de Windows
+  (`systeme::choisir_dossier`, `IFileOpenDialog` en mode dossier, fil STA à part, modal à
+  la fenêtre). La page n'en montre que le nom court ; le chemin n'est jamais au journal.
+- **Démarrer avec Windows** : `systeme::demarrage_avec_systeme(Some(oui))` écrit ou efface
+  la valeur `BreezyShot` (`"<current_exe>"` entre guillemets) de la clé `Run`, `None` la lit.
+  `EtatDemarrage` : `Actif`, `Inactif`, `DesactiveParWindows` (désactivé dans le Gestionnaire
+  des tâches : `StartupApproved\Run`, affiché éteint, jamais réactivé par l'app),
+  `Indisponible` (hors Windows). Avec `BREEZYSHOT_DOSSIER_ESSAI`, la clé est
+  `HKCU\Software\BreezyShot\Essais\Run` (`demarrage: cle d'essai`). L'installateur pourra
+  appeler `demarrage_avec_systeme(Some(false))`.
+- **Thème** : `fenetres::theme::fixer` émet `interface:theme { theme: "light"|"dark"|null }`
+  à toutes les pages et règle le cadre des Réglages (`set_theme`) ; une page prête le reçoit
+  par `theme::envoyer_a` (le bandeau, dans `bandeau_pret`). `commun/theme.js` pose
+  `data-theme` sur `<html>`, que lisent les jetons. Le bandeau suit donc le thème choisi.
+- **Habillage provisoire** : `reglages.css` n'utilise que les jetons ; le comportement
+  (`reglages.js`) et les essais ne s'appuient que sur les attributs `data-*`, les rôles et
+  les noms accessibles, pour que le design puisse être refait sans y toucher.
+- Lignes du journal (contrat des essais, sans chemin) : `menu: reglages`,
+  `reglages fenetre <hwnd>`, `reglages ramenes devant`, `reglages page prete`,
+  `reglages fermes`, `demarrage avec le systeme: actif|inactif|desactive_par_windows|indisponible`,
+  `reglage change: <ligne> <valeur>` (`reglage change: modele_nom`, `reglage change: dossier`
+  sans valeur), `reglage refuse: <ligne> (<code>)`, `reglages ecrits`,
+  `reglages non ecrits: <code>`, `reglages relus: changes exterieurs`,
+  `theme interface: systeme|clair|sombre`, `demarrage avec le systeme ecrit: oui|non`,
+  `dossier: dialogue annule`, `raccourcis suspendus (saisie <action>)`, `raccourcis repris`,
+  `raccourcis repris d'office`, `raccourci <action> change: <canonique>`,
+  `raccourci <action> refuse: <candidat> (<raison>)`.
+
 ## 7. Vérification
 
 - `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `cargo test` : sur Windows (machine
   GitHub), et un `cargo check` + `cargo test` sur macOS pour garder le Mac ouvert.
 - `node outils/generer-jetons.mjs --verifier` : `jetons.css` est à jour. `node
   essais/pages/bandeau.cjs` : la page du bandeau dans Chromium, servie avec la CSP de l'app
-  (job `pages`, Linux).
+  (job `pages`, Linux). `essais/pages/reglages.cjs` : la page des Réglages de la même façon
+  (rubriques au clavier, lignes montrées, changements, refus, nom et aperçu, saisie d'un
+  raccourci, thème), sur une vue simulée.
+- Essai 08 sous Windows (`08-reglages-fenetre.ps1`) : ouverture par le vrai menu de l'icône
+  (si le menu ne s'ouvre pas, l'essai échoue en le disant), fenêtre unique ramenée devant,
+  changements écrits, raccourci changé à chaud puis refusé quand une autre application le
+  tient, démarrage avec Windows sur la clé d'essai seulement (la vraie clé `Run` est relue
+  inchangée à la fin), sélecteur de dossier puis capture enregistrée dedans, changement
+  extérieur gardé, thème sombre peint, fermeture, arrêt propre.
 - Essai 03 sous Windows, en plus des raccourcis : style étendu du bandeau (outil, sans
   `APPWINDOW`, sans activation), `IsWindowVisible` faux après `bandeau termine`,
   `WindowFromPoint` à côté de la pilule (pas le bandeau) et sur la croix (le bandeau),
@@ -661,7 +751,7 @@ Module pur : il reçoit le dossier où écrire, ne connaît ni Tauri ni les autr
   effet puis clic droit ; rien ne reste à l'écran, premier plan rendu, arrêt propre. Une
   fenêtre à cheval sur deux écrans et les échelles mêlées ne s'y vérifient pas.
 - `essais/` : un script par étape (`01-socle.ps1`, `02-reglages.ps1`, `03-raccourci.ps1`,
-  `04-zone.ps1`, `05-plein-ecran.ps1`, `06-fenetre.ps1`),
+  `04-zone.ps1`, `05-plein-ecran.ps1`, `06-fenetre.ps1`, `08-reglages-fenetre.ps1`),
   lancés par `essais/lancer.ps1` sur le .exe de release. Chaque essai démarre l'app avec
   `BREEZYSHOT_DOSSIER_ESSAI`, agit (lancer une seconde instance, simuler une touche, abîmer un
   fichier), puis lit le journal et les fichiers. Un essai qui échoue fait échouer GitHub.

@@ -43,6 +43,24 @@ pub enum Constat {
     EcritureImpossible { erreur: String },
 }
 
+impl Constat {
+    /// Code court, sans chemin, pour les lignes de journal de la fenêtre Réglages.
+    pub fn code(&self) -> &'static str {
+        match self {
+            Constat::Cree { .. } => "cree",
+            Constat::Abime { .. } => "abime",
+            Constat::AbimeNonSauvegarde { .. } => "abime_non_sauvegarde",
+            Constat::AncienneSauvegardeSupprimee { .. } => "ancienne_sauvegarde_supprimee",
+            Constat::LectureImpossible { .. } => "lecture_impossible",
+            Constat::MisANiveau { .. } => "mis_a_niveau",
+            Constat::ValeurRemplacee { .. } => "valeur_remplacee",
+            Constat::CopieRallumee => "copie_rallumee",
+            Constat::VersionPlusRecente { .. } => "version_recente",
+            Constat::EcritureImpossible { .. } => "ecriture_impossible",
+        }
+    }
+}
+
 impl fmt::Display for Constat {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -120,6 +138,21 @@ pub enum ErreurEcriture {
         etape: &'static str,
         erreur: io::Error,
     },
+}
+
+impl ErreurEcriture {
+    /// Code court, sans chemin, pour les lignes de journal de la fenêtre Réglages.
+    pub fn code(&self) -> &'static str {
+        match self {
+            ErreurEcriture::AucuneSortie => "aucune_sortie",
+            ErreurEcriture::ValeurInvalide { .. } => "valeur_invalide",
+            ErreurEcriture::VersionPlusRecente { .. } => "version_recente",
+            ErreurEcriture::FichierProtege => "protege",
+            ErreurEcriture::TropGros { .. } => "trop_gros",
+            ErreurEcriture::LectureSeule { .. } => "lecture_seule",
+            ErreurEcriture::Disque { .. } => "disque",
+        }
+    }
 }
 
 impl fmt::Display for ErreurEcriture {

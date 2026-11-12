@@ -1,0 +1,500 @@
+# Étape 10 : la fenêtre des Réglages et le démarrage avec Windows (ARCHITECTURE.md §3.5,
+# §4, §5, §6), sur le vrai .exe, avec de vrais clics et de vraies touches.
+#
+# (1) Démarrage : « demarrage: cle d'essai » (la vraie clé Run n'est ni lue ni écrite).
+# (2) Ouverture par le VRAI menu de l'icône : l'essai envoie à la fenêtre cachée de l'icône
+#     (classe « tray_icon_app » de l'app) le message que Windows lui envoie au clic droit,
+#     puis choisit « Réglages » dans le menu (#32768) par UI Automation. Si le menu ne
+#     s'ouvre pas, la vérification ÉCHOUE (jamais sautée). Fenêtre ordinaire : visible,
+#     dans la barre des tâches (pas WS_EX_TOOLWINDOW).
+# (3) Rouvrir : une seule fenêtre, ramenée devant.
+# (4) Copier éteint : journal, fichier, puis Ctrl+Maj+2 : « sortie copie non demandee » et
+#     presse-papiers inchangé ; rallumé.
+# (5) Raccourci du plein écran changé au clavier en Ctrl+Maj+7 : raccourcis suspendus puis
+#     repris, fichier, Ctrl+Maj+7 capture, Ctrl+Maj+2 ne fait plus rien.
+# (6) Ctrl+Maj+8 tenu par une autre application : refus dit sur la ligne, rien ne change ;
+#     saisie puis Échap : rien ne change, raccourcis repris.
+# (7) Lancer au démarrage sur la clé d'essai : écrit, retiré par l'essai, fenêtre rouverte
+#     → éteint (état lu dans le système) ; allumé puis éteint → valeur absente. La vraie
+#     clé Run est identique avant et après.
+# (8) Parcourir… : le sélecteur de dossier du système, un dossier d'essai choisi, une
+#     capture y est enregistrée ; le chemin n'apparaît jamais dans le journal.
+# (9) Fichier changé de l'extérieur pendant que la fenêtre est ouverte : le changement
+#     suivant le relit et ne l'écrase pas.
+# (10) Thème Sombre : le fond de la fenêtre prend la couleur du jeton --page sombre.
+# (11) Fermer : la fenêtre disparaît, l'app tourne ; mémoire notée ; arrêt propre.
+#
+# Ce que la machine GitHub ne prouve pas : le vrai démarrage de Windows avec la vraie clé,
+# la désactivation par le gestionnaire des tâches (tests purs de `etat_depuis`), un
+# clavier AZERTY (tests purs de `notation_saisie`), plusieurs écrans.
+# Hors Windows : seul le démarrage est vérifié.
+
+param(
+    [Parameter(Mandatory)][string]$Exe,
+    [Parameter(Mandatory)][string]$Sortie
+)
+
+. "$PSScriptRoot/commun.ps1"
+Initialiser-Essai -Nom '08-reglages-fenetre' -Exe $Exe -Sortie $Sortie | Out-Null
+
+$script:Auxiliaires = [System.Collections.Generic.List[object]]::new()
+$script:Pwsh = (Get-Process -Id $PID).Path
+$CLE_ESSAI = 'HKCU:\Software\BreezyShot\Essais'
+$CLE_RUN_ESSAI = 'HKCU:\Software\BreezyShot\Essais\Run'
+$CLE_RUN = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
+
+# --- Aides (même forme que les essais 04 à 06) -----------------------------------------
+
+function Lignes-Journal([string]$Dossier) {
+    return @((Lire-Journal -Dossier $Dossier) -split "`n" | ForEach-Object { $_.TrimEnd("`r") } | Where-Object { $_ -ne '' })
+}
+
+function Derniere-Ligne([string]$Motif, [string]$Dossier) {
+    $trouvee = $null
+    foreach ($l in (Lignes-Journal $Dossier)) { if ($l -match $Motif) { $trouvee = $l } }
+    return $trouvee
+}
+
+function Compter-Motif([string]$Motif, [string]$Dossier) {
+    $n = 0
+    foreach ($l in (Lignes-Journal $Dossier)) { if ($l -match $Motif) { $n++ } }
+    return $n
+}
+
+function Attendre-Motif([string]$Motif, [string]$Dossier, [double]$DelaiS, [string]$Quoi, [int]$Fois = 1) {
+    $limite = [DateTime]::UtcNow.AddSeconds($DelaiS)
+    do {
+        if ((Compter-Motif -Motif $Motif -Dossier $Dossier) -ge $Fois) {
+            return (Derniere-Ligne -Motif $Motif -Dossier $Dossier)
+        }
+        Start-Sleep -Milliseconds 50
+    } while ([DateTime]::UtcNow -lt $limite)
+    $vu = Compter-Motif -Motif $Motif -Dossier $Dossier
+    throw "$Quoi : rien dans le journal en $DelaiS s (motif « $Motif », attendu $Fois fois, vu $vu)"
+}
+
+# Attend la ligne suivante d'un motif (comptée avant le geste).
+function Attendre-Suivante([string]$Motif, [string]$Dossier, [int]$Avant, [string]$Quoi, [double]$DelaiS = 5) {
+    return Attendre-Motif -Motif $Motif -Dossier $Dossier -DelaiS $DelaiS -Quoi $Quoi -Fois ($Avant + 1)
+}
+
+function Lire-Reglages([string]$Dossier) {
+    return (Get-Content -LiteralPath (Join-Path $Dossier 'reglages/reglages.json') -Raw -Encoding utf8 | ConvertFrom-Json)
+}
+
+function Ecrire-Reglages([string]$Dossier, $Objet) {
+    $d = Join-Path $Dossier 'reglages'
+    New-Item -ItemType Directory -Force -Path $d | Out-Null
+    $texte = $Objet | ConvertTo-Json -Depth 6
+    [System.IO.File]::WriteAllText((Join-Path $d 'reglages.json'), $texte, [System.Text.UTF8Encoding]::new($false))
+}
+
+# Réglages du cas : un raccourci par action, sans Impr. écran (pas d'annonce), copie et
+# enregistrement allumés (l'enregistrement prouve le dossier choisi au point 8, vignette
+# construite ou non).
+function Reglages-Du-Cas {
+    return [ordered]@{
+        version                   = 2
+        raccourcis                = [ordered]@{ zone = @('Ctrl+Maj+1'); plein_ecran = @('Ctrl+Maj+2'); fenetre = @('Ctrl+Maj+3') }
+        copier_apres_capture      = $true
+        enregistrer_apres_capture = $true
+        dossier_enregistrement    = $null
+    }
+}
+
+function Valeur-Run([string]$Cle) {
+    $v = Get-ItemProperty -LiteralPath $Cle -Name 'BreezyShot' -ErrorAction SilentlyContinue
+    if ($null -eq $v) { return $null }
+    return [string]$v.BreezyShot
+}
+
+try {
+    $cas = Join-Path $script:Essai.Dossier 'cas'
+    New-Item -ItemType Directory -Force -Path $cas | Out-Null
+    Ecrire-Reglages -Dossier $cas -Objet (Reglages-Du-Cas)
+
+    if (-not $IsWindows) {
+        $p = Demarrer-App -Dossier $cas
+        $null = Attendre-Motif -Motif 'application +pret$' -Dossier $cas -DelaiS 30 -Quoi 'démarrage'
+        Verifier '(1) clé d''essai annoncée' ((Compter-Motif -Motif "demarrage: cle d'essai$" -Dossier $cas) -eq 1) | Out-Null
+        $q = Quitter-App -DelaiS 10 -Dossier $cas
+        Verifier '(11) --quitter → arret propre' ($q.Fini -and $p.WaitForExit(10000)) | Out-Null
+        Write-Host '[saute] (2) à (10) : sautés hors Windows'
+        return
+    }
+
+    Add-Type -AssemblyName UIAutomationClient
+    Add-Type -AssemblyName UIAutomationTypes
+    Add-Type -AssemblyName System.Drawing
+    Add-Type -Namespace BreezyShotEssai -Name Reglages -MemberDefinition @'
+[DllImport("user32.dll")]
+static extern void keybd_event(byte vk, byte scan, uint flags, UIntPtr extra);
+[DllImport("user32.dll")]
+static extern uint MapVirtualKey(uint code, uint type);
+[DllImport("user32.dll")]
+static extern void mouse_event(uint flags, int dx, int dy, uint data, UIntPtr extra);
+[DllImport("user32.dll")]
+public static extern bool SetCursorPos(int x, int y);
+[DllImport("user32.dll", SetLastError = true)]
+public static extern bool SetProcessDpiAwarenessContext(IntPtr contexte);
+[DllImport("user32.dll")]
+public static extern bool IsWindowVisible(IntPtr h);
+[DllImport("user32.dll")]
+public static extern bool IsWindow(IntPtr h);
+[DllImport("user32.dll")]
+public static extern IntPtr GetForegroundWindow();
+[DllImport("user32.dll")]
+public static extern int GetWindowLong(IntPtr h, int index);
+[DllImport("user32.dll", SetLastError = true)]
+public static extern bool PostMessage(IntPtr h, uint msg, IntPtr w, IntPtr l);
+[DllImport("user32.dll")]
+static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid);
+delegate bool Rappel(IntPtr h, IntPtr p);
+[DllImport("user32.dll")]
+static extern bool EnumWindows(Rappel f, IntPtr p);
+[DllImport("user32.dll", CharSet = CharSet.Unicode)]
+static extern int GetClassName(IntPtr h, System.Text.StringBuilder nom, int taille);
+[DllImport("user32.dll", CharSet = CharSet.Unicode)]
+static extern int GetWindowText(IntPtr h, System.Text.StringBuilder texte, int taille);
+[StructLayout(LayoutKind.Sequential)]
+public struct RECT { public int Left; public int Top; public int Right; public int Bottom; }
+[DllImport("user32.dll")]
+public static extern bool GetClientRect(IntPtr h, out RECT r);
+[StructLayout(LayoutKind.Sequential)]
+public struct POINT { public int X; public int Y; }
+[DllImport("user32.dll")]
+public static extern bool ClientToScreen(IntPtr h, ref POINT p);
+
+const uint RELACHEE = 0x2;
+static void Bas(byte vk) { keybd_event(vk, (byte)MapVirtualKey(vk, 0), 0u, UIntPtr.Zero); }
+static void Haut(byte vk) { keybd_event(vk, (byte)MapVirtualKey(vk, 0), RELACHEE, UIntPtr.Zero); }
+public static void Appuyer(byte[] mods, byte touche) {
+    foreach (var m in mods) Bas(m);
+    System.Threading.Thread.Sleep(20);
+    Bas(touche);
+    System.Threading.Thread.Sleep(30);
+    Haut(touche);
+    for (int i = mods.Length - 1; i >= 0; i--) Haut(mods[i]);
+}
+public static void Cliquer(int x, int y) {
+    SetCursorPos(x, y);
+    mouse_event(0x1, 0, 0, 0, UIntPtr.Zero);
+    System.Threading.Thread.Sleep(30);
+    mouse_event(0x2, 0, 0, 0, UIntPtr.Zero);
+    System.Threading.Thread.Sleep(30);
+    mouse_event(0x4, 0, 0, 0, UIntPtr.Zero);
+}
+// Fenêtres de premier niveau d'un processus, d'une classe donnée (toutes si classe vide).
+public static IntPtr[] Fenetres(int pid, string classe) {
+    var liste = new System.Collections.Generic.List<IntPtr>();
+    EnumWindows((h, p) => {
+        uint proprio; GetWindowThreadProcessId(h, out proprio);
+        if ((int)proprio != pid) return true;
+        var nom = new System.Text.StringBuilder(256);
+        GetClassName(h, nom, nom.Capacity);
+        if (classe == "" || nom.ToString() == classe) liste.Add(h);
+        return true;
+    }, IntPtr.Zero);
+    return liste.ToArray();
+}
+// Fenêtres visibles de cette classe, tous processus confondus.
+public static IntPtr[] Visibles(string classe) {
+    var liste = new System.Collections.Generic.List<IntPtr>();
+    EnumWindows((h, p) => {
+        var nom = new System.Text.StringBuilder(256);
+        if (IsWindowVisible(h) && GetClassName(h, nom, nom.Capacity) > 0 && nom.ToString() == classe) liste.Add(h);
+        return true;
+    }, IntPtr.Zero);
+    return liste.ToArray();
+}
+public static string Titre(IntPtr h) {
+    var t = new System.Text.StringBuilder(512);
+    GetWindowText(h, t, t.Capacity);
+    return t.ToString();
+}
+'@
+    try { $null = [BreezyShotEssai.Reglages]::SetProcessDpiAwarenessContext([IntPtr]::new(-4)) } catch { }
+    $AE = [System.Windows.Automation.AutomationElement]
+    $CTRL_MAJ = [byte[]]@(0x11, 0x10)
+
+    # Un élément de la fenêtre $Racine par son nom accessible (et son type), attendu.
+    function Element([IntPtr]$Racine, [string]$Nom, $Type = $null, [double]$DelaiS = 5) {
+        $cond = [System.Windows.Automation.PropertyCondition]::new($AE::NameProperty, $Nom)
+        if ($null -ne $Type) {
+            $cond = [System.Windows.Automation.AndCondition]::new($cond,
+                [System.Windows.Automation.PropertyCondition]::new($AE::ControlTypeProperty, $Type))
+        }
+        $limite = [DateTime]::UtcNow.AddSeconds($DelaiS)
+        do {
+            try {
+                $e = $AE::FromHandle($Racine).FindFirst([System.Windows.Automation.TreeScope]::Descendants, $cond)
+                if ($null -ne $e) { return $e }
+            } catch { }
+            Start-Sleep -Milliseconds 100
+        } while ([DateTime]::UtcNow -lt $limite)
+        return $null
+    }
+    function Cliquer-Element($e, [string]$Quoi) {
+        if ($null -eq $e) { throw "$Quoi : élément introuvable" }
+        $r = $e.Current.BoundingRectangle
+        [BreezyShotEssai.Reglages]::Cliquer([int]($r.X + $r.Width / 2), [int]($r.Y + $r.Height / 2))
+        Start-Sleep -Milliseconds 150
+    }
+    function Cliquer-Nom([IntPtr]$Fenetre, [string]$Nom, $Type, [string]$Quoi) {
+        Cliquer-Element (Element $Fenetre $Nom $Type) $Quoi
+    }
+    function Etat-Interrupteur([IntPtr]$Fenetre, [string]$Nom) {
+        $e = Element $Fenetre $Nom
+        if ($null -eq $e) { return 'introuvable' }
+        try { return [string]$e.GetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern).Current.ToggleState }
+        catch { return 'sans etat' }
+    }
+
+    $reelAvant = Valeur-Run $CLE_RUN
+    Remove-Item -LiteralPath $CLE_ESSAI -Recurse -Force -ErrorAction SilentlyContinue
+
+    # (1) Démarrage.
+    $p = Demarrer-App -Dossier $cas
+    $null = Attendre-Motif -Motif 'application +pret$' -Dossier $cas -DelaiS 30 -Quoi '(1) démarrage'
+    $null = Attendre-Motif -Motif 'bandeau pret$' -Dossier $cas -DelaiS 20 -Quoi '(1) page du bandeau'
+    Verifier "(1) « demarrage: cle d'essai »" ((Compter-Motif -Motif "demarrage: cle d'essai$" -Dossier $cas) -eq 1) | Out-Null
+    Verifier '(1) raccourci plein_ecran: Ctrl+Maj+2' ((Compter-Motif -Motif 'raccourci plein_ecran: Ctrl\+Maj\+2$' -Dossier $cas) -eq 1) | Out-Null
+
+    # (2) Ouvrir par le vrai menu de l'icône.
+    function Ouvrir-Par-Menu([string]$Quoi) {
+        $icones = [BreezyShotEssai.Reglages]::Fenetres($p.Id, 'tray_icon_app')
+        if ($icones.Length -lt 1) {
+            Verifier "$Quoi : fenêtre de l'icône trouvée" $false 'aucune fenêtre tray_icon_app' | Out-Null
+            throw "$Quoi : menu de l'icône impossible à ouvrir"
+        }
+        $menusAvant = [BreezyShotEssai.Reglages]::Visibles('#32768').Length
+        $vus = Compter-Motif -Motif 'menu: reglages$' -Dossier $cas
+        # WM_USER_TRAYICON (6002) avec WM_RBUTTONUP (0x205) : ce que Windows envoie au clic droit.
+        foreach ($h in $icones) { [void][BreezyShotEssai.Reglages]::PostMessage($h, 6002, [IntPtr]::Zero, [IntPtr]0x205) }
+        $menu = [IntPtr]::Zero
+        $limite = [DateTime]::UtcNow.AddSeconds(3)
+        do {
+            $m = [BreezyShotEssai.Reglages]::Visibles('#32768')
+            if ($m.Length -gt $menusAvant -or ($m.Length -gt 0 -and $menusAvant -eq 0)) { $menu = $m[0] }
+            Start-Sleep -Milliseconds 50
+        } while ($menu -eq [IntPtr]::Zero -and [DateTime]::UtcNow -lt $limite)
+        if (-not (Verifier "$Quoi : le menu de l'icône s'ouvre" ($menu -ne [IntPtr]::Zero))) {
+            throw "$Quoi : le menu de l'icône ne s'ouvre pas"
+        }
+        $entree = Element $menu 'Réglages' $null 3
+        if (-not (Verifier "$Quoi : entrée « Réglages » au menu" ($null -ne $entree))) { throw "$Quoi : pas d'entrée Réglages" }
+        try { $entree.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke() }
+        catch { Cliquer-Element $entree $Quoi }
+        $null = Attendre-Suivante 'menu: reglages$' $cas $vus "$Quoi : menu: reglages"
+    }
+
+    $ouvertes = Compter-Motif -Motif 'reglages fenetre \d+$' -Dossier $cas
+    Ouvrir-Par-Menu '(2)'
+    $l = Attendre-Suivante 'reglages fenetre (\d+)$' $cas $ouvertes '(2) fenêtre créée' 10
+    if ($l -notmatch 'reglages fenetre (\d+)$') { throw "(2) ligne illisible : $l" }
+    $fen = [IntPtr][long]$Matches[1]
+    $null = Attendre-Motif -Motif 'reglages page prete$' -Dossier $cas -DelaiS 20 -Quoi '(2) page prête'
+    $ex = [BreezyShotEssai.Reglages]::GetWindowLong($fen, -20)
+    Verifier '(2) fenêtre visible, titre « Réglages de BreezyShot »' (([BreezyShotEssai.Reglages]::IsWindowVisible($fen)) -and ([BreezyShotEssai.Reglages]::Titre($fen) -eq 'Réglages de BreezyShot')) | Out-Null
+    Verifier '(2) fenêtre ordinaire (pas WS_EX_TOOLWINDOW)' (($ex -band 0x80) -eq 0) ('0x{0:X}' -f $ex) | Out-Null
+
+    # (3) Rouvrir : ramenée devant, une seule.
+    $devant = Compter-Motif -Motif 'reglages ramenes devant$' -Dossier $cas
+    Ouvrir-Par-Menu '(3)'
+    $null = Attendre-Suivante 'reglages ramenes devant$' $cas $devant '(3) ramenée devant'
+    Start-Sleep -Milliseconds 300
+    $titres = @([BreezyShotEssai.Reglages]::Fenetres($p.Id, '') | Where-Object { [BreezyShotEssai.Reglages]::Titre($_) -eq 'Réglages de BreezyShot' })
+    Verifier '(3) une seule fenêtre Réglages' ($titres.Count -eq 1) "$($titres.Count)" | Out-Null
+    Verifier '(3) au premier plan' ([BreezyShotEssai.Reglages]::GetForegroundWindow() -eq $fen) | Out-Null
+
+    # (4) Copier éteint, capture sans copie, rallumé.
+    $ecrits = Compter-Motif -Motif 'reglages ecrits$' -Dossier $cas
+    Cliquer-Nom $fen 'Copier automatiquement' $null '(4) interrupteur Copier'
+    $null = Attendre-Suivante 'reglage change: copier non$' $cas 0 '(4) copier non'
+    $null = Attendre-Suivante 'reglages ecrits$' $cas $ecrits '(4) écrit'
+    Verifier '(4) fichier : copier_apres_capture false' ((Lire-Reglages $cas).copier_apres_capture -eq $false) | Out-Null
+    Set-Clipboard -Value 'temoin-08'
+    $sorties = Compter-Motif -Motif 'sortie copie ' -Dossier $cas
+    [BreezyShotEssai.Reglages]::Appuyer($CTRL_MAJ, 0x32)
+    $ls = Attendre-Suivante 'sortie copie ' $cas $sorties '(4) capture' 10
+    Verifier '(4) Ctrl+Maj+2 : copie non demandée' ($ls -match 'sortie copie non demandee') $ls | Out-Null
+    Verifier '(4) presse-papiers inchangé' ((Get-Clipboard -Raw) -eq 'temoin-08') | Out-Null
+    $repos = Compter-Motif -Motif 'Decoupe -> Repos' -Dossier $cas
+    Start-Sleep -Milliseconds 500
+    Cliquer-Nom $fen 'Copier automatiquement' $null '(4) interrupteur Copier (rallumer)'
+    $null = Attendre-Motif -Motif 'reglage change: copier oui$' -Dossier $cas -DelaiS 5 -Quoi '(4) copier oui'
+
+    # (5) Ctrl+Maj+7 pour le plein écran.
+    Cliquer-Nom $fen 'Raccourcis' ([System.Windows.Automation.ControlType]::TabItem) '(5) rubrique Raccourcis'
+    $susp = Compter-Motif -Motif 'raccourcis suspendus \(saisie plein_ecran\)$' -Dossier $cas
+    $repris = Compter-Motif -Motif 'raccourcis repris$' -Dossier $cas
+    Cliquer-Nom $fen 'Plein écran' ([System.Windows.Automation.ControlType]::Button) '(5) raccourci du plein écran'
+    $null = Attendre-Suivante 'raccourcis suspendus \(saisie plein_ecran\)$' $cas $susp '(5) saisie'
+    [BreezyShotEssai.Reglages]::Appuyer($CTRL_MAJ, 0x37)
+    $null = Attendre-Motif -Motif 'raccourci plein_ecran change: Ctrl\+Maj\+7$' -Dossier $cas -DelaiS 5 -Quoi '(5) changé'
+    $null = Attendre-Suivante 'raccourcis repris$' $cas $repris '(5) repris'
+    Start-Sleep -Milliseconds 300
+    $lu = @((Lire-Reglages $cas).raccourcis.plein_ecran)
+    Verifier '(5) fichier : plein_ecran = [Ctrl+Maj+7]' (($lu.Count -eq 1) -and ($lu[0] -eq 'Ctrl+Maj+7')) ($lu -join ',') | Out-Null
+    function Presses { return (Compter-Motif -Motif 'raccourci presse: plein_ecran$' -Dossier $cas) }
+    function Attendre-Repos([int]$Avant) { $null = Attendre-Suivante 'Decoupe -> Repos' $cas $Avant 'retour au repos' 10 }
+    $n = Presses; $repos = Compter-Motif -Motif 'Decoupe -> Repos' -Dossier $cas
+    [BreezyShotEssai.Reglages]::Appuyer($CTRL_MAJ, 0x37)
+    $null = Attendre-Suivante 'raccourci presse: plein_ecran$' $cas $n '(5) Ctrl+Maj+7 capture'
+    Attendre-Repos $repos
+    Verifier '(5) Ctrl+Maj+7 lance la capture de l''écran' $true | Out-Null
+    $n = Presses
+    [BreezyShotEssai.Reglages]::Appuyer($CTRL_MAJ, 0x32)
+    Start-Sleep -Milliseconds 1500
+    Verifier '(5) Ctrl+Maj+2 ne fait plus rien' ((Presses) -eq $n) | Out-Null
+
+    # (6) Ctrl+Maj+8 tenu ailleurs : refus sur la ligne ; puis saisie et Échap.
+    $f = Join-Path $script:Essai.Dossier 'tenu-8.txt'
+    $aide = Start-Process -FilePath $script:Pwsh -PassThru -ArgumentList @('-NoProfile', '-File', (Join-Path $PSScriptRoot 'tenir-raccourci.ps1'), '-Vk', 0x38, '-Mods', 6, '-Fichier', $f)
+    $script:Auxiliaires.Add($aide)
+    $limite = [DateTime]::UtcNow.AddSeconds(30)
+    while (-not (Test-Path -LiteralPath $f) -and [DateTime]::UtcNow -lt $limite) { Start-Sleep -Milliseconds 100 }
+    $tenu = (Test-Path -LiteralPath $f) -and ((Get-Content -LiteralPath $f -Raw).Trim() -eq 'tenu')
+    if (-not (Verifier '(6) Ctrl+Maj+8 tenu par une autre application' $tenu)) { throw '(6) Ctrl+Maj+8 non tenu' }
+    $susp = Compter-Motif -Motif 'raccourcis suspendus \(saisie plein_ecran\)$' -Dossier $cas
+    Cliquer-Nom $fen 'Plein écran' ([System.Windows.Automation.ControlType]::Button) '(6) raccourci du plein écran'
+    $null = Attendre-Suivante 'raccourcis suspendus \(saisie plein_ecran\)$' $cas $susp '(6) saisie'
+    [BreezyShotEssai.Reglages]::Appuyer($CTRL_MAJ, 0x38)
+    $null = Attendre-Motif -Motif 'raccourci plein_ecran refuse: Ctrl\+Maj\+8 \(refuse par le systeme\)$' -Dossier $cas -DelaiS 5 -Quoi '(6) refus'
+    Verifier '(6) « Pris par une autre application » sur la ligne' ($null -ne (Element $fen 'Pris par une autre application')) | Out-Null
+    $lu = @((Lire-Reglages $cas).raccourcis.plein_ecran)
+    Verifier '(6) fichier inchangé' (($lu.Count -eq 1) -and ($lu[0] -eq 'Ctrl+Maj+7')) ($lu -join ',') | Out-Null
+    $n = Presses; $repos = Compter-Motif -Motif 'Decoupe -> Repos' -Dossier $cas
+    [BreezyShotEssai.Reglages]::Appuyer($CTRL_MAJ, 0x37)
+    $null = Attendre-Suivante 'raccourci presse: plein_ecran$' $cas $n '(6) Ctrl+Maj+7 marche encore'
+    Attendre-Repos $repos
+    Verifier '(6) Ctrl+Maj+7 capture toujours' $true | Out-Null
+    $susp = Compter-Motif -Motif 'raccourcis suspendus \(saisie plein_ecran\)$' -Dossier $cas
+    $repris = Compter-Motif -Motif 'raccourcis repris$' -Dossier $cas
+    Cliquer-Nom $fen 'Plein écran' ([System.Windows.Automation.ControlType]::Button) '(6) saisie avant Échap'
+    $null = Attendre-Suivante 'raccourcis suspendus \(saisie plein_ecran\)$' $cas $susp '(6) saisie avant Échap'
+    [BreezyShotEssai.Reglages]::Appuyer([byte[]]@(), 0x1B)
+    $null = Attendre-Suivante 'raccourcis repris$' $cas $repris '(6) Échap : repris'
+    $lu = @((Lire-Reglages $cas).raccourcis.plein_ecran)
+    Verifier '(6) Échap : rien ne change' (($lu.Count -eq 1) -and ($lu[0] -eq 'Ctrl+Maj+7')) | Out-Null
+    $n = Presses; $repos = Compter-Motif -Motif 'Decoupe -> Repos' -Dossier $cas
+    [BreezyShotEssai.Reglages]::Appuyer($CTRL_MAJ, 0x37)
+    $null = Attendre-Suivante 'raccourci presse: plein_ecran$' $cas $n '(6) Ctrl+Maj+7 après Échap'
+    Attendre-Repos $repos
+    try { $aide.Kill() } catch { }
+
+    # (7) Lancer au démarrage, sur la clé d'essai.
+    $commande = '"' + $script:Essai.Exe + '"'
+    Cliquer-Nom $fen 'Général' ([System.Windows.Automation.ControlType]::TabItem) '(7) rubrique Général'
+    Cliquer-Nom $fen 'Lancer au démarrage' $null '(7) interrupteur'
+    $null = Attendre-Motif -Motif 'demarrage avec le systeme ecrit: oui$' -Dossier $cas -DelaiS 5 -Quoi '(7) écrit'
+    Verifier '(7) clé d''essai : la valeur est l''exe entre guillemets' ((Valeur-Run $CLE_RUN_ESSAI) -eq $commande) "$(Valeur-Run $CLE_RUN_ESSAI)" | Out-Null
+    Verifier '(7) fichier : demarrer_avec_systeme true' ((Lire-Reglages $cas).demarrer_avec_systeme -eq $true) | Out-Null
+    Remove-ItemProperty -LiteralPath $CLE_RUN_ESSAI -Name 'BreezyShot'
+    $fermes = Compter-Motif -Motif 'reglages fermes$' -Dossier $cas
+    [void][BreezyShotEssai.Reglages]::PostMessage($fen, 0x10, [IntPtr]::Zero, [IntPtr]::Zero)
+    $null = Attendre-Suivante 'reglages fermes$' $cas $fermes '(7) fermée'
+    $ouvertes = Compter-Motif -Motif 'reglages fenetre \d+$' -Dossier $cas
+    Ouvrir-Par-Menu '(7) réouverture'
+    $l = Attendre-Suivante 'reglages fenetre (\d+)$' $cas $ouvertes '(7) fenêtre recréée' 10
+    $null = $l -match 'reglages fenetre (\d+)$'; $fen = [IntPtr][long]$Matches[1]
+    Verifier '(7) état relu dans le système : inactif' ((Derniere-Ligne 'demarrage avec le systeme: ' $cas) -match 'demarrage avec le systeme: inactif$') | Out-Null
+    Cliquer-Nom $fen 'Général' ([System.Windows.Automation.ControlType]::TabItem) '(7) rubrique Général'
+    Start-Sleep -Milliseconds 300
+    Verifier '(7) interrupteur éteint (le fichier dit pourtant oui)' ((Etat-Interrupteur $fen 'Lancer au démarrage') -eq 'Off') (Etat-Interrupteur $fen 'Lancer au démarrage') | Out-Null
+    Cliquer-Nom $fen 'Lancer au démarrage' $null '(7) allumer'
+    $null = Attendre-Motif -Motif 'demarrage avec le systeme ecrit: oui$' -Dossier $cas -DelaiS 5 -Quoi '(7) rallumé' -Fois 2
+    Cliquer-Nom $fen 'Lancer au démarrage' $null '(7) éteindre'
+    $null = Attendre-Motif -Motif 'demarrage avec le systeme ecrit: non$' -Dossier $cas -DelaiS 5 -Quoi '(7) éteint'
+    Verifier '(7) éteint : valeur absente de la clé d''essai' ($null -eq (Valeur-Run $CLE_RUN_ESSAI)) | Out-Null
+    Verifier '(7) vraie clé Run identique' ((Valeur-Run $CLE_RUN) -eq $reelAvant) | Out-Null
+
+    # (8) Parcourir… : un dossier d'essai choisi dans le sélecteur du système.
+    $jeton = 'choisi-' + [guid]::NewGuid().ToString('N').Substring(0, 8)
+    $choisi = Join-Path $script:Essai.Dossier $jeton
+    New-Item -ItemType Directory -Force -Path $choisi | Out-Null
+    Cliquer-Nom $fen 'Après la capture' ([System.Windows.Automation.ControlType]::TabItem) '(8) rubrique'
+    $dialoguesAvant = @([BreezyShotEssai.Reglages]::Fenetres($p.Id, '#32770') | Where-Object { [BreezyShotEssai.Reglages]::IsWindowVisible($_) }).Count
+    Cliquer-Nom $fen 'Parcourir…' ([System.Windows.Automation.ControlType]::Button) '(8) Parcourir'
+    $dialogue = [IntPtr]::Zero
+    $limite = [DateTime]::UtcNow.AddSeconds(10)
+    do {
+        $d = @([BreezyShotEssai.Reglages]::Fenetres($p.Id, '#32770') | Where-Object { [BreezyShotEssai.Reglages]::IsWindowVisible($_) })
+        if ($d.Count -gt $dialoguesAvant) { $dialogue = $d[0] }
+        Start-Sleep -Milliseconds 100
+    } while ($dialogue -eq [IntPtr]::Zero -and [DateTime]::UtcNow -lt $limite)
+    if (-not (Verifier '(8) le sélecteur de dossier s''ouvre' ($dialogue -ne [IntPtr]::Zero))) { throw '(8) pas de sélecteur' }
+    # Champ « Dossier : » (1152) puis bouton de validation (1) du dialogue de Windows.
+    $champ = $AE::FromHandle($dialogue).FindFirst([System.Windows.Automation.TreeScope]::Descendants,
+        [System.Windows.Automation.PropertyCondition]::new($AE::AutomationIdProperty, '1152'))
+    if ($null -eq $champ) { throw '(8) champ du dossier introuvable' }
+    $champ.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).SetValue($choisi)
+    $ok = $AE::FromHandle($dialogue).FindFirst([System.Windows.Automation.TreeScope]::Descendants,
+        [System.Windows.Automation.AndCondition]::new(
+            [System.Windows.Automation.PropertyCondition]::new($AE::AutomationIdProperty, '1'),
+            [System.Windows.Automation.PropertyCondition]::new($AE::ControlTypeProperty, [System.Windows.Automation.ControlType]::Button)))
+    if ($null -eq $ok) { throw '(8) bouton de validation introuvable' }
+    $ok.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    $null = Attendre-Motif -Motif 'reglage change: dossier$' -Dossier $cas -DelaiS 10 -Quoi '(8) dossier changé'
+    Verifier '(8) fichier : dossier choisi' ((Lire-Reglages $cas).dossier_enregistrement -eq $choisi) | Out-Null
+    $n = Presses; $repos = Compter-Motif -Motif 'Decoupe -> Repos' -Dossier $cas
+    [BreezyShotEssai.Reglages]::Appuyer($CTRL_MAJ, 0x37)
+    $null = Attendre-Suivante 'raccourci presse: plein_ecran$' $cas $n '(8) capture'
+    Attendre-Repos $repos
+    $pngs = @(Get-ChildItem -LiteralPath $choisi -Filter '*.png' -ErrorAction SilentlyContinue)
+    Verifier '(8) la capture est enregistrée dans le dossier choisi' ($pngs.Count -eq 1) "$($pngs.Count)" | Out-Null
+    Verifier '(8) le chemin choisi n''est jamais au journal' ((Compter-Lignes -Texte $jeton -Dossier $cas) -eq 0) | Out-Null
+
+    # (9) Fichier changé de l'extérieur pendant l'ouverture : jamais écrasé.
+    $r = Lire-Reglages $cas
+    $r.modele_nom = 'Externe {date}'
+    Ecrire-Reglages -Dossier $cas -Objet $r
+    $exterieurs = Compter-Motif -Motif 'reglages relus: changes exterieurs$' -Dossier $cas
+    Cliquer-Nom $fen 'Copier automatiquement' $null '(9) Copier'
+    $null = Attendre-Suivante 'reglages relus: changes exterieurs$' $cas $exterieurs '(9) relu'
+    Start-Sleep -Milliseconds 300
+    $r = Lire-Reglages $cas
+    Verifier '(9) changement extérieur gardé, nouveau changement écrit' (($r.modele_nom -eq 'Externe {date}') -and ($r.copier_apres_capture -eq $false)) "$($r.modele_nom) / $($r.copier_apres_capture)" | Out-Null
+    Cliquer-Nom $fen 'Copier automatiquement' $null '(9) Copier rallumé'
+
+    # (10) Thème sombre : le fond de la page prend le jeton --page sombre (#202020).
+    Cliquer-Nom $fen 'Général' ([System.Windows.Automation.ControlType]::TabItem) '(10) rubrique'
+    Cliquer-Nom $fen 'Sombre' $null '(10) Sombre'
+    $null = Attendre-Motif -Motif 'theme interface: sombre$' -Dossier $cas -DelaiS 5 -Quoi '(10) thème'
+    Start-Sleep -Milliseconds 600
+    $rc = New-Object BreezyShotEssai.Reglages+RECT
+    $null = [BreezyShotEssai.Reglages]::GetClientRect($fen, [ref]$rc)
+    $pt = New-Object BreezyShotEssai.Reglages+POINT
+    $pt.X = 20; $pt.Y = $rc.Bottom - 20
+    $null = [BreezyShotEssai.Reglages]::ClientToScreen($fen, [ref]$pt)
+    $bmp = [System.Drawing.Bitmap]::new(1, 1)
+    $g = [System.Drawing.Graphics]::FromImage($bmp)
+    $g.CopyFromScreen($pt.X, $pt.Y, 0, 0, [System.Drawing.Size]::new(1, 1))
+    $c = $bmp.GetPixel(0, 0); $g.Dispose(); $bmp.Dispose()
+    $proche = ([math]::Abs($c.R - 0x20) -le 6) -and ([math]::Abs($c.G - 0x20) -le 6) -and ([math]::Abs($c.B - 0x20) -le 6)
+    Verifier '(10) fond sombre (#202020 ±6)' $proche "$($c.R),$($c.G),$($c.B)" | Out-Null
+    Cliquer-Nom $fen 'Système' $null '(10) Système'
+
+    # (11) Fermer : la fenêtre disparaît, l'app tourne.
+    $fermes = Compter-Motif -Motif 'reglages fermes$' -Dossier $cas
+    [void][BreezyShotEssai.Reglages]::PostMessage($fen, 0x10, [IntPtr]::Zero, [IntPtr]::Zero)
+    $null = Attendre-Suivante 'reglages fermes$' $cas $fermes '(11) fermée'
+    Start-Sleep -Milliseconds 500
+    Verifier '(11) fenêtre détruite, app toujours là' ((-not [BreezyShotEssai.Reglages]::IsWindow($fen)) -and (-not $p.HasExited)) | Out-Null
+    Noter-Mesure -Nom 'memoire privee apres fermeture des reglages' -Valeur (Memoire-Privee-Mo) -Unite 'Mo'
+    $arrets = Compter-Motif -Motif 'arret propre$' -Dossier $cas
+    $q = Quitter-App -DelaiS 10 -Dossier $cas
+    Verifier '(11) --quitter → arret propre' ($q.Fini -and $p.WaitForExit(10000)) | Out-Null
+    $null = Attendre-Suivante 'arret propre$' $cas $arrets '(11) arrêt'
+}
+catch {
+    Verifier "essai interrompu : $_" $false | Out-Null
+}
+finally {
+    foreach ($a in $script:Auxiliaires) { try { if (-not $a.HasExited) { $a.Kill() } } catch { } }
+    if ($IsWindows) {
+        Remove-Item -LiteralPath $CLE_ESSAI -Recurse -Force -ErrorAction SilentlyContinue
+        Verifier 'vraie clé Run jamais touchée' ((Valeur-Run $CLE_RUN) -eq $reelAvant) | Out-Null
+    }
+    Terminer-Essai
+}

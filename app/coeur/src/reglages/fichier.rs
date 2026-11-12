@@ -169,6 +169,25 @@ pub(super) fn texte_du_fichier(reglages: &Reglages) -> Result<String, ErreurEcri
             version: reglages.version_fichier,
         });
     }
+    valider(reglages)?;
+    let valeur = vers_json(reglages).map_err(|champ| ErreurEcriture::ValeurInvalide { champ })?;
+    let mut texte = serde_json::to_string_pretty(&valeur).map_err(|e| ErreurEcriture::Disque {
+        etape: "mise en forme",
+        erreur: io::Error::other(e),
+    })?;
+    texte.push('\n');
+    if texte.len() > TAILLE_MAX {
+        return Err(ErreurEcriture::TropGros {
+            taille: texte.len(),
+        });
+    }
+    Ok(texte)
+}
+
+/// Les contrôles de valeur que fait `ecrire`, sans le disque ni la protection : au moins
+/// une sortie active, durée permise, modèle de nom non vide, dossier non vide. Fonction
+/// pure, pour refuser un changement avant de l'appliquer.
+pub fn valider(reglages: &Reglages) -> Result<(), ErreurEcriture> {
     if !reglages.une_sortie_active() {
         return Err(ErreurEcriture::AucuneSortie);
     }
@@ -189,18 +208,7 @@ pub(super) fn texte_du_fichier(reglages: &Reglages) -> Result<String, ErreurEcri
             });
         }
     }
-    let valeur = vers_json(reglages).map_err(|champ| ErreurEcriture::ValeurInvalide { champ })?;
-    let mut texte = serde_json::to_string_pretty(&valeur).map_err(|e| ErreurEcriture::Disque {
-        etape: "mise en forme",
-        erreur: io::Error::other(e),
-    })?;
-    texte.push('\n');
-    if texte.len() > TAILLE_MAX {
-        return Err(ErreurEcriture::TropGros {
-            taille: texte.len(),
-        });
-    }
-    Ok(texte)
+    Ok(())
 }
 
 /// Renomme le fichier abîmé en `reglages.abime-<horodatage>.json` sans écraser une

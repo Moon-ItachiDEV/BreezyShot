@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-reglages-changer"
+description = "Enables the reglages_changer command without any pre-configured scope."
+commands.allow = ["reglages_changer"]
+
+[[permission]]
+identifier = "deny-reglages-changer"
+description = "Denies the reglages_changer command without any pre-configured scope."
+commands.deny = ["reglages_changer"]

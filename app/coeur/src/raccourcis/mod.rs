@@ -20,13 +20,15 @@ mod notation;
 mod reservation;
 
 pub use annonces::{decider_annonce, Annonce, Decision, Situation};
-pub use choix::{choisir, Bilan, ChoixAction, Ecarte, Raison, ACTIONS_PRIORITAIRES};
+pub use choix::{
+    choisir, choisir_action, Bilan, ChoixAction, Ecarte, Raison, ACTIONS_PRIORITAIRES,
+};
 pub use conversion::vers_systeme;
 pub use notation::{
     analyser, ErreurNotation, Modificateurs, Raccourci, Touche, RESERVES_AU_SYSTEME,
 };
 pub use reservation::{
-    liberer, liberer_echap, lignes_journal, reserver, reserver_echap, texte_raison,
+    liberer, liberer_echap, lignes_journal, reserver, reserver_echap, texte_raison, Reservations,
 };
 
 /// Ce que le module signale à l'Application.
