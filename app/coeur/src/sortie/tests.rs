@@ -1636,3 +1636,36 @@ fn enregistrer_a_refuse_sans_panique_ni_ecriture() {
     assert!(noms_du_dossier(racine.path()).is_empty());
     assert_eq!(noms_du_dossier(&courant), avant);
 }
+
+#[test]
+fn enregistrer_a_pixels_abimes_laisse_l_original_intact() {
+    let racine = tempfile::tempdir().expect("dossier temporaire");
+    let chemin = racine.path().join("original.png");
+    let ancien: Vec<u8> = (0..=255).collect();
+    fs::write(&chemin, &ancien).expect("ecriture");
+    let abimee = Pixels {
+        largeur: 4,
+        hauteur: 4,
+        rgba: vec![7; 63],
+    };
+    let etape = super::enregistrer_a(&abimee, &chemin, false);
+    assert!(matches!(etape, EtapeFichier::Echec { .. }), "{etape:?}");
+    assert_eq!(fs::read(&chemin).expect("lecture"), ancien);
+    assert_eq!(noms_du_dossier(racine.path()), noms(&["original.png"]));
+}
+
+#[test]
+fn enregistrer_a_tolere_un_disque_sans_vidage() {
+    use std::io::{Error, ErrorKind};
+    assert!(fichier::sync_tolere(Ok(())).is_ok());
+    assert!(fichier::sync_tolere(Err(Error::from(ErrorKind::Unsupported))).is_ok());
+    for genre in [
+        ErrorKind::PermissionDenied,
+        ErrorKind::StorageFull,
+        ErrorKind::Other,
+        ErrorKind::InvalidInput,
+    ] {
+        let rendu = fichier::sync_tolere(Err(Error::from(genre))).expect_err("echec garde");
+        assert_eq!(rendu.kind(), genre);
+    }
+}

@@ -115,7 +115,6 @@ mod tests {
 
     #[test]
     fn filtre_png_exact() {
-        assert_eq!(FILTRE_PNG, ("Image PNG", "*.png"));
         assert_eq!(
             large(FILTRE_PNG.0),
             [73, 109, 97, 103, 101, 32, 80, 78, 71, 0]
@@ -171,6 +170,18 @@ mod tests {
             chemin_png(d.join("a"), |c| c == d.join("a")),
             Ok(d.join("a.png"))
         );
+    }
+
+    #[test]
+    fn chemin_png_nom_fait_de_l_extension() {
+        // Comportement actuel : « .png » n'a pas d'extension pour `Path` (fichier cache),
+        // `.png` est donc ajoute, comme pour tout nom sans extension.
+        let d = Path::new("/d");
+        assert_eq!(
+            chemin_png(d.join(".png"), |_| false),
+            Ok(d.join(".png.png"))
+        );
+        assert!(chemin_png(d.join(".png"), |_| true).is_err());
     }
 
     #[test]

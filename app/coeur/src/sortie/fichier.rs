@@ -91,20 +91,32 @@ fn ecrire_a(
         creer_temporaire(dossier).map_err(|e| cause_temporaire(e.kind(), ""))?;
     // Sur le disque avant le remplacement : un ancien fichier n'est jamais remplace par un
     // fichier a moitie ecrit, meme si la machine s'arrete juste apres.
-    let ecrit = f.write_all(&octets).and_then(|()| f.sync_all());
+    let ecrit = f
+        .write_all(&octets)
+        .and_then(|()| sync_tolere(f.sync_all()));
     drop(f);
     if let Err(e) = ecrit {
         let _ = fs::remove_file(&temporaire);
         return Err(cause_disque(e.kind(), ""));
     }
-    // `fs::rename` remplace un fichier existant (Windows : MOVEFILE_REPLACE_EXISTING) ;
-    // il echoue sur un dossier. Fichier tenu : trois essais, puis echec.
+    // `fs::rename` remplace un fichier existant, sous Windows aussi ; il echoue sur un
+    // dossier. Fichier tenu : trois essais, puis echec.
     let place = avec_essais_si_tenu(|| fs::rename(&temporaire, chemin), &mut thread::sleep);
     if let Err(e) = place {
         let _ = fs::remove_file(&temporaire);
         return Err(cause_disque(e.kind(), ""));
     }
     Ok(())
+}
+
+/// Le resultat de `sync_all` vu par `enregistrer_a` : un disque qui ne sait pas vider ses
+/// tampons (`Unsupported` : montage en nuage, WebDAV) n'empeche pas l'enregistrement ; toute
+/// autre erreur reste un echec.
+pub(super) fn sync_tolere(resultat: io::Result<()>) -> io::Result<()> {
+    match resultat {
+        Err(e) if e.kind() == ErrorKind::Unsupported => Ok(()),
+        autre => autre,
+    }
 }
 
 /// Vrai si le dossier peut recevoir une ecriture : non vide et absolu.

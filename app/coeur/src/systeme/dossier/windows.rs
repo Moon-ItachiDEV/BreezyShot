@@ -86,7 +86,7 @@ pub fn choisir_fichier_png(
     let _appartement = unsafe {
         CoInitializeEx(None, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE)
             .ok()
-            .map_err(|e| format!("com: {e}"))?;
+            .map_err(|e| format!("com: {:#010x}", e.code().0))?;
         Appartement
     };
     let filtre_nom = super::large(super::FILTRE_PNG.0);
@@ -102,20 +102,22 @@ pub fn choisir_fichier_png(
     let choisi = unsafe {
         let dialogue: IFileSaveDialog =
             CoCreateInstance(&FileSaveDialog, None, CLSCTX_INPROC_SERVER)
-                .map_err(|e| format!("dialogue: {e}"))?;
-        let options = dialogue.GetOptions().map_err(|e| format!("options: {e}"))?;
+                .map_err(|e| format!("dialogue: {:#010x}", e.code().0))?;
+        let options = dialogue
+            .GetOptions()
+            .map_err(|e| format!("options: {:#010x}", e.code().0))?;
         dialogue
             .SetOptions(options | FOS_OVERWRITEPROMPT | FOS_FORCEFILESYSTEM | FOS_STRICTFILETYPES)
-            .map_err(|e| format!("options: {e}"))?;
+            .map_err(|e| format!("options: {:#010x}", e.code().0))?;
         dialogue
             .SetFileTypes(&filtres)
-            .map_err(|e| format!("filtre: {e}"))?;
+            .map_err(|e| format!("filtre: {:#010x}", e.code().0))?;
         dialogue
             .SetFileTypeIndex(1)
-            .map_err(|e| format!("filtre: {e}"))?;
+            .map_err(|e| format!("filtre: {:#010x}", e.code().0))?;
         dialogue
             .SetDefaultExtension(PCWSTR(extension.as_ptr()))
-            .map_err(|e| format!("extension: {e}"))?;
+            .map_err(|e| format!("extension: {:#010x}", e.code().0))?;
         if let Some(nom) = super::nom_propose(nom) {
             let texte = super::large(&nom);
             // Un nom refusé laisse le champ vide : l'utilisateur en tape un.
@@ -134,12 +136,14 @@ pub fn choisir_fichier_png(
             if e.code() == ERROR_CANCELLED.to_hresult() {
                 return Ok(None);
             }
-            return Err(format!("dialogue: {e}"));
+            return Err(format!("dialogue: {:#010x}", e.code().0));
         }
-        let element = dialogue.GetResult().map_err(|e| format!("resultat: {e}"))?;
+        let element = dialogue
+            .GetResult()
+            .map_err(|e| format!("resultat: {:#010x}", e.code().0))?;
         let texte = element
             .GetDisplayName(SIGDN_FILESYSPATH)
-            .map_err(|e| format!("chemin: {e}"))?;
+            .map_err(|e| format!("chemin: {:#010x}", e.code().0))?;
         let chemin = super::chemin_depuis_large(texte.as_wide());
         CoTaskMemFree(Some(texte.0 as *const core::ffi::c_void));
         chemin?
