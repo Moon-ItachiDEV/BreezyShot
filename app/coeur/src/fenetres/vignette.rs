@@ -1072,6 +1072,7 @@ pub fn vignette_pret(vignette: State<'_, Vignette>) {
 /// La page du souffle écoute ses événements.
 #[tauri::command]
 pub fn souffle_pret(vignette: State<'_, Vignette>) {
+    theme::envoyer_a(&vignette.app, ETIQUETTE_SOUFFLE);
     if let Some(mut e) = vignette.etat() {
         e.souffle_pret = true;
     }

@@ -1101,8 +1101,17 @@ d'erreur, la vignette reste.
 départ, puis `sortie::supprimer` dans un fil (fichier de « Récents », fichier enregistré
 pour cette capture, ses fichiers de glisser ; jamais le presse-papiers). **Une nouvelle
 capture ou l'arrêt pendant les 4 s font la suppression tout de suite, sans l'abandonner**
-(dans un fil pour une capture, sur le fil principal à l'arrêt). Échec : « Impossible de
-supprimer » / cause.
+(dans un fil pour une capture, sur le fil principal à l'arrêt ; l'arrêt attend aussi, 2 s
+au plus, les fils de suppression déjà lancés avant `arret propre`). Le fil écrit le bilan au
+journal ; échec : « Impossible de supprimer » / cause.
+
+**Enregistrer en retard** : Supprimer reste accepté pendant qu'un Enregistrer écrit. Une
+capture qui part avec son effacement lancé alors que son Enregistrer tourne encore est
+retenue (`a_retenir`, 8 au plus) ; le fichier qui arrive ensuite (carte partie et retenue,
+ou carte encore là mais effacement lancé) est effacé à son tour, par les mêmes gardes que
+Supprimer (`enregistrement_tardif` puis `sortie::a_effacer`) : `vignette suppression <id>
+tardive recent aucun fichier <ok|echec>`. Arrivé pendant les 4 s, il rejoint simplement
+la suppression en attente.
 
 **Durée** : `vignette.duree_s` du réglage, 0 = toujours (`duree_affichage`). La minuterie
 (`fenetres::vignette::Minuterie`, pure) est tenue par le cœur : elle démarre à l'entrée,
@@ -1146,6 +1155,8 @@ envoie `vignette_glisser` après un appui sur l'image et 4 px ; le cœur refuse 
 gestionnaire de WebView2). Bouton déjà relâché : `annule (bouton relache)`. Dépôt sur une
 fenêtre de BreezyShot (vignette, souffle, bandeau, par `fenetre_sous` à la position de la
 souris) : compte comme annulé (`vignette::depot`). Dépôt ailleurs : `GlisserReussi`, départ.
+Le bouton lu est le bouton principal : le droit quand les boutons sont inversés
+(`SM_SWAPBUTTON`, `systeme::glisser::bouton_principal`, pure).
 L'image qui suit la souris est celle du Shell (pas d'image propre en 0.3).
 
 **Pixels** : les pixels pleine taille de la capture restent en mémoire tant que la vignette
@@ -1153,6 +1164,13 @@ est là (recopier, réenregistrer), rendus à sa fermeture.
 
 **Fond** : uni, jeton `acrylic-solid` (pas de faux verre flouté en 0.3 : aucune copie du
 bureau n'est gardée).
+
+**Thème** : la page de la vignette et celle du souffle suivent le thème (`commun/theme.js`,
+attendu avant `vignette_pret` et `souffle_pret`, qui renvoient `interface:theme` à leur
+fenêtre). Animations : la page suit seulement `reduites` de la charge (le cœur a déjà tenu
+compte du système). Une page qui redit prête ne reçoit plus la charge d'une carte partie, et
+`Prete` ne lance le souffle qu'en état Souffle (`prete_acceptee`) : `vignette prete <id>
+ignoree`.
 
 **Journal** (jamais de chemin ni de contenu) : `vignette fenetre <hwnd>`, `souffle fenetre
 <hwnd>`, `vignette exclue des captures: …`, `souffle exclu des captures: …`, `vignette
@@ -1163,11 +1181,16 @@ depart … arrivee …`, `souffle saute <id>: animations reduites|fenetre absent
 termine [d'office] <id>`, `vignette entree <id>`, `chrono vignette …`, `vignette minuterie
 <id> pause survol|pause glisser|reprise`, `vignette action <id> <action> [ignoree]`,
 `vignette copie <id> faite|echec`, `vignette enregistrement <id> fait|deja fait|echec`,
-`vignette suppression <id> en attente|annulee|faite recent <ok|echec|aucun> fichier
-<ok|echec|aucun>`, `vignette glisser <id> debut|depose|annule|annule (bouton relache)|
+`vignette suppression <id> en attente|annulee|faite|tardive recent <ok|echec|aucun> fichier
+<ok|echec|aucun>`, `suppression non attendue (<n> fil(s) encore en cours)`, `vignette
+glisser <id> debut|depose|annule|annule (bouton relache)|
 indisponible|refuse (<cause>)`, `capture ignoree: glisser en cours`, `vignette fermee <id>
 delai|fermer|glisser|supprimer|capture|arret`, `vignette terminee <id>`, `vignette cachee
-d'office <id>`, `vignette impossible <id>: <cause>`, `vignette: apercu impossible`.
+d'office <id>`, `vignette impossible <id>: <cause>` (dont `page muette`), `vignette: apercu
+impossible`, `vignette zone <id> refusee (valeur non finie)`, `vignette prete <id> ignoree`,
+`vignette: charge non envoyee: <e>`, `souffle: charge non envoyee: <e>`, `vignette:
+surveillance impossible: <e>`, `fil de l'action impossible (<e>): action sur le fil
+principal`, `fil de suppression impossible (<e>): suppression sur le fil principal`.
 
 **Commandes** (fil principal ; un `id` qui n'est pas celui en cours est ignoré) :
 `vignette_pret`, `vignette_image`, `vignette_zone`, `vignette_entree`, `vignette_action`,

@@ -172,6 +172,12 @@
     "origine": "design/vignette5 (disposition A « Au survol »), .prev img."
    },
    {
+    "name": "duree-vignette-coche",
+    "value": "120ms",
+    "usage": "Retard du trait de la coche après le clic.",
+    "origine": "design/vignette5 (disposition A « Au survol »), .ok transition-delay:120ms."
+   },
+   {
     "name": "duree-envol-fenetre",
     "value": "460ms",
     "usage": "Durée de l'envol de la fenêtre de l'installateur vers la zone de notification.",
@@ -397,6 +403,84 @@
     "value": "6px",
     "usage": "Flou final du coup de vent.",
     "origine": "design/vignette5 (disposition A « Au survol »), blur(6px)."
+   },
+   {
+    "name": "vignette-principales-bas",
+    "value": "11px",
+    "usage": "Écart entre le bas de la carte et les pilules Copier / Enregistrer.",
+    "origine": "design/vignette5 (disposition A « Au survol »), .actions bottom:11px."
+   },
+   {
+    "name": "vignette-principales-ecart",
+    "value": "6px",
+    "usage": "Écart entre les pilules Copier et Enregistrer.",
+    "origine": "design/vignette5 (disposition A « Au survol »), .actions gap:6px."
+   },
+   {
+    "name": "vignette-coin-ecart",
+    "value": "6px",
+    "usage": "Retrait de la croix et des ronds secondaires depuis le coin haut droit.",
+    "origine": "design/vignette5 (disposition A « Au survol »), .x top/right:6px."
+   },
+   {
+    "name": "vignette-pilule-ecart",
+    "value": "7px",
+    "usage": "Écart entre le pictogramme et le libellé d'une pilule (et d'Annuler).",
+    "origine": "design/vignette5 (disposition A « Au survol »), .pill gap:7px."
+   },
+   {
+    "name": "vignette-revele-decalage",
+    "value": "4px",
+    "usage": "Décalage vertical des boutons avant le survol.",
+    "origine": "design/vignette5 (disposition A « Au survol »), translateY(4px)."
+   },
+   {
+    "name": "vignette-croix-picto",
+    "value": "10px",
+    "usage": "Côté de la croix de fermeture.",
+    "origine": "design/vignette5 (disposition A « Au survol »), .x svg 10px."
+   },
+   {
+    "name": "vignette-picto-anime",
+    "value": "16px",
+    "usage": "Côté des pictogrammes animés de Copier, Enregistrer et Annuler.",
+    "origine": "design/vignette5 (disposition A « Au survol »), .pill svg 16px."
+   },
+   {
+    "name": "vignette-libelle-hauteur",
+    "value": "18px",
+    "usage": "Hauteur (et interligne) du libellé qui glisse « Copier » → « Copié ».",
+    "origine": "design/vignette5 (disposition A « Au survol »), .lbl height:18px."
+   },
+   {
+    "name": "vignette-onde",
+    "value": "8px",
+    "usage": "Diamètre de départ de l'onde du clic.",
+    "origine": "design/vignette5 (disposition A « Au survol »), .pill::after 8px."
+   },
+   {
+    "name": "vignette-grise-flou",
+    "value": "2px",
+    "usage": "Flou de l'image de la carte « supprimée ».",
+    "origine": "design/vignette5 (disposition A « Au survol »), blur(2px)."
+   },
+   {
+    "name": "vignette-annuler-hauteur",
+    "value": "32px",
+    "usage": "Hauteur du bouton Annuler.",
+    "origine": "design/vignette5 (disposition A « Au survol »), .undo height:32px."
+   },
+   {
+    "name": "vignette-annuler-texte-taille",
+    "value": "13px",
+    "usage": "Taille du texte du bouton Annuler.",
+    "origine": "design/vignette5 (disposition A « Au survol »), .undo font 13px."
+   },
+   {
+    "name": "vignette-rayon-petit",
+    "value": "6px",
+    "usage": "Coins du bouton Annuler et de l'infobulle.",
+    "origine": "design/vignette5 (disposition A « Au survol »), .undo / .tip radius:6px."
    },
    {
     "name": "installateur-carte-largeur",
