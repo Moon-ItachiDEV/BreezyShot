@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-editeur-vue"
+description = "Enables the editeur_vue command without any pre-configured scope."
+commands.allow = ["editeur_vue"]
+
+[[permission]]
+identifier = "deny-editeur-vue"
+description = "Denies the editeur_vue command without any pre-configured scope."
+commands.deny = ["editeur_vue"]

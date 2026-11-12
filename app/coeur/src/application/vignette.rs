@@ -8,6 +8,7 @@ use std::time::{Duration, Instant};
 
 use chrono::{DateTime, Local};
 
+use super::editeur::annotable;
 use super::etats::{Declencheur, Etat};
 use super::zone::{message_annonce, DELAI_SORTIE};
 use crate::fenetres::vignette::{ActionVignette, Coin, Place};
@@ -26,6 +27,7 @@ pub const SOUS_DOSSIER_GLISSER: &str = "Glisser";
 /// Identifiants des actions (aussi dans la page et l'essai 07).
 pub const COPIER: &str = "copier";
 pub const ENREGISTRER: &str = "enregistrer";
+pub const ANNOTER: &str = "annoter";
 pub const SUPPRIMER: &str = "supprimer";
 pub const FERMER: &str = "fermer";
 pub const ANNULER: &str = "annuler";
@@ -79,10 +81,11 @@ fn action(id: &str, libelle: &str, fait: Option<&str>, place: Place) -> ActionVi
     }
 }
 
-/// Les boutons de la carte, dans l'ordre de la page : seulement ce qui marche (ni Annoter
-/// ni Épingler en 0.3).
-pub fn actions() -> Vec<ActionVignette> {
-    vec![
+/// Les boutons de la carte, dans l'ordre de la page : seulement ce qui marche. Annoter
+/// (`annoter` : éditeur construit et capture annotable), rond, avant Supprimer ; jamais
+/// Épingler.
+pub fn actions(annoter: bool) -> Vec<ActionVignette> {
+    let mut a = vec![
         action(COPIER, "Copier", Some("Copié"), Place::Principale),
         action(
             ENREGISTRER,
@@ -90,10 +93,16 @@ pub fn actions() -> Vec<ActionVignette> {
             Some("Enregistré"),
             Place::Principale,
         ),
+    ];
+    if annoter {
+        a.push(action(ANNOTER, "Annoter", None, Place::Secondaire));
+    }
+    a.extend([
         action(SUPPRIMER, "Supprimer", None, Place::Secondaire),
         action(FERMER, "Fermer", None, Place::Fermer),
         action(ANNULER, "Annuler", None, Place::Annulation),
-    ]
+    ]);
+    a
 }
 
 /// Le message du bandeau après la sortie : avec la vignette, seulement une erreur (la
@@ -162,6 +171,8 @@ pub enum Geste {
     Copier,
     Enregistrer,
     DejaEnregistree,
+    /// Ouvrir l'éditeur sur cette capture (contrat 0.4 « Éditeur », §4.2).
+    Annoter,
     Supprimer,
     Annuler,
     Fermer,
@@ -173,7 +184,9 @@ fn en_cours(depuis: Option<Instant>, maintenant: Instant) -> bool {
 }
 
 /// Ce que fait l'action `action` sur `capture` : pendant l'état « supprimée », seul
-/// Annuler compte ; une action qui tourne encore (moins de `DELAI_SORTIE`) est ignorée.
+/// Annuler compte ; une action qui tourne encore (moins de `DELAI_SORTIE`) est ignorée ;
+/// Annoter est ignoré pendant une copie, un enregistrement, un glisser, ou si la capture
+/// n'est pas annotable (R14, R11).
 pub fn decider(capture: &CaptureMontree, action: &str, maintenant: Instant) -> Geste {
     if capture.suppression != EtatSuppression::Aucune {
         return match (action, capture.suppression) {
@@ -187,6 +200,15 @@ pub fn decider(capture: &CaptureMontree, action: &str, maintenant: Instant) -> G
         ENREGISTRER if capture.enregistre.is_some() => Geste::DejaEnregistree,
         ENREGISTRER if en_cours(capture.enregistrement, maintenant) => Geste::Ignorer,
         ENREGISTRER => Geste::Enregistrer,
+        ANNOTER
+            if en_cours(capture.copie, maintenant)
+                || en_cours(capture.enregistrement, maintenant)
+                || capture.glisser
+                || !annotable(capture.pixels.largeur, capture.pixels.hauteur) =>
+        {
+            Geste::Ignorer
+        }
+        ANNOTER => Geste::Annoter,
         SUPPRIMER if capture.glisser => Geste::Ignorer,
         SUPPRIMER => Geste::Supprimer,
         FERMER => Geste::Fermer,
@@ -485,12 +507,82 @@ mod tests {
 
     #[test]
     fn actions_construites_seulement() {
-        let a = actions();
+        let a = actions(false);
         let ids: Vec<&str> = a.iter().map(|a| a.id.as_str()).collect();
         assert_eq!(ids, [COPIER, ENREGISTRER, SUPPRIMER, FERMER, ANNULER]);
         assert_eq!(a[0].libelle_fait.as_deref(), Some("Copié"));
         assert_eq!(a[1].libelle_fait.as_deref(), Some("Enregistré"));
-        assert!(!ids.contains(&"annoter") && !ids.contains(&"epingler"));
+        assert!(!ids.contains(&ANNOTER) && !ids.contains(&"epingler"));
+    }
+
+    #[test]
+    fn annoter_avant_supprimer() {
+        let a = actions(true);
+        let ids: Vec<&str> = a.iter().map(|a| a.id.as_str()).collect();
+        assert_eq!(
+            ids,
+            [COPIER, ENREGISTRER, ANNOTER, SUPPRIMER, FERMER, ANNULER]
+        );
+        let annoter = &a[2];
+        assert_eq!(annoter.libelle, "Annoter");
+        assert_eq!(annoter.libelle_fait, None);
+        assert_eq!(annoter.place, Place::Secondaire);
+        assert_eq!(annoter.picto, "annoter");
+        // Premier des boutons secondaires (ronds).
+        let ronds: Vec<&str> = a
+            .iter()
+            .filter(|a| a.place == Place::Secondaire)
+            .map(|a| a.id.as_str())
+            .collect();
+        assert_eq!(ronds, [ANNOTER, SUPPRIMER]);
+        assert!(!ids.contains(&"epingler"));
+    }
+
+    #[test]
+    fn annoter_ignore_pendant_une_action_ou_trop_grand() {
+        let t = Instant::now();
+        let mut c = capture();
+        assert_eq!(decider(&c, ANNOTER, t), Geste::Annoter);
+        // Copie, enregistrement en cours : ignoré ; plus après DELAI_SORTIE.
+        c.copie = Some(t);
+        assert_eq!(decider(&c, ANNOTER, t), Geste::Ignorer);
+        assert_eq!(decider(&c, ANNOTER, t + DELAI_SORTIE), Geste::Annoter);
+        c.copie = None;
+        c.enregistrement = Some(t);
+        assert_eq!(decider(&c, ANNOTER, t), Geste::Ignorer);
+        c.enregistrement = None;
+        // Glisser en cours.
+        c.glisser = true;
+        assert_eq!(decider(&c, ANNOTER, t), Geste::Ignorer);
+        c.glisser = false;
+        // Suppression en attente ou lancée.
+        c.suppression = EtatSuppression::EnAttente;
+        assert_eq!(decider(&c, ANNOTER, t), Geste::Ignorer);
+        c.suppression = EtatSuppression::Lancee;
+        assert_eq!(decider(&c, ANNOTER, t), Geste::Ignorer);
+        c.suppression = EtatSuppression::Aucune;
+        // Déjà enregistrée : Annoter reste possible.
+        c.enregistre = Some(PathBuf::from("/i/a.png"));
+        assert_eq!(decider(&c, ANNOTER, t), Geste::Annoter);
+        // Non annotable (côté ou nombre de pixels) : ignoré. Les pixels ne sont pas lus.
+        let taille = |largeur, hauteur| {
+            Arc::new(Pixels {
+                largeur,
+                hauteur,
+                rgba: Vec::new(),
+            })
+        };
+        for (l, h, attendu) in [
+            (16_384, 1, Geste::Annoter),
+            (16_385, 1, Geste::Ignorer),
+            (1, 16_385, Geste::Ignorer),
+            (5_000, 5_000, Geste::Annoter),
+            (5_000, 5_001, Geste::Ignorer),
+            (0, 10, Geste::Ignorer),
+        ] {
+            c.pixels = taille(l, h);
+            assert_eq!(decider(&c, ANNOTER, t), attendu, "{l}x{h}");
+        }
     }
 
     #[test]
@@ -522,7 +614,8 @@ mod tests {
         assert_eq!(decider(&c, SUPPRIMER, t), Geste::Supprimer);
         assert_eq!(decider(&c, FERMER, t), Geste::Fermer);
         assert_eq!(decider(&c, ANNULER, t), Geste::Ignorer);
-        assert_eq!(decider(&c, "annoter", t), Geste::Ignorer);
+        assert_eq!(decider(&c, ANNOTER, t), Geste::Annoter);
+        assert_eq!(decider(&c, "epingler", t), Geste::Ignorer);
         // En cours : ignoré, puis plus « en cours » après DELAI_SORTIE.
         c.copie = Some(t);
         assert_eq!(decider(&c, COPIER, t), Geste::Ignorer);

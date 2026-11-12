@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-editeur-exporter"
+description = "Enables the editeur_exporter command without any pre-configured scope."
+commands.allow = ["editeur_exporter"]
+
+[[permission]]
+identifier = "deny-editeur-exporter"
+description = "Denies the editeur_exporter command without any pre-configured scope."
+commands.deny = ["editeur_exporter"]
