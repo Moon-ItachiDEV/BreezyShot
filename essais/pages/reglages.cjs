@@ -18,19 +18,17 @@ const serveur = http.createServer((q, r) => {
   fs.createReadStream(p).pipe(r);
 });
 
-// La vue que le cœur enverrait (version volontairement quelconque : jamais supposée).
+// La vue réelle de l'app assemblée et le vrai refus de la dernière sortie, écrits par le
+// cœur (`cargo test vue_de_l_essai_de_page`, qui échoue si ce fichier n'est plus à jour).
+// Seuls les raccourcis sont remplacés, pour essayer un raccourci absent et modifié.
+const REEL = JSON.parse(fs.readFileSync(path.join(__dirname, 'vue-reglages.json'), 'utf8'));
 const VUE = {
-  lignes: ['copier', 'vignette', 'vignette_duree', 'vignette_coin', 'dossier', 'enregistrer', 'modele_nom', 'theme', 'demarrage', 'version'],
-  copier: true, enregistrer: false,
-  vignette: { afficher: true, duree_s: 6, coin: 'bas_gauche' }, durees: [3, 6, 10, 0],
-  dossier: 'Images › BreezyShot', modele_nom: 'BreezyShot {date} à {heure}', apercu_nom: 'BreezyShot 2026-11-12 à 10.42.08.png',
-  theme: 'systeme', demarrage: 'non',
+  ...REEL.vue,
   raccourcis: [
     { action: 'zone', libelle: 'Zone', touches: ['Ctrl', 'Maj', '1'], modifie: false, refus: null },
     { action: 'plein_ecran', libelle: 'Plein écran', touches: ['Ctrl', 'Maj', '2'], modifie: false, refus: null },
     { action: 'fenetre', libelle: 'Fenêtre', touches: [], modifie: true, refus: 'Aucun raccourci' },
   ],
-  version: '7.8.9-essai', alerte: null, saisie_en_cours: false,
 };
 const SANS_VIGNETTE = { ...VUE, lignes: ['copier', 'dossier', 'modele_nom', 'theme', 'demarrage', 'version'] };
 
@@ -107,16 +105,37 @@ const SANS_VIGNETTE = { ...VUE, lignes: ['copier', 'dossier', 'modele_nom', 'the
     await p.context().close();
   }
 
-  // 3. Interrupteur : envoie le changement ; un refus remet l'interrupteur (vue) et dit le texte.
+  // 2 bis. Vue réelle (vignette construite) : toutes ses lignes montrées, dont la vignette,
+  // sa durée, son coin et « Enregistrer automatiquement ».
   {
     const p = await page();
-    await p.evaluate(() => { window.__refus = { ligne: 'copier', texte: 'Gardez la copie, l’enregistrement ou la vignette' }; });
+    const montrees = await p.$$eval('[data-reglage]:not([data-reglage="raccourci"])', ls => ls.filter(l => !l.hidden).map(l => l.dataset.reglage));
+    verifier(JSON.stringify(montrees) === JSON.stringify(REEL.vue.lignes) && ['vignette', 'vignette_duree', 'vignette_coin', 'enregistrer'].every(l => montrees.includes(l)),
+      '2 vue réelle : lignes du cœur, vignette et enregistrement compris', JSON.stringify(montrees));
+    const durees = await p.$$eval('[data-controle="vignette_duree"] [role="radio"]', bs => bs.map(b => [b.textContent, b.getAttribute('aria-checked')]));
+    const attendues = REEL.vue.durees.map(d => [d === 0 ? 'Toujours' : `${d} s`, String(d === REEL.vue.vignette.duree_s)]);
+    verifier(JSON.stringify(durees) === JSON.stringify(attendues), '2 durées du cœur, la sienne cochée', JSON.stringify(durees));
+    const coin = await p.$$eval('[data-controle="vignette_coin"] [aria-checked="true"]', bs => bs.map(b => b.dataset.valeur));
+    verifier(JSON.stringify(coin) === JSON.stringify([REEL.vue.vignette.coin]), '2 coin du cœur coché', JSON.stringify(coin));
+    const inter = await p.$$eval('[role="switch"]', bs => Object.fromEntries(bs.map(b => [b.dataset.controle, b.getAttribute('aria-checked')])));
+    verifier(inter.vignette === String(REEL.vue.vignette.afficher) && inter.enregistrer === String(REEL.vue.enregistrer), '2 interrupteurs vignette et enregistrement d’après la vue', JSON.stringify(inter));
+    await p.getByRole('switch', { name: 'Enregistrer automatiquement' }).click(); await p.waitForTimeout(50);
+    verifier(JSON.stringify((await dernier(p, 'reglages_changer'))?.[1]) === JSON.stringify({ changement: { cle: 'enregistrer', valeur: !REEL.vue.enregistrer } }), '2 Enregistrer → reglages_changer enregistrer');
+    await p.context().close();
+  }
+
+  // 3. Interrupteur : envoie le changement ; un refus (le vrai, rendu par le cœur) remet
+  // l'interrupteur et dit son texte sur la ligne.
+  {
+    const p = await page();
+    await p.evaluate((r) => { window.__refus = r; }, REEL.refus_copier);
     await p.getByRole('switch', { name: 'Copier automatiquement' }).click(); await p.waitForTimeout(100);
     const a = await dernier(p, 'reglages_changer');
     verifier(JSON.stringify(a?.[1]) === JSON.stringify({ changement: { cle: 'copier', valeur: false } }), '3 copier → reglages_changer { copier, false }', JSON.stringify(a));
     const etat = await p.getByRole('switch', { name: 'Copier automatiquement' }).getAttribute('aria-checked');
     const refus = await p.$eval('[data-reglage="copier"] [data-refus]', e => [e.hidden, e.textContent]);
-    verifier(etat === 'true' && !refus[0] && refus[1].length > 0 && !refus[1].includes('\n'), '3 refus : interrupteur remis, une ligne de texte', JSON.stringify([etat, refus]));
+    verifier(etat === 'true' && !refus[0] && refus[1] === REEL.refus_copier.texte && refus[1].startsWith('Gardez au moins') && !refus[1].includes('\n'),
+      '3 refus réel « Gardez au moins… » : interrupteur remis, une ligne', JSON.stringify([etat, refus]));
     await p.getByRole('switch', { name: 'Vignette' }).click(); await p.waitForTimeout(50);
     verifier(JSON.stringify((await dernier(p, 'reglages_changer'))[1]) === JSON.stringify({ changement: { cle: 'vignette_afficher', valeur: false } }), '3 vignette → vignette_afficher');
     await p.context().close();

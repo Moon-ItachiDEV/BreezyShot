@@ -765,13 +765,20 @@ Module pur : il reçoit le dossier où écrire, ne connaît ni Tauri ni les autr
   essais/pages/bandeau.cjs` : la page du bandeau dans Chromium, servie avec la CSP de l'app
   (job `pages`, Linux). `essais/pages/reglages.cjs` : la page des Réglages de la même façon
   (rubriques au clavier, lignes montrées, changements, refus, nom et aperçu, saisie d'un
-  raccourci, thème), sur une vue simulée.
+  raccourci, thème), sur la vue réelle de l'app assemblée et le vrai refus « Gardez au
+  moins… », écrits par le cœur dans `essais/pages/vue-reglages.json` (le test
+  `vue_de_l_essai_de_page_a_jour` échoue si ce fichier n'est plus à jour ;
+  `BREEZYSHOT_ECRIRE_VUE=1` le réécrit). Seuls les raccourcis y sont remplacés.
 - Essai 08 sous Windows (`08-reglages-fenetre.ps1`) : ouverture par le vrai menu de l'icône
   (si le menu ne s'ouvre pas, l'essai échoue en le disant), fenêtre unique ramenée devant,
-  changements écrits, raccourci changé à chaud (l'ancien rendu à Windows) puis refusé
-  quand une autre application le tient, démarrage avec Windows sur la clé d'essai seulement (la vraie clé `Run` est relue
-  inchangée à la fin), sélecteur de dossier puis capture enregistrée dedans, changement
-  extérieur gardé, thème sombre peint, fermeture, arrêt propre.
+  dernière sortie refusée pour de vrai, vignette allumée par la fenêtre (préparée au coin
+  et à la durée du réglage, partie au délai) puis éteinte (plus de `vignette preparee`),
+  copie éteinte, raccourci changé à chaud (l'ancien rendu à Windows) puis refusé quand une
+  autre application le tient, démarrage avec Windows sur la clé d'essai seulement (la vraie
+  clé `Run` est relue inchangée à la fin), enregistrement allumé par la fenêtre, sélecteur
+  de dossier puis capture enregistrée dedans, changement extérieur gardé, thème clair puis
+  sombre peint, fermeture, arrêt propre. Le cas part de la copie seule (ni vignette, ni
+  enregistrement) : la vignette ne gêne aucun autre point.
 - Pages de l'étape 9 : `vignette.cjs` (carte aux mesures des jetons et à sa place
   pour les coins et un retrait à 150 %, boutons rendus depuis la liste, cachés avant le
   survol, « Copié » puis retour, état supprimé, barre en marche, en pause, absente pour

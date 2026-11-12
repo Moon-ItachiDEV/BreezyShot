@@ -803,3 +803,65 @@ mod tests {
         assert_eq!(theme_page(Theme::Sombre), Some(ThemePage::Sombre));
     }
 }
+
+/// La vue réelle de l'app assemblée, que l'essai de page charge (`essais/pages/
+/// vue-reglages.json`) : la page est essayée sur les lignes que le cœur montre vraiment,
+/// et sur le vrai texte du refus de la dernière sortie. Fichier tenu à jour par ce test
+/// (`BREEZYSHOT_ECRIRE_VUE=1 cargo test vue_de_l_essai_de_page` le réécrit).
+#[cfg(test)]
+mod essai_de_page {
+    use super::*;
+    use crate::raccourcis::choisir;
+    use crate::reglages::Plateforme;
+    use chrono::TimeZone;
+    use std::collections::BTreeMap;
+
+    fn fixture() -> String {
+        let r = Reglages::par_defaut(Plateforme::Windows);
+        let mut table = BTreeMap::new();
+        for a in crate::application::ACTIONS_CONSTRUITES {
+            table.insert(a.to_string(), r.raccourcis.candidats(a).unwrap().to_vec());
+        }
+        let bilan = choisir(&table, true, |_| true);
+        let refus = BTreeMap::new();
+        let defaut = Raccourcis::par_defaut(Plateforme::Windows);
+        let c = Contexte {
+            vignette_construite: crate::application::VIGNETTE_CONSTRUITE,
+            actions: &crate::application::ACTIONS_CONSTRUITES,
+            bilan: &bilan,
+            defaut: &defaut,
+            refus_raccourcis: &refus,
+            dossier_affiche: "Images › BreezyShot".into(),
+            demarrage: EtatDemarrage::Inactif,
+            // Jamais la vraie version : l'essai ne la suppose pas.
+            version: "7.8.9-essai",
+            alerte: None,
+            maintenant: Local.with_ymd_and_hms(2026, 11, 12, 10, 42, 8).unwrap(),
+            saisie_en_cours: false,
+        };
+        // Le refus de la dernière sortie, tel que le cœur le rend : copie seule active.
+        let mut seule_copie = r.clone();
+        seule_copie.vignette.afficher = false;
+        seule_copie.enregistrer_apres_capture = false;
+        let refus_copier = appliquer(&seule_copie, &Changement::Copier(false)).unwrap_err();
+        let tout = serde_json::json!({ "vue": vue(&r, &c), "refus_copier": refus_copier });
+        serde_json::to_string_pretty(&tout).unwrap() + "\n"
+    }
+
+    #[test]
+    fn vue_de_l_essai_de_page_a_jour() {
+        let chemin = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../essais/pages/vue-reglages.json");
+        let attendu = fixture();
+        if std::env::var_os("BREEZYSHOT_ECRIRE_VUE").is_some() {
+            std::fs::write(&chemin, &attendu).unwrap();
+        }
+        let lu = std::fs::read_to_string(&chemin).unwrap_or_default();
+        assert_eq!(
+            lu.replace("\r\n", "\n"),
+            attendu,
+            "essais/pages/vue-reglages.json n'est pas à jour : \
+             BREEZYSHOT_ECRIRE_VUE=1 cargo test vue_de_l_essai_de_page"
+        );
+    }
+}
