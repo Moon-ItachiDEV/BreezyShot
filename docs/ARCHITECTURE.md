@@ -1287,8 +1287,15 @@ contenu d'une image) :
   depuis la vignette de prise vers `cible-glisser.ps1` : `debut`, `depose`, un fichier au
   modèle, mêmes octets que « Récents » ; (14) premier plan rendu (SetForegroundWindow ou
   clic dans la barre du haut de la page), `--quitter` modifié : `ferme (arret)`, `arret
-  propre`. Cas B : (15) ouvert ≤ repos + 90 Mo ; 10 ouvertures et fermetures ; 10 s après,
-  ≤ repos froid + 8 Mo et ≤ repos chaud + 8 Mo ; fils et poignées stables. Plusieurs
+  propre`. Cas B : (15) ouvert ≤ repos + 90 Mo ; 20 ouvertures et fermetures ; 10 s après :
+  le processus de rendu de l'éditeur est parti (même nombre qu'au repos), le processus de
+  l'app n'a pas pris plus de 8 Mo depuis la première fermeture (une image gardée par
+  ouverture en ferait 60), app et WebView2 ensemble ≤ repos chaud + 40 Mo (une page gardée
+  en ferait 50) ; fils et poignées stables ; mémoire notée par sorte de processus, puis
+  après 40 captures sans éditeur. Le seuil d'abord écrit (tout l'arbre ≤ repos + 8 Mo après
+  10 fermetures) ne mesurait pas l'éditeur : le repos varie de 177 à 188 Mo d'une mesure à
+  l'autre, et les pages permanentes prennent environ 10 Mo en 10 captures sans éditeur
+  (essai 07). Plusieurs
   écrans, 125 à 200 %, captures de 3 × 1080p ou 2K, Enregistrer sous… jusqu'au fichier
   (chemin tapé dans le dialogue), le glisser vers l'Explorateur, Word ou Teams, le
   redimensionnement par les bords et le déplacement par la barre de la page ne s'y
