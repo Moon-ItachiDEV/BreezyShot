@@ -188,9 +188,16 @@ dans le dossier temporaire du système (`systeme::dossier_secours()`), sous le n
 - Icône Moulinet monochrome : `notif-blanc` sur une barre des tâches sombre, `notif-sombre`
   sur une barre claire, choisie d'après le thème de la barre des tâches (pas celui des applis)
   et mise à jour quand il change. Jamais la version couleur dans la zone de notification.
-- Le menu « Capturer une zone » lance la même capture que le raccourci.
-- Menu (clic droit) : seulement ce qui marche. Étape 1 : « Quitter BreezyShot ». Étape 3 :
-  « Capturer une zone » avec le raccourci actif affiché, un séparateur, « Quitter BreezyShot ».
+- Chaque entrée de capture du menu lance la même capture que le raccourci de son mode, mais
+  après `ATTENTE_MENU` (350 ms) : un petit fil dort puis poste `lancer_capture` sur le fil
+  principal, pour que le menu, que Windows fait disparaître en fondu, ne soit pas sur la
+  photo. Un raccourci n'attend jamais. Si l'état n'est plus Repos ni Vignette à l'échéance,
+  la table ignore la demande. Journal : `menu: capturer <mode>` à la réception.
+- Menu (clic droit) : seulement ce qui marche. Étape 1 : « Quitter BreezyShot ». Étape 7 :
+  une entrée par mode construit, dans l'ordre `ORDRE_MENU` (« Capturer une zone »,
+  [« Capturer une fenêtre » à l'étape 8], « Capturer l'écran »), un séparateur, « Quitter
+  BreezyShot ». La liste est construite par `entrees_menu` à partir de `ACTIONS_CONSTRUITES` :
+  un mode construit y entre sans autre code. Identifiants `capturer_<mode>`.
   Le raccourci suit une tabulation dans le texte de l'entrée (aligné à droite par les menus
   Windows) ; sans raccourci retenu, l'entrée reste, sans raccourci affiché.
   Les entrées « Captures récentes », « Vider les récentes », « Réglages » arrivent avec leurs
@@ -215,7 +222,7 @@ sur le fil principal tout ce qui touche à la capture et arriverait d'ailleurs. 
 1. `lancer_capture(Zone)` : `DemandeCapture` → Gel. Un appui pendant Gel, Sélection ou
    Découpe est ignoré par la table (`capture deja en cours: appui ignore`) : aucun second
    `figer` tant qu'une capture est en cours.
-2. Le bandeau est caché s'il montre un message (`Bandeau::cacher`), puis
+2. (Début commun à tous les modes, `photographier`, avec l'étape 3.) Le bandeau est caché s'il montre un message (`Bandeau::cacher`), puis
    `systeme::attendre_composition(100 ms)` (deux `DwmFlush` dans un petit fil ; le fil
    principal n'attend jamais plus de 100 ms, sinon `composition non attendue (100 ms): photo
    prise quand meme`) : il n'est ni sur la photo ni
@@ -239,7 +246,10 @@ sur le fil principal tout ce qui touche à la capture et arriverait d'ailleurs. 
    `SelectionMuette`, `SelectionImpossible`, bandeau d'erreur. Écrans changés, session
    verrouillée → `EcransChanges`, `SessionVerrouillee`, sans message. Un signal d'un autre
    affichage que celui en cours est ignoré.
-8. Sortie dans un fil `sortie` : `sortie::sortir` avec les réglages lus au démarrage, puis
+8. Sortie dans un fil `sortie` : `sortie::sortir` avec les réglages lus au démarrage
+   (sauf l'enregistrement : `zone::doit_enregistrer(réglage, VIGNETTE_CONSTRUITE)`, vrai
+   tant que la vignette n'existe pas, versions 0.1 et 0.2 ; le réglage lu n'est pas
+   modifié et le fichier de réglages n'est jamais écrit pour cela), puis
    retour sur le fil principal : journal, `ImagePreteSansVignette` → Repos, annonce dans
    le bandeau. Dossier affiché : « Images › BreezyShot » quand le réglage est absent ou
    vide, sinon `sortie::nom_affiche(dossier)`. « Récents » : `<local>/Recents`.
@@ -288,8 +298,38 @@ non reserve: …`), `zone choisie <x>,<y> <l>x<h>`, `sortie copie <faite|non dem
 recent <ok|echec> fichier <fait|non demande|echec>`, `recents: echec (…)`, `sortie annonce
 reussite|erreur: <titre>`, `chrono decoupe <ms> sortie <ms> relache-annonce <ms>`,
 `capture impossible: <photo|ecran_fige|selection|muette|lecture|non_disponible|
-sortie_sans_bilan>`, `sortie sans bilan`, `sortie <n>: bilan perime ignore`. Aucun
-chemin de capture complet, aucun contenu.
+sortie_sans_bilan>`, `sortie sans bilan`, `sortie <n>: bilan perime ignore`,
+`menu: capturer <mode>`. Aucun chemin de capture complet, aucun contenu.
+
+### 3.7 Capture plein écran (étape 7)
+
+`Ctrl + Maj + 2` (ou « Capturer l'écran » au menu) garde **l'écran où se trouve la
+souris**, sans écran figé ni sélection : Gel → Découpe → Sortie → bandeau. Rien ne
+s'affiche par-dessus l'écran avant le bandeau. Séquence de `lancer_capture(PleinEcran)`
+(fil principal) :
+
+1. `DemandeCapture(PleinEcran)` : ignoré hors Repos et Vignette (la table).
+2. La souris est lue tout de suite, avant de cacher le bandeau et avant la photo, en pixels
+   réels : `systeme::position_souris()`, sinon `cursor_position` de Tauri (le repli du
+   bandeau), arrondie par `zone::point_souris`.
+3. Début commun (`photographier`) : bandeau caché, compositeur attendu (100 ms au plus),
+   `capture::figer()`. Erreur → `GelImpossible` → Repos, « Impossible de capturer ».
+4. L'écran, par la fonction pure `capture::ecran_de_capture(souris, ecrans)` : celui qui
+   contient la souris (`Origine::Souris`) ; sinon (souris inconnue ou sur aucun écran)
+   le principal (`Principal`) ; sinon le premier (`Premier`) ; liste vide → `GelImpossible`,
+   `capture impossible: photo`.
+5. `PhotoPrise(PleinEcran)` → Découpe. Aucun `montrer_ecran_fige`, aucune sélection, aucun
+   Échap réservé, aucune `GardeEcran`, aucune `CaptureEnCours` rangée.
+6. `capture::decouper(&gel, ecran.rect)` puis `lancer_sortie` (le même que la zone).
+   Erreur de lecture → `DecoupeImpossible`, bandeau.
+7. Bilan : `finir_sortie`, inchangé (`ImagePreteSansVignette` → Repos, annonce).
+
+L'image a la taille de l'écran choisi en pixels réels, barre des tâches comprise.
+
+**Journal** (contrat de l'essai 05) : `plein ecran <x>,<y> <l>x<h>
+<souris|principal|premier>` après le choix de l'écran, `chrono gel photo <ms> total <ms>`
+(sans `visible` : rien n'est montré), puis les lignes de sortie de §3.6 ;
+`relache-annonce` se compte ici depuis la réception de la demande.
 
 ## 4. Réglages (`reglages/`, étape 2)
 
@@ -378,8 +418,8 @@ Module pur : il reçoit le dossier où écrire, ne connaît ni Tauri ni les autr
   (ou aucun) et pourquoi chaque candidat écarté l'a été. Une liste vide veut dire « pas de
   raccourci voulu » : ni raccourci ni message.
 - **Seules les actions qui existent sont réservées.** L'Application tient la liste des actions
-  dont la capture est construite (`zone` à l'étape 3, `plein_ecran` et `fenetre` quand leur
-  étape arrive) et ne donne que celles-là au choix. BreezyShot ne prend jamais à une autre
+  dont la capture est construite (`ACTIONS_CONSTRUITES` : `zone` à l'étape 3, `plein_ecran`
+  à l'étape 7, `fenetre` quand son étape arrive) et ne donne que celles-là au choix. BreezyShot ne prend jamais à une autre
   application un raccourci qui ne ferait rien.
 - Le module ne connaît pas le type des réglages : l'Application lui passe une table
   `action → candidats` construite à partir d'eux.
@@ -543,8 +583,15 @@ Module pur : il reçoit le dossier où écrire, ne connaît ni Tauri ni les autr
   perte de focus, second appui ignoré, deux captures rapprochées sans le bandeau, dossier
   impossible, fenêtres et fils stables, arrêt propre. Plusieurs écrans, échelles mêlées,
   application figée et verrouillage réel ne se vérifient pas sur la machine GitHub.
+- Essai 05 sous Windows (`05-plein-ecran.ps1`), même cadre : `Ctrl + Maj + 2`, lignes
+  d'état et `plein ecran … souris`, écran figé et sélection jamais visibles (guettés toutes
+  les 2 ms pendant et après), PNG enregistré et presse-papiers à la taille exacte de l'écran
+  principal avec le témoin à sa place, zone du bandeau identique dans deux captures de
+  suite, second appui ignoré, réglages non réécrits, arrêt propre. Le choix entre plusieurs
+  écrans (tests purs seulement) et le délai du menu (aucun clic sur l'icône) ne s'y
+  vérifient pas.
 - `essais/` : un script par étape (`01-socle.ps1`, `02-reglages.ps1`, `03-raccourci.ps1`,
-  `04-zone.ps1`),
+  `04-zone.ps1`, `05-plein-ecran.ps1`),
   lancés par `essais/lancer.ps1` sur le .exe de release. Chaque essai démarre l'app avec
   `BREEZYSHOT_DOSSIER_ESSAI`, agit (lancer une seconde instance, simuler une touche, abîmer un
   fichier), puis lit le journal et les fichiers. Un essai qui échoue fait échouer GitHub.
