@@ -1,4 +1,5 @@
-//! Capture d'une zone : les décisions de l'Application, en fonctions pures (§3.6).
+//! Capture d'une zone et du plein écran : les décisions de l'Application, en fonctions
+//! pures (§3.6, §3.7).
 //!
 //! `mod.rs` fait les gestes (montrer, cacher, réserver Échap, lancer la sortie) ; ce
 //! fichier dit lesquels, sans toucher à aucune fenêtre : que faire de chaque signal
@@ -8,7 +9,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use super::etats::Declencheur;
-use crate::capture;
+use crate::capture::{self, Origine};
 use crate::fenetres::selection::Signal as SignalSelection;
 use crate::fenetres::{Genre, Message};
 use crate::sortie::{self, Annonce, Bilan, Demande, Etape, EtapeFichier};
@@ -257,8 +258,52 @@ pub fn ligne_chrono_gel(photo: Duration, total: Duration, visible: Duration) -> 
     )
 }
 
+/// Enregistrer ou non le fichier : toujours tant que la vignette n'existe pas (versions
+/// 0.1 et 0.2, sans l'écrire dans les réglages), sinon d'après le réglage.
+pub fn doit_enregistrer(reglage: bool, vignette_construite: bool) -> bool {
+    reglage || !vignette_construite
+}
+
+/// La souris en pixels réels entiers ; `None` si elle est inconnue ou illisible.
+pub fn point_souris(souris: Option<(f64, f64)>) -> Option<(i32, i32)> {
+    let (x, y) = souris?;
+    let entier = |v: f64| {
+        let v = v.floor();
+        (v.is_finite() && v >= f64::from(i32::MIN) && v <= f64::from(i32::MAX)).then_some(v as i32)
+    };
+    Some((entier(x)?, entier(y)?))
+}
+
+/// Nom de l'origine de l'écran pour le journal.
+pub fn nom_origine(origine: Origine) -> &'static str {
+    match origine {
+        Origine::Souris => "souris",
+        Origine::Principal => "principal",
+        Origine::Premier => "premier",
+    }
+}
+
+/// `plein ecran <x>,<y> <l>x<h> <souris|principal|premier>`.
+pub fn ligne_plein_ecran(ecran: Rect, origine: Origine) -> String {
+    format!(
+        "plein ecran {},{} {}x{} {}",
+        ecran.x,
+        ecran.y,
+        ecran.largeur,
+        ecran.hauteur,
+        nom_origine(origine)
+    )
+}
+
+/// `chrono gel photo <ms> total <ms>` : en plein écran, rien n'est montré, donc pas de
+/// `visible`.
+pub fn ligne_chrono_photo(photo: Duration, total: Duration) -> String {
+    format!("chrono gel photo {} total {}", ms(photo), ms(total))
+}
+
 /// `chrono decoupe <ms> sortie <ms> relache-annonce <ms>` (`relache-annonce` : du signal
-/// `Zone` à la demande d'affichage du bandeau).
+/// `Zone` à la demande d'affichage du bandeau ; en plein écran, de la réception de la
+/// demande).
 pub fn ligne_chrono_sortie(
     decoupe: Duration,
     sortie: Duration,
@@ -594,6 +639,46 @@ mod tests {
         assert_eq!(
             ligne_chrono_sortie(d(3_000), d(180_400), d(200_000)),
             "chrono decoupe 3 sortie 180 relache-annonce 200"
+        );
+    }
+
+    #[test]
+    fn enregistrer_tant_que_la_vignette_n_existe_pas() {
+        assert!(doit_enregistrer(false, false));
+        assert!(doit_enregistrer(true, false));
+        assert!(doit_enregistrer(true, true));
+        assert!(!doit_enregistrer(false, true));
+        // Aujourd'hui (pas de vignette) : toujours enregistré.
+        assert!(doit_enregistrer(
+            false,
+            crate::application::VIGNETTE_CONSTRUITE
+        ));
+    }
+
+    #[test]
+    fn souris_en_pixels_entiers() {
+        assert_eq!(point_souris(None), None);
+        assert_eq!(point_souris(Some((10.0, -20.0))), Some((10, -20)));
+        assert_eq!(point_souris(Some((-0.5, 1079.9))), Some((-1, 1079)));
+        assert_eq!(point_souris(Some((f64::NAN, 0.0))), None);
+        assert_eq!(point_souris(Some((0.0, f64::INFINITY))), None);
+        assert_eq!(point_souris(Some((1e12, 0.0))), None);
+    }
+
+    #[test]
+    fn lignes_du_plein_ecran() {
+        assert_eq!(
+            ligne_plein_ecran(r(-2560, -300, 2560, 1440), Origine::Souris),
+            "plein ecran -2560,-300 2560x1440 souris"
+        );
+        assert_eq!(
+            ligne_plein_ecran(r(0, 0, 1920, 1080), Origine::Principal),
+            "plein ecran 0,0 1920x1080 principal"
+        );
+        assert_eq!(nom_origine(Origine::Premier), "premier");
+        assert_eq!(
+            ligne_chrono_photo(Duration::from_micros(12_900), Duration::from_micros(14_100)),
+            "chrono gel photo 12 total 14"
         );
     }
 }

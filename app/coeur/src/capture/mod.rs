@@ -93,6 +93,9 @@ pub fn decouper(gel: &Gel, zone: Rect) -> Result<Pixels, Erreur> {
     gel.image.lire(coupee).map_err(Erreur::Lecture)
 }
 
+// Plein écran (étape 7) : l'écran à capturer.
+pub use geometrie::{ecran_de_capture, Origine};
+
 #[cfg(test)]
 mod tests {
     use super::*;

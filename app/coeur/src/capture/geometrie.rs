@@ -36,6 +36,33 @@ pub fn zone_valide(zone: Rect) -> bool {
     zone.largeur >= COTE_MIN && zone.hauteur >= COTE_MIN
 }
 
+/// D'où vient l'écran choisi pour une capture plein écran.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Origine {
+    /// L'écran qui contient la souris.
+    Souris,
+    /// Souris inconnue ou sur aucun écran : l'écran principal.
+    Principal,
+    /// Ni souris ni écran principal : le premier de la liste.
+    Premier,
+}
+
+/// L'écran à capturer en plein écran : celui qui contient la souris ; sinon (souris
+/// inconnue ou sur aucun écran) l'écran principal ; sinon le premier. `None` si la liste
+/// est vide.
+pub fn ecran_de_capture(
+    souris: Option<(i32, i32)>,
+    ecrans: &[EcranInfo],
+) -> Option<(EcranInfo, Origine)> {
+    if let Some(e) = souris.and_then(|p| ecran_sous(p, ecrans)) {
+        return Some((*e, Origine::Souris));
+    }
+    if let Some(e) = ecrans.iter().find(|e| e.principal) {
+        return Some((*e, Origine::Principal));
+    }
+    ecrans.first().map(|e| (*e, Origine::Premier))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -185,5 +212,104 @@ mod tests {
         assert!(!zone_valide(r(0, 0, COTE_MIN - 1, 100)));
         assert!(!zone_valide(r(0, 0, 100, 0)));
         assert!(!zone_valide(r(0, 0, -5, 100)));
+    }
+}
+
+#[cfg(test)]
+mod tests_ecran_de_capture {
+    use super::*;
+
+    fn ecran(x: i32, y: i32, largeur: i32, hauteur: i32, principal: bool) -> EcranInfo {
+        let rect = Rect {
+            x,
+            y,
+            largeur,
+            hauteur,
+        };
+        EcranInfo {
+            rect,
+            zone_utile: rect,
+            echelle: 1.0,
+            principal,
+        }
+    }
+
+    /// Trois écrans côte à côte : à gauche (coordonnées négatives), le principal, à
+    /// droite plus petit et décalé vers le bas (un trou sous le principal à droite).
+    fn trois() -> Vec<EcranInfo> {
+        vec![
+            ecran(-2560, -300, 2560, 1440, false),
+            ecran(0, 0, 1920, 1080, true),
+            ecran(1920, 200, 1280, 1024, false),
+        ]
+    }
+
+    #[test]
+    fn souris_sur_le_deuxieme_de_trois() {
+        let e = trois();
+        assert_eq!(
+            ecran_de_capture(Some((500, 500)), &e),
+            Some((e[1], Origine::Souris))
+        );
+        assert_eq!(
+            ecran_de_capture(Some((1920, 200)), &e),
+            Some((e[2], Origine::Souris))
+        );
+    }
+
+    #[test]
+    fn souris_sur_un_ecran_a_gauche_en_coordonnees_negatives() {
+        let e = trois();
+        assert_eq!(
+            ecran_de_capture(Some((-1, -300)), &e),
+            Some((e[0], Origine::Souris))
+        );
+        assert_eq!(
+            ecran_de_capture(Some((-2560, 1139)), &e),
+            Some((e[0], Origine::Souris))
+        );
+    }
+
+    #[test]
+    fn souris_entre_deux_ecrans_donne_le_principal() {
+        let e = trois();
+        // Dans le trou au-dessus de l'écran de droite, et sous l'écran de gauche.
+        assert_eq!(
+            ecran_de_capture(Some((2000, 100)), &e),
+            Some((e[1], Origine::Principal))
+        );
+        assert_eq!(
+            ecran_de_capture(Some((-100, 1200)), &e),
+            Some((e[1], Origine::Principal))
+        );
+    }
+
+    #[test]
+    fn souris_inconnue_donne_le_principal() {
+        let e = trois();
+        assert_eq!(ecran_de_capture(None, &e), Some((e[1], Origine::Principal)));
+    }
+
+    #[test]
+    fn sans_principal_le_premier() {
+        let e = vec![
+            ecran(0, 0, 1920, 1080, false),
+            ecran(1920, 0, 1920, 1080, false),
+        ];
+        assert_eq!(ecran_de_capture(None, &e), Some((e[0], Origine::Premier)));
+        assert_eq!(
+            ecran_de_capture(Some((5000, 5000)), &e),
+            Some((e[0], Origine::Premier))
+        );
+        assert_eq!(
+            ecran_de_capture(Some((1920, 0)), &e),
+            Some((e[1], Origine::Souris))
+        );
+    }
+
+    #[test]
+    fn liste_vide() {
+        assert_eq!(ecran_de_capture(Some((0, 0)), &[]), None);
+        assert_eq!(ecran_de_capture(None, &[]), None);
     }
 }
