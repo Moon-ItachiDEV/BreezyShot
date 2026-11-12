@@ -64,7 +64,8 @@
 # (15) éditeur ouvert ≤ repos + 90 Mo ; 10 ouvertures et fermetures ; 10 s après : ≤ repos
 #     froid + 8 Mo (le contrat) et ≤ repos chaud + 8 Mo (repos chaud : après la première
 #     fermeture, vignette et « Récents » déjà en mémoire) ; les deux repos et les deux écarts
-#     notés ; fenêtres et fils stables.
+#     notés ; fenêtres et fils stables ; puis dix ouvertures de plus et la mémoire par
+#     sorte de processus (app, navigateur, rendu, GPU…), notées 10 s et 40 s après.
 #
 # Non vérifiable sur GitHub (un écran 1024 × 768 à 100 %) : plusieurs écrans, 125, 150 et
 # 200 %, captures de 3 × 1080p et 2K, Enregistrer sous… jusqu'au bout (le chemin tapé dans
@@ -174,6 +175,38 @@ function Fermer-Cas($Processus, [string]$Dossier, [string]$Quoi) {
     if (-not $q.Fini) { throw "$Quoi : --quitter n'a pas répondu en 15 s" }
     if (-not $Processus.WaitForExit(15000)) { throw "$Quoi : l'app ne s'est pas fermée en 15 s" }
     $null = Attendre-Motif -Motif 'arret propre$' -Dossier $Dossier -DelaiS 3 -Quoi "$Quoi : arrêt" -Fois ($arrets + 1)
+}
+
+# La mémoire privée par sorte de processus : l'app, puis les processus WebView2 d'après
+# leur `--type` (sans type : le navigateur). Rien d'autre de la ligne de commande n'est lu.
+function Detail-Memoire($Processus) {
+    $enfants = @{}
+    foreach ($c in @(Get-CimInstance Win32_Process -Property ProcessId, ParentProcessId, CommandLine -ErrorAction SilentlyContinue)) {
+        $parent = [int]$c.ParentProcessId
+        if (-not $enfants.ContainsKey($parent)) { $enfants[$parent] = [System.Collections.Generic.List[object]]::new() }
+        $enfants[$parent].Add($c)
+    }
+    $sommes = [ordered]@{}
+    $nombres = @{}
+    $vus = @{ [int]$Processus.Id = $true }
+    $file = [System.Collections.Generic.Queue[object]]::new()
+    $file.Enqueue([pscustomobject]@{ Id = [int]$Processus.Id; Sorte = 'app' })
+    while ($file.Count -gt 0) {
+        $n = $file.Dequeue()
+        try { $mo = (Get-Process -Id $n.Id -ErrorAction Stop).PrivateMemorySize64 / 1MB } catch { $mo = 0 }
+        if (-not $sommes.Contains($n.Sorte)) { $sommes[$n.Sorte] = 0.0; $nombres[$n.Sorte] = 0 }
+        $sommes[$n.Sorte] += $mo
+        $nombres[$n.Sorte] += 1
+        if (-not $enfants.ContainsKey($n.Id)) { continue }
+        foreach ($e in $enfants[$n.Id]) {
+            $id = [int]$e.ProcessId
+            if ($vus.ContainsKey($id)) { continue }
+            $vus[$id] = $true
+            $sorte = if ("$($e.CommandLine)" -match '--type=([\w-]+)') { $Matches[1] } else { 'navigateur' }
+            $file.Enqueue([pscustomobject]@{ Id = $id; Sorte = $sorte })
+        }
+    }
+    return (@($sommes.Keys) | ForEach-Object { "$_ x$($nombres[$_]) $([math]::Round($sommes[$_], 1))" }) -join ' ; '
 }
 
 # Un point de l'essai dans son propre try : un échec est noté et l'essai continue.
@@ -906,6 +939,7 @@ public static int Pixel(byte[] a, int l, int x, int y) {
                 Start-Sleep -Seconds 3
                 $froid = Memoire-Privee-Mo -Processus $script:proc
                 Noter-Mesure -Nom 'memoire privee au repos (cas B)' -Valeur $froid -Unite 'Mo'
+                Noter-Mesure -Nom 'detail au repos (cas B)' -Valeur (Detail-Memoire $script:proc) -Unite 'Mo'
                 $chaud = $null; $fils = $null; $fenetres = $null; $ouvert = $null
                 for ($i = 1; $i -le 11; $i++) {
                     $c = Capturer $db "(15) $i"
@@ -927,12 +961,14 @@ public static int Pixel(byte[] a, int l, int x, int y) {
                         $fils = $script:proc.Threads.Count
                         $fenetres = (Get-Process -Id $script:proc.Id).HandleCount
                         Noter-Mesure -Nom 'memoire privee apres une fermeture (repos chaud)' -Valeur $chaud -Unite 'Mo'
+                        Noter-Mesure -Nom 'detail apres une fermeture' -Valeur (Detail-Memoire $script:proc) -Unite 'Mo'
                     }
                 }
                 Verifier '(15) éditeur ouvert ≤ repos + 90 Mo' ($ouvert -le $froid + 90) "$ouvert Mo, repos $froid Mo" | Out-Null
                 Start-Sleep -Seconds 10
                 $apres = Memoire-Privee-Mo -Processus $script:proc
                 Noter-Mesure -Nom 'memoire privee 10 s apres 10 fermetures' -Valeur $apres -Unite 'Mo'
+                Noter-Mesure -Nom 'detail 10 s apres 10 fermetures' -Valeur (Detail-Memoire $script:proc) -Unite 'Mo'
                 Noter-Mesure -Nom 'ecart au repos froid 10 s apres 10 fermetures' -Valeur ($apres - $froid) -Unite 'Mo'
                 Noter-Mesure -Nom 'ecart au repos chaud 10 s apres 10 fermetures' -Valeur ($apres - $chaud) -Unite 'Mo'
                 Verifier '(15) 10 s après 10 fermetures ≤ repos froid + 8 Mo' ($apres -le $froid + 8) "$apres Mo, repos froid $froid Mo" | Out-Null
@@ -943,6 +979,22 @@ public static int Pixel(byte[] a, int l, int x, int y) {
                 Noter-Mesure -Nom 'fils apres 10 fermetures' -Valeur "$fils -> $filsApres" -Unite ''
                 Verifier '(15) fils et poignées stables' (($filsApres -le $fils + 3) -and ($poignees -le $fenetres + 60)) "fils $fils -> $filsApres, poignées $fenetres -> $poignees" | Out-Null
                 Verifier '(15) aucune fenêtre « Annoter la capture » restante' (($E::FenetresTitre($script:proc.Id, $TITRE)).Count -eq 0) | Out-Null
+                # Dix ouvertures de plus, notées : la mémoire monte-t-elle encore, redescend-elle ?
+                for ($i = 12; $i -le 21; $i++) {
+                    $c = Capturer $db "(15) $i"
+                    $h = Ouvrir-Editeur $db $c "(15) $i"
+                    $null = $E::PostMessage($h, $WM_CLOSE, [IntPtr]::Zero, [IntPtr]::Zero)
+                    $null = Attendre-Motif -Motif "editeur pixels rendus $($c.Id)$" -Dossier $db -DelaiS 10 -Quoi "(15) $i fermeture"
+                    $limite = [DateTime]::UtcNow.AddSeconds(5)
+                    while ($E::IsWindow($h) -and [DateTime]::UtcNow -lt $limite) { Start-Sleep -Milliseconds 100 }
+                    if ($E::IsWindow($h)) { throw "(15) $i : fenêtre non détruite" }
+                }
+                Start-Sleep -Seconds 10
+                Noter-Mesure -Nom 'memoire privee 10 s apres 20 fermetures' -Valeur (Memoire-Privee-Mo -Processus $script:proc) -Unite 'Mo'
+                Noter-Mesure -Nom 'detail 10 s apres 20 fermetures' -Valeur (Detail-Memoire $script:proc) -Unite 'Mo'
+                Start-Sleep -Seconds 30
+                Noter-Mesure -Nom 'memoire privee 40 s apres 20 fermetures' -Valeur (Memoire-Privee-Mo -Processus $script:proc) -Unite 'Mo'
+                Noter-Mesure -Nom 'detail 40 s apres 20 fermetures' -Valeur (Detail-Memoire $script:proc) -Unite 'Mo'
                 Fermer-Cas $script:proc $db '(15)'
             }
         }

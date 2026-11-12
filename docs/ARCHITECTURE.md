@@ -1300,7 +1300,7 @@ contenu d'une image) :
   vue à la taille réelle égale à l'export, temps sur 25 Mpx, Projecteur (P1 à P10 : prise
   par le bord, réunion, alpha, coût du voile) ; `ECHECS : 0` attendu. Étape du job `pages`.
 - `essais/pages/editeur.cjs` (0.4) : la page de l'éditeur dans Chromium, cœur simulé et
-  vrai modèle, 144 points : noms et rôles accessibles (contrat de l'essai 12), chaque
+  vrai modèle, 145 points : noms et rôles accessibles (contrat de l'essai 12), chaque
   outil, Gomme, Projecteur, recadrage par chaque coin, sélection, bulle de l'outil,
   couleurs, menu « Fermer » et ses issues, « Copier » qui ferme, vignette de prise, règle
   de `fermer_demande`, un seul export à la fois, clair, sombre, fenêtre étroite, aucune
