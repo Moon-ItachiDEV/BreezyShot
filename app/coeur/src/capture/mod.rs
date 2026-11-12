@@ -3,8 +3,8 @@
 //! Aucun code propre à un système ici : la photo est prise par `systeme::gel`, qui seul
 //! sait comment (GDI sous Windows). Ce module assemble le résultat, chronomètre, et fait
 //! la géométrie et la découpe en fonctions pures. `Pixels` est le seul format qui sort.
-//! Il n'écrit rien sur le disque ni dans le journal : l'Application écrira les durées
-//! (`chrono gel photo <ms> total <ms>`).
+//! Il n'écrit rien sur le disque, et dans le journal seulement la lecture du pointeur
+//! (`figer(true)`) ; l'Application écrit les durées (`chrono gel photo <ms> total <ms>`).
 
 pub mod decoupe;
 pub mod fenetre;
@@ -20,7 +20,7 @@ use crate::systeme::Rect;
 pub use decoupe::{arrondir, reduire};
 pub use fenetre::{coins_a_arrondir, fenetre_sous, rayon_coins, rayon_plafonne, zone_fenetre};
 pub use geometrie::{borner_a_un_ecran, ecran_sous, rect_entre, zone_valide, COTE_MIN};
-pub use pointeur::{couche, poser_pointeur, Couche};
+pub use pointeur::{couche, ligne_lecture, ligne_pose, poser_pointeur, Couche, LecturePointeur};
 
 /// Un bureau figé : la photo, et ce qu'il faut pour choisir une zone ou une fenêtre.
 #[derive(Debug)]
@@ -37,6 +37,9 @@ pub struct Gel {
     /// Le pointeur lu juste après la photo (`figer(true)`), à poser dans les pixels
     /// découpés ; `None` s'il n'est pas voulu, caché ou illisible.
     pub pointeur: Option<Pointeur>,
+    /// La lecture du pointeur (durée, erreur), pour le journal (`ligne_lecture`) ; `None`
+    /// si le pointeur n'était pas voulu (rien n'a été lu).
+    pub lecture_pointeur: Option<LecturePointeur>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -78,13 +81,34 @@ pub fn figer(avec_pointeur: bool) -> Result<Gel, Erreur> {
     }
     let debut = Instant::now();
     let image = gel::figer_bureau().map_err(Erreur::Photo)?;
-    // Socle de la 0.4 : une erreur de lecture vaut « pas de pointeur » (le chantier du
-    // pointeur décidera de la remonter pour le journal).
-    let pointeur = if avec_pointeur {
-        gel::lire_pointeur().ok().flatten()
+    // Le pointeur, juste après la photo : une erreur vaut « pas de pointeur » pour l'image,
+    // et reste dans `lecture_pointeur` pour le journal.
+    let (pointeur, lecture_pointeur) = if avec_pointeur {
+        let debut_pointeur = Instant::now();
+        let lu = gel::lire_pointeur();
+        let duree = debut_pointeur.elapsed();
+        match lu {
+            Ok(p) => (
+                p,
+                Some(LecturePointeur {
+                    duree,
+                    erreur: None,
+                }),
+            ),
+            Err(e) => (
+                None,
+                Some(LecturePointeur {
+                    duree,
+                    erreur: Some(e),
+                }),
+            ),
+        }
     } else {
-        None
+        (None, None)
     };
+    if let Some(lecture) = &lecture_pointeur {
+        log::info!("{}", ligne_lecture(lecture, pointeur.as_ref()));
+    }
     let ecrans = gel::ecrans();
     let duree_totale = debut.elapsed();
     Ok(Gel {
@@ -94,6 +118,7 @@ pub fn figer(avec_pointeur: bool) -> Result<Gel, Erreur> {
         ecrans,
         duree_totale,
         pointeur,
+        lecture_pointeur,
     })
 }
 
