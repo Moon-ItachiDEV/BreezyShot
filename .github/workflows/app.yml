@@ -118,6 +118,12 @@ jobs:
           SORTIE: ${{ github.workspace }}/essais-resultats/pages
         run: node essais/pages/bandeau.cjs
 
+      - name: Essai du décompte (page du bandeau)
+        env:
+          NODE_PATH: ${{ github.workspace }}/app/node_modules
+          SORTIE: ${{ github.workspace }}/essais-resultats/pages
+        run: node essais/pages/decompte.cjs
+
       - name: Essai de la page de sélection
         env:
           NODE_PATH: ${{ github.workspace }}/app/node_modules
