@@ -150,6 +150,18 @@ jobs:
           SORTIE: ${{ github.workspace }}/essais-resultats/pages
         run: node essais/pages/installateur.cjs
 
+      - name: Essai du modèle et du dessin de l'éditeur
+        env:
+          NODE_PATH: ${{ github.workspace }}/app/node_modules
+          SORTIE: ${{ github.workspace }}/essais-resultats/pages
+        run: node essais/pages/editeur-modele.cjs
+
+      - name: Essai de la page de l'éditeur
+        env:
+          NODE_PATH: ${{ github.workspace }}/app/node_modules
+          SORTIE: ${{ github.workspace }}/essais-resultats/pages
+        run: node essais/pages/editeur.cjs
+
       - name: Envoyer les captures de la page
         if: always()
         uses: actions/upload-artifact@v4

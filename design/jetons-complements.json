@@ -265,6 +265,135 @@
     "value": "color-mix(in srgb, var(--acrylic-solid) 80%, transparent)",
     "usage": "Fond de la croix « Annuler » du décompte.",
     "origine": "design/capture/index.html (prototype du décompte), .cdx background."
+   },
+   {
+    "name": "editeur-fond",
+    "value": {
+     "light": "#EEF0F3",
+     "dark": "#1C1C1C"
+    },
+    "usage": "Fond de la fenêtre de l'éditeur.",
+    "origine": "design/editeur/index.html, piste A v2, --mica."
+   },
+   {
+    "name": "editeur-scene",
+    "value": {
+     "light": "#E4E7EC",
+     "dark": "#141414"
+    },
+    "usage": "Scène autour de l'image.",
+    "origine": "design/editeur/index.html, piste A v2, --stage."
+   },
+   {
+    "name": "editeur-verre",
+    "value": {
+     "light": "rgba(252,252,252,0.78)",
+     "dark": "rgba(44,44,44,0.80)"
+    },
+    "usage": "Fond des pastilles de la barre et de l'étiquette de zoom.",
+    "origine": "design/editeur/index.html, piste A v2, --glass."
+   },
+   {
+    "name": "editeur-verre-bord",
+    "value": {
+     "light": "rgba(0,0,0,0.08)",
+     "dark": "rgba(255,255,255,0.09)"
+    },
+    "usage": "Bord des pastilles de la barre.",
+    "origine": "design/editeur/index.html, piste A v2, --glass-stroke."
+   },
+   {
+    "name": "editeur-menu-fond",
+    "value": {
+     "light": "#FBFBFB",
+     "dark": "#2C2C2C"
+    },
+    "usage": "Fond des menus et de la fenêtre des réglages de l'outil.",
+    "origine": "design/editeur/index.html, piste A v2, --glass-pop."
+   },
+   {
+    "name": "editeur-indicateur",
+    "value": {
+     "light": "rgba(255,255,255,0.70)",
+     "dark": "rgba(255,255,255,0.09)"
+    },
+    "usage": "Indicateur de l'outil choisi, qui glisse.",
+    "origine": "design/editeur/index.html, piste A v2, .ind."
+   },
+   {
+    "name": "editeur-poignee",
+    "value": "#FFFFFF",
+    "usage": "Disque des poignées de l'objet sélectionné (vue seulement).",
+    "origine": "design/editeur/index.html, piste A v2, drawOverlay, poignées."
+   },
+   {
+    "name": "editeur-voile",
+    "value": {
+     "light": "rgba(0,0,0,0.28)",
+     "dark": "rgba(0,0,0,0.45)"
+    },
+    "usage": "Voile sous le dialogue de fermeture (scrim du design, plus léger en clair).",
+    "origine": "design/editeur/index.html, piste A v2, --scrim."
+   },
+   {
+    "name": "editeur-pastille-bord",
+    "value": {
+     "light": "rgba(0,0,0,0.15)",
+     "dark": "rgba(255,255,255,0.35)"
+    },
+    "usage": "Liseré intérieur des pastilles de couleur.",
+    "origine": "design/editeur/index.html, piste A v2, .swb i, .cl-sw i."
+   },
+   {
+    "name": "editeur-danger",
+    "value": {
+     "light": "#C42B1C",
+     "dark": "#FF99A4"
+    },
+    "usage": "Ligne « Supprimer » du menu.",
+    "origine": "design/editeur/index.html, piste A v2, .mi.danger."
+   },
+   {
+    "name": "editeur-recadrage-voile",
+    "value": "rgba(0,0,0,0.5)",
+    "usage": "Voile hors du recadrage en cours.",
+    "origine": "design/editeur/index.html, piste A v2, drawOverlay, recadrage."
+   },
+   {
+    "name": "editeur-recadrage-tiers",
+    "value": "rgba(255,255,255,0.35)",
+    "usage": "Lignes des tiers du recadrage.",
+    "origine": "design/editeur/index.html, piste A v2, drawOverlay, recadrage."
+   },
+   {
+    "name": "editeur-recadrage-bord",
+    "value": "#FFFFFF",
+    "usage": "Bord du recadrage en cours et de la pipette.",
+    "origine": "design/editeur/index.html, piste A v2, drawOverlay."
+   },
+   {
+    "name": "editeur-etiquette-fond",
+    "value": "rgba(20,20,20,0.78)",
+    "usage": "Étiquette « l × h » du recadrage.",
+    "origine": "design/editeur/index.html, piste A v2, drawOverlay, recadrage."
+   },
+   {
+    "name": "editeur-etiquette-texte",
+    "value": "#FFFFFF",
+    "usage": "Texte de l'étiquette « l × h ».",
+    "origine": "design/editeur/index.html, piste A v2, drawOverlay, recadrage."
+   },
+   {
+    "name": "editeur-ombre-poignee",
+    "value": "rgba(0,0,0,0.25)",
+    "usage": "Ombre des poignées.",
+    "origine": "design/editeur/index.html, piste A v2, drawOverlay."
+   },
+   {
+    "name": "editeur-ombre-pipette",
+    "value": "rgba(0,0,0,0.3)",
+    "usage": "Ombre de la pastille de la pipette.",
+    "origine": "design/editeur/index.html, piste A v2, drawOverlay."
    }
   ]
  },
@@ -491,6 +620,60 @@
     "value": "300ms",
     "usage": "Arrivée de chaque chiffre du décompte.",
     "origine": "design/capture/index.html (prototype du décompte), .num.tick (numIn 300ms)."
+   },
+   {
+    "name": "duree-editeur-indicateur",
+    "value": "320ms",
+    "usage": "Glissement de l'indicateur d'outil.",
+    "origine": "design/editeur/index.html, piste A v2, .ind."
+   },
+   {
+    "name": "duree-editeur-infobulle",
+    "value": "450ms",
+    "usage": "Délai d'une infobulle (0 juste après une autre).",
+    "origine": "design/editeur/index.html, piste A v2, showTip."
+   },
+   {
+    "name": "duree-editeur-infobulle-suite",
+    "value": "500ms",
+    "usage": "Fenêtre où l'infobulle suivante vient sans délai.",
+    "origine": "design/editeur/index.html, piste A v2, showTip."
+   },
+   {
+    "name": "duree-editeur-zoom",
+    "value": "900ms",
+    "usage": "Étiquette « <n> % » après un changement de zoom.",
+    "origine": "design/editeur/index.html, piste A v2, showZoom."
+   },
+   {
+    "name": "duree-editeur-fait",
+    "value": "1800ms",
+    "usage": "« Copié », « Enregistré ».",
+    "origine": "design/editeur/index.html, piste A v2, feedback."
+   },
+   {
+    "name": "duree-editeur-message",
+    "value": "4000ms",
+    "usage": "Message d'échec de la page (contrat R13).",
+    "origine": "design/editeur/index.html, piste A v2, contrat §7.4."
+   },
+   {
+    "name": "duree-editeur-menu",
+    "value": "240ms",
+    "usage": "Ouverture d'un menu.",
+    "origine": "design/editeur/index.html, piste A v2, .pop."
+   },
+   {
+    "name": "duree-editeur-onde",
+    "value": "420ms",
+    "usage": "Onde au clic de Copier et Enregistrer.",
+    "origine": "design/editeur/index.html, piste A v2, .vb.wave."
+   },
+   {
+    "name": "duree-editeur-ressort",
+    "value": "260ms",
+    "usage": "Pictogrammes et pastilles (ressort).",
+    "origine": "design/editeur/index.html, piste A v2, .tl .ico."
    }
   ]
  },
@@ -1456,6 +1639,264 @@
     "value": "90deg",
     "usage": "Rotation de la croix du décompte au survol.",
     "origine": "design/capture/index.html (prototype du décompte), .cdx:hover rotate(90deg)."
+   },
+   {
+    "name": "editeur-bouton",
+    "value": "32px",
+    "usage": "Côté des boutons de la barre.",
+    "origine": "design/editeur/index.html, piste A v2, .tl."
+   },
+   {
+    "name": "editeur-bouton-zoom",
+    "value": "28px",
+    "usage": "Côté des boutons de zoom.",
+    "origine": "design/editeur/index.html, piste A v2, .zpill .tl."
+   },
+   {
+    "name": "editeur-bouton-etroit",
+    "value": "30px",
+    "usage": "Largeur des boutons sous 560 px.",
+    "origine": "design/editeur/index.html, piste A v2, @media max-width 560."
+   },
+   {
+    "name": "editeur-bouton-rayon",
+    "value": "6px",
+    "usage": "Rayon des boutons et de l'indicateur.",
+    "origine": "design/editeur/index.html, piste A v2, .tl."
+   },
+   {
+    "name": "editeur-picto",
+    "value": "18px",
+    "usage": "Pictogrammes de la barre.",
+    "origine": "design/editeur/index.html, piste A v2, .ico."
+   },
+   {
+    "name": "editeur-picto-petit",
+    "value": "16px",
+    "usage": "Pictogrammes des menus, du zoom, des boutons texte.",
+    "origine": "design/editeur/index.html, piste A v2, .mi .ico."
+   },
+   {
+    "name": "editeur-pastille-rayon",
+    "value": "12px",
+    "usage": "Rayon des pastilles de la barre.",
+    "origine": "design/editeur/index.html, piste A v2, .pill."
+   },
+   {
+    "name": "editeur-pastille-marge",
+    "value": "4px",
+    "usage": "Marge intérieure des pastilles.",
+    "origine": "design/editeur/index.html, piste A v2, .pill."
+   },
+   {
+    "name": "editeur-pastille-flou",
+    "value": "24px",
+    "usage": "Flou d'arrière-plan des pastilles.",
+    "origine": "design/editeur/index.html, piste A v2, .pill backdrop-filter."
+   },
+   {
+    "name": "editeur-pastille-saturation",
+    "value": "1.5",
+    "usage": "Saturation d'arrière-plan des pastilles.",
+    "origine": "design/editeur/index.html, piste A v2, .pill."
+   },
+   {
+    "name": "editeur-barre-bas",
+    "value": "14px",
+    "usage": "Distance de la barre au bas de la scène.",
+    "origine": "design/editeur/index.html, piste A v2, .fbar."
+   },
+   {
+    "name": "editeur-barre-cotes",
+    "value": "12px",
+    "usage": "Distance de la barre aux côtés.",
+    "origine": "design/editeur/index.html, piste A v2, .fbar."
+   },
+   {
+    "name": "editeur-barre-ecart",
+    "value": "8px",
+    "usage": "Écart entre les pastilles (et au-dessus des menus).",
+    "origine": "design/editeur/index.html, piste A v2, .fbar."
+   },
+   {
+    "name": "editeur-barre-trace",
+    "value": "0.35",
+    "usage": "Opacité de la barre pendant un tracé.",
+    "origine": "design/editeur/index.html, piste A v2, .drawing .pill."
+   },
+   {
+    "name": "editeur-separateur",
+    "value": "20px",
+    "usage": "Hauteur des séparateurs.",
+    "origine": "design/editeur/index.html, piste A v2, .sep."
+   },
+   {
+    "name": "editeur-menu-rayon",
+    "value": "10px",
+    "usage": "Rayon des menus.",
+    "origine": "design/editeur/index.html, piste A v2, .pop."
+   },
+   {
+    "name": "editeur-menu-largeur",
+    "value": "200px",
+    "usage": "Largeur minimale des menus.",
+    "origine": "design/editeur/index.html, piste A v2, .pop.menu."
+   },
+   {
+    "name": "editeur-menu-marge",
+    "value": "10px",
+    "usage": "Marge intérieure de la fenêtre des réglages.",
+    "origine": "design/editeur/index.html, piste A v2, .pop."
+   },
+   {
+    "name": "editeur-menu-ligne",
+    "value": "32px",
+    "usage": "Hauteur d'une ligne de menu.",
+    "origine": "design/editeur/index.html, piste A v2, .mi."
+   },
+   {
+    "name": "editeur-couleur",
+    "value": "26px",
+    "usage": "Pastille de couleur des réglages.",
+    "origine": "design/editeur/index.html, piste A v2, .cl-sw."
+   },
+   {
+    "name": "editeur-couleur-disque",
+    "value": "18px",
+    "usage": "Disque de la pastille de couleur.",
+    "origine": "design/editeur/index.html, piste A v2, .cl-sw i."
+   },
+   {
+    "name": "editeur-couleur-barre",
+    "value": "16px",
+    "usage": "Disque de la pastille Réglages de la barre.",
+    "origine": "design/editeur/index.html, piste A v2, .swb i."
+   },
+   {
+    "name": "editeur-segment-hauteur",
+    "value": "24px",
+    "usage": "Hauteur des boutons segmentés.",
+    "origine": "design/editeur/index.html, piste A v2, .seg2 button."
+   },
+   {
+    "name": "editeur-glissiere",
+    "value": "150px",
+    "usage": "Largeur des glissières.",
+    "origine": "design/editeur/index.html, piste A v2, input[type=range]."
+   },
+   {
+    "name": "editeur-libelle",
+    "value": "58px",
+    "usage": "Largeur minimale des libellés des réglages.",
+    "origine": "design/editeur/index.html, piste A v2, .lab."
+   },
+   {
+    "name": "editeur-libelle-taille",
+    "value": "11.5px",
+    "usage": "Taille des libellés des réglages.",
+    "origine": "design/editeur/index.html, piste A v2, .lab."
+   },
+   {
+    "name": "editeur-gras",
+    "value": "28px",
+    "usage": "Bouton « G » (Gras).",
+    "origine": "design/editeur/index.html, piste A v2, .gbtn."
+   },
+   {
+    "name": "editeur-dialogue-largeur",
+    "value": "420px",
+    "usage": "Largeur du dialogue de fermeture.",
+    "origine": "design/editeur/index.html, piste A v2, .dlg."
+   },
+   {
+    "name": "editeur-image-rayon",
+    "value": "2px",
+    "usage": "Rayon de l'ombre de l'image.",
+    "origine": "design/editeur/index.html, piste A v2, .cv."
+   },
+   {
+    "name": "editeur-zoom-haut",
+    "value": "12px",
+    "usage": "Étiquette de zoom et message : distance au haut.",
+    "origine": "design/editeur/index.html, piste A v2, .zoomchip."
+   },
+   {
+    "name": "editeur-glisser-largeur",
+    "value": "44px",
+    "usage": "Vignette de la ligne Glisser.",
+    "origine": "design/editeur/index.html, piste A v2, .mi.drag img."
+   },
+   {
+    "name": "editeur-glisser-hauteur",
+    "value": "28px",
+    "usage": "Vignette de la ligne Glisser.",
+    "origine": "design/editeur/index.html, piste A v2, .mi.drag img."
+   },
+   {
+    "name": "editeur-glisser-seuil",
+    "value": "4",
+    "usage": "Déplacement (px) qui lance le glisser.",
+    "origine": "design/editeur/index.html, piste A v2, contrat §12.2 (16)."
+   },
+   {
+    "name": "editeur-scene-marge",
+    "value": "40px",
+    "usage": "Marge horizontale totale de l'image ajustée.",
+    "origine": "design/editeur/index.html, piste A v2, avail()."
+   },
+   {
+    "name": "editeur-scene-marge-etroite",
+    "value": "16px",
+    "usage": "Même marge sous 420 px.",
+    "origine": "design/editeur/index.html, piste A v2, avail()."
+   },
+   {
+    "name": "editeur-scene-haut",
+    "value": "10px",
+    "usage": "Marge au-dessus de l'image ajustée.",
+    "origine": "design/editeur/index.html, piste A v2, avail()."
+   },
+   {
+    "name": "editeur-scene-bas",
+    "value": "22px",
+    "usage": "Marge entre l'image ajustée et la barre.",
+    "origine": "design/editeur/index.html, piste A v2, avail()."
+   },
+   {
+    "name": "editeur-tolerance",
+    "value": "7",
+    "usage": "Tolérance (px d'écran) pour toucher un objet.",
+    "origine": "design/editeur/index.html, piste A v2, hit()."
+   },
+   {
+    "name": "editeur-poignee-rayon",
+    "value": "4.5",
+    "usage": "Rayon des poignées (px d'écran).",
+    "origine": "design/editeur/index.html, piste A v2, drawOverlay."
+   },
+   {
+    "name": "editeur-poignee-prise",
+    "value": "6",
+    "usage": "Rayon de prise d'une poignée (px d'écran).",
+    "origine": "design/editeur/index.html, piste A v2, handleAt()."
+   },
+   {
+    "name": "editeur-selection-marge",
+    "value": "4",
+    "usage": "Marge du contour de sélection (px d'écran).",
+    "origine": "design/editeur/index.html, piste A v2, drawOverlay."
+   },
+   {
+    "name": "editeur-pipette-rayon",
+    "value": "11",
+    "usage": "Pastille d'aperçu de la pipette (px d'écran).",
+    "origine": "design/editeur/index.html, piste A v2, drawOverlay."
+   },
+   {
+    "name": "editeur-pipette-decalage",
+    "value": "18",
+    "usage": "Décalage de la pastille de la pipette.",
+    "origine": "design/editeur/index.html, piste A v2, drawOverlay."
    }
   ]
  },
