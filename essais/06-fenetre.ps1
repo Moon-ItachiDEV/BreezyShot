@@ -578,9 +578,9 @@ public static int NonOpaques(byte[] o, int stride, int l, int h) {
             $origine = [BreezyShotEssai.Fenetre]::OrigineCliente($temoin)
             if ($null -eq $origine) { throw 'témoin : ClientToScreen impossible' }
             $MX = [int]($bord.X + [math]::Floor($bord.L / 2)); $MY = [int]($bord.Y + [math]::Floor($bord.H / 2))
-            $BORD = "$($bord.X),$($bord.Y) $($bord.L)x$($bord.H)"
-            Write-Host "témoin $temoin : vrai bord $BORD, zone cliente en $($origine[0]),$($origine[1]), milieu $MX,$MY"
-            Verifier 'témoin : le vrai bord est sur la zone utile de l''écran principal' (($bord.X -ge $utile.X) -and ($bord.Y -ge $utile.Y) -and ($bord.X + $bord.L -le $utile.X + $utile.Width) -and ($bord.Y + $bord.H -le $utile.Y + $utile.Height)) "bord $BORD, zone utile $utile" | Out-Null
+            $TEXTE_BORD = "$($bord.X),$($bord.Y) $($bord.L)x$($bord.H)"
+            Write-Host "témoin $temoin : vrai bord $TEXTE_BORD, zone cliente en $($origine[0]),$($origine[1]), milieu $MX,$MY"
+            Verifier 'témoin : le vrai bord est sur la zone utile de l''écran principal' (($bord.X -ge $utile.X) -and ($bord.Y -ge $utile.Y) -and ($bord.X + $bord.L -le $utile.X + $utile.Width) -and ($bord.Y + $bord.H -le $utile.Y + $utile.Height)) "bord $TEXTE_BORD, zone utile $utile" | Out-Null
 
             $da = Dossier-Cas 'a'
             Ecrire-Reglages -Dossier $da
@@ -634,7 +634,7 @@ public static int NonOpaques(byte[] o, int stride, int l, int h) {
                 if (($choisie.Count -eq 1) -and ($choisie[0] -match $motifChoisie)) {
                     $rayon = [int]$Matches[5]; $coinsLus = $Matches[6]
                     $lu = "$($Matches[1]),$($Matches[2]) $($Matches[3])x$($Matches[4])"
-                    Verifier '(3) fenetre choisie = le vrai bord de la témoin (DWMWA_EXTENDED_FRAME_BOUNDS)' ($lu -eq $BORD) "journal $lu, vrai bord $BORD" | Out-Null
+                    Verifier '(3) fenetre choisie = le vrai bord de la témoin (DWMWA_EXTENDED_FRAME_BOUNDS)' ($lu -eq $TEXTE_BORD) "journal $lu, vrai bord $TEXTE_BORD" | Out-Null
                     Verifier '(3) fenetre choisie : coins 1111 (fenêtre entière sur un écran)' ($coinsLus -eq '1111') $choisie[0] | Out-Null
                 }
                 else {
