@@ -79,10 +79,21 @@ pub fn placer(ecran: &Ecran, taille_logique: (f64, f64)) -> Rect {
 /// Le rectangle de la pilule envoyé par la page, vérifié : `None` si une valeur n'est pas
 /// finie ; sinon borné à la fenêtre (0..560 × 0..220 pixels CSS).
 pub fn borner_zone(x: f64, y: f64, largeur: f64, hauteur: f64) -> Option<ZoneCss> {
+    borner_zone_dans(x, y, largeur, hauteur, TAILLE_LOGIQUE)
+}
+
+/// `borner_zone` pour une fenêtre de taille logique `taille` (pixels CSS).
+pub fn borner_zone_dans(
+    x: f64,
+    y: f64,
+    largeur: f64,
+    hauteur: f64,
+    taille: (f64, f64),
+) -> Option<ZoneCss> {
     if ![x, y, largeur, hauteur].iter().all(|v| v.is_finite()) {
         return None;
     }
-    let (lmax, hmax) = TAILLE_LOGIQUE;
+    let (lmax, hmax) = taille;
     let x = x.clamp(0.0, lmax);
     let y = y.clamp(0.0, hmax);
     Some(ZoneCss {

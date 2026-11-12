@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-vignette-glisser"
+description = "Enables the vignette_glisser command without any pre-configured scope."
+commands.allow = ["vignette_glisser"]
+
+[[permission]]
+identifier = "deny-vignette-glisser"
+description = "Denies the vignette_glisser command without any pre-configured scope."
+commands.deny = ["vignette_glisser"]

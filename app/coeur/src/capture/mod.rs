@@ -16,7 +16,7 @@ use std::time::{Duration, Instant};
 use crate::systeme::gel::{self, EcranInfo, FenetreInfo, ImageFigee, Pixels};
 use crate::systeme::Rect;
 
-pub use decoupe::arrondir;
+pub use decoupe::{arrondir, reduire};
 pub use fenetre::{coins_a_arrondir, fenetre_sous, rayon_coins, rayon_plafonne, zone_fenetre};
 pub use geometrie::{borner_a_un_ecran, ecran_sous, rect_entre, zone_valide, COTE_MIN};
 

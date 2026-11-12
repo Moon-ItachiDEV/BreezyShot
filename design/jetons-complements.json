@@ -19,6 +19,72 @@
     },
     "usage": "Pastille d'erreur du bandeau.",
     "origine": "Maquette complète, variable --danger (le #C42B1C clair est aussi celui de ARCHITECTURE.md §6 et de « Choix 2 »)."
+   },
+   {
+    "name": "vignette-voile",
+    "value": "linear-gradient(to top, rgba(8,10,14,0.62), rgba(8,10,14,0.18) 45%, transparent 70%)",
+    "usage": "Voile de la carte au survol (sous les boutons).",
+    "origine": "design/vignette5 (disposition A « Au survol »), .la .veil."
+   },
+   {
+    "name": "vignette-voile-supprimee",
+    "value": "rgba(8,10,14,0.40)",
+    "usage": "Voile de la carte « supprimée ».",
+    "origine": "design/vignette5 (disposition A « Au survol »), .la.deleted .veil."
+   },
+   {
+    "name": "vignette-rond-fond",
+    "value": "rgba(20,20,22,0.58)",
+    "usage": "Fond des boutons ronds et de la croix.",
+    "origine": "design/vignette5 (disposition A « Au survol »), .la .rb."
+   },
+   {
+    "name": "vignette-rond-fond-survol",
+    "value": "rgba(20,20,22,0.82)",
+    "usage": "Fond des boutons ronds au survol.",
+    "origine": "design/vignette5 (disposition A « Au survol »), .la .rb:hover."
+   },
+   {
+    "name": "vignette-rond-bord",
+    "value": "rgba(255,255,255,0.16)",
+    "usage": "Bord des boutons ronds.",
+    "origine": "design/vignette5 (disposition A « Au survol »), .la .rb."
+   },
+   {
+    "name": "vignette-rond-texte",
+    "value": "#FFFFFF",
+    "usage": "Pictogramme des boutons ronds.",
+    "origine": "design/vignette5 (disposition A « Au survol »), .la .rb."
+   },
+   {
+    "name": "vignette-pilule-fond",
+    "value": "rgba(255,255,255,0.94)",
+    "usage": "Fond de la pilule secondaire (Enregistrer).",
+    "origine": "design/vignette5 (disposition A « Au survol »), .la .main .vb:not(.accent)."
+   },
+   {
+    "name": "vignette-pilule-texte",
+    "value": "#1A1A1A",
+    "usage": "Texte de la pilule secondaire.",
+    "origine": "design/vignette5 (disposition A « Au survol »), .la .main .vb:not(.accent)."
+   },
+   {
+    "name": "vignette-pilule-fait",
+    "value": "#0F7B0F",
+    "usage": "Texte de la pilule secondaire après réussite.",
+    "origine": "design/vignette5 (disposition A « Au survol »), .vb.done."
+   },
+   {
+    "name": "vignette-barre-fond",
+    "value": "rgba(0,0,0,0.14)",
+    "usage": "Fond de la barre du temps restant.",
+    "origine": "design/vignette5 (disposition A « Au survol »), .prog."
+   },
+   {
+    "name": "souffle-flash",
+    "value": "#FFFFFF",
+    "usage": "Flash sur la zone capturée.",
+    "origine": "design/vignette5 (disposition A « Au survol »), .flash."
    }
   ]
  },
@@ -41,6 +107,42 @@
     "value": "300ms",
     "usage": "Entrée en ressort de la pilule du bandeau (courbe-ressort).",
     "origine": "ARCHITECTURE.md §6 ; maquette complète (duration:300). Même valeur que duree-vignette, mais jeton propre au bandeau (relecture de l'étape 3)."
+   },
+   {
+    "name": "duree-souffle-flash",
+    "value": "180ms",
+    "usage": "Flash sur la zone capturée (opacité 0,55 → 0, courbe-douce).",
+    "origine": "Contrat de l'étape 9, décision D8 ; design/vignette5 (disposition A « Au survol »), animate 180."
+   },
+   {
+    "name": "duree-vignette-confirmation",
+    "value": "1800ms",
+    "usage": "« Copié » / « Enregistré » restent ce temps avant de revenir.",
+    "origine": "design/vignette5 (disposition A « Au survol »), setTimeout 1800."
+   },
+   {
+    "name": "duree-vignette-voile",
+    "value": "180ms",
+    "usage": "Fondu du voile au survol.",
+    "origine": "design/vignette5 (disposition A « Au survol »), .la .veil."
+   },
+   {
+    "name": "duree-vignette-bouton",
+    "value": "160ms",
+    "usage": "Fondu d'apparition d'un bouton au survol.",
+    "origine": "design/vignette5 (disposition A « Au survol »), .la .main>*."
+   },
+   {
+    "name": "duree-vignette-decalage",
+    "value": "60ms",
+    "usage": "Décalage entre deux boutons qui apparaissent.",
+    "origine": "design/vignette5 (disposition A « Au survol »), transition-delay 60/120 ms."
+   },
+   {
+    "name": "duree-vignette-grise",
+    "value": "220ms",
+    "usage": "Image grisée de la carte « supprimée ».",
+    "origine": "design/vignette5 (disposition A « Au survol »), .prev img."
    }
   ]
  },
@@ -172,6 +274,96 @@
     "value": "160px",
     "usage": "Largeur maximale d'un bouton d'action en texte, au-delà : « … ». Garde la place du texte et de la croix.",
     "origine": "À valider par le fil design : choix de l'agent pour que les boutons restent à droite sans passer à la ligne."
+   },
+   {
+    "name": "vignette-largeur",
+    "value": "260px",
+    "usage": "Largeur de la carte.",
+    "origine": "design/vignette5 (disposition A « Au survol »), .thumb width (max)."
+   },
+   {
+    "name": "vignette-ratio",
+    "value": "16 / 10",
+    "usage": "Proportions de l'image de la carte.",
+    "origine": "design/vignette5 (disposition A « Au survol »), .la .prev."
+   },
+   {
+    "name": "vignette-marge",
+    "value": "12px",
+    "usage": "Écart entre la carte et les bords de la zone utile.",
+    "origine": "design/vignette5 (disposition A « Au survol »), .thumb left:12px."
+   },
+   {
+    "name": "vignette-rayon",
+    "value": "8px",
+    "usage": "Coins de la carte.",
+    "origine": "design/vignette5 (disposition A « Au survol »), .thumb."
+   },
+   {
+    "name": "vignette-barre",
+    "value": "3px",
+    "usage": "Hauteur de la barre du temps restant.",
+    "origine": "design/vignette5 (disposition A « Au survol »), .prog."
+   },
+   {
+    "name": "vignette-pilule",
+    "value": "28px",
+    "usage": "Hauteur des pilules (Copier, Enregistrer).",
+    "origine": "design/vignette5 (disposition A « Au survol »), .la .main .vb."
+   },
+   {
+    "name": "vignette-pilule-texte-taille",
+    "value": "12.5px",
+    "usage": "Taille du texte des pilules.",
+    "origine": "design/vignette5 (disposition A « Au survol »), .la .main .vb."
+   },
+   {
+    "name": "vignette-rond",
+    "value": "26px",
+    "usage": "Côté des boutons ronds et de la croix.",
+    "origine": "design/vignette5 (disposition A « Au survol »), .la .rb."
+   },
+   {
+    "name": "vignette-picto",
+    "value": "14px",
+    "usage": "Pictogrammes des boutons ronds.",
+    "origine": "design/vignette5 (disposition A « Au survol »), .la .rb .ico."
+   },
+   {
+    "name": "vignette-arc",
+    "value": "40px",
+    "usage": "Hauteur de l'arc de l'envol (à mi-chemin).",
+    "origine": "design/vignette5 (disposition A « Au survol »), envol dy*.5-40."
+   },
+   {
+    "name": "vignette-entree-decalage",
+    "value": "14px",
+    "usage": "Départ vertical de l'entrée (−14 px pour un coin du haut).",
+    "origine": "design/vignette5 (disposition A « Au survol »), translateY(14px)."
+   },
+   {
+    "name": "vignette-vent-recul",
+    "value": "6px",
+    "usage": "Petit recul au début du coup de vent.",
+    "origine": "design/vignette5 (disposition A « Au survol »), translateX(6px) rotate(1deg)."
+   },
+   {
+    "name": "vignette-vent-decalage",
+    "value": "125%",
+    "usage": "Distance du coup de vent (vers le bord le plus proche).",
+    "origine": "design/vignette5 (disposition A « Au survol »), translate(-125%,-14px)."
+   },
+   {
+    "name": "vignette-vent-angle",
+    "value": "6deg",
+    "usage": "Rotation finale du coup de vent.",
+    "origine": "design/vignette5 (disposition A « Au survol »), rotate(-6deg)."
+   },
+   {
+    "name": "vignette-vent-flou",
+    "value": "6px",
+    "usage": "Flou final du coup de vent.",
+    "origine": "design/vignette5 (disposition A « Au survol »), blur(6px)."
    }
   ]
  }

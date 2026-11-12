@@ -90,7 +90,7 @@ jobs:
           if-no-files-found: warn
 
   pages:
-    name: Pages (bandeau et sélection dans Chromium)
+    name: Pages (bandeau, sélection, vignette dans Chromium)
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -129,6 +129,14 @@ jobs:
           NODE_PATH: ${{ github.workspace }}/app/node_modules
           SORTIE: ${{ github.workspace }}/essais-resultats/pages
         run: node essais/pages/reglages.cjs
+
+      - name: Essai des pages de la vignette et du souffle
+        env:
+          NODE_PATH: ${{ github.workspace }}/app/node_modules
+          SORTIE: ${{ github.workspace }}/essais-resultats/pages
+        run: |
+          node essais/pages/vignette.cjs
+          node essais/pages/souffle.cjs
 
       - name: Envoyer les captures de la page
         if: always()

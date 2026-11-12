@@ -44,8 +44,8 @@ pub fn annonce(bilan: &Bilan, demande: &Demande) -> Annonce {
         ),
         // Ni copie ni enregistrement demandes : seul « Recents » compte.
         (Etape::NonDemandee, EtapeFichier::NonDemande) => match &bilan.recent {
-            Ok(_) => reussite("Capture prise"),
-            Err(cause) => erreur("Impossible de garder la capture", cause),
+            Some(Err(cause)) => erreur("Impossible de garder la capture", cause),
+            Some(Ok(_)) | None => reussite("Capture prise"),
         },
     }
 }

@@ -22,6 +22,15 @@ fn main() {
         "reglages_saisie",
         "reglages_raccourci",
         "reglages_retablir",
+        "vignette_pret",
+        "vignette_image",
+        "vignette_zone",
+        "vignette_entree",
+        "vignette_action",
+        "vignette_glisser",
+        "vignette_terminee",
+        "souffle_pret",
+        "souffle_termine",
     ]);
     tauri_build::try_build(
         tauri_build::Attributes::new()

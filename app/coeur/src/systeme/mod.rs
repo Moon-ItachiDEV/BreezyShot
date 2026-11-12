@@ -14,6 +14,7 @@ mod composition;
 pub mod demarrage;
 mod dossier;
 pub mod gel;
+pub mod glisser;
 pub mod presse_papiers;
 pub use composition::attendre_composition;
 pub use demarrage::{demarrage_avec_systeme, EtatDemarrage};
