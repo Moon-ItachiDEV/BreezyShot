@@ -6,6 +6,9 @@
 //! Si le disque ne prend pas en charge les liens durs, repli : on reserve le
 //! nom final (creation exclusive d'un fichier vide), puis on renomme le
 //! temporaire dessus. Seule notre propre reservation est alors remplacee.
+//!
+//! Seule exception : `enregistrer_a` (Enregistrer sous... de l'editeur) remplace le fichier
+//! choisi, puisque l'utilisateur a confirme le remplacement dans le dialogue du systeme.
 
 use std::fs::{self, OpenOptions};
 use std::io::{self, ErrorKind, Write};
@@ -15,7 +18,7 @@ use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use super::nom::chemin_libre;
-use super::EtapeFichier;
+use super::{png, EtapeFichier};
 use crate::systeme::gel::Pixels;
 
 /// Nombre de noms essayes si d'autres ecritures prennent le nom entre-temps.
@@ -54,13 +57,54 @@ pub(super) fn enregistrer(
 /// Enregistre `pixels` en PNG exactement a `chemin` (Enregistrer sous... de l'editeur, 0.4) :
 /// temporaire du meme dossier, puis remplacement (l'utilisateur l'a confirme dans le
 /// dialogue du systeme). Alpha garde avec `transparence`, sinon force a 255.
+///
+/// Le dossier n'est jamais cree : il a ete choisi dans le dialogue, il existe ou l'ecriture
+/// echoue. Les causes ne nomment ni le dossier ni le fichier (« Le dossier est
+/// introuvable. ») : aucun chemin de l'utilisateur ne peut en sortir.
 pub fn enregistrer_a(pixels: &Pixels, chemin: &Path, transparence: bool) -> EtapeFichier {
-    // Provisoire (D) : rien n'est ecrit.
-    let _ = (pixels, transparence);
-    EtapeFichier::Echec {
-        dossier: chemin.parent().map(Path::to_path_buf).unwrap_or_default(),
-        cause: "Enregistrer sous n'est pas encore construit.".into(),
+    let dossier = chemin.parent().map(Path::to_path_buf).unwrap_or_default();
+    match ecrire_a(pixels, chemin, &dossier, transparence) {
+        Ok(()) => EtapeFichier::Fait(chemin.to_path_buf()),
+        Err(cause) => EtapeFichier::Echec { dossier, cause },
     }
+}
+
+fn ecrire_a(
+    pixels: &Pixels,
+    chemin: &Path,
+    dossier: &Path,
+    transparence: bool,
+) -> Result<(), String> {
+    png::valider(pixels)?;
+    if chemin.file_name().is_none() || !dossier_utilisable(dossier) || !dossier.is_dir() {
+        return Err(cause_disque(ErrorKind::NotFound, ""));
+    }
+    let (largeur, hauteur) = (pixels.largeur, pixels.hauteur);
+    let octets = if transparence {
+        png::encoder_rgba(largeur, hauteur, &pixels.rgba)?
+    } else {
+        png::encoder_rgba(largeur, hauteur, &png::opaques(&pixels.rgba))?
+    };
+    nettoyer_temporaires(dossier);
+
+    let (temporaire, mut f) =
+        creer_temporaire(dossier).map_err(|e| cause_temporaire(e.kind(), ""))?;
+    // Sur le disque avant le remplacement : un ancien fichier n'est jamais remplace par un
+    // fichier a moitie ecrit, meme si la machine s'arrete juste apres.
+    let ecrit = f.write_all(&octets).and_then(|()| f.sync_all());
+    drop(f);
+    if let Err(e) = ecrit {
+        let _ = fs::remove_file(&temporaire);
+        return Err(cause_disque(e.kind(), ""));
+    }
+    // `fs::rename` remplace un fichier existant (Windows : MOVEFILE_REPLACE_EXISTING) ;
+    // il echoue sur un dossier. Fichier tenu : trois essais, puis echec.
+    let place = avec_essais_si_tenu(|| fs::rename(&temporaire, chemin), &mut thread::sleep);
+    if let Err(e) = place {
+        let _ = fs::remove_file(&temporaire);
+        return Err(cause_disque(e.kind(), ""));
+    }
+    Ok(())
 }
 
 /// Vrai si le dossier peut recevoir une ecriture : non vide et absolu.

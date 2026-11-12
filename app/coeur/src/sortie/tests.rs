@@ -1513,3 +1513,126 @@ fn mesure_encodage_png() {
         );
     }
 }
+
+// ---------- Enregistrer sous... de l'editeur (enregistrer_a, 0.4) ----------
+
+/// Des pixels a l'alpha varie (0, 128, 255) et aux couleurs toutes differentes.
+fn image_alpha_variee(largeur: u32, hauteur: u32) -> Pixels {
+    let mut pixels = image(largeur, hauteur);
+    for (i, p) in pixels.rgba.chunks_exact_mut(4).enumerate() {
+        p[3] = [0, 128, 255][i % 3];
+    }
+    pixels
+}
+
+#[test]
+fn enregistrer_a_ecrit_le_png_exact_alpha_garde_ou_force() {
+    let racine = tempfile::tempdir().expect("dossier temporaire");
+    let pixels = image_alpha_variee(7, 5);
+    for (transparence, nom) in [(true, "garde.png"), (false, "force.png")] {
+        let chemin = racine.path().join(nom);
+        let etape = super::enregistrer_a(&pixels, &chemin, transparence);
+        assert_eq!(etape, EtapeFichier::Fait(chemin.clone()));
+        let relu = decoder(&fs::read(&chemin).expect("lecture"));
+        assert_eq!((relu.largeur, relu.hauteur), (7, 5));
+        let mut attendu = pixels.rgba.clone();
+        if !transparence {
+            attendu.chunks_exact_mut(4).for_each(|p| p[3] = 255);
+        }
+        assert_eq!(relu.rgba, attendu, "transparence {transparence}");
+    }
+    sans_temporaire(racine.path());
+    assert_eq!(noms_du_dossier(racine.path()).len(), 2);
+}
+
+#[test]
+fn enregistrer_a_remplace_le_fichier_choisi() {
+    let racine = tempfile::tempdir().expect("dossier temporaire");
+    let chemin = racine.path().join("deja là.png");
+    fs::write(&chemin, b"ancien contenu bien plus long qu'un petit PNG ?").expect("ecriture");
+    let etape = super::enregistrer_a(&image(3, 2), &chemin, false);
+    assert_eq!(etape, EtapeFichier::Fait(chemin.clone()));
+    assert_eq!(decoder(&fs::read(&chemin).expect("lecture")), image(3, 2));
+    // Un seul fichier : remplace, pas de « (2) », aucun temporaire.
+    assert_eq!(noms_du_dossier(racine.path()), noms(&["deja là.png"]));
+}
+
+#[test]
+fn enregistrer_a_echoue_sur_un_dossier_absent_sans_le_creer() {
+    let racine = tempfile::tempdir().expect("dossier temporaire");
+    let absent = racine.path().join("Absent").join("Sous-dossier");
+    let chemin = absent.join("capture.png");
+    let etape = super::enregistrer_a(&image(2, 2), &chemin, false);
+    assert_eq!(
+        etape,
+        EtapeFichier::Echec {
+            dossier: absent.clone(),
+            cause: "Le dossier est introuvable.".to_string()
+        }
+    );
+    assert!(!racine.path().join("Absent").exists());
+    assert!(noms_du_dossier(racine.path()).is_empty());
+}
+
+#[test]
+fn enregistrer_a_echoue_sans_rien_laisser_si_la_cible_est_un_dossier() {
+    let racine = tempfile::tempdir().expect("dossier temporaire");
+    let cible = racine.path().join("pris.png");
+    fs::create_dir(&cible).expect("dossier");
+    fs::write(cible.join("dedans"), b"x").expect("ecriture");
+    let etape = super::enregistrer_a(&image(2, 2), &cible, false);
+    let EtapeFichier::Echec { dossier, cause } = etape else {
+        panic!("echec attendu : {etape:?}");
+    };
+    assert_eq!(dossier, racine.path());
+    assert!(
+        !cause.contains(&*racine.path().to_string_lossy()),
+        "{cause}"
+    );
+    assert!(cible.is_dir());
+    assert_eq!(noms_du_dossier(&cible), noms(&["dedans"]));
+    sans_temporaire(racine.path());
+    assert_eq!(noms_du_dossier(racine.path()), noms(&["pris.png"]));
+}
+
+#[test]
+fn enregistrer_a_refuse_sans_panique_ni_ecriture() {
+    let courant = std::env::current_dir().expect("dossier courant");
+    let avant = noms_du_dossier(&courant);
+    let racine = tempfile::tempdir().expect("dossier temporaire");
+    let abimee = Pixels {
+        largeur: 3,
+        hauteur: 3,
+        rgba: vec![0; 35],
+    };
+    let vide = Pixels {
+        largeur: 0,
+        hauteur: 0,
+        rgba: Vec::new(),
+    };
+    let dans = |nom: &str| racine.path().join(nom);
+    let cas = [
+        (abimee, dans("abimee.png"), "La capture est vide ou abîmée."),
+        (vide, dans("vide.png"), "La capture est vide ou abîmée."),
+        (image(2, 2), PathBuf::new(), "Le dossier est introuvable."),
+        (
+            image(2, 2),
+            PathBuf::from("relatif-breezyshot-test.png"),
+            "Le dossier est introuvable.",
+        ),
+        (
+            image(2, 2),
+            racine.path().join(".."),
+            "Le dossier est introuvable.",
+        ),
+    ];
+    for (pixels, chemin, cause) in cas {
+        let etape = super::enregistrer_a(&pixels, &chemin, true);
+        let EtapeFichier::Echec { cause: rendue, .. } = &etape else {
+            panic!("echec attendu pour {chemin:?} : {etape:?}");
+        };
+        assert_eq!(rendue, cause, "{chemin:?}");
+    }
+    assert!(noms_du_dossier(racine.path()).is_empty());
+    assert_eq!(noms_du_dossier(&courant), avant);
+}
