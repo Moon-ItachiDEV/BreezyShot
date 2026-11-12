@@ -601,6 +601,240 @@ const L = 1280, H = 400;
   verifier(refus.length === 0 && t.length === 1 && style[0] === 'crosshair' && style[1] === 'rgba(0, 0, 0, 0.45)' && style[2].includes('inset') && style[2].startsWith('rgb(255, 255, 255)'), 'CSP de l\'app respectée (aucun refus, styles chargés)', JSON.stringify({ refus, style }));
   await p.context().close();
 
+  // 12. Mode fenêtre (étape 8). Charges en pixels réels ; trait --selection-fenetre.
+  const BLEU = [76, 194, 255];
+  let nf = 0; // points du mode fenêtre
+  const vf = (ok, quoi, info) => { nf++; verifier(ok, quoi, info); };
+  async function montrerFenetre(p, { fenetres, ecrans, souris = null, numero, R, RH }) {
+    const id = prochain++;
+    const k = p.echelle;
+    R = R || Math.round(L * k); RH = RH || Math.round(H * k);
+    await p.evaluate(m => __emettre('selection:montrer', m), { id, numero: numero || id, largeur: R, hauteur: RH, ecrans: ecrans || [{ x: 0, y: 0, largeur: R, hauteur: RH }], cote_min: 3, mode: 'fenetre', fenetres, souris });
+    await p.waitForTimeout(100);
+    await vider(p);
+    return id;
+  }
+  const etatFenetre = (p) => p.evaluate(() => {
+    const f = document.getElementById('fenetre'), s = getComputedStyle(f);
+    return { entoure: document.body.classList.contains('entoure'), affiche: s.display, x: parseInt(f.style.left), y: parseInt(f.style.top), l: parseInt(f.style.width), h: parseInt(f.style.height), rayons: f.style.borderRadius, curseur: getComputedStyle(document.documentElement).cursor };
+  });
+  // Pixels d'une capture : couleurs des points demandés et bilan de toute l'image autour du
+  // rectangle `r` (coins arrondis de rayon `ray` exclus du compte des pixels mêlés).
+  async function analyser(p, pts, r, ray) {
+    const b64 = (await p.screenshot()).toString('base64');
+    return p.evaluate(async ([b64, pts, r, ray, fond, voile, bleu]) => {
+      const bm = await createImageBitmap(await (await fetch('data:image/png;base64,' + b64)).blob());
+      const c = new OffscreenCanvas(bm.width, bm.height), x = c.getContext('2d'); x.drawImage(bm, 0, 0);
+      const d = x.getImageData(0, 0, bm.width, bm.height).data;
+      const col = (px, py) => { const i = (py * bm.width + px) * 4; return [d[i], d[i + 1], d[i + 2]]; };
+      const pres = (a, b) => a.every((u, k) => Math.abs(u - b[k]) <= 3);
+      const couleurs = pts.map(([px, py]) => col(px, py));
+      if (!r) return { couleurs };
+      let x0 = 1e9, y0 = 1e9, x1 = -1, y1 = -1, autres = 0, sombresDedans = 0;
+      const coin = (px, py) => (px < r.x + ray || px >= r.x + r.l - ray) && (py < r.y + ray || py >= r.y + r.h - ray);
+      for (let py = 0; py < bm.height; py++) for (let px = 0; px < bm.width; px++) {
+        const v = col(px, py);
+        const estVoile = pres(v, voile);
+        if (!estVoile) { x0 = Math.min(x0, px); y0 = Math.min(y0, py); x1 = Math.max(x1, px); y1 = Math.max(y1, py); }
+        if (coin(px, py)) continue;
+        if (!estVoile && !pres(v, fond) && !pres(v, bleu)) autres++;
+        if (estVoile && px >= r.x && px < r.x + r.l && py >= r.y && py < r.y + r.h) sombresDedans++;
+      }
+      return { couleurs, vu: { x: x0, y: y0, l: x1 - x0 + 1, h: y1 - y0 + 1 }, autres, sombresDedans };
+    }, [b64, pts, r, ray, FOND, VOILE, BLEU]);
+  }
+  // Le dernier pixel de la diagonale d'un coin entièrement hors de l'arc (voile) et le premier
+  // entièrement dans l'arc intérieur du trait (clair), décalés depuis le coin.
+  const horsArc = (r) => { let i = 0; while ((r - (i + 1) - 1) * Math.SQRT2 > r + 1e-6) i++; return i; };
+  const dansArc = (r, t) => Math.floor(r - (r - t) / Math.SQRT2) + 1;
+
+  // 12 a. Contour au pixel près à 100, 125, 150 et 200 % : voile autour, fenêtre claire, trait
+  // de max(2, round(2 k)) pixels réels à l'intérieur, coins arrondis au rayon du cœur.
+  for (const e of [1, 1.25, 1.5, 2]) {
+    p = await page({ echelle: e });
+    const W = { x: Math.round(200 * e), y: Math.round(80 * e), largeur: Math.round(500 * e), hauteur: Math.round(250 * e), rayon: Math.round(8 * e) };
+    id = await montrerFenetre(p, { fenetres: [W] });
+    await p.mouse.move(400.3, 200.6); await p.waitForTimeout(60);
+    const ef = await etatFenetre(p);
+    const t = Math.max(2, Math.round(2 * e)), r = W.rayon;
+    const x0 = W.x, y0 = W.y, x1 = W.x + W.largeur, y1 = W.y + W.hauteur, ym = y0 + 100, xm = x0 + 200;
+    const ho = horsArc(r), di = dansArc(r, t);
+    const pts = [[x0 - 1, ym], [x0, ym], [x0 + t - 1, ym], [x0 + t, ym], [x1 - t - 1, ym], [x1 - t, ym], [x1 - 1, ym], [x1, ym],
+      [xm, y0 - 1], [xm, y0], [xm, y0 + t - 1], [xm, y0 + t], [xm, y1 - t - 1], [xm, y1 - t], [xm, y1 - 1], [xm, y1],
+      [x0, y0], [x1 - 1, y0], [x0, y1 - 1], [x1 - 1, y1 - 1],
+      [x0 + ho, y0 + ho], [x1 - 1 - ho, y0 + ho], [x0 + ho, y1 - 1 - ho], [x1 - 1 - ho, y1 - 1 - ho],
+      [x0 + di, y0 + di], [x1 - 1 - di, y0 + di], [x0 + di, y1 - 1 - di], [x1 - 1 - di, y1 - 1 - di]];
+    const a = await analyser(p, pts, { x: x0, y: y0, l: W.largeur, h: W.hauteur }, r);
+    const C = a.couleurs, V = (c) => proche(c, VOILE), F = (c) => proche(c, FOND), B = (c) => proche(c, BLEU);
+    const bords = V(C[0]) && B(C[1]) && B(C[2]) && F(C[3]) && F(C[4]) && B(C[5]) && B(C[6]) && V(C[7])
+      && V(C[8]) && B(C[9]) && B(C[10]) && F(C[11]) && F(C[12]) && B(C[13]) && B(C[14]) && V(C[15]);
+    vf(ef.entoure && ef.x === x0 && ef.y === y0 && ef.l === W.largeur && ef.h === W.hauteur && bords,
+      `12 a k = ${e} : contour posé au pixel près, trait de ${t} pixels réels à l'intérieur`, JSON.stringify({ ef, C: C.slice(0, 16) }));
+    vf(a.vu.x === x0 && a.vu.y === y0 && a.vu.l === W.largeur && a.vu.h === W.hauteur && a.autres === 0 && a.sombresDedans === 0,
+      `12 a k = ${e} : rien de clair hors du contour, rien de sombre dedans, aucun pixel adouci hors des arcs`, JSON.stringify(a.vu) + ' ' + a.autres + ' ' + a.sombresDedans);
+    vf(C.slice(16, 24).every(V) && C.slice(24, 28).every(F),
+      `12 a k = ${e} : coins arrondis (rayon ${r}) : pixel du coin et dernier pixel hors de l'arc (${ho}) assombris, premier pixel dans l'arc (${di}) clair`, JSON.stringify(C.slice(16)));
+    await p.screenshot({ path: `${SORTIE}/selection-fenetre-${Math.round(e * 100)}.png` });
+    vf(ef.curseur === 'default', `12 a k = ${e} : curseur flèche en mode fenêtre`, ef.curseur);
+    await p.context().close();
+  }
+
+  // 12 b. Fenêtre à cheval sur deux écrans : coupée à l'écran de la souris ; seuls les vrais
+  // coins sont arrondis (le côté coupé garde des coins droits).
+  for (const e of [1, 1.5]) {
+    p = await page({ echelle: e });
+    const R = Math.round(L * e), RH = Math.round(H * e), Fr = Math.round(640 * e);
+    const ecr = [{ x: 0, y: 0, largeur: Fr, hauteur: RH }, { x: Fr, y: 0, largeur: R - Fr, hauteur: RH }];
+    const W = { x: Math.round(500 * e), y: Math.round(100 * e), largeur: Math.round(300 * e), hauteur: Math.round(200 * e), rayon: Math.round(8 * e) };
+    const r = W.rayon, t = Math.max(2, Math.round(2 * e)), y0 = W.y, y1 = W.y + W.hauteur, x0 = W.x, x1 = W.x + W.largeur;
+    id = await montrerFenetre(p, { fenetres: [W], ecrans: ecr });
+    await p.mouse.move(550, 200); await p.waitForTimeout(60);
+    let ef = await etatFenetre(p);
+    let a = await analyser(p, [[x0, y0], [x0, y1 - 1], [Fr - 1, y0], [Fr - 1, y1 - 1], [Fr, y0 + 50]], { x: x0, y: y0, l: Fr - x0, h: W.hauteur }, r);
+    let C = a.couleurs;
+    vf(ef.entoure && ef.x === x0 && ef.l === Fr - x0 && ef.rayons === `${r}px 0px 0px ${r}px` && proche(C[0], VOILE) && proche(C[1], VOILE) && proche(C[2], BLEU) && proche(C[3], BLEU) && proche(C[4], VOILE)
+      && a.vu.x === x0 && a.vu.l === Fr - x0 && a.autres === 0 && a.sombresDedans === 0,
+      `12 b k = ${e} : souris à gauche : partie gauche entourée, coins droits au bord de l'écran`, JSON.stringify({ ef, C, a: a.vu }));
+    await p.mouse.move(Fr / e + 40, 200); await p.waitForTimeout(60);
+    ef = await etatFenetre(p);
+    a = await analyser(p, [[Fr, y0], [Fr, y1 - 1], [x1 - 1, y0], [x1 - 1, y1 - 1], [Fr - 1, y0 + 50]], { x: Fr, y: y0, l: x1 - Fr, h: W.hauteur }, r);
+    C = a.couleurs;
+    vf(ef.entoure && ef.x === Fr && ef.l === x1 - Fr && ef.rayons === `0px ${r}px ${r}px 0px` && proche(C[0], BLEU) && proche(C[1], BLEU) && proche(C[2], VOILE) && proche(C[3], VOILE) && proche(C[4], VOILE)
+      && a.vu.x === Fr && a.vu.l === x1 - Fr && a.autres === 0 && a.sombresDedans === 0,
+      `12 b k = ${e} : souris à droite : le contour suit, coupé à l'écran de droite`, JSON.stringify({ ef, C, a: a.vu, t }));
+    await p.screenshot({ path: `${SORTIE}/selection-fenetre-cheval-${Math.round(e * 100)}.png` });
+    // Trop petite une fois coupée (2 pixels sur l'écran de droite) : rien.
+    id = await montrerFenetre(p, { fenetres: [{ x: Fr - 400, y: 50, largeur: 402, hauteur: 300, rayon: 8 }], ecrans: ecr });
+    await p.mouse.move((Fr + 1) / e, 100 / e); await p.mouse.move((Fr + 1.5) / e, 101 / e); await p.waitForTimeout(60);
+    ef = await etatFenetre(p);
+    await p.mouse.click((Fr + 1.5) / e, 101 / e); await p.waitForTimeout(40);
+    vf(!ef.entoure && (await appels(p)).length === 0, `12 b k = ${e} : fenêtre trop petite sur l'écran de la souris : rien d'entouré, clic sans effet`, JSON.stringify(ef));
+    await p.context().close();
+  }
+
+  // 12 c. Survol de deux fenêtres qui se recouvrent, bureau, position initiale de la souris.
+  p = await page();
+  const A = { x: 100, y: 100, largeur: 300, hauteur: 200, rayon: 8 }, Bf = { x: 250, y: 150, largeur: 400, hauteur: 200, rayon: 0 };
+  id = await montrerFenetre(p, { fenetres: [A, Bf], souris: { x: 500, y: 300 } });
+  let ef = await etatFenetre(p);
+  vf(ef.entoure && ef.x === 250 && ef.y === 150 && ef.l === 400 && ef.h === 200 && ef.rayons === '0px', '12 c position souris de la charge : fenêtre entourée avant tout mouvement', JSON.stringify(ef));
+  await p.mouse.move(300, 200); await p.waitForTimeout(60);
+  ef = await etatFenetre(p);
+  const surA = ef.entoure && ef.x === 100 && ef.y === 100 && ef.l === 300 && ef.rayons === '8px';
+  await p.mouse.move(500, 320); await p.waitForTimeout(60);
+  ef = await etatFenetre(p);
+  const surB = ef.entoure && ef.x === 250 && ef.l === 400;
+  vf(surA && surB, '12 c recouvrement : la fenêtre du dessus, puis celle de dessous, sans attendre', JSON.stringify(ef));
+  await p.mouse.move(900, 50); await p.waitForTimeout(60);
+  ef = await etatFenetre(p);
+  px = await ligne(p, 200);
+  vf(!ef.entoure && ef.affiche === 'none' && px.every(c => proche(c, VOILE)), '12 c bureau : rien n\'est entouré, voile partout', JSON.stringify(ef));
+  await p.mouse.click(900, 50); await p.waitForTimeout(40);
+  vf((await appels(p)).length === 0, '12 c clic sur le bureau : rien envoyé');
+  // Souris de la charge sur rien, ou absente : rien.
+  id = await montrerFenetre(p, { fenetres: [A] });
+  await p.context().close();
+  p = await page();
+  id = await montrerFenetre(p, { fenetres: [A], souris: { x: 10, y: 10 } });
+  ef = await etatFenetre(p);
+  vf(!ef.entoure, '12 c souris de la charge sur le bureau : rien d\'entouré', JSON.stringify(ef));
+  await p.context().close();
+
+  // 12 d. Clic : selection_cliquee une seule fois, au pixel sous la pointe ; glisser : rien.
+  for (const e of [1, 1.25]) {
+    p = await page({ echelle: e });
+    const W = { x: Math.round(100 * e), y: Math.round(100 * e), largeur: Math.round(400 * e), hauteur: Math.round(200 * e), rayon: 8 };
+    id = await montrerFenetre(p, { fenetres: [W] });
+    await p.mouse.move(150, 150); await p.waitForTimeout(40);
+    await p.mouse.down(); await p.mouse.move(250, 220, { steps: 5 }); await p.mouse.up(); await p.waitForTimeout(60);
+    const zoneVue = await etatZone(p);
+    vf((await appels(p)).length === 0 && !zoneVue.glisse, `12 d k = ${e} : glisser : rien envoyé, rien tracé`, JSON.stringify(zoneVue));
+    await p.keyboard.down('Shift'); await p.keyboard.down('Space'); await p.waitForTimeout(40);
+    const sousTouches = await etatFenetre(p);
+    await p.keyboard.up('Space'); await p.keyboard.up('Shift');
+    await p.mouse.click(301.3, 170.7); await p.waitForTimeout(40);
+    const avant = await etatFenetre(p);
+    await p.mouse.move(600, 380); await p.waitForTimeout(40);
+    await p.mouse.click(301.3, 170.7); await p.keyboard.press('Escape'); await p.waitForTimeout(40);
+    const apres = await etatFenetre(p);
+    const c = await appels(p);
+    const attendu = { id, numero: id, x: Math.floor(301.3 * e + 1e-3), y: Math.floor(170.7 * e + 1e-3) };
+    vf(JSON.stringify(c) === JSON.stringify([['selection_cliquee', attendu]]) && JSON.stringify(avant) === JSON.stringify(apres) && avant.entoure && sousTouches.entoure,
+      `12 d k = ${e} : clic → selection_cliquee une seule fois, bon pixel, plus rien ne change ; Maj et Espace sans effet`, JSON.stringify({ c, attendu, avant, apres }));
+    await p.context().close();
+  }
+
+  // 12 e. Clic droit, Échap : annulation ; envoi refusé : utilisable de nouveau.
+  p = await page();
+  const W1 = { x: 100, y: 100, largeur: 400, hauteur: 200, rayon: 8 };
+  id = await montrerFenetre(p, { fenetres: [W1] });
+  await p.mouse.click(200, 200, { button: 'right' }); await p.mouse.click(200, 200); await p.waitForTimeout(40);
+  a = await appels(p);
+  vf(JSON.stringify(a) === JSON.stringify([['selection_annulee', { id, numero: id, cause: 'clic_droit' }]]), '12 e clic droit : annulation, plus rien ensuite', JSON.stringify(a));
+  id = await montrerFenetre(p, { fenetres: [W1] });
+  await p.keyboard.press('Escape'); await p.keyboard.press('Escape'); await p.waitForTimeout(40);
+  a = await appels(p);
+  vf(JSON.stringify(a) === JSON.stringify([['selection_annulee', { id, numero: id, cause: 'echap' }]]), '12 e Échap : une seule annulation', JSON.stringify(a));
+  id = await montrerFenetre(p, { fenetres: [W1] });
+  await p.evaluate(() => __rejeter.add('selection_cliquee'));
+  await p.mouse.click(200, 200); await p.waitForTimeout(40);
+  await p.evaluate(() => __rejeter.clear()); await vider(p);
+  await p.mouse.move(210, 210); await p.mouse.click(210, 210); await p.waitForTimeout(40);
+  a = await appels(p);
+  vf(JSON.stringify(a) === JSON.stringify([['selection_cliquee', { id, numero: id, x: 210, y: 210 }]]), '12 e clic refusé par le cœur : utilisable aussitôt', JSON.stringify(a));
+  // Même charge renvoyée (clic sur rien pour le cœur) : repos, contour de nouveau, nouveau clic.
+  id = await montrerFenetre(p, { fenetres: [W1] });
+  await p.mouse.click(220, 220); await p.waitForTimeout(40); await vider(p);
+  await p.evaluate(([id, L, H]) => __emettre('selection:montrer', { id, numero: id, largeur: L, hauteur: H, ecrans: [{ x: 0, y: 0, largeur: L, hauteur: H }], cote_min: 3, mode: 'fenetre', fenetres: [{ x: 100, y: 100, largeur: 400, hauteur: 200, rayon: 8 }], souris: { x: 230, y: 230 } }), [id, L, H]);
+  await p.waitForTimeout(100);
+  ef = await etatFenetre(p);
+  await p.mouse.click(230, 230); await p.waitForTimeout(40);
+  a = await appels(p);
+  vf(ef.entoure && a.length === 2 && a[0][0] === 'selection_prete' && JSON.stringify(a[1]) === JSON.stringify(['selection_cliquee', { id, numero: id, x: 230, y: 230 }]), '12 e charge renvoyée : contour de nouveau, nouveau clic', JSON.stringify({ ef, a }));
+  await p.context().close();
+
+  // 12 f. Charge de mode zone après une charge de mode fenêtre : plus aucune trace du contour.
+  p = await page();
+  id = await montrerFenetre(p, { fenetres: [W1], souris: { x: 200, y: 200 } });
+  const avantZone = await etatFenetre(p);
+  id = await montrer(p);
+  ef = await etatFenetre(p);
+  px = await ligne(p, 200);
+  await glisser(p, [600, 100], [800, 300]);
+  t = await termine(p);
+  vf(avantZone.entoure && !ef.entoure && ef.affiche === 'none' && ef.curseur === 'crosshair' && px.every(c => proche(c, VOILE)) && t.length === 1,
+    '12 f charge de mode zone ensuite : plus de contour, croix, voile partout, glisser normal', JSON.stringify({ avantZone, ef }));
+  // Clic en mode zone : toujours rien.
+  id = await montrer(p);
+  await p.mouse.click(200, 200); await p.waitForTimeout(40);
+  vf((await appels(p)).length === 0, '12 f mode zone : un clic ne fait rien');
+  await p.context().close();
+
+  // 12 g. Demandes invalides en mode fenêtre : ignorées ; taille changée : plus de contour
+  // jusqu'à la charge suivante.
+  p = await page();
+  await vider(p);
+  const TF = { numero: 1, largeur: L, hauteur: H, ecrans: [], cote_min: 3 };
+  for (const m of [{ ...TF, id: 1, mode: 'fenêtre', fenetres: [] }, { ...TF, id: 2, mode: 'fenetre', fenetres: [{ x: 1.5, y: 0, largeur: 10, hauteur: 10, rayon: 0 }] },
+    { ...TF, id: 3, mode: 'fenetre', fenetres: [{ x: 0, y: 0, largeur: 10, hauteur: 10, rayon: -1 }] }, { ...TF, id: 4, mode: 'fenetre', fenetres: 'x' },
+    { ...TF, id: 5, mode: 'fenetre', fenetres: [{ x: 0, y: 0, largeur: 10, hauteur: 10 }] }, { ...TF, id: 6, mode: 'fenetre', fenetres: [], souris: { x: 1.5, y: 2 } },
+    { ...TF, id: 7, mode: 3, fenetres: [] }, { ...TF, id: 8, mode: 'fenetre', fenetres: [{ x: 0, y: 0, largeur: -1, hauteur: 10, rayon: 0 }] }]) {
+    await p.evaluate(m => __emettre('selection:montrer', m), m);
+  }
+  await p.waitForTimeout(100);
+  vf((await appels(p)).length === 0, '12 g demandes invalides (mode inconnu, fenêtre non entière, rayon négatif…) ignorées');
+  id = await montrerFenetre(p, { fenetres: [W1], souris: { x: 200, y: 200 } });
+  const avantTaille = await etatFenetre(p);
+  await p.setViewportSize({ width: 1000, height: 380 }); await p.waitForTimeout(150);
+  await p.mouse.move(300, 200); await p.waitForTimeout(40);
+  await p.mouse.click(300, 200); await p.waitForTimeout(40);
+  const apresTaille = await etatFenetre(p);
+  a = await appels(p);
+  vf(avantTaille.entoure && !apresTaille.entoure && a.length === 1 && a[0][0] === 'selection_prete' && a[0][1].attente === true,
+    '12 g taille changée : contour retiré, clic sans effet, prête en attente', JSON.stringify({ apresTaille, a }));
+  await p.context().close();
+  console.log('POINTS DU MODE FENETRE :', nf);
+
   console.log('ECHECS :', echecs);
   console.log('ERREURS PAGE :', JSON.stringify(erreurs));
   if (erreurs.length) echecs++;

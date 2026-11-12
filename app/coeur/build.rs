@@ -13,6 +13,7 @@ fn main() {
         "selection_chargee",
         "selection_prete",
         "selection_terminee",
+        "selection_cliquee",
         "selection_annulee",
     ]);
     tauri_build::try_build(

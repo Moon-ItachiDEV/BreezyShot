@@ -1,23 +1,28 @@
-//! Sélection (étape 5) : choisir une zone de l'écran.
+//! Sélection (étapes 5 et 8) : choisir une zone de l'écran, ou une fenêtre.
 //!
 //! Une seule fenêtre Tauri transparente, préparée au démarrage et cachée. Montrée, elle
 //! couvre tout le bureau virtuel juste au-dessus de l'écran figé (fenêtre native de
-//! `systeme::gel`) et ne dessine que le voile et le rectangle. Elle ne reçoit jamais les
-//! pixels de la capture et ne sait pas ce que deviendra la zone : elle rend deux coins en
-//! pixels réels du bureau, ou une annulation, par `Signal`.
+//! `systeme::gel`) et ne dessine que le voile et le rectangle (mode zone), ou le contour de
+//! la fenêtre sous la souris (mode fenêtre). Elle ne reçoit jamais les pixels de la capture
+//! et ne sait pas ce que deviendra le choix : elle rend deux coins (`Signal::Zone`) ou une
+//! fenêtre de la liste et le point cliqué (`Signal::Fenetre`), en pixels réels du bureau, ou
+//! une annulation, par `Signal`.
 //!
 //! # Ce que l'Application doit faire à l'assemblage
 //!
-//! 1. Déclarer les quatre commandes dans `invoke_handler` :
+//! 1. Déclarer les cinq commandes dans `invoke_handler` :
 //!    `fenetres::selection::{selection_chargee, selection_prete, selection_terminee,
-//!    selection_annulee}` (elles sont déjà permises à la seule fenêtre `selection` par
-//!    `capabilities/selection.json` et `build.rs`).
+//!    selection_cliquee, selection_annulee}` (elles sont déjà permises à la seule fenêtre
+//!    `selection` par `capabilities/selection.json` et `build.rs`).
 //! 2. Au démarrage, sur le fil principal, après `systeme::gel::preparer_ecran_fige` :
 //!    `Selection::creer(app, rappel)`, puis `app.manage(selection)` (les commandes
 //!    trouvent la sélection par `State<Selection>`).
 //! 3. Pour une capture de zone, sur le fil principal : figer et montrer l'écran figé, puis
 //!    `selection.montrer(Demande { bureau: <rect de la photo>, ecrans: <rect de chaque
-//!    écran>, dessous: systeme::gel::poignee_ecran_fige(), cote_min: capture::COTE_MIN })`.
+//!    écran>, dessous: systeme::gel::poignee_ecran_fige(), cote_min: capture::COTE_MIN,
+//!    mode: Mode::Zone, fenetres: Vec::new() })`. Pour une capture de fenêtre : `mode:
+//!    Mode::Fenetre` et `fenetres` : les fenêtres du premier plan vers le fond, chacune avec
+//!    son rectangle et son rayon de coins (pixels réels).
 //!    Sur `Err` : la fenêtre est déjà cachée ; cacher l'écran figé et revenir au Repos.
 //! 4. Pendant que la sélection est montrée (de `montrer` jusqu'au signal de fin), réserver
 //!    Échap en global (`raccourcis`) : à l'appui, `selection.cacher()` puis cacher l'écran
@@ -26,14 +31,16 @@
 //! 5. Dans le rappel (fil principal pour les signaux de fin, dans le même tour que le
 //!    masquage de la fenêtre) : `Zone` → cacher l'écran figé tout de suite, puis
 //!    `capture::rect_entre(depart, arrivee)`, borner à l'écran du départ et découper hors
-//!    du fil principal ; `Annulee`, `Muette`, `Impossible` → cacher l'écran figé, Repos
+//!    du fil principal ; `Fenetre { indice, point }` → de même, avec la fenêtre `indice` de
+//!    la demande coupée à l'écran de `point` ; `Annulee`, `Muette`, `Impossible` → cacher l'écran figé, Repos
 //!    (`Impossible` : ligne de journal déjà écrite ici, message si utile). `Prete` : rien
 //!    d'obligatoire (le chrono est déjà au journal). Le rappel ne doit pas bloquer.
 //! 6. À l'arrêt : `selection.fermer()`, avant `systeme::gel::detruire_ecran_fige()`.
 //!
 //! # Règles
 //!
-//! - Un seul signal de fin par affichage (`Zone`, `Annulee`, `Muette`, `Impossible`) : le
+//! - Un seul signal de fin par affichage (`Zone`, `Fenetre`, `Annulee`, `Muette`,
+//!   `Impossible`) : le
 //!   premier gagne. Toute commande dont l'`id` n'est pas celui en cours est ignorée.
 //! - Avant le rappel d'un signal de fin : le premier plan est rendu à la fenêtre notée
 //!   (avant le masquage, tant que l'app a encore le droit de le donner), la fenêtre est
@@ -58,7 +65,8 @@ use crate::systeme::{self, Rect};
 /// Étiquette de la fenêtre (aussi dans `capabilities/selection.json`).
 pub const ETIQUETTE_SELECTION: &str = "selection";
 /// Événement écouté par la page : `{ id, numero, largeur, hauteur, ecrans: [RectFenetre],
-/// cote_min }`, tout en pixels réels relatifs au coin de la fenêtre.
+/// cote_min, mode, fenetres: [{ x, y, largeur, hauteur, rayon }], souris: { x, y } | null }`,
+/// tout en pixels réels relatifs au coin de la fenêtre.
 pub const EVENEMENT_MONTRER: &str = "selection:montrer";
 /// Événement écouté par la page : la fenêtre est cachée, retour au repos.
 pub const EVENEMENT_CACHEE: &str = "selection:cachee";
@@ -66,6 +74,38 @@ pub const EVENEMENT_CACHEE: &str = "selection:cachee";
 pub const DELAI_PRETE: Duration = Duration::from_secs(2);
 /// Tolérance, en pixels réels, pour un point venu de la page juste au bord de la fenêtre.
 const TOLERANCE: f64 = 1.0;
+/// Nombre de fenêtres proposées au plus : au-delà, la liste est tronquée (les premières,
+/// celles du premier plan, sont gardées).
+pub const FENETRES_MAX: usize = 512;
+
+/// Ce que l'utilisateur choisit : une zone (glisser) ou une fenêtre (clic). Propre à la
+/// sélection, sans lien avec les modes de l'Application.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Mode {
+    #[default]
+    Zone,
+    Fenetre,
+}
+
+impl Mode {
+    /// Nom écrit au journal et envoyé à la page : `zone`, `fenetre`.
+    pub fn nom(self) -> &'static str {
+        match self {
+            Mode::Zone => "zone",
+            Mode::Fenetre => "fenetre",
+        }
+    }
+}
+
+/// Une fenêtre proposée en mode fenêtre, en pixels réels du bureau.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FenetreProposee {
+    /// Le vrai bord de la fenêtre (sans l'ombre). Peut déborder du bureau.
+    pub rect: Rect,
+    /// Rayon de ses coins arrondis, en pixels réels (0 : coins droits).
+    pub rayon: i32,
+}
 
 /// Ce que l'Application demande d'afficher.
 #[derive(Debug, Clone, PartialEq)]
@@ -76,8 +116,28 @@ pub struct Demande {
     pub ecrans: Vec<Rect>,
     /// Poignée de la fenêtre figée, à garder juste en dessous.
     pub dessous: Option<isize>,
-    /// Côté minimal d'une zone, en pixels réels (`capture::COTE_MIN`).
+    /// Côté minimal d'une zone, en pixels réels (`capture::COTE_MIN`). En mode fenêtre :
+    /// côté minimal de la fenêtre coupée à l'écran de la souris.
     pub cote_min: i32,
+    pub mode: Mode,
+    /// Du premier plan vers le fond. Vide en mode zone (ignorée si elle ne l'est pas) ;
+    /// tronquée à `FENETRES_MAX`.
+    pub fenetres: Vec<FenetreProposee>,
+}
+
+/// Les fenêtres retenues d'une demande : aucune en mode zone, les `FENETRES_MAX` premières
+/// en mode fenêtre. `Signal::Fenetre::indice` est un indice de cette liste, qui est aussi
+/// celui de `Demande::fenetres`.
+fn fenetres_de(demande: &Demande) -> Vec<FenetreProposee> {
+    match demande.mode {
+        Mode::Zone => Vec::new(),
+        Mode::Fenetre => demande
+            .fenetres
+            .iter()
+            .take(FENETRES_MAX)
+            .copied()
+            .collect(),
+    }
 }
 
 /// Pourquoi la sélection a été annulée.
@@ -117,6 +177,13 @@ pub enum Signal {
         depart: (i32, i32),
         arrivee: (i32, i32),
     },
+    /// Fenêtre choisie (mode fenêtre) : `indice` dans `Demande::fenetres`, et le pixel
+    /// cliqué, en pixels réels du bureau (il désigne l'écran où couper la fenêtre).
+    Fenetre {
+        id: u64,
+        indice: usize,
+        point: (i32, i32),
+    },
     Annulee {
         id: u64,
         cause: Cause,
@@ -138,6 +205,7 @@ impl Signal {
         match self {
             Signal::Prete { id, .. }
             | Signal::Zone { id, .. }
+            | Signal::Fenetre { id, .. }
             | Signal::Annulee { id, .. }
             | Signal::Muette { id }
             | Signal::Impossible { id, .. } => *id,
@@ -145,12 +213,13 @@ impl Signal {
     }
 }
 
-/// Fin d'un affichage telle qu'écrite au journal : `zone`, `annulee echap`, `muette`,
+/// Fin d'un affichage telle qu'écrite au journal : `zone`, `fenetre`, `annulee echap`, `muette`,
 /// `impossible <cause>`. `None` pour `Prete`, qui n'est pas une fin.
 pub fn decrire_fin(signal: &Signal) -> Option<String> {
     match signal {
         Signal::Prete { .. } => None,
         Signal::Zone { .. } => Some("zone".into()),
+        Signal::Fenetre { .. } => Some("fenetre".into()),
         Signal::Annulee { cause, .. } => Some(format!("annulee {}", cause.nom())),
         Signal::Muette { .. } => Some("muette".into()),
         Signal::Impossible { cause, .. } => Some(format!("impossible {cause}")),
@@ -314,6 +383,101 @@ pub fn decider_zone(
     Decision::Zone(a, b)
 }
 
+/// Ce que vaut un `selection_cliquee` pour l'affichage en cours.
+#[derive(Debug, Clone, PartialEq)]
+pub enum DecisionFenetre {
+    /// La fenêtre `indice` de la liste, cliquée au pixel `point` (pixels réels du bureau).
+    Fenetre { indice: usize, point: (i32, i32) },
+    /// Aucune fenêtre sous le point, ou une fenêtre trop petite une fois coupée à l'écran
+    /// du point : rien n'est choisi, la sélection continue.
+    Rien,
+    /// Point non fini ou hors de la fenêtre de sélection.
+    Invalide(String),
+}
+
+/// Décide d'un `selection_cliquee` (fonction pure). `point` : pixel réel relatif à la
+/// fenêtre de sélection, dont `fenetre_selection` est le rectangle réel ; `fenetres` : du
+/// premier plan vers le fond, en pixels réels du bureau.
+///
+/// Le cœur ne croit pas la page : il reçoit un point, pas une fenêtre. La fenêtre choisie
+/// est la première de la liste qui contient le point ; coupée à l'écran du point, elle doit
+/// garder `cote_min` de côté (sinon `Rien`, sans chercher plus loin dans la liste, comme la
+/// page). Un point sur aucun écran ou sur aucune fenêtre : `Rien`.
+pub fn decider_fenetre(
+    point: (f64, f64),
+    fenetre_selection: Rect,
+    fenetres: &[FenetreProposee],
+    ecrans: &[Rect],
+    cote_min: i32,
+) -> DecisionFenetre {
+    let Some(p) = vers_bureau(point, fenetre_selection) else {
+        return DecisionFenetre::Invalide("point invalide".into());
+    };
+    let Some(indice) = fenetres.iter().position(|f| f.rect.contient(p)) else {
+        return DecisionFenetre::Rien;
+    };
+    let Some(ecran) = ecrans.iter().find(|e| e.contient(p)) else {
+        return DecisionFenetre::Rien;
+    };
+    let min = cote_min.max(0);
+    match fenetres[indice].rect.intersection(*ecran) {
+        Some(c) if c.largeur >= min && c.hauteur >= min => {
+            DecisionFenetre::Fenetre { indice, point: p }
+        }
+        _ => DecisionFenetre::Rien,
+    }
+}
+
+/// Garde-fou : une commande de fin qui ne va pas avec le mode de l'affichage (fonction
+/// pure). `Err` porte la cause du signal `Impossible`.
+fn garde_mode(mode: Mode, attendu: Mode) -> Result<(), String> {
+    match (mode, attendu) {
+        (Mode::Zone, Mode::Fenetre) => Err("clic en mode zone".into()),
+        (Mode::Fenetre, Mode::Zone) => Err("zone en mode fenetre".into()),
+        _ => Ok(()),
+    }
+}
+
+/// Une fenêtre proposée, telle que la reçoit la page : pixels réels relatifs au coin de la
+/// fenêtre de sélection (elle peut en déborder, coordonnées négatives comprises).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+struct FenetrePage {
+    x: i32,
+    y: i32,
+    largeur: i32,
+    hauteur: i32,
+    rayon: i32,
+}
+
+/// Pixel réel relatif au coin de la fenêtre de sélection.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+struct PointPage {
+    x: i32,
+    y: i32,
+}
+
+/// La position de la souris (pixels réels du bureau, `systeme::position_souris`) → le pixel
+/// relatif à la fenêtre `fenetre` ; `None` si elle est inconnue ou hors de la fenêtre.
+fn souris_pour(position: Option<(f64, f64)>, fenetre: Rect) -> Option<PointPage> {
+    let (x, y) = position?;
+    if !x.is_finite() || !y.is_finite() {
+        return None;
+    }
+    let (px, py) = (x.floor(), y.floor());
+    let dans_i32 = |v: f64| v >= f64::from(i32::MIN) && v <= f64::from(i32::MAX);
+    if !dans_i32(px) || !dans_i32(py) {
+        return None;
+    }
+    let p = (px as i32, py as i32);
+    if !fenetre.contient(p) {
+        return None;
+    }
+    Some(PointPage {
+        x: borner_i32(i64::from(p.0) - i64::from(fenetre.x)),
+        y: borner_i32(i64::from(p.1) - i64::from(fenetre.y)),
+    })
+}
+
 /// Ce que reçoit la page avec `selection:montrer` : tout en pixels réels, relatifs au coin
 /// haut gauche de la fenêtre. Aucune échelle : la page la mesure.
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -327,15 +491,35 @@ struct ChargeMontrer {
     hauteur: i32,
     ecrans: Vec<RectFenetre>,
     cote_min: i32,
+    mode: Mode,
+    /// Vide en mode zone.
+    fenetres: Vec<FenetrePage>,
+    /// La souris relue à chaque envoi (`avec_souris`), pour entourer la bonne fenêtre avant
+    /// tout mouvement ; `null` si elle est inconnue ou hors de la fenêtre.
+    souris: Option<PointPage>,
+    /// Le rectangle réel de la fenêtre, repère de cette charge (non envoyé).
+    #[serde(skip)]
+    repere: Rect,
 }
 
-/// La charge d'un affichage pour la fenêtre `fenetre` (fonction pure).
+impl ChargeMontrer {
+    /// La même charge, avec la position de la souris `position` (pixels réels du bureau).
+    fn avec_souris(mut self, position: Option<(f64, f64)>) -> ChargeMontrer {
+        self.souris = souris_pour(position, self.repere);
+        self
+    }
+}
+
+/// La charge d'un affichage pour la fenêtre `fenetre` (fonction pure). La souris n'y est
+/// pas encore : elle est relue à chaque envoi.
 fn charge_pour(
     id: u64,
     numero: u64,
     fenetre: Rect,
     ecrans: &[Rect],
     cote_min: i32,
+    mode: Mode,
+    fenetres: &[FenetreProposee],
 ) -> ChargeMontrer {
     ChargeMontrer {
         id,
@@ -344,6 +528,22 @@ fn charge_pour(
         hauteur: fenetre.hauteur.max(0),
         ecrans: ecrans.iter().map(|r| vers_page(*r, fenetre)).collect(),
         cote_min: cote_min.max(0),
+        mode,
+        fenetres: fenetres
+            .iter()
+            .map(|f| {
+                let r = vers_page(f.rect, fenetre);
+                FenetrePage {
+                    x: r.x,
+                    y: r.y,
+                    largeur: r.largeur,
+                    hauteur: r.hauteur,
+                    rayon: f.rayon.max(0),
+                }
+            })
+            .collect(),
+        souris: None,
+        repere: fenetre,
     }
 }
 
@@ -392,6 +592,9 @@ struct Affichage {
     /// Échelle annoncée par tao, seulement pour le journal.
     echelle_tao: f64,
     cote_min: i32,
+    mode: Mode,
+    /// Fenêtres retenues (`fenetres_de`), en pixels réels du bureau.
+    fenetres: Vec<FenetreProposee>,
     montre_a: Instant,
     /// La fenêtre au premier plan avant l'affichage, à qui le rendre.
     avant: Option<isize>,
@@ -410,6 +613,8 @@ impl Affichage {
             ecrans: demande.ecrans.clone(),
             echelle_tao: f64::NAN,
             cote_min: demande.cote_min,
+            mode: demande.mode,
+            fenetres: fenetres_de(demande),
             montre_a: maintenant,
             avant,
             prete: false,
@@ -457,7 +662,15 @@ impl Etat {
         self.dernier_numero += 1;
         let numero = self.dernier_numero;
         let a = self.en_cours.as_mut().filter(|a| a.id == id)?;
-        let charge = charge_pour(id, numero, fenetre, &a.ecrans, a.cote_min);
+        let charge = charge_pour(
+            id,
+            numero,
+            fenetre,
+            &a.ecrans,
+            a.cote_min,
+            a.mode,
+            &a.fenetres,
+        );
         a.fenetre = fenetre;
         a.charge = Some(charge.clone());
         Some(charge)
@@ -775,9 +988,11 @@ impl Interne {
         let echelle_tao = fenetre.scale_factor().unwrap_or(f64::NAN);
         let repere = reel.filter(|r| !r.est_vide()).unwrap_or(voulu);
         log::info!(
-            "selection montree {id} voulu {} reel {} echelle {echelle_tao} placements {placements}",
+            "selection montree {id} voulu {} reel {} echelle {echelle_tao} placements {placements} mode {} fenetres {}",
             texte_rect(voulu),
-            reel.map(texte_rect).unwrap_or_else(|| "inconnu".into())
+            reel.map(texte_rect).unwrap_or_else(|| "inconnu".into()),
+            demande.mode.nom(),
+            fenetres_de(demande).len()
         );
         // 5. Prévenir la page : tout en pixels réels relatifs au coin de la fenêtre.
         let charge = {
@@ -787,8 +1002,7 @@ impl Interne {
             etat.nouvelle_charge(id, repere)
                 .ok_or("affichage remplace")?
         };
-        self.app
-            .emit_to(ETIQUETTE_SELECTION, EVENEMENT_MONTRER, charge)
+        self.emettre_charge(charge)
             .map_err(|e| format!("evenement non envoye: {e}"))?;
         // 6. Le filet de sécurité : sans page prête à temps, on cache.
         self.armer_delai(id)
@@ -934,13 +1148,17 @@ impl Interne {
         }
     }
 
+    /// Envoie une charge à la page, avec la souris relue à l'instant.
+    fn emettre_charge(&self, charge: ChargeMontrer) -> tauri::Result<()> {
+        let charge = charge.avec_souris(systeme::position_souris());
+        self.app
+            .emit_to(ETIQUETTE_SELECTION, EVENEMENT_MONTRER, charge)
+    }
+
     /// Renvoie à la page la demande de l'affichage en cours : elle revient au repos (son
     /// `selection_prete` suivant est ignoré s'il l'était déjà).
     fn renvoyer(&self, charge: ChargeMontrer) {
-        if let Err(e) = self
-            .app
-            .emit_to(ETIQUETTE_SELECTION, EVENEMENT_MONTRER, charge)
-        {
+        if let Err(e) = self.emettre_charge(charge) {
             log::warn!("selection: demande non renvoyee: {e}");
         }
     }
@@ -1033,7 +1251,7 @@ impl Interne {
     /// dans une fenêtre qui a changé, et la charge suivante, déjà envoyée, remet la page au
     /// repos.
     fn terminee(self: &Arc<Self>, id: u64, numero: u64, depart: Point, arrivee: Point) {
-        let Some((fenetre, cote_min, charge, courante)) = ({
+        let Some((fenetre, cote_min, charge, courante, mode)) = ({
             let etat = self.etat();
             etat.courant(id).map(|a| {
                 (
@@ -1041,11 +1259,16 @@ impl Interne {
                     a.cote_min,
                     a.charge.clone(),
                     etat.charge_courante(id, numero),
+                    a.mode,
                 )
             })
         }) else {
             return;
         };
+        if let Err(cause) = garde_mode(mode, Mode::Zone) {
+            self.finir(Signal::Impossible { id, cause });
+            return;
+        }
         if !courante {
             log::info!("selection {id}: zone d'une ancienne charge {numero} ignoree");
             return;
@@ -1069,6 +1292,39 @@ impl Interne {
                 }
             }
             Decision::Invalide(cause) => self.finir(Signal::Impossible { id, cause }),
+        }
+    }
+
+    /// Clic en mode fenêtre. Mêmes règles que `terminee` : un ancien numéro de charge est
+    /// ignoré ; un clic sur rien (la page et le cœur ne sont pas d'accord) remet la page au
+    /// repos et la sélection continue ; un point invalide termine l'affichage.
+    fn cliquee(self: &Arc<Self>, id: u64, numero: u64, point: (f64, f64)) {
+        let Some((a, courante)) = ({
+            let etat = self.etat();
+            etat.courant(id)
+                .map(|a| (a.clone(), etat.charge_courante(id, numero)))
+        }) else {
+            return;
+        };
+        if let Err(cause) = garde_mode(a.mode, Mode::Fenetre) {
+            self.finir(Signal::Impossible { id, cause });
+            return;
+        }
+        if !courante {
+            log::info!("selection {id}: clic d'une ancienne charge {numero} ignore");
+            return;
+        }
+        match decider_fenetre(point, a.fenetre, &a.fenetres, &a.ecrans, a.cote_min) {
+            DecisionFenetre::Fenetre { indice, point } => {
+                self.finir(Signal::Fenetre { id, indice, point })
+            }
+            DecisionFenetre::Rien => {
+                log::info!("selection {id}: clic sur aucune fenetre ignore");
+                if let Some(charge) = a.charge {
+                    self.renvoyer(charge);
+                }
+            }
+            DecisionFenetre::Invalide(cause) => self.finir(Signal::Impossible { id, cause }),
         }
     }
 
@@ -1176,6 +1432,27 @@ pub fn selection_terminee(
     selection.interne.terminee(id, numero, depart, arrivee);
 }
 
+/// Clic en mode fenêtre : le pixel réel sous la pointe au relâchement, relatif au coin de la
+/// fenêtre ; `numero` : celui de la charge sur laquelle il est compté. Une coordonnée qui
+/// n'est pas un nombre (ou absente) devient `NaN` et donne `Impossible`.
+#[tauri::command]
+pub fn selection_cliquee(
+    selection: State<'_, Selection>,
+    id: u64,
+    numero: u64,
+    x: Option<serde_json::Value>,
+    y: Option<serde_json::Value>,
+) {
+    selection
+        .interne
+        .cliquee(id, numero, (nombre_ou_rien(x), nombre_ou_rien(y)));
+}
+
+/// Un argument de commande lu comme un nombre ; `NaN` s'il est absent ou n'en est pas un.
+fn nombre_ou_rien(v: Option<serde_json::Value>) -> f64 {
+    v.and_then(|v| v.as_f64()).unwrap_or(f64::NAN)
+}
+
 /// Annulation par la page : `cause` vaut `"echap"` ou `"clic_droit"`.
 #[tauri::command]
 pub fn selection_annulee(selection: State<'_, Selection>, id: u64, numero: u64, cause: String) {
@@ -1201,6 +1478,8 @@ mod tests {
             ecrans: vec![r(0, 0, 1920, 1080)],
             dessous: None,
             cote_min: 3,
+            mode: Mode::Zone,
+            fenetres: Vec::new(),
         }
     }
 
@@ -1551,14 +1830,236 @@ mod tests {
 
     #[test]
     fn charge_envoyee_a_la_page() {
-        let c = charge_pour(3, 8, r(-1920, 0, 3520, 1080), &[r(0, 0, 1600, 900)], 3);
+        let c = charge_pour(
+            3,
+            8,
+            r(-1920, 0, 3520, 1080),
+            &[r(0, 0, 1600, 900)],
+            3,
+            Mode::Zone,
+            &[],
+        );
         assert_eq!(
             serde_json::to_string(&c).unwrap(),
             concat!(
                 r#"{"id":3,"numero":8,"largeur":3520,"hauteur":1080,"#,
-                r#""ecrans":[{"x":1920,"y":0,"largeur":1600,"hauteur":900}],"cote_min":3}"#
+                r#""ecrans":[{"x":1920,"y":0,"largeur":1600,"hauteur":900}],"cote_min":3,"#,
+                r#""mode":"zone","fenetres":[],"souris":null}"#
             )
         );
+    }
+
+    fn fp(x: i32, y: i32, largeur: i32, hauteur: i32, rayon: i32) -> FenetreProposee {
+        FenetreProposee {
+            rect: r(x, y, largeur, hauteur),
+            rayon,
+        }
+    }
+
+    #[test]
+    fn charge_du_mode_fenetre() {
+        // Fenêtres relatives à la fenêtre de sélection, débordements et rayon négatif borné.
+        let f = r(-1920, -100, 3840, 1180);
+        let c = charge_pour(
+            1,
+            2,
+            f,
+            &[r(-1920, -100, 1920, 1080), r(0, 0, 1920, 1080)],
+            3,
+            Mode::Fenetre,
+            &[fp(-2000, -150, 500, 400, 8), fp(100, 200, 300, 200, -4)],
+        )
+        .avec_souris(Some((-1900.0, -90.5)));
+        assert_eq!(
+            serde_json::to_string(&c).unwrap(),
+            concat!(
+                r#"{"id":1,"numero":2,"largeur":3840,"hauteur":1180,"ecrans":["#,
+                r#"{"x":0,"y":0,"largeur":1920,"hauteur":1080},"#,
+                r#"{"x":1920,"y":100,"largeur":1920,"hauteur":1080}],"cote_min":3,"#,
+                r#""mode":"fenetre","fenetres":["#,
+                r#"{"x":-80,"y":-50,"largeur":500,"hauteur":400,"rayon":8},"#,
+                r#"{"x":2020,"y":300,"largeur":300,"hauteur":200,"rayon":0}],"#,
+                r#""souris":{"x":20,"y":9}}"#
+            )
+        );
+    }
+
+    #[test]
+    fn souris_relue_relative_a_la_fenetre() {
+        let f = r(-1920, 0, 3840, 1080);
+        let p = |x, y| Some(PointPage { x, y });
+        assert_eq!(souris_pour(Some((-1920.0, 0.0)), f), p(0, 0));
+        assert_eq!(souris_pour(Some((1919.9, 1079.9)), f), p(3839, 1079));
+        assert_eq!(souris_pour(Some((-1920.5, 0.0)), f), None, "hors a gauche");
+        assert_eq!(souris_pour(Some((1920.0, 5.0)), f), None, "hors a droite");
+        assert_eq!(souris_pour(Some((f64::NAN, 5.0)), f), None);
+        assert_eq!(souris_pour(Some((1e300, 5.0)), f), None);
+        assert_eq!(souris_pour(None, f), None);
+    }
+
+    #[test]
+    fn mode_zone_sans_fenetres_et_liste_tronquee() {
+        let mut d = demande();
+        d.fenetres = vec![fp(0, 0, 10, 10, 0)];
+        assert!(fenetres_de(&d).is_empty(), "vide en mode zone");
+        d.mode = Mode::Fenetre;
+        d.fenetres = (0..600).map(|i| fp(i, 0, 10, 10, 0)).collect();
+        let retenues = fenetres_de(&d);
+        assert_eq!(retenues.len(), FENETRES_MAX);
+        assert_eq!(retenues[0], d.fenetres[0]);
+        assert_eq!(retenues[511], d.fenetres[511]);
+        // La charge porte la liste tronquée.
+        let mut e = Etat::default();
+        let (id, _) = e.commencer(&d, None, None, Instant::now());
+        let c = e.nouvelle_charge(id, r(0, 0, 1920, 1080)).expect("charge");
+        assert_eq!((c.mode, c.fenetres.len()), (Mode::Fenetre, FENETRES_MAX));
+        assert_eq!(Mode::Zone.nom(), "zone");
+        assert_eq!(Mode::Fenetre.nom(), "fenetre");
+        assert_eq!(Mode::default(), Mode::Zone);
+    }
+
+    #[test]
+    fn decider_fenetre_premiere_de_la_liste() {
+        let f = r(0, 0, 1920, 1080);
+        let ecrans = [f];
+        // Deux fenêtres qui se recouvrent : la première de la liste (premier plan) gagne.
+        let liste = [fp(100, 100, 400, 300, 8), fp(300, 200, 600, 500, 8)];
+        assert_eq!(
+            decider_fenetre((350.0, 250.0), f, &liste, &ecrans, 3),
+            DecisionFenetre::Fenetre {
+                indice: 0,
+                point: (350, 250)
+            }
+        );
+        // Sous la seconde seulement.
+        assert_eq!(
+            decider_fenetre((600.0, 600.0), f, &liste, &ecrans, 3),
+            DecisionFenetre::Fenetre {
+                indice: 1,
+                point: (600, 600)
+            }
+        );
+        // Bords : le dernier pixel de la fenêtre en est, le suivant non.
+        assert_eq!(
+            decider_fenetre((499.0, 399.0), f, &liste[..1], &ecrans, 3),
+            DecisionFenetre::Fenetre {
+                indice: 0,
+                point: (499, 399)
+            }
+        );
+        assert_eq!(
+            decider_fenetre((500.0, 250.0), f, &liste[..1], &ecrans, 3),
+            DecisionFenetre::Rien
+        );
+        // Sur le bureau, sur rien.
+        assert_eq!(
+            decider_fenetre((50.0, 50.0), f, &liste, &ecrans, 3),
+            DecisionFenetre::Rien
+        );
+        assert_eq!(
+            decider_fenetre((50.0, 50.0), f, &[], &ecrans, 3),
+            DecisionFenetre::Rien
+        );
+    }
+
+    #[test]
+    fn decider_fenetre_coupee_a_l_ecran_du_point() {
+        // Deux écrans, celui de gauche à coordonnées négatives ; fenêtre de sélection sur
+        // tout le bureau.
+        let sel = r(-1920, -200, 3840, 1280);
+        let ecrans = [r(-1920, -200, 1920, 1080), r(0, 0, 1920, 1080)];
+        // Fenêtre à cheval : 2 pixels à droite de la frontière, le reste à gauche.
+        let liste = [fp(-1000, 100, 1002, 400, 8)];
+        // Point à gauche (pixel réel du bureau -500, 300 → relatif 1420, 500) : elle garde
+        // 1000 × 400.
+        assert_eq!(
+            decider_fenetre((1420.0, 500.0), sel, &liste, &ecrans, 3),
+            DecisionFenetre::Fenetre {
+                indice: 0,
+                point: (-500, 300)
+            }
+        );
+        // Point à droite (pixel 0, 300) : coupée à l'écran de droite, 2 × 400 : trop petite.
+        assert_eq!(
+            decider_fenetre((1920.0, 500.0), sel, &liste, &ecrans, 3),
+            DecisionFenetre::Rien
+        );
+        // Avec 3 pixels à droite : assez grande.
+        let liste = [fp(-1000, 100, 1003, 400, 8)];
+        assert_eq!(
+            decider_fenetre((1922.0, 500.0), sel, &liste, &ecrans, 3),
+            DecisionFenetre::Fenetre {
+                indice: 0,
+                point: (2, 300)
+            }
+        );
+        // La première trop petite ne laisse pas passer celle d'en dessous.
+        let liste = [fp(-2, 100, 1000, 400, 0), fp(-1500, 0, 3000, 900, 0)];
+        assert_eq!(
+            decider_fenetre((1919.0, 500.0), sel, &liste, &ecrans, 3),
+            DecisionFenetre::Rien
+        );
+        // Point dans le bureau mais sur aucun écran (sous l'écran de gauche, pixel -500,
+        // 1000) : rien.
+        let grande = [fp(-1920, -200, 3840, 1280, 0)];
+        assert_eq!(
+            decider_fenetre((1420.0, 1200.0), sel, &grande, &ecrans, 3),
+            DecisionFenetre::Rien
+        );
+    }
+
+    #[test]
+    fn decider_fenetre_refuse_un_point_invalide() {
+        let f = r(0, 0, 1920, 1080);
+        let liste = [fp(0, 0, 1920, 1080, 0)];
+        for p in [
+            (f64::NAN, 1.0),
+            (1.0, f64::INFINITY),
+            (-5.0, 10.0),
+            (10.0, 1081.5),
+        ] {
+            assert!(
+                matches!(
+                    decider_fenetre(p, f, &liste, &[f], 3),
+                    DecisionFenetre::Invalide(_)
+                ),
+                "{p:?}"
+            );
+        }
+        assert_eq!(nombre_ou_rien(Some(serde_json::json!(12))), 12.0);
+        assert!(nombre_ou_rien(Some(serde_json::Value::Null)).is_nan());
+        assert!(nombre_ou_rien(Some(serde_json::json!("3"))).is_nan());
+        assert!(nombre_ou_rien(None).is_nan());
+    }
+
+    #[test]
+    fn garde_fous_de_mode() {
+        assert_eq!(garde_mode(Mode::Zone, Mode::Zone), Ok(()));
+        assert_eq!(garde_mode(Mode::Fenetre, Mode::Fenetre), Ok(()));
+        assert_eq!(
+            garde_mode(Mode::Zone, Mode::Fenetre),
+            Err("clic en mode zone".into())
+        );
+        assert_eq!(
+            garde_mode(Mode::Fenetre, Mode::Zone),
+            Err("zone en mode fenetre".into())
+        );
+    }
+
+    #[test]
+    fn numero_de_charge_en_mode_fenetre() {
+        let mut d = demande();
+        d.mode = Mode::Fenetre;
+        d.fenetres = vec![fp(10, 10, 500, 500, 8)];
+        let mut e = Etat::default();
+        let (id, _) = e.commencer(&d, None, None, Instant::now());
+        let c1 = e.nouvelle_charge(id, r(0, 0, 1920, 1080)).expect("charge");
+        let c2 = e.nouvelle_charge(id, r(0, 0, 1600, 900)).expect("charge");
+        assert!(!e.charge_courante(id, c1.numero) && e.charge_courante(id, c2.numero));
+        // La charge relue garde le mode et les fenêtres, relatives au nouveau repère.
+        assert_eq!(c2.mode, Mode::Fenetre);
+        assert_eq!(c2.fenetres[0].x, 10);
+        assert_eq!(c2.repere, r(0, 0, 1600, 900));
     }
 
     #[test]
@@ -1650,6 +2151,15 @@ mod tests {
             })
             .as_deref(),
             Some("zone")
+        );
+        assert_eq!(
+            decrire_fin(&Signal::Fenetre {
+                id: 1,
+                indice: 0,
+                point: (5, 5)
+            })
+            .as_deref(),
+            Some("fenetre")
         );
         assert_eq!(
             decrire_fin(&Signal::Annulee {

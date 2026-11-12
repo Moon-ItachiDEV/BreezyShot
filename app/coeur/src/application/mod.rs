@@ -940,6 +940,8 @@ fn capturer_zone(app: &AppHandle, recu_a: Instant) {
         ecrans: gel_pris.ecrans.iter().map(|e| e.rect).collect(),
         dessous: gel::poignee_ecran_fige(),
         cote_min: capture::COTE_MIN,
+        mode: selection::Mode::Zone,
+        fenetres: Vec::new(),
     };
     // La capture est notée avant `montrer` : un signal de fin arrivé pendant `montrer`
     // la trouve et la termine. La place est vide : vidée avant la photo, sur ce même fil,
