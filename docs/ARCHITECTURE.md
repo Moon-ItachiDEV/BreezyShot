@@ -595,8 +595,11 @@ Module pur : il reçoit le dossier où écrire, ne connaît ni Tauri ni les autr
 - Essai 05 sous Windows (`05-plein-ecran.ps1`), même cadre : `Ctrl + Maj + 2`, lignes
   d'état et `plein ecran … souris`, écran figé et sélection jamais visibles (guettés toutes
   les 2 ms pendant et après), PNG enregistré et presse-papiers à la taille exacte de l'écran
-  principal avec le témoin à sa place, zone du bandeau identique dans deux captures de
-  suite, second appui ignoré, réglages non réécrits, arrêt propre. Le choix entre plusieurs
+  principal avec le témoin à sa place, seconde capture pendant le bandeau de la première
+  (visible juste avant l'appui) sans lui sur la part du témoin qu'il couvre, second appui
+  ignoré (presse-papiers tenu par l'essai : la copie réessaie 250 ms, la Découpe dure
+  donc au moins autant ; « Impossible de copier »), puis une capture normale, réglages
+  non réécrits, arrêt propre. Le choix entre plusieurs
   écrans (tests purs seulement) et le délai du menu (aucun clic sur l'icône) ne s'y
   vérifient pas.
 - `essais/` : un script par étape (`01-socle.ps1`, `02-reglages.ps1`, `03-raccourci.ps1`,

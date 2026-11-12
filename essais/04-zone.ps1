@@ -2,8 +2,8 @@
 # §8, §9, §10), sur le vrai .exe, avec de vraies entrées clavier et souris.
 #
 # Cas A (réglage d'enregistrement par défaut, faux : tant que la vignette n'existe pas,
-# l'app enregistre quand même, « Copié et enregistré », sans toucher au réglage) : (1) raccourci → chronos et lignes du journal ; (2) fenêtres
-# pendant la sélection (couverture, ordre, premier plan, styles étendus, bandeau caché,
+# l'app enregistre quand même, « Copié et enregistré », sans toucher au réglage) :
+# (1) raccourci → chronos et lignes du journal ; (2) fenêtres pendant la sélection (couverture, ordre, premier plan, styles étendus, bandeau caché,
 # pas de focus_perdu parasite en 3 s) ; (3) glisser exact sur les quatre carrés du témoin
 # → presse-papiers et « Récents » identiques pixel par pixel, Repos, premier plan rendu ;
 # (4) Échap puis clic droit annulent ; (5) clic sans glisser et glisser de 1 px (zone 2×2) :
@@ -381,8 +381,14 @@ public static string[] Ecarts(byte[] o, int stride, int l, int h, int[] c, int m
 
         # Compare une image aux quatre carrés : taille exacte, puis chaque pixel. En cas
         # d'écart, les premiers pixels fautifs dans le détail.
+        # L'image est libérée à la fin (chaque appel lui passe une image à lui).
         function Verifier-Image([string]$Nom, $Image) {
             if ($null -eq $Image) { Verifier $Nom $false 'aucune image' | Out-Null; return }
+            try { Verifier-Image-Tenue $Nom $Image }
+            finally { $Image.Dispose() }
+        }
+
+        function Verifier-Image-Tenue([string]$Nom, $Image) {
             $taille = "$($Image.Width)x$($Image.Height)"
             if (-not (Verifier "$Nom : taille ${COTE}x$COTE" (($Image.Width -eq $COTE) -and ($Image.Height -eq $COTE)) "obtenu $taille")) {
                 $Image.Save((Join-Path $script:Essai.Sortie ("04-" + ($Nom -replace '[^\w]+', '-') + '.png')), [System.Drawing.Imaging.ImageFormat]::Png)

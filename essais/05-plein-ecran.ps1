@@ -9,9 +9,11 @@
 # ni l'écran figé ni la sélection ne deviennent visibles (guettés pendant et après).
 # (4) Le PNG enregistré et l'image du presse-papiers ont exactement la taille de l'écran
 # principal en pixels réels, et la fenêtre témoin y est à sa place, aux bonnes couleurs.
-# (5) Deux captures de suite, la seconde pendant le bandeau de la première : la zone du
-# bandeau (« bandeau zone … ») est la même dans les deux images. (6) Un second appui
-# pendant la capture est ignoré ; après, l'app capture de nouveau. (7) --quitter → arret
+# (5) Deux captures de suite, la seconde pendant le bandeau de la première (vérifié
+# visible juste avant l'appui, sans « bandeau termine ») : sous la zone du bandeau, la
+# seconde image a les couleurs du témoin. (6) Presse-papiers tenu par l'essai, deux appuis
+# à 30 ms : le second, pendant la capture, est ignoré (la copie échoue : « Impossible de
+# copier ») ; après, une capture normale, presse-papiers compris. (7) --quitter → arret
 # propre, aucune instance BreezyShot restée en vie.
 #
 # Ce que la machine GitHub ne peut pas vérifier : le choix entre plusieurs écrans (un seul
@@ -182,9 +184,18 @@ public static void Poser(int x, int y) {
     SetCursorPos(x, y);
     mouse_event(0x1, 0, 0, 0, UIntPtr.Zero);
 }
+[DllImport("user32.dll", SetLastError = true)]
+static extern bool OpenClipboard(IntPtr h);
+[DllImport("user32.dll")]
+static extern bool CloseClipboard();
 // Appuie (comme Appuyer) en guettant les fenêtres données, toutes les 2 ms, depuis avant
 // l'appui jusqu'à $dureeMs après : rend le nombre de relevés où l'une était visible.
-public static int AppuyerEnGuettant(byte[] mods, byte touche, int fois, int ecart, IntPtr[] guettees, int dureeMs) {
+// Avec $tenueMs > 0, le presse-papiers est ouvert (donc occupé pour l'app) avant l'appui
+// et refermé $tenueMs après : la copie de l'app réessaie jusqu'à son échéance (250 ms),
+// la Découpe dure donc au moins ce temps. Rend -1 si le presse-papiers n'a pas pu être
+// ouvert (rien n'est alors appuyé).
+public static int AppuyerEnGuettant(byte[] mods, byte touche, int fois, int ecart, IntPtr[] guettees, int dureeMs, int tenueMs) {
+    if (tenueMs > 0 && !OpenClipboard(IntPtr.Zero)) return -1;
     int vues = 0;
     bool fin = false;
     var guet = new System.Threading.Thread(() => {
@@ -195,8 +206,12 @@ public static int AppuyerEnGuettant(byte[] mods, byte touche, int fois, int ecar
     });
     guet.IsBackground = true;
     guet.Start();
-    System.Threading.Thread.Sleep(20);
-    Appuyer(mods, touche, fois, ecart);
+    try {
+        System.Threading.Thread.Sleep(20);
+        Appuyer(mods, touche, fois, ecart);
+        if (tenueMs > 0) System.Threading.Thread.Sleep(tenueMs);
+    }
+    finally { if (tenueMs > 0) CloseClipboard(); }
     System.Threading.Thread.Sleep(dureeMs);
     System.Threading.Volatile.Write(ref fin, true);
     guet.Join();
@@ -223,14 +238,17 @@ public static IntPtr[] FenetresDeClasse(string classe) {
     }, IntPtr.Zero);
     return liste.ToArray();
 }
-// Pixels différents entre deux images (octets BGRA de LockBits, Format32bppArgb) dans le
-// rectangle (x, y, l, h), déjà borné aux deux images.
-public static int Differences(byte[] a, int sa, byte[] b, int sb, int x, int y, int l, int h) {
-    int n = 0;
+// Pixels du rectangle (x, y, l, h) d'une image (octets BGRA de LockBits,
+// Format32bppArgb), déjà borné à l'image et au témoin, qui n'ont pas la couleur du carré
+// du témoin à cet endroit. (tx, ty) : coin haut gauche du témoin dans l'image ; c : r,v,b
+// des carrés haut gauche, haut droite, bas gauche, bas droite.
+public static int EcartsTemoin(byte[] o, int stride, int x, int y, int l, int h, int tx, int ty, int cote, int[] c) {
+    int n = 0, m = cote / 2;
     for (int j = y; j < y + h; j++) {
         for (int i = x; i < x + l; i++) {
-            int ia = j * sa + 4 * i, ib = j * sb + 4 * i;
-            if (a[ia] != b[ib] || a[ia + 1] != b[ib + 1] || a[ia + 2] != b[ib + 2]) n++;
+            int q = ((j - ty) < m ? 0 : 2) + ((i - tx) < m ? 0 : 1);
+            int k = j * stride + 4 * i;
+            if (o[k + 2] != c[3 * q] || o[k + 1] != c[3 * q + 1] || o[k] != c[3 * q + 2]) n++;
         }
     }
     return n;
@@ -249,6 +267,7 @@ public static int Differences(byte[] a, int sa, byte[] b, int sb, int x, int y, 
         # Haut gauche, haut droite, bas gauche, bas droite (r, v, b).
         $COULEURS = @(@(220, 40, 40), @(40, 180, 60), @(40, 80, 220), @(240, 200, 30))
         $texteCouleurs = '220,40,40;40,180,60;40,80,220;240,200,30'
+        $COULEURS_PLAT = [int[]]@(220, 40, 40, 40, 180, 60, 40, 80, 220, 240, 200, 30)
 
         # L'écran principal en pixels réels, par deux chemins qui doivent s'accorder.
         $principal = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
@@ -393,13 +412,15 @@ public static int Differences(byte[] a, int sa, byte[] b, int sb, int x, int y, 
         }
 
         # Une capture plein écran par Ctrl+Maj+2, en guettant l'écran figé et la sélection.
-        # Rend { Lignes (journal de cette capture), Vues (relevés où l'une était visible),
-        # Ecran, Fichier (dernier PNG), Seq (presse-papiers avant) }.
-        function Capturer-PleinEcran([string]$Dossier, [string]$Quoi, [IntPtr[]]$Guettees, [int]$Fois = 1) {
+        # Avec -TenirPressePapiersMs, le presse-papiers est tenu ouvert pendant l'appui.
+        # Rend { Debut (lignes du journal avant), Lignes (journal de cette capture), Vues
+        # (relevés où l'une était visible), Ecran, LigneEcran, Seq (presse-papiers avant) }.
+        function Capturer-PleinEcran([string]$Dossier, [string]$Quoi, [IntPtr[]]$Guettees, [int]$Fois = 1, [int]$TenirPressePapiersMs = 0) {
             $debut = @(Lignes-Journal $Dossier).Count
             $annonces = Compter-Motif -Motif 'sortie annonce ' -Dossier $Dossier
             $seq = [BreezyShotEssai.PleinEcran]::GetClipboardSequenceNumber()
-            $vues = [BreezyShotEssai.PleinEcran]::AppuyerEnGuettant($MODS, $TOUCHE_2, $Fois, 30, $Guettees, 300)
+            $vues = [BreezyShotEssai.PleinEcran]::AppuyerEnGuettant($MODS, $TOUCHE_2, $Fois, 30, $Guettees, 300, $TenirPressePapiersMs)
+            if ($vues -lt 0) { throw "$Quoi : presse-papiers impossible à ouvrir pour l'essai" }
             $null = Attendre-Motif -Motif 'sortie annonce ' -Dossier $Dossier -DelaiS 10 -Quoi "$Quoi : annonce de la sortie" -Fois ($annonces + 1)
             $null = Attendre-Motif -Motif 'chrono decoupe \d+ sortie \d+ relache-annonce \d+$' -Dossier $Dossier -DelaiS 3 -Quoi "$Quoi : fin de la sortie" -Fois ($annonces + 1)
             # Après : toujours rien de visible.
@@ -408,7 +429,7 @@ public static int Differences(byte[] a, int sa, byte[] b, int sb, int x, int y, 
             $lignes = @(Lignes-Depuis $Dossier $debut)
             $ligneEcran = $null
             foreach ($l in $lignes) { if ($l -match 'plein ecran ') { $ligneEcran = $l } }
-            return [pscustomobject]@{ Lignes = $lignes; Vues = $vues; Ecran = (Lire-PleinEcran $ligneEcran); LigneEcran = $ligneEcran; Seq = $seq }
+            return [pscustomobject]@{ Debut = $debut; Lignes = $lignes; Vues = $vues; Ecran = (Lire-PleinEcran $ligneEcran); LigneEcran = $ligneEcran; Seq = $seq }
         }
 
         try {
@@ -435,7 +456,55 @@ public static int Differences(byte[] a, int sa, byte[] b, int sb, int x, int y, 
                 # (2) Souris sur l'écran principal, loin du témoin et du bandeau.
                 [BreezyShotEssai.PleinEcran]::Poser([int]($utile.X + $utile.Width / 2), [int]($utile.Y + $utile.Height - 120))
                 Start-Sleep -Milliseconds 200
+                $affiches = Compter-Motif -Motif 'bandeau affiche \d+ reussite ' -Dossier $da
                 $c1 = Capturer-PleinEcran -Dossier $da -Quoi '(2) première capture' -Guettees $guettees
+
+                # (5) Tout de suite : la seconde capture pendant le bandeau de la première
+                # (une réussite part seule après 2,5 s). Les vérifications de la première
+                # viennent après.
+                $aff = Attendre-Motif -Motif 'bandeau affiche (\d+) reussite ' -Dossier $da -DelaiS 5 -Quoi '(5) bandeau de la première' -Fois ($affiches + 1)
+                $null = $aff -match 'bandeau affiche (\d+) reussite '
+                $idBandeau = $Matches[1]
+                $lz = Attendre-Motif -Motif "bandeau zone $idBandeau (-?\d+),(-?\d+) (\d+)x(\d+)$" -Dossier $da -DelaiS 3 -Quoi '(5) zone du bandeau'
+                $null = $lz -match "bandeau zone $idBandeau (-?\d+),(-?\d+) (\d+)x(\d+)$"
+                $zb = [pscustomobject]@{ X = [int]$Matches[1]; Y = [int]$Matches[2]; L = [int]$Matches[3]; H = [int]$Matches[4] }
+                # Seule la part de la zone du bandeau qui couvre le témoin est comparée : ses
+                # couleurs sont connues, rien n'y bouge.
+                $ix = [math]::Max($zb.X, $TX); $iy = [math]::Max($zb.Y, $TY)
+                $il = [math]::Min($zb.X + $zb.L, $TX + $COTE) - $ix
+                $ih = [math]::Min($zb.Y + $zb.H, $TY + $COTE) - $iy
+                Write-Host "(5) zone du bandeau $($zb.X),$($zb.Y) $($zb.L)x$($zb.H) ; sur le témoin $ix,$iy ${il}x$ih"
+                $surTemoin = ($il -gt 0) -and ($ih -gt 0)
+                Verifier '(5) la zone du bandeau couvre une part du témoin' $surTemoin "zone $($zb.X),$($zb.Y) $($zb.L)x$($zb.H), témoin $TX,$TY ${COTE}x$COTE" | Out-Null
+                Start-Sleep -Milliseconds 400   # pilule entrée (300 ms), encore là (2,5 s)
+                if ($surTemoin) {
+                    # Témoin de la preuve : le bandeau est réellement peint à l'écran à cet
+                    # endroit (une copie d'écran n'y a plus les couleurs du témoin).
+                    $copieEcran = [System.Drawing.Bitmap]::new($il, $ih, [System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
+                    try {
+                        $g = [System.Drawing.Graphics]::FromImage($copieEcran)
+                        try { $g.CopyFromScreen($ix, $iy, 0, 0, $copieEcran.Size) }
+                        finally { $g.Dispose() }
+                        $oc = Octets-Image $copieEcran
+                        $peints = [BreezyShotEssai.PleinEcran]::EcartsTemoin($oc.Octets, $oc.Stride, 0, 0, $il, $ih, ($TX - $ix), ($TY - $iy), $COTE, $COULEURS_PLAT)
+                    }
+                    finally { $copieEcran.Dispose() }
+                    Verifier '(5) témoin de la preuve : le bandeau est peint à l''écran, sur le témoin' ($peints -gt 0) "$peints pixel(s) sans la couleur du témoin" | Out-Null
+                }
+                # Juste avant l'appui : le bandeau est là et n'a pas fini.
+                $termineAvant = Compter-Motif -Motif "bandeau termine $idBandeau$" -Dossier $da
+                $bandeauLa = Visible $bandeau
+                Verifier '(5) le bandeau de la première est à l''écran juste avant l''appui' ($bandeauLa -and ($termineAvant -eq 0)) "visible $bandeauLa, bandeau termine vu $termineAvant fois" | Out-Null
+                $c2 = Capturer-PleinEcran -Dossier $da -Quoi '(5) seconde capture' -Guettees $guettees
+                # Aucun « bandeau termine » de ce message avant le Repos -> Gel de la seconde.
+                $toutes = @(Lignes-Journal $da)
+                $iGel = -1
+                for ($k = $c2.Debut; $k -lt $toutes.Count; $k++) { if ($toutes[$k] -match 'etat Repos -> Gel ') { $iGel = $k; break } }
+                $iTermine = -1
+                for ($k = 0; $k -lt $toutes.Count; $k++) { if ($toutes[$k] -match "bandeau termine $idBandeau$") { $iTermine = $k; break } }
+                Verifier '(5) aucun « bandeau termine » de la première avant le Repos -> Gel de la seconde' (($iGel -ge 0) -and (($iTermine -lt 0) -or ($iTermine -gt $iGel))) "ligne du Gel $iGel, ligne de la fin du bandeau $iTermine" | Out-Null
+
+                # (2) La première capture, d'après son journal.
                 $t1 = $c1.Lignes -join "`n"
                 Verifier '(2) etat Repos -> Gel (DemandeCapture plein_ecran)' ($t1.Contains('etat Repos -> Gel (DemandeCapture plein_ecran)')) | Out-Null
                 Verifier '(2) etat Gel -> Decoupe (PhotoPrise plein_ecran)' ($t1.Contains('etat Gel -> Decoupe (PhotoPrise plein_ecran)')) | Out-Null
@@ -445,87 +514,85 @@ public static int Differences(byte[] a, int sa, byte[] b, int sb, int x, int y, 
                 Verifier '(2) sortie annonce reussite: Copié et enregistré' ($t1.Contains('sortie annonce reussite: Copié et enregistré')) | Out-Null
                 Verifier '(2) sortie copie faite recent ok fichier fait' ($t1.Contains('sortie copie faite recent ok fichier fait')) | Out-Null
                 Verifier '(2) aucune « capture impossible »' (-not $t1.Contains('capture impossible')) | Out-Null
+                $t2 = $c2.Lignes -join "`n"
+                Verifier '(5) seconde capture : Copié et enregistré' ($t2.Contains('sortie annonce reussite: Copié et enregistré')) | Out-Null
 
-                # (3) Rien de montré.
-                $montrees = @($c1.Lignes | Where-Object { $_ -match ' (ecran fige|selection|echap global)' })
-                Verifier '(3) aucune ligne « ecran fige », « selection » ni « echap global » pour cette capture' ($montrees.Count -eq 0) ($montrees -join ' ; ') | Out-Null
-                Verifier '(3) écran figé et sélection jamais visibles (guettés pendant et après)' ($c1.Vues -eq 0) "$($c1.Vues) relevé(s) visible(s)" | Out-Null
-
-                # (4) Le fichier et le presse-papiers.
-                $pngs = @(Fichiers-Png $images)
-                Verifier '(4) un PNG dans le dossier Images › BreezyShot de l''essai' ($pngs.Count -eq 1) "$($pngs.Count) fichier(s)" | Out-Null
-                $image1 = $null
-                if ($pngs.Count -ge 1) {
-                    $image1 = Lire-Png $pngs[-1].FullName
-                    Verifier-Image '(4) PNG enregistré' $image1 $c1.Ecran
+                # (3) Rien de montré, pour les deux captures.
+                foreach ($c in @(@('première', $c1), @('seconde', $c2))) {
+                    $montrees = @($c[1].Lignes | Where-Object { $_ -match ' (ecran fige|selection|echap global)' })
+                    Verifier "(3) $($c[0]) : aucune ligne « ecran fige », « selection » ni « echap global »" ($montrees.Count -eq 0) ($montrees -join ' ; ') | Out-Null
+                    Verifier "(3) $($c[0]) : écran figé et sélection jamais visibles (guettés pendant et après)" ($c[1].Vues -eq 0) "$($c[1].Vues) relevé(s) visible(s)" | Out-Null
                 }
-                Verifier '(4) le presse-papiers a changé' ([BreezyShotEssai.PleinEcran]::GetClipboardSequenceNumber() -ne $c1.Seq) | Out-Null
+
+                # (4) Les fichiers et le presse-papiers (celui de la seconde capture : la
+                # première l'avait déjà changé, la seconde l'a remplacé).
+                $pngs = @(Fichiers-Png $images)
+                Verifier '(4) deux PNG dans le dossier Images › BreezyShot de l''essai' ($pngs.Count -eq 2) "$($pngs.Count) fichier(s)" | Out-Null
+                if ($pngs.Count -ge 1) {
+                    $image1 = Lire-Png $pngs[0].FullName
+                    try { Verifier-Image '(4) premier PNG' $image1 $c1.Ecran }
+                    finally { $image1.Dispose() }
+                }
+                $seqFin = [BreezyShotEssai.PleinEcran]::GetClipboardSequenceNumber()
+                Verifier '(4) le presse-papiers a changé à chaque capture' (($c2.Seq -ne $c1.Seq) -and ($seqFin -ne $c2.Seq)) "séquence $($c1.Seq) → $($c2.Seq) → $seqFin" | Out-Null
                 $copie = Lire-PressePapiers
-                Verifier-Image '(4) presse-papiers' $copie $c1.Ecran
-                if ($null -ne $copie) { $copie.Dispose() }
+                try { Verifier-Image '(4) presse-papiers' $copie $c2.Ecran }
+                finally { if ($null -ne $copie) { $copie.Dispose() } }
                 $reglagesApres = [System.IO.File]::ReadAllBytes($cheminReglages)
                 Verifier '(2) réglages non réécrits (enregistrement automatique sans toucher au fichier)' ([Convert]::ToBase64String($reglagesAvant) -eq [Convert]::ToBase64String($reglagesApres)) | Out-Null
 
-                # (5) La seconde pendant le bandeau de la première.
-                $aff = Attendre-Motif -Motif 'bandeau affiche (\d+) reussite ' -Dossier $da -DelaiS 5 -Quoi '(5) bandeau de la première'
-                $null = $aff -match 'bandeau affiche (\d+) reussite '
-                $idBandeau = $Matches[1]
-                $lz = Attendre-Motif -Motif "bandeau zone $idBandeau (-?\d+),(-?\d+) (\d+)x(\d+)$" -Dossier $da -DelaiS 3 -Quoi '(5) zone du bandeau'
-                $null = $lz -match "bandeau zone $idBandeau (-?\d+),(-?\d+) (\d+)x(\d+)$"
-                $zb = [pscustomobject]@{ X = [int]$Matches[1]; Y = [int]$Matches[2]; L = [int]$Matches[3]; H = [int]$Matches[4] }
-                Start-Sleep -Milliseconds 400   # pilule entrée (300 ms), encore là (2,5 s)
-                Verifier '(5) le bandeau de la première est à l''écran' (Visible $bandeau) | Out-Null
-                # La zone du bandeau, bornée à l'image (coordonnées de l'image).
-                $ex = 0; $ey = 0
-                if ($null -ne $c1.Ecran) { $ex = $c1.Ecran.X; $ey = $c1.Ecran.Y }
-                $zx = [math]::Max(0, $zb.X - $ex); $zy = [math]::Max(0, $zb.Y - $ey)
-                $zl = [math]::Min($principal.Width, $zb.X - $ex + $zb.L) - $zx
-                $zh = [math]::Min($principal.Height, $zb.Y - $ey + $zb.H) - $zy
-                Write-Host "(5) zone du bandeau $($zb.X),$($zb.Y) $($zb.L)x$($zb.H) ; dans l'image $zx,$zy ${zl}x$zh"
-                # Témoin de la preuve : le bandeau est réellement peint à l'écran à cet endroit
-                # (une copie d'écran y diffère de la première image).
-                if (($null -ne $image1) -and ($zl -gt 0) -and ($zh -gt 0)) {
-                    $ecranCopie = [System.Drawing.Bitmap]::new($principal.Width, $principal.Height, [System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
-                    $g = [System.Drawing.Graphics]::FromImage($ecranCopie)
-                    try { $g.CopyFromScreen($principal.X, $principal.Y, 0, 0, $ecranCopie.Size) }
-                    finally { $g.Dispose() }
-                    $oa = Octets-Image $image1; $oc = Octets-Image $ecranCopie
-                    $peints = [BreezyShotEssai.PleinEcran]::Differences($oa.Octets, $oa.Stride, $oc.Octets, $oc.Stride, $zx, $zy, $zl, $zh)
-                    $ecranCopie.Dispose()
-                    Verifier '(5) témoin de la preuve : le bandeau est peint à l''écran, dans sa zone' ($peints -gt 0) "$peints pixel(s) différents de la première image" | Out-Null
-                }
-                $c2 = Capturer-PleinEcran -Dossier $da -Quoi '(5) seconde capture' -Guettees $guettees
-                Verifier '(5) seconde capture : Copié et enregistré, rien de visible' ((($c2.Lignes -join "`n").Contains('sortie annonce reussite: Copié et enregistré')) -and ($c2.Vues -eq 0)) "$($c2.Vues) relevé(s) visible(s)" | Out-Null
-                $pngs = @(Fichiers-Png $images)
-                Verifier '(5) un second PNG' ($pngs.Count -eq 2) "$($pngs.Count) fichier(s)" | Out-Null
-                if (($pngs.Count -ge 2) -and ($null -ne $image1) -and ($zl -gt 0) -and ($zh -gt 0)) {
+                # (5) La seconde image : sur la part du témoin sous le bandeau, les couleurs du
+                # témoin (le bandeau n'y est pas).
+                if (($pngs.Count -ge 2) -and $surTemoin -and ($null -ne $c2.Ecran)) {
                     $image2 = Lire-Png $pngs[-1].FullName
-                    Verifier-Image '(5) second PNG' $image2 $c2.Ecran
-                    if ("$($image2.Width)x$($image2.Height)" -eq $TAILLE) {
-                        $oa = Octets-Image $image1; $ob = Octets-Image $image2
-                        $diff = [BreezyShotEssai.PleinEcran]::Differences($oa.Octets, $oa.Stride, $ob.Octets, $ob.Stride, $zx, $zy, $zl, $zh)
-                        if ($diff -ne 0) { $image2.Save((Join-Path $script:Essai.Sortie '05-seconde-image.png'), [System.Drawing.Imaging.ImageFormat]::Png) }
-                        Verifier '(5) zone du bandeau : la seconde image est identique à la première (bandeau absent)' ($diff -eq 0) "$diff pixel(s) différents sur ${zl}x$zh" | Out-Null
+                    try {
+                        Verifier-Image '(5) second PNG' $image2 $c2.Ecran
+                        $taille2 = "$($image2.Width)x$($image2.Height)"
+                        if ($taille2 -eq $TAILLE) {
+                            $ob = Octets-Image $image2
+                            $ex = $c2.Ecran.X; $ey = $c2.Ecran.Y
+                            $diff = [BreezyShotEssai.PleinEcran]::EcartsTemoin($ob.Octets, $ob.Stride, ($ix - $ex), ($iy - $ey), $il, $ih, ($TX - $ex), ($TY - $ey), $COTE, $COULEURS_PLAT)
+                            if ($diff -ne 0) { $image2.Save((Join-Path $script:Essai.Sortie '05-seconde-image.png'), [System.Drawing.Imaging.ImageFormat]::Png) }
+                            Verifier '(5) sous la zone du bandeau, la seconde image a les couleurs du témoin (bandeau absent)' ($diff -eq 0) "$diff pixel(s) différents sur ${il}x$ih" | Out-Null
+                        }
+                        else {
+                            Verifier '(5) comparaison sous la zone du bandeau' $false "image $taille2, écran $TAILLE" | Out-Null
+                        }
                     }
-                    $image2.Dispose()
+                    finally { $image2.Dispose() }
                 }
                 else {
-                    Verifier '(5) comparaison des deux images possible' $false "PNG $($pngs.Count), première image $($null -ne $image1), zone ${zl}x$zh" | Out-Null
+                    Verifier '(5) comparaison sous la zone du bandeau possible' $false "PNG $($pngs.Count), zone sur le témoin $surTemoin, écran lu $($null -ne $c2.Ecran)" | Out-Null
                 }
-                if ($null -ne $image1) { $image1.Dispose() }
 
-                # (6) Deux appuis à 30 ms : le second arrive pendant la capture, ignoré.
-                $gels = Compter-Motif -Motif 'etat Repos -> Gel' -Dossier $da
-                $ignores = Compter-Motif -Motif 'capture deja en cours: appui ignore$' -Dossier $da
+                # (6) Deux appuis à 30 ms, presse-papiers tenu 500 ms par l'essai : la copie de
+                # l'app réessaie jusqu'à son échéance (250 ms), la Découpe dure au moins
+                # autant, le second appui tombe forcément pendant la capture.
                 $nPng = @(Fichiers-Png $images).Count
-                $c3 = Capturer-PleinEcran -Dossier $da -Quoi '(6) double appui' -Guettees $guettees -Fois 2
-                $null = Attendre-Motif -Motif 'capture deja en cours: appui ignore$' -Dossier $da -DelaiS 3 -Quoi '(6) second appui' -Fois ($ignores + 1)
-                Start-Sleep -Milliseconds 500
-                $gelsApres = Compter-Motif -Motif 'etat Repos -> Gel' -Dossier $da
+                $c3 = Capturer-PleinEcran -Dossier $da -Quoi '(6) double appui' -Guettees $guettees -Fois 2 -TenirPressePapiersMs 500
+                $l3 = @($c3.Lignes)
+                $iGel3 = -1; $iIgnore3 = -1; $iRepos3 = -1; $gels3 = 0
+                for ($k = 0; $k -lt $l3.Count; $k++) {
+                    if ($l3[$k] -match 'etat Repos -> Gel ') { $gels3++; if ($iGel3 -lt 0 -and $l3[$k].Contains('etat Repos -> Gel (DemandeCapture plein_ecran)')) { $iGel3 = $k } }
+                    if (($iIgnore3 -lt 0) -and $l3[$k].EndsWith('capture deja en cours: appui ignore')) { $iIgnore3 = $k }
+                    if (($iRepos3 -lt 0) -and $l3[$k].Contains('etat Decoupe -> Repos')) { $iRepos3 = $k }
+                }
                 $pngApres = @(Fichiers-Png $images).Count
-                Verifier '(6) second appui ignoré : une seule capture (un Gel, un PNG de plus)' (($gelsApres -eq $gels + 1) -and ($pngApres -eq $nPng + 1) -and ($c3.Vues -eq 0)) "Gel $gels → $gelsApres, PNG $nPng → $pngApres" | Out-Null
+                Verifier '(6) ordre : Repos -> Gel, puis appui ignoré, puis Decoupe -> Repos' (($iGel3 -ge 0) -and ($iIgnore3 -gt $iGel3) -and ($iRepos3 -gt $iIgnore3)) "Gel $iGel3, ignoré $iIgnore3, Repos $iRepos3" | Out-Null
+                Verifier '(6) une seule capture : un Gel, un PNG de plus, rien de visible' (($gels3 -eq 1) -and ($pngApres -eq $nPng + 1) -and ($c3.Vues -eq 0)) "Gel $gels3, PNG $nPng → $pngApres, $($c3.Vues) relevé(s) visible(s)" | Out-Null
+                # Copie en échec, fichier fait : « Impossible de copier » (sortie/annonce.rs).
+                $t3 = $l3 -join "`n"
+                Verifier '(6) copie en échec, fichier enregistré : « Impossible de copier »' (($t3.Contains('sortie copie echec recent ok fichier fait')) -and ($t3.Contains("sortie annonce erreur: Impossible de copier"))) | Out-Null
+
+                # Puis une capture normale : l'app capture de nouveau, le presse-papiers remarche.
+                Start-Sleep -Milliseconds 300
                 $c4 = Capturer-PleinEcran -Dossier $da -Quoi '(6) capture suivante' -Guettees $guettees
-                Verifier '(6) après, l''app capture de nouveau' ((($c4.Lignes -join "`n").Contains('etat Decoupe -> Repos (ImagePreteSansVignette)')) -and (@(Fichiers-Png $images).Count -eq $pngApres + 1)) | Out-Null
+                $t4 = $c4.Lignes -join "`n"
+                Verifier '(6) après, l''app capture de nouveau : Copié et enregistré' (($t4.Contains('etat Decoupe -> Repos (ImagePreteSansVignette)')) -and ($t4.Contains('sortie annonce reussite: Copié et enregistré')) -and (@(Fichiers-Png $images).Count -eq $pngApres + 1)) | Out-Null
+                Verifier '(6) le presse-papiers a changé' ([BreezyShotEssai.PleinEcran]::GetClipboardSequenceNumber() -ne $c4.Seq) | Out-Null
+                $copie4 = Lire-PressePapiers
+                try { Verifier-Image '(6) presse-papiers de la capture suivante' $copie4 $c4.Ecran }
+                finally { if ($null -ne $copie4) { $copie4.Dispose() } }
 
                 Verifier '(A) aucune garde déclenchée, aucune erreur de capture' (((Compter-Lignes -Texte 'arret force' -Dossier $da) -eq 0) -and ((Compter-Lignes -Texte 'capture impossible' -Dossier $da) -eq 0)) | Out-Null
             }
