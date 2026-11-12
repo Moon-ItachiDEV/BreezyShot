@@ -215,8 +215,8 @@ dans le dossier temporaire du système (`systeme::dossier_secours()`), sous le n
   `pret`). Un mode inconnu ne fait qu'une ligne au journal, sans la valeur reçue. Sert à
   « Essayer une capture » de l'installateur. Lignes : `--capturer recu: <mode>` (ou `<vide>`,
   `<inconnu>`), `--capturer: mode inconnu`, `--capturer: en attente du demarrage`.
-- **Ce que l'exe est (version 0.3)** : lancé sous le nom `breezyshot.exe` (casse ignorée), il
-  est l'app ; sous tout autre nom (le fichier téléchargé `BreezyShot-<v>-essai.exe`), il est
+- **Ce que l'exe est (version 0.3)** : lancé sous le nom `breezyshot.exe`, ou `breezyshot`
+  sans extension (macOS, Linux), casse ignorée, il est l'app ; sous tout autre nom (le fichier téléchargé `BreezyShot-<v>-essai.exe`), il est
   l'installateur ; `--desinstaller` le fait désinstaller. Décision pure `arguments::lancement`.
   Le contexte Tauri n'est engendré qu'une fois. Détails : §12.
 - Aucune autre option pour l'instant.
@@ -1217,7 +1217,8 @@ courant sans droits d'administrateur, lance l'app, puis dit « BreezyShot est pr
 
 Un seul exe, trois rôles, décidés par `arguments::lancement` (pur, testé) :
 
-- nom de fichier `breezyshot.exe` (casse ignorée, rien d'autre de toléré) : l'app ;
+- nom de fichier `breezyshot.exe`, ou `breezyshot` sans extension (le programme sous macOS
+  et Linux, où il n'y a pas d'installateur), casse ignorée, rien d'autre de toléré : l'app ;
 - tout autre nom (le fichier téléchargé) : l'installateur ;
 - `--desinstaller`, quel que soit le nom : la désinstallation, sans fenêtre ni question.
 
