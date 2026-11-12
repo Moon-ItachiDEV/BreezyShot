@@ -573,8 +573,9 @@ fn cacher(fenetre: &WebviewWindow) {
     }
 }
 
-/// Souris en pixels réels : directement par `systeme`, sinon par Tauri.
-fn souris(app: &AppHandle) -> Option<(f64, f64)> {
+/// Souris en pixels réels : directement par `systeme`, sinon par Tauri. Le seul repli
+/// de l'app (le bandeau, et l'Application pour le plein écran).
+pub fn souris(app: &AppHandle) -> Option<(f64, f64)> {
     systeme::position_souris().or_else(|| app.cursor_position().ok().map(|p| (p.x, p.y)))
 }
 
