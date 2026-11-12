@@ -10,8 +10,13 @@
 #     s'ouvre pas, la vérification ÉCHOUE (jamais sautée). Fenêtre ordinaire : visible,
 #     dans la barre des tâches (pas WS_EX_TOOLWINDOW).
 # (3) Rouvrir : une seule fenêtre, ramenée devant.
+# (3b) Rubrique Capture ouverte au départ (sans aucun clic d'onglet) : retardateur 3 s
+#     écrit dans le fichier puis remis à Aucun ; Inclure le pointeur allumé puis éteint ;
+#     Loupe de même si l'app a créé sa fenêtre (« loupe fenetre »), sinon la ligne est
+#     absente de la page.
 # (4) Copie seule sortie : l'éteindre est refusé (« Gardez au moins… », reste allumée).
-#     Vignette allumée par la fenêtre, copie éteinte : Ctrl+Maj+2 : « sortie copie non
+#     (Rubrique « Après la capture » ouverte d'abord.) Vignette allumée par la fenêtre,
+#     copie éteinte : Ctrl+Maj+2 : « sortie copie non
 #     demandee », presse-papiers inchangé, vignette préparée au coin et à la durée du
 #     réglage, partie au bout de 3 s ; l'éteindre, seule sortie, est refusé (second refus
 #     voulu) ; copie rallumée puis vignette éteinte. (5) vérifie
@@ -108,10 +113,12 @@ function Ecrire-Reglages([string]$Dossier, $Objet) {
 function Reglages-Du-Cas {
     return [ordered]@{
         version                   = 3
-        raccourcis                = [ordered]@{ zone = @('Ctrl+Maj+1'); plein_ecran = @('Ctrl+Maj+2'); fenetre = @('Ctrl+Maj+3') }
+        raccourcis                = [ordered]@{ zone = @('Ctrl+Maj+1'); plein_ecran = @('Ctrl+Maj+2'); fenetre = @('Ctrl+Maj+3'); derniere_zone = @('Ctrl+Maj+4') }
         copier_apres_capture      = $true
         enregistrer_apres_capture = $false
         vignette                  = [ordered]@{ afficher = $false; duree_s = 3; coin = 'bas_gauche' }
+        selection                 = [ordered]@{ loupe = $false }
+        capture                   = [ordered]@{ retardateur_s = 0; pointeur = $false }
         dossier_enregistrement    = $null
     }
 }
@@ -474,7 +481,43 @@ public static string Titre(IntPtr h) {
         return $lu
     }
 
+    # (3b) Rubrique Capture, ouverte au départ : ses contrôles sont à l'écran sans aucun
+    # clic d'onglet, ceux d'« Après la capture » ne le sont pas.
+    $aucun = Element $fen 'Aucun' $RADIO
+    $ouverte = ($null -ne $aucun) -and (-not $aucun.Current.IsOffscreen)
+    Verifier '(3b) rubrique Capture ouverte au départ (« Aucun » du retardateur à l''écran)' $ouverte $(if ($null -eq $aucun) { Introuvable $fen 'Aucun' $RADIO } else { Decrire $aucun }) | Out-Null
+    $copier = Element $fen 'Copier automatiquement' $INTERRUPTEUR 0.5
+    Verifier '(3b) « Après la capture » fermée au départ' (($null -eq $copier) -or $copier.Current.IsOffscreen) $(if ($null -ne $copier) { Decrire $copier } else { '' }) | Out-Null
+    # Retardateur : 3 s écrit, puis remis à Aucun (les captures suivantes partent tout de suite).
+    Cliquer-Nom $fen '3 s' $RADIO '(3b) retardateur 3 s'
+    $null = Attendre-Motif -Motif 'reglage change: retardateur 3$' -Dossier $cas -DelaiS 5 -Quoi '(3b) retardateur 3'
+    Verifier '(3b) fichier : capture.retardateur_s = 3' ((Lire-Reglages $cas).capture.retardateur_s -eq 3) | Out-Null
+    Cliquer-Nom $fen 'Aucun' $RADIO '(3b) retardateur Aucun'
+    $null = Attendre-Motif -Motif 'reglage change: retardateur 0$' -Dossier $cas -DelaiS 5 -Quoi '(3b) retardateur 0'
+    Verifier '(3b) fichier : capture.retardateur_s = 0' ((Lire-Reglages $cas).capture.retardateur_s -eq 0) | Out-Null
+    # Inclure le pointeur : allumé puis éteint, chaque fois dans le fichier.
+    Cliquer-Interrupteur $fen 'Inclure le pointeur' '(3b) interrupteur Inclure le pointeur'
+    $null = Attendre-Motif -Motif 'reglage change: pointeur oui$' -Dossier $cas -DelaiS 5 -Quoi '(3b) pointeur oui'
+    Verifier '(3b) fichier : capture.pointeur true' ((Lire-Reglages $cas).capture.pointeur -eq $true) | Out-Null
+    Cliquer-Interrupteur $fen 'Inclure le pointeur' '(3b) interrupteur Inclure le pointeur (éteindre)'
+    $null = Attendre-Motif -Motif 'reglage change: pointeur non$' -Dossier $cas -DelaiS 5 -Quoi '(3b) pointeur non'
+    Verifier '(3b) fichier : capture.pointeur false' ((Lire-Reglages $cas).capture.pointeur -eq $false) | Out-Null
+    # Loupe : la ligne suit l'existence de la loupe, que dit la fenêtre créée au démarrage.
+    if ((Compter-Motif -Motif 'loupe fenetre \d+$' -Dossier $cas) -gt 0) {
+        Cliquer-Interrupteur $fen 'Loupe' '(3b) interrupteur Loupe'
+        $null = Attendre-Motif -Motif 'reglage change: loupe oui$' -Dossier $cas -DelaiS 5 -Quoi '(3b) loupe oui'
+        Verifier '(3b) fichier : selection.loupe true' ((Lire-Reglages $cas).selection.loupe -eq $true) | Out-Null
+        Cliquer-Interrupteur $fen 'Loupe' '(3b) interrupteur Loupe (éteindre)'
+        $null = Attendre-Motif -Motif 'reglage change: loupe non$' -Dossier $cas -DelaiS 5 -Quoi '(3b) loupe non'
+        Verifier '(3b) fichier : selection.loupe false' ((Lire-Reglages $cas).selection.loupe -eq $false) | Out-Null
+    }
+    else {
+        $loupe = Element $fen 'Loupe' $INTERRUPTEUR 0.5
+        Verifier '(3b) pas de fenêtre de loupe : aucune ligne Loupe dans la page' ($null -eq $loupe) $(if ($null -ne $loupe) { Decrire $loupe } else { '' }) | Out-Null
+    }
+
     # (4) La copie est la seule sortie : l'éteindre est refusé, pour de vrai.
+    Cliquer-Nom $fen 'Après la capture' ([System.Windows.Automation.ControlType]::TabItem) '(4) rubrique Après la capture'
     $refuses = Compter-Motif -Motif 'reglage refuse: copier \(aucune_sortie\)$' -Dossier $cas
     Cliquer-Nom $fen 'Copier automatiquement' $INTERRUPTEUR '(4) Copier, seule sortie'
     $null = Attendre-Suivante 'reglage refuse: copier \(aucune_sortie\)$' $cas $refuses '(4) refus de la dernière sortie'
