@@ -42,9 +42,11 @@
 // Mode fenêtre : le pixel sous la pointe (à défaut, `souris` de la charge, tant qu'aucun
 // mouvement n'est arrivé) → la première fenêtre de la liste qui le contient → coupée à
 // l'écran de ce pixel → entourée si elle garde `cote_min` de côté. Un coin n'est arrondi
-// que si c'est un vrai coin de la fenêtre. Clic gauche (appui puis relâchement au même
-// endroit) sur une fenêtre entourée : `selection_cliquee`. Glisser (`cote_min` pixels réels
-// ou plus sur un axe) : rien. Maj et Espace : rien. Échap, clic droit : annuler.
+// que si c'est un vrai coin de la fenêtre. Clic gauche (appui puis relâchement presque au
+// même endroit) sur une fenêtre entourée : `selection_cliquee`. Glisser : rien. Le seuil est
+// en pixels logiques, comme le rectangle de glisser de Windows : c'est un glisser si le
+// pointeur a bougé de max(cote_min, round(4 × k)) pixels réels ou plus sur un axe (4 à
+// 100 %, 5 à 125 %, 8 à 200 %). Maj et Espace : rien. Échap, clic droit : annuler.
 // Filet : si `selection:cachee` n'arrive pas dans FILET_MS après un envoi (ou si l'envoi
 // est refusé), la page redevient utilisable.
 
@@ -358,6 +360,10 @@ function entourer(c) {
   corps.classList.add("entoure");
 }
 
+/** Mode fenêtre : déplacement (pixels réels, sur un axe) à partir duquel l'appui est un
+ *  glisser et non un clic : 4 pixels logiques, au moins `cote_min`. */
+const seuilGlisser = () => Math.max(coteMin, Math.round(4 * Math.max(kx, ky)));
+
 /** Le pixel réel d'une position CSS du pointeur (même règle que `point`). */
 const pixel = (cx, cy) => ({
   x: borne(Math.floor(cx * kx + PRES), 0, largeur - 1),
@@ -413,7 +419,8 @@ addEventListener(
       return;
     }
     if (mode === "fenetre") {
-      if (e.button === 0 && prete && !appui) appui = { pointeur: e.pointerId, p: point(e) };
+      // Chaque appui gauche remplace le précédent : un relâchement perdu ne laisse rien.
+      if (e.button === 0) appui = prete ? { pointeur: e.pointerId, p: point(e) } : null;
       return;
     }
     if (e.button !== 0 || glisser || !prete) return;
@@ -470,7 +477,7 @@ addEventListener(
       // Un glisser n'est pas un clic : rien (seul le clic compte).
       const dx = Math.abs(p.x - a.p.x);
       const dy = Math.abs(p.y - a.p.y);
-      if ((dx !== 0 || dy !== 0) && Math.max(dx, dy) + 1 >= coteMin) {
+      if (Math.max(dx, dy) >= seuilGlisser()) {
         planifier();
         return;
       }

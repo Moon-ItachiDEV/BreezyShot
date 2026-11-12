@@ -601,7 +601,7 @@ const L = 1280, H = 400;
   verifier(refus.length === 0 && t.length === 1 && style[0] === 'crosshair' && style[1] === 'rgba(0, 0, 0, 0.45)' && style[2].includes('inset') && style[2].startsWith('rgb(255, 255, 255)'), 'CSP de l\'app respectée (aucun refus, styles chargés)', JSON.stringify({ refus, style }));
   await p.context().close();
 
-  // 12. Mode fenêtre (étape 8). Charges en pixels réels ; trait --selection-fenetre.
+  // 12. Mode fenêtre (étape 8). Charges en pixels réels ; trait --window-highlight.
   const BLEU = [76, 194, 255];
   let nf = 0; // points du mode fenêtre
   const vf = (ok, quoi, info) => { nf++; verifier(ok, quoi, info); };
@@ -731,8 +731,10 @@ const L = 1280, H = 400;
   vf(!ef.entoure && ef.affiche === 'none' && px.every(c => proche(c, VOILE)), '12 c bureau : rien n\'est entouré, voile partout', JSON.stringify(ef));
   await p.mouse.click(900, 50); await p.waitForTimeout(40);
   vf((await appels(p)).length === 0, '12 c clic sur le bureau : rien envoyé');
-  // Souris de la charge sur rien, ou absente : rien.
+  // Souris de la charge absente (et aucun mouvement depuis la charge) : rien.
   id = await montrerFenetre(p, { fenetres: [A] });
+  ef = await etatFenetre(p);
+  vf(!ef.entoure, '12 c souris absente de la charge, aucun mouvement depuis : rien d\'entouré', JSON.stringify(ef));
   await p.context().close();
   p = await page();
   id = await montrerFenetre(p, { fenetres: [A], souris: { x: 10, y: 10 } });
@@ -763,6 +765,52 @@ const L = 1280, H = 400;
       `12 d k = ${e} : clic → selection_cliquee une seule fois, bon pixel, plus rien ne change ; Maj et Espace sans effet`, JSON.stringify({ c, attendu, avant, apres }));
     await p.context().close();
   }
+
+  // 12 d bis. Seuil entre clic et glisser : max(cote_min, round(4 k)) pixels réels sur un axe
+  // (4 pixels logiques). Juste en dessous : clic ; au seuil : glisser, rien.
+  for (const e of [1, 1.25, 2]) {
+    const S = Math.max(3, Math.round(4 * e));
+    for (const [d, axe, clic] of [[S - 1, 'x', true], [S, 'x', false], [S - 1, 'y', true], [S, 'y', false]]) {
+      p = await page({ echelle: e });
+      const W = { x: 0, y: 0, largeur: Math.round(L * e), hauteur: Math.round(H * e), rayon: 0 };
+      id = await montrerFenetre(p, { fenetres: [W] });
+      const P0 = [400, 200], P1 = axe === 'x' ? [400 + d, 200] : [400, 200 + d];
+      await p.mouse.move((P0[0] + 0.5) / e, (P0[1] + 0.5) / e); await p.mouse.down();
+      await p.mouse.move((P1[0] + 0.5) / e, (P1[1] + 0.5) / e, { steps: 3 }); await p.mouse.up(); await p.waitForTimeout(40);
+      a = await appels(p);
+      const ok = clic ? JSON.stringify(a) === JSON.stringify([['selection_cliquee', { id, numero: id, x: P1[0], y: P1[1] }]]) : a.length === 0;
+      vf(ok, `12 d bis k = ${e} : déplacement de ${d} pixels réels en ${axe} (seuil ${S}) : ${clic ? 'clic' : 'glisser, rien'}`, JSON.stringify(a));
+      await p.context().close();
+    }
+  }
+
+  // 12 d ter. Appui perdu, pointercancel, charge reçue pendant l'appui : rien, puis le clic
+  // suivant part.
+  p = await page();
+  id = await montrerFenetre(p, { fenetres: [{ x: 0, y: 0, largeur: L, hauteur: H, rayon: 0 }] });
+  await p.evaluate(() => document.documentElement.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true, pointerId: 7, pointerType: 'mouse', isPrimary: true, clientX: 100, clientY: 100, button: 0, buttons: 1 })));
+  await p.mouse.click(600, 300); await p.waitForTimeout(40);
+  a = await appels(p);
+  vf(JSON.stringify(a) === JSON.stringify([['selection_cliquee', { id, numero: id, x: 600, y: 300 }]]), '12 d ter appui sans relâchement puis clic ailleurs : le clic part', JSON.stringify(a));
+  id = await montrerFenetre(p, { fenetres: [{ x: 0, y: 0, largeur: L, hauteur: H, rayon: 0 }] });
+  await p.mouse.move(300, 200); await p.mouse.down();
+  await p.evaluate(() => document.documentElement.dispatchEvent(new PointerEvent('pointercancel', { bubbles: true, pointerId: __pointeur, pointerType: 'mouse', isPrimary: true })));
+  await p.mouse.up(); await p.waitForTimeout(40);
+  const apresAnnule = await appels(p);
+  await p.mouse.click(310, 210); await p.waitForTimeout(40);
+  a = await appels(p);
+  vf(apresAnnule.length === 0 && JSON.stringify(a) === JSON.stringify([['selection_cliquee', { id, numero: id, x: 310, y: 210 }]]), '12 d ter pointercancel pendant l\'appui : rien, puis le clic suivant part', JSON.stringify({ apresAnnule, a }));
+  id = await montrerFenetre(p, { fenetres: [{ x: 0, y: 0, largeur: L, hauteur: H, rayon: 0 }] });
+  await p.mouse.move(300, 200); await p.mouse.down();
+  await p.evaluate(([id, L, H]) => __emettre('selection:montrer', { id, numero: id, largeur: L, hauteur: H, ecrans: [{ x: 0, y: 0, largeur: L, hauteur: H }], cote_min: 3, mode: 'fenetre', fenetres: [{ x: 0, y: 0, largeur: L, hauteur: H, rayon: 0 }], souris: null }), [id, L, H]);
+  await p.waitForTimeout(100);
+  await p.mouse.up(); await p.waitForTimeout(40);
+  const apresCharge = (await appels(p)).filter(x => x[0] !== 'selection_prete');
+  await vider(p);
+  await p.mouse.click(320, 220); await p.waitForTimeout(40);
+  a = await appels(p);
+  vf(apresCharge.length === 0 && JSON.stringify(a) === JSON.stringify([['selection_cliquee', { id, numero: id, x: 320, y: 220 }]]), '12 d ter charge reçue pendant l\'appui : rien, puis le clic suivant part', JSON.stringify({ apresCharge, a }));
+  await p.context().close();
 
   // 12 e. Clic droit, Échap : annulation ; envoi refusé : utilisable de nouveau.
   p = await page();
