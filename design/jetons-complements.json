@@ -267,31 +267,58 @@
     "origine": "design/capture/index.html (prototype du décompte), .cdx background."
    },
    {
-    "name": "editeur-fond",
+    "name": "editeur-mica",
     "value": {
      "light": "#EEF0F3",
-     "dark": "#1C1C1C"
+     "dark": "#232323"
     },
-    "usage": "Fond de la fenêtre de l'éditeur.",
-    "origine": "design/editeur/index.html, piste A v2, --mica."
+    "usage": "Fond de la barre du haut.",
+    "origine": "design/editeur-epure/index.html, piste B (--mica)."
    },
    {
     "name": "editeur-scene",
     "value": {
-     "light": "#E4E7EC",
-     "dark": "#141414"
+     "light": "#E6E8EC",
+     "dark": "#171717"
     },
-    "usage": "Scène autour de l'image.",
-    "origine": "design/editeur/index.html, piste A v2, --stage."
+    "usage": "Fond de la scène ; voile du recadrage (72 %).",
+    "origine": "design/editeur-epure/index.html, piste B (--stage)."
+   },
+   {
+    "name": "editeur-survol",
+    "value": {
+     "light": "rgba(0,0,0,0.045)",
+     "dark": "rgba(255,255,255,0.06)"
+    },
+    "usage": "Survol des boutons et des lignes de menu.",
+    "origine": "design/editeur-epure/index.html, piste B (--hover)."
+   },
+   {
+    "name": "editeur-trait",
+    "value": {
+     "light": "rgba(0,0,0,0.08)",
+     "dark": "rgba(255,255,255,0.08)"
+    },
+    "usage": "Trait bas de la barre, séparation des lignes d'une bulle.",
+    "origine": "design/editeur-epure/index.html, piste B (--stroke)."
+   },
+   {
+    "name": "editeur-trait-fort",
+    "value": {
+     "light": "rgba(0,0,0,0.16)",
+     "dark": "rgba(255,255,255,0.16)"
+    },
+    "usage": "Séparateurs de la palette.",
+    "origine": "design/editeur-epure/index.html, piste B (--stroke-2)."
    },
    {
     "name": "editeur-verre",
     "value": {
-     "light": "rgba(252,252,252,0.78)",
-     "dark": "rgba(44,44,44,0.80)"
+     "light": "rgba(250,250,251,0.82)",
+     "dark": "rgba(44,44,46,0.84)"
     },
-    "usage": "Fond des pastilles de la barre et de l'étiquette de zoom.",
-    "origine": "design/editeur/index.html, piste A v2, --glass."
+    "usage": "Fond de la palette.",
+    "origine": "design/editeur-epure/index.html, piste B (--glass)."
    },
    {
     "name": "editeur-verre-bord",
@@ -299,107 +326,182 @@
      "light": "rgba(0,0,0,0.08)",
      "dark": "rgba(255,255,255,0.09)"
     },
-    "usage": "Bord des pastilles de la barre.",
-    "origine": "design/editeur/index.html, piste A v2, --glass-stroke."
+    "usage": "Bord de la palette, des menus, du message et de la vignette.",
+    "origine": "design/editeur-epure/index.html, piste B (--glass-stroke)."
    },
    {
-    "name": "editeur-menu-fond",
+    "name": "editeur-pop",
     "value": {
      "light": "#FBFBFB",
      "dark": "#2C2C2C"
     },
-    "usage": "Fond des menus et de la fenêtre des réglages de l'outil.",
-    "origine": "design/editeur/index.html, piste A v2, --glass-pop."
+    "usage": "Fond des menus, bulles, message et vignette de prise.",
+    "origine": "design/editeur-epure/index.html, piste B (--pop)."
    },
    {
-    "name": "editeur-indicateur",
+    "name": "editeur-danger",
+    "value": "#E5484D",
+    "usage": "« Fermer sans copier ».",
+    "origine": "design/editeur-epure/index.html, piste B (.mi.danger)."
+   },
+   {
+    "name": "editeur-instrument-corps",
     "value": {
-     "light": "rgba(255,255,255,0.70)",
-     "dark": "rgba(255,255,255,0.09)"
+     "light": "#C2C7CF",
+     "dark": "url(#argent)"
     },
-    "usage": "Indicateur de l'outil choisi, qui glisse.",
-    "origine": "design/editeur/index.html, piste A v2, .ind."
+    "usage": "Corps des instruments (clair : uni ; sombre : dégradé argent).",
+    "origine": "design/editeur-epure/index.html, piste B (:root[data-th] .dir-b --inst-body, .inst .b)."
+   },
+   {
+    "name": "editeur-argent-bord",
+    "value": "#8E949C",
+    "usage": "Dégradé argent des instruments en sombre, bords.",
+    "origine": "design/editeur-epure/index.html, piste B (#gSilver)."
+   },
+   {
+    "name": "editeur-argent-milieu",
+    "value": "#D4D8DD",
+    "usage": "Dégradé argent des instruments en sombre, milieu.",
+    "origine": "design/editeur-epure/index.html, piste B (#gSilver)."
+   },
+   {
+    "name": "editeur-instrument-bord",
+    "value": {
+     "light": "rgba(0,0,0,0.34)",
+     "dark": "rgba(255,255,255,0.22)"
+    },
+    "usage": "Contour des pièces des instruments.",
+    "origine": "design/editeur-epure/index.html, piste B (.dir-b .inst>:not(.em))."
+   },
+   {
+    "name": "editeur-instrument-bout",
+    "value": {
+     "light": "#5F6670",
+     "dark": "#9AA0A8"
+    },
+    "usage": "Bout métallique des instruments.",
+    "origine": "design/editeur-epure/index.html, piste B (--inst-tip)."
+   },
+   {
+    "name": "editeur-instrument-relief",
+    "value": "rgba(0,0,0,0.4)",
+    "usage": "Gravure du corps (Texte, Forme, Numéro, Flou, Projecteur).",
+    "origine": "design/editeur-epure/index.html, piste B (--inst-emb)."
+   },
+   {
+    "name": "editeur-instrument-neutre",
+    "value": "#9EA3AA",
+    "usage": "Couleur des instruments sans couleur (Gomme, Flou, Projecteur).",
+    "origine": "design/editeur-epure/index.html, piste B (syncTools)."
+   },
+   {
+    "name": "editeur-instrument-ombre-bout",
+    "value": "rgba(0,0,0,0.12)",
+    "usage": "Ombre du biseau du surligneur.",
+    "origine": "design/editeur-epure/index.html, piste B (instSVG)."
+   },
+   {
+    "name": "editeur-gomme-bout",
+    "value": {
+     "light": "#D98E84",
+     "dark": "#E9B8B0"
+    },
+    "usage": "Bout de la gomme.",
+    "origine": "design/editeur-epure/index.html, piste B (instSVG, .tl[data-t=erase])."
+   },
+   {
+    "name": "editeur-projecteur-lumiere",
+    "value": "#FFE7A3",
+    "usage": "Lentille du projecteur.",
+    "origine": "design/editeur-epure/index.html, piste B (instSVG)."
+   },
+   {
+    "name": "editeur-projecteur-coeur",
+    "value": "#FFFFFF",
+    "usage": "Cœur de la lentille du projecteur.",
+    "origine": "design/editeur-epure/index.html, piste B (instSVG)."
+   },
+   {
+    "name": "editeur-copier-fait-texte",
+    "value": "#FFFFFF",
+    "usage": "Coche de « Copier » réussi et du message.",
+    "origine": "design/editeur-epure/index.html, piste B (.ok.done, .msg i svg)."
+   },
+   {
+    "name": "editeur-image-fond",
+    "value": "#FFFFFF",
+    "usage": "Fond sous l'image (porte l'ombre).",
+    "origine": "design/editeur-epure/index.html, piste B (draw())."
+   },
+   {
+    "name": "editeur-equerre",
+    "value": {
+     "light": "#1A1A1A",
+     "dark": "#FFFFFF"
+    },
+    "usage": "Équerres de recadrage.",
+    "origine": "design/editeur-epure/index.html, piste B (brackets())."
+   },
+   {
+    "name": "editeur-equerre-ombre",
+    "value": "rgba(0,0,0,0.35)",
+    "usage": "Ombre des équerres.",
+    "origine": "design/editeur-epure/index.html, piste B (brackets())."
+   },
+   {
+    "name": "editeur-recadrage-cadre",
+    "value": "rgba(255,255,255,0.9)",
+    "usage": "Cadre du recadrage en cours.",
+    "origine": "design/editeur-epure/index.html, piste B (draw(), d.type crop)."
+   },
+   {
+    "name": "editeur-recadrage-tiers",
+    "value": "rgba(255,255,255,0.28)",
+    "usage": "Tiers du recadrage en cours.",
+    "origine": "design/editeur-epure/index.html, piste B (draw(), d.type crop)."
    },
    {
     "name": "editeur-poignee",
     "value": "#FFFFFF",
-    "usage": "Disque des poignées de l'objet sélectionné (vue seulement).",
-    "origine": "design/editeur/index.html, piste A v2, drawOverlay, poignées."
+    "usage": "Fond des poignées de l'objet choisi.",
+    "origine": "design/editeur-epure/index.html, piste B (contrat 0.4 (poignées gardées))."
    },
    {
-    "name": "editeur-voile",
-    "value": {
-     "light": "rgba(0,0,0,0.28)",
-     "dark": "rgba(0,0,0,0.45)"
-    },
-    "usage": "Voile sous le dialogue de fermeture (scrim du design, plus léger en clair).",
-    "origine": "design/editeur/index.html, piste A v2, --scrim."
+    "name": "editeur-poignee-ombre-couleur",
+    "value": "rgba(0,0,0,0.3)",
+    "usage": "Ombre des poignées.",
+    "origine": "design/editeur-epure/index.html, piste B (contrat 0.4 (poignées gardées))."
    },
    {
     "name": "editeur-pastille-bord",
-    "value": {
-     "light": "rgba(0,0,0,0.15)",
-     "dark": "rgba(255,255,255,0.35)"
-    },
-    "usage": "Liseré intérieur des pastilles de couleur.",
-    "origine": "design/editeur/index.html, piste A v2, .swb i, .cl-sw i."
+    "value": "inset 0 0 0 1px rgba(0,0,0,0.18)",
+    "usage": "Bord des pastilles de couleur.",
+    "origine": "design/editeur-epure/index.html, piste B (.dot)."
    },
    {
-    "name": "editeur-danger",
-    "value": {
-     "light": "#C42B1C",
-     "dark": "#FF99A4"
-    },
-    "usage": "Ligne « Supprimer » du menu.",
-    "origine": "design/editeur/index.html, piste A v2, .mi.danger."
+    "name": "editeur-roue",
+    "value": "conic-gradient(#E5484D, #FFD43B, #30A46C, #4CC2FF, #0067C0, #8E4EC6, #E5484D)",
+    "usage": "Pastille « Autre couleur ».",
+    "origine": "design/editeur-epure/index.html, piste B (.dot.wheel)."
    },
    {
-    "name": "editeur-recadrage-voile",
-    "value": "rgba(0,0,0,0.5)",
-    "usage": "Voile hors du recadrage en cours.",
-    "origine": "design/editeur/index.html, piste A v2, drawOverlay, recadrage."
+    "name": "editeur-roue-centre-bord",
+    "value": "0 0 0 1.5px #FFFFFF",
+    "usage": "Bord de la couleur libre au centre de la roue.",
+    "origine": "design/editeur-epure/index.html, piste B (.dot.wheel i)."
    },
    {
-    "name": "editeur-recadrage-tiers",
-    "value": "rgba(255,255,255,0.35)",
-    "usage": "Lignes des tiers du recadrage.",
-    "origine": "design/editeur/index.html, piste A v2, drawOverlay, recadrage."
+    "name": "editeur-image-ombre",
+    "value": "0 4px 18px rgba(0,0,0,0.18)",
+    "usage": "Ombre sous l'image.",
+    "origine": "design/editeur-epure/index.html, piste B (draw(), piste b)."
    },
    {
-    "name": "editeur-recadrage-bord",
-    "value": "#FFFFFF",
-    "usage": "Bord du recadrage en cours et de la pipette.",
-    "origine": "design/editeur/index.html, piste A v2, drawOverlay."
-   },
-   {
-    "name": "editeur-etiquette-fond",
-    "value": "rgba(20,20,20,0.78)",
-    "usage": "Étiquette « l × h » du recadrage.",
-    "origine": "design/editeur/index.html, piste A v2, drawOverlay, recadrage."
-   },
-   {
-    "name": "editeur-etiquette-texte",
-    "value": "#FFFFFF",
-    "usage": "Texte de l'étiquette « l × h ».",
-    "origine": "design/editeur/index.html, piste A v2, drawOverlay, recadrage."
-   },
-   {
-    "name": "editeur-ombre-poignee",
-    "value": "rgba(0,0,0,0.25)",
-    "usage": "Ombre des poignées.",
-    "origine": "design/editeur/index.html, piste A v2, drawOverlay."
-   },
-   {
-    "name": "editeur-ombre-pipette",
-    "value": "rgba(0,0,0,0.3)",
-    "usage": "Ombre de la pastille de la pipette.",
-    "origine": "design/editeur/index.html, piste A v2, drawOverlay."
-   },
-   {
-    "name": "editeur-accent-ombre",
-    "value": "rgba(0,0,0,0.16)",
-    "usage": "Liseré bas du bouton accent (Copier).",
-    "origine": "design/editeur/index.html, piste A v2, .btn.accent."
+    "name": "editeur-instrument-ombre",
+    "value": "0 2px 3px rgba(0,0,0,0.25)",
+    "usage": "Ombre portée des instruments (drop-shadow).",
+    "origine": "design/editeur-epure/index.html, piste B (.tl .inst)."
    }
   ]
  },
@@ -628,190 +730,100 @@
     "origine": "design/capture/index.html (prototype du décompte), .num.tick (numIn 300ms)."
    },
    {
-    "name": "duree-editeur-indicateur",
-    "value": "320ms",
-    "usage": "Glissement de l'indicateur d'outil.",
-    "origine": "design/editeur/index.html, piste A v2, .ind."
+    "name": "duree-editeur-survol",
+    "value": "150ms",
+    "usage": "Survol.",
+    "origine": "design/editeur-epure/index.html, piste B (transition 150ms)."
    },
    {
-    "name": "duree-editeur-infobulle",
-    "value": "450ms",
-    "usage": "Délai d'une infobulle (0 juste après une autre).",
-    "origine": "design/editeur/index.html, piste A v2, showTip."
-   },
-   {
-    "name": "duree-editeur-infobulle-suite",
-    "value": "500ms",
-    "usage": "Fenêtre où l'infobulle suivante vient sans délai.",
-    "origine": "design/editeur/index.html, piste A v2, showTip."
-   },
-   {
-    "name": "duree-editeur-zoom",
-    "value": "900ms",
-    "usage": "Étiquette « <n> % » après un changement de zoom.",
-    "origine": "design/editeur/index.html, piste A v2, showZoom."
+    "name": "duree-editeur-appui",
+    "value": "90ms",
+    "usage": "Appui.",
+    "origine": "design/editeur-epure/index.html, piste B (transition 90ms)."
    },
    {
     "name": "duree-editeur-fait",
-    "value": "1800ms",
-    "usage": "« Copié », « Enregistré ».",
-    "origine": "design/editeur/index.html, piste A v2, feedback."
+    "value": "380ms",
+    "usage": "Copier réussi.",
+    "origine": "design/editeur-epure/index.html, piste B (.ok.done 380ms)."
    },
    {
-    "name": "duree-editeur-message",
-    "value": "4000ms",
-    "usage": "Message d'échec de la page (contrat R13).",
-    "origine": "design/editeur/index.html, piste A v2, contrat §7.4."
+    "name": "duree-editeur-copier-fermer",
+    "value": "650ms",
+    "usage": "Copier : la fenêtre se ferme après.",
+    "origine": "design/editeur-epure/index.html, piste B (copyClose 650)."
    },
    {
-    "name": "duree-editeur-menu",
-    "value": "240ms",
-    "usage": "Ouverture d'un menu.",
-    "origine": "design/editeur/index.html, piste A v2, .pop."
+    "name": "duree-editeur-copier-fermer-reduite",
+    "value": "250ms",
+    "usage": "Idem, animations réduites.",
+    "origine": "design/editeur-epure/index.html, piste B (copyClose 250)."
    },
    {
-    "name": "duree-editeur-onde",
-    "value": "420ms",
-    "usage": "Onde au clic de Copier et Enregistrer.",
-    "origine": "design/editeur/index.html, piste A v2, .vb.wave."
+    "name": "duree-editeur-instrument",
+    "value": "340ms",
+    "usage": "Instrument qui se soulève.",
+    "origine": "design/editeur-epure/index.html, piste B (.tl .inst)."
    },
    {
-    "name": "duree-editeur-ressort",
-    "value": "260ms",
-    "usage": "Pictogrammes et pastilles (ressort).",
-    "origine": "design/editeur/index.html, piste A v2, .tl .ico."
-   },
-   {
-    "name": "duree-editeur-pill",
-    "value": "200ms",
-    "usage": "Durée de la maquette, .pill : transition.",
-    "origine": "design/editeur/index.html, piste A v2."
-   },
-   {
-    "name": "duree-editeur-swb-i",
-    "value": "200ms",
-    "usage": "Durée de la maquette, .swb i : transition.",
-    "origine": "design/editeur/index.html, piste A v2."
-   },
-   {
-    "name": "duree-editeur-vi-ok",
-    "value": "240ms",
-    "usage": "Durée de la maquette, .vi .ok : transition.",
-    "origine": "design/editeur/index.html, piste A v2."
-   },
-   {
-    "name": "duree-editeur-lbs-span",
-    "value": "300ms",
-    "usage": "Durée de la maquette, .lbs span : transition.",
-    "origine": "design/editeur/index.html, piste A v2."
-   },
-   {
-    "name": "duree-editeur-vb-fait-ok-delay",
-    "value": "120ms",
-    "usage": "Durée de la maquette, .vb.fait .ok : transition-delay.",
-    "origine": "design/editeur/index.html, piste A v2."
+    "name": "duree-editeur-instrument-entree",
+    "value": "360ms",
+    "usage": "Outil qui arrive dans l'emplacement.",
+    "origine": "design/editeur-epure/index.html, piste B (.tl.in .inst)."
    },
    {
     "name": "duree-editeur-pop",
-    "value": "160ms",
-    "usage": "Durée de la maquette, .pop : transition.",
-    "origine": "design/editeur/index.html, piste A v2."
-   },
-   {
-    "name": "duree-editeur-pop-ouvert",
-    "value": "160ms",
-    "usage": "Durée de la maquette, .pop.ouvert : transition.",
-    "origine": "design/editeur/index.html, piste A v2."
-   },
-   {
-    "name": "duree-editeur-cl-sw-i",
     "value": "220ms",
-    "usage": "Durée de la maquette, .cl-sw i : transition.",
-    "origine": "design/editeur/index.html, piste A v2."
+    "usage": "Ouverture des menus.",
+    "origine": "design/editeur-epure/index.html, piste B (.pop.open)."
    },
    {
-    "name": "duree-editeur-glissiere-pouce",
-    "value": "160ms",
-    "usage": "Durée de la maquette, input[type=\"range\"]::-webkit-slider-thumb : transition.",
-    "origine": "design/editeur/index.html, piste A v2."
+    "name": "duree-editeur-vignette",
+    "value": "260ms",
+    "usage": "Apparition de la vignette.",
+    "origine": "design/editeur-epure/index.html, piste B (.ghost)."
    },
    {
-    "name": "duree-editeur-etiquette-zoom",
-    "value": "160ms",
-    "usage": "Durée de la maquette, .etiquette-zoom : transition.",
-    "origine": "design/editeur/index.html, piste A v2."
-   },
-   {
-    "name": "duree-editeur-etiquette-zoom-2",
-    "value": "240ms",
-    "usage": "Durée de la maquette, .etiquette-zoom : transition. Ressort, comme la maquette (.zoomchip).",
-    "origine": "design/editeur/index.html, piste A v2."
+    "name": "duree-editeur-message",
+    "value": "320ms",
+    "usage": "Message (ressort).",
+    "origine": "design/editeur-epure/index.html, piste B (.msg)."
    },
    {
     "name": "duree-editeur-message-fondu",
     "value": "160ms",
-    "usage": "Durée de la maquette, .message : transition.",
-    "origine": "design/editeur/index.html, piste A v2."
+    "usage": "Message (fondu).",
+    "origine": "design/editeur-epure/index.html, piste B (.msg)."
    },
    {
-    "name": "duree-editeur-scrim",
-    "value": "180ms",
-    "usage": "Durée de la maquette, .scrim : transition.",
-    "origine": "design/editeur/index.html, piste A v2."
+    "name": "duree-editeur-message-affiche",
+    "value": "1600ms",
+    "usage": "Message affiché.",
+    "origine": "design/editeur-epure/index.html, piste B (msg() 1600)."
    },
    {
-    "name": "duree-editeur-scrim-2",
-    "value": "200ms",
-    "usage": "Durée de la maquette, .scrim : transition.",
-    "origine": "design/editeur/index.html, piste A v2."
+    "name": "duree-editeur-message-echec",
+    "value": "4000ms",
+    "usage": "Message d'échec affiché.",
+    "origine": "design/editeur-epure/index.html, piste B (contrat 0.4 (gardé))."
    },
    {
-    "name": "duree-editeur-scrim-ouvert",
-    "value": "180ms",
-    "usage": "Durée de la maquette, .scrim.ouvert : transition.",
-    "origine": "design/editeur/index.html, piste A v2."
-   },
-   {
-    "name": "duree-editeur-tip",
-    "value": "120ms",
-    "usage": "Durée de la maquette, .tip : transition.",
-    "origine": "design/editeur/index.html, piste A v2."
-   },
-   {
-    "name": "duree-editeur-tip-2",
-    "value": "160ms",
-    "usage": "Durée de la maquette, .tip : transition.",
-    "origine": "design/editeur/index.html, piste A v2."
-   },
-   {
-    "name": "duree-editeur-racine-duration",
-    "value": "1ms",
-    "usage": "Durée de la maquette, *::after : transition-duration.",
-    "origine": "design/editeur/index.html, piste A v2."
-   },
-   {
-    "name": "duree-editeur-racine-animation-duration",
-    "value": "1ms",
-    "usage": "Durée de la maquette, *::after : animation-duration.",
-    "origine": "design/editeur/index.html, piste A v2."
-   },
-   {
-    "name": "duree-editeur-reduites-duration",
-    "value": "1ms",
-    "usage": "Durée de la maquette, :root[data-reduites] *::after : transition-duration.",
-    "origine": "design/editeur/index.html, piste A v2."
-   },
-   {
-    "name": "duree-editeur-reduites-animation-duration",
-    "value": "1ms",
-    "usage": "Durée de la maquette, :root[data-reduites] *::after : animation-duration.",
-    "origine": "design/editeur/index.html, piste A v2."
+    "name": "duree-editeur-zoom",
+    "value": "1200ms",
+    "usage": "Étiquette du zoom affichée.",
+    "origine": "design/editeur-epure/index.html, piste B (contrat 0.4 (gardé))."
    },
    {
     "name": "duree-editeur-recadrage",
-    "value": "320ms",
-    "usage": "Animation de la vue après Recadrer, Image entière ou l'annulation d'un recadrage (ressort).",
-    "origine": "Revue de la page, chantier C : animation du recadrage."
+    "value": "260ms",
+    "usage": "Animation après un recadrage.",
+    "origine": "design/editeur-epure/index.html, piste B (contrat 0.4 (gardé))."
+   },
+   {
+    "name": "duree-editeur-reduite",
+    "value": "1ms",
+    "usage": "Animations réduites.",
+    "origine": "design/editeur-epure/index.html, piste B (prefers-reduced-motion)."
    }
   ]
  },
@@ -1779,1126 +1791,718 @@
     "origine": "design/capture/index.html (prototype du décompte), .cdx:hover rotate(90deg)."
    },
    {
-    "name": "editeur-bouton",
-    "value": "32px",
-    "usage": "Côté des boutons de la barre.",
-    "origine": "design/editeur/index.html, piste A v2, .tl."
+    "name": "editeur-police-taille",
+    "value": "14px",
+    "usage": "Taille du texte de la page.",
+    "origine": "design/editeur-epure/index.html, piste B (body)."
    },
    {
-    "name": "editeur-bouton-zoom",
-    "value": "28px",
-    "usage": "Côté des boutons de zoom.",
-    "origine": "design/editeur/index.html, piste A v2, .zpill .tl."
+    "name": "editeur-interligne",
+    "value": "20px",
+    "usage": "Interligne du texte de la page.",
+    "origine": "design/editeur-epure/index.html, piste B (body)."
    },
    {
-    "name": "editeur-bouton-etroit",
-    "value": "30px",
-    "usage": "Largeur des boutons sous 560 px.",
-    "origine": "design/editeur/index.html, piste A v2, @media max-width 560."
-   },
-   {
-    "name": "editeur-bouton-rayon",
-    "value": "6px",
-    "usage": "Rayon des boutons et de l'indicateur.",
-    "origine": "design/editeur/index.html, piste A v2, .tl."
+    "name": "editeur-focus",
+    "value": "2px",
+    "usage": "Anneau de focus et son écart.",
+    "origine": "design/editeur-epure/index.html, piste B (:focus-visible)."
    },
    {
     "name": "editeur-picto",
-    "value": "18px",
-    "usage": "Pictogrammes de la barre.",
-    "origine": "design/editeur/index.html, piste A v2, .ico."
+    "value": "20px",
+    "usage": "Pictogrammes.",
+    "origine": "design/editeur-epure/index.html, piste B (.ico)."
    },
    {
     "name": "editeur-picto-petit",
+    "value": "18px",
+    "usage": "Pictogramme de l'opacité.",
+    "origine": "design/editeur-epure/index.html, piste B (.rng .ico)."
+   },
+   {
+    "name": "editeur-picto-vignette",
     "value": "16px",
-    "usage": "Pictogrammes des menus, du zoom, des boutons texte.",
-    "origine": "design/editeur/index.html, piste A v2, .mi .ico."
+    "usage": "Picto de prise de la vignette.",
+    "origine": "design/editeur-epure/index.html, piste B (.ghost svg)."
    },
    {
-    "name": "editeur-pastille-rayon",
-    "value": "12px",
-    "usage": "Rayon des pastilles de la barre.",
-    "origine": "design/editeur/index.html, piste A v2, .pill."
-   },
-   {
-    "name": "editeur-pastille-marge",
-    "value": "4px",
-    "usage": "Marge intérieure des pastilles.",
-    "origine": "design/editeur/index.html, piste A v2, .pill."
-   },
-   {
-    "name": "editeur-pastille-flou",
-    "value": "24px",
-    "usage": "Flou d'arrière-plan des pastilles.",
-    "origine": "design/editeur/index.html, piste A v2, .pill backdrop-filter."
-   },
-   {
-    "name": "editeur-pastille-saturation",
-    "value": "1.5",
-    "usage": "Saturation d'arrière-plan des pastilles.",
-    "origine": "design/editeur/index.html, piste A v2, .pill."
-   },
-   {
-    "name": "editeur-barre-bas",
-    "value": "14px",
-    "usage": "Distance de la barre au bas de la scène.",
-    "origine": "design/editeur/index.html, piste A v2, .fbar."
-   },
-   {
-    "name": "editeur-barre-cotes",
-    "value": "12px",
-    "usage": "Distance de la barre aux côtés.",
-    "origine": "design/editeur/index.html, piste A v2, .fbar."
+    "name": "editeur-barre-hauteur",
+    "value": "52px",
+    "usage": "Barre du haut (et de la fenêtre).",
+    "origine": "design/editeur-epure/index.html, piste B (.dir-b .tbar)."
    },
    {
     "name": "editeur-barre-ecart",
     "value": "8px",
-    "usage": "Écart entre les pastilles (et au-dessus des menus).",
-    "origine": "design/editeur/index.html, piste A v2, .fbar."
+    "usage": "Écart entre les boutons du haut.",
+    "origine": "design/editeur-epure/index.html, piste B (.tbar)."
    },
    {
-    "name": "editeur-barre-trace",
-    "value": "0.35",
-    "usage": "Opacité de la barre pendant un tracé.",
-    "origine": "design/editeur/index.html, piste A v2, .drawing .pill."
-   },
-   {
-    "name": "editeur-separateur",
-    "value": "20px",
-    "usage": "Hauteur des séparateurs.",
-    "origine": "design/editeur/index.html, piste A v2, .sep."
-   },
-   {
-    "name": "editeur-menu-rayon",
+    "name": "editeur-barre-marge",
     "value": "10px",
-    "usage": "Rayon des menus.",
-    "origine": "design/editeur/index.html, piste A v2, .pop."
+    "usage": "Marges de la barre du haut.",
+    "origine": "design/editeur-epure/index.html, piste B (.dir-b .tbar)."
+   },
+   {
+    "name": "editeur-trait-largeur",
+    "value": "1px",
+    "usage": "Traits et bords.",
+    "origine": "design/editeur-epure/index.html, piste B (.tbar, .pal, .pop)."
+   },
+   {
+    "name": "editeur-bouton-haut",
+    "value": "36px",
+    "usage": "Boutons Fermer et Enregistrer.",
+    "origine": "design/editeur-epure/index.html, piste B (.dir-b .rb)."
+   },
+   {
+    "name": "editeur-bouton-haut-rayon",
+    "value": "6px",
+    "usage": "Rayon des boutons du haut.",
+    "origine": "design/editeur-epure/index.html, piste B (.dir-b .rb, .dir-b .ok)."
+   },
+   {
+    "name": "editeur-copier-largeur",
+    "value": "44px",
+    "usage": "Bouton Copier, largeur.",
+    "origine": "design/editeur-epure/index.html, piste B (.dir-b .ok)."
+   },
+   {
+    "name": "editeur-copier-hauteur",
+    "value": "32px",
+    "usage": "Bouton Copier, hauteur.",
+    "origine": "design/editeur-epure/index.html, piste B (.dir-b .ok)."
+   },
+   {
+    "name": "editeur-copier-picto",
+    "value": "18px",
+    "usage": "Coche de Copier.",
+    "origine": "design/editeur-epure/index.html, piste B (.dir-b .ok svg)."
+   },
+   {
+    "name": "editeur-copier-focus",
+    "value": "3px",
+    "usage": "Écart du focus de Copier.",
+    "origine": "design/editeur-epure/index.html, piste B (.ok:focus-visible)."
+   },
+   {
+    "name": "editeur-image-rayon",
+    "value": "5px",
+    "usage": "Rayon des coins de l'image (peindreVue, option rayon).",
+    "origine": "design/editeur-epure/index.html, piste B (draw(), rr(…, 5))."
+   },
+   {
+    "name": "editeur-palette-hauteur",
+    "value": "72px",
+    "usage": "Palette du bas.",
+    "origine": "design/editeur-epure/index.html, piste B (.dir-b .pal)."
+   },
+   {
+    "name": "editeur-palette-hauteur-etroite",
+    "value": "68px",
+    "usage": "Palette du bas, fenêtre étroite.",
+    "origine": "design/editeur-epure/index.html, piste B (@media (max-width:620px) .pal)."
+   },
+   {
+    "name": "editeur-palette-bas",
+    "value": "16px",
+    "usage": "Palette : écart au bas.",
+    "origine": "design/editeur-epure/index.html, piste B (.pal)."
+   },
+   {
+    "name": "editeur-palette-bas-etroit",
+    "value": "10px",
+    "usage": "Palette : écart au bas, fenêtre étroite.",
+    "origine": "design/editeur-epure/index.html, piste B (@media .pal)."
+   },
+   {
+    "name": "editeur-palette-ecart",
+    "value": "6px",
+    "usage": "Écart des éléments de la palette et des bulles.",
+    "origine": "design/editeur-epure/index.html, piste B (.pal, .row)."
+   },
+   {
+    "name": "editeur-palette-marge",
+    "value": "14px",
+    "usage": "Marges de la palette.",
+    "origine": "design/editeur-epure/index.html, piste B (.pal)."
+   },
+   {
+    "name": "editeur-palette-marge-etroite",
+    "value": "6px",
+    "usage": "Marges de la palette, fenêtre étroite.",
+    "origine": "design/editeur-epure/index.html, piste B (@media .pal)."
+   },
+   {
+    "name": "editeur-palette-rayon",
+    "value": "38px",
+    "usage": "Rayon de la palette.",
+    "origine": "design/editeur-epure/index.html, piste B (.pal)."
+   },
+   {
+    "name": "editeur-palette-flou",
+    "value": "28px",
+    "usage": "Flou derrière la palette.",
+    "origine": "design/editeur-epure/index.html, piste B (.pal)."
+   },
+   {
+    "name": "editeur-palette-retrait",
+    "value": "24px",
+    "usage": "La palette tient dans la fenêtre à 12 px de chaque bord.",
+    "origine": "design/editeur-epure/index.html, piste B (.pal max-width)."
+   },
+   {
+    "name": "editeur-bouton-palette",
+    "value": "36px",
+    "usage": "Boutons ronds de la palette, options des bulles.",
+    "origine": "design/editeur-epure/index.html, piste B (.pb, .opt)."
+   },
+   {
+    "name": "editeur-bouton-etroit",
+    "value": "32px",
+    "usage": "Boutons de la palette, fenêtre étroite.",
+    "origine": "design/editeur-epure/index.html, piste B (@media .pal .pb)."
+   },
+   {
+    "name": "editeur-separateur-hauteur",
+    "value": "28px",
+    "usage": "Séparateurs de la palette.",
+    "origine": "design/editeur-epure/index.html, piste B (.dv)."
+   },
+   {
+    "name": "editeur-separateur-marge",
+    "value": "4px",
+    "usage": "Marges des séparateurs.",
+    "origine": "design/editeur-epure/index.html, piste B (.dv)."
+   },
+   {
+    "name": "editeur-separateur-marge-etroite",
+    "value": "3px",
+    "usage": "Marges des séparateurs, fenêtre étroite.",
+    "origine": "design/editeur-epure/index.html, piste B (@media .dv)."
+   },
+   {
+    "name": "editeur-outils-ecart",
+    "value": "2px",
+    "usage": "Écart entre les instruments.",
+    "origine": "design/editeur-epure/index.html, piste B (.tools)."
+   },
+   {
+    "name": "editeur-outils-marge",
+    "value": "4px",
+    "usage": "Marges des instruments et des pastilles.",
+    "origine": "design/editeur-epure/index.html, piste B (.tools, .cols)."
+   },
+   {
+    "name": "editeur-outils-marge-etroite",
+    "value": "2px",
+    "usage": "Marges des instruments, fenêtre étroite.",
+    "origine": "design/editeur-epure/index.html, piste B (@media .tools)."
+   },
+   {
+    "name": "editeur-instrument-place",
+    "value": "38px",
+    "usage": "Place d'un instrument.",
+    "origine": "design/editeur-epure/index.html, piste B (.tl)."
+   },
+   {
+    "name": "editeur-instrument-place-etroite",
+    "value": "31px",
+    "usage": "Place d'un instrument, fenêtre étroite.",
+    "origine": "design/editeur-epure/index.html, piste B (@media .tl)."
+   },
+   {
+    "name": "editeur-instrument-haut",
+    "value": "2px",
+    "usage": "Retrait du haut d'un instrument.",
+    "origine": "design/editeur-epure/index.html, piste B (.tl)."
+   },
+   {
+    "name": "editeur-instrument-rayon",
+    "value": "8px",
+    "usage": "Rayon du focus d'un instrument.",
+    "origine": "design/editeur-epure/index.html, piste B (.tl)."
+   },
+   {
+    "name": "editeur-instrument-largeur",
+    "value": "28px",
+    "usage": "Instrument dessiné, largeur.",
+    "origine": "design/editeur-epure/index.html, piste B (.tl .inst)."
+   },
+   {
+    "name": "editeur-instrument-hauteur",
+    "value": "84px",
+    "usage": "Instrument dessiné, hauteur.",
+    "origine": "design/editeur-epure/index.html, piste B (.tl .inst)."
+   },
+   {
+    "name": "editeur-instrument-repos",
+    "value": "22px",
+    "usage": "Instrument au repos (enfoncé).",
+    "origine": "design/editeur-epure/index.html, piste B (.tl .inst)."
+   },
+   {
+    "name": "editeur-instrument-survol",
+    "value": "17px",
+    "usage": "Instrument au survol.",
+    "origine": "design/editeur-epure/index.html, piste B (.tl:hover .inst)."
+   },
+   {
+    "name": "editeur-instrument-leve",
+    "value": "2px",
+    "usage": "Instrument choisi (soulevé).",
+    "origine": "design/editeur-epure/index.html, piste B (.tl[aria-pressed=true] .inst)."
+   },
+   {
+    "name": "editeur-instrument-entree",
+    "value": "60px",
+    "usage": "Départ de l'outil qui arrive dans l'emplacement.",
+    "origine": "design/editeur-epure/index.html, piste B (@keyframes rise)."
+   },
+   {
+    "name": "editeur-pastille",
+    "value": "24px",
+    "usage": "Pastilles de couleur.",
+    "origine": "design/editeur-epure/index.html, piste B (.dot, .cols)."
+   },
+   {
+    "name": "editeur-pastilles-ecart-v",
+    "value": "6px",
+    "usage": "Écart vertical des pastilles.",
+    "origine": "design/editeur-epure/index.html, piste B (.cols)."
+   },
+   {
+    "name": "editeur-pastilles-ecart-h",
+    "value": "8px",
+    "usage": "Écart horizontal des pastilles.",
+    "origine": "design/editeur-epure/index.html, piste B (.cols)."
+   },
+   {
+    "name": "editeur-pastille-anneau",
+    "value": "2px",
+    "usage": "Anneau de la pastille choisie.",
+    "origine": "design/editeur-epure/index.html, piste B (.dot[aria-pressed]::after)."
+   },
+   {
+    "name": "editeur-pastille-anneau-ecart",
+    "value": "4px",
+    "usage": "Écart de l'anneau.",
+    "origine": "design/editeur-epure/index.html, piste B (.dot[aria-pressed]::after)."
+   },
+   {
+    "name": "editeur-roue-centre",
+    "value": "6px",
+    "usage": "Retrait de la couleur libre dans la roue.",
+    "origine": "design/editeur-epure/index.html, piste B (.dot.wheel i)."
+   },
+   {
+    "name": "editeur-pop-rayon",
+    "value": "14px",
+    "usage": "Rayon des menus et bulles.",
+    "origine": "design/editeur-epure/index.html, piste B (.pop)."
+   },
+   {
+    "name": "editeur-pop-marge",
+    "value": "6px",
+    "usage": "Marge intérieure des menus, bulles et vignette.",
+    "origine": "design/editeur-epure/index.html, piste B (.pop, .ghost)."
+   },
+   {
+    "name": "editeur-pop-flou",
+    "value": "30px",
+    "usage": "Flou derrière les menus.",
+    "origine": "design/editeur-epure/index.html, piste B (.pop)."
+   },
+   {
+    "name": "editeur-pop-ecart",
+    "value": "10px",
+    "usage": "Écart entre un menu et la palette.",
+    "origine": "design/editeur-epure/index.html, piste B (placePop)."
+   },
+   {
+    "name": "editeur-pop-ecart-haut",
+    "value": "8px",
+    "usage": "Écart entre un menu et la barre du haut ; bord de la fenêtre.",
+    "origine": "design/editeur-epure/index.html, piste B (placePop)."
+   },
+   {
+    "name": "editeur-menu-ecart",
+    "value": "12px",
+    "usage": "Écart picto-texte d'une ligne de menu.",
+    "origine": "design/editeur-epure/index.html, piste B (.mi)."
    },
    {
     "name": "editeur-menu-largeur",
     "value": "200px",
-    "usage": "Largeur minimale des menus.",
-    "origine": "design/editeur/index.html, piste A v2, .pop.menu."
-   },
-   {
-    "name": "editeur-menu-marge",
-    "value": "10px",
-    "usage": "Marge intérieure de la fenêtre des réglages.",
-    "origine": "design/editeur/index.html, piste A v2, .pop."
+    "usage": "Largeur mini d'un menu.",
+    "origine": "design/editeur-epure/index.html, piste B (.mi)."
    },
    {
     "name": "editeur-menu-ligne",
-    "value": "32px",
-    "usage": "Hauteur d'une ligne de menu.",
-    "origine": "design/editeur/index.html, piste A v2, .mi."
-   },
-   {
-    "name": "editeur-couleur",
-    "value": "26px",
-    "usage": "Pastille de couleur des réglages.",
-    "origine": "design/editeur/index.html, piste A v2, .cl-sw."
-   },
-   {
-    "name": "editeur-couleur-disque",
-    "value": "18px",
-    "usage": "Disque de la pastille de couleur.",
-    "origine": "design/editeur/index.html, piste A v2, .cl-sw i."
-   },
-   {
-    "name": "editeur-couleur-barre",
-    "value": "16px",
-    "usage": "Disque de la pastille Réglages de la barre.",
-    "origine": "design/editeur/index.html, piste A v2, .swb i."
-   },
-   {
-    "name": "editeur-segment-hauteur",
-    "value": "24px",
-    "usage": "Hauteur des boutons segmentés.",
-    "origine": "design/editeur/index.html, piste A v2, .seg2 button."
-   },
-   {
-    "name": "editeur-glissiere",
-    "value": "150px",
-    "usage": "Largeur des glissières.",
-    "origine": "design/editeur/index.html, piste A v2, input[type=range]."
-   },
-   {
-    "name": "editeur-libelle",
-    "value": "58px",
-    "usage": "Largeur minimale des libellés des réglages.",
-    "origine": "design/editeur/index.html, piste A v2, .lab."
-   },
-   {
-    "name": "editeur-libelle-taille",
-    "value": "11.5px",
-    "usage": "Taille des libellés des réglages.",
-    "origine": "design/editeur/index.html, piste A v2, .lab."
-   },
-   {
-    "name": "editeur-gras",
-    "value": "28px",
-    "usage": "Bouton « G » (Gras).",
-    "origine": "design/editeur/index.html, piste A v2, .gbtn."
-   },
-   {
-    "name": "editeur-dialogue-largeur",
-    "value": "420px",
-    "usage": "Largeur du dialogue de fermeture.",
-    "origine": "design/editeur/index.html, piste A v2, .dlg."
-   },
-   {
-    "name": "editeur-image-rayon",
-    "value": "2px",
-    "usage": "Rayon de l'ombre de l'image.",
-    "origine": "design/editeur/index.html, piste A v2, .cv."
-   },
-   {
-    "name": "editeur-zoom-haut",
-    "value": "12px",
-    "usage": "Étiquette de zoom et message : distance au haut.",
-    "origine": "design/editeur/index.html, piste A v2, .zoomchip."
-   },
-   {
-    "name": "editeur-glisser-largeur",
-    "value": "44px",
-    "usage": "Vignette de la ligne Glisser.",
-    "origine": "design/editeur/index.html, piste A v2, .mi.drag img."
-   },
-   {
-    "name": "editeur-glisser-hauteur",
-    "value": "28px",
-    "usage": "Vignette de la ligne Glisser.",
-    "origine": "design/editeur/index.html, piste A v2, .mi.drag img."
-   },
-   {
-    "name": "editeur-glisser-seuil",
-    "value": "4",
-    "usage": "Déplacement (px) qui lance le glisser.",
-    "origine": "design/editeur/index.html, piste A v2, contrat §12.2 (16)."
-   },
-   {
-    "name": "editeur-scene-marge",
     "value": "40px",
-    "usage": "Marge horizontale totale de l'image ajustée.",
-    "origine": "design/editeur/index.html, piste A v2, avail()."
+    "usage": "Hauteur d'une ligne de menu.",
+    "origine": "design/editeur-epure/index.html, piste B (.mi)."
    },
    {
-    "name": "editeur-scene-marge-etroite",
+    "name": "editeur-menu-marge",
+    "value": "12px",
+    "usage": "Marges d'une ligne de menu.",
+    "origine": "design/editeur-epure/index.html, piste B (.mi)."
+   },
+   {
+    "name": "editeur-menu-rayon",
+    "value": "9px",
+    "usage": "Rayon d'une ligne de menu et d'une option.",
+    "origine": "design/editeur-epure/index.html, piste B (.mi, .opt)."
+   },
+   {
+    "name": "editeur-ligne-marge",
+    "value": "4px",
+    "usage": "Marge d'une ligne de bulle.",
+    "origine": "design/editeur-epure/index.html, piste B (.row)."
+   },
+   {
+    "name": "editeur-taille-0",
+    "value": "4px",
+    "usage": "Option Fin.",
+    "origine": "design/editeur-epure/index.html, piste B (openToolPop)."
+   },
+   {
+    "name": "editeur-taille-1",
+    "value": "7px",
+    "usage": "Option Moyen.",
+    "origine": "design/editeur-epure/index.html, piste B (openToolPop)."
+   },
+   {
+    "name": "editeur-taille-2",
+    "value": "11px",
+    "usage": "Option Épais.",
+    "origine": "design/editeur-epure/index.html, piste B (openToolPop)."
+   },
+   {
+    "name": "editeur-taille-surligneur-0",
+    "value": "8px",
+    "usage": "Surligneur, Fin.",
+    "origine": "design/editeur-epure/index.html, piste B (openToolPop)."
+   },
+   {
+    "name": "editeur-taille-surligneur-1",
+    "value": "12px",
+    "usage": "Surligneur, Moyen.",
+    "origine": "design/editeur-epure/index.html, piste B (openToolPop)."
+   },
+   {
+    "name": "editeur-taille-surligneur-2",
     "value": "16px",
-    "usage": "Même marge sous 420 px.",
-    "origine": "design/editeur/index.html, piste A v2, avail()."
+    "usage": "Surligneur, Épais.",
+    "origine": "design/editeur-epure/index.html, piste B (openToolPop)."
    },
    {
-    "name": "editeur-scene-haut",
+    "name": "editeur-taille-numero-0",
     "value": "10px",
-    "usage": "Marge au-dessus de l'image ajustée.",
-    "origine": "design/editeur/index.html, piste A v2, avail()."
+    "usage": "Numéro, Fin.",
+    "origine": "design/editeur-epure/index.html, piste B (openToolPop)."
    },
    {
-    "name": "editeur-scene-bas",
-    "value": "22px",
-    "usage": "Marge entre l'image ajustée et la barre.",
-    "origine": "design/editeur/index.html, piste A v2, avail()."
+    "name": "editeur-taille-numero-1",
+    "value": "13px",
+    "usage": "Numéro, Moyen.",
+    "origine": "design/editeur-epure/index.html, piste B (openToolPop)."
    },
    {
-    "name": "editeur-tolerance",
-    "value": "7",
-    "usage": "Tolérance (px d'écran) pour toucher un objet.",
-    "origine": "design/editeur/index.html, piste A v2, hit()."
+    "name": "editeur-taille-numero-2",
+    "value": "16px",
+    "usage": "Numéro, Épais.",
+    "origine": "design/editeur-epure/index.html, piste B (openToolPop)."
    },
    {
-    "name": "editeur-poignee-rayon",
-    "value": "4.5",
-    "usage": "Rayon des poignées (px d'écran).",
-    "origine": "design/editeur/index.html, piste A v2, drawOverlay."
+    "name": "editeur-taille-texte-0",
+    "value": "12px",
+    "usage": "Texte, premier A.",
+    "origine": "design/editeur-epure/index.html, piste B (openToolPop)."
    },
    {
-    "name": "editeur-poignee-prise",
-    "value": "6",
-    "usage": "Rayon de prise d'une poignée (px d'écran).",
-    "origine": "design/editeur/index.html, piste A v2, handleAt()."
+    "name": "editeur-taille-texte-1",
+    "value": "16px",
+    "usage": "Texte, deuxième A.",
+    "origine": "design/editeur-epure/index.html, piste B (openToolPop)."
    },
    {
-    "name": "editeur-selection-marge",
-    "value": "4",
-    "usage": "Marge du contour de sélection (px d'écran).",
-    "origine": "design/editeur/index.html, piste A v2, drawOverlay."
+    "name": "editeur-taille-texte-2",
+    "value": "21px",
+    "usage": "Texte, troisième A.",
+    "origine": "design/editeur-epure/index.html, piste B (openToolPop)."
    },
    {
-    "name": "editeur-pipette-rayon",
-    "value": "11",
-    "usage": "Pastille d'aperçu de la pipette (px d'écran).",
-    "origine": "design/editeur/index.html, piste A v2, drawOverlay."
+    "name": "editeur-glissiere-ecart",
+    "value": "10px",
+    "usage": "Écart picto-glissière.",
+    "origine": "design/editeur-epure/index.html, piste B (.rng)."
    },
    {
-    "name": "editeur-pipette-decalage",
-    "value": "18",
-    "usage": "Décalage de la pastille de la pipette.",
-    "origine": "design/editeur/index.html, piste A v2, drawOverlay."
+    "name": "editeur-glissiere-marge-v",
+    "value": "6px",
+    "usage": "Marge verticale de la glissière.",
+    "origine": "design/editeur-epure/index.html, piste B (.rng)."
    },
    {
-    "name": "editeur-trait",
-    "value": "1",
-    "usage": "Trait fin de la surcouche : tiers, cadre de sélection (px d'écran).",
-    "origine": "design/editeur/index.html, piste A v2, drawOverlay."
+    "name": "editeur-glissiere-marge-h",
+    "value": "8px",
+    "usage": "Marge horizontale de la glissière.",
+    "origine": "design/editeur-epure/index.html, piste B (.rng)."
    },
    {
-    "name": "editeur-recadrage-trait",
-    "value": "1.5",
-    "usage": "Bord du recadrage en cours (px d'écran).",
-    "origine": "design/editeur/index.html, piste A v2, drawOverlay."
+    "name": "editeur-glissiere-largeur",
+    "value": "120px",
+    "usage": "Largeur mini de la glissière.",
+    "origine": "design/editeur-epure/index.html, piste B (input[type=range])."
    },
    {
-    "name": "editeur-etiquette-police",
-    "value": "11",
-    "usage": "Corps de l'étiquette « l × h » du recadrage (px d'écran).",
-    "origine": "design/editeur/index.html, piste A v2, drawOverlay."
+    "name": "editeur-glissiere-hauteur",
+    "value": "24px",
+    "usage": "Hauteur de la glissière.",
+    "origine": "design/editeur-epure/index.html, piste B (input[type=range])."
    },
    {
-    "name": "editeur-etiquette-graisse",
-    "value": "600",
-    "usage": "Graisse de l'étiquette « l × h » du recadrage.",
-    "origine": "design/editeur/index.html, piste A v2, drawOverlay."
+    "name": "editeur-message-haut",
+    "value": "62px",
+    "usage": "Message : sous la barre du haut.",
+    "origine": "design/editeur-epure/index.html, piste B (.dir-b .msg)."
    },
    {
-    "name": "editeur-etiquette-marge",
-    "value": "12",
-    "usage": "Marge horizontale totale de l'étiquette « l × h ».",
-    "origine": "design/editeur/index.html, piste A v2, drawOverlay."
+    "name": "editeur-message-hauteur",
+    "value": "36px",
+    "usage": "Message, hauteur.",
+    "origine": "design/editeur-epure/index.html, piste B (.msg)."
    },
    {
-    "name": "editeur-etiquette-hauteur",
-    "value": "18",
-    "usage": "Hauteur de l'étiquette « l × h » (px d'écran).",
-    "origine": "design/editeur/index.html, piste A v2, drawOverlay."
+    "name": "editeur-message-ecart",
+    "value": "8px",
+    "usage": "Message : écart coche-texte.",
+    "origine": "design/editeur-epure/index.html, piste B (.msg)."
    },
    {
-    "name": "editeur-etiquette-ecart",
-    "value": "8",
-    "usage": "Écart entre le cadre et l'étiquette dessous (px d'écran).",
-    "origine": "design/editeur/index.html, piste A v2, drawOverlay."
+    "name": "editeur-message-marge",
+    "value": "16px",
+    "usage": "Message : marge.",
+    "origine": "design/editeur-epure/index.html, piste B (.msg)."
    },
    {
-    "name": "editeur-etiquette-dessus",
-    "value": "26",
-    "usage": "Remontée de l'étiquette quand elle n'a pas la place dessous.",
-    "origine": "design/editeur/index.html, piste A v2, drawOverlay."
+    "name": "editeur-message-marge-icone",
+    "value": "10px",
+    "usage": "Message : marge côté coche.",
+    "origine": "design/editeur-epure/index.html, piste B (.msg)."
    },
    {
-    "name": "editeur-etiquette-bord",
-    "value": "2",
-    "usage": "Marge gardée au bas de la toile sous l'étiquette.",
-    "origine": "design/editeur/index.html, piste A v2, drawOverlay."
+    "name": "editeur-message-rayon",
+    "value": "18px",
+    "usage": "Message : rayon.",
+    "origine": "design/editeur-epure/index.html, piste B (.msg)."
    },
    {
-    "name": "editeur-etiquette-rayon",
-    "value": "5",
-    "usage": "Rayon des coins de l'étiquette « l × h ».",
-    "origine": "design/editeur/index.html, piste A v2, drawOverlay."
+    "name": "editeur-message-police",
+    "value": "13px",
+    "usage": "Message : taille du texte.",
+    "origine": "design/editeur-epure/index.html, piste B (.msg)."
    },
    {
-    "name": "editeur-cadre-opacite",
-    "value": "0.1",
-    "usage": "Opacité du fond du cadre de sélection (accent).",
-    "origine": "design/editeur/index.html, piste A v2, drawOverlay."
+    "name": "editeur-message-depart",
+    "value": "-8px",
+    "usage": "Message : départ de l'apparition.",
+    "origine": "design/editeur-epure/index.html, piste B (.msg)."
    },
    {
-    "name": "editeur-cadre-opacite-trait",
-    "value": "0.9",
-    "usage": "Opacité du bord du cadre de sélection (accent).",
-    "origine": "design/editeur/index.html, piste A v2, drawOverlay."
+    "name": "editeur-message-icone",
+    "value": "20px",
+    "usage": "Message : rond de la coche.",
+    "origine": "design/editeur-epure/index.html, piste B (.msg i)."
    },
    {
-    "name": "editeur-poignee-ombre",
-    "value": "3",
-    "usage": "Flou de l'ombre des poignées (px d'écran).",
-    "origine": "design/editeur/index.html, piste A v2, drawOverlay."
+    "name": "editeur-message-coche",
+    "value": "12px",
+    "usage": "Message : coche.",
+    "origine": "design/editeur-epure/index.html, piste B (.msg i svg)."
    },
    {
-    "name": "editeur-poignee-trait",
-    "value": "1.5",
-    "usage": "Bord des poignées (px d'écran).",
-    "origine": "design/editeur/index.html, piste A v2, drawOverlay."
+    "name": "editeur-vignette-droite",
+    "value": "20px",
+    "usage": "Vignette de prise : écart au bord droit.",
+    "origine": "design/editeur-epure/index.html, piste B (.ghost)."
    },
    {
-    "name": "editeur-poignee-retrait",
-    "value": "0.5",
-    "usage": "Retrait du rayon de la poignée du milieu (courbe).",
-    "origine": "design/editeur/index.html, piste A v2, drawOverlay."
+    "name": "editeur-vignette-ecart",
+    "value": "30px",
+    "usage": "Vignette de prise : au-dessus de la palette.",
+    "origine": "design/editeur-epure/index.html, piste B (dragOut())."
    },
    {
-    "name": "editeur-pipette-ombre",
-    "value": "6",
-    "usage": "Flou de l'ombre de la pastille de la pipette.",
-    "origine": "design/editeur/index.html, piste A v2, drawOverlay."
+    "name": "editeur-vignette-largeur",
+    "value": "150px",
+    "usage": "Vignette de prise : largeur.",
+    "origine": "design/editeur-epure/index.html, piste B (.ghost)."
    },
    {
-    "name": "editeur-pipette-trait",
-    "value": "2.5",
-    "usage": "Bord de la pastille de la pipette (px d'écran).",
-    "origine": "design/editeur/index.html, piste A v2, drawOverlay."
+    "name": "editeur-vignette-rayon",
+    "value": "12px",
+    "usage": "Vignette de prise : rayon.",
+    "origine": "design/editeur-epure/index.html, piste B (.ghost)."
+   },
+   {
+    "name": "editeur-vignette-ecart-interne",
+    "value": "4px",
+    "usage": "Vignette de prise : écart image-picto.",
+    "origine": "design/editeur-epure/index.html, piste B (.ghost)."
+   },
+   {
+    "name": "editeur-saisie-trait",
+    "value": "1.5px",
+    "usage": "Contour de la saisie du texte.",
+    "origine": "design/editeur-epure/index.html, piste B (#tin)."
+   },
+   {
+    "name": "editeur-saisie-ecart",
+    "value": "4px",
+    "usage": "Écart du contour de la saisie.",
+    "origine": "design/editeur-epure/index.html, piste B (#tin)."
    },
    {
     "name": "editeur-saisie-marge",
-    "value": "8",
-    "usage": "Place gardée au bout de la zone de saisie d'un texte.",
-    "origine": "design/editeur/index.html, piste A v2, drawOverlay."
+    "value": "28px",
+    "usage": "Place du curseur après le texte en saisie.",
+    "origine": "design/editeur-epure/index.html, piste B (placeInput())."
    },
    {
-    "name": "editeur-glissiere-outline",
-    "value": "2px",
-    "usage": "Mesure de la maquette, input:focus-visible : outline.",
-    "origine": "design/editeur/index.html, piste A v2."
-   },
-   {
-    "name": "editeur-glissiere-outline-offset",
-    "value": "1px",
-    "usage": "Mesure de la maquette, input:focus-visible : outline-offset.",
-    "origine": "design/editeur/index.html, piste A v2."
-   },
-   {
-    "name": "editeur-pill-gap",
-    "value": "2px",
-    "usage": "Mesure de la maquette, .pill : gap.",
-    "origine": "design/editeur/index.html, piste A v2."
-   },
-   {
-    "name": "editeur-pill-border",
-    "value": "1px",
-    "usage": "Mesure de la maquette, .pill : border.",
-    "origine": "design/editeur/index.html, piste A v2."
-   },
-   {
-    "name": "editeur-outils-gap",
-    "value": "2px",
-    "usage": "Mesure de la maquette, .outils : gap.",
-    "origine": "design/editeur/index.html, piste A v2."
-   },
-   {
-    "name": "editeur-tl-chev-right",
-    "value": "3px",
-    "usage": "Mesure de la maquette, .tl .chev : right.",
-    "origine": "design/editeur/index.html, piste A v2."
-   },
-   {
-    "name": "editeur-tl-chev-bottom",
-    "value": "3px",
-    "usage": "Mesure de la maquette, .tl .chev : bottom.",
-    "origine": "design/editeur/index.html, piste A v2."
-   },
-   {
-    "name": "editeur-tl-chev-border-left",
-    "value": "4px",
-    "usage": "Mesure de la maquette, .tl .chev : border-left.",
-    "origine": "design/editeur/index.html, piste A v2."
-   },
-   {
-    "name": "editeur-tl-chev-border-top",
-    "value": "4px",
-    "usage": "Mesure de la maquette, .tl .chev : border-top.",
-    "origine": "design/editeur/index.html, piste A v2."
-   },
-   {
-    "name": "editeur-ind-box-shadow",
-    "value": "1px",
-    "usage": "Mesure de la maquette, .ind : box-shadow.",
-    "origine": "design/editeur/index.html, piste A v2."
-   },
-   {
-    "name": "editeur-sep-width",
-    "value": "1px",
-    "usage": "Mesure de la maquette, .sep : width.",
-    "origine": "design/editeur/index.html, piste A v2."
-   },
-   {
-    "name": "editeur-sep-margin",
-    "value": "4px",
-    "usage": "Mesure de la maquette, .sep : margin.",
-    "origine": "design/editeur/index.html, piste A v2."
-   },
-   {
-    "name": "editeur-swb-i-box-shadow",
-    "value": "1px",
-    "usage": "Mesure de la maquette, .swb i : box-shadow.",
-    "origine": "design/editeur/index.html, piste A v2."
-   },
-   {
-    "name": "editeur-swb-i-box-shadow-2",
-    "value": "2px",
-    "usage": "Mesure de la maquette, .swb i : box-shadow.",
-    "origine": "design/editeur/index.html, piste A v2."
-   },
-   {
-    "name": "editeur-swb-i-box-shadow-3",
-    "value": "3px",
-    "usage": "Mesure de la maquette, .swb i : box-shadow.",
-    "origine": "design/editeur/index.html, piste A v2."
-   },
-   {
-    "name": "editeur-btn-gap",
-    "value": "7px",
-    "usage": "Mesure de la maquette, .btn : gap.",
-    "origine": "design/editeur/index.html, piste A v2."
-   },
-   {
-    "name": "editeur-btn-padding",
-    "value": "12px",
-    "usage": "Mesure de la maquette, .btn : padding.",
-    "origine": "design/editeur/index.html, piste A v2."
-   },
-   {
-    "name": "editeur-btn-font-size",
-    "value": "13px",
-    "usage": "Mesure de la maquette, .btn : font-size.",
-    "origine": "design/editeur/index.html, piste A v2."
-   },
-   {
-    "name": "editeur-btn-border",
-    "value": "1px",
-    "usage": "Mesure de la maquette, .btn : border.",
-    "origine": "design/editeur/index.html, piste A v2."
-   },
-   {
-    "name": "editeur-btn-box-shadow",
-    "value": "1px",
-    "usage": "Mesure de la maquette, .btn : box-shadow.",
-    "origine": "design/editeur/index.html, piste A v2."
-   },
-   {
-    "name": "editeur-btn-accent-box-shadow",
-    "value": "-1px",
-    "usage": "Mesure de la maquette, .btn.accent : box-shadow.",
-    "origine": "design/editeur/index.html, piste A v2."
-   },
-   {
-    "name": "editeur-vb-sh-f-transform",
-    "value": "-1.5px",
-    "usage": "Mesure de la maquette, .vb:hover .sh-f : transform.",
-    "origine": "design/editeur/index.html, piste A v2."
-   },
-   {
-    "name": "editeur-vb-sh-f-transform-2",
-    "value": "-1.5px",
-    "usage": "Mesure de la maquette, .vb:hover .sh-f : transform.",
-    "origine": "design/editeur/index.html, piste A v2."
-   },
-   {
-    "name": "editeur-vb-sh-b-transform",
-    "value": "1px",
-    "usage": "Mesure de la maquette, .vb:hover .sh-b : transform.",
-    "origine": "design/editeur/index.html, piste A v2."
-   },
-   {
-    "name": "editeur-vb-sh-b-transform-2",
-    "value": "1px",
-    "usage": "Mesure de la maquette, .vb:hover .sh-b : transform.",
-    "origine": "design/editeur/index.html, piste A v2."
-   },
-   {
-    "name": "editeur-vb-arw-transform",
-    "value": "1.4px",
-    "usage": "Mesure de la maquette, .vb:hover .arw : transform.",
-    "origine": "design/editeur/index.html, piste A v2."
-   },
-   {
-    "name": "editeur-lbs-height",
-    "value": "18px",
-    "usage": "Mesure de la maquette, .lbs : height.",
-    "origine": "design/editeur/index.html, piste A v2."
-   },
-   {
-    "name": "editeur-lbs-line-height",
-    "value": "18px",
-    "usage": "Mesure de la maquette, .lbs : line-height.",
-    "origine": "design/editeur/index.html, piste A v2."
-   },
-   {
-    "name": "editeur-vb-fait-sh-f-transform",
-    "value": "2px",
-    "usage": "Mesure de la maquette, .vb.fait .sh-f : transform.",
-    "origine": "design/editeur/index.html, piste A v2."
-   },
-   {
-    "name": "editeur-vb-fait-sh-f-transform-2",
-    "value": "2px",
-    "usage": "Mesure de la maquette, .vb.fait .sh-f : transform.",
-    "origine": "design/editeur/index.html, piste A v2."
-   },
-   {
-    "name": "editeur-vb-fait-sh-b-transform-origin",
-    "value": "9px",
-    "usage": "Mesure de la maquette, .vb.fait .sh-b : transform-origin.",
-    "origine": "design/editeur/index.html, piste A v2."
-   },
-   {
-    "name": "editeur-vb-fait-sh-b-transform-origin-2",
-    "value": "9px",
-    "usage": "Mesure de la maquette, .vb.fait .sh-b : transform-origin.",
-    "origine": "design/editeur/index.html, piste A v2."
-   },
-   {
-    "name": "editeur-vb-fait-arw-transform",
-    "value": "5px",
-    "usage": "Mesure de la maquette, .vb.fait .arw : transform.",
-    "origine": "design/editeur/index.html, piste A v2."
-   },
-   {
-    "name": "editeur-vb-width",
-    "value": "8px",
-    "usage": "Mesure de la maquette, .vb::after : width.",
-    "origine": "design/editeur/index.html, piste A v2."
-   },
-   {
-    "name": "editeur-vb-height",
-    "value": "8px",
-    "usage": "Mesure de la maquette, .vb::after : height.",
-    "origine": "design/editeur/index.html, piste A v2."
-   },
-   {
-    "name": "editeur-vb-margin",
-    "value": "-4px",
-    "usage": "Mesure de la maquette, .vb::after : margin.",
-    "origine": "design/editeur/index.html, piste A v2."
-   },
-   {
-    "name": "editeur-vb-margin-2",
-    "value": "-4px",
-    "usage": "Mesure de la maquette, .vb::after : margin.",
-    "origine": "design/editeur/index.html, piste A v2."
-   },
-   {
-    "name": "editeur-pop-border",
-    "value": "1px",
-    "usage": "Mesure de la maquette, .pop : border.",
-    "origine": "design/editeur/index.html, piste A v2."
-   },
-   {
-    "name": "editeur-pop-gap",
-    "value": "10px",
-    "usage": "Mesure de la maquette, .pop : gap.",
-    "origine": "design/editeur/index.html, piste A v2."
-   },
-   {
-    "name": "editeur-pop-transform",
-    "value": "4px",
-    "usage": "Mesure de la maquette, .pop : transform.",
-    "origine": "design/editeur/index.html, piste A v2."
-   },
-   {
-    "name": "editeur-pop-max-width",
-    "value": "48px",
-    "usage": "Mesure de la maquette, .pop : max-width.",
-    "origine": "design/editeur/index.html, piste A v2."
-   },
-   {
-    "name": "editeur-pop-menu-padding",
-    "value": "4px",
-    "usage": "Mesure de la maquette, .pop.menu : padding.",
-    "origine": "design/editeur/index.html, piste A v2."
-   },
-   {
-    "name": "editeur-row-gap",
-    "value": "4px",
-    "usage": "Mesure de la maquette, .row : gap.",
-    "origine": "design/editeur/index.html, piste A v2."
-   },
-   {
-    "name": "editeur-cl-sw-i-box-shadow",
-    "value": "1px",
-    "usage": "Mesure de la maquette, .cl-sw i : box-shadow.",
-    "origine": "design/editeur/index.html, piste A v2."
-   },
-   {
-    "name": "editeur-cl-sw-box-shadow",
-    "value": "1.5px",
-    "usage": "Mesure de la maquette, .cl-sw[aria-checked=\"true\"] : box-shadow.",
-    "origine": "design/editeur/index.html, piste A v2."
-   },
-   {
-    "name": "editeur-cl-sw-pk-box-shadow",
-    "value": "1.5px",
-    "usage": "Mesure de la maquette, .cl-sw.pk[aria-pressed=\"true\"] : box-shadow.",
-    "origine": "design/editeur/index.html, piste A v2."
-   },
-   {
-    "name": "editeur-gbtn-font-size",
-    "value": "13px",
-    "usage": "Mesure de la maquette, .gbtn : font-size.",
-    "origine": "design/editeur/index.html, piste A v2."
-   },
-   {
-    "name": "editeur-gbtn-box-shadow",
-    "value": "1px",
-    "usage": "Mesure de la maquette, .gbtn[aria-pressed=\"true\"] : box-shadow.",
-    "origine": "design/editeur/index.html, piste A v2."
-   },
-   {
-    "name": "editeur-seg2-padding",
-    "value": "2px",
-    "usage": "Mesure de la maquette, .seg2 : padding.",
-    "origine": "design/editeur/index.html, piste A v2."
-   },
-   {
-    "name": "editeur-seg2-border-radius",
-    "value": "7px",
-    "usage": "Mesure de la maquette, .seg2 : border-radius.",
-    "origine": "design/editeur/index.html, piste A v2."
-   },
-   {
-    "name": "editeur-seg2-gap",
-    "value": "2px",
-    "usage": "Mesure de la maquette, .seg2 : gap.",
-    "origine": "design/editeur/index.html, piste A v2."
-   },
-   {
-    "name": "editeur-seg2-button-min-width",
-    "value": "30px",
-    "usage": "Mesure de la maquette, .seg2 button : min-width.",
-    "origine": "design/editeur/index.html, piste A v2."
-   },
-   {
-    "name": "editeur-seg2-button-padding",
-    "value": "9px",
-    "usage": "Mesure de la maquette, .seg2 button : padding.",
-    "origine": "design/editeur/index.html, piste A v2."
-   },
-   {
-    "name": "editeur-seg2-button-border-radius",
-    "value": "5px",
-    "usage": "Mesure de la maquette, .seg2 button : border-radius.",
-    "origine": "design/editeur/index.html, piste A v2."
-   },
-   {
-    "name": "editeur-seg2-button-font-size",
-    "value": "12px",
-    "usage": "Mesure de la maquette, .seg2 button : font-size.",
-    "origine": "design/editeur/index.html, piste A v2."
-   },
-   {
-    "name": "editeur-seg2-b-width",
-    "value": "16px",
-    "usage": "Mesure de la maquette, .seg2 b : width.",
-    "origine": "design/editeur/index.html, piste A v2."
-   },
-   {
-    "name": "editeur-seg2-b-border-radius",
-    "value": "4px",
-    "usage": "Mesure de la maquette, .seg2 b : border-radius.",
-    "origine": "design/editeur/index.html, piste A v2."
-   },
-   {
-    "name": "editeur-seg2-b-t0-height",
-    "value": "2px",
-    "usage": "Mesure de la maquette, .seg2 b.t0 : height.",
-    "origine": "design/editeur/index.html, piste A v2."
-   },
-   {
-    "name": "editeur-seg2-b-t1-height",
-    "value": "3.5px",
-    "usage": "Mesure de la maquette, .seg2 b.t1 : height.",
-    "origine": "design/editeur/index.html, piste A v2."
-   },
-   {
-    "name": "editeur-seg2-b-t2-height",
-    "value": "6px",
-    "usage": "Mesure de la maquette, .seg2 b.t2 : height.",
-    "origine": "design/editeur/index.html, piste A v2."
-   },
-   {
-    "name": "editeur-glissiere-height",
-    "value": "20px",
-    "usage": "Mesure de la maquette, input[type=\"range\"] : height.",
-    "origine": "design/editeur/index.html, piste A v2."
-   },
-   {
-    "name": "editeur-glissiere-min-width",
-    "value": "90px",
-    "usage": "Mesure de la maquette, input[type=\"range\"] : min-width.",
-    "origine": "design/editeur/index.html, piste A v2."
-   },
-   {
-    "name": "editeur-glissiere-piste-height",
-    "value": "4px",
-    "usage": "Mesure de la maquette, input[type=\"range\"]::-webkit-slider-runnable-track : height.",
-    "origine": "design/editeur/index.html, piste A v2."
-   },
-   {
-    "name": "editeur-glissiere-piste-border-radius",
-    "value": "2px",
-    "usage": "Mesure de la maquette, input[type=\"range\"]::-webkit-slider-runnable-track : border-radius.",
-    "origine": "design/editeur/index.html, piste A v2."
-   },
-   {
-    "name": "editeur-glissiere-pouce-width",
-    "value": "16px",
-    "usage": "Mesure de la maquette, input[type=\"range\"]::-webkit-slider-thumb : width.",
-    "origine": "design/editeur/index.html, piste A v2."
-   },
-   {
-    "name": "editeur-glissiere-pouce-height",
-    "value": "16px",
-    "usage": "Mesure de la maquette, input[type=\"range\"]::-webkit-slider-thumb : height.",
-    "origine": "design/editeur/index.html, piste A v2."
-   },
-   {
-    "name": "editeur-glissiere-pouce-margin-top",
-    "value": "-6px",
-    "usage": "Mesure de la maquette, input[type=\"range\"]::-webkit-slider-thumb : margin-top.",
-    "origine": "design/editeur/index.html, piste A v2."
-   },
-   {
-    "name": "editeur-glissiere-pouce-border",
-    "value": "1px",
-    "usage": "Mesure de la maquette, input[type=\"range\"]::-webkit-slider-thumb : border.",
-    "origine": "design/editeur/index.html, piste A v2."
-   },
-   {
-    "name": "editeur-glissiere-pouce-box-shadow",
-    "value": "4px",
-    "usage": "Mesure de la maquette, input[type=\"range\"]::-webkit-slider-thumb : box-shadow.",
-    "origine": "design/editeur/index.html, piste A v2."
-   },
-   {
-    "name": "editeur-val-min-width",
-    "value": "34px",
-    "usage": "Mesure de la maquette, .val : min-width.",
-    "origine": "design/editeur/index.html, piste A v2."
-   },
-   {
-    "name": "editeur-mi-gap",
-    "value": "10px",
-    "usage": "Mesure de la maquette, .mi : gap.",
-    "origine": "design/editeur/index.html, piste A v2."
-   },
-   {
-    "name": "editeur-mi-padding",
-    "value": "10px",
-    "usage": "Mesure de la maquette, .mi : padding.",
-    "origine": "design/editeur/index.html, piste A v2."
-   },
-   {
-    "name": "editeur-mi-font-size",
-    "value": "13px",
-    "usage": "Mesure de la maquette, .mi : font-size.",
-    "origine": "design/editeur/index.html, piste A v2."
-   },
-   {
-    "name": "editeur-mi-drag-padding",
-    "value": "6px",
-    "usage": "Mesure de la maquette, .mi.drag : padding.",
-    "origine": "design/editeur/index.html, piste A v2."
-   },
-   {
-    "name": "editeur-mi-drag-padding-2",
-    "value": "10px",
-    "usage": "Mesure de la maquette, .mi.drag : padding.",
-    "origine": "design/editeur/index.html, piste A v2."
-   },
-   {
-    "name": "editeur-mi-drag-img-border-radius",
-    "value": "3px",
-    "usage": "Mesure de la maquette, .mi.drag img : border-radius.",
-    "origine": "design/editeur/index.html, piste A v2."
-   },
-   {
-    "name": "editeur-msep-height",
-    "value": "1px",
-    "usage": "Mesure de la maquette, .msep : height.",
-    "origine": "design/editeur/index.html, piste A v2."
-   },
-   {
-    "name": "editeur-msep-margin",
-    "value": "4px",
-    "usage": "Mesure de la maquette, .msep : margin.",
-    "origine": "design/editeur/index.html, piste A v2."
-   },
-   {
-    "name": "editeur-msep-margin-2",
-    "value": "6px",
-    "usage": "Mesure de la maquette, .msep : margin.",
-    "origine": "design/editeur/index.html, piste A v2."
-   },
-   {
-    "name": "editeur-message-border-radius",
-    "value": "999px",
-    "usage": "Mesure de la maquette, .message : border-radius.",
-    "origine": "design/editeur/index.html, piste A v2."
-   },
-   {
-    "name": "editeur-etiquette-zoom-transform",
-    "value": "-4px",
-    "usage": "Mesure de la maquette, .etiquette-zoom : transform.",
-    "origine": "design/editeur/index.html, piste A v2."
-   },
-   {
-    "name": "editeur-etiquette-zoom-padding",
-    "value": "3px",
-    "usage": "Mesure de la maquette, .etiquette-zoom : padding.",
-    "origine": "design/editeur/index.html, piste A v2."
-   },
-   {
-    "name": "editeur-etiquette-zoom-padding-2",
-    "value": "10px",
-    "usage": "Mesure de la maquette, .etiquette-zoom : padding.",
-    "origine": "design/editeur/index.html, piste A v2."
-   },
-   {
-    "name": "editeur-etiquette-zoom-font-size",
-    "value": "12px",
-    "usage": "Mesure de la maquette, .etiquette-zoom : font-size.",
-    "origine": "design/editeur/index.html, piste A v2."
-   },
-   {
-    "name": "editeur-etiquette-zoom-border",
-    "value": "1px",
-    "usage": "Mesure de la maquette, .etiquette-zoom : border.",
-    "origine": "design/editeur/index.html, piste A v2."
-   },
-   {
-    "name": "editeur-etiquette-zoom-backdrop-filter",
-    "value": "20px",
-    "usage": "Mesure de la maquette, .etiquette-zoom : backdrop-filter.",
-    "origine": "design/editeur/index.html, piste A v2."
-   },
-   {
-    "name": "editeur-message-transform",
-    "value": "-6px",
-    "usage": "Mesure de la maquette, .message : transform.",
-    "origine": "design/editeur/index.html, piste A v2."
-   },
-   {
-    "name": "editeur-message-padding",
-    "value": "6px",
-    "usage": "Mesure de la maquette, .message : padding.",
-    "origine": "design/editeur/index.html, piste A v2."
-   },
-   {
-    "name": "editeur-message-padding-2",
-    "value": "12px",
-    "usage": "Mesure de la maquette, .message : padding.",
-    "origine": "design/editeur/index.html, piste A v2."
-   },
-   {
-    "name": "editeur-message-font-size",
-    "value": "12.5px",
-    "usage": "Mesure de la maquette, .message : font-size.",
-    "origine": "design/editeur/index.html, piste A v2."
-   },
-   {
-    "name": "editeur-message-border",
-    "value": "1px",
-    "usage": "Mesure de la maquette, .message : border.",
-    "origine": "design/editeur/index.html, piste A v2."
-   },
-   {
-    "name": "editeur-message-max-width",
-    "value": "24px",
-    "usage": "Mesure de la maquette, .message : max-width.",
-    "origine": "design/editeur/index.html, piste A v2."
-   },
-   {
-    "name": "editeur-saisie-outline",
-    "value": "1px",
-    "usage": "Mesure de la maquette, .saisie : outline.",
-    "origine": "design/editeur/index.html, piste A v2."
-   },
-   {
-    "name": "editeur-saisie-outline-offset",
-    "value": "3px",
-    "usage": "Mesure de la maquette, .saisie : outline-offset.",
-    "origine": "design/editeur/index.html, piste A v2."
-   },
-   {
-    "name": "editeur-saisie-border-radius",
-    "value": "2px",
-    "usage": "Mesure de la maquette, .saisie : border-radius.",
-    "origine": "design/editeur/index.html, piste A v2."
-   },
-   {
-    "name": "editeur-saisie-min-width",
-    "value": "24px",
-    "usage": "Mesure de la maquette, .saisie : min-width.",
-    "origine": "design/editeur/index.html, piste A v2."
-   },
-   {
-    "name": "editeur-scrim-padding",
-    "value": "16px",
-    "usage": "Mesure de la maquette, .scrim : padding.",
-    "origine": "design/editeur/index.html, piste A v2."
-   },
-   {
-    "name": "editeur-dlg-border",
-    "value": "1px",
-    "usage": "Mesure de la maquette, .dlg : border.",
-    "origine": "design/editeur/index.html, piste A v2."
-   },
-   {
-    "name": "editeur-dlg-border-radius",
-    "value": "8px",
-    "usage": "Mesure de la maquette, .dlg : border-radius.",
-    "origine": "design/editeur/index.html, piste A v2."
-   },
-   {
-    "name": "editeur-dlg-bd-padding",
-    "value": "20px",
-    "usage": "Mesure de la maquette, .dlg .bd : padding.",
-    "origine": "design/editeur/index.html, piste A v2."
-   },
-   {
-    "name": "editeur-dlg-bd-padding-2",
-    "value": "20px",
-    "usage": "Mesure de la maquette, .dlg .bd : padding.",
-    "origine": "design/editeur/index.html, piste A v2."
-   },
-   {
-    "name": "editeur-dlg-bd-padding-3",
-    "value": "18px",
-    "usage": "Mesure de la maquette, .dlg .bd : padding.",
-    "origine": "design/editeur/index.html, piste A v2."
-   },
-   {
-    "name": "editeur-dlg-h2-font",
-    "value": "16px",
-    "usage": "Mesure de la maquette, .dlg h2 : font.",
-    "origine": "design/editeur/index.html, piste A v2."
-   },
-   {
-    "name": "editeur-dlg-h2-font-2",
-    "value": "22px",
-    "usage": "Mesure de la maquette, .dlg h2 : font.",
-    "origine": "design/editeur/index.html, piste A v2."
-   },
-   {
-    "name": "editeur-dlg-ft-gap",
-    "value": "8px",
-    "usage": "Mesure de la maquette, .dlg .ft : gap.",
-    "origine": "design/editeur/index.html, piste A v2."
-   },
-   {
-    "name": "editeur-dlg-ft-padding",
+    "name": "editeur-reserve-haut",
     "value": "14px",
-    "usage": "Mesure de la maquette, .dlg .ft : padding.",
-    "origine": "design/editeur/index.html, piste A v2."
+    "usage": "Réserve de la vue en haut.",
+    "origine": "design/editeur-epure/index.html, piste B (reserve() piste b)."
    },
    {
-    "name": "editeur-dlg-ft-padding-2",
-    "value": "20px",
-    "usage": "Mesure de la maquette, .dlg .ft : padding.",
-    "origine": "design/editeur/index.html, piste A v2."
+    "name": "editeur-reserve-bas",
+    "value": "34px",
+    "usage": "Réserve de la vue en bas, en plus de la palette.",
+    "origine": "design/editeur-epure/index.html, piste B (reserve() piste b)."
    },
    {
-    "name": "editeur-dlg-ft-border-top",
-    "value": "1px",
-    "usage": "Mesure de la maquette, .dlg .ft : border-top.",
-    "origine": "design/editeur/index.html, piste A v2."
+    "name": "editeur-reserve-cote",
+    "value": "36px",
+    "usage": "Réserve de la vue sur les côtés.",
+    "origine": "design/editeur-epure/index.html, piste B (reserve())."
    },
    {
-    "name": "editeur-tip-gap",
-    "value": "8px",
-    "usage": "Mesure de la maquette, .tip : gap.",
-    "origine": "design/editeur/index.html, piste A v2."
+    "name": "editeur-reserve-cote-etroite",
+    "value": "14px",
+    "usage": "Réserve des côtés, fenêtre étroite.",
+    "origine": "design/editeur-epure/index.html, piste B (reserve())."
    },
    {
-    "name": "editeur-tip-padding",
-    "value": "5px",
-    "usage": "Mesure de la maquette, .tip : padding.",
-    "origine": "design/editeur/index.html, piste A v2."
+    "name": "editeur-etroite",
+    "value": "620px",
+    "usage": "Fenêtre étroite en dessous de cette largeur.",
+    "origine": "design/editeur-epure/index.html, piste B (narrow())."
    },
    {
-    "name": "editeur-tip-padding-2",
-    "value": "8px",
-    "usage": "Mesure de la maquette, .tip : padding.",
-    "origine": "design/editeur/index.html, piste A v2."
+    "name": "editeur-ombre-flou",
+    "value": "18px",
+    "usage": "Flou de l'ombre de l'image.",
+    "origine": "design/editeur-epure/index.html, piste B (draw())."
    },
    {
-    "name": "editeur-tip-border-radius",
-    "value": "6px",
-    "usage": "Mesure de la maquette, .tip : border-radius.",
-    "origine": "design/editeur/index.html, piste A v2."
+    "name": "editeur-equerre-trait",
+    "value": "3.5px",
+    "usage": "Trait des équerres.",
+    "origine": "design/editeur-epure/index.html, piste B (brackets())."
    },
    {
-    "name": "editeur-tip-font-size",
-    "value": "12px",
-    "usage": "Mesure de la maquette, .tip : font-size.",
-    "origine": "design/editeur/index.html, piste A v2."
+    "name": "editeur-equerre-longueur",
+    "value": "22px",
+    "usage": "Longueur des équerres (au plus).",
+    "origine": "design/editeur-epure/index.html, piste B (brackets())."
    },
    {
-    "name": "editeur-tip-line-height",
-    "value": "16px",
-    "usage": "Mesure de la maquette, .tip : line-height.",
-    "origine": "design/editeur/index.html, piste A v2."
-   },
-   {
-    "name": "editeur-tip-border",
-    "value": "1px",
-    "usage": "Mesure de la maquette, .tip : border.",
-    "origine": "design/editeur/index.html, piste A v2."
-   },
-   {
-    "name": "editeur-tip-transform",
-    "value": "2px",
-    "usage": "Mesure de la maquette, .tip : transform.",
-    "origine": "design/editeur/index.html, piste A v2."
-   },
-   {
-    "name": "editeur-tip-kbd-font",
-    "value": "11px",
-    "usage": "Mesure de la maquette, .tip kbd : font.",
-    "origine": "design/editeur/index.html, piste A v2."
-   },
-   {
-    "name": "editeur-tip-kbd-font-2",
-    "value": "16px",
-    "usage": "Mesure de la maquette, .tip kbd : font.",
-    "origine": "design/editeur/index.html, piste A v2."
-   },
-   {
-    "name": "editeur-tip-kbd-padding",
-    "value": "5px",
-    "usage": "Mesure de la maquette, .tip kbd : padding.",
-    "origine": "design/editeur/index.html, piste A v2."
-   },
-   {
-    "name": "editeur-tip-kbd-border-radius",
+    "name": "editeur-equerre-ecart",
     "value": "4px",
-    "usage": "Mesure de la maquette, .tip kbd : border-radius.",
-    "origine": "design/editeur/index.html, piste A v2."
+    "usage": "Écart des équerres au bord de l'image.",
+    "origine": "design/editeur-epure/index.html, piste B (brackets())."
    },
    {
-    "name": "editeur-tip-kbd-border",
-    "value": "1px",
-    "usage": "Mesure de la maquette, .tip kbd : border.",
-    "origine": "design/editeur/index.html, piste A v2."
+    "name": "editeur-equerre-prise",
+    "value": "22px",
+    "usage": "Zone de prise d'une équerre.",
+    "origine": "design/editeur-epure/index.html, piste B (cropCorner())."
    },
    {
-    "name": "editeur-pill-btn-padding",
-    "value": "9px",
-    "usage": "Mesure de la maquette, .pill .btn : padding.",
-    "origine": "design/editeur/index.html, piste A v2."
+    "name": "editeur-equerre-ombre-flou",
+    "value": "4px",
+    "usage": "Flou de l'ombre des équerres.",
+    "origine": "design/editeur-epure/index.html, piste B (brackets())."
    },
    {
-    "name": "editeur-pill-sep-margin",
-    "value": "2px",
-    "usage": "Mesure de la maquette, .pill .sep : margin.",
-    "origine": "design/editeur/index.html, piste A v2."
+    "name": "editeur-recadrage-min",
+    "value": "40px",
+    "usage": "Recadrage : 40 px d'image au moins.",
+    "origine": "design/editeur-epure/index.html, piste B (pointermove, M=40)."
    },
    {
-    "name": "editeur-dlg-h2-marge",
-    "value": "6px",
-    "usage": "Marge sous le titre du dialogue.",
-    "origine": "design/editeur/index.html, piste A v2, .dlg h2."
+    "name": "editeur-tolerance",
+    "value": "8px",
+    "usage": "Tolérance de prise d'un objet (écran).",
+    "origine": "design/editeur-epure/index.html, piste B (hit(), 8/S.T.s)."
+   },
+   {
+    "name": "editeur-deplacement-seuil",
+    "value": "3px",
+    "usage": "Déplacement d'un objet : seuil.",
+    "origine": "design/editeur-epure/index.html, piste B (pointermove, 3 px)."
+   },
+   {
+    "name": "editeur-glisser-seuil",
+    "value": "4px",
+    "usage": "Vignette de prise : seuil du glisser natif.",
+    "origine": "design/editeur-epure/index.html, piste B (avenant §3)."
+   },
+   {
+    "name": "editeur-poignee-rayon",
+    "value": "5px",
+    "usage": "Poignées : rayon.",
+    "origine": "design/editeur-epure/index.html, piste B (contrat 0.4 (poignées gardées))."
+   },
+   {
+    "name": "editeur-poignee-trait",
+    "value": "1.5px",
+    "usage": "Poignées : trait.",
+    "origine": "design/editeur-epure/index.html, piste B (contrat 0.4)."
+   },
+   {
+    "name": "editeur-poignee-prise",
+    "value": "10px",
+    "usage": "Poignées : zone de prise.",
+    "origine": "design/editeur-epure/index.html, piste B (contrat 0.4)."
+   },
+   {
+    "name": "editeur-poignee-ombre",
+    "value": "3px",
+    "usage": "Poignées : flou de l'ombre.",
+    "origine": "design/editeur-epure/index.html, piste B (contrat 0.4)."
+   },
+   {
+    "name": "editeur-recadrage-voile",
+    "value": "0.72",
+    "usage": "Opacité du voile hors du cadre.",
+    "origine": "design/editeur-epure/index.html, piste B (globalAlpha=.72)."
    },
    {
     "name": "editeur-recadrage-echelle",
     "value": "0.97",
-    "usage": "Échelle de départ de l'animation du recadrage.",
-    "origine": "Revue de la page, chantier C : animation du recadrage."
+    "usage": "Animation du recadrage : échelle de départ.",
+    "origine": "design/editeur-epure/index.html, piste B (contrat 0.4 (animation gardée))."
    },
    {
     "name": "editeur-recadrage-opacite",
     "value": "0.6",
-    "usage": "Opacité de départ de l'animation du recadrage.",
-    "origine": "Revue de la page, chantier C : animation du recadrage."
+    "usage": "Animation du recadrage : opacité de départ.",
+    "origine": "design/editeur-epure/index.html, piste B (contrat 0.4)."
    }
   ]
  },

@@ -10,29 +10,48 @@
 </head>
 <body>
 <!--
-  Structure seulement (contrat 0.4 « Éditeur », §10) : la scène, la barre, les menus, le
-  dialogue. Le comportement (editeur.js, barre.js, outils.js) ne vise que les identifiants,
-  les data-*, les rôles et les noms ; l'habillage est dans editeur.css (jetons seulement).
-  Pictogrammes : ceux du design (piste A v2), sans ceux des outils reportés.
+  Structure seulement (avenant « Éditeur épuré », piste B « Fenêtre ») : la barre du haut, qui
+  est aussi la barre de la fenêtre sans cadre, la scène, la palette, les menus et bulles. Le
+  comportement (editeur.js, barre.js, outils.js) ne vise que les identifiants, les data-*, les
+  rôles et les noms ; l'habillage est dans editeur.css (jetons seulement). Pictogrammes et
+  instruments : ceux de design/editeur-epure/index.html.
 -->
 <svg width="0" height="0" class="defs" aria-hidden="true">
   <defs>
-    <symbol id="i-sel" viewBox="0 0 20 20"><path d="M5 3.5 15 9.2l-4.4 1.2-2.2 4.1z"/></symbol>
+    <linearGradient id="argent" x1="0" x2="1"><stop offset="0" class="argent-bord"/>
+      <stop offset=".45" class="argent-milieu"/><stop offset="1" class="argent-bord"/>
+    </linearGradient>
+    <symbol id="i-x" viewBox="0 0 20 20"><path d="M5.5 5.5l9 9M14.5 5.5l-9 9"/></symbol>
+    <symbol id="i-save" viewBox="0 0 20 20"><path d="M10 3v9M6.5 8.5 10 12l3.5-3.5"/>
+      <path d="M3.5 13v2a2 2 0 0 0 2 2h9a2 2 0 0 0 2-2v-2"/></symbol>
+    <symbol id="i-copy" viewBox="0 0 20 20"><rect x="6.5" y="6.5" width="10" height="10"
+      rx="1.5"/><path d="M13.5 6.5V4.5A1.5 1.5 0 0 0 12 3H4.5A1.5 1.5 0 0 0 3 4.5V12a1.5 1.5 0 0 0
+      1.5 1.5h2"/></symbol>
+    <symbol id="i-saveas" viewBox="0 0 20 20">
+      <path d="M4 4.5h9l3 3V15a1.5 1.5 0 0 1-1.5 1.5h-9A1.5 1.5 0 0 1 4 15z"/>
+      <path d="M7 4.5v3.5h5V4.5M7 16.5v-4h6v4"/></symbol>
+    <symbol id="i-drag" viewBox="0 0 20 20"><rect x="3" y="5" width="9" height="9" rx="1.5"/>
+      <path d="M10 10h7M14 7l3 3-3 3"/></symbol>
+    <symbol id="i-grip" viewBox="0 0 20 20"><path d="M6 8h8M6 12h8"/></symbol>
+    <symbol id="i-undo" viewBox="0 0 20 20"><path d="M7.5 5 4 8.5 7.5 12"/>
+      <path d="M4 8.5h8a4 4 0 0 1 0 8H9"/></symbol>
+    <symbol id="i-redo" viewBox="0 0 20 20"><path d="M12.5 5 16 8.5 12.5 12"/>
+      <path d="M16 8.5H8a4 4 0 0 0 0 8h3"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 20 20"><path d="M10 4v12M4 10h12"/></symbol>
+    <symbol id="i-more" viewBox="0 0 20 20">
+      <circle cx="4.5" cy="10" r="1.2" fill="currentColor" stroke="none"/>
+      <circle cx="10" cy="10" r="1.2" fill="currentColor" stroke="none"/>
+      <circle cx="15.5" cy="10" r="1.2" fill="currentColor" stroke="none"/></symbol>
     <symbol id="i-arrow" viewBox="0 0 20 20"><path d="M4.5 15.5 15 5M8.5 5H15v6.5"/></symbol>
     <symbol id="i-arrowc" viewBox="0 0 20 20"><path d="M4 15.5C5 9 9 5.5 15 5"/>
       <path d="M10.5 3.2 15 5l-2.6 4"/></symbol>
-    <symbol id="i-arrowd" viewBox="0 0 20 20">
-      <path d="M5 15 15 5M9.5 5H15v5.5M10.5 15H5V9.5"/></symbol>
     <symbol id="i-rect" viewBox="0 0 20 20">
       <rect x="3.5" y="5" width="13" height="10" rx="2.5"/></symbol>
     <symbol id="i-ell" viewBox="0 0 20 20"><ellipse cx="10" cy="10" rx="6.8" ry="5.3"/></symbol>
     <symbol id="i-line" viewBox="0 0 20 20"><path d="M4.5 15.5 15.5 4.5"/></symbol>
-    <symbol id="i-pen" viewBox="0 0 20 20">
-      <path d="M4 16l1-3.5 8.5-8.5a1.8 1.8 0 0 1 2.5 2.5L7.5 15z"/><path d="M12 5.5l2.5 2.5"/>
-    </symbol>
-    <symbol id="i-hl" viewBox="0 0 20 20"><path d="M5 13.5 11.5 7l2.5 2.5L7.5 16H5z"/>
-      <path d="M3 18h14" stroke-width="2.4" opacity=".45"/></symbol>
     <symbol id="i-text" viewBox="0 0 20 20"><path d="M5 5.5V4h10v1.5M10 4v12M7.5 16h5"/></symbol>
+    <symbol id="i-shape" viewBox="0 0 20 20"><rect x="3" y="7.5" width="9" height="9" rx="1.5"/>
+      <circle cx="12.5" cy="7.5" r="4.5"/></symbol>
     <symbol id="i-num" viewBox="0 0 20 20"><circle cx="10" cy="10" r="7"/>
       <path d="M8.6 7.6 10.4 6.5v7M8.6 13.5h3.6"/></symbol>
     <symbol id="i-pixel" viewBox="0 0 20 20">
@@ -43,26 +62,17 @@
       <circle cx="10" cy="10" r="3" opacity=".6"/></symbol>
     <symbol id="i-box" viewBox="0 0 20 20">
       <rect x="3.5" y="6" width="13" height="8" rx="1.5" fill="currentColor"/></symbol>
-    <symbol id="i-crop" viewBox="0 0 20 20"><path d="M6 2.5V14h11.5M2.5 6H14v11.5"/></symbol>
-    <symbol id="i-undo" viewBox="0 0 20 20"><path d="M7.5 5 4 8.5 7.5 12"/>
-      <path d="M4 8.5h8a4 4 0 0 1 0 8H9"/></symbol>
-    <symbol id="i-redo" viewBox="0 0 20 20"><path d="M12.5 5 16 8.5 12.5 12"/>
-      <path d="M16 8.5H8a4 4 0 0 0 0 8h3"/></symbol>
-    <symbol id="i-more" viewBox="0 0 20 20"><circle cx="5" cy="10" r=".6" fill="currentColor"/>
-      <circle cx="10" cy="10" r=".6" fill="currentColor"/>
-      <circle cx="15" cy="10" r=".6" fill="currentColor"/></symbol>
-    <symbol id="i-pick" viewBox="0 0 20 20">
-      <path d="M12.5 4.2a1.9 1.9 0 0 1 2.7 0l.6.6a1.9 1.9 0 0 1 0 2.7l-1.6 1.6-3.3-3.3z"/>
-      <path d="m11.6 6.1-6.8 6.8-.8 3.1 3.1-.8 6.8-6.8"/></symbol>
-    <symbol id="i-full" viewBox="0 0 20 20">
-      <rect x="3.5" y="3.5" width="13" height="13" rx="1.5" stroke-dasharray="2.5 2.2"/></symbol>
-    <symbol id="i-saveas" viewBox="0 0 20 20">
-      <path d="M4 4.5h9l3 3V15a1.5 1.5 0 0 1-1.5 1.5h-9A1.5 1.5 0 0 1 4 15z"/>
-      <path d="M7 4.5v3.5h5V4.5M7 16.5v-4h6v4"/></symbol>
+    <symbol id="i-spot" viewBox="0 0 20 20">
+      <rect x="2.5" y="3.5" width="15" height="13" rx="1.5" opacity=".45"/>
+      <rect x="6" y="7" width="8" height="6" rx="1"/></symbol>
+    <symbol id="i-spotE" viewBox="0 0 20 20">
+      <rect x="2.5" y="3.5" width="15" height="13" rx="1.5" opacity=".45"/>
+      <ellipse cx="10" cy="10" rx="4.5" ry="3.4"/></symbol>
+    <symbol id="i-op" viewBox="0 0 20 20"><circle cx="10" cy="10" r="6.5"/>
+      <path d="M10 3.5a6.5 6.5 0 0 1 0 13z" fill="currentColor" stroke="none"/></symbol>
     <symbol id="i-dup" viewBox="0 0 20 20"><rect x="6.5" y="6.5" width="10" height="10" rx="1.5"/>
       <path d="M13.5 6.5V4.5A1.5 1.5 0 0 0 12 3H4.5A1.5 1.5 0 0 0 3 4.5V12a1.5 1.5 0 0 0
-        1.5 1.5h2"/>
-    </symbol>
+        1.5 1.5h2"/></symbol>
     <symbol id="i-front" viewBox="0 0 20 20">
       <rect x="3" y="3" width="9" height="9" rx="1.5" opacity=".5"/>
       <rect x="8" y="8" width="9" height="9" rx="1.5" fill="currentColor" fill-opacity=".25"/>
@@ -72,109 +82,94 @@
       <rect x="8" y="8" width="9" height="9" rx="1.5" opacity=".5"/></symbol>
     <symbol id="i-del" viewBox="0 0 20 20">
       <path d="M4 6h12M8 6V4.5h4V6M6 6l.7 9.5a1.5 1.5 0 0 0 1.5 1.5h3.6a1.5 1.5 0 0 0
-        1.5-1.5L14 6"/>
-    </symbol>
-    <symbol id="i-grip" viewBox="0 0 20 20"><circle cx="8" cy="6" r=".5"/>
-      <circle cx="12" cy="6" r=".5"/><circle cx="8" cy="10" r=".5"/>
-      <circle cx="12" cy="10" r=".5"/><circle cx="8" cy="14" r=".5"/>
-      <circle cx="12" cy="14" r=".5"/></symbol>
-    <symbol id="i-tune" viewBox="0 0 20 20"><path d="M4 6.5h12M4 13.5h12"/>
-      <circle class="tune-rond" cx="7.5" cy="6.5" r="1.8"/>
-      <circle class="tune-rond" cx="12.5" cy="13.5" r="1.8"/></symbol>
-    <symbol id="i-fit" viewBox="0 0 20 20">
-      <path d="M3.5 7.5v-4h4M12.5 3.5h4v4M16.5 12.5v4h-4M7.5 16.5h-4v-4"/></symbol>
-    <symbol id="i-z100" viewBox="0 0 20 20"><rect x="2.5" y="4" width="15" height="12" rx="2"/>
-      <path d="M6.5 8v4.5M13.5 8v4.5"/><circle cx="10" cy="9" r=".4" fill="currentColor"/>
-      <circle cx="10" cy="11.8" r=".4" fill="currentColor"/></symbol>
+        1.5-1.5L14 6"/></symbol>
   </defs>
 </svg>
 
 <div class="fenetre" id="fenetre">
+  <header class="tbar" id="barre-haut" data-tauri-drag-region>
+    <button class="rb" type="button" data-act="fermer" aria-label="Fermer" title="Fermer"
+      aria-haspopup="menu" aria-expanded="false"><svg class="ico"><use href="#i-x"/></svg>
+    </button>
+    <div class="sp" data-tauri-drag-region></div>
+    <button class="rb" type="button" data-act="enregistrer" aria-label="Enregistrer"
+      title="Enregistrer"><svg class="ico"><use href="#i-save"/></svg></button>
+    <button class="ok" type="button" data-act="copier" aria-label="Copier" title="Copier"><svg
+      viewBox="0 0 24 24" aria-hidden="true"><path d="M5.5 12.5l4.2 4.2L18.5 7.5"/></svg></button>
+  </header>
+
   <main class="scene" id="scene" tabindex="-1" aria-label="Annoter la capture">
     <div class="ombre-image" id="ombre-image" hidden></div>
     <canvas class="vue" id="vue"></canvas>
     <textarea class="saisie" id="saisie" rows="1" hidden aria-label="Texte de l'annotation"
       spellcheck="false"></textarea>
-    <div class="etiquette-zoom" id="etiquette-zoom" aria-live="polite"></div>
-    <div class="message" id="message" role="status"></div>
-
-    <div class="pop menu ctx" id="menu-objet" role="menu" aria-label="Forme">
-      <button class="mi" type="button" role="menuitem" data-act="dupliquer"><svg class="ico">
-        <use href="#i-dup"/></svg>Dupliquer</button>
-      <button class="mi" type="button" role="menuitem" data-act="devant"><svg class="ico">
-        <use href="#i-front"/></svg>Premier plan</button>
-      <button class="mi" type="button" role="menuitem" data-act="derriere"><svg class="ico">
-        <use href="#i-back"/></svg>Arrière-plan</button>
-      <div class="msep"></div>
-      <button class="mi danger" type="button" role="menuitem" data-act="supprimer"><svg
-        class="ico"><use href="#i-del"/></svg>Supprimer</button>
-    </div>
-
-    <div class="barre" id="barre">
-      <div class="pill" id="pastille-outils" role="toolbar" aria-label="Outils">
-        <div class="outils" id="outils"><span class="ind" id="indicateur" aria-hidden="true"></span>
-        </div>
-        <span class="sep"></span>
-        <button class="swb" id="bouton-reglages" type="button" aria-haspopup="dialog"
-          aria-expanded="false" aria-label="Réglages de l'outil" data-tip="Réglages"><i></i><svg
-          class="ico gl" aria-hidden="true"><use href="#i-tune"/></svg></button>
-        <div class="pop menu" id="menu-variantes" role="menu"></div>
-        <div class="pop" id="reglages-outil" role="dialog" aria-label="Réglages de l'outil"></div>
-      </div>
-      <div class="pill zpill" id="pastille-zoom" role="toolbar" aria-label="Zoom">
-        <button class="tl" id="zoom-ajuster" type="button" aria-label="Ajuster" data-tip="Ajuster"
-          data-key="Ctrl 0" aria-pressed="true"><svg class="ico"><use href="#i-fit"/></svg></button>
-        <button class="tl" id="zoom-reel" type="button" aria-label="Taille réelle"
-          data-tip="Taille réelle" data-key="Ctrl 1" aria-pressed="false"><svg class="ico">
-          <use href="#i-z100"/></svg></button>
-      </div>
-      <div class="pill" id="pastille-actions" role="toolbar" aria-label="Actions">
-        <button class="tl" type="button" data-act="annuler" aria-label="Annuler" data-tip="Annuler"
-          data-key="Ctrl Z" disabled><svg class="ico"><use href="#i-undo"/></svg></button>
-        <button class="tl" type="button" data-act="retablir" aria-label="Rétablir"
-          data-tip="Rétablir" data-key="Ctrl Y" disabled><svg class="ico"><use href="#i-redo"/>
-          </svg>
-        </button>
-        <span class="sep"></span>
-        <button class="btn ghost vb" type="button" data-act="enregistrer" data-tip="Enregistrer"
-          data-key="Ctrl S"><svg class="vi" viewBox="0 0 16 16" aria-hidden="true"><path
-          class="tray" d="M2.5 10.5v1.5a1.5 1.5 0 0 0 1.5 1.5h8a1.5 1.5 0 0 0 1.5-1.5v-1.5"/><g
-          class="arw"><path d="M8 2.5v7M5.2 6.8 8 9.6l2.8-2.8"/></g><path class="ok"
-          d="M3.5 7.4 6.6 10.4 12.5 3.8"/></svg><span class="lbs"><span
-          class="l1">Enregistrer</span><span class="l2" aria-hidden="true">Enregistré</span></span>
-        </button>
-        <button class="btn accent vb" type="button" data-act="copier" data-tip="Copier"
-          data-key="Ctrl C"><svg class="vi" viewBox="0 0 16 16" aria-hidden="true"><rect
-          class="sh-b" x="5" y="5" width="8" height="8" rx="1.5"/><rect class="sh-f" x="3" y="3"
-          width="8" height="8" rx="1.5"/><path class="ok"
-          d="M3.5 8.4 6.6 11.4 12.5 4.8"/></svg><span
-          class="lbs"><span class="l1">Copier</span><span class="l2"
-          aria-hidden="true">Copié</span></span></button>
-        <button class="tl" id="bouton-plus" type="button" aria-haspopup="menu" aria-expanded="false"
-          aria-label="Plus" data-tip="Plus"><svg class="ico"><use href="#i-more"/></svg></button>
-        <div class="pop menu" id="menu-plus" role="menu" aria-label="Plus d'actions">
-          <button class="mi" type="button" role="menuitem" data-act="enregistrer_sous"><svg
-            class="ico"><use href="#i-saveas"/></svg>Enregistrer sous…</button>
-          <div class="mi drag" id="glisser" role="menuitem" tabindex="-1" aria-disabled="false"><img
-            alt="" id="glisser-image"><span>Glisser</span><svg class="ico grip"><use
-            href="#i-grip"/></svg></div>
-        </div>
-      </div>
-    </div>
   </main>
 
-  <div class="scrim" id="voile">
-    <div class="dlg" id="dialogue" role="alertdialog" aria-modal="true"
-      aria-labelledby="dialogue-titre">
-      <div class="bd"><h2 id="dialogue-titre">Fermer sans garder ?</h2></div>
-      <div class="ft">
-        <button class="btn accent" type="button" data-act="copier_fermer">Copier et fermer</button>
-        <button class="btn" type="button" data-act="ne_pas_garder">Ne pas garder</button>
-        <button class="btn" type="button" data-act="continuer">Continuer</button>
-      </div>
-    </div>
+  <div class="pal" id="palette" role="toolbar" aria-label="Annotation">
+    <button class="pb" type="button" data-act="annuler" aria-label="Annuler" title="Annuler"
+      disabled><svg class="ico"><use href="#i-undo"/></svg></button>
+    <button class="pb" type="button" data-act="retablir" aria-label="Rétablir" title="Rétablir"
+      disabled><svg class="ico"><use href="#i-redo"/></svg></button>
+    <div class="dv"></div>
+    <div class="tools" id="outils"></div>
+    <div class="dv"></div>
+    <div class="cols" id="couleurs"></div>
+    <button class="pb cur" type="button" id="bouton-couleur" aria-label="Couleur" title="Couleur"
+      aria-haspopup="dialog" aria-expanded="false"><span class="dot" id="pastille"></span>
+    </button>
+    <button class="pb fill" type="button" id="bouton-ajouter" aria-label="Ajouter"
+      title="Ajouter" aria-haspopup="menu" aria-expanded="false"><svg class="ico"><use
+      href="#i-plus"/></svg></button>
+    <button class="pb fill" type="button" id="bouton-plus" aria-label="Plus" title="Plus"
+      aria-haspopup="menu" aria-expanded="false"><svg class="ico"><use href="#i-more"/></svg>
+    </button>
   </div>
+  <input type="color" class="cc" id="autre-couleur" tabindex="-1" aria-hidden="true">
+
+  <div class="pop" id="reglages-outil" role="dialog" aria-label="Réglages de l'outil"></div>
+  <div class="pop" id="menu-couleur" role="dialog" aria-label="Couleur"><div class="cols"
+    id="couleurs-menu"></div></div>
+  <div class="pop" id="menu-ajouter" role="menu" aria-label="Ajouter">
+    <button class="mi" type="button" role="menuitem" data-outil="texte"><svg class="ico"><use
+      href="#i-text"/></svg>Texte</button>
+    <button class="mi" type="button" role="menuitem" data-outil="forme"><svg class="ico"><use
+      href="#i-shape"/></svg>Forme</button>
+    <button class="mi" type="button" role="menuitem" data-outil="numero"><svg class="ico"><use
+      href="#i-num"/></svg>Numéro</button>
+    <button class="mi" type="button" role="menuitem" data-outil="flou"><svg class="ico"><use
+      href="#i-pixel"/></svg>Flou</button>
+    <button class="mi" type="button" role="menuitem" data-outil="projecteur"><svg class="ico">
+      <use href="#i-spot"/></svg>Projecteur</button>
+  </div>
+  <div class="pop" id="menu-plus" role="menu" aria-label="Plus">
+    <button class="mi" type="button" role="menuitem" data-act="enregistrer_sous"><svg
+      class="ico"><use href="#i-saveas"/></svg>Enregistrer sous</button>
+    <button class="mi" type="button" role="menuitem" data-act="glisser"><svg class="ico"><use
+      href="#i-drag"/></svg>Glisser vers une appli</button>
+  </div>
+  <div class="pop" id="menu-fermer" role="menu" aria-label="Fermer">
+    <button class="mi" type="button" role="menuitem" data-act="copier_fermer"><svg
+      class="ico"><use href="#i-copy"/></svg>Copier et fermer</button>
+    <button class="mi danger" type="button" role="menuitem" data-act="fermer_sans_copier"><svg
+      class="ico"><use href="#i-x"/></svg>Fermer sans copier</button>
+  </div>
+  <div class="pop" id="menu-objet" role="menu" aria-label="Forme">
+    <button class="mi" type="button" role="menuitem" data-act="dupliquer"><svg class="ico">
+      <use href="#i-dup"/></svg>Dupliquer</button>
+    <button class="mi" type="button" role="menuitem" data-act="devant"><svg class="ico">
+      <use href="#i-front"/></svg>Premier plan</button>
+    <button class="mi" type="button" role="menuitem" data-act="derriere"><svg class="ico">
+      <use href="#i-back"/></svg>Arrière-plan</button>
+    <button class="mi danger" type="button" role="menuitem" data-act="supprimer"><svg
+      class="ico"><use href="#i-del"/></svg>Supprimer</button>
+  </div>
+
+  <div class="ghost" id="vignette-prise" role="button" tabindex="-1"
+    aria-label="Glisser vers une appli" title="Glisser vers une appli" hidden><img alt=""
+    id="vignette-image"><svg class="ico" aria-hidden="true"><use href="#i-grip"/></svg></div>
+  <div class="etiquette-zoom" id="etiquette-zoom" aria-live="polite"></div>
+  <div class="msg" id="message" role="status"><i aria-hidden="true"><svg viewBox="0 0 12 12"><path
+    d="M2.5 6.3l2.3 2.3 4.7-5"/></svg></i><span></span></div>
 </div>
-<div class="tip" id="infobulle" role="tooltip"></div>
 </body>
 </html>

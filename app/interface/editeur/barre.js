@@ -1,8 +1,8 @@
-// Barre de l'éditeur (contrat 0.4 « Éditeur », §0, §3.3, §4.5, §4.6, §5, §7.2, §7.4) :
-// outils et leurs variantes, fenêtre « Réglages de l'outil », zoom, actions, menus,
-// dialogue de fermeture, infobulles et clavier. Textes posés en texte, jamais en HTML.
-// D'après le design validé (design/editeur/index.html, piste A v2), sans Mise en avant, Fond
-// ni Épingler (U1, U2).
+// Barre du haut et palette de l'éditeur (avenant « Éditeur épuré », piste B « Fenêtre ») :
+// instruments et emplacement de l'outil venu de « Ajouter », bulle « Réglages de l'outil »,
+// pastilles de couleur, menus « Ajouter », « Plus », « Fermer » et de l'objet, vignette de
+// prise, message, clavier. Textes posés en texte, jamais en HTML ; les instruments sont ceux
+// de la maquette (constantes, sans texte de l'utilisateur).
 
 import { jeton, jetonNombre, DEFAUTS } from "./editeur.js";
 
@@ -10,135 +10,145 @@ const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => Array.from(r.querySelectorAll(s));
 const NS = "http://www.w3.org/2000/svg";
 
-// Outils, dans l'ordre de la barre (§0). `touche` du groupe, ou de chaque variante.
-export const GROUPES = [
-  { id: "selection", nom: "Sélection", touche: "V", picto: "sel" },
-  {
-    id: "fleche",
+// Outils (avenant §2). Variante : [id, nom, picto, touche].
+export const OUTILS = {
+  fleche: {
     nom: "Flèche",
     touche: "A",
     variantes: [
-      { id: "droite", nom: "Droite", picto: "arrow" },
-      { id: "courbe", nom: "Courbe", picto: "arrowc" },
-      { id: "double", nom: "Double", picto: "arrowd" },
+      ["droite", "Droite", "arrow"],
+      ["courbe", "Courbe", "arrowc"],
     ],
   },
-  {
-    id: "formes",
-    nom: "Formes",
+  stylo: { nom: "Stylo", touche: "P" },
+  surligneur: { nom: "Surligneur", touche: "H" },
+  gomme: { nom: "Gomme" },
+  texte: { nom: "Texte", touche: "T" },
+  forme: {
+    nom: "Forme",
     variantes: [
-      { id: "rectangle", nom: "Rectangle", touche: "R", picto: "rect" },
-      { id: "ellipse", nom: "Ellipse", touche: "E", picto: "ell" },
-      { id: "ligne", nom: "Ligne", touche: "L", picto: "line" },
+      ["rectangle", "Rectangle", "rect", "R"],
+      ["ellipse", "Ellipse", "ell", "E"],
+      ["ligne", "Ligne", "line", "L"],
     ],
   },
-  {
-    id: "dessin",
-    nom: "Dessin",
+  numero: { nom: "Numéro", touche: "N" },
+  flou: {
+    nom: "Flou",
     variantes: [
-      { id: "crayon", nom: "Crayon", touche: "P", picto: "pen" },
-      { id: "surligneur", nom: "Surligneur", touche: "H", picto: "hl" },
+      ["pixeliser", "Pixeliser", "pixel", "B"],
+      ["flouter", "Flouter", "smooth"],
+      ["bloc", "Bloc noir", "box"],
     ],
   },
-  { id: "texte", nom: "Texte", touche: "T", picto: "text" },
-  { id: "numeros", nom: "Numéros", touche: "N", picto: "num" },
-  {
-    id: "masquer",
-    nom: "Masquer",
+  projecteur: {
+    nom: "Projecteur",
     variantes: [
-      { id: "pixeliser", nom: "Pixeliser", touche: "B", picto: "pixel" },
-      { id: "flouter", nom: "Flouter", picto: "smooth" },
-      { id: "bloc", nom: "Bloc noir", picto: "box" },
+      ["rectangle", "Rectangle", "spot"],
+      ["ovale", "Ovale", "spotE"],
     ],
   },
-  { id: "recadrer", nom: "Recadrer", touche: "C", picto: "crop", ratios: true },
-];
-export const RATIOS = [
-  [0, "Libre"],
-  [1, "1:1"],
-  [4 / 3, "4:3"],
-  [16 / 9, "16:9"],
-];
+};
+export const BASE = ["fleche", "stylo", "surligneur", "gomme"];
+export const AJOUTS = ["texte", "forme", "numero", "flou", "projecteur"];
 
 // Sorte de l'outil (variante comprise) → type d'objet créé.
 export const TYPE_DE_SORTE = {
   droite: "fleche",
   courbe: "fleche",
-  double: "fleche",
   rectangle: "rectangle",
   ellipse: "ellipse",
   ligne: "ligne",
   crayon: "crayon",
   surligneur: "surligneur",
   texte: "texte",
-  numeros: "numero",
+  numero: "numero",
   pixeliser: "masque",
   flouter: "masque",
   bloc: "masque",
+  projecteur: "projecteur",
 };
-export const SORTE_DE_MASQUE = { pixeliser: "pixeliser", flouter: "flouter", bloc: "bloc" };
 
-const groupe = (id) => GROUPES.find((g) => g.id === id);
 export function sorteOutil(prefs) {
-  const g = groupe(prefs.outil);
-  return g.variantes ? prefs.variantes[g.id] : g.id;
+  const o = prefs.outil;
+  if (o === "stylo") return "crayon";
+  if (o === "fleche" || o === "forme" || o === "flou") return prefs.variantes[o];
+  return o;
 }
 export function sorteObjet(o) {
   if (!o) return null;
-  if (o.type === "fleche") return o.cx != null ? "courbe" : o.double ? "double" : "droite";
+  if (o.type === "fleche") return o.cx != null ? "courbe" : "droite";
   if (o.type === "masque") return o.sorte;
-  if (o.type === "numero") return "numeros";
   return o.type;
 }
 
-// Lignes de la fenêtre des réglages (§3.3) par sorte.
-const AVEC_COULEUR = new Set([
-  "droite",
-  "courbe",
-  "double",
-  "rectangle",
-  "ellipse",
-  "ligne",
-  "crayon",
-  "surligneur",
-  "texte",
-  "numeros",
-]);
-const AVEC_EPAISSEUR = new Set([
-  "droite",
-  "courbe",
-  "double",
-  "rectangle",
-  "ellipse",
-  "ligne",
-  "crayon",
-  "surligneur",
-]);
-const AVEC_OPACITE = new Set([
-  "droite",
-  "courbe",
-  "double",
-  "rectangle",
-  "ellipse",
-  "ligne",
-  "crayon",
-  "texte",
-  "numeros",
-]);
+const TRAITS = ["droite", "courbe", "rectangle", "ellipse", "ligne", "crayon", "surligneur"];
+const AVEC_COULEUR = new Set([...TRAITS, "texte", "numero"]);
+const AVEC_OPACITE = new Set([...AVEC_COULEUR].filter((s) => s !== "surligneur"));
+export const TAILLES_TEXTE = [20, 28, 40];
 
-// Réglage → champ de l'objet, et à quels objets il s'applique.
+// Réglage → champ de l'objet, et à quelles sortes d'objet il s'applique.
 const CHAMPS = {
   couleur: ["couleur", (s) => AVEC_COULEUR.has(s)],
-  epaisseur: ["epaisseur", (s) => AVEC_EPAISSEUR.has(s)],
-  plein: ["plein", (s) => s === "rectangle" || s === "ellipse"],
-  arrondi: ["arrondi", (s) => s === "rectangle"],
+  epaisseur: ["epaisseur", (s) => TRAITS.includes(s)],
   tailleTexte: ["taille", (s) => s === "texte"],
-  gras: ["gras", (s) => s === "texte"],
-  styleTexte: ["style", (s) => s === "texte"],
-  numero: ["rayon", (s) => s === "numeros"],
+  numero: ["rayon", (s) => s === "numero"],
   intensite: ["intensite", (s) => s === "pixeliser" || s === "flouter"],
   opacite: ["opacite", (s) => AVEC_OPACITE.has(s)],
 };
+
+// Instruments dessinés de la maquette (instSVG), en 28 × 90 ; les couleurs par classes.
+const BOUT = {
+  stylo:
+    '<path class="t" d="M8 28 L13 9 h2 L20 28Z"/>' +
+    '<path d="M12.4 12 L14 5.5 L15.6 12Z" fill="currentColor"/>',
+  fleche:
+    '<path class="t" d="M11 28V15h6v13z"/><path d="M6.5 16.5 14 4l7.5 12.5z" fill="currentColor"/>',
+  surligneur:
+    '<path d="M7 28V17l14-7v18z" fill="currentColor" opacity=".9"/>' +
+    '<path class="ombre-bout" d="M7 17l14-7v3L7 20z"/>',
+  gomme:
+    '<path class="gomme" d="M7 28V15a7 7 0 0 1 14 0v13z"/>' +
+    '<path d="M7 26h14" stroke-opacity=".12"/>',
+  texte:
+    '<path class="t" d="M8.5 28 13 9.5h2L19.5 28z"/><path d="M14 9.5V20" stroke-opacity=".3"/>' +
+    '<path d="M13 9.5 14 5l1 4.5z" fill="currentColor"/>',
+  forme:
+    '<path class="t" d="M7.5 28V17l3-5h7l3 5v11z"/>' +
+    '<rect x="10.5" y="5" width="7" height="7" rx="1.2" fill="currentColor"/>',
+  numero:
+    '<path class="t" d="M8 28v-9q0-6 6-6t6 6v9z"/>' +
+    '<ellipse cx="14" cy="11" rx="6" ry="2.6" fill="currentColor"/>',
+  flou:
+    '<path class="t" d="M8 28c0-9 2.6-17 6-21 3.4 4 6 12 6 21z"/>' +
+    '<path d="M14 9c-1.4 3-2.2 9-2.2 19M14 9c1.4 3 2.2 9 2.2 19"' +
+    ' stroke-opacity=".35" fill="none"/>',
+  projecteur:
+    '<path class="t" d="M8.5 28v-7l-1.5-9h14l-1.5 9v7z"/>' +
+    '<ellipse class="lumiere" cx="14" cy="12" rx="7" ry="2.4"/>' +
+    '<ellipse class="coeur" cx="14" cy="12" rx="3.5" ry="1.1"/>',
+};
+const GRAVURE = {
+  texte: '<path class="em" d="M11 52h6M14 52v9"/>',
+  forme: '<rect class="em" x="10.5" y="51" width="7" height="7" rx="1"/>',
+  numero: '<path class="em" d="M12.6 52.5 14.4 51v10"/>',
+  flou:
+    '<path class="em" d="M10.5 51h2v2h-2zM15.5 51h2v2h-2zM13 53.5h2v2h-2z' +
+    'M10.5 56h2v2h-2zM15.5 56h2v2h-2z"/>',
+  projecteur: '<circle class="em" cx="14" cy="55" r="3.2"/>',
+};
+const SANS_BAGUE = new Set(["gomme", "flou", "projecteur"]);
+function instrument(t) {
+  const bague = SANS_BAGUE.has(t)
+    ? ""
+    : '<rect x="7" y="38" width="14" height="5" fill="currentColor"/>';
+  const texte =
+    `<svg xmlns="${NS}" class="inst" viewBox="0 0 28 90" aria-hidden="true">` +
+    '<rect class="b" x="7" y="27" width="14" height="66" rx="2.5"/>' +
+    `${bague}${BOUT[t]}${GRAVURE[t] || ""}</svg>`;
+  const svg = new DOMParser().parseFromString(texte, "image/svg+xml").documentElement;
+  return document.importNode(svg, true);
+}
 
 function picto(id, classe = "ico") {
   const svg = document.createElementNS(NS, "svg");
@@ -155,237 +165,175 @@ function el(tag, classe, texte) {
   if (texte != null) e.textContent = texte;
   return e;
 }
+function nommer(b, nom) {
+  b.setAttribute("aria-label", nom);
+  b.title = nom;
+}
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 
 export function installerBarre(ed) {
   const fenetre = $("#fenetre");
   const scene = $("#scene");
+  const palette = $("#palette");
   const outilsEl = $("#outils");
-  const ind = $("#indicateur");
-  const variantes = $("#menu-variantes");
   const reglages = $("#reglages-outil");
-  const bReglages = $("#bouton-reglages");
+  const menuCouleur = $("#menu-couleur");
+  const ajouter = $("#menu-ajouter");
   const plus = $("#menu-plus");
-  const bPlus = $("#bouton-plus");
+  const menuFermer = $("#menu-fermer");
   const menuObjet = $("#menu-objet");
-  const voile = $("#voile");
-  const pops = [variantes, reglages, plus, menuObjet];
+  const bAjouter = $("#bouton-ajouter");
+  const bPlus = $("#bouton-plus");
+  const bCouleur = $("#bouton-couleur");
+  const bFermer = $('[data-act="fermer"]');
+  const bCopier = $('[data-act="copier"]');
+  const autre = $("#autre-couleur");
+  const vignette = $("#vignette-prise");
+  const pops = [reglages, menuCouleur, ajouter, plus, menuFermer, menuObjet];
   let ouvreur = null;
-  let marqueGlissiere = 0;
-  let glisserGrise = false;
   let reglant = false;
 
   const prefs = () => ed.prefs ?? DEFAUTS;
   const sorte = () => sorteOutil(prefs());
-  // Sorte que règle la fenêtre : celle du premier objet choisi avec Sélection.
-  const sorteReglee = () =>
-    prefs().outil === "selection" ? sorteObjet(ed.objetsChoisis()[0]) : sorte();
+  const couleurDe = (s) =>
+    s === "surligneur" ? prefs().couleurSurligneur : AVEC_COULEUR.has(s) ? prefs().couleur : null;
 
-  // ---------- outils ----------
-  for (const g of GROUPES) {
+  // ---------- instruments ----------
+  for (const t of [...BASE, ""]) {
     const b = el("button", "tl");
     b.type = "button";
-    b.dataset.outil = g.id;
-    b.setAttribute("aria-pressed", "false");
-    b.setAttribute("aria-label", g.nom);
-    if (g.variantes || g.ratios) {
-      b.setAttribute("aria-haspopup", "menu");
-      b.setAttribute("aria-expanded", "false");
-    }
-    b.appendChild(picto(g.picto || g.variantes[0].picto));
-    if (g.variantes || g.ratios) {
-      const c = el("span", "chev");
-      c.setAttribute("aria-hidden", "true");
-      b.appendChild(c);
-    }
-    b.addEventListener("click", () => {
-      if (prefs().outil === g.id && (g.variantes || g.ratios)) basculerVariantes(b, g);
-      else {
-        choisirOutil(g.id);
-        fermerMenus();
-      }
-    });
-    b.addEventListener("contextmenu", (e) => {
-      e.preventDefault();
-      if (!g.variantes && !g.ratios) return;
-      choisirOutil(g.id);
-      basculerVariantes(b, g, true);
-    });
+    b.dataset.place = t || "emplacement";
     outilsEl.appendChild(b);
+    b.addEventListener("click", () => {
+      const id = b.dataset.outil;
+      const encore = id === prefs().outil && !ouvert(reglages);
+      fermerMenus();
+      choisirOutil(id);
+      if (encore && id !== "gomme") ouvrirReglages(b);
+    });
   }
+  const emplacement = $('[data-place="emplacement"]', outilsEl);
+  function poserInstrument(b, t) {
+    if (b.dataset.outil === t) return false;
+    b.dataset.outil = t;
+    nommer(b, OUTILS[t].nom);
+    b.replaceChildren(instrument(t));
+    return true;
+  }
+  for (const t of BASE) poserInstrument($(`[data-place="${t}"]`, outilsEl), t);
 
   function synchroniserOutils() {
     const p = prefs();
-    for (const g of GROUPES) {
-      const b = $(`[data-outil="${g.id}"]`, outilsEl);
-      const v = g.variantes ? g.variantes.find((x) => x.id === p.variantes[g.id]) : null;
-      b.setAttribute("aria-pressed", p.outil === g.id ? "true" : "false");
-      $("use", b).setAttribute("href", `#i-${v ? v.picto : g.picto}`);
-      const nom = v ? v.nom : g.nom;
-      const touche = v
-        ? v.touche || g.touche || g.variantes.find((x) => x.touche)?.touche
-        : g.touche;
-      b.dataset.tip = nom;
-      if (touche) {
-        b.dataset.key = touche;
-        b.setAttribute("aria-keyshortcuts", touche);
-      } else {
-        delete b.dataset.key;
-        b.removeAttribute("aria-keyshortcuts");
-      }
+    const place = p.emplacement;
+    emplacement.hidden = !OUTILS[place];
+    if (OUTILS[place] && poserInstrument(emplacement, place) && ed.affiche) {
+      emplacement.classList.remove("in");
+      void emplacement.offsetWidth;
+      emplacement.classList.add("in");
+      outilsEl.scrollLeft = outilsEl.scrollWidth;
+    }
+    for (const b of $$(".tl", outilsEl)) {
+      const t = b.dataset.outil;
+      b.setAttribute("aria-pressed", t === p.outil ? "true" : "false");
+      const s = t === p.outil ? sorte() : sorteOutil({ ...p, outil: t });
+      const c = couleurDe(s);
+      if (c) b.style.setProperty("--c", c);
+      else b.style.removeProperty("--c");
     }
   }
-
-  function placerIndicateur(instant) {
-    const b = $(`[data-outil="${prefs().outil}"]`, outilsEl);
-    if (!b) return;
-    if (instant) ind.classList.add("instant");
-    ind.style.transform = `translate(${b.offsetLeft}px, ${b.offsetTop}px)`;
-    if (instant) {
-      void ind.offsetWidth;
-      ind.classList.remove("instant");
-    }
-  }
-  new ResizeObserver(() => placerIndicateur(true)).observe(outilsEl);
 
   function choisirOutil(id, variante) {
+    if (!OUTILS[id]) return;
     ed.outils?.validerSaisie();
-    ed.outils?.arreterPipette();
     const p = prefs();
     if (variante) p.variantes[id] = variante;
     p.outil = id;
-    if (id !== "selection") ed.selection = [];
-    synchroniserOutils();
-    placerIndicateur(false);
-    synchroniserPastille();
-    if (reglages.classList.contains("ouvert")) construireReglages();
+    if (AJOUTS.includes(id)) p.emplacement = id;
+    if (id === "stylo" || id === "surligneur" || id === "gomme") ed.selection = [];
+    synchroniser();
     ed.dessiner();
   }
 
-  // ---------- menus flottants : un seul ouvert à la fois ----------
-  function fermerMenus(sauf) {
-    for (const p of pops) {
-      if (p === sauf || !p.classList.contains("ouvert")) continue;
-      p.classList.remove("ouvert");
-      if (p.contains(document.activeElement)) {
-        if (ouvreur && ouvreur !== sauf) ouvreur.focus({ preventScroll: true });
-        else scene.focus({ preventScroll: true });
-      }
-    }
-    for (const b of $$('[aria-expanded="true"]', fenetre)) {
-      if (!sauf || b !== ouvreur) b.setAttribute("aria-expanded", "false");
-    }
-  }
-  const menuOuvert = () => pops.some((p) => p.classList.contains("ouvert"));
-
-  function ouvrir(p, bouton) {
-    fermerMenus(p);
-    ouvreur = bouton;
-    p.classList.add("ouvert");
-    if (bouton) bouton.setAttribute("aria-expanded", "true");
-    placerPop(p, bouton);
-  }
-  // Au-dessus de la barre (des deux lignes si elle se replie), centré sur le bouton, dans
-  // la fenêtre.
-  function placerPop(p, bouton) {
-    if (!bouton) return;
-    const pill = p.parentElement;
-    const haut = Math.min(...$$("#barre > .pill").map((x) => x.offsetTop));
-    const ecart = jetonNombre("editeur-barre-ecart");
-    p.style.bottom = `calc(100% + ${pill.offsetTop - haut + ecart}px)`;
-    const l = p.offsetWidth;
-    const c = bouton.offsetLeft + bouton.offsetWidth / 2;
-    const pl = pill.getBoundingClientRect().left;
-    const gauche = clamp(c - l / 2, 8 - pl, window.innerWidth - 8 - l - pl);
-    p.style.left = `${gauche}px`;
-    p.style.setProperty("--ox", `${c - gauche}px`);
-  }
-
-  function basculerVariantes(bouton, g, force) {
-    if (variantes.classList.contains("ouvert") && !force) {
-      fermerMenus();
-      return;
-    }
-    variantes.replaceChildren();
-    variantes.setAttribute("aria-label", g.nom);
-    const p = prefs();
-    if (g.ratios) {
-      for (const [r, nom] of RATIOS) {
-        const m = el("button", "mi");
-        m.type = "button";
-        m.setAttribute("role", "menuitemradio");
-        m.setAttribute("aria-checked", p.ratio === r ? "true" : "false");
-        m.append(picto("crop"), nom);
-        m.addEventListener("click", () => {
-          p.ratio = r;
-          fermerMenus();
-        });
-        variantes.appendChild(m);
-      }
-      variantes.appendChild(el("div", "msep"));
-      const f = el("button", "mi");
-      f.type = "button";
-      f.setAttribute("role", "menuitem");
-      f.dataset.act = "image_entiere";
-      f.append(picto("full"), "Image entière");
-      f.disabled = !ed.h || !ed.h.doc.recadrage;
-      f.addEventListener("click", () => {
-        ed.outils.imageEntiere();
-        fermerMenus();
+  // ---------- couleurs ----------
+  function pastilles(hote) {
+    const liste = ed.dessin.COULEURS.map(([c, nom]) => [c, nom]);
+    liste.splice(3, 0, ["", "Autre couleur"]);
+    for (const [c, nom] of liste) {
+      const b = el("button", c ? "dot" : "dot wheel");
+      b.type = "button";
+      b.dataset.couleur = c;
+      nommer(b, nom);
+      if (c) b.style.setProperty("--c", c);
+      else b.appendChild(el("i"));
+      b.addEventListener("click", () => {
+        if (!c) {
+          choisirAutre();
+          return;
+        }
+        regler("couleur", c);
       });
-      variantes.appendChild(f);
-    } else {
-      for (const v of g.variantes) {
-        const m = el("button", "mi");
-        m.type = "button";
-        m.setAttribute("role", "menuitemradio");
-        m.dataset.variante = v.id;
-        m.setAttribute("aria-checked", p.variantes[g.id] === v.id ? "true" : "false");
-        m.append(picto(v.picto), v.nom);
-        m.addEventListener("click", () => {
-          choisirOutil(g.id, v.id);
-          fermerMenus();
-          bouton.focus({ preventScroll: true });
-        });
-        variantes.appendChild(m);
+      hote.appendChild(b);
+    }
+  }
+  pastilles($("#couleurs"));
+  pastilles($("#couleurs-menu"));
+  function choisirAutre() {
+    const c = prefs().autre || ed.dessin.COULEURS[0][0];
+    autre.value = c.toLowerCase();
+    try {
+      if (autre.showPicker) autre.showPicker();
+      else autre.click();
+    } catch {
+      autre.click();
+    }
+  }
+  let marqueAutre = 0;
+  autre.addEventListener("input", () => {
+    prefs().autre = autre.value.toUpperCase();
+    regler("couleur", prefs().autre, `autre-${marqueAutre}`);
+  });
+  autre.addEventListener("change", () => {
+    marqueAutre += 1;
+  });
+
+  // Couleur montrée : celle de l'objet choisi s'il en a une, sinon celle de l'outil.
+  function couleurCourante() {
+    const o = ed.objetsChoisis().find((x) => x.couleur);
+    return o ? o.couleur : couleurDe(sorte());
+  }
+  function synchroniserCouleurs() {
+    const c = couleurCourante();
+    const cu = c ? c.toUpperCase() : null;
+    const libre = prefs().autre;
+    const connue = ed.dessin.COULEURS.some((x) => x[0] === cu);
+    for (const b of $$(".dot[data-couleur]")) {
+      const d = b.dataset.couleur;
+      b.disabled = !c;
+      if (d) b.setAttribute("aria-pressed", d === cu ? "true" : "false");
+      else {
+        b.classList.toggle("has", !!libre);
+        if (libre) $("i", b).style.setProperty("--c", libre);
+        b.setAttribute("aria-pressed", libre && cu === libre && !connue ? "true" : "false");
       }
     }
-    ouvrir(variantes, bouton);
-    const coche = $('[aria-checked="true"]', variantes);
-    if (coche && bouton.matches(":focus-visible")) coche.focus();
-  }
-
-  // ---------- pastille et fenêtre « Réglages de l'outil » ----------
-  function couleurCourante(s) {
-    const o = prefs().outil === "selection" ? ed.objetsChoisis()[0] : null;
-    if (o && o.couleur) return o.couleur;
-    return s === "surligneur" ? prefs().couleurSurligneur : prefs().couleur;
-  }
-  function synchroniserPastille() {
-    const s = sorteReglee();
-    bReglages.classList.toggle("neutre", !AVEC_COULEUR.has(s));
-    $("i", bReglages).style.setProperty("--c", couleurCourante(s));
-    bReglages.disabled = !s || s === "recadrer" || s === "bloc" || s === "selection";
-    if (bReglages.disabled && reglages.classList.contains("ouvert")) fermerMenus();
+    $("#pastille").style.setProperty("--c", c || "transparent");
+    bCouleur.classList.toggle("none", !c);
+    bCouleur.disabled = !c;
+    if (!c && ouvert(menuCouleur)) fermerMenus();
   }
 
   // Un réglage change : la préférence, et les objets choisis à qui il s'applique (un pas
   // d'annulation ; `marque` : une glissière tirée = un pas).
   function regler(cle, valeur, marque = null) {
     const p = prefs();
-    const s = sorteReglee();
+    const s = sorte();
     if (cle === "couleur" && s === "surligneur") p.couleurSurligneur = valeur;
-    else p[cle] = valeur;
+    else if (cle !== "couleur" || AVEC_COULEUR.has(s)) p[cle] = valeur;
     const [champ, sApplique] = CHAMPS[cle];
-    const enSelection = p.outil === "selection";
     const cibles = ed
       .objetsChoisis()
-      .filter((o) => {
-        const so = sorteObjet(o);
-        return sApplique(so) && (enSelection || so === s || o.type === TYPE_DE_SORTE[s]);
-      })
+      .filter((o) => sApplique(sorteObjet(o)))
       .map((o) => o.id);
-    if (cle === "couleur") ajouterPerso(valeur);
     if (cibles.length) {
       const v =
         cle === "numero"
@@ -393,7 +341,6 @@ export function installerBarre(ed) {
           : cle === "opacite"
             ? valeur / 100
             : valeur;
-      // La fenêtre n'est pas reconstruite sous le pointeur (glissière tirée).
       reglant = true;
       try {
         ed.modifier((doc) => {
@@ -403,249 +350,303 @@ export function installerBarre(ed) {
         reglant = false;
       }
     }
-    synchroniserPastille();
-  }
-  function ajouterPerso(c) {
-    const p = prefs();
-    c = c.toUpperCase();
-    if (ed.dessin.COULEURS.some((x) => x[0] === c) || p.perso.includes(c)) return;
-    p.perso.unshift(c);
-    p.perso = p.perso.slice(0, ed.dessin.COULEURS_PERSO_MAX);
+    synchroniserOutils();
+    synchroniserCouleurs();
   }
 
-  // Valeur montrée : celle de l'objet choisi s'il en a une, sinon la préférence.
-  function valeur(cle) {
-    const p = prefs();
-    const o = p.outil === "selection" ? ed.objetsChoisis()[0] : null;
-    const [champ, sApplique] = CHAMPS[cle];
-    if (o && sApplique(sorteObjet(o)) && o[champ] !== undefined) {
-      if (cle === "numero") return Math.max(0, ed.dessin.RAYONS_NUMERO.indexOf(o[champ]));
-      if (cle === "opacite") return Math.round(o[champ] * 100);
-      return o[champ];
+  // ---------- menus et bulles : un seul ouvert à la fois ----------
+  const ouvert = (p) => p.classList.contains("ouvert");
+  const menuOuvert = () => pops.some(ouvert);
+  // Refermer le menu « Fermer » sans choisir = l'ancien « Continuer » (editeur_garder).
+  function fermerMenus(garder = true) {
+    const fermerEtait = ouvert(menuFermer);
+    let focusDedans = false;
+    for (const p of pops) {
+      if (!ouvert(p)) continue;
+      if (p.contains(document.activeElement)) focusDedans = true;
+      p.classList.remove("ouvert");
     }
-    if (cle === "couleur") return couleurCourante(sorteReglee());
-    return p[cle];
+    for (const b of $$('[aria-expanded="true"]', fenetre)) b.setAttribute("aria-expanded", "false");
+    if (focusDedans) (ouvreur?.isConnected ? ouvreur : scene).focus({ preventScroll: true });
+    if (fermerEtait && garder) ed.garder();
   }
-
-  function segments(libelle, items, courant, choisir, sansLibelle) {
-    const r = el("div", "row");
-    if (!sansLibelle) r.appendChild(el("span", "lab", libelle));
-    const s = el("div", "seg2");
-    s.setAttribute("role", "radiogroup");
-    s.setAttribute("aria-label", libelle);
-    for (const [v, texte, nom, trait] of items) {
-      const b = el("button", "", trait == null ? texte : null);
-      b.type = "button";
-      b.setAttribute("role", "radio");
-      b.setAttribute("aria-label", nom || texte);
-      if (trait != null) b.appendChild(el("b", `t${trait}`));
-      b.setAttribute("aria-checked", v === courant ? "true" : "false");
-      b.addEventListener("click", () => {
-        choisir(v);
-        for (const x of $$("button", s)) x.setAttribute("aria-checked", x === b ? "true" : "false");
-      });
-      s.appendChild(b);
-    }
-    r.appendChild(s);
-    return r;
+  function ouvrir(p, bouton) {
+    fermerMenus();
+    ouvreur = bouton;
+    p.classList.add("ouvert");
+    if (bouton?.hasAttribute("aria-expanded")) bouton.setAttribute("aria-expanded", "true");
+    placerPop(p, bouton);
+    const premier = $("button, input", p);
+    if (premier && document.querySelector(":focus-visible")) premier.focus({ preventScroll: true });
   }
-  function glissiere(libelle, min, max, v, cle, unite, sansLibelle) {
-    const r = el("div", "row");
-    if (!sansLibelle) r.appendChild(el("span", "lab", libelle));
-    const i = el("input");
-    i.type = "range";
-    i.min = min;
-    i.max = max;
-    i.value = v;
-    i.dataset.reglage = cle;
-    i.setAttribute("aria-label", libelle);
-    const val = el("span", "val");
-    const maj = () => {
-      val.textContent = `${i.value}${unite}`;
-      i.style.setProperty("--v", `${((i.value - min) / (max - min)) * 100}%`);
-    };
-    maj();
-    let marque = `${cle}-${++marqueGlissiere}`;
-    i.addEventListener("input", () => {
-      maj();
-      regler(cle, Number(i.value), marque);
-    });
-    i.addEventListener("change", () => {
-      marque = `${cle}-${++marqueGlissiere}`;
-    });
-    r.append(i, val);
-    return r;
+  // Au-dessus de la palette, centré sur le bouton ; sous un bouton de la barre du haut.
+  function placerPop(p, bouton) {
+    const er = fenetre.getBoundingClientRect();
+    const r = bouton.getBoundingClientRect();
+    const l = p.offsetWidth;
+    const h = p.offsetHeight;
+    const bord = jetonNombre("editeur-pop-ecart-haut");
+    let x = clamp(r.left - er.left + r.width / 2 - l / 2, bord, er.width - l - bord);
+    let y;
+    if (palette.contains(bouton)) {
+      y = palette.getBoundingClientRect().top - er.top - h - jetonNombre("editeur-pop-ecart");
+      p.style.setProperty("--oy", "100%");
+    } else {
+      if (bouton === bFermer) x = r.left - er.left;
+      y = r.bottom - er.top + bord;
+      p.style.setProperty("--oy", "0%");
+    }
+    p.style.setProperty("--ox", `${r.left - er.left + r.width / 2 - x}px`);
+    p.style.left = `${x}px`;
+    p.style.top = `${y}px`;
   }
-
-  function construireReglages() {
-    reglages.replaceChildren();
-    const s = sorteReglee();
-    if (!s || bReglages.disabled) return;
-    const D = ed.dessin;
-    if (AVEC_COULEUR.has(s)) {
-      const row = el("div", "row");
-      row.setAttribute("role", "radiogroup");
-      row.setAttribute("aria-label", "Couleur");
-      const cc = String(valeur("couleur")).toUpperCase();
-      const liste = D.COULEURS.concat(prefs().perso.map((c) => [c, "Couleur perso"]));
-      for (const [c, nom] of liste) {
-        const b = el("button", "cl-sw");
-        b.type = "button";
-        b.setAttribute("role", "radio");
-        b.setAttribute("aria-label", nom);
-        b.dataset.couleur = c;
-        b.setAttribute("aria-checked", c.toUpperCase() === cc ? "true" : "false");
-        const i = el("i");
-        i.style.setProperty("--c", c);
-        b.appendChild(i);
-        b.addEventListener("click", () => {
-          regler("couleur", c);
-          construireReglages();
-        });
-        row.appendChild(b);
-      }
-      const autre = el("label", "cl-sw arc");
-      const arc = D.COULEURS.slice(0, 6).map((c) => c[0]);
-      autre.style.setProperty("--arc", `conic-gradient(${[...arc, arc[0]].join(", ")})`);
-      autre.dataset.tip = "Autre couleur";
-      autre.appendChild(el("i"));
-      const champ = el("input");
-      champ.type = "color";
-      champ.value = (/^#[0-9A-F]{6}$/.test(cc) ? cc : D.COULEURS[0][0]).toLowerCase();
-      champ.setAttribute("aria-label", "Autre couleur");
-      champ.addEventListener("change", () => {
-        regler("couleur", champ.value.toUpperCase());
-        construireReglages();
-      });
-      autre.appendChild(champ);
-      row.appendChild(autre);
-      const pk = el("button", "cl-sw pk");
-      pk.type = "button";
-      pk.id = "bouton-pipette";
-      pk.setAttribute("aria-label", "Pipette");
-      pk.dataset.tip = "Pipette";
-      pk.dataset.key = "I";
-      pk.setAttribute("aria-keyshortcuts", "I");
-      pk.setAttribute("aria-pressed", ed.outils?.pipette() ? "true" : "false");
-      pk.appendChild(picto("pick"));
-      pk.addEventListener("click", () => ed.outils.basculerPipette());
-      row.appendChild(pk);
-      reglages.appendChild(row);
-    }
-    if (AVEC_EPAISSEUR.has(s)) {
-      reglages.appendChild(
-        segments(
-          "Épaisseur",
-          [
-            [0, "", "Fin", 0],
-            [1, "", "Moyen", 1],
-            [2, "", "Épais", 2],
-          ],
-          valeur("epaisseur"),
-          (v) => regler("epaisseur", v),
-        ),
-      );
-    }
-    if (s === "rectangle" || s === "ellipse") {
-      reglages.appendChild(
-        segments(
-          "Style",
-          [
-            [false, "Contour"],
-            [true, "Plein"],
-          ],
-          valeur("plein"),
-          (v) => regler("plein", v),
-        ),
-      );
-    }
-    if (s === "rectangle") {
-      reglages.appendChild(glissiere("Arrondi", 0, 40, valeur("arrondi"), "arrondi", " px"));
-    }
-    if (s === "texte") {
-      reglages.appendChild(
-        glissiere("Taille", 12, 96, valeur("tailleTexte"), "tailleTexte", " px", true),
-      );
-      const r = segments(
-        "Style",
-        [
-          ["simple", "Simple"],
-          ["contour", "Contour"],
-          ["etiquette", "Étiquette"],
-        ],
-        valeur("styleTexte"),
-        (v) => regler("styleTexte", v),
-        true,
-      );
-      const g = el("button", "gbtn", "G");
-      g.type = "button";
-      g.setAttribute("aria-label", "Gras");
-      g.dataset.tip = "Gras";
-      g.setAttribute("aria-pressed", valeur("gras") ? "true" : "false");
-      g.addEventListener("click", () => {
-        const oui = g.getAttribute("aria-pressed") !== "true";
-        g.setAttribute("aria-pressed", oui ? "true" : "false");
-        regler("gras", oui);
-      });
-      r.insertBefore(g, r.firstChild);
-      reglages.appendChild(r);
-    }
-    if (s === "numeros") {
-      reglages.appendChild(
-        segments(
-          "Taille",
-          [
-            [0, "P", "Petit"],
-            [1, "M", "Moyen"],
-            [2, "G", "Grand"],
-          ],
-          valeur("numero"),
-          (v) => regler("numero", v),
-        ),
-      );
-    }
-    if (s === "pixeliser" || s === "flouter") {
-      reglages.appendChild(
-        segments(
-          "Intensité",
-          [
-            [0, "Légère"],
-            [1, "Moyenne"],
-            [2, "Forte"],
-          ],
-          valeur("intensite"),
-          (v) => regler("intensite", v),
-        ),
-      );
-    }
-    if (AVEC_OPACITE.has(s)) {
-      reglages.appendChild(
-        glissiere("Opacité", 10, 100, valeur("opacite"), "opacite", " %", s === "texte"),
-      );
-    }
-    if (reglages.classList.contains("ouvert")) placerPop(reglages, bReglages);
-  }
-  bReglages.addEventListener("click", () => {
-    if (reglages.classList.contains("ouvert")) {
+  function basculer(p, bouton, avant) {
+    if (ouvert(p)) {
       fermerMenus();
       return;
     }
-    construireReglages();
-    ouvrir(reglages, bReglages);
+    avant?.();
+    ouvrir(p, bouton);
+  }
+  bAjouter.addEventListener("click", () => basculer(ajouter, bAjouter));
+  bPlus.addEventListener("click", () => basculer(plus, bPlus));
+  bCouleur.addEventListener("click", () => basculer(menuCouleur, bCouleur));
+  for (const m of $$(".mi[data-outil]", ajouter)) {
+    m.addEventListener("click", () => {
+      fermerMenus();
+      choisirOutil(m.dataset.outil);
+      if (document.querySelector(":focus-visible")) emplacement.focus({ preventScroll: true });
+    });
+  }
+
+  // ---------- bulle « Réglages de l'outil » ----------
+  function option(nom, contenu, choisie, choisir) {
+    const b = el("button", "opt");
+    b.type = "button";
+    nommer(b, nom);
+    b.setAttribute("aria-pressed", choisie ? "true" : "false");
+    b.appendChild(contenu);
+    b.addEventListener("click", () => {
+      choisir();
+      for (const x of $$(".opt", b.parentElement)) {
+        x.setAttribute("aria-pressed", x === b ? "true" : "false");
+      }
+    });
+    return b;
+  }
+  // Valeur montrée : celle de l'objet choisi s'il en a une, sinon la préférence.
+  function valeur(cle) {
+    const [champ, sApplique] = CHAMPS[cle];
+    const o = ed.objetsChoisis().find((x) => sApplique(sorteObjet(x)) && x[champ] !== undefined);
+    if (o && sorteObjet(o) === sorte()) {
+      if (cle === "numero") return Math.max(0, ed.dessin.RAYONS_NUMERO.indexOf(o[champ]));
+      if (cle === "opacite") return Math.round(o[champ] * 100);
+      if (cle === "tailleTexte") return o[champ];
+      return o[champ];
+    }
+    return prefs()[cle];
+  }
+  let marqueGlissiere = 0;
+  function construireReglages() {
+    reglages.replaceChildren();
+    const t = prefs().outil;
+    const s = sorte();
+    const def = OUTILS[t];
+    if (def.variantes) {
+      const r = el("div", "row");
+      for (const [id, nom, ic] of def.variantes) {
+        r.appendChild(
+          option(nom, picto(ic), prefs().variantes[t] === id, () => {
+            choisirOutil(t, id);
+            construireReglages();
+          }),
+        );
+      }
+      reglages.appendChild(r);
+    }
+    let cle = null;
+    if (TRAITS.includes(s)) cle = "epaisseur";
+    else if (s === "texte") cle = "tailleTexte";
+    else if (s === "numero") cle = "numero";
+    else if (s === "pixeliser" || s === "flouter") cle = "intensite";
+    if (cle) {
+      const r = el("div", "row");
+      const noms = cle === "intensite" ? ["Léger", "Moyen", "Fort"] : ["Fin", "Moyen", "Épais"];
+      const v = valeur(cle);
+      for (let i = 0; i < 3; i++) {
+        let contenu;
+        if (cle === "tailleTexte") contenu = el("span", `a a${i}`, "A");
+        else if (cle === "intensite") contenu = picto("pixel", `ico f${i}`);
+        else contenu = el("b", `${s === "surligneur" ? "s" : cle === "numero" ? "n" : "t"}${i}`);
+        const val = cle === "tailleTexte" ? TAILLES_TEXTE[i] : i;
+        r.appendChild(option(noms[i], contenu, v === val, () => regler(cle, val)));
+      }
+      reglages.appendChild(r);
+    }
+    if (AVEC_OPACITE.has(s)) {
+      const r = el("div", "row");
+      const g = el("label", "rng");
+      g.appendChild(picto("op"));
+      const i = el("input");
+      i.type = "range";
+      i.min = 20;
+      i.max = 100;
+      i.step = 5;
+      i.value = valeur("opacite");
+      i.setAttribute("aria-label", "Opacité");
+      let marque = `opacite-${++marqueGlissiere}`;
+      i.addEventListener("input", () => regler("opacite", Number(i.value), marque));
+      i.addEventListener("change", () => {
+        marque = `opacite-${++marqueGlissiere}`;
+      });
+      g.appendChild(i);
+      r.appendChild(g);
+      reglages.appendChild(r);
+    }
+    return reglages.children.length > 0;
+  }
+  function ouvrirReglages(bouton) {
+    if (!construireReglages()) return;
+    ouvrir(reglages, bouton);
+  }
+
+  // ---------- menu « Fermer » (à la place du dialogue) ----------
+  function ouvrirMenuFermer() {
+    if (ouvert(menuFermer)) return;
+    ed.outils?.validerSaisie();
+    retirerVignette();
+    ouvrir(menuFermer, bFermer);
+    $('[data-act="copier_fermer"]', menuFermer).focus({ preventScroll: true });
+  }
+  function fermerMenuFermer() {
+    if (!ouvert(menuFermer)) return;
+    fermerMenus(false);
+  }
+  menuFermer.addEventListener("keydown", (e) => {
+    if (e.key !== "Tab") return;
+    const bs = $$(".mi", menuFermer);
+    const i = bs.indexOf(document.activeElement);
+    e.preventDefault();
+    bs[(i + (e.shiftKey ? -1 : 1) + bs.length) % bs.length].focus();
   });
 
-  // ---------- zoom ----------
-  $("#zoom-ajuster").addEventListener("click", () => ed.ajuster());
-  $("#zoom-reel").addEventListener("click", () => {
-    if (ed.estTailleReelle()) ed.ajuster();
-    else ed.tailleReelle();
-  });
-  function synchroniserZoom() {
-    $("#zoom-ajuster").setAttribute(
-      "aria-pressed",
-      ed.cadrage.mode === "ajuster" ? "true" : "false",
+  // ---------- message, Copier ----------
+  let minuterieMessage = null;
+  function message(texte, echec = /^Impossible/.test(texte)) {
+    const m = $("#message");
+    $("span", m).textContent = texte;
+    m.classList.toggle("echec", echec);
+    m.classList.add("on");
+    clearTimeout(minuterieMessage);
+    const duree = jetonNombre(
+      echec ? "duree-editeur-message-echec" : "duree-editeur-message-affiche",
     );
-    $("#zoom-reel").setAttribute("aria-pressed", ed.estTailleReelle() ? "true" : "false");
+    minuterieMessage = setTimeout(() => m.classList.remove("on"), duree);
+  }
+  function fait(but) {
+    if (but === "copier") message("Copié");
+    else if (but === "enregistrer" || but === "enregistrer_sous") message("Enregistré");
+  }
+  // « Copier » réussi (copier puis fermer) : la coche, puis la fenêtre se ferme.
+  function copierReussi(fermer) {
+    fermerMenus(false);
+    bCopier.classList.remove("done");
+    void bCopier.offsetWidth;
+    bCopier.classList.add("done");
+    const reduites =
+      "reduites" in document.documentElement.dataset ||
+      matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const d = jetonNombre(`duree-editeur-copier-fermer${reduites ? "-reduite" : ""}`);
+    setTimeout(() => {
+      bCopier.classList.remove("done");
+      fermer();
+    }, d);
+  }
+  const exporter = (but) => {
+    if (ed.exportEnCours()) return;
+    ed.exporter(but);
+  };
+  ed.actions = {
+    copier: () => exporter("copier"),
+    copierFermer: () => exporter("copier_fermer"),
+    enregistrer: () => exporter("enregistrer"),
+    enregistrerSous: () => {
+      fermerMenus();
+      exporter("enregistrer_sous");
+    },
+  };
+
+  // ---------- vignette de prise (« Glisser vers une appli ») ----------
+  let urlVignette = null;
+  function montrerVignette() {
+    if (!ed.fond || !ed.h) return;
+    const cadre = ed.modele.cadre(ed.h.doc);
+    const l = Math.round(
+      (jetonNombre("editeur-vignette-largeur") - 2 * jetonNombre("editeur-pop-marge")) * 2,
+    );
+    const h = Math.max(1, Math.round((l * cadre.hauteur) / cadre.largeur));
+    const c = document.createElement("canvas");
+    c.width = l;
+    c.height = h;
+    const e = l / cadre.largeur;
+    const vue = { x: Math.round(-cadre.x * e), y: Math.round(-cadre.y * e), echelle: e, dpr: 1 };
+    ed.dessin.peindreVue(c.getContext("2d"), ed.h.doc, ed.fond, vue, []);
+    c.toBlob((blob) => {
+      c.width = 0;
+      if (!blob) return;
+      if (urlVignette) URL.revokeObjectURL(urlVignette);
+      urlVignette = URL.createObjectURL(blob);
+      $("#vignette-image").src = urlVignette;
+    });
+    vignette.hidden = false;
+    vignette.tabIndex = 0;
+    vignette.focus({ preventScroll: true });
+  }
+  function retirerVignette() {
+    if (vignette.hidden) return;
+    const focus = vignette.contains(document.activeElement);
+    vignette.hidden = true;
+    vignette.tabIndex = -1;
+    appui = null;
+    if (focus) scene.focus({ preventScroll: true });
+  }
+  // Appui puis 4 px de déplacement sur la vignette → export « glisser » ; le cœur fait le
+  // glisser du système.
+  let appui = null;
+  vignette.addEventListener("pointerdown", (e) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    appui = { x: e.clientX, y: e.clientY, id: e.pointerId };
+    vignette.setPointerCapture?.(e.pointerId);
+  });
+  vignette.addEventListener("pointermove", (e) => {
+    if (!appui || e.pointerId !== appui.id) return;
+    const seuil = jetonNombre("editeur-glisser-seuil");
+    if (Math.hypot(e.clientX - appui.x, e.clientY - appui.y) < seuil) return;
+    retirerVignette();
+    ed.exporter("glisser");
+  });
+  for (const n of ["pointerup", "pointercancel"]) {
+    vignette.addEventListener(n, () => {
+      appui = null;
+    });
+  }
+  function glisserEnCours(oui) {
+    if (oui) retirerVignette();
+  }
+
+  // Menu contextuel d'un objet (« Forme »).
+  function ouvrirMenuObjet(e) {
+    const r = fenetre.getBoundingClientRect();
+    fermerMenus();
+    menuObjet.classList.add("ouvert");
+    const l = menuObjet.offsetWidth;
+    const h = menuObjet.offsetHeight;
+    const bord = jetonNombre("editeur-pop-ecart-haut");
+    menuObjet.style.left = `${clamp(e.clientX - r.left, bord, r.width - l - bord)}px`;
+    menuObjet.style.top = `${clamp(e.clientY - r.top, bord, r.height - h - bord)}px`;
+    ouvreur = null;
+    if (e.button !== 2) $(".mi", menuObjet)?.focus({ preventScroll: true });
   }
 
   // ---------- actions ----------
@@ -657,183 +658,37 @@ export function installerBarre(ed) {
       !h || !ed.modele.peutRetablir(h) || !!ed.outils?.saisieOuverte();
   }
   // Annuler et Rétablir ne prennent pas le focus : une saisie ouverte n'est pas validée par
-  // le clic (Annuler l'abandonne, §3.3).
+  // le clic (Annuler l'abandonne).
   for (const b of $$('[data-act="annuler"], [data-act="retablir"]')) {
     b.addEventListener("pointerdown", (e) => e.preventDefault());
     b.addEventListener("mousedown", (e) => e.preventDefault());
   }
-  // L'onde au clic ; « Copié », « Enregistré » au résultat (§7.2).
-  function onde(bouton, e) {
-    const r = bouton.getBoundingClientRect();
-    bouton.style.setProperty("--rx", `${e?.clientX ? e.clientX - r.left : r.width / 2}px`);
-    bouton.style.setProperty("--ry", `${e?.clientY ? e.clientY - r.top : r.height / 2}px`);
-    bouton.classList.remove("onde");
-    void bouton.offsetWidth;
-    bouton.classList.add("onde");
-  }
-  function fait(but) {
-    const act =
-      but === "copier"
-        ? "copier"
-        : but === "enregistrer" || but === "enregistrer_sous"
-          ? "enregistrer"
-          : null;
-    if (!act) return;
-    const b = $(`[data-act="${act}"]`);
-    b.classList.remove("fait");
-    void b.offsetWidth;
-    b.classList.add("fait");
-    $(".l1", b).setAttribute("aria-hidden", "true");
-    $(".l2", b).removeAttribute("aria-hidden");
-    clearTimeout(b.minuterie);
-    b.minuterie = setTimeout(() => {
-      b.classList.remove("fait", "onde");
-      $(".l2", b).setAttribute("aria-hidden", "true");
-      $(".l1", b).removeAttribute("aria-hidden");
-    }, jetonNombre("duree-editeur-fait"));
-  }
-  let minuterieMessage = null;
-  function message(texte) {
-    const m = $("#message");
-    m.textContent = texte;
-    m.classList.add("on");
-    clearTimeout(minuterieMessage);
-    minuterieMessage = setTimeout(() => {
-      m.classList.remove("on");
-      m.textContent = "";
-    }, jetonNombre("duree-editeur-message"));
-  }
-  // L'onde au clic, et au clavier (au centre du bouton) ; un export à la fois (editeur.js).
-  const exporter = (but, e) => {
-    if (ed.exportEnCours()) return;
-    const b = $(`[data-act="${but === "copier" ? "copier" : "enregistrer"}"]`);
-    if (but !== "enregistrer_sous") onde(b, e);
-    ed.exporter(but);
-  };
-  ed.actions = {
-    copier: (e) => exporter("copier", e),
-    enregistrer: (e) => exporter("enregistrer", e),
-    enregistrerSous: () => {
-      fermerMenus();
-      exporter("enregistrer_sous");
-    },
-  };
-
-  // Menu « Plus » : vignette de l'image (blob:) pour la ligne Glisser.
-  let urlVignette = null;
-  function vignette() {
-    if (!ed.fond || !ed.h) return;
-    const img = $("#glisser-image");
-    const l = jetonNombre("editeur-glisser-largeur") * 2;
-    const h = jetonNombre("editeur-glisser-hauteur") * 2;
-    const c = document.createElement("canvas");
-    c.width = l;
-    c.height = h;
-    const cadre = ed.modele.cadre(ed.h.doc);
-    const e = Math.max(l / cadre.largeur, h / cadre.hauteur);
-    const vue = {
-      x: Math.round((l - cadre.largeur * e) / 2 - cadre.x * e),
-      y: Math.round((h - cadre.hauteur * e) / 2 - cadre.y * e),
-      echelle: e,
-      dpr: 1,
-    };
-    ed.dessin.peindreVue(c.getContext("2d"), ed.h.doc, ed.fond, vue, []);
-    c.toBlob((blob) => {
-      c.width = 0;
-      if (!blob) return;
-      if (urlVignette) URL.revokeObjectURL(urlVignette);
-      urlVignette = URL.createObjectURL(blob);
-      img.src = urlVignette;
-    });
-  }
-  bPlus.addEventListener("click", () => {
-    if (plus.classList.contains("ouvert")) {
-      fermerMenus();
-      return;
-    }
-    vignette();
-    ouvrir(plus, bPlus);
-  });
-
-  // Glisser : appui puis 4 px de déplacement → export « glisser » ; le cœur fait le
-  // glisser du système (§7.3).
-  const ligneGlisser = $("#glisser");
-  let appui = null;
-  ligneGlisser.addEventListener("pointerdown", (e) => {
-    if (e.button !== 0 || glisserGrise) return;
-    e.preventDefault();
-    appui = { x: e.clientX, y: e.clientY, id: e.pointerId };
-    ligneGlisser.setPointerCapture?.(e.pointerId);
-  });
-  ligneGlisser.addEventListener("pointermove", (e) => {
-    if (!appui || e.pointerId !== appui.id) return;
-    const seuil = jetonNombre("editeur-glisser-seuil");
-    if (Math.hypot(e.clientX - appui.x, e.clientY - appui.y) < seuil) return;
-    appui = null;
-    fermerMenus();
-    ed.exporter("glisser");
-  });
-  const finAppui = () => {
-    appui = null;
-  };
-  ligneGlisser.addEventListener("pointerup", finAppui);
-  ligneGlisser.addEventListener("pointercancel", finAppui);
-  function glisserEnCours(oui) {
-    glisserGrise = oui;
-    ligneGlisser.setAttribute("aria-disabled", oui ? "true" : "false");
-  }
-
-  // Menu contextuel d'un objet (« Forme »).
-  function ouvrirMenuObjet(e) {
-    const r = fenetre.getBoundingClientRect();
-    fermerMenus(menuObjet);
-    menuObjet.classList.add("ouvert");
-    const l = menuObjet.offsetWidth;
-    const h = menuObjet.offsetHeight;
-    menuObjet.style.left = `${clamp(e.clientX - r.left, 8, r.width - l - 8)}px`;
-    menuObjet.style.top = `${clamp(e.clientY - r.top, 8, r.height - h - 8)}px`;
-    ouvreur = null;
-    if (e.button !== 2) $(".mi", menuObjet)?.focus({ preventScroll: true });
-  }
-
-  // ---------- dialogue de fermeture (§4.5) ----------
-  let focusAvant = null;
-  const dialogueOuvert = () => voile.classList.contains("ouvert");
-  function ouvrirDialogue() {
-    fermerMenus();
-    focusAvant = document.activeElement;
-    voile.classList.add("ouvert");
-    $('[data-act="copier_fermer"]', voile).focus();
-  }
-  function fermerDialogue() {
-    if (!dialogueOuvert()) return;
-    voile.classList.remove("ouvert");
-    (focusAvant?.isConnected ? focusAvant : scene).focus?.({ preventScroll: true });
-  }
-  voile.addEventListener("keydown", (e) => {
-    if (e.key !== "Tab") return;
-    const bs = $$("button", voile);
-    const i = bs.indexOf(document.activeElement);
-    e.preventDefault();
-    bs[(i + (e.shiftKey ? -1 : 1) + bs.length) % bs.length].focus();
-  });
-  voile.addEventListener("focusout", (e) => {
-    if (dialogueOuvert() && !voile.contains(e.relatedTarget)) {
-      $('[data-act="copier_fermer"]', voile).focus();
-    }
-  });
-
-  // Les clics sur [data-act].
   fenetre.addEventListener("click", (e) => {
     const b = e.target.closest("[data-act]");
     if (!b || b.disabled) return;
     const a = b.dataset.act;
     if (a === "annuler") ed.annuler();
     else if (a === "retablir") ed.retablir();
-    else if (a === "copier") ed.actions.copier(e);
-    else if (a === "enregistrer") ed.actions.enregistrer(e);
-    else if (a === "enregistrer_sous") ed.actions.enregistrerSous();
-    else if (a === "dupliquer") {
+    else if (a === "copier") {
+      fermerMenus();
+      ed.actions.copierFermer();
+    } else if (a === "enregistrer") {
+      fermerMenus();
+      ed.actions.enregistrer();
+    } else if (a === "enregistrer_sous") ed.actions.enregistrerSous();
+    else if (a === "glisser") {
+      fermerMenus();
+      montrerVignette();
+    } else if (a === "fermer") {
+      if (ouvert(menuFermer)) fermerMenus();
+      else ed.fermer(false);
+    } else if (a === "copier_fermer") {
+      fermerMenus(false);
+      ed.actions.copierFermer();
+    } else if (a === "fermer_sans_copier") {
+      fermerMenus(false);
+      ed.fermer(true);
+    } else if (a === "dupliquer") {
       fermerMenus();
       ed.outils.dupliquer();
     } else if (a === "devant") {
@@ -845,99 +700,27 @@ export function installerBarre(ed) {
     } else if (a === "supprimer") {
       fermerMenus();
       ed.outils.supprimer();
-    } else if (a === "copier_fermer") ed.exporter("copier_fermer");
-    else if (a === "ne_pas_garder") ed.fermer(true);
-    else if (a === "continuer") {
-      fermerDialogue();
-      ed.garder();
     }
   });
-  document.addEventListener("pointerdown", (e) => {
-    if (!menuOuvert()) return;
-    if (e.target.closest(".pop") || e.target.closest('[aria-expanded="true"]')) return;
-    if (e.target === ed.toile) return;
-    fermerMenus();
-  });
+  document.addEventListener(
+    "pointerdown",
+    (e) => {
+      if (!vignette.hidden && !vignette.contains(e.target)) retirerVignette();
+      if (!menuOuvert() || e.target === ed.toile) return;
+      if (e.target.closest(".pop") || e.target.closest('[aria-expanded="true"]')) return;
+      if (e.target.closest(".tl")) return;
+      fermerMenus();
+    },
+    true,
+  );
 
-  // ---------- infobulles (nom et touche seulement) ----------
-  const bulle = $("#infobulle");
-  let minuterieBulle = 0;
-  let bullePour = null;
-  let derniereBulle = -Infinity;
-  function montrerBulle(cible) {
-    const t = cible.dataset.tip;
-    if (!t) return;
-    bulle.replaceChildren(el("span", "", t));
-    if (cible.dataset.key) bulle.appendChild(el("kbd", "", cible.dataset.key));
-    bulle.style.left = "0px";
-    bulle.style.top = "0px";
-    const r = cible.getBoundingClientRect();
-    const l = bulle.offsetWidth;
-    const h = bulle.offsetHeight;
-    const x = clamp(r.left + r.width / 2 - l / 2, 8, window.innerWidth - l - 8);
-    const y = clamp(r.top - h - 8, 8, window.innerHeight - h - 8);
-    bulle.style.left = `${x}px`;
-    bulle.style.top = `${y}px`;
-    bulle.classList.add("on");
-    bullePour = cible;
-  }
-  function cacherBulle() {
-    clearTimeout(minuterieBulle);
-    if (bullePour) derniereBulle = performance.now();
-    bullePour = null;
-    bulle.classList.remove("on");
-  }
-  document.addEventListener("mouseover", (e) => {
-    const t = e.target.closest?.("[data-tip]");
-    if (t === bullePour) return;
-    if (!t || t.closest(".pop.ouvert")) {
-      cacherBulle();
-      return;
-    }
-    clearTimeout(minuterieBulle);
-    const suite = performance.now() - derniereBulle < jetonNombre("duree-editeur-infobulle-suite");
-    const attente = suite || bullePour ? 0 : jetonNombre("duree-editeur-infobulle");
-    minuterieBulle = setTimeout(() => {
-      if (!menuOuvert()) montrerBulle(t);
-    }, attente);
-  });
-  document.addEventListener("focusin", (e) => {
-    const t = e.target.closest?.("[data-tip]");
-    if (t && t.matches(":focus-visible")) montrerBulle(t);
-  });
-  document.addEventListener("focusout", cacherBulle);
-  document.addEventListener("pointerdown", cacherBulle, true);
-
-  // ---------- clavier (§5) et raccourcis du navigateur (§4.6) ----------
+  // ---------- clavier et raccourcis du navigateur ----------
   const TOUCHES = {};
-  for (const g of GROUPES) {
-    if (g.touche) TOUCHES[g.touche.toLowerCase()] = [g.id, null];
-    for (const v of g.variantes || []) if (v.touche) TOUCHES[v.touche.toLowerCase()] = [g.id, v.id];
+  for (const [id, o] of Object.entries(OUTILS)) {
+    if (o.touche) TOUCHES[o.touche.toLowerCase()] = [id, null];
+    for (const v of o.variantes || []) if (v[3]) TOUCHES[v[3].toLowerCase()] = [id, v[0]];
   }
-  const NAVIGATEUR_CTRL = new Set([
-    "r",
-    "p",
-    "f",
-    "u",
-    "g",
-    "o",
-    "n",
-    "j",
-    "h",
-    "l",
-    "e",
-    "k",
-    "w",
-    "t",
-    "i",
-    "+",
-    "=",
-    "-",
-    "0",
-    "1",
-    "s",
-    "a",
-  ]);
+  const NAVIGATEUR_CTRL = new Set("rpfugonjhlekwti+=-01sa".split(""));
   const NAVIGATEUR = new Set([
     "F1",
     "F3",
@@ -997,18 +780,28 @@ export function installerBarre(ed) {
   document.addEventListener("keydown", (e) => {
     const t = e.target;
     if (enSaisie(t)) return;
-    if (dialogueOuvert()) {
+    const pop = t.closest?.(".pop");
+    // Flèches haut et bas : d'une ligne à l'autre dans un menu ou une bulle.
+    if (pop && (e.key === "ArrowDown" || e.key === "ArrowUp") && t.tagName !== "INPUT") {
+      const it = $$(".mi, .opt, .dot", pop).filter((x) => x.offsetParent && !x.disabled);
+      const i = it.indexOf(t);
+      if (i >= 0) {
+        e.preventDefault();
+        it[(i + (e.key === "ArrowDown" ? 1 : it.length - 1)) % it.length].focus();
+        return;
+      }
+    }
+    if (ouvert(menuFermer)) {
       if (e.key === "Escape") {
         e.preventDefault();
-        fermerDialogue();
-        ed.garder();
+        fermerMenus();
       }
       return;
     }
     const ctl = e.ctrlKey || e.metaKey;
     const k = e.key.toLowerCase();
     // Espace : déplacer la vue si le focus n'est pas sur un bouton (qu'il activerait).
-    if (e.key === " " && !ctl && !t.closest?.("button, [role='menuitem']")) {
+    if (e.key === " " && !ctl && !t.closest?.("button, [role='menuitem'], [role='button']")) {
       e.preventDefault();
       ed.outils.espace(true);
       return;
@@ -1032,12 +825,12 @@ export function installerBarre(ed) {
     if (e.altKey) return;
     if (e.key === "Escape") {
       e.preventDefault();
-      if (ed.outils.pipette()) ed.outils.arreterPipette();
-      else if (menuOuvert()) {
+      if (menuOuvert()) {
         const o = ouvreur;
         fermerMenus();
         o?.focus({ preventScroll: true });
-      } else if (ed.selection.length) {
+      } else if (!vignette.hidden) retirerVignette();
+      else if (ed.selection.length) {
         ed.selection = [];
         synchroniser();
         ed.dessiner();
@@ -1052,7 +845,7 @@ export function installerBarre(ed) {
       }
       return;
     }
-    if (e.key.startsWith("Arrow") && ed.selection.length && !t.closest?.(".pop")) {
+    if (e.key.startsWith("Arrow") && ed.selection.length && !pop) {
       e.preventDefault();
       const pas = e.shiftKey ? 10 : 1;
       const dx = e.key === "ArrowLeft" ? -pas : e.key === "ArrowRight" ? pas : 0;
@@ -1060,15 +853,11 @@ export function installerBarre(ed) {
       ed.outils.pousser(dx, dy);
       return;
     }
-    if (t.closest?.(".pop")) return;
-    if (k === "i") {
-      ed.outils.basculerPipette();
-      return;
-    }
+    if (pop) return;
     const m = TOUCHES[k];
     if (m && !e.repeat) {
-      choisirOutil(m[0], m[1]);
       fermerMenus();
+      choisirOutil(m[0], m[1]);
     }
   });
   document.addEventListener("keyup", (e) => {
@@ -1082,39 +871,37 @@ export function installerBarre(ed) {
   // ---------- synchronisation ----------
   function synchroniser() {
     synchroniserOutils();
-    synchroniserPastille();
+    synchroniserCouleurs();
     synchroniserActions();
-    if (reglages.classList.contains("ouvert") && !reglant) construireReglages();
+    if (ouvert(reglages) && !reglant) {
+      const b = $(`.tl[data-outil="${prefs().outil}"]`, outilsEl);
+      if (!b || !construireReglages()) fermerMenus();
+      else placerPop(reglages, b);
+    }
   }
   function remiseAZero() {
-    fermerMenus();
-    fermerDialogue();
+    fermerMenus(false);
+    retirerVignette();
+    bCopier.classList.remove("done");
     synchroniser();
-    synchroniserZoom();
-    placerIndicateur(true);
   }
-  // Pendant un tracé, la barre passe à 35 % d'opacité.
-  const tracer = (oui) => fenetre.classList.toggle("trace", oui);
 
   synchroniserOutils();
   return {
     synchroniser,
-    synchroniserZoom,
     remiseAZero,
     fait,
     message,
-    ouvrirDialogue,
-    fermerDialogue,
+    copierReussi,
+    ouvrirMenuFermer,
+    fermerMenuFermer,
     glisserEnCours,
     menuOuvert,
     fermerMenus,
     ouvrirMenuObjet,
-    tracer,
     choisirOutil,
     sorte,
-    construireReglages,
-    reglagesOuverts: () => reglages.classList.contains("ouvert"),
-    couleur: (s) => (s === "surligneur" ? prefs().couleurSurligneur : prefs().couleur),
+    couleur: couleurDe,
     regler,
     accent: () => jeton("accent"),
   };

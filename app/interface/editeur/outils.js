@@ -1,22 +1,19 @@
-// Gestes de chaque outil sur la scène (contrat 0.4 « Éditeur », §3.3) : tracés, sélection,
-// déplacement et poignées, texte en place, numéros, masques, recadrage, pipette, vue à la
-// main. Tout changement du document passe par `ed.modifier` (document.js) ; la page dessine
-// par-dessus la vue les poignées, le cadre de sélection, le recadrage en cours et la pipette.
+// Gestes sur la scène (contrat 0.4 « Éditeur », §3.3, et avenant « Éditeur épuré », §2) :
+// tracés, gomme, projecteur, sélection et déplacement par appui sur un objet, poignées, texte
+// en place, numéros, masques, recadrage par les équerres des coins, vue à la main. Tout
+// changement du document passe par `ed.modifier` (document.js) ; la page dessine par-dessus
+// la vue les équerres, le recadrage en cours et les poignées.
 
 import { jeton, jetonNombre } from "./editeur.js";
-import { sorteObjet, TYPE_DE_SORTE, SORTE_DE_MASQUE } from "./barre.js";
+import { sorteObjet, TYPE_DE_SORTE } from "./barre.js";
 
 const $ = (s) => document.querySelector(s);
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
-const RECTANGULAIRES = new Set(["rectangle", "ellipse", "masque"]);
-const RAPPORTS = new Map([
-  [1, [1, 1]],
-  [4 / 3, [4, 3]],
-  [16 / 9, [16, 9]],
-]);
+const RECTANGULAIRES = new Set(["rectangle", "ellipse", "masque", "projecteur"]);
 const MIN_TRAIT = 8; // flèche ou ligne : ≤ 8 px, rien n'est créé
 const MIN_BOITE = 6; // autre : ≤ 6 px
 const ANGLE = Math.PI / 12; // Maj : 15°
+const SANS_PRISE = new Set(["crayon", "surligneur", "gomme"]); // un appui ne prend pas d'objet
 
 const copie = (o) => JSON.parse(JSON.stringify(o));
 
@@ -24,10 +21,8 @@ export function installerOutils(ed) {
   const toile = ed.toile;
   const scene = ed.scene;
   const saisie = $("#saisie");
-  let geste = null; // { mode: pan|cadre|deplacer|poignee, … }
+  let geste = null; // { mode: pan|equerre|gomme|deplacer|poignee|trace, … }
   let espace = false;
-  let pipette = false;
-  let survolPipette = null;
   let edition = null; // { objet, existant }
   let numeroGeste = 0;
 
@@ -46,17 +41,34 @@ export function installerOutils(ed) {
   }
   const versToile = (px, py) => [ed.vue.x + px * ed.vue.echelle, ed.vue.y + py * ed.vue.echelle];
 
-  function filtre() {
-    const s = sorte();
-    return s === "selection" ? null : (TYPE_DE_SORTE[s] ?? null);
-  }
   function poigneeSous(p) {
-    if (ed.selection.length !== 1) return null;
+    if (ed.selection.length !== 1 || SANS_PRISE.has(sorte())) return null;
     const o = ed.objet(ed.selection[0]);
     if (!o) return null;
     const r = jetonNombre("editeur-poignee-prise") / echelleCss();
     for (const [x, y, nom] of ed.modele.poignees(o)) {
       if (Math.hypot(p.x - x, p.y - y) < r) return nom;
+    }
+    return null;
+  }
+  // L'équerre d'un coin de l'image sous le pointeur (zone de prise de 22 px), ou null.
+  function equerreSous(e) {
+    if (!ed.h || !ed.fond) return null;
+    const r = toile.getBoundingClientRect();
+    const dpr = ed.vue.dpr;
+    const mx = (e.clientX - r.left) * dpr;
+    const my = (e.clientY - r.top) * dpr;
+    const k = ed.modele.cadre(ed.h.doc);
+    const [ax, ay] = versToile(k.x, k.y);
+    const [bx, by] = versToile(k.x + k.largeur, k.y + k.hauteur);
+    const prise = jetonNombre("editeur-equerre-prise") * dpr;
+    for (const [nom, x, y] of [
+      ["nw", ax, ay],
+      ["ne", bx, ay],
+      ["sw", ax, by],
+      ["se", bx, by],
+    ]) {
+      if (Math.hypot(mx - x, my - y) < prise) return nom;
     }
     return null;
   }
@@ -72,7 +84,7 @@ export function installerOutils(ed) {
         return {
           type: "fleche",
           ...base,
-          double: s === "double",
+          double: false,
           courbe: s === "courbe",
           couleur,
           epaisseur: pr.epaisseur,
@@ -84,8 +96,8 @@ export function installerOutils(ed) {
           ...base,
           couleur,
           epaisseur: pr.epaisseur,
-          plein: pr.plein,
-          arrondi: pr.arrondi,
+          plein: false,
+          arrondi: 6,
           opacite,
         };
       case "ellipse":
@@ -94,7 +106,7 @@ export function installerOutils(ed) {
           ...base,
           couleur,
           epaisseur: pr.epaisseur,
-          plein: pr.plein,
+          plein: false,
           opacite,
         };
       case "ligne":
@@ -104,19 +116,21 @@ export function installerOutils(ed) {
       case "surligneur":
         return { type: "surligneur", points: [[p.x, p.y]], couleur, epaisseur: pr.epaisseur };
       case "masque":
-        return { type: "masque", ...base, sorte: SORTE_DE_MASQUE[s], intensite: pr.intensite };
+        return { type: "masque", ...base, sorte: s, intensite: pr.intensite };
+      case "projecteur":
+        return { type: "projecteur", forme: pr.variantes.projecteur, ...base };
       default:
         return null;
     }
   }
   // Pose `o` dans le document (un pas ; `ajouter` donne l'`id`, et l'`ordre` d'un numéro),
-  // et le choisit.
+  // et le choisit (sauf un trait du stylo ou du surligneur).
   function poser(o) {
     let id = 0;
     ed.modifier((doc) => {
       id = ed.modele.ajouter(doc, o);
     });
-    ed.selection = [id];
+    ed.selection = o.points ? [] : [id];
     ed.barre.synchroniser();
     ed.dessiner();
     return id;
@@ -133,7 +147,11 @@ export function installerOutils(ed) {
     if (enEdition) validerSaisie();
     scene.focus({ preventScroll: true });
     if (enEdition || !ed.h || !ed.fond) return;
-    if (ed.barre.menuOuvert() && !espace) ed.barre.fermerMenus();
+    // Un menu ouvert : l'appui le referme seulement (maquette).
+    if (ed.barre.menuOuvert() && !espace) {
+      ed.barre.fermerMenus();
+      return;
+    }
     toile.setPointerCapture?.(e.pointerId);
     const p = versImage(e);
     const s = sorte();
@@ -142,13 +160,21 @@ export function installerOutils(ed) {
       scene.dataset.curseur = "grabbing";
       return;
     }
-    if (pipette) {
-      const c = couleurSous(e);
-      if (c) ed.barre.regler("couleur", c);
-      arreterPipette();
+    const coin = equerreSous(e);
+    if (coin) {
+      const k = ed.modele.cadre(ed.h.doc);
+      geste = { mode: "equerre", coin, k0: { ...k }, cadre: { ...k } };
+      ed.selection = [];
+      ed.barre.synchroniser();
+      ed.dessiner();
       return;
     }
-    if (s !== "recadrer") {
+    if (s === "gomme") {
+      geste = { mode: "gomme", marque: `gomme-${++numeroGeste}` };
+      effacer(p);
+      return;
+    }
+    if (!SANS_PRISE.has(s)) {
       const h = poigneeSous(p);
       if (h) {
         const o = ed.objet(ed.selection[0]);
@@ -158,10 +184,9 @@ export function installerOutils(ed) {
           origine: copie(o),
           marque: `geste-${++numeroGeste}`,
         };
-        ed.barre.tracer(true);
         return;
       }
-      const o = ed.modele.objetSous(ed.h.doc, p, tolerance(), filtre());
+      const o = ed.modele.objetSous(ed.h.doc, p, tolerance(), null);
       if (o) {
         if (s === "texte" && o.type === "texte" && !e.shiftKey) {
           ouvrirSaisie(o, true);
@@ -175,6 +200,7 @@ export function installerOutils(ed) {
         geste = {
           mode: "deplacer",
           p,
+          ecran: [e.clientX, e.clientY],
           origines: ed.objetsChoisis().map(copie),
           marque: `geste-${++numeroGeste}`,
           bouge: false,
@@ -184,31 +210,14 @@ export function installerOutils(ed) {
         return;
       }
     }
-    if (!e.shiftKey) ed.selection = [];
-    if (s !== "selection" && !dansCadre(p)) {
-      // Hors de l'image : rien n'est créé, la sélection seulement est vidée (design). Un
-      // geste commencé dans l'image peut finir dehors.
-      ed.selection = [];
-      ed.barre.synchroniser();
-      ed.dessiner();
-      return;
-    }
-    if (s === "selection") {
-      geste = {
-        mode: "cadre",
-        x0: p.x,
-        y0: p.y,
-        x1: p.x,
-        y1: p.y,
-        ajout: e.shiftKey,
-        base: ed.selection.slice(),
-      };
-      ed.barre.synchroniser();
-      ed.dessiner();
-      return;
-    }
     ed.selection = [];
-    if (s === "numeros") {
+    ed.barre.synchroniser();
+    if (!dansCadre(p)) {
+      // Hors de l'image : rien n'est créé. Un geste commencé dans l'image peut finir dehors.
+      ed.dessiner();
+      return;
+    }
+    if (s === "numero") {
       poser({
         type: "numero",
         x: p.x,
@@ -229,21 +238,16 @@ export function installerOutils(ed) {
           texte: "",
           couleur: ed.barre.couleur(s),
           taille: pr.tailleTexte,
-          gras: pr.gras,
-          style: pr.styleTexte,
+          gras: true,
+          style: "contour",
           opacite: pr.opacite / 100,
         },
         false,
       );
       return;
     }
-    if (s === "recadrer") {
-      geste = { mode: "recadrage", x1: p.x, y1: p.y, x2: p.x, y2: p.y };
-    } else {
-      ed.enCours = nouvelObjet(s, p);
-      geste = { mode: "trace" };
-    }
-    ed.barre.tracer(true);
+    ed.enCours = nouvelObjet(s, p);
+    geste = { mode: "trace" };
     ed.dessiner();
   }
 
@@ -252,19 +256,19 @@ export function installerOutils(ed) {
     return p.x >= k.x && p.y >= k.y && p.x <= k.x + k.largeur && p.y <= k.y + k.hauteur;
   }
 
+  // Gomme : chaque objet touché est supprimé ; un geste = un seul pas (même marque).
+  function effacer(p) {
+    const o = ed.modele.objetSous(ed.h.doc, p, tolerance(), null);
+    if (!o) return;
+    ed.modifier((doc) => ed.modele.supprimer(doc, [o.id]), geste.marque);
+  }
+
   function mouvement(e) {
     if (!ed.h) return;
     const p = versImage(e);
-    if (pipette) {
-      const r = scene.getBoundingClientRect();
-      const c = couleurSous(e);
-      survolPipette = c ? { x: e.clientX - r.left, y: e.clientY - r.top, c } : null;
-      ed.dessiner();
-      return;
-    }
     const g = geste;
     if (!g) {
-      if (e.target === toile) curseur(p);
+      if (e.target === toile) curseur(e, p);
       return;
     }
     if (g.mode === "pan") {
@@ -274,32 +278,36 @@ export function installerOutils(ed) {
       g.y = e.clientY;
       return;
     }
-    if (g.mode === "cadre") {
-      g.x1 = p.x;
-      g.y1 = p.y;
-      const m = {
-        x: Math.min(g.x0, g.x1),
-        y: Math.min(g.y0, g.y1),
-        l: Math.abs(g.x1 - g.x0),
-        h: Math.abs(g.y1 - g.y0),
-      };
-      const ids = ed.h.doc.objets
-        .filter((o) => {
-          const b = ed.modele.boite(o);
-          return (
-            b.x < m.x + m.l && b.x + b.largeur > m.x && b.y < m.y + m.h && b.y + b.hauteur > m.y
-          );
-        })
-        .map((o) => o.id);
-      ed.selection = g.ajout ? g.base.concat(ids.filter((i) => !g.base.includes(i))) : ids;
+    if (g.mode === "equerre") {
+      // Toute l'image reste à l'échelle du début du geste ; 40 px d'image au moins.
+      const doc = ed.h.doc;
+      const k = g.k0;
+      const M = jetonNombre("editeur-recadrage-min");
+      const px = clamp(p.x, 0, doc.largeur);
+      const py = clamp(p.y, 0, doc.hauteur);
+      let x0 = k.x;
+      let y0 = k.y;
+      let x1 = k.x + k.largeur;
+      let y1 = k.y + k.hauteur;
+      if (g.coin[1] === "w") x0 = Math.max(0, Math.min(px, x1 - M));
+      else x1 = Math.min(doc.largeur, Math.max(px, x0 + M));
+      if (g.coin[0] === "n") y0 = Math.max(0, Math.min(py, y1 - M));
+      else y1 = Math.min(doc.hauteur, Math.max(py, y0 + M));
+      x0 = Math.round(x0);
+      y0 = Math.round(y0);
+      g.cadre = { x: x0, y: y0, largeur: Math.round(x1) - x0, hauteur: Math.round(y1) - y0 };
       ed.dessiner();
+      return;
+    }
+    if (g.mode === "gomme") {
+      effacer(p);
       return;
     }
     if (g.mode === "deplacer") {
       const dx = p.x - g.p.x;
       const dy = p.y - g.p.y;
-      if (!g.bouge && Math.hypot(dx, dy) * echelleCss() < 1) return;
-      if (!g.bouge) ed.barre.tracer(true);
+      const seuil = jetonNombre("editeur-deplacement-seuil");
+      if (!g.bouge && Math.hypot(e.clientX - g.ecran[0], e.clientY - g.ecran[1]) < seuil) return;
       g.bouge = true;
       ed.modifier((doc) => {
         for (const q of g.origines) {
@@ -317,18 +325,13 @@ export function installerOutils(ed) {
       }, g.marque);
       return;
     }
-    if (g.mode === "recadrage") {
-      contraindre(g, p, e.shiftKey, true);
-      ed.dessiner();
-      return;
-    }
     const c = ed.enCours;
     if (!c) return;
     if (c.points) {
       const l = c.points[c.points.length - 1];
       if (Math.hypot(p.x - l[0], p.y - l[1]) > 2 / echelleCss()) c.points.push([p.x, p.y]);
     } else {
-      contraindre(c, p, e.shiftKey, false);
+      contraindre(c, p, e.shiftKey);
       if (c.courbe) {
         const dx = c.x2 - c.x1;
         const dy = c.y2 - c.y1;
@@ -339,9 +342,8 @@ export function installerOutils(ed) {
     ed.dessiner();
   }
 
-  // Maj : 15° pour flèche et ligne, carré pour les boîtes ; Recadrer suit son rapport et
-  // reste dans le cadre.
-  function contraindre(c, p, maj, recadrage) {
+  // Maj : 15° pour flèche et ligne, carré pour les boîtes.
+  function contraindre(c, p, maj) {
     let { x, y } = p;
     const trait = c.type === "fleche" || c.type === "ligne";
     if (maj && trait) {
@@ -349,26 +351,10 @@ export function installerOutils(ed) {
       const l = Math.hypot(x - c.x1, y - c.y1);
       x = c.x1 + Math.cos(a) * l;
       y = c.y1 + Math.sin(a) * l;
-    } else if (recadrage && ed.prefs.ratio) {
-      // Le rapport tenu jusqu'au bord du cadre.
-      const r = ed.prefs.ratio;
-      const k = ed.modele.cadre(ed.h.doc);
-      const sx = Math.sign(x - c.x1 || 1);
-      const sy = Math.sign(y - c.y1 || 1);
-      const lx = sx > 0 ? k.x + k.largeur - c.x1 : c.x1 - k.x;
-      const ly = sy > 0 ? k.y + k.hauteur - c.y1 : c.y1 - k.y;
-      const l = Math.max(0, Math.min(Math.abs(x - c.x1), lx, ly * r));
-      x = c.x1 + sx * l;
-      y = c.y1 + (sy * l) / r;
-    } else if (maj && (recadrage || RECTANGULAIRES.has(c.type))) {
+    } else if (maj && RECTANGULAIRES.has(c.type)) {
       const m = Math.max(Math.abs(x - c.x1), Math.abs(y - c.y1));
       x = c.x1 + Math.sign(x - c.x1 || 1) * m;
       y = c.y1 + Math.sign(y - c.y1 || 1) * m;
-    }
-    if (recadrage) {
-      const k = ed.modele.cadre(ed.h.doc);
-      x = clamp(x, k.x, k.x + k.largeur);
-      y = clamp(y, k.y, k.y + k.hauteur);
     }
     c.x2 = x;
     c.y2 = y;
@@ -377,18 +363,13 @@ export function installerOutils(ed) {
   function relache() {
     const g = geste;
     geste = null;
-    ed.barre.tracer(false);
     if (!g || !ed.h) return;
     if (g.mode === "pan") {
       scene.dataset.curseur = espace ? "grab" : "";
       ed.envoyerVue();
       return;
     }
-    if (g.mode === "cadre") {
-      ed.barre.synchroniser();
-      ed.dessiner();
-      return;
-    }
+    if (g.mode === "gomme") return;
     if (g.mode === "deplacer" || g.mode === "poignee") {
       if (g.bouge) {
         const ids = ed.selection.slice();
@@ -399,23 +380,17 @@ export function installerOutils(ed) {
       ed.dessiner();
       return;
     }
-    if (g.mode === "recadrage") {
-      const k = ed.modele.cadre(ed.h.doc);
-      let x = Math.round(Math.max(Math.min(g.x1, g.x2), k.x));
-      let y = Math.round(Math.max(Math.min(g.y1, g.y2), k.y));
-      let l = Math.round(Math.min(Math.max(g.x1, g.x2), k.x + k.largeur)) - x;
-      let h = Math.round(Math.min(Math.max(g.y1, g.y2), k.y + k.hauteur)) - y;
-      // Rapport exact en pixels entiers (1:1, 4:3, 16:9), ancré au point de départ.
-      const rapport = RAPPORTS.get(ed.prefs.ratio);
-      if (rapport) {
-        const n = Math.min(Math.floor(l / rapport[0]), Math.floor(h / rapport[1]));
-        if (g.x2 < g.x1) x += l - n * rapport[0];
-        if (g.y2 < g.y1) y += h - n * rapport[1];
-        l = n * rapport[0];
-        h = n * rapport[1];
-      }
-      if (l > MIN_BOITE && h > MIN_BOITE) {
-        ed.modifier((doc) => ed.modele.recadrer(doc, { x, y, largeur: l, hauteur: h }));
+    if (g.mode === "equerre") {
+      // Un pas d'annulation ; l'image entière (à 1 px près) retire le recadrage.
+      const c = g.cadre;
+      const k = g.k0;
+      const doc = ed.h.doc;
+      const entiere =
+        c.x <= 1 && c.y <= 1 && c.largeur >= doc.largeur - 2 && c.hauteur >= doc.hauteur - 2;
+      const pareil =
+        c.x === k.x && c.y === k.y && c.largeur === k.largeur && c.hauteur === k.hauteur;
+      if (!pareil && !(entiere && !doc.recadrage)) {
+        ed.modifier((d) => ed.modele.recadrer(d, entiere ? null : c));
       }
       ed.dessiner();
       return;
@@ -441,25 +416,26 @@ export function installerOutils(ed) {
     poser(c);
   }
 
-  function curseur(p) {
+  function curseur(e, p) {
     if (espace) {
       scene.dataset.curseur = "grab";
       return;
     }
-    if (pipette) {
-      scene.dataset.curseur = "pick";
+    const coin = equerreSous(e);
+    if (coin) {
+      scene.dataset.curseur = coin === "nw" || coin === "se" ? "nwse" : "nesw";
       return;
     }
     const s = sorte();
     let c = "";
-    if (s !== "recadrer") {
+    if (s === "gomme") c = "cell";
+    else if (!SANS_PRISE.has(s)) {
       const h = poigneeSous(p);
       if (h) c = h === "nw" || h === "se" ? "nwse" : h === "ne" || h === "sw" ? "nesw" : "pt";
       else {
-        const o = ed.modele.objetSous(ed.h.doc, p, tolerance(), filtre());
+        const o = ed.modele.objetSous(ed.h.doc, p, tolerance(), null);
         if (o) c = s === "texte" && o.type === "texte" ? "text" : "move";
         else if (s === "texte") c = "text";
-        else if (s === "selection") c = "def";
       }
     }
     scene.dataset.curseur = c;
@@ -476,7 +452,7 @@ export function installerOutils(ed) {
     }
   });
   window.addEventListener("pointermove", (e) => {
-    if (geste || ed.enCours || pipette || e.target === toile) mouvement(e);
+    if (geste || ed.enCours || e.target === toile) mouvement(e);
   });
   window.addEventListener("pointerup", relache);
   window.addEventListener("pointercancel", relache);
@@ -521,37 +497,6 @@ export function installerOutils(ed) {
     { passive: false },
   );
 
-  // ---------- pipette ----------
-  function couleurSous(e) {
-    const r = toile.getBoundingClientRect();
-    const x = Math.floor((e.clientX - r.left) * ed.vue.dpr);
-    const y = Math.floor((e.clientY - r.top) * ed.vue.dpr);
-    const p = versImage(e);
-    const k = ed.modele.cadre(ed.h.doc);
-    if (p.x < k.x || p.y < k.y || p.x >= k.x + k.largeur || p.y >= k.y + k.hauteur) return null;
-    if (x < 0 || y < 0 || x >= toile.width || y >= toile.height) return null;
-    const d = ed.couleurPoint(x, y);
-    const hex = [d[0], d[1], d[2]].map((v) => v.toString(16).padStart(2, "0")).join("");
-    return `#${hex}`.toUpperCase();
-  }
-  function basculerPipette() {
-    if (pipette) arreterPipette();
-    else {
-      pipette = true;
-      scene.dataset.curseur = "pick";
-      ed.barre.fermerMenus();
-    }
-    $("#bouton-pipette")?.setAttribute("aria-pressed", pipette ? "true" : "false");
-  }
-  function arreterPipette() {
-    if (!pipette) return;
-    pipette = false;
-    survolPipette = null;
-    scene.dataset.curseur = "";
-    $("#bouton-pipette")?.setAttribute("aria-pressed", "false");
-    ed.dessiner();
-  }
-
   // ---------- texte en place ----------
   // La zone de saisie a la place, la police et la boîte du texte dessiné (mesureTexte). Son
   // texte est transparent : la vue dessine le texte en saisie (`ajout` de peindreVue), avec
@@ -567,9 +512,8 @@ export function installerOutils(ed) {
     saisie.style.left = `${tx / dpr}px`;
     saisie.style.top = `${ty / dpr}px`;
     saisie.style.font = ed.modele.policeTexte({ ...o, taille: t });
-    const etiquette = o.style === "etiquette";
     saisie.style.padding = `${m.py * s}px ${m.px * s}px`;
-    const marge = etiquette ? 0 : jetonNombre("editeur-saisie-marge");
+    const marge = o.style === "etiquette" ? 0 : jetonNombre("editeur-saisie-marge");
     saisie.style.width = `${m.largeur * s + marge}px`;
     saisie.style.height = `${m.hauteur * s}px`;
     ed.dessiner();
@@ -675,108 +619,93 @@ export function installerOutils(ed) {
       for (const o of doc.objets) if (ids.includes(o.id)) ed.modele.deplacer(o, copie(o), dx, dy);
     }, marquePousser);
   }
-  function imageEntiere() {
-    if (!ed.h?.doc.recadrage) return;
-    ed.modifier((doc) => ed.modele.recadrer(doc, null));
-  }
 
   // ---------- surcouche de la vue ----------
-  // Poignées, cadre de sélection, recadrage en cours, pipette : dessinés par la page, en
-  // pixels de la toile (mesures d'écran × dpr), couleurs des jetons.
+  // Équerres des coins, recadrage en cours, poignées : dessinés par la page, en pixels de la
+  // toile (mesures d'écran × dpr), couleurs des jetons.
+  function equerres(ctx, x, y, w, h) {
+    const n = (nom) => jetonNombre(nom) * ed.vue.dpr;
+    const L = Math.min(n("editeur-equerre-longueur"), w / 3, h / 3);
+    const g = n("editeur-equerre-ecart");
+    const [X0, Y0, X1, Y1] = [x - g, y - g, x + w + g, y + h + g];
+    ctx.save();
+    ctx.strokeStyle = jeton("editeur-equerre");
+    ctx.lineWidth = n("editeur-equerre-trait");
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    ctx.shadowColor = jeton("editeur-equerre-ombre");
+    ctx.shadowBlur = n("editeur-equerre-ombre-flou");
+    ctx.beginPath();
+    ctx.moveTo(X0, Y0 + L);
+    ctx.lineTo(X0, Y0);
+    ctx.lineTo(X0 + L, Y0);
+    ctx.moveTo(X1 - L, Y0);
+    ctx.lineTo(X1, Y0);
+    ctx.lineTo(X1, Y0 + L);
+    ctx.moveTo(X1, Y1 - L);
+    ctx.lineTo(X1, Y1);
+    ctx.lineTo(X1 - L, Y1);
+    ctx.moveTo(X0 + L, Y1);
+    ctx.lineTo(X0, Y1);
+    ctx.lineTo(X0, Y1 - L);
+    ctx.stroke();
+    ctx.restore();
+  }
   ed.surcouche = (ctx) => {
     const dpr = ed.vue.dpr;
-    // Une mesure de jeton (px d'écran) en pixels de la toile.
     const n = (nom) => jetonNombre(nom) * dpr;
     const acc = jeton("accent");
     ctx.save();
-    if (geste?.mode === "recadrage") {
-      const g = geste;
-      const k = ed.modele.cadre(ed.h.doc);
-      const [ax, ay] = versToile(Math.min(g.x1, g.x2), Math.min(g.y1, g.y2));
-      const [bx, by] = versToile(Math.max(g.x1, g.x2), Math.max(g.y1, g.y2));
-      const [kx, ky] = versToile(k.x, k.y);
-      const [lx, ly] = versToile(k.x + k.largeur, k.y + k.hauteur);
-      ctx.fillStyle = jeton("editeur-recadrage-voile");
+    if (geste?.mode === "equerre") {
+      const doc = ed.h.doc;
+      const c = geste.cadre;
+      const [ix, iy] = versToile(0, 0);
+      const [jx, jy] = versToile(doc.largeur, doc.hauteur);
+      const [ax, ay] = versToile(c.x, c.y);
+      const [bx, by] = versToile(c.x + c.largeur, c.y + c.hauteur);
+      ctx.fillStyle = jeton("editeur-scene");
+      ctx.globalAlpha = jetonNombre("editeur-recadrage-voile");
       ctx.beginPath();
-      ctx.rect(kx, ky, lx - kx, ly - ky);
+      ctx.rect(ix, iy, jx - ix, jy - iy);
       ctx.rect(ax, ay, bx - ax, by - ay);
       ctx.fill("evenodd");
+      ctx.globalAlpha = 1;
+      ctx.lineWidth = dpr;
+      ctx.strokeStyle = jeton("editeur-recadrage-cadre");
+      ctx.strokeRect(ax + dpr / 2, ay + dpr / 2, bx - ax - dpr, by - ay - dpr);
       ctx.strokeStyle = jeton("editeur-recadrage-tiers");
-      ctx.lineWidth = n("editeur-trait");
+      ctx.beginPath();
       for (let i = 1; i < 3; i++) {
-        ctx.beginPath();
         ctx.moveTo(ax + ((bx - ax) * i) / 3, ay);
         ctx.lineTo(ax + ((bx - ax) * i) / 3, by);
         ctx.moveTo(ax, ay + ((by - ay) * i) / 3);
         ctx.lineTo(bx, ay + ((by - ay) * i) / 3);
-        ctx.stroke();
       }
-      ctx.strokeStyle = jeton("editeur-recadrage-bord");
-      ctx.lineWidth = n("editeur-recadrage-trait");
-      ctx.strokeRect(ax, ay, bx - ax, by - ay);
-      const texte = `${Math.round(Math.abs(g.x2 - g.x1))} × ${Math.round(Math.abs(g.y2 - g.y1))}`;
-      const graisse = jetonNombre("editeur-etiquette-graisse");
-      ctx.font = `${graisse} ${n("editeur-etiquette-police")}px ${ed.modele.POLICE}`;
-      const lw = ctx.measureText(texte).width + n("editeur-etiquette-marge");
-      const hh = n("editeur-etiquette-hauteur");
-      let ey = by + n("editeur-etiquette-ecart");
-      if (ey + hh + n("editeur-etiquette-bord") > ed.toile.height) {
-        ey = by - n("editeur-etiquette-dessus");
-      }
-      const ex = (ax + bx) / 2 - lw / 2;
-      ctx.beginPath();
-      ctx.roundRect(ex, ey, lw, hh, n("editeur-etiquette-rayon"));
-      ctx.fillStyle = jeton("editeur-etiquette-fond");
-      ctx.fill();
-      ctx.fillStyle = jeton("editeur-etiquette-texte");
-      ctx.textAlign = "center";
-      ctx.textBaseline = "middle";
-      ctx.fillText(texte, ex + lw / 2, ey + hh / 2);
+      ctx.stroke();
+      equerres(ctx, ax, ay, bx - ax, by - ay);
+      ctx.restore();
+      return;
     }
-    if (geste?.mode === "cadre") {
-      const g = geste;
-      const [ax, ay] = versToile(Math.min(g.x0, g.x1), Math.min(g.y0, g.y1));
-      const [bx, by] = versToile(Math.max(g.x0, g.x1), Math.max(g.y0, g.y1));
-      ctx.fillStyle = acc;
-      ctx.globalAlpha = jetonNombre("editeur-cadre-opacite");
-      ctx.fillRect(ax, ay, bx - ax, by - ay);
-      ctx.globalAlpha = jetonNombre("editeur-cadre-opacite-trait");
-      ctx.strokeStyle = acc;
-      ctx.lineWidth = n("editeur-trait");
-      ctx.strokeRect(Math.round(ax) + 0.5, Math.round(ay) + 0.5, bx - ax, by - ay);
-      ctx.globalAlpha = 1;
-    }
-    if (!edition && sorte() !== "recadrer" && ed.selection.length === 1) {
+    const k = ed.modele.cadre(ed.h.doc);
+    const [ax, ay] = versToile(k.x, k.y);
+    const [bx, by] = versToile(k.x + k.largeur, k.y + k.hauteur);
+    equerres(ctx, Math.round(ax), Math.round(ay), Math.round(bx - ax), Math.round(by - ay));
+    if (!edition && ed.selection.length === 1 && !SANS_PRISE.has(sorte())) {
       const o = ed.objet(ed.selection[0]);
       const rayon = n("editeur-poignee-rayon");
-      for (const [x, y, nom] of o ? ed.modele.poignees(o) : []) {
+      for (const [x, y] of o ? ed.modele.poignees(o) : []) {
         const [px, py] = versToile(x, y);
-        const milieu = nom === "pc";
         ctx.beginPath();
-        ctx.arc(px, py, milieu ? rayon - n("editeur-poignee-retrait") : rayon, 0, 2 * Math.PI);
-        ctx.shadowColor = jeton("editeur-ombre-poignee");
+        ctx.arc(px, py, rayon, 0, 2 * Math.PI);
+        ctx.shadowColor = jeton("editeur-poignee-ombre-couleur");
         ctx.shadowBlur = n("editeur-poignee-ombre");
-        ctx.fillStyle = milieu ? acc : jeton("editeur-poignee");
+        ctx.fillStyle = jeton("editeur-poignee");
         ctx.fill();
         ctx.shadowColor = "transparent";
         ctx.lineWidth = n("editeur-poignee-trait");
-        ctx.strokeStyle = milieu ? jeton("editeur-poignee") : acc;
+        ctx.strokeStyle = acc;
         ctx.stroke();
       }
-    }
-    if (pipette && survolPipette) {
-      const d = jetonNombre("editeur-pipette-decalage");
-      const r = n("editeur-pipette-rayon");
-      ctx.beginPath();
-      ctx.arc((survolPipette.x + d) * dpr, (survolPipette.y - d) * dpr, r, 0, 2 * Math.PI);
-      ctx.fillStyle = survolPipette.c;
-      ctx.shadowColor = jeton("editeur-ombre-pipette");
-      ctx.shadowBlur = n("editeur-pipette-ombre");
-      ctx.fill();
-      ctx.shadowColor = "transparent";
-      ctx.lineWidth = n("editeur-pipette-trait");
-      ctx.strokeStyle = jeton("editeur-recadrage-bord");
-      ctx.stroke();
     }
     ctx.restore();
   };
@@ -787,13 +716,10 @@ export function installerOutils(ed) {
     saisieOuverte: () => !!edition,
     // Un geste en cours (bouton enfoncé) : ni annuler ni rétablir.
     gesteEnCours: () => !!geste,
+    recadrageEnCours: () => geste?.mode === "equerre",
     idEnEdition: () => (edition?.existant ? edition.objet.id : null),
     texteEnSaisie,
     placerSaisie,
-    pipette: () => pipette,
-    basculerPipette,
-    arreterPipette,
-    imageEntiere,
     dupliquer,
     supprimer,
     ordonner,
@@ -807,7 +733,6 @@ export function installerOutils(ed) {
       edition = null;
       saisie.hidden = true;
       ed.enCours = null;
-      arreterPipette();
     },
     sorteObjet,
   };

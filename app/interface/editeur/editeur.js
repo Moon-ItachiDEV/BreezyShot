@@ -1,6 +1,6 @@
-// Page de l'éditeur d'annotation (contrat 0.4 « Éditeur », §3.4, §3.5, §4, §6, §7.2) :
-// entrée de la page. IPC avec le cœur, charge, image, les trois toiles et la vue, sorties
-// et fermeture. La barre (barre.js) et les gestes (outils.js) reçoivent l'objet `ed`.
+// Page de l'éditeur d'annotation (contrat 0.4 « Éditeur », §3.4, §3.5, §4, §6, §7.2, et
+// avenant « Éditeur épuré ») : entrée de la page. IPC avec le cœur, charge, image, les trois
+// toiles et la vue, sorties et fermeture. La barre (barre.js) et les gestes (outils.js) reçoivent l'objet `ed`.
 //
 // Commandes (permises à la seule fenêtre `editeur`) : `editeur_pret` → ChargeEditeur ;
 // `editeur_image` { id } → octets RGBA ; `editeur_affiche` { id } ; `editeur_vue` { id, x,
@@ -71,23 +71,32 @@ const ed = {
 
 // Couleurs de contenu : celles de dessin.js, par leur nom.
 const couleurDessin = (nom) => dessin.COULEURS.find((c) => c[1] === nom)[0];
+// `emplacement` : l'outil venu de « Ajouter » (vide : l'emplacement n'est pas montré) ;
+// `autre` : la couleur libre gardée (« Autre couleur »).
 export const DEFAUTS = {
   outil: "fleche",
-  variantes: { fleche: "droite", formes: "rectangle", dessin: "crayon", masquer: "pixeliser" },
-  ratio: 0,
+  emplacement: "",
+  variantes: { fleche: "droite", forme: "rectangle", flou: "pixeliser", projecteur: "rectangle" },
   couleur: couleurDessin("Rouge"),
   couleurSurligneur: couleurDessin("Jaune"),
+  autre: "",
   epaisseur: 1,
-  plein: false,
-  arrondi: 10,
   tailleTexte: 28,
-  gras: true,
-  styleTexte: "contour",
   numero: 1,
   intensite: 1,
   opacite: 100,
-  perso: [],
 };
+const OUTILS_CONNUS = [
+  "fleche",
+  "stylo",
+  "surligneur",
+  "gomme",
+  "texte",
+  "forme",
+  "numero",
+  "flou",
+  "projecteur",
+];
 
 function lirePreferences(texte) {
   const p = structuredClone(DEFAUTS);
@@ -98,7 +107,7 @@ function lirePreferences(texte) {
       if (lu[k] === undefined || typeof lu[k] !== typeof DEFAUTS[k]) continue;
       p[k] = k === "variantes" ? { ...p.variantes, ...lu.variantes } : lu[k];
     }
-    if (!Array.isArray(p.perso)) p.perso = [];
+    if (!OUTILS_CONNUS.includes(p.outil)) p.outil = DEFAUTS.outil;
   } catch {
     // Préférences illisibles : les défauts.
   }
@@ -240,14 +249,16 @@ matchMedia(`(resolution: ${window.devicePixelRatio}dppx)`).addEventListener?.("c
   ajusterToile(),
 );
 
-// Zone utile de la scène pour l'image ajustée (pixels CSS), comme le design (avail).
+// Zone utile de la scène pour l'image ajustée (pixels CSS) : les réserves de la maquette
+// (reserve(), piste b), la palette comprise.
 function zoneUtile() {
   const l = scene.clientWidth;
   const h = scene.clientHeight;
-  const marge = jetonNombre(l < 420 ? "editeur-scene-marge-etroite" : "editeur-scene-marge");
-  const haut = jetonNombre("editeur-scene-haut");
-  const barre = $("#barre").offsetHeight + jetonNombre("editeur-scene-bas");
-  return { l, h, al: Math.max(1, l - marge), ah: Math.max(1, h - 2 * haut - barre), haut };
+  const etroite = $("#fenetre").clientWidth < jetonNombre("editeur-etroite");
+  const cote = jetonNombre(etroite ? "editeur-reserve-cote-etroite" : "editeur-reserve-cote");
+  const haut = jetonNombre("editeur-reserve-haut");
+  const bas = $("#palette").offsetHeight + jetonNombre("editeur-reserve-bas");
+  return { l, h, al: Math.max(1, l - 2 * cote), ah: Math.max(1, h - haut - bas), haut };
 }
 
 ed.echelleAjuster = () => {
@@ -279,7 +290,6 @@ function placer() {
   ombre.style.top = `${(ed.vue.y + c.y * echelle) / dpr}px`;
   ombre.style.width = `${(c.largeur * echelle) / dpr}px`;
   ombre.style.height = `${(c.hauteur * echelle) / dpr}px`;
-  ed.barre?.synchroniserZoom();
   ed.outils?.placerSaisie();
   ed.dessiner();
 }
@@ -370,22 +380,19 @@ function optionsVue() {
   if (enEdition) options.cacher = enEdition;
   return options;
 }
-// La pipette lit un point de la vue peint à part (toile 1 × 1), jamais la toile `vue`.
-const point = document.createElement("canvas");
-point.width = point.height = 1;
-const ctxPoint = point.getContext("2d", { willReadFrequently: true });
-ed.couleurPoint = (x, y) => {
-  const v = { ...ed.vue, x: ed.vue.x - x, y: ed.vue.y - y };
-  dessin.peindreVue(ctxPoint, ed.h.doc, ed.fond, v, [], optionsVue());
-  return ctxPoint.getImageData(0, 0, 1, 1).data;
-};
 function peindre() {
   demande = 0;
   const ctx = ed.ctx;
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.clearRect(0, 0, toile.width, toile.height);
   if (!ed.h || !ed.fond) return;
-  dessin.peindreVue(ctx, ed.h.doc, ed.fond, ed.vue, ed.selection, optionsVue());
+  // Pendant un recadrage, toute l'image à l'échelle du début du geste, coins droits.
+  const recadrage = ed.outils?.recadrageEnCours();
+  const doc = recadrage ? { ...ed.h.doc, recadrage: null } : ed.h.doc;
+  const options = optionsVue();
+  options.rayon = recadrage ? 0 : jetonNombre("editeur-image-rayon") * ed.vue.dpr;
+  dessin.peindreVue(ctx, doc, ed.fond, ed.vue, recadrage ? [] : ed.selection, options);
+  $("#ombre-image").hidden = !!recadrage;
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   ed.surcouche?.(ctx);
   if (!ed.affiche && ed.charge) {
@@ -523,15 +530,16 @@ function resultat(r) {
   if (reussi && e) ed.exportee = e.version;
   if (reussi) ed.barre?.fait(r.but);
   else if (r.etat === "echec" && r.message) ed.barre?.message(r.message);
+  // « Copier » (copier puis fermer) : la coche, puis la fenêtre se ferme ; en échec elle reste.
   if (r.but === "copier_fermer") {
-    if (reussi) fermer(false);
-    else ed.barre?.fermerDialogue();
+    if (reussi) ed.barre?.copierReussi(() => fermer(false));
+    else ed.barre?.fermerMenuFermer();
   }
 }
 
-// ---------- fermeture (§4.5) ----------
+// ---------- fermeture (§4.5, avenant §3) ----------
 
-// `force` : « Ne pas garder ».
+// `force` : « Fermer sans copier ». « demander » : le menu « Fermer ».
 async function fermer(force = false) {
   if (!ed.charge) return;
   ed.outils?.validerSaisie();
@@ -553,13 +561,13 @@ async function fermer(force = false) {
     console.info("editeur_fermer :", e);
   }
   if (reponse === "demander" && ed.charge?.id === id) {
-    ed.barre?.ouvrirDialogue();
+    ed.barre?.ouvrirMenuFermer();
     return;
   }
   // Toiles relâchées après « fermee » seulement. « fermee » peut être suivie d'un
   // `editeur:charger` (capture en attente) : seules les toiles de CE document le sont.
   if (ed.charge?.id !== id) return;
-  ed.barre?.fermerDialogue();
+  ed.barre?.fermerMenuFermer();
   if (reponse === "fermee") relacherToiles();
 }
 ed.fermer = fermer;
