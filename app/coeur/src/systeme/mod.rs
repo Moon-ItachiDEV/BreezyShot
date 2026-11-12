@@ -18,7 +18,7 @@ pub mod glisser;
 pub mod installation;
 pub mod presse_papiers;
 pub use composition::attendre_composition;
-pub use demarrage::{demarrage_avec_systeme, EtatDemarrage};
+pub use demarrage::{demarrage_avec_systeme, mettre_a_jour_chemin, EtatDemarrage};
 pub use dossier::choisir_dossier;
 pub use gel::Rect;
 
