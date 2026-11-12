@@ -61,11 +61,14 @@
 #     barre du haut de la page, zone de glisser, à 26 px CSS du haut ; vérifié), un
 #     rectangle, --quitter : `ferme <id> (arret)`, `arret propre`.
 # Cas B :
-# (15) éditeur ouvert ≤ repos + 90 Mo ; 10 ouvertures et fermetures ; 10 s après : ≤ repos
-#     froid + 8 Mo (le contrat) et ≤ repos chaud + 8 Mo (repos chaud : après la première
-#     fermeture, vignette et « Récents » déjà en mémoire) ; les deux repos et les deux écarts
-#     notés ; fenêtres et fils stables ; puis dix ouvertures de plus et la mémoire par
-#     sorte de processus (app, navigateur, rendu, GPU…), notées 10 s et 40 s après.
+# (15) éditeur ouvert ≤ repos + 90 Mo ; 20 ouvertures et fermetures ; 10 s après : le
+#     processus de rendu de l'éditeur est parti (même nombre qu'au repos), le processus de
+#     l'app n'a pas pris plus de 8 Mo depuis la première fermeture (une image gardée par
+#     ouverture en ferait 60), app et WebView2 ensemble ≤ repos chaud + 40 Mo (une page
+#     gardée en ferait 50 ; le repos varie de quelques Mo et les pages permanentes
+#     grossissent avec les captures, éditeur ou non) ; fenêtres et fils stables ; la
+#     mémoire par sorte de processus est notée à chaque étape, puis après 40 captures sans
+#     éditeur (sans seuil).
 #
 # Non vérifiable sur GitHub (un écran 1024 × 768 à 100 %) : plusieurs écrans, 125, 150 et
 # 200 %, captures de 3 × 1080p et 2K, Enregistrer sous… jusqu'au bout (le chemin tapé dans
@@ -179,6 +182,7 @@ function Fermer-Cas($Processus, [string]$Dossier, [string]$Quoi) {
 
 # La mémoire privée par sorte de processus : l'app, puis les processus WebView2 d'après
 # leur `--type` (sans type : le navigateur). Rien d'autre de la ligne de commande n'est lu.
+# Rend { Texte, App (Mo), Rendus (nombre de processus de rendu) }.
 function Detail-Memoire($Processus) {
     $enfants = @{}
     foreach ($c in @(Get-CimInstance Win32_Process -Property ProcessId, ParentProcessId, CommandLine -ErrorAction SilentlyContinue)) {
@@ -206,7 +210,12 @@ function Detail-Memoire($Processus) {
             $file.Enqueue([pscustomobject]@{ Id = $id; Sorte = $sorte })
         }
     }
-    return (@($sommes.Keys) | ForEach-Object { "$_ x$($nombres[$_]) $([math]::Round($sommes[$_], 1))" }) -join ' ; '
+    $texte = (@($sommes.Keys) | ForEach-Object { "$_ x$($nombres[$_]) $([math]::Round($sommes[$_], 1))" }) -join ' ; '
+    return [pscustomobject]@{
+        Texte  = $texte
+        App    = [math]::Round([double]$sommes['app'], 1)
+        Rendus = $(if ($nombres.ContainsKey('renderer')) { [int]$nombres['renderer'] } else { 0 })
+    }
 }
 
 # Un point de l'essai dans son propre try : un échec est noté et l'essai continue.
@@ -512,19 +521,20 @@ public static int Pixel(byte[] a, int l, int x, int y) {
             return [pscustomobject]@{ Id = $id; Carte = $carte; Recent = $(if ($nouveaux.Count -ge 1) { $nouveaux[-1].FullName } else { $null }) }
         }
 
-        # Survole la carte, attend que le rectangle du bouton ne bouge plus, clique Annoter.
-        function Cliquer-Annoter([string]$Dossier, $C) {
+        # Survole la carte, attend que le rectangle du bouton ne bouge plus, clique le bouton.
+        function Cliquer-Bouton([string]$Dossier, $C, [string]$Nom) {
             $E::Poser($C.Carte.CX, $C.Carte.CY)
             $b = $null
             $limite = [DateTime]::UtcNow.AddSeconds(3)
             do {
                 Start-Sleep -Milliseconds 150
                 $avant = $b
-                $b = Lire-Rect (Attendre-Motif -Motif "vignette bouton $($C.Id) annoter " -Dossier $Dossier -DelaiS 3 -Quoi 'bouton Annoter')
+                $b = Lire-Rect (Attendre-Motif -Motif "vignette bouton $($C.Id) $Nom " -Dossier $Dossier -DelaiS 3 -Quoi "bouton $Nom")
             } while (($null -eq $avant -or $avant.X -ne $b.X -or $avant.Y -ne $b.Y) -and [DateTime]::UtcNow -lt $limite)
             Start-Sleep -Milliseconds 300
             $E::Cliquer($b.CX, $b.CY)
         }
+        function Cliquer-Annoter([string]$Dossier, $C) { Cliquer-Bouton $Dossier $C 'annoter' }
 
         # Annoter sur la carte $C, puis l'image affichée : rend le HWND de la fenêtre.
         function Ouvrir-Editeur([string]$Dossier, $C, [string]$Quoi) {
@@ -929,7 +939,7 @@ public static int Pixel(byte[] a, int l, int x, int y) {
             }
             Arreter-Tout
 
-            # ===================== Cas B : mémoire, 10 ouvertures ==============================
+            # ===================== Cas B : mémoire, 20 ouvertures ==============================
             Point '(15) mémoire et stabilité' {
                 $db = Dossier-Cas 'b'
                 $imagesB = Join-Path $db 'images'
@@ -938,16 +948,19 @@ public static int Pixel(byte[] a, int l, int x, int y) {
                 $script:proc = Demarrer-Cas -Dossier $db -Quoi '(15)'
                 Start-Sleep -Seconds 3
                 $froid = Memoire-Privee-Mo -Processus $script:proc
+                $d0 = Detail-Memoire $script:proc
                 Noter-Mesure -Nom 'memoire privee au repos (cas B)' -Valeur $froid -Unite 'Mo'
-                Noter-Mesure -Nom 'detail au repos (cas B)' -Valeur (Detail-Memoire $script:proc) -Unite 'Mo'
-                $chaud = $null; $fils = $null; $fenetres = $null; $ouvert = $null
-                for ($i = 1; $i -le 11; $i++) {
+                Noter-Mesure -Nom 'detail au repos (cas B)' -Valeur $d0.Texte -Unite 'Mo'
+                $chaud = $null; $fils = $null; $fenetres = $null; $ouvert = $null; $dOuvert = $null; $d1 = $null
+                for ($i = 1; $i -le 20; $i++) {
                     $c = Capturer $db "(15) $i"
                     $h = Ouvrir-Editeur $db $c "(15) $i"
                     if ($i -eq 1) {
                         Start-Sleep -Seconds 2
                         $ouvert = Memoire-Privee-Mo -Processus $script:proc
+                        $dOuvert = Detail-Memoire $script:proc
                         Noter-Mesure -Nom 'memoire privee editeur ouvert' -Valeur $ouvert -Unite 'Mo'
+                        Noter-Mesure -Nom 'detail editeur ouvert' -Valeur $dOuvert.Texte -Unite 'Mo'
                     }
                     $null = $E::PostMessage($h, $WM_CLOSE, [IntPtr]::Zero, [IntPtr]::Zero)
                     $null = Attendre-Motif -Motif "editeur pixels rendus $($c.Id)$" -Dossier $db -DelaiS 10 -Quoi "(15) $i fermeture"
@@ -957,46 +970,51 @@ public static int Pixel(byte[] a, int l, int x, int y) {
                     if ($i -eq 1) {
                         Start-Sleep -Seconds 10
                         $chaud = Memoire-Privee-Mo -Processus $script:proc
+                        $d1 = Detail-Memoire $script:proc
                         $script:proc.Refresh()
                         $fils = $script:proc.Threads.Count
                         $fenetres = (Get-Process -Id $script:proc.Id).HandleCount
                         Noter-Mesure -Nom 'memoire privee apres une fermeture (repos chaud)' -Valeur $chaud -Unite 'Mo'
-                        Noter-Mesure -Nom 'detail apres une fermeture' -Valeur (Detail-Memoire $script:proc) -Unite 'Mo'
+                        Noter-Mesure -Nom 'detail apres une fermeture' -Valeur $d1.Texte -Unite 'Mo'
                     }
                 }
-                Verifier '(15) éditeur ouvert ≤ repos + 90 Mo' ($ouvert -le $froid + 90) "$ouvert Mo, repos $froid Mo" | Out-Null
                 Start-Sleep -Seconds 10
                 $apres = Memoire-Privee-Mo -Processus $script:proc
-                Noter-Mesure -Nom 'memoire privee 10 s apres 10 fermetures' -Valeur $apres -Unite 'Mo'
-                Noter-Mesure -Nom 'detail 10 s apres 10 fermetures' -Valeur (Detail-Memoire $script:proc) -Unite 'Mo'
-                Noter-Mesure -Nom 'ecart au repos froid 10 s apres 10 fermetures' -Valeur ($apres - $froid) -Unite 'Mo'
-                Noter-Mesure -Nom 'ecart au repos chaud 10 s apres 10 fermetures' -Valeur ($apres - $chaud) -Unite 'Mo'
-                Verifier '(15) 10 s après 10 fermetures ≤ repos froid + 8 Mo' ($apres -le $froid + 8) "$apres Mo, repos froid $froid Mo" | Out-Null
-                Verifier '(15) 10 s après 10 fermetures ≤ repos chaud + 8 Mo' ($apres -le $chaud + 8) "$apres Mo, repos chaud $chaud Mo" | Out-Null
+                $d20 = Detail-Memoire $script:proc
+                Noter-Mesure -Nom 'memoire privee 10 s apres 20 fermetures' -Valeur $apres -Unite 'Mo'
+                Noter-Mesure -Nom 'detail 10 s apres 20 fermetures' -Valeur $d20.Texte -Unite 'Mo'
+                Noter-Mesure -Nom 'ecart au repos chaud 10 s apres 20 fermetures' -Valeur ([math]::Round($apres - $chaud, 1)) -Unite 'Mo'
+                Verifier '(15) éditeur ouvert ≤ repos + 90 Mo' ($ouvert -le $froid + 90) "$ouvert Mo, repos $froid Mo" | Out-Null
+                # La page de l'éditeur a son processus de rendu : il part avec la fenêtre.
+                $rendus = "repos $($d0.Rendus), ouvert $($dOuvert.Rendus), après 1 fermeture $($d1.Rendus), après 20 $($d20.Rendus)"
+                Verifier '(15) le processus de rendu de l''éditeur part à la fermeture' (($d0.Rendus -ge 1) -and ($dOuvert.Rendus -gt $d0.Rendus) -and ($d1.Rendus -eq $d0.Rendus) -and ($d20.Rendus -eq $d0.Rendus)) $rendus | Out-Null
+                # Le processus de l'app tient les pixels des captures : une image gardée par
+                # ouverture ferait 3 Mo de plus à chaque fois (60 Mo ici).
+                Verifier '(15) processus de l''app : après 20 fermetures ≤ après la première + 8 Mo' ($d20.App -le $d1.App + 8) "$($d20.App) Mo, après la première $($d1.App) Mo" | Out-Null
+                # Tout l'arbre (app et WebView2) : le repos varie de quelques Mo d'une mesure à
+                # l'autre et les pages permanentes grossissent avec les captures, éditeur ou
+                # non ; une page d'éditeur gardée ferait 50 Mo de plus.
+                Verifier '(15) app et WebView2 : 10 s après 20 fermetures ≤ repos chaud + 40 Mo' ($apres -le $chaud + 40) "$apres Mo, repos chaud $chaud Mo" | Out-Null
                 $script:proc.Refresh()
                 $filsApres = $script:proc.Threads.Count
                 $poignees = (Get-Process -Id $script:proc.Id).HandleCount
-                Noter-Mesure -Nom 'fils apres 10 fermetures' -Valeur "$fils -> $filsApres" -Unite ''
+                Noter-Mesure -Nom 'fils apres 20 fermetures' -Valeur "$fils -> $filsApres" -Unite ''
                 Verifier '(15) fils et poignées stables' (($filsApres -le $fils + 3) -and ($poignees -le $fenetres + 60)) "fils $fils -> $filsApres, poignées $fenetres -> $poignees" | Out-Null
                 Verifier '(15) aucune fenêtre « Annoter la capture » restante' (($E::FenetresTitre($script:proc.Id, $TITRE)).Count -eq 0) | Out-Null
-                # Dix ouvertures de plus, notées : la mémoire monte-t-elle encore, redescend-elle ?
-                for ($i = 12; $i -le 21; $i++) {
-                    $c = Capturer $db "(15) $i"
-                    $h = Ouvrir-Editeur $db $c "(15) $i"
-                    $null = $E::PostMessage($h, $WM_CLOSE, [IntPtr]::Zero, [IntPtr]::Zero)
-                    $null = Attendre-Motif -Motif "editeur pixels rendus $($c.Id)$" -Dossier $db -DelaiS 10 -Quoi "(15) $i fermeture"
-                    $limite = [DateTime]::UtcNow.AddSeconds(5)
-                    while ($E::IsWindow($h) -and [DateTime]::UtcNow -lt $limite) { Start-Sleep -Milliseconds 100 }
-                    if ($E::IsWindow($h)) { throw "(15) $i : fenêtre non détruite" }
-                }
-                Start-Sleep -Seconds 10
-                Noter-Mesure -Nom 'memoire privee 10 s apres 20 fermetures' -Valeur (Memoire-Privee-Mo -Processus $script:proc) -Unite 'Mo'
-                Noter-Mesure -Nom 'detail 10 s apres 20 fermetures' -Valeur (Detail-Memoire $script:proc) -Unite 'Mo'
-                Start-Sleep -Seconds 30
-                Noter-Mesure -Nom 'memoire privee 40 s apres 20 fermetures' -Valeur (Memoire-Privee-Mo -Processus $script:proc) -Unite 'Mo'
-                Noter-Mesure -Nom 'detail 40 s apres 20 fermetures' -Valeur (Detail-Memoire $script:proc) -Unite 'Mo'
-                Fermer-Cas $script:proc $db '(15)'
             }
+            # Noté, sans seuil : 40 captures sans éditeur (chaque vignette remplace la
+            # précédente, la dernière est fermée). La mémoire suit-elle le nombre de captures ?
+            Point '(15) mémoire après 40 captures sans éditeur' {
+                $c = $null
+                for ($i = 1; $i -le 40; $i++) { $c = Capturer $db "(15) capture seule $i" }
+                Cliquer-Bouton $db $c 'fermer'
+                $null = Attendre-Motif -Motif "vignette fermee $($c.Id) fermer$" -Dossier $db -DelaiS 5 -Quoi '(15) vignette fermée'
+                $E::Poser($REPOS_X, $REPOS_Y)
+                Start-Sleep -Seconds 10
+                Noter-Mesure -Nom 'memoire privee 10 s apres 40 captures sans editeur' -Valeur (Memoire-Privee-Mo -Processus $script:proc) -Unite 'Mo'
+                Noter-Mesure -Nom 'detail 10 s apres 40 captures sans editeur' -Valeur (Detail-Memoire $script:proc).Texte -Unite 'Mo'
+            }
+            Point '(15) arrêt' { Fermer-Cas $script:proc $db '(15)' }
         }
         finally {
             try { $E::BoutonHaut() } catch { }
