@@ -266,9 +266,9 @@ pub fn doit_enregistrer(reglage: bool, vignette_construite: bool, dossier_connu:
     reglage || (!vignette_construite && dossier_connu)
 }
 
-/// Une demande du menu, différée, part seulement si aucune autre demande de capture
-/// (raccourci, autre clic) n'est arrivée depuis le clic : `prise` est son numéro,
-/// `actuelle` le numéro de la dernière demande reçue.
+/// Une demande du menu, différée, part seulement si aucune capture n'a démarré depuis le
+/// clic : `prise` est le nombre de captures démarrées au clic, `actuelle` ce nombre à
+/// l'échéance. Un appui ignoré par la table ne compte pas.
 pub fn demande_menu_a_jour(prise: u64, actuelle: u64) -> bool {
     prise == actuelle
 }
@@ -670,10 +670,38 @@ mod tests {
 
     #[test]
     fn demande_du_menu_caduque() {
+        // Rien n'a démarré depuis le clic (un raccourci ignoré par la table n'est pas
+        // compté) : la demande part.
         assert!(demande_menu_a_jour(7, 7));
-        // Un raccourci ou un autre clic entre-temps.
+        // Une capture a démarré entre-temps (raccourci, ou un clic précédent arrivé à
+        // échéance) : caduque.
         assert!(!demande_menu_a_jour(7, 8));
         assert!(!demande_menu_a_jour(7, 9));
+    }
+
+    /// Le compte suit l'automate : seule une demande acceptée par la table le change.
+    #[test]
+    fn seule_une_capture_demarree_rend_le_menu_caduc() {
+        use crate::application::etats::{Automate, Mode};
+        // Comme `demarrer_capture` : compter seulement une demande acceptée.
+        fn demander(a: &mut Automate, demarrees: &mut u64, mode: Mode) {
+            if a.traiter(Declencheur::DemandeCapture(mode)).is_some() {
+                *demarrees += 1;
+            }
+        }
+        let mut a = Automate::default();
+        let mut demarrees = 0;
+        // Une capture en cours, puis un clic au menu.
+        demander(&mut a, &mut demarrees, Mode::Zone);
+        let au_clic = demarrees;
+        // Un raccourci arrive pendant la capture : ignoré, non compté.
+        demander(&mut a, &mut demarrees, Mode::PleinEcran);
+        assert!(demande_menu_a_jour(au_clic, demarrees));
+        // Revenu au Repos, un raccourci démarre une capture : le clic est caduc.
+        a.traiter(Declencheur::GelImpossible);
+        demander(&mut a, &mut demarrees, Mode::PleinEcran);
+        assert_eq!(demarrees, 2);
+        assert!(!demande_menu_a_jour(au_clic, demarrees));
     }
 
     #[test]

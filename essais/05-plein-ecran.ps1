@@ -10,7 +10,7 @@
 # (4) Le PNG enregistré et l'image du presse-papiers ont exactement la taille de l'écran
 # principal en pixels réels, et la fenêtre témoin y est à sa place, aux bonnes couleurs.
 # (5) Deux captures de suite, la seconde pendant le bandeau de la première (vérifié
-# visible juste avant l'appui, sans « bandeau termine ») : sous la zone du bandeau, la
+# visible juste avant l'appui, sans « bandeau termine ») : sous la fenêtre du bandeau, la
 # seconde image a les couleurs du témoin. (6) Presse-papiers tenu par l'essai, deux appuis
 # à 30 ms : le second, pendant la capture, est ignoré (la copie échoue : « Impossible de
 # copier ») ; après, une capture normale, presse-papiers compris. (7) --quitter → arret
@@ -184,6 +184,10 @@ public static void Poser(int x, int y) {
     SetCursorPos(x, y);
     mouse_event(0x1, 0, 0, 0, UIntPtr.Zero);
 }
+[StructLayout(LayoutKind.Sequential)]
+public struct RECT { public int Left; public int Top; public int Right; public int Bottom; }
+[DllImport("user32.dll")]
+public static extern bool GetWindowRect(IntPtr h, out RECT r);
 [DllImport("user32.dll", SetLastError = true)]
 static extern bool OpenClipboard(IntPtr h);
 [DllImport("user32.dll")]
@@ -193,9 +197,17 @@ static extern bool CloseClipboard();
 // Avec $tenueMs > 0, le presse-papiers est ouvert (donc occupé pour l'app) avant l'appui
 // et refermé $tenueMs après : la copie de l'app réessaie jusqu'à son échéance (250 ms),
 // la Découpe dure donc au moins ce temps. Rend -1 si le presse-papiers n'a pas pu être
-// ouvert (rien n'est alors appuyé).
+// ouvert en 10 essais (rien n'est alors appuyé).
 public static int AppuyerEnGuettant(byte[] mods, byte touche, int fois, int ecart, IntPtr[] guettees, int dureeMs, int tenueMs) {
-    if (tenueMs > 0 && !OpenClipboard(IntPtr.Zero)) return -1;
+    if (tenueMs > 0) {
+        // Quelques essais, 20 ms d'écart : une autre application peut le tenir un instant.
+        bool ouvert = false;
+        for (int i = 0; i < 10 && !ouvert; i++) {
+            if (i > 0) System.Threading.Thread.Sleep(20);
+            ouvert = OpenClipboard(IntPtr.Zero);
+        }
+        if (!ouvert) return -1;
+    }
     int vues = 0;
     bool fin = false;
     var guet = new System.Threading.Thread(() => {
@@ -465,17 +477,29 @@ public static int EcartsTemoin(byte[] o, int stride, int x, int y, int l, int h,
                 $aff = Attendre-Motif -Motif 'bandeau affiche (\d+) reussite ' -Dossier $da -DelaiS 5 -Quoi '(5) bandeau de la première' -Fois ($affiches + 1)
                 $null = $aff -match 'bandeau affiche (\d+) reussite '
                 $idBandeau = $Matches[1]
-                $lz = Attendre-Motif -Motif "bandeau zone $idBandeau (-?\d+),(-?\d+) (\d+)x(\d+)$" -Dossier $da -DelaiS 3 -Quoi '(5) zone du bandeau'
-                $null = $lz -match "bandeau zone $idBandeau (-?\d+),(-?\d+) (\d+)x(\d+)$"
+                # Une réussite n'envoie jamais sa zone (`bandeau.js`, `envoyerZone` : pas de
+                # zone cliquable), il n'y a donc pas de « bandeau zone » : on prend le
+                # rectangle de la fenêtre du bandeau, en pixels réels, dans la ligne
+                # « bandeau affiche <id> reussite ecran <x>,<y> <l>x<h> echelle <e> »
+                # (`fenetres::placer` : 560 × 220 pixels logiques fois l'échelle, centrée en
+                # haut de la zone utile). La pilule y est centrée à 64 px logiques du haut,
+                # environ 170 × 34 pixels logiques pour « Copié et enregistré »
+                # (`bandeau.css`, jetons) : à 1024 px de large et 100 %, fenêtre
+                # 232..792 × 0..220, témoin 412..612 × 40..240, pilule vers 427..597 × 64..98,
+                # donc dans l'intersection. Le témoin de la preuve ci-dessous le vérifie.
+                if ($aff -notmatch "bandeau affiche $idBandeau reussite ecran (-?\d+),(-?\d+) (\d+)x(\d+) echelle") { throw "(5) ligne d'affichage illisible : $aff" }
                 $zb = [pscustomobject]@{ X = [int]$Matches[1]; Y = [int]$Matches[2]; L = [int]$Matches[3]; H = [int]$Matches[4] }
-                # Seule la part de la zone du bandeau qui couvre le témoin est comparée : ses
-                # couleurs sont connues, rien n'y bouge.
+                $rf = [BreezyShotEssai.PleinEcran+RECT]::new()
+                [void][BreezyShotEssai.PleinEcran]::GetWindowRect($bandeau, [ref]$rf)
+                Write-Host "(5) fenêtre du bandeau : journal $($zb.X),$($zb.Y) $($zb.L)x$($zb.H), GetWindowRect $($rf.Left),$($rf.Top) $($rf.Right - $rf.Left)x$($rf.Bottom - $rf.Top)"
+                # Seule la part de la fenêtre du bandeau qui couvre le témoin est comparée :
+                # ses couleurs sont connues, rien n'y bouge.
                 $ix = [math]::Max($zb.X, $TX); $iy = [math]::Max($zb.Y, $TY)
                 $il = [math]::Min($zb.X + $zb.L, $TX + $COTE) - $ix
                 $ih = [math]::Min($zb.Y + $zb.H, $TY + $COTE) - $iy
-                Write-Host "(5) zone du bandeau $($zb.X),$($zb.Y) $($zb.L)x$($zb.H) ; sur le témoin $ix,$iy ${il}x$ih"
+                Write-Host "(5) fenêtre du bandeau sur le témoin : $ix,$iy ${il}x$ih"
                 $surTemoin = ($il -gt 0) -and ($ih -gt 0)
-                Verifier '(5) la zone du bandeau couvre une part du témoin' $surTemoin "zone $($zb.X),$($zb.Y) $($zb.L)x$($zb.H), témoin $TX,$TY ${COTE}x$COTE" | Out-Null
+                Verifier '(5) la fenêtre du bandeau couvre une part du témoin' $surTemoin "fenêtre $($zb.X),$($zb.Y) $($zb.L)x$($zb.H), témoin $TX,$TY ${COTE}x$COTE" | Out-Null
                 Start-Sleep -Milliseconds 400   # pilule entrée (300 ms), encore là (2,5 s)
                 if ($surTemoin) {
                     # Témoin de la preuve : le bandeau est réellement peint à l'écran à cet
@@ -553,16 +577,16 @@ public static int EcartsTemoin(byte[] o, int stride, int x, int y, int l, int h,
                             $ex = $c2.Ecran.X; $ey = $c2.Ecran.Y
                             $diff = [BreezyShotEssai.PleinEcran]::EcartsTemoin($ob.Octets, $ob.Stride, ($ix - $ex), ($iy - $ey), $il, $ih, ($TX - $ex), ($TY - $ey), $COTE, $COULEURS_PLAT)
                             if ($diff -ne 0) { $image2.Save((Join-Path $script:Essai.Sortie '05-seconde-image.png'), [System.Drawing.Imaging.ImageFormat]::Png) }
-                            Verifier '(5) sous la zone du bandeau, la seconde image a les couleurs du témoin (bandeau absent)' ($diff -eq 0) "$diff pixel(s) différents sur ${il}x$ih" | Out-Null
+                            Verifier '(5) sous la fenêtre du bandeau, la seconde image a les couleurs du témoin (bandeau absent)' ($diff -eq 0) "$diff pixel(s) différents sur ${il}x$ih" | Out-Null
                         }
                         else {
-                            Verifier '(5) comparaison sous la zone du bandeau' $false "image $taille2, écran $TAILLE" | Out-Null
+                            Verifier '(5) comparaison sous la fenêtre du bandeau' $false "image $taille2, écran $TAILLE" | Out-Null
                         }
                     }
                     finally { $image2.Dispose() }
                 }
                 else {
-                    Verifier '(5) comparaison sous la zone du bandeau possible' $false "PNG $($pngs.Count), zone sur le témoin $surTemoin, écran lu $($null -ne $c2.Ecran)" | Out-Null
+                    Verifier '(5) comparaison sous la fenêtre du bandeau possible' $false "PNG $($pngs.Count), zone sur le témoin $surTemoin, écran lu $($null -ne $c2.Ecran)" | Out-Null
                 }
 
                 # (6) Deux appuis à 30 ms, presse-papiers tenu 500 ms par l'essai : la copie de

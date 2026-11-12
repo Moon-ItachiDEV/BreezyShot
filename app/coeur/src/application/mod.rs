@@ -182,8 +182,8 @@ pub struct Application {
     /// La sortie dont on attend le bilan ; `None` une fois le bilan reçu ou l'échéance
     /// tombée.
     sortie_attendue: Mutex<Option<u64>>,
-    /// Numéro de la dernière demande de capture reçue (raccourci ou clic au menu). Une
-    /// demande du menu, différée de `ATTENTE_MENU`, est caduque si ce numéro a changé.
+    /// Nombre de captures démarrées (demandes acceptées par la table). Une demande du
+    /// menu, différée de `ATTENTE_MENU`, est caduque si ce nombre a changé depuis le clic.
     demandes: AtomicU64,
 }
 
@@ -749,21 +749,25 @@ fn afficher_probleme(app: &AppHandle, probleme: Probleme) {
     afficher(app, zone::message_capture_impossible());
 }
 
-/// Note une demande de capture reçue et rend son numéro.
-fn noter_demande(app: &AppHandle) -> u64 {
-    app.state::<Application>()
-        .demandes
-        .fetch_add(1, Ordering::SeqCst)
-        .wrapping_add(1)
+/// Le nombre de captures démarrées jusqu'ici.
+fn captures_demarrees(app: &AppHandle) -> u64 {
+    app.state::<Application>().demandes.load(Ordering::SeqCst)
 }
 
-/// Lance la capture `mode` après `attente` (menu de l'icône) : le numéro de la demande
-/// est pris au clic, un petit fil dort, puis la demande est postée sur le fil principal.
-/// Toute demande reçue entre-temps (raccourci, autre clic) la rend caduque
-/// (`zone::demande_menu_a_jour`). Si l'état n'est plus Repos ni Vignette à l'échéance,
-/// la table ignore la demande.
+/// Note une capture démarrée (demande acceptée par la table).
+fn noter_demande(app: &AppHandle) {
+    app.state::<Application>()
+        .demandes
+        .fetch_add(1, Ordering::SeqCst);
+}
+
+/// Lance la capture `mode` après `attente` (menu de l'icône) : le nombre de captures
+/// démarrées est pris au clic, un petit fil dort, puis la demande est postée sur le fil
+/// principal. Une capture démarrée entre-temps (raccourci, autre clic arrivé à échéance)
+/// la rend caduque (`zone::demande_menu_a_jour`) ; un appui ignoré par la table, non. Si
+/// l'état n'est plus Repos ni Vignette à l'échéance, la table ignore la demande.
 fn lancer_capture_apres(app: &AppHandle, mode: Mode, attente: Duration) {
-    let numero = noter_demande(app);
+    let numero = captures_demarrees(app);
     let pour_fil = app.clone();
     let lance = std::thread::Builder::new()
         .name("menu-attente".into())
@@ -771,10 +775,7 @@ fn lancer_capture_apres(app: &AppHandle, mode: Mode, attente: Duration) {
             std::thread::sleep(attente);
             let pour_traiter = pour_fil.clone();
             let poste = pour_fil.run_on_main_thread(move || {
-                let actuelle = pour_traiter
-                    .state::<Application>()
-                    .demandes
-                    .load(Ordering::SeqCst);
+                let actuelle = captures_demarrees(&pour_traiter);
                 if zone::demande_menu_a_jour(numero, actuelle) {
                     demarrer_capture(&pour_traiter, mode);
                 } else {
@@ -791,8 +792,8 @@ fn lancer_capture_apres(app: &AppHandle, mode: Mode, attente: Duration) {
     }
 }
 
-/// Demande une capture par raccourci. Fil principal (sinon postée). La demande est notée
-/// (une demande du menu en attente devient caduque), puis `demarrer_capture`.
+/// Demande une capture par raccourci. Fil principal (sinon postée), puis
+/// `demarrer_capture`.
 pub fn lancer_capture(app: &AppHandle, mode: Mode) {
     if hors_fil_principal(app) {
         let pour = app.clone();
@@ -801,19 +802,20 @@ pub fn lancer_capture(app: &AppHandle, mode: Mode) {
         }
         return;
     }
-    noter_demande(app);
     demarrer_capture(app, mode);
 }
 
 /// Démarre une capture (fil principal). La table ignore la demande hors Repos et
-/// Vignette (aucun second `figer` tant qu'une capture est en cours), puis chaque mode
-/// suit sa séquence : zone (§3.6), plein écran (§3.7).
+/// Vignette (aucun second `figer` tant qu'une capture est en cours) ; acceptée, elle est
+/// comptée (une demande du menu en attente devient caduque), puis chaque mode suit sa
+/// séquence : zone (§3.6), plein écran (§3.7).
 fn demarrer_capture(app: &AppHandle, mode: Mode) {
     let recu_a = Instant::now();
     if appliquer(app, Declencheur::DemandeCapture(mode)).is_none() {
         log::info!("capture deja en cours: appui ignore");
         return;
     }
+    noter_demande(app);
     match mode {
         Mode::Zone => capturer_zone(app, recu_a),
         Mode::PleinEcran => capturer_plein_ecran(app, recu_a),

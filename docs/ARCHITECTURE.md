@@ -191,8 +191,9 @@ dans le dossier temporaire du système (`systeme::dossier_secours()`), sous le n
 - Chaque entrée de capture du menu lance la même capture que le raccourci de son mode, mais
   après `ATTENTE_MENU` (350 ms) : un petit fil dort puis poste `lancer_capture` sur le fil
   principal, pour que le menu, que Windows fait disparaître en fondu, ne soit pas sur la
-  photo. Un raccourci n'attend jamais. Chaque demande (raccourci, clic) prend un numéro ; à
-  l'échéance, si une autre demande est arrivée depuis le clic, celle du menu est caduque
+  photo. Un raccourci n'attend jamais. Le clic note le nombre de captures démarrées (demandes
+  acceptées par la table) ; à l'échéance, si une capture a démarré depuis (raccourci, autre
+  clic), celle du menu est caduque ; un appui ignoré ne compte pas
   (`zone::demande_menu_a_jour`, `menu: demande perimee`). Si l'état n'est plus Repos ni
   Vignette à l'échéance, la table ignore la demande. Journal : `menu: capturer <mode>` à
   la réception.
