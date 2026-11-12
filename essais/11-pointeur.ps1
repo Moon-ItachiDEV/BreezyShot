@@ -211,10 +211,25 @@ public static void Glisser(int x1, int y1, int x2, int y2) {
     System.Threading.Thread.Sleep(150);
     mouse_event(0x4, 0, 0, 0, UIntPtr.Zero);
 }
-public static int FenetresDe(int pid) {
-    int n = 0;
-    EnumWindows((h, p) => { uint q; GetWindowThreadProcessId(h, out q); if ((int)q == pid) n++; return true; }, IntPtr.Zero);
-    return n;
+[DllImport("user32.dll", CharSet = CharSet.Unicode)]
+static extern int GetClassNameW(IntPtr h, System.Text.StringBuilder s, int n);
+// Les classes des fenêtres de premier niveau du processus, triées. Les fenêtres de saisie
+// que Windows crée lui-même pour un fil quand une de ses fenêtres reçoit le clavier
+// (« IME », « MSCTFIME UI ») ne sont pas des fenêtres de l'app : elles ne comptent pas.
+public static string[] FenetresDe(int pid) {
+    var l = new System.Collections.Generic.List<string>();
+    EnumWindows((h, p) => {
+        uint q; GetWindowThreadProcessId(h, out q);
+        if ((int)q == pid) {
+            var sb = new System.Text.StringBuilder(256);
+            GetClassNameW(h, sb, 256);
+            string c = sb.ToString();
+            if (c != "IME" && c != "MSCTFIME UI") l.Add(c);
+        }
+        return true;
+    }, IntPtr.Zero);
+    l.Sort(StringComparer.Ordinal);
+    return l.ToArray();
 }
 // Pixels du rectangle (x, y, l, h) d'une image BGRA (LockBits, Format32bppArgb), borné à
 // l'image : { différents de rgb, presque noirs (< 60), presque blancs (> 200) }.
@@ -363,7 +378,7 @@ public static int[] EcartsTemoin(byte[] o, int stride, int il, int ih, int tx, i
         Verifier '(2) pointeur éteint : aucune ligne « pointeur »' ((Compter-Motif -Motif 'pointeur (pris|absent|pose|hors zone)' -Dossier $de) -eq 0) | Out-Null
 
         $fenetresApres = [BreezyShotEssai.Pointeur]::FenetresDe($p.Id)
-        Verifier '(5) éteint : fenêtres stables' ($fenetresApres -eq $fenetresAvant) "$fenetresAvant → $fenetresApres" | Out-Null
+        Verifier '(5) éteint : fenêtres stables' (($fenetresApres -join '|') -ceq ($fenetresAvant -join '|')) "$($fenetresAvant.Count) → $($fenetresApres.Count) ; avant : $($fenetresAvant -join ', ') ; après : $($fenetresApres -join ', ')" | Out-Null
         Fermer-Cas $p $de 'éteint'
 
         # --- Cas « allumé » -----------------------------------------------------------------
@@ -413,7 +428,7 @@ public static int[] EcartsTemoin(byte[] o, int stride, int il, int ih, int tx, i
         }
         else { Verifier '(4) une image de la zone dans Récents' $false "$($pngs.Count - $avant) image(s) nouvelle(s)" | Out-Null }
         $fenetresApres = [BreezyShotEssai.Pointeur]::FenetresDe($p.Id)
-        Verifier '(5) allumé : fenêtres stables' ($fenetresApres -eq $fenetresAvant) "$fenetresAvant → $fenetresApres" | Out-Null
+        Verifier '(5) allumé : fenêtres stables' (($fenetresApres -join '|') -ceq ($fenetresAvant -join '|')) "$($fenetresAvant.Count) → $($fenetresApres.Count) ; avant : $($fenetresAvant -join ', ') ; après : $($fenetresApres -join ', ')" | Out-Null
         Fermer-Cas $p $da 'allumé'
         $null = $temoin
     }
