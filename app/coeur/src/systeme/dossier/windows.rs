@@ -1,7 +1,7 @@
 //! Windows : `IFileOpenDialog` avec `FOS_PICKFOLDERS`, dans un appartement COM à un fil
 //! (le fil de l'appelant, qui n'est pas le fil principal).
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use ::windows::core::{HSTRING, PCWSTR};
 use ::windows::Win32::Foundation::{ERROR_CANCELLED, HWND};
@@ -69,4 +69,15 @@ pub fn choisir_dossier(
         let chemin = chemin.map_err(|e| format!("chemin: {e}"))?;
         Ok(Some(PathBuf::from(chemin)))
     }
+}
+
+/// Le dialogue « Enregistrer sous » (`IFileSaveDialog`, même appartement COM à un fil).
+pub fn choisir_fichier_png(
+    proprietaire: Option<isize>,
+    depart: Option<&Path>,
+    nom: &str,
+) -> Result<Option<PathBuf>, String> {
+    // Provisoire (D) : comme un dialogue annulé.
+    let _ = (proprietaire, depart, nom);
+    Ok(None)
 }

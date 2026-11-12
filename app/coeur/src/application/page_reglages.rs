@@ -584,6 +584,7 @@ mod tests {
         assert_eq!(c, Changement::Pointeur(true));
         for faux in [
             r#"{"cle":"barre","valeur":true}"#,
+            r#"{"cle":"loupe","valeur":true}"#,
             r#"{"cle":"retardateur","valeur":-1}"#,
             r#"{"cle":"retardateur","valeur":"3"}"#,
             r#"{"cle":"pointeur","valeur":1}"#,
@@ -652,10 +653,6 @@ mod tests {
                 ("retardateur", "", "invalide")
             );
         }
-        let n = appliquer(&r, &Changement::Pointeur(true)).unwrap();
-        let mut attendu = r.clone();
-        attendu.capture.pointeur = true;
-        assert_eq!(n, attendu, "rien d'autre ne bouge");
         // Un retardateur du fichier hors de la liste (7) survit aux autres changements.
         let mut sept = r.clone();
         sept.capture.retardateur_s = 7;

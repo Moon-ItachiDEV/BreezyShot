@@ -688,8 +688,15 @@ public static string Titre(IntPtr h) {
     $repris = Compter-Motif -Motif 'raccourcis repris$' -Dossier $cas
     $changes = Compter-Motif -Motif 'raccourci plein_ecran change: ' -Dossier $cas
     $refus = Compter-Motif -Motif 'raccourci plein_ecran refuse: ' -Dossier $cas
+    $devant6 = [BreezyShotEssai.Reglages]::GetForegroundWindow()
     Cliquer-Nom $fen 'Plein écran' ([System.Windows.Automation.ControlType]::Button) '(6) raccourci du plein écran'
-    $null = Attendre-Suivante 'raccourcis suspendus \(saisie plein_ecran\)$' $cas $susp '(6) saisie'
+    try { $null = Attendre-Suivante 'raccourcis suspendus \(saisie plein_ecran\)$' $cas $susp '(6) saisie' }
+    catch {
+        # De quoi comprendre un clic sans effet : qui était devant, où est le bouton.
+        $e6 = Element $fen 'Plein écran' ([System.Windows.Automation.ControlType]::Button)
+        $ou = if ($null -ne $e6) { Decrire $e6 } else { 'bouton introuvable' }
+        throw "$_ ; fenêtre Réglages $fen, devant avant le clic $devant6, devant après $([BreezyShotEssai.Reglages]::GetForegroundWindow()) ; $ou"
+    }
     [BreezyShotEssai.Reglages]::Appuyer($CTRL_MAJ, 0x38)
     Start-Sleep -Milliseconds 1200
     $changesApres = Compter-Motif -Motif 'raccourci plein_ecran change: ' -Dossier $cas
@@ -919,6 +926,12 @@ public static string Titre(IntPtr h) {
 }
 catch {
     Verifier "essai interrompu : $_" $false | Out-Null
+    # Les 30 dernières lignes du journal du cas : sans elles, un clic sans effet ne
+    # s'explique pas.
+    if (Test-Path variable:cas) {
+        Write-Host '--- fin du journal du cas ---'
+        Lignes-Journal $cas | Select-Object -Last 30 | ForEach-Object { Write-Host $_ }
+    }
 }
 finally {
     foreach ($a in $script:Auxiliaires) { try { if (-not $a.HasExited) { $a.Kill() } } catch { } }

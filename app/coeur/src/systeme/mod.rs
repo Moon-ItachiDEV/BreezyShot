@@ -19,7 +19,7 @@ pub mod installation;
 pub mod presse_papiers;
 pub use composition::attendre_composition;
 pub use demarrage::{demarrage_avec_systeme, mettre_a_jour_chemin, EtatDemarrage};
-pub use dossier::choisir_dossier;
+pub use dossier::{choisir_dossier, choisir_fichier_png};
 pub use gel::Rect;
 
 #[cfg(windows)]

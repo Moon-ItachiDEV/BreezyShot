@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-editeur-etat"
+description = "Enables the editeur_etat command without any pre-configured scope."
+commands.allow = ["editeur_etat"]
+
+[[permission]]
+identifier = "deny-editeur-etat"
+description = "Denies the editeur_etat command without any pre-configured scope."
+commands.deny = ["editeur_etat"]

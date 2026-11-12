@@ -476,7 +476,7 @@ public static string[] Ecarts(byte[] o, int s, int l, int h, int[] c, int max) {
             if (-not (Verifier "$Nom : taille ${COTE}x$COTE" (($Image.Width -eq $COTE) -and ($Image.Height -eq $COTE)) "obtenu $($Image.Width)x$($Image.Height)")) {
                 Garder-Image $Nom $Image; return
             }
-            $e = Ecarts-Temoin $Image 8
+            $e = @(Ecarts-Temoin $Image 8)
             if ($e[0] -ne 'total 0') { Garder-Image $Nom $Image }
             Verifier "$Nom : chaque pixel à la couleur du témoin" ($e[0] -eq 'total 0') ($e -join ' ; ') | Out-Null
         }
@@ -486,7 +486,7 @@ public static string[] Ecarts(byte[] o, int s, int l, int h, int[] c, int max) {
             if (-not (Verifier "$Nom : même taille" (($A.Width -eq $B.Width) -and ($A.Height -eq $B.Height)) "$($A.Width)x$($A.Height) contre $($B.Width)x$($B.Height)")) {
                 Garder-Image "$Nom-a" $A; Garder-Image "$Nom-b" $B; return
             }
-            $e = Comparer-Images $A $B 0 0 $A.Width $A.Height 0
+            $e = @(Comparer-Images $A $B 0 0 $A.Width $A.Height 0)
             if ($e[0] -ne 'total 0') { Garder-Image "$Nom-a" $A; Garder-Image "$Nom-b" $B }
             Verifier "$Nom : identiques pixel pour pixel" ($e[0] -eq 'total 0') ($e -join ' ; ') | Out-Null
         }
@@ -624,7 +624,7 @@ public static string[] Ecarts(byte[] o, int s, int l, int h, int[] c, int max) {
                 if (-not $C::GetMenuItemRect([IntPtr]::Zero, $m.Menu, [uint32]$pos, [ref]$ri)) { throw '(4) rectangle de l''entrée illisible' }
                 # Le menu est bien au-dessus du témoin, dans la zone : sinon le point ne prouve rien.
                 $vue = Copie-Ecran $x4 $y4 $cote4 $cote4
-                $ecartsMenu = Ecarts-Temoin $vue 1
+                $ecartsMenu = @(Ecarts-Temoin $vue 1)
                 $vue.Dispose()
                 Verifier '(4) le menu ouvert couvre le témoin dans la zone' ($ecartsMenu[0] -ne 'total 0') ($ecartsMenu -join ' ; ') | Out-Null
                 $n = @(Fichiers-Png $recents).Count
@@ -751,12 +751,14 @@ public static string[] Ecarts(byte[] o, int s, int l, int h, int[] c, int max) {
                 $n = @(Fichiers-Png $recents).Count
                 $photos = Compter-Motif -Motif 'chrono gel photo ' -Dossier $db
                 $liberes = Compter-Motif -Motif 'echap global libere$' -Dossier $db
+                $reserves = Compter-Motif -Motif 'echap global reserve$' -Dossier $db
                 $C::Touches($CTRL_MAJ_2)
                 $ld = Attendre-Motif -Motif 'decompte (\d+) debut 10 s plein_ecran$' -Dossier $db -DelaiS 5 -Quoi '(7) decompte debut'
                 $t7 = [DateTime]::UtcNow
                 $null = $ld -match 'decompte (\d+) debut'
                 $num = $Matches[1]
-                Start-Sleep -Milliseconds 500
+                # Échap n'annule qu'une fois réservé : la ligne `debut` est écrite avant.
+                $null = Attendre-Suivante 'echap global reserve$' $db $reserves '(7) echap global reserve'
                 $C::Touches($ECHAP)
                 $la = Attendre-Motif -Motif "decompte $num annule \(\w+\)$" -Dossier $db -DelaiS 3 -Quoi '(7) annulation'
                 Verifier '(7) annule (echap)' ($la -match 'annule \(echap\)$') $la | Out-Null
@@ -771,6 +773,7 @@ public static string[] Ecarts(byte[] o, int s, int l, int h, int[] c, int max) {
 
                 # (8) La croix.
                 $n = @(Fichiers-Png $recents).Count
+                $photos = Compter-Motif -Motif 'chrono gel photo ' -Dossier $db
                 $premier = $C::GetForegroundWindow()
                 $debuts = Compter-Motif -Motif 'decompte \d+ debut ' -Dossier $db
                 $C::Touches($CTRL_MAJ_2)
@@ -788,7 +791,7 @@ public static string[] Ecarts(byte[] o, int s, int l, int h, int[] c, int max) {
                 Verifier '(8) bandeau action annuler, annule (croix)' ($la -match 'annule \(croix\)$') $la | Out-Null
                 Verifier '(8) premier plan inchangé' ($C::GetForegroundWindow() -eq $premier) "avant $premier, après $($C::GetForegroundWindow())" | Out-Null
                 Attendre-Jusqua $t8 11
-                Verifier '(8) aucune photo 11 s après le début' (@(Fichiers-Png $recents).Count -eq $n) | Out-Null
+                Verifier '(8) aucune photo 11 s après le début' (((Compter-Motif -Motif 'chrono gel photo ' -Dossier $db) -eq $photos) -and (@(Fichiers-Png $recents).Count -eq $n)) "photos $photos → $(Compter-Motif -Motif 'chrono gel photo ' -Dossier $db)" | Out-Null
 
                 # (11) --quitter pendant un décompte.
                 $n = @(Fichiers-Png $recents).Count

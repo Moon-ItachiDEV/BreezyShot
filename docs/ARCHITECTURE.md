@@ -23,7 +23,9 @@ app/
                             de la vignette (pures, étape 9) ; page_reglages.rs :
                             décisions de la fenêtre Réglages (pures),
                             fenetre_reglages.rs : ses commandes (étape 10) ;
-                            decompte.rs : décisions du retardateur (pures, 0.4)
+                            decompte.rs : décisions du retardateur (pures, 0.4) ;
+                            editeur.rs : décisions de l'éditeur d'annotation (pures),
+                            fenetre_editeur.rs : ses commandes (0.4, §6.2)
       raccourcis/           raccourcis globaux (étape 3), Échap global de la sélection
       capture/              figer (appelle systeme::gel), géométrie de la sélection, découpe
                             (étape 4) ; fenetre.rs : liste des fenêtres, partie à découper,
@@ -31,13 +33,15 @@ app/
                             pointeur posé dans l'image (0.4) ; aucun code propre à un
                             système
       sortie/               presse-papiers, PNG, « Récents », enregistrement (étape 6) ;
-                            glisser.rs : fichier donné au glisser, effacement de Supprimer
+                            glisser.rs : fichier donné au glisser, effacement de Supprimer ;
+                            fichier.rs : aussi `enregistrer_a` (Enregistrer sous…, 0.4)
       reglages/             fichier de réglages (étape 2)
       fenetres/             crée, place, montre et cache les fenêtres de l'interface :
                             mod.rs (bandeau, création commune des fenêtres outil), place.rs,
                             selection.rs (étape 5), vignette.rs (vignette et souffle,
                             étape 9), decompte.rs (disque du retardateur dans le
-                            bandeau, 0.4), reglages.rs (fenêtre Réglages), theme.rs (thème
+                            bandeau, 0.4), reglages.rs (fenêtre Réglages), editeur.rs
+                            (fenêtre de l'éditeur d'annotation, 0.4), theme.rs (thème
                             des pages),
                             installateur.rs (fenêtre de l'installateur, version 0.3)
       installation/         décisions pures de l'installateur (version 0.3) : version.rs,
@@ -52,7 +56,7 @@ app/
                             « PNG » puis CF_DIB sur blanc ; mod.rs, windows.rs, autre.rs),
                             glisser/ (glisser-déposer d'un fichier, étape 9),
                             demarrage/ (démarrer avec le système), dossier/ (sélecteur de
-                            dossier natif) (étape 10),
+                            dossier natif, étape 10 ; « Enregistrer sous » PNG, 0.4),
                             installation/ (fichiers, registre de l'utilisateur, raccourci,
                             WebView2, processus ; mod.rs, windows.rs, autre.rs)
   interface/                ce qu'on voit (web), partagé entre Windows et Mac
@@ -65,6 +69,9 @@ app/
     reglages/               fenêtre des Réglages (étape 10) : html (structure), css
                             (habillage, jetons seulement), js (comportement),
                             habillage.js (affichage seulement)
+    editeur/                éditeur d'annotation (0.4, §6.2) : editeur.html, .css, .js,
+                            barre.js, outils.js ; document.js (modèle pur, sans DOM) et
+                            dessin.js (rendu et composition de l'export)
     barre/                  barre de capture (plus tard)
 design/                     jetons et icônes Moulinet, copiés du design system
 docs/                       ce fichier, TRAVAIL-VALIDE.md, notices d'essai
@@ -919,6 +926,60 @@ Module pur : il reçoit le dossier où écrire, ne connaît ni Tauri ni les autr
   `raccourci <action> refuse: <candidat> (<raison>)` (une touche refusée par la page :
   son code, ASCII imprimable, 24 caractères au plus), `raccourci <action> perdu a la reprise`.
 
+### 6.2 Éditeur d'annotation (0.4)
+
+Contrat : « Contrat de la version 0.4 Éditeur d'annotation » (§3 à §8), qui fait foi pour
+le détail. Une fenêtre ordinaire unique (étiquette `editeur`, « Annoter la capture »),
+créée cachée au clic Annoter de la vignette, montrée à `editeur_pret`, détruite à la
+fermeture ; aucune fenêtre préparée au démarrage ; aucun état ni passage nouveau dans
+`etats.rs`. Le document (objets, historique) et le dessin vivent dans la page
+(`editeur/document.js`, `dessin.js`, modules purs essayés sous Node et Chromium) ; tout ce
+qui quitte l'app est décidé en Rust (`application/editeur.rs`) et passe par
+`sortie::sortir`. L'image va à la page en RGBA brut (`editeur_image` →
+`tauri::ipc::Response`) et revient en corps brut (`editeur_exporter`, en-têtes
+`x-editeur-*`).
+
+**Posé par le socle** (signatures, câblage minimal) :
+
+- `application/editeur.rs` : `COTE_MAX`, `PIXELS_MAX`, `DELAI_PAGE`, `DELAI_FERMETURE`,
+  `PREFERENCES_MAX`, `Document`, `EtatEditeur`, `ExportEnCours`, `But` (`nom`,
+  `depuis_nom`), `EnTete`, `Refus` (`code`), `Sortie`, `Arrivee`, `Fermeture`,
+  `RaisonFermeture`, `FinExportEditeur`, les charges `ChargeEditeur`,
+  `ChargeFermerDemande`, `ChargeResultat`, `ChargeGlisser`, et `annotable`,
+  `lire_en_tete`, `accepter_export`, `sortie_pour`, `arrivee`, `fermeture`,
+  `message_echec`, `ligne_export`, `ligne_bilan`, `ligne_fermeture`.
+- `application/fenetre_editeur.rs` : les huit commandes (`editeur_pret`, `editeur_image`,
+  `editeur_affiche`, `editeur_vue`, `editeur_etat`, `editeur_exporter`, `editeur_fermer`,
+  `editeur_garder`), déclarées dans `build.rs`, dans `invoke_handler`, permises à la seule
+  fenêtre `editeur` (`capabilities/editeur.json` : écoute et ces huit commandes).
+- `application/mod.rs` : `EDITEUR_CONSTRUIT`, champ `Application.editeur`, variantes
+  `Evenement::EditeurDetruit`, `EditeurFermetureDemandee`, `EditeurExportFait`,
+  `EditeurExportEchu`, `EditeurGlisser { id, chemin }` (ramenées sur le fil principal),
+  leurs branches, et la branche `vignette::Geste::Annoter`.
+- `application/vignette.rs` (complet) : `ANNOTER`, `actions(annoter)`, `Geste::Annoter`
+  (ignoré pendant une suppression, une copie ou un enregistrement en cours, un glisser, ou
+  si la capture n'est pas `annotable`).
+- `fenetres/editeur.rs` : `ETIQUETTE_EDITEUR`, `TITRE`, `PAGE`, `TAILLE_MIN`, `MARGES`,
+  `PART_MAX`, les noms des quatre événements (`editeur:charger`, `editeur:fermer_demande`,
+  `editeur:resultat`, `editeur:glisser`), `Ouverture`, `placer`, `ouvrir`, `montrer`,
+  `ramener_devant`, `emettre`, `rect_page`, `regler_cadre`, `fermer`, `identifiant`.
+- `sortie::enregistrer_a(&Pixels, &Path, transparence) -> EtapeFichier` ;
+  `systeme::choisir_fichier_png(proprietaire, depart, nom)` (`systeme/dossier/`).
+- `interface/editeur/document.js` et `dessin.js` : les exports, et les constantes de
+  contenu de `dessin.js` (`COULEURS`, `TRAITS`, `TRAITS_SURLIGNEUR`, `RAYONS_NUMERO`,
+  `BLOCS`, `FLOUS`, `COULEURS_PERSO_MAX`).
+
+**Encore provisoire** (chaque corps le dit, avec le chantier qui le remplace) :
+`EDITEUR_CONSTRUIT` vaut faux, donc la vignette ne montre pas Annoter ; `ouvrir` rend
+« pas construit » et les autres gestes de la fenêtre ne font rien ; les commandes sont
+inertes (refus « pas construit » ou rien) ; `lire_en_tete` et `accepter_export` refusent,
+`sortie_pour`, `arrivee`, `fermeture`, `message_echec` et les lignes du journal ont des
+corps de remplacement ; `EditeurDetruit` retire seulement l'état ; `enregistrer_a` échoue
+sans rien écrire ; `choisir_fichier_png` rend `Ok(None)` (aussi hors Windows, pour
+toujours : pas de dialogue natif) ; les fonctions de `document.js` et `dessin.js` ne font
+presque rien ; aucune page `editeur.html` encore. Les lignes du journal de l'éditeur
+(contrat §8) entrent ici avec leur code.
+
 ## 7. Vérification
 
 - `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `cargo test` : sur Windows (machine
@@ -1042,9 +1103,10 @@ Module pur : il reçoit le dossier où écrire, ne connaît ni Tauri ni les autr
   toujours avant la fin) : (7) Échap : `annule (echap)`, `echap global libere`, aucune
   photo 11 s après le début, puis une capture normale ; (8) clic réel au centre de `bandeau
   zone` : `bandeau action <id> annuler`, `annule (croix)`, aucune photo 11 s après le
-  début ; (11) `--quitter` pendant un décompte : `annule (arret)`, aucune photo. Cas C (vignette allumée) : (10) `vignette
-  fermee <id> capture` à l'entrée du décompte. (12) Mémoire et chrono notés. Plusieurs
-  écrans, échelles, menu d'une autre application et vrai verrouillage ne s'y vérifient pas.
+  début ; (11) `--quitter` pendant un décompte : `annule (arret)`, aucune photo. Cas C
+  (vignette allumée) : (10) `vignette fermee <id> capture` à l'entrée du décompte. (12)
+  Mémoire et chrono notés. Plusieurs écrans, échelles, menu d'une autre application et vrai
+  verrouillage ne s'y vérifient pas.
 - Essai 11 sous Windows (`11-pointeur.ps1`, 0.4), avec la variable capturable et le
   témoin : (1) un vrai mouvement (`SendInput`), puis MouseKeys si besoin (remis à la fin) ;
   si `GetCursorInfo` dit toujours le pointeur caché, les points du pointeur échouent en le
@@ -1331,13 +1393,14 @@ Après une capture, la carte apparaît dans un coin (disposition A « Au survol 
 premier plan ni le clavier ; les clics hors de la carte passent à travers. Une seule à la
 fois ; une nouvelle capture la retire d'un coup.
 
-**Boutons** : la liste vient de l'Application (`vignette::actions()`) : Copier et
+**Boutons** : la liste vient de l'Application (`vignette::actions(annoter)`) : Copier et
 Enregistrer (pilules, « Copié », « Enregistré » 1,8 s), Supprimer (rond), la croix
-(Fermer), Annuler (seulement sur la carte « supprimée »). Annoter et Épingler n'existent
-pas en 0.3 (rien qui ne marche pas). Décisions pures (`vignette::decider`) : pendant l'état
-« supprimée », seul Annuler compte ; une action qui tourne encore (moins de `DELAI_SORTIE`)
-est ignorée ; Enregistrer déjà fait (réglage ou clic précédent) : « Enregistré » sans
-rien écrire. Copier et Enregistrer passent par `sortie::sortir` sur les pixels gardés, dans
+(Fermer), Annuler (seulement sur la carte « supprimée »). Épingler n'existe pas (rien qui
+ne marche pas). Annoter (0.4, §6.2) : rond, premier des secondaires, avant Supprimer,
+seulement si l'éditeur est construit et la capture annotable. Décisions pures
+(`vignette::decider`) : pendant l'état « supprimée », seul Annuler compte ; une action
+qui tourne encore (moins de `DELAI_SORTIE`) est ignorée ; Enregistrer déjà fait (réglage
+ou clic précédent) : « Enregistré » sans rien écrire. Copier et Enregistrer passent par `sortie::sortir` sur les pixels gardés, dans
 un fil, sans « Récents », à l'heure de la capture (`demande_action`). Échec : bandeau
 d'erreur, la vignette reste.
 

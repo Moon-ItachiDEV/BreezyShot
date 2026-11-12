@@ -18,8 +18,10 @@
 
 pub mod arguments;
 pub mod decompte;
+pub mod editeur;
 pub mod etat;
 pub mod etats;
+pub mod fenetre_editeur;
 pub mod fenetre_reglages;
 pub mod icone;
 pub mod installateur;
@@ -77,6 +79,10 @@ pub const ATTENTE_MENU: Duration = Duration::from_millis(350);
 /// plus que du réglage (`zone::doit_enregistrer`) ; sinon, le bouton Enregistrer.
 pub const VIGNETTE_CONSTRUITE: bool = true;
 
+/// Vrai quand l'éditeur d'annotation est construit (chantier A, 0.4) : la vignette ne
+/// montre Annoter qu'à partir de là (seulement ce qui marche).
+pub const EDITEUR_CONSTRUIT: bool = false;
+
 /// Les actions dont la capture existe : seules celles-ci reçoivent un raccourci (§5) et
 /// une entrée au menu.
 pub const ACTIONS_CONSTRUITES: [&str; 4] = ["zone", "plein_ecran", "fenetre", "derniere_zone"];
@@ -126,6 +132,16 @@ pub enum Evenement {
     CaptureCli(String),
     /// Le délai du décompte numéro `n` est écoulé (posté par le fil `decompte`).
     DecompteFini(u64),
+    /// La fenêtre de l'éditeur est détruite (ramené sur le fil principal).
+    EditeurDetruit,
+    /// Croix du cadre, Alt+F4, menu système : la fermeture a été empêchée.
+    EditeurFermetureDemandee,
+    /// Un export de l'éditeur est fini (rendu par le fil `editeur-sortie`).
+    EditeurExportFait(Box<editeur::FinExportEditeur>),
+    /// L'échéance de l'export numéro `n` de l'éditeur est tombée.
+    EditeurExportEchu(u64),
+    /// Le glisser du document `id`, reposté hors du gestionnaire de la page.
+    EditeurGlisser { id: u64, chemin: PathBuf },
 }
 
 /// Ce que le fil d'une action de la vignette rend au fil principal.
@@ -287,6 +303,9 @@ pub struct Application {
     numero_decompte: AtomicU64,
     /// La dernière zone capturée, en mémoire seulement (§5 du contrat de la 0.4).
     derniere_zone: Mutex<Option<DerniereZone>>,
+    /// L'éditeur ouvert (fil principal ; verrou jamais tenu pendant un appel à Tauri ou à
+    /// un module).
+    editeur: Mutex<Option<editeur::EtatEditeur>>,
 }
 
 /// Une annonce envoyée au bandeau, dont la situation attend d'être retenue.
@@ -379,7 +398,15 @@ fn lancer_app(contexte: tauri::Context, commande: Commande, inconnus: Vec<String
             carte::vignette_glisser,
             carte::vignette_terminee,
             carte::souffle_pret,
-            carte::souffle_termine
+            carte::souffle_termine,
+            fenetre_editeur::editeur_pret,
+            fenetre_editeur::editeur_image,
+            fenetre_editeur::editeur_affiche,
+            fenetre_editeur::editeur_vue,
+            fenetre_editeur::editeur_etat,
+            fenetre_editeur::editeur_exporter,
+            fenetre_editeur::editeur_fermer,
+            fenetre_editeur::editeur_garder
         ])
         .setup(move |app| {
             demarrer(app.handle(), commande, &inconnus);
@@ -882,6 +909,11 @@ pub fn traiter(app: &AppHandle, evenement: Evenement) {
             | Evenement::SuppressionFaite { .. }
             | Evenement::LancerGlisser { .. }
             | Evenement::DecompteFini(_)
+            | Evenement::EditeurDetruit
+            | Evenement::EditeurFermetureDemandee
+            | Evenement::EditeurExportFait(_)
+            | Evenement::EditeurExportEchu(_)
+            | Evenement::EditeurGlisser { .. }
             | Evenement::Fenetres(fenetres::Signal::ActionBandeau { .. })
     );
     if de_capture && hors_fil_principal(app) {
@@ -1004,6 +1036,20 @@ pub fn traiter(app: &AppHandle, evenement: Evenement) {
             afficher(app, message);
         }
         Evenement::LancerGlisser { id, chemin } => lancer_glisser(app, id, &chemin),
+        Evenement::EditeurDetruit => {
+            // Provisoire (A) : l'état est retiré, sans journal (A : `fermer_editeur`).
+            if let Ok(mut e) = app.state::<Application>().editeur.lock() {
+                *e = None;
+            }
+        }
+        // Provisoire (A) : `editeur:fermer_demande { raison: "cadre" }` ou fermeture directe.
+        Evenement::EditeurFermetureDemandee => {}
+        // Provisoire (A) : `finir_export`.
+        Evenement::EditeurExportFait(_) => {}
+        // Provisoire (A) : export oublié, `editeur export <id> <n> sans bilan`.
+        Evenement::EditeurExportEchu(_) => {}
+        // Provisoire (A) : `systeme::glisser`, comme `lancer_glisser`.
+        Evenement::EditeurGlisser { .. } => {}
     }
 }
 
@@ -1965,7 +2011,9 @@ fn montrer_vignette(app: &AppHandle, fin: FinSortie, annonce: Annonce, apercu: A
         id: fin.numero,
         capture: vignette::rect_fenetres(fin.capture),
         coin: vignette::coin(reglages.vignette.coin),
-        actions: vignette::actions(),
+        actions: vignette::actions(
+            EDITEUR_CONSTRUIT && editeur::annotable(fin.pixels.largeur, fin.pixels.hauteur),
+        ),
         duree: vignette::duree_affichage(reglages.vignette.duree_s),
         duree_annulation: vignette::DELAI_ANNULATION,
         glisser: recent.is_some(),
@@ -2147,6 +2195,8 @@ fn action_vignette(app: &AppHandle, v: &Vignette, id: u64, action: &str) {
             log::info!("vignette fermee {id} fermer");
             v.partir(id, true);
         }
+        // Provisoire (A) : `annoter(app, id)` (§4.2).
+        vignette::Geste::Annoter => {}
         vignette::Geste::Ignorer => {}
     }
 }

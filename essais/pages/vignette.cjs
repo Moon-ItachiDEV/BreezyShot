@@ -262,6 +262,27 @@ const charge = (o = {}) => ({ id: 5, coin: 'bas_gauche', retrait: { haut: 0, bas
     '12 CSP respectée, aperçu chargé (blob:), fond uni sombre', JSON.stringify(refus) + ' ' + fond);
   await p.context().close();
 
+  // 13. Annoter (0.4, quand le cœur le met dans la liste) : rond, avant Supprimer, nom
+  // « Annoter », clic → vignette_action annoter.
+  p = await page();
+  const AVEC_ANNOTER = [...ACTIONS.slice(0, 2),
+    { id: 'annoter', libelle: 'Annoter', libelle_fait: null, place: 'secondaire', picto: 'annoter' }, ...ACTIONS.slice(2)];
+  await prete(p, charge({ actions: AVEC_ANNOTER }));
+  await emettre(p, 'vignette:entrer', { id: 5 });
+  await emettre(p, 'vignette:survol', { id: 5, dedans: true });
+  await p.waitForTimeout(450);
+  verifier(JSON.stringify(await visibles(p)) === JSON.stringify(['copier', 'enregistrer', 'annoter', 'supprimer', 'fermer']),
+    '13 Annoter avant Supprimer', JSON.stringify(await visibles(p)));
+  const ronds = await p.$$eval('.secondaires button', bs => bs.map(b => b.dataset.action));
+  const nom = await p.evaluate(() => { const b = document.querySelector('[data-action=annoter]'); return b.getAttribute('aria-label') || b.title || b.textContent.trim(); });
+  verifier(JSON.stringify(ronds) === JSON.stringify(['annoter', 'supprimer']) && nom === 'Annoter' && await p.evaluate(() => !!document.querySelector('[data-action=annoter] svg')),
+    '13 premier rond, nom « Annoter », picto crayon', JSON.stringify(ronds) + ' ' + nom);
+  const an = await rect(p, '[data-action=annoter]');
+  await p.mouse.click(an.x + an.l / 2, an.y + an.h / 2);
+  verifier(JSON.stringify((await appels(p, 'vignette_action')).map(a => a[1])) === JSON.stringify([{ id: 5, action: 'annoter' }]), '13 clic Annoter → vignette_action annoter');
+  verifier(await p.evaluate(() => !document.querySelector('[data-action=epingler]')), '13 jamais Épingler');
+  await p.context().close();
+
   console.log('ECHECS :', echecs);
   console.log('ERREURS PAGE :', JSON.stringify(erreurs));
   if (erreurs.length) echecs++;
