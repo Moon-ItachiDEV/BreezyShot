@@ -24,6 +24,7 @@ use super::{
 use crate::fenetres::{reglages as fenetre, theme};
 use crate::raccourcis::{self, Raison};
 use crate::reglages::{self, Raccourcis, Reglages};
+use crate::systeme::gel;
 use crate::systeme::{self, EtatDemarrage};
 
 /// La saisie d'un raccourci rend les raccourcis d'office après ce délai.
@@ -204,6 +205,7 @@ fn vue(app: &AppHandle) -> VueReglages {
         .and_then(|a| a.clone());
     let contexte = Contexte {
         vignette_construite: VIGNETTE_CONSTRUITE,
+        capture_disponible: gel::disponible(),
         actions: &ACTIONS_CONSTRUITES,
         bilan: &bilan,
         defaut: &defaut,

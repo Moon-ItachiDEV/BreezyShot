@@ -1,6 +1,8 @@
 {
   "vue": {
     "lignes": [
+      "retardateur",
+      "pointeur",
       "copier",
       "vignette",
       "vignette_duree",
@@ -11,6 +13,16 @@
       "theme",
       "demarrage",
       "version"
+    ],
+    "capture": {
+      "retardateur_s": 0,
+      "pointeur": false
+    },
+    "retardateurs": [
+      0,
+      3,
+      5,
+      10
     ],
     "copier": true,
     "enregistrer": false,
@@ -60,6 +72,17 @@
           "Ctrl",
           "Maj",
           "3"
+        ],
+        "modifie": false,
+        "refus": null
+      },
+      {
+        "action": "derniere_zone",
+        "libelle": "Refaire la dernière zone",
+        "touches": [
+          "Ctrl",
+          "Maj",
+          "4"
         ],
         "modifie": false,
         "refus": null

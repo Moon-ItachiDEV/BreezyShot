@@ -3,7 +3,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use super::{Changement, EcranInfo, FenetreInfo, Pixels, Rect};
+use super::{Changement, EcranInfo, FenetreInfo, Pixels, Pointeur, Rect};
 
 pub const DISPONIBLE: bool = false;
 
@@ -59,4 +59,8 @@ pub fn surveillance_session() -> bool {
 
 pub fn poignee_ecran_fige() -> Option<isize> {
     None
+}
+
+pub fn lire_pointeur() -> Result<Option<Pointeur>, String> {
+    Ok(None)
 }

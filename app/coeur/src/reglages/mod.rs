@@ -25,6 +25,6 @@ mod tests;
 pub use constat::{Constat, ErreurEcriture, Raison};
 pub use fichier::{charger, ecrire, valider, MODELE_NOM_MAX, NOM_FICHIER};
 pub use modele::{
-    Animations, Coin, Plateforme, Raccourcis, Reglages, Selection, Theme, Vignette, DUREE_MAX_S,
-    DUREE_MIN_S, DUREE_TOUJOURS, VERSION_ACTUELLE,
+    Animations, Capture, Coin, Plateforme, Raccourcis, Reglages, Selection, Theme, Vignette,
+    DUREE_MAX_S, DUREE_MIN_S, DUREE_TOUJOURS, RETARDATEUR_MAX_S, VERSION_ACTUELLE,
 };

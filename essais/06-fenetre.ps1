@@ -91,13 +91,14 @@ function Lignes-Depuis([string]$Dossier, [int]$Debut) {
 # son essai 07).
 function Ecrire-Reglages([string]$Dossier) {
     $r = [ordered]@{
-        version                   = 2
-        raccourcis                = [ordered]@{ zone = @('Ctrl+Maj+1'); plein_ecran = @(); fenetre = @('Ctrl+Maj+3') }
+        version                   = 3
+        raccourcis                = [ordered]@{ zone = @('Ctrl+Maj+1'); plein_ecran = @(); fenetre = @('Ctrl+Maj+3'); derniere_zone = @() }
         copier_apres_capture      = $true
         enregistrer_apres_capture = $true
         dossier_enregistrement    = $null
         vignette                  = [ordered]@{ afficher = $false; duree_s = 6; coin = 'bas_gauche' }
         selection                 = [ordered]@{ loupe = $false }
+        capture                   = [ordered]@{ retardateur_s = 0; pointeur = $false }
         demarrer_avec_systeme     = $false
         modele_nom                = 'BreezyShot {date} à {heure}'
         animations                = 'systeme'

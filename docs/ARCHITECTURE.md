@@ -22,11 +22,13 @@ app/
                             du plein écran (fonctions pures) ; vignette.rs : décisions
                             de la vignette (pures, étape 9) ; page_reglages.rs :
                             décisions de la fenêtre Réglages (pures),
-                            fenetre_reglages.rs : ses commandes (étape 10)
+                            fenetre_reglages.rs : ses commandes (étape 10) ;
+                            decompte.rs : décisions du retardateur (pures, 0.4)
       raccourcis/           raccourcis globaux (étape 3), Échap global de la sélection
       capture/              figer (appelle systeme::gel), géométrie de la sélection, découpe
                             (étape 4) ; fenetre.rs : liste des fenêtres, partie à découper,
-                            rayon et coins à arrondir (étape 8) ; aucun code propre à un
+                            rayon et coins à arrondir (étape 8) ; pointeur.rs : le
+                            pointeur posé dans l'image (0.4) ; aucun code propre à un
                             système
       sortie/               presse-papiers, PNG, « Récents », enregistrement (étape 6) ;
                             glisser.rs : fichier donné au glisser, effacement de Supprimer
@@ -34,7 +36,8 @@ app/
       fenetres/             crée, place, montre et cache les fenêtres de l'interface :
                             mod.rs (bandeau, création commune des fenêtres outil), place.rs,
                             selection.rs (étape 5), vignette.rs (vignette et souffle,
-                            étape 9), reglages.rs (fenêtre Réglages), theme.rs (thème
+                            étape 9), decompte.rs (disque du retardateur dans le
+                            bandeau, 0.4), reglages.rs (fenêtre Réglages), theme.rs (thème
                             des pages),
                             installateur.rs (fenêtre de l'installateur, version 0.3)
       installation/         décisions pures de l'installateur (version 0.3) : version.rs,
@@ -43,8 +46,9 @@ app/
       systeme/              tous les gestes propres à un système : mod.rs (façade commune),
                             windows.rs, autre.rs (Linux pour le développement, macos.rs ensuite),
                             composition.rs (attendre le compositeur),
-                            gel/ (photo du bureau et écran figé natif : mod.rs, windows.rs,
-                            autre.rs), presse_papiers/ (image avec transparence : format
+                            gel/ (photo du bureau, écran figé natif, pointeur : mod.rs,
+                            windows.rs, autre.rs),
+                            presse_papiers/ (image avec transparence : format
                             « PNG » puis CF_DIB sur blanc ; mod.rs, windows.rs, autre.rs),
                             glisser/ (glisser-déposer d'un fichier, étape 9),
                             demarrage/ (démarrer avec le système), dossier/ (sélecteur de
@@ -55,7 +59,7 @@ app/
     commun/                 jetons du design system (jetons.css), theme.js (data-theme),
                             composants partagés
     vignette/               bandeau de messages (bandeau.*, étape 3), vignette.* et souffle.*
-                            (étape 9)
+                            (étape 9), decompte.* (disque du retardateur, 0.4)
     selection/              page de la sélection (étape 5)
     installateur/           page de l'installateur (version 0.3 ; A + C du design validé)
     reglages/               fenêtre des Réglages (étape 10) : html (structure), css
@@ -67,7 +71,7 @@ docs/                       ce fichier, TRAVAIL-VALIDE.md, notices d'essai
 essais/                     scénarios PowerShell joués sur la machine Windows de GitHub
                             (NN-*.ps1 ; aides : tenir-raccourci.ps1, temoin.ps1, qui
                             prend un cadre avec -Cadre pour l'essai 06, cible-glisser.ps1
-                            pour l'essai 07)
+                            pour l'essai 07 ; temoin.ps1 sert aussi aux essais 10 et 11)
   pages/                    essais des pages dans Chromium (Playwright), sur Linux
 outils/                     petits scripts Node sans dépendance (generer-jetons.mjs)
 ```
@@ -152,7 +156,8 @@ privé. Trois précautions suffisent, dès maintenant :
 
 ### 3.1 États (`application/etats.rs`)
 
-Six états : `Repos`, `Gel`, `Selection`, `Decoupe`, `Souffle`, `Vignette`. Les passages sont
+Sept états : `Repos`, `Gel`, `Selection`, `Decoupe`, `Souffle`, `Vignette` et, depuis la
+0.4, `Decompte` (retardateur). Les passages sont
 une **table constante unique** `(Etat, Declencheur) -> Etat` et une fonction pure
 `suivant(etat, declencheur) -> Option<Etat>` (`None` = déclencheur ignoré dans cet état).
 Ajouter un état, c'est ajouter des lignes. La table suit le tableau « États » du workflow :
@@ -169,7 +174,27 @@ impossible, par `ImagePreteSansVignette`. Ajoutés à l'étape 9 : `VignetteImpo
 (`Souffle -> Repos` et `Vignette -> Repos`, la page n'a pas posé la carte à temps) et
 `CaptureSupprimee` (`Vignette -> Repos`, fin du délai d'annulation de Supprimer).
 
-Modes : `zone`, `plein_ecran`, `fenetre`. Ce sont aussi les **noms d'action** des raccourcis.
+Ajoutés en 0.4 (aucune ligne de la 0.3 n'est changée ni retirée ; tests `table_0_3_incluse`,
+`seulement_des_lignes_nouvelles`, `six_etats_inchanges`) :
+
+```text
+Repos     DemandeCapture(DerniereZone)  -> Gel
+Vignette  DemandeCapture(DerniereZone)  -> Gel
+Gel       PhotoPrise(DerniereZone)      -> Decoupe
+Repos     DemandeDecompte(m)            -> Decompte   (m : les quatre modes)
+Vignette  DemandeDecompte(m)            -> Decompte   (la vignette est fermée à l'entrée)
+Decompte  DecompteFini(m)               -> Gel        (puis la suite de m, inchangée)
+Decompte  DecompteAnnule                -> Repos
+```
+
+En Décompte, tout autre déclencheur est ignoré : un raccourci de capture (`DemandeCapture`,
+`DemandeDecompte`) donne `capture deja en cours: appui ignore`. La dernière zone inutilisable
+passe par `PhotoPrise(Zone)` (ligne de la 0.3) vers la sélection. Libellés du journal :
+`DemandeDecompte zone`, `DecompteFini plein_ecran`, `DecompteAnnule`, `PhotoPrise
+derniere_zone`.
+
+Modes : `zone`, `plein_ecran`, `fenetre` et `derniere_zone` (0.4). Ce sont aussi les **noms
+d'action** des raccourcis.
 
 ### 3.2 Journal (`application/journal.rs`)
 
@@ -211,7 +236,8 @@ dans le dossier temporaire du système (`systeme::dossier_secours()`), sous le n
 - `breezyshot.exe --quitter` : demande à l'instance en cours de se fermer proprement (libère
   les raccourcis, retire l'icône, écrit `arret propre`), puis sort. Sans instance en cours,
   sort tout de suite avec le code 0. C'est le moyen qu'utilisent les essais pour fermer l'app.
-- `breezyshot.exe --capturer <mode>` (`zone`, `plein_ecran`, `fenetre`) : lance cette capture
+- `breezyshot.exe --capturer <mode>` (`zone`, `plein_ecran`, `fenetre`, `derniere_zone`
+  depuis la 0.4) : lance cette capture, retardateur compris (§3.9)
   (seconde instance qui confie l'ordre à la première, ou au démarrage, où l'ordre attend
   `pret`). Un mode inconnu ne fait qu'une ligne au journal, sans la valeur reçue. Sert à
   « Essayer une capture » de l'installateur. Lignes : `--capturer recu: <mode>` (ou `<vide>`,
@@ -255,6 +281,10 @@ dans le dossier temporaire du système (`systeme::dossier_secours()`), sous le n
   Depuis l'étape 10 : captures, séparateur, « Réglages » (identifiant `reglages`, journal
   `menu: reglages`, ouvre la fenêtre ou la ramène devant, §6.1), séparateur, « Quitter
   BreezyShot ». Le menu est refait (`icone::changer_menu`) quand un raccourci change.
+  Depuis la 0.4 : quatre captures dans l'ordre `ORDRE_MENU`, « Refaire la dernière zone »
+  (`capturer_derniere_zone`) en quatrième ; le menu a donc huit positions (quatre captures,
+  séparateur, « Réglages », séparateur, « Quitter BreezyShot »). Une entrée de capture
+  passe par le retardateur comme un raccourci (§3.9), après `ATTENTE_MENU`.
   Les entrées « Captures récentes », « Vider les récentes » arrivent avec leurs étapes.
 - Info-bulle : « BreezyShot ».
 
@@ -426,22 +456,75 @@ l'image figée : aucune seconde photo, aucun appel à la fenêtre capturée. Sé
 mode fenetre fenetres <n>`, `selection fin <id> fenetre`, `fenetre choisie <x>,<y> <l>x<h>
 rayon <r> coins <hg><hd><bg><bd>` (quatre chiffres 0 ou 1), puis les lignes de §3.6.
 
+### 3.9 Retardateur, dernière zone et pointeur (0.4)
+
+Décisions pures dans `application/decompte.rs` (retardateur) et `application/zone.rs`
+(dernière zone) ; câblage dans `application/mod.rs`.
+
+**Retardateur.** `demarrer_capture` choisit le déclencheur (`decompte::declencheur`, réglages
+relus à chaque demande : raccourci, menu après `ATTENTE_MENU`, `--capturer`). En Décompte :
+vignette fermée (`vignette fermee <id> capture`), décompte rangé dans `Application.decompte`
+AVANT `montrer_decompte` et `reserver_echap` (une annulation arrivée pendant ces appels le
+trouve), disque montré par le bandeau sur `decompte::cible` (§6), Échap réservé, fil
+`decompte` qui dort par `recv_timeout(duree)` et appelle `traiter(DecompteFini(n))` à
+l'échéance (ramené sur le fil principal) ; jeter le `Sender` l'arrête sans rien poster. Une
+fin d'un autre numéro est périmée et ignorée (`decompte::fin_a_jour`). À la fin
+(`finir_decompte`) : Échap rendu, disque caché (`cacher_decompte`), `DecompteFini` → Gel,
+puis la séquence du mode (`apres_gel`), le compositeur étant attendu avant la photo ; les
+chronos partent de la fin, et en plein écran la souris est lue à ce moment-là. Annulation
+par Échap global, la croix (`bandeau_action <id> annuler` de l'id du décompte), le
+verrouillage de session ou l'arrêt (`decompte::annulation`) : disque caché, Échap rendu,
+Repos (sauf à l'arrêt), aucun message. Un raccourci pendant le décompte est ignoré par la
+table. `decompte::cible` : en dernière zone, le centre et le petit côté de la zone si un
+écran la contient entière ; sinon le centre de la zone utile de l'écran de la souris, à
+défaut du principal, à défaut du premier. La page propose 0, 3, 5 et 10 s
+(`RETARDATEURS_PROPOSES`).
+
+**Dernière zone.** Toute découpe de zone réussie remplace la dernière zone
+(`zone::nouvelle_derniere_zone`) : retenue avec le rectangle et l'échelle de l'écran qui la
+contient, oubliée si la zone est à cheval sur deux écrans ; ni une fenêtre ni un écran ne la
+remplacent. Elle vit en mémoire seulement. `Mode::DerniereZone` photographie (mêmes
+contrôles que la zone), puis `zone::refaire` : un écran au même rectangle, à 0,001 près
+d'échelle, qui contient la zone → découpe immédiate, rien n'est montré
+(`PhotoPrise(DerniereZone)`, `decouper_sans_selection` commun avec le plein écran) ; sinon
+la sélection de zone s'ouvre sur la même photo (`PhotoPrise(Zone)`), sans message.
+
+**Pointeur (côté Application).** Le pointeur est lu par
+`capture::figer(reglages.capture.pointeur)` et posé dans les pixels découpés (zone, fenêtre
+avant l'arrondi, écran, dernière zone) ; le journal reçoit `capture::ligne_pose(pose)`.
+
+**Journal** (contrat de l'essai 10) : `decompte <n> debut <s> s <mode>`, `decompte <n> sans
+affichage`, `decompte <n> fini en <ms> ms`, `decompte <n>: fin perimee ignoree`,
+`decompte <n> annule (echap|croix|session|arret)`,
+`decompte impossible (<e>): capture tout de suite`, `derniere zone <x>,<y> <l>x<h>`,
+`derniere zone: aucune, selection`, `derniere zone: ecran change, selection`,
+`derniere zone retenue <x>,<y> <l>x<h>`, `pointeur pose`, `pointeur hors zone`. Ne doivent
+jamais paraître : `decompte <n> encore range: remplace`,
+`decompte <n>: fin refusee par la table`. Lignes existantes qui reçoivent la nouvelle action
+sans changer de forme : `raccourci derniere_zone: …`, `raccourci presse: derniere_zone`,
+`menu: capturer derniere_zone`, `--capturer recu: derniere_zone`.
+
+Écart au contrat accepté : `decompte <n> debut` est écrit dès que le numéro est donné, avant
+`bandeau decompte …` et `echap global reserve`.
+
 ## 4. Réglages (`reglages/`, étape 2)
 
 Module pur : il reçoit le dossier où écrire, ne connaît ni Tauri ni les autres modules.
 
 ```json
 {
-  "version": 2,
+  "version": 3,
   "raccourcis": {
     "zone": ["ImprEcran", "Ctrl+Maj+1"],
     "plein_ecran": ["Ctrl+Maj+2"],
-    "fenetre": ["Ctrl+Maj+3"]
+    "fenetre": ["Ctrl+Maj+3"],
+    "derniere_zone": ["Ctrl+Maj+4"]
   },
   "copier_apres_capture": true,
   "enregistrer_apres_capture": false,
   "vignette": { "afficher": true, "duree_s": 6, "coin": "bas_gauche" },
   "selection": { "loupe": false },
+  "capture": { "retardateur_s": 0, "pointeur": false },
   "demarrer_avec_systeme": false,
   "dossier_enregistrement": null,
   "modele_nom": "BreezyShot {date} à {heure}",
@@ -453,9 +536,16 @@ Module pur : il reçoit le dossier où écrire, ne connaît ni Tauri ni les autr
 - `raccourcis` : par **nom d'action**, une liste de candidats par ordre de préférence. Le
   premier qui peut être réservé est utilisé : le repli n'est pas un cas particulier. Les
   réglages gardent des chaînes sans les interpréter (c'est le module `raccourcis` qui les lit).
-  Les valeurs par défaut dépendent du système (`ImprEcran` n'existe pas sur Mac).
+  Les valeurs par défaut dépendent du système (`ImprEcran` n'existe pas sur Mac ; la
+  dernière zone : `Ctrl+Maj+4` sous Windows, `Cmd+Maj+7` sur Mac, provisoire).
 - `duree_s` : 1 à 60 s, ou `0` = toujours (`DUREE_TOUJOURS`, version 2 ; la page propose
   3, 6, 10 et Toujours).
+- `capture` (version 3) : `retardateur_s` vaut 0 (aucun) ou 1 à 10 s entières
+  (`RETARDATEUR_MAX_S`) ; la page propose 0, 3, 5, 10 ; une autre valeur valide (7) reste
+  telle quelle ; invalide (11, -1, `"3"`, 2,5) → 0 avec un avertissement. `pointeur` :
+  booléen, le pointeur dessiné dans l'image. `selection.loupe` existait en 0.3 : il est
+  toujours lu et réécrit tel quel pour ne casser aucun fichier, mais n'a aucun effet et
+  n'est montré nulle part.
 - `dossier_enregistrement: null` = Images › BreezyShot. `coin` : `bas_gauche`, `bas_droite`,
   `haut_gauche`, `haut_droite`. `animations` : `systeme`, `normales`, `reduites`.
   `theme` : `systeme`, `clair`, `sombre`.
@@ -467,17 +557,25 @@ Module pur : il reçoit le dossier où écrire, ne connaît ni Tauri ni les autr
   de 1 à 60 s) : la valeur par défaut remplace cette valeur seulement, avec un avertissement.
 - **Champ inconnu** : conservé tel quel à la réécriture.
 - **Version plus ancienne** : mise à niveau pas à pas par une liste de fonctions
-  (`v0 -> v1`, `v1 -> v2`) qui complète sans rien effacer, puis réécriture. `v1 -> v2` ne
-  change rien à la forme : il permet seulement `duree_s: 0`, qu'une app de version 1 aurait
-  remplacé par 6.
+  (`v0 -> v1`, `v1 -> v2`, `v2 -> v3`) qui complète sans rien effacer, puis réécriture.
+  `v1 -> v2` ne change rien à la forme : il permet seulement `duree_s: 0`, qu'une app de
+  version 1 aurait remplacé par 6. `v2 -> v3` (0.4) ajoute `raccourcis.derniere_zone`
+  (défaut de la plateforme, seulement dans un objet `raccourcis` présent et seulement s'il
+  manque) et l'objet `capture`, sans rien remplacer (un objet `raccourcis` absent n'est pas
+  créé, un `capture` qui n'est pas un objet est laissé à la validation) : constat
+  `MisANiveau { de: 2, a: 3 }`,
+  une seule ligne d'info. Une 0.3 lancée sur un fichier v3 le lit au mieux et refuse de
+  l'écrire. Si `Ctrl+Maj+4` est déjà donné à une autre action, la dernière zone n'a pas de
+  raccourci et l'annonce du démarrage le dit une fois (« Aucun raccourci pour la dernière
+  zone »).
   Un fichier sans champ `version` est une version 0.
 - **Version plus récente que l'app** : on lit ce qu'on comprend et on ne réécrit pas le fichier.
 - **Au moins une sortie active** : si copie, enregistrement et vignette sont tous éteints, la
   copie est rallumée à la lecture, et `ecrire` refuse cette combinaison.
 - Écriture atomique (fichier temporaire puis renommage), JSON indenté, UTF-8, fin de ligne finale.
 - `valider(&Reglages)` dit sans toucher au disque ce que `ecrire` refuserait (aucune sortie
-  active, durée invalide, modèle de nom vide ou de plus de `MODELE_NOM_MAX` caractères,
-  dossier vide) : la fenêtre Réglages refuse un
+  active, durée ou retardateur invalide, modèle de nom vide ou de plus de `MODELE_NOM_MAX`
+  caractères, dossier vide) : la fenêtre Réglages refuse un
   changement avant de l'appliquer. `ErreurEcriture::code()` et `Constat::code()` donnent un
   code court sans chemin, pour les nouvelles lignes du journal.
 - Interface : `charger(dossier, plateforme) -> (Reglages, Vec<Constat>)`, `ecrire(dossier,
@@ -523,7 +621,8 @@ Module pur : il reçoit le dossier où écrire, ne connaît ni Tauri ni les autr
   raccourci voulu » : ni raccourci ni message.
 - **Seules les actions qui existent sont réservées.** L'Application tient la liste des actions
   dont la capture est construite (`ACTIONS_CONSTRUITES` : `zone` à l'étape 3, `plein_ecran`
-  à l'étape 7, `fenetre` à l'étape 8 : les trois) et ne donne que celles-là au choix. BreezyShot ne
+  à l'étape 7, `fenetre` à l'étape 8, `derniere_zone` en 0.4 : les quatre) et ne donne que
+  celles-là au choix. BreezyShot ne
   prend jamais à une autre application un raccourci qui ne ferait rien.
 - Le module ne connaît pas le type des réglages : l'Application lui passe une table
   `action → candidats` construite à partir d'eux.
@@ -578,8 +677,9 @@ Module pur : il reçoit le dossier où écrire, ne connaît ni Tauri ni les autr
   libérés (`suspendre`), sinon le système avalerait les touches ; `reprendre` les reprend et
   une perte (prise entre-temps par une autre application) devient `refuse_par_le_systeme`
   dans le bilan. Filet : la saisie est reprise d'office au bout de 15 s.
-  Ctrl+Maj+4, T et H tapés par l'utilisateur sont acceptés ; ils ne sont jamais proposés par
-  défaut.
+  `Ctrl + Maj + 4` est, depuis la 0.4, le raccourci par défaut de « Refaire la dernière
+  zone » (`derniere_zone`, modifiable dans Réglages › Raccourcis). T et H tapés par
+  l'utilisateur sont acceptés ; ils ne sont jamais proposés par défaut.
 
 ## 6. Fenêtres et bandeau (`fenetres/`, `interface/vignette/bandeau.*`)
 
@@ -685,6 +785,40 @@ Module pur : il reçoit le dossier où écrire, ne connaît ni Tauri ni les autr
   le cœur cache alors la fenêtre et arrête de surveiller la souris. Un message remplacé par un
   autre ne reçoit pas de `bandeau_termine` : pour le cœur, afficher un message termine le
   précédent. Une action ne part qu'une fois par message.
+- **Décompte du retardateur (0.4).** La fenêtre du bandeau montre une seule chose à la fois :
+  `Contenu::Message` ou `Contenu::Decompte`, avec le même compteur d'id.
+  `Bandeau::montrer_decompte(Decompte)` pose la fenêtre de 560 × 220 logiques centrée sur la
+  cible (`decompte::placer`), bornée à la zone utile de l'écran qui la contient, à l'échelle
+  de cet écran. Il envoie `bandeau:decompte { id, secondes, restant_ms, diametre, decalage:
+  { x, y }, reduites }`. `restant_ms` tient compte du temps écoulé depuis la demande.
+  `diametre` vaut `diametre_logique(petit côté / échelle)`, entre 64 et 88 (`DIAMETRE_MIN`,
+  `DIAMETRE_MAX` ; 88 sans petit côté). `decalage` (`decompte::decalage`) est le centre de
+  la cible moins celui de la fenêtre, en pixels logiques, borné pour que le disque, la croix
+  et leur ombre restent dans la fenêtre : le disque reste donc sur sa cible quand la fenêtre
+  a été ramenée dans l'écran. La page envoie `bandeau_zone` avec le rectangle de la croix
+  seulement, à sa place réelle, et la surveillance ne rend les clics que sur cette croix. Le
+  filet s'applique : sans zone en 3 s, `bandeau cache d'office <id>`. La croix envoie
+  `bandeau_action { id, action: "annuler" }`, et l'Application décide (§3.9).
+- `cacher_decompte(id)`, `cacher()` et le filet retirent le contenu sous le verrou
+  (`decider_retrait`). La fenêtre est ensuite cachée, sauf si un contenu arrivé entre-temps
+  est déjà montré (`cacher_apres_retrait`). La page reçoit `bandeau:decompte_cache { id }` ou
+  `bandeau:message_cache { id }` et efface ce qui a été retiré, si l'`id` est encore le sien.
+  Un décompte retiré écrit `bandeau decompte cache <id>` ; un second appel n'écrit rien. Un
+  décompte remplacé, par un message ou par un autre décompte, écrit
+  `bandeau decompte <id> remplace`, avec l'id de l'ancien. Un `bandeau_termine` portant l'id
+  d'un décompte est ignoré. Un décompte n'émet jamais `MessageMontre`.
+- **Page du décompte.** `vignette/decompte.js` et `decompte.css` sont chargés par
+  `bandeau.html`. Le chiffre est `ceil(restant)` (3, 2, 1, jamais 0), l'anneau suit le temps
+  écoulé, et l'horloge de la page part de `restant_ms`. Avec les animations réduites
+  (réglage du cœur ou préférence), il n'y a aucune animation et l'anneau avance par cran
+  d'une seconde. Le conteneur a le rôle `timer` et `aria-live="off"` ; la croix s'appelle
+  « Annuler ». Les mesures et les couleurs viennent des jetons `decompte-*`
+  (`CROIX_SOUS_DISQUE` = 36 et `MARGE_OMBRE` = 8 dans `fenetres/decompte.rs` recopient les
+  jetons `decompte-ecart`, `decompte-croix`, `shadow-8` : à changer ensemble).
+- Journal du décompte : `bandeau decompte <id> ecran <x>,<y> <l>x<h> echelle <e>` (le
+  rectangle de la fenêtre, comme `bandeau affiche` ; ou `bandeau decompte <id> ecran
+  inconnu`), `bandeau decompte cache <id>`, `bandeau decompte <id> remplace` ;
+  `bandeau zone <id> …` et `bandeau cache d'office <id>` valent aussi pour le décompte.
 - Les pages n'utilisent ni bundler ni framework : HTML, CSS et modules JavaScript simples,
   `window.__TAURI__` exposé. Les couleurs, durées et courbes viennent de `commun/jetons.css`,
   généré à partir de `design/jetons.json` ; aucune valeur du design system n'est recopiée à
@@ -709,6 +843,17 @@ Module pur : il reçoit le dossier où écrire, ne connaît ni Tauri ni les autr
 - **Lignes montrées** : seulement ce qui marche (`lignes_montrees`) ; la vignette, sa durée,
   son coin et « Enregistrer automatiquement » n'apparaissent que si
   `VIGNETTE_CONSTRUITE` est vrai (sans vignette, chaque capture est enregistrée).
+- **Rubrique Capture (0.4).** Premier onglet, ouvert au départ ; si elle est cachée, le
+  premier onglet visible s'ouvre. Lignes : `retardateur` (segments rendus depuis
+  `vue.retardateurs = [0, 3, 5, 10]`, « Aucun » pour 0 ; une valeur du fichier hors de la
+  liste, 7, s'affiche sans segment coché et reste telle quelle) et `pointeur` (« Inclure le
+  pointeur », `capture.pointeur`). `lignes_montrees(vignette_construite, capture_disponible)`
+  les met en tête quand `gel::disponible()` est vrai ; sans elles, la rubrique se cache.
+  Changements : `retardateur` (u32 ; au-delà de `RETARDATEUR_MAX_S`, refus sans texte, code
+  `invalide`), `pointeur` (bool). Ils prennent effet à la capture suivante, qui relit les
+  réglages en mémoire. `VueReglages.capture = { retardateur_s, pointeur }`. Aucune ligne
+  Barre, Format ou
+  Mise à jour. Raccourcis : quatre lignes, « Refaire la dernière zone » en quatrième.
 - **Application immédiate** : chaque changement est validé (`reglages::valider`), appliqué,
   écrit. Si l'écriture échoue, il reste appliqué pour la session et l'alerte « Réglages non
   enregistrés » s'affiche. Avant d'écrire, le fichier est relu : s'il a changé depuis la
@@ -762,7 +907,8 @@ Module pur : il reçoit le dossier où écrire, ne connaît ni Tauri ni les autr
   `reglages fermes`, `demarrage avec le systeme: actif|inactif|desactive par windows|indisponible`,
   `demarrage avec le systeme: echec (<erreur>)`, `reglages relus: <code du constat>`,
   `reglage change: <ligne> <valeur>` (`reglage change: modele_nom`, `reglage change: dossier`
-  sans valeur), `reglage refuse: <ligne> (<code>)`, `reglages ecrits`,
+  sans valeur ; depuis la 0.4 `retardateur <n>`, `pointeur oui|non`),
+  `reglage refuse: <ligne> (<code>)` (`reglage refuse: retardateur (invalide)`), `reglages ecrits`,
   `reglages non ecrits: <code>`, `reglages relus: changes exterieurs`,
   `theme interface: systeme|clair|sombre`, `demarrage avec le systeme ecrit: oui|non`,
   `demarrage avec le systeme: chemin mis a jour|chemin non mis a jour (<erreur>)`,
@@ -784,7 +930,28 @@ Module pur : il reçoit le dossier où écrire, ne connaît ni Tauri ni les autr
   raccourci, thème), sur la vue réelle de l'app assemblée et le vrai refus « Gardez au
   moins… », écrits par le cœur dans `essais/pages/vue-reglages.json` (le test
   `vue_de_l_essai_de_page_a_jour` échoue si ce fichier n'est plus à jour ;
-  `BREEZYSHOT_ECRIRE_VUE=1` le réécrit). Seuls les raccourcis y sont remplacés.
+  `BREEZYSHOT_ECRIRE_VUE=1` le réécrit). Seuls les raccourcis y sont remplacés. Point 10
+  (0.4) : rubrique Capture en premier et ouverte, seule montrée quand la vue n'a qu'elle ;
+  deux lignes d'après `vue.lignes` (« Retardateur », « Inclure le pointeur ») ;
+  segments de `vue.retardateurs`, « Aucun » coché ; « 5 s » et les flèches →
+  `reglages_changer { cle: "retardateur", valeur }` en nombre ; valeur 7 : aucun segment
+  coché, flèches vers 3 et 10 ; vue poussée appliquée ; pointeur → un appel, refus remis par
+  la vue sans texte ; rubrique vidée : onglet caché, « Après la capture » ouverte ; flèches
+  des onglets qui sautent un onglet caché ; quatre raccourcis, « Refaire la dernière zone »
+  en `Ctrl+Maj+4` ; copies
+  claire et sombre à 680 × 512.
+- `essais/pages/decompte.cjs` (0.4) : le décompte dans `bandeau.html`, sous la CSP de l'app,
+  `__TAURI__` simulé, temps avancé par l'horloge de Playwright (aucune attente fixe) :
+  « 3 », « 2 », « 1 » aux bonnes secondes, jamais « 0 », anneau qui avance ; diamètre reçu
+  appliqué ; `bandeau_zone` une seule fois, rectangle de la croix dans la fenêtre ; clic sur
+  la croix → `bandeau_action annuler` une fois, clic sur le disque : rien, focus jamais
+  pris ; nom « Annuler », rôle `timer`, `aria-live` off ; `bandeau:afficher` efface le
+  disque, `bandeau:decompte` efface la pilule sans `bandeau_termine`,
+  `bandeau:decompte_cache` et `bandeau:message_cache` n'effacent que le leur ; charges
+  invalides refusées ; envoi tardif (chiffre et anneau du temps qui reste) ; décalage
+  appliqué, croix déplacée avec le disque ; animations réduites (préférence ou réglage du
+  cœur) : aucune animation, anneau par cran ; copies claire et sombre. `bandeau.cjs` passe
+  sans changement.
 - Essai 08 sous Windows (`08-reglages-fenetre.ps1`) : ouverture par le vrai menu de l'icône
   (si le menu ne s'ouvre pas, l'essai échoue en le disant), fenêtre unique ramenée devant,
   dernière sortie refusée pour de vrai, vignette allumée par la fenêtre (préparée au coin
@@ -794,7 +961,13 @@ Module pur : il reçoit le dossier où écrire, ne connaît ni Tauri ni les autr
   clé `Run` est relue inchangée à la fin), enregistrement allumé par la fenêtre, sélecteur
   de dossier puis capture enregistrée dedans, changement extérieur gardé, thème clair puis
   sombre peint, fermeture, arrêt propre. Le cas part de la copie seule (ni vignette, ni
-  enregistrement) : la vignette ne gêne aucun autre point.
+  enregistrement) : la vignette ne gêne aucun autre point. Depuis la 0.4 : (3b) rubrique
+  Capture ouverte sans clic d'onglet, retardateur 3 s écrit dans le fichier puis remis à
+  Aucun, Inclure le pointeur allumé puis éteint (lignes `reglage change: …`), aucun
+  interrupteur de loupe dans la page ; (5b) « Refaire la dernière
+  zone » changée au clavier en `Ctrl + Maj + 9`, fichier, puis le menu de l'icône lu en
+  entier par l'API des menus : l'entrée vaut « Refaire la dernière zone<tab>Ctrl + Maj + 9 »,
+  menu fermé par Échap.
 - Pages de l'étape 9 : `vignette.cjs` (carte aux mesures des jetons et à sa place
   pour les coins et un retrait à 150 %, boutons rendus depuis la liste, cachés avant le
   survol, « Copié » puis retour, état supprimé, barre en marche, en pause, absente pour
@@ -852,9 +1025,39 @@ Module pur : il reçoit le dossier où écrire, ne connaît ni Tauri ni les autr
   coin haut droit, animations réduites) ; fenêtres et fils stables après 10 vignettes,
   mémoire notée ; `--quitter` avec une suppression en attente. Les essais 04 à 06 coupent la
   vignette et demandent l'enregistrement par leurs réglages (parcours de 0.2).
+- Essai 10 sous Windows (`10-confort.ps1`, 0.4), avec `BREEZYSHOT_ESSAI_CAPTURABLE=1` et le
+  témoin. Cas A (sans retardateur) : (1) `raccourci derniere_zone: Ctrl+Maj+4`, menu lu par
+  l'API des menus, les quatre captures dans l'ordre ; (2) `Ctrl + Maj + 4` avant toute zone :
+  `derniere zone: aucune, selection`, Échap, rien d'écrit ; (3) zone tracée (PNG A), puis
+  `Ctrl + Maj + 4` : `derniere zone` aux nombres de `zone choisie`, `PhotoPrise
+  derniere_zone`, écran figé et sélection jamais visibles (guettés toutes les 2 ms), PNG
+  identique à A ; (4) par le vrai menu, zone retracée sur la place du menu : `menu: capturer
+  derniere_zone`, photo au moins 350 ms après le clic, PNG identique à celui du clavier.
+  Cas B (retardateur 3 s) : (5) `Ctrl + Maj + 2` : `DemandeDecompte plein_ecran`, `echap
+  global reserve`, `bandeau decompte`, fenêtre visible centrée sur la zone utile (± 2 px),
+  sans `WS_EX_APPWINDOW`, premier plan inchangé, disque peint (au moins 20 pixels `accent`
+  ± 6), `fini en` entre 2950 et 3600 ms, `bandeau decompte cache` avant `chrono gel photo`,
+  le témoin exact sous le disque dans le PNG ; (6) second appui ignoré, une photo ; (9)
+  zone avec retardateur, PNG juste. Cas B' (retardateur 10 s, pour qu'une annulation arrive
+  toujours avant la fin) : (7) Échap : `annule (echap)`, `echap global libere`, aucune
+  photo 11 s après le début, puis une capture normale ; (8) clic réel au centre de `bandeau
+  zone` : `bandeau action <id> annuler`, `annule (croix)`, aucune photo 11 s après le
+  début ; (11) `--quitter` pendant un décompte : `annule (arret)`, aucune photo. Cas C (vignette allumée) : (10) `vignette
+  fermee <id> capture` à l'entrée du décompte. (12) Mémoire et chrono notés. Plusieurs
+  écrans, échelles, menu d'une autre application et vrai verrouillage ne s'y vérifient pas.
+- Essai 11 sous Windows (`11-pointeur.ps1`, 0.4), avec la variable capturable et le
+  témoin : (1) un vrai mouvement (`SendInput`), puis MouseKeys si besoin (remis à la fin) ;
+  si `GetCursorInfo` dit toujours le pointeur caché, les points du pointeur échouent en le
+  disant. Éteint : (2) `Ctrl + Maj + 2` pointe sur un carré, aucune ligne `pointeur`, le
+  carré de 32 × 32 sous la pointe à la couleur du témoin. Allumé : (3) `pointeur pris`,
+  `pointeur pose`, au moins 20 pixels changés dont un presque noir et un presque blanc,
+  témoin intact autour ; (4) zone tracée loin de la pointe : `zone choisie` exacte,
+  `pointeur hors zone`, pixels du témoin ; (5) fenêtres stables, arrêt propre. 125, 150 et
+  200 %, plusieurs écrans, pointeur agrandi ou animé ne s'y vérifient pas.
 - `essais/` : un script par étape (`01-socle.ps1`, `02-reglages.ps1`, `03-raccourci.ps1`,
   `04-zone.ps1`, `05-plein-ecran.ps1`, `06-fenetre.ps1`, `07-vignette.ps1`,
-  `08-reglages-fenetre.ps1`),
+  `08-reglages-fenetre.ps1`, `09-installateur.ps1`, `10-confort.ps1`,
+  `11-pointeur.ps1`), tous les `NN-*.ps1` pris dans l'ordre sans liste écrite,
   lancés par `essais/lancer.ps1` sur le .exe de release. Chaque essai démarre l'app avec
   `BREEZYSHOT_DOSSIER_ESSAI`, agit (lancer une seconde instance, simuler une touche, abîmer un
   fichier), puis lit le journal et les fichiers. Un essai qui échoue fait échouer GitHub.
@@ -878,8 +1081,9 @@ web. Donc l'écran figé ne passe jamais par le moteur web.
   `rect`, `duree_photo`, `lire`), `figer_bureau`, `ecrans`, `fenetres_visibles`,
   `preparer_ecran_fige`, `montrer_ecran_fige`, `cacher_ecran_fige`, `detruire_ecran_fige`,
   `poignee_ecran_fige`, `liberer_image`, `garder_ecran_fige`, `quand_bureau_change`
-  (`Changement::Ecrans | SessionVerrouillee`), `surveillance_session`. Hors Windows :
-  réponses neutres (`figer_bureau` dit « non disponible »).
+  (`Changement::Ecrans | SessionVerrouillee`), `surveillance_session` ; depuis la 0.4
+  `Pointeur`, `lire_pointeur`. Hors Windows : réponses neutres (`figer_bureau` dit « non
+  disponible », pas de pointeur).
 - **Une seule image à la fois** : une `ImageFigee` dépassée par une photo plus récente
   refuse de se lire ou de se montrer. `figer_bureau` refuse tant que l'écran figé est
   montré (ou encore visible après un masquage posté) : on ne remplace jamais l'image
@@ -894,8 +1098,9 @@ web. Donc l'écran figé ne passe jamais par le moteur web.
 - **Garde** : un fil vérifie toutes les 500 ms, tant que l'écran figé est montré, que son
   fil répond (`SendMessageTimeoutW(WM_NULL)`, 1 s) ; après le délai donné sans réponse, il
   appelle le rappel de `garder_ecran_fige`, une fois par blocage.
-- **Capture** (`capture/`, sans code système) : `figer() -> Gel { image, bureau, ecrans,
-  duree_photo, duree_totale }` (la liste des fenêtres se demande à part, `capture::fenetres`,
+- **Capture** (`capture/`, sans code système) : `figer(avec_pointeur) -> Gel { image,
+  bureau, ecrans, duree_photo, duree_totale, pointeur, lecture_pointeur }` (la liste des
+  fenêtres se demande à part, `capture::fenetres`,
   pour le mode fenêtre) ; `decouper(&gel, zone) -> Pixels` ; géométrie pure :
   `rect_entre(a, b)` (les deux coins inclus : de (0, 0) à (1919, 1079), 1920 × 1080),
   `ecran_sous`, `borner_a_un_ecran(zone, depart, ecrans)` (une zone reste sur l'écran du
@@ -903,9 +1108,27 @@ web. Donc l'écran figé ne passe jamais par le moteur web.
   `ZoneHorsBureau`, `Lecture`.
 - Mémoire : l'image du bureau reste allouée entre deux captures (3 écrans 1080p = 24 Mo),
   rendue à l'arrêt (`liberer_image`). Aucune écriture sur le disque, aucune image au journal.
-- Tests Windows (`cargo test` sur la machine GitHub, un par un) : photo au pixel près d'une
-  fenêtre de quatre carrés, écran figé montré sans prendre le premier plan puis caché,
-  200 photos sans fuite d'objets GDI.
+- Tests Windows (`cargo test` sur la machine GitHub, un par un : chacun tient le verrou
+  `VERROU_ECRAN` de sa `Seance`) : photo au pixel près d'une fenêtre de quatre carrés,
+  écran figé montré sans prendre le premier plan puis caché, 200 photos sans fuite d'objets
+  GDI ; depuis la 0.4 `pointeur_lu_sans_fuite_gdi` (taille non nulle, point chaud dans
+  l'image, 200 lectures sans fuite ; si Windows ne montre pas le pointeur sur la machine, le
+  test le dit et ne vérifie que `Ok(None)` et l'absence de fuite : la preuve du pointeur
+  appartient à l'essai 11).
+- **Pointeur (0.4).** Si le réglage Inclure le pointeur est allumé, `capture::figer(true)` lit
+  le pointeur juste après la photo (`gel::lire_pointeur` : `GetCursorInfo`, `GetIconInfo`,
+  puis `DrawIconEx` sur noir et sur blanc ; un pointeur animé donne sa première image) et
+  écrit `pointeur pris <l>x<h> en <ms> ms` ou `pointeur absent (cache|<erreur>)`
+  (`capture::ligne_lecture` ; `Gel.lecture_pointeur` porte la durée et l'erreur). Le
+  pointeur n'est jamais posé sur l'écran figé. `capture::poser_pointeur` le pose dans les
+  pixels découpés, pixel par pixel, d'après ses deux peintures (`couche` : `Transparent`,
+  `Opaque`, `Mele` testé avant l'inversion, `Inverse` seulement si un canal est plus sombre
+  sur blanc) ; l'alpha de l'image est gardé. L'Application écrit `pointeur pose` ou
+  `pointeur hors zone` (§3.9). Réglage éteint : rien n'est lu, aucune ligne `pointeur`.
+- La loupe de la sélection a été écartée à la demande de l'utilisateur (12/11/2026) : elle
+  n'est pas construite.
+- Journal (contrat de l'essai 11) : `pointeur pris <l>x<h> en <ms> ms`,
+  `pointeur absent (cache|<erreur>)`.
 - **Fenêtres** (étape 8) : `fenetres_visibles` (`EnumWindows`, du premier plan vers le
   fond) rend des `FenetreInfo { rect, titre, coins }` ; `rect` est le vrai bord sans
   l'ombre (`DWMWA_EXTENDED_FRAME_BOUNDS`). Règle pure `garder_fenetre` : visible, non
@@ -940,8 +1163,7 @@ Ce que voit l'utilisateur : tous les écrans figés et assombris ; il glisse, la
 claire, entourée d'un trait fin ; il relâche, tout disparaît d'un coup. Rien d'autre : ni
 viseur, ni taille, ni poignées, ni texte, ni animation d'entrée. Curseur en croix. Maj :
 carré. Espace tenue : la zone se déplace. Échap ou clic droit : annuler. Un clic, ou moins de
-3 pixels réels de côté, n'est pas une zone : la sélection continue. La loupe n'est pas
-construite (le réglage existe, sans effet).
+3 pixels réels de côté, n'est pas une zone : la sélection continue.
 
 - **Une fenêtre Tauri transparente**, préparée au démarrage et cachée, posée juste au-dessus
   de l'écran figé et couvrant tout le bureau virtuel. Elle ne dessine que le voile (jeton

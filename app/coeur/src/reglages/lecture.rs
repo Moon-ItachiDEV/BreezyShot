@@ -6,17 +6,17 @@ use serde_json::{json, Map, Value};
 
 use super::constat::{Constat, Raison};
 use super::modele::{
-    vers_json, Animations, Coin, Plateforme, Raccourcis, Reglages, Selection, Theme, Vignette,
-    DUREE_MAX_S, DUREE_MIN_S, DUREE_TOUJOURS, VERSION_ACTUELLE,
+    vers_json, Animations, Capture, Coin, Plateforme, Raccourcis, Reglages, Selection, Theme,
+    Vignette, DUREE_MAX_S, DUREE_MIN_S, DUREE_TOUJOURS, RETARDATEUR_MAX_S, VERSION_ACTUELLE,
 };
 
 /// Une mise à niveau d'une version à la suivante. Elle complète l'objet sans rien effacer ;
 /// le numéro de version est tenu par `interpreter`, pas par elle.
 pub(super) type MiseANiveau = fn(&mut Map<String, Value>, Plateforme);
 
-/// `MISES_A_NIVEAU[n]` fait passer de la version `n` à `n + 1`. Pour une version 3 un jour :
-/// ajouter `v2_vers_v3` à la fin, et `VERSION_ACTUELLE` passe à 3 tout seul.
-pub(super) const MISES_A_NIVEAU: &[MiseANiveau] = &[v0_vers_v1, v1_vers_v2];
+/// `MISES_A_NIVEAU[n]` fait passer de la version `n` à `n + 1`. Pour une version 4 un jour :
+/// ajouter `v3_vers_v4` à la fin, et `VERSION_ACTUELLE` passe à 4 tout seul.
+pub(super) const MISES_A_NIVEAU: &[MiseANiveau] = &[v0_vers_v1, v1_vers_v2, v2_vers_v3];
 
 /// Version 0 (aucun champ `version`) vers 1 : ajoute les champs de la version 1 qui manquent,
 /// y compris dans les sous-objets, sans toucher à ceux qui sont là (même invalides : la
@@ -44,6 +44,24 @@ fn v0_vers_v1(objet: &mut Map<String, Value>, plateforme: Plateforme) {
 /// (`0` = toujours affichée). Le numéro change pour qu'une app plus ancienne, qui
 /// remplacerait 0 par sa valeur par défaut et réécrirait le fichier, le laisse intact.
 fn v1_vers_v2(_objet: &mut Map<String, Value>, _plateforme: Plateforme) {}
+
+/// Version 2 vers 3 (0.4) : le raccourci de la dernière zone (celui de la plateforme) et
+/// l'objet `capture` (retardateur, pointeur), sans rien effacer ni remplacer. Un raccourci
+/// `derniere_zone` déjà là est gardé ; un objet `raccourcis` absent n'est pas créé (la
+/// validation le dira absent, comme en version 2) ; un `capture` qui n'est pas un objet
+/// reste tel quel (la validation le remplacera, avec son constat).
+fn v2_vers_v3(objet: &mut Map<String, Value>, plateforme: Plateforme) {
+    if let Some(Value::Object(raccourcis)) = objet.get_mut("raccourcis") {
+        if !raccourcis.contains_key("derniere_zone") {
+            let r = Raccourcis::par_defaut(plateforme);
+            raccourcis.insert("derniere_zone".into(), json!(r.derniere_zone));
+        }
+    }
+    let modele = json!({ "capture": { "retardateur_s": 0, "pointeur": false } });
+    if let Value::Object(modele) = modele {
+        completer(objet, &modele);
+    }
+}
 
 /// Ajoute à `cible` les clés de `modele` qui lui manquent, en descendant dans les sous-objets
 /// présents des deux côtés. Rien n'est effacé ni remplacé.
@@ -137,6 +155,7 @@ pub(super) fn interpreter(objet: Map<String, Value>, plateforme: Plateforme) -> 
     );
     let vignette = lire_vignette(&mut m, c);
     let selection = lire_selection(&mut m, c);
+    let capture = lire_capture(&mut m, c);
     let demarrer_avec_systeme = lire(
         &mut m,
         "",
@@ -170,6 +189,7 @@ pub(super) fn interpreter(objet: Map<String, Value>, plateforme: Plateforme) -> 
         enregistrer_apres_capture,
         vignette,
         selection,
+        capture,
         demarrer_avec_systeme,
         dossier_enregistrement,
         modele_nom,
@@ -331,6 +351,40 @@ fn lire_selection(m: &mut Map<String, Value>, constats: &mut Vec<Constat>) -> Se
         loupe,
         inconnus: objet,
     }
+}
+
+fn lire_capture(m: &mut Map<String, Value>, constats: &mut Vec<Constat>) -> Capture {
+    let d = Capture::par_defaut();
+    let Some(mut objet) = sous_objet(m, "capture", constats) else {
+        return d;
+    };
+    let p = "capture.";
+    let retardateur_s = lire(
+        &mut objet,
+        p,
+        "retardateur_s",
+        d.retardateur_s,
+        retardateur_valide,
+        constats,
+    );
+    let pointeur = lire(
+        &mut objet,
+        p,
+        "pointeur",
+        d.pointeur,
+        Value::as_bool,
+        constats,
+    );
+    Capture {
+        retardateur_s,
+        pointeur,
+        inconnus: objet,
+    }
+}
+
+/// Un nombre entier de secondes de 0 à `RETARDATEUR_MAX_S` (`3.0` vaut 3, `"3"` est refusé).
+pub(super) fn retardateur_valide(v: &Value) -> Option<u32> {
+    entier_sature(v).filter(|n| *n <= RETARDATEUR_MAX_S)
 }
 
 fn lire_vignette(m: &mut Map<String, Value>, constats: &mut Vec<Constat>) -> Vignette {

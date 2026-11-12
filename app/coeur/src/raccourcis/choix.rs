@@ -9,7 +9,7 @@ use super::notation::{analyser, ErreurNotation, Raccourci};
 
 /// Les actions dont l'ordre de traitement est fixé. Les autres suivent, par ordre
 /// alphabétique.
-pub const ACTIONS_PRIORITAIRES: [&str; 3] = ["zone", "plein_ecran", "fenetre"];
+pub const ACTIONS_PRIORITAIRES: [&str; 4] = ["zone", "plein_ecran", "fenetre", "derniere_zone"];
 
 /// Pourquoi un candidat a été écarté.
 #[derive(Clone, Debug, PartialEq, Eq)]

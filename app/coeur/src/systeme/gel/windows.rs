@@ -19,10 +19,11 @@ use ::windows::Win32::Graphics::Dwm::{
     DWMWA_TRANSITIONS_FORCEDISABLED, DWMWA_WINDOW_CORNER_PREFERENCE,
 };
 use ::windows::Win32::Graphics::Gdi::{
-    BeginPaint, BitBlt, CreateCompatibleBitmap, CreateCompatibleDC, DeleteDC, DeleteObject,
-    EndPaint, EnumDisplayMonitors, GdiFlush, GetDC, GetDIBits, GetMonitorInfoW, ReleaseDC,
-    SelectObject, ValidateRect, BITMAPINFO, BITMAPINFOHEADER, BI_RGB, CAPTUREBLT, DIB_RGB_COLORS,
-    HBITMAP, HDC, HGDIOBJ, HMONITOR, MONITORINFO, PAINTSTRUCT, SRCCOPY,
+    BeginPaint, BitBlt, CreateCompatibleBitmap, CreateCompatibleDC, CreateDIBSection, DeleteDC,
+    DeleteObject, EndPaint, EnumDisplayMonitors, GdiFlush, GetDC, GetDIBits, GetMonitorInfoW,
+    GetObjectW, ReleaseDC, SelectObject, ValidateRect, BITMAP, BITMAPINFO, BITMAPINFOHEADER,
+    BI_RGB, CAPTUREBLT, DIB_RGB_COLORS, HBITMAP, HDC, HGDIOBJ, HMONITOR, MONITORINFO, PAINTSTRUCT,
+    SRCCOPY,
 };
 use ::windows::Win32::System::LibraryLoader::{GetModuleHandleW, GetProcAddress};
 use ::windows::Win32::System::RemoteDesktop::{
@@ -31,10 +32,11 @@ use ::windows::Win32::System::RemoteDesktop::{
 use ::windows::Win32::System::Threading::{GetCurrentProcessId, GetCurrentThreadId};
 use ::windows::Win32::UI::HiDpi::{GetDpiForMonitor, MDT_EFFECTIVE_DPI};
 use ::windows::Win32::UI::WindowsAndMessaging::{
-    CreateWindowExW, DefWindowProcW, DestroyWindow, EnumWindows, GetClassNameW, GetSystemMetrics,
-    GetWindowLongW, GetWindowRect, GetWindowTextW, GetWindowThreadProcessId, IsIconic, IsWindow,
-    IsWindowVisible, IsZoomed, LoadCursorW, PostMessageW, RegisterClassW, SendMessageTimeoutW,
-    SetWindowPos, ShowWindow, ShowWindowAsync, GWL_EXSTYLE, GWL_STYLE, HWND_TOPMOST, IDC_CROSS,
+    CreateWindowExW, DefWindowProcW, DestroyWindow, DrawIconEx, EnumWindows, GetClassNameW,
+    GetCursorInfo, GetIconInfo, GetSystemMetrics, GetWindowLongW, GetWindowRect, GetWindowTextW,
+    GetWindowThreadProcessId, IsIconic, IsWindow, IsWindowVisible, IsZoomed, LoadCursorW,
+    PostMessageW, RegisterClassW, SendMessageTimeoutW, SetWindowPos, ShowWindow, ShowWindowAsync,
+    CURSORINFO, DI_NORMAL, GWL_EXSTYLE, GWL_STYLE, HICON, HWND_TOPMOST, ICONINFO, IDC_CROSS,
     MA_NOACTIVATE, MONITORINFOF_PRIMARY, SMTO_ABORTIFHUNG, SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN,
     SM_XVIRTUALSCREEN, SM_YVIRTUALSCREEN, SWP_NOACTIVATE, SWP_SHOWWINDOW, SW_HIDE, WM_CLOSE,
     WM_DESTROY, WM_DISPLAYCHANGE, WM_DPICHANGED, WM_ERASEBKGND, WM_MOUSEACTIVATE, WM_NULL,
@@ -44,8 +46,9 @@ use ::windows::Win32::UI::WindowsAndMessaging::{
 };
 
 use super::{
-    bgra_en_rgba, coins_de, echelle_depuis_dpi, est_classe_du_bureau, garder_fenetre, Changement,
-    Coins, EcranInfo, EtatCoins, EtatFenetre, FenetreInfo, Pixels, Rect,
+    bgra_en_rgba, coins_de, echelle_depuis_dpi, est_classe_du_bureau, garder_fenetre,
+    pointeur_montre, taille_pointeur, Changement, Coins, EcranInfo, EtatCoins, EtatFenetre,
+    FenetreInfo, Pixels, Pointeur, Rect,
 };
 
 pub const DISPONIBLE: bool = true;
@@ -1043,6 +1046,187 @@ pub fn poignee_ecran_fige() -> Option<isize> {
 }
 
 // ---------------------------------------------------------------------------------------
+// Une section DIB 32 bits, de haut en bas, sélectionnée dans un DC en mémoire : ses octets
+// (BGRA) se lisent et s'écrivent directement. Pointeur (0.4).
+
+struct Dib {
+    dc: DcMemoire,
+    _bitmap: Bitmap,
+    ancien: HGDIOBJ,
+    bits: *mut u8,
+    largeur: i32,
+    hauteur: i32,
+}
+
+impl Dib {
+    fn nouvelle(largeur: i32, hauteur: i32) -> Result<Dib, String> {
+        if largeur <= 0 || hauteur <= 0 {
+            return Err(format!("taille d'image invalide ({largeur}x{hauteur})"));
+        }
+        // SAFETY : DC en mémoire compatible avec l'écran.
+        let dc = unsafe { CreateCompatibleDC(None) };
+        if dc.is_invalid() {
+            return Err("CreateCompatibleDC a echoue".into());
+        }
+        let dc = DcMemoire(dc);
+        let info = BITMAPINFO {
+            bmiHeader: BITMAPINFOHEADER {
+                biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
+                biWidth: largeur,
+                // Hauteur négative : lignes de haut en bas.
+                biHeight: -hauteur,
+                biPlanes: 1,
+                biBitCount: 32,
+                biCompression: BI_RGB.0,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let mut bits: *mut core::ffi::c_void = std::ptr::null_mut();
+        // SAFETY : `info` décrit une image 32 bits sans table de couleurs ; `bits` reçoit
+        // l'adresse des pixels, valide tant que le bitmap existe.
+        let bitmap =
+            unsafe { CreateDIBSection(Some(dc.0), &info, DIB_RGB_COLORS, &mut bits, None, 0) }
+                .map_err(|e| format!("CreateDIBSection {largeur}x{hauteur}: {e}"))?;
+        let bitmap = Bitmap(bitmap);
+        if bits.is_null() {
+            return Err("CreateDIBSection sans pixels".into());
+        }
+        // SAFETY : DC et bitmap valides, possédés ici.
+        let ancien = unsafe { SelectObject(dc.0, bitmap.0.into()) };
+        if ancien.is_invalid() {
+            return Err("SelectObject de la section DIB a echoue".into());
+        }
+        Ok(Dib {
+            dc,
+            _bitmap: bitmap,
+            ancien,
+            bits: bits.cast(),
+            largeur,
+            hauteur,
+        })
+    }
+
+    /// Les octets de l'image, après avoir fini les dessins GDI en attente.
+    fn octets(&mut self) -> &mut [u8] {
+        // SAFETY : `bits` couvre largeur × hauteur × 4 octets (32 bits, aucune ligne n'est
+        // complétée) tant que le bitmap vit ; `&mut self` empêche tout autre accès.
+        unsafe {
+            let _ = GdiFlush();
+            std::slice::from_raw_parts_mut(
+                self.bits,
+                self.largeur as usize * self.hauteur as usize * 4,
+            )
+        }
+    }
+}
+
+impl Drop for Dib {
+    fn drop(&mut self) {
+        // SAFETY : remet dans le DC l'objet qu'il avait ; puis le DC et le bitmap sont
+        // détruits dans cet ordre (ordre des champs), comme pour `ImageGdi`.
+        unsafe {
+            SelectObject(self.dc.0, self.ancien);
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------------------
+// Le pointeur (0.4).
+
+/// Un bitmap rendu par `GetIconInfo`, qui peut être absent (pointeur monochrome).
+struct BitmapRecu(HBITMAP);
+
+impl Drop for BitmapRecu {
+    fn drop(&mut self) {
+        if !self.0.is_invalid() {
+            // SAFETY : bitmap donné par `GetIconInfo`, à rendre par l'appelant, une fois.
+            unsafe {
+                let _ = DeleteObject(self.0.into());
+            }
+        }
+    }
+}
+
+/// Le côté d'un bitmap (`GetObjectW`), `None` s'il est absent ou illisible.
+fn taille_bitmap(bitmap: HBITMAP) -> Option<(i32, i32)> {
+    if bitmap.is_invalid() {
+        return None;
+    }
+    let mut b = BITMAP::default();
+    // SAFETY : `b` est un BITMAP dont la taille est passée.
+    let lu = unsafe {
+        GetObjectW(
+            bitmap.into(),
+            std::mem::size_of::<BITMAP>() as i32,
+            Some((&mut b as *mut BITMAP).cast()),
+        )
+    };
+    (lu != 0).then_some((b.bmWidth, b.bmHeight))
+}
+
+/// Peint le pointeur sur un fond uni (`fond` : 0 noir, 255 blanc) et rend ses pixels RGBA.
+fn peindre_pointeur(dib: &mut Dib, icone: HICON, fond: u8) -> Result<Vec<u8>, String> {
+    dib.octets().fill(fond);
+    // SAFETY : DC et pointeur valides ; le dessin tient dans l'image (même taille).
+    unsafe {
+        DrawIconEx(
+            dib.dc.0,
+            0,
+            0,
+            icone,
+            dib.largeur,
+            dib.hauteur,
+            0,
+            None,
+            DI_NORMAL,
+        )
+    }
+    .map_err(|e| format!("DrawIconEx: {e}"))?;
+    let mut rgba = dib.octets().to_vec();
+    bgra_en_rgba(&mut rgba);
+    Ok(rgba)
+}
+
+pub fn lire_pointeur() -> Result<Option<Pointeur>, String> {
+    let mut info = CURSORINFO {
+        cbSize: std::mem::size_of::<CURSORINFO>() as u32,
+        ..Default::default()
+    };
+    // SAFETY : `info` est un CURSORINFO dont la taille est renseignée.
+    unsafe { GetCursorInfo(&mut info) }.map_err(|e| format!("GetCursorInfo: {e}"))?;
+    if !pointeur_montre(info.flags.0) || info.hCursor.is_invalid() {
+        return Ok(None);
+    }
+    let icone = HICON(info.hCursor.0);
+    let mut icone_info = ICONINFO::default();
+    // SAFETY : `icone_info` reçoit deux bitmaps, rendus par les gardes ci-dessous.
+    unsafe { GetIconInfo(icone, &mut icone_info) }.map_err(|e| format!("GetIconInfo: {e}"))?;
+    let masque = BitmapRecu(icone_info.hbmMask);
+    let couleurs = BitmapRecu(icone_info.hbmColor);
+    let (largeur, hauteur) = taille_bitmap(masque.0)
+        .and_then(|m| taille_pointeur(m, taille_bitmap(couleurs.0)))
+        .ok_or("taille du pointeur illisible")?;
+    let mut dib = Dib::nouvelle(largeur as i32, hauteur as i32)?;
+    let sur_noir = peindre_pointeur(&mut dib, icone, 0)?;
+    let sur_blanc = peindre_pointeur(&mut dib, icone, 255)?;
+    Ok(Some(Pointeur {
+        origine: (
+            info.ptScreenPos
+                .x
+                .saturating_sub(icone_info.xHotspot as i32),
+            info.ptScreenPos
+                .y
+                .saturating_sub(icone_info.yHotspot as i32),
+        ),
+        largeur,
+        hauteur,
+        sur_noir,
+        sur_blanc,
+    }))
+}
+
+// ---------------------------------------------------------------------------------------
 // Fil de garde : si le fil de l'écran figé ne répond plus, prévenir l'Application.
 
 /// Cadence des vérifications pendant que l'écran figé est montré.
@@ -1200,7 +1384,7 @@ mod tests {
     use std::sync::Once;
     use std::time::{Duration, Instant};
 
-    use ::windows::Win32::Foundation::COLORREF;
+    use ::windows::Win32::Foundation::{COLORREF, POINT};
     use ::windows::Win32::Graphics::Dwm::{
         DwmFlush, DWMWA_BORDER_COLOR, DWMWA_COLOR_NONE, DWMWCP_DEFAULT, DWMWCP_DONOTROUND,
         DWMWCP_ROUNDSMALL, DWM_WINDOW_CORNER_PREFERENCE,
@@ -1211,10 +1395,10 @@ mod tests {
         SetProcessDpiAwarenessContext, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2,
     };
     use ::windows::Win32::UI::WindowsAndMessaging::{
-        DispatchMessageW, FindWindowW, GetForegroundWindow, PeekMessageW, SendMessageW,
-        SetLayeredWindowAttributes, TranslateMessage, LWA_ALPHA, MSG, PM_REMOVE, SWP_NOMOVE,
-        SWP_NOSIZE, SW_SHOWMINNOACTIVE, WINDOW_EX_STYLE, WINDOW_STYLE, WS_OVERLAPPEDWINDOW,
-        WTS_SESSION_UNLOCK,
+        DispatchMessageW, FindWindowW, GetCursorPos, GetForegroundWindow, PeekMessageW,
+        SendMessageW, SetCursorPos, SetLayeredWindowAttributes, TranslateMessage, LWA_ALPHA, MSG,
+        PM_REMOVE, SWP_NOMOVE, SWP_NOSIZE, SW_SHOWMINNOACTIVE, WINDOW_EX_STYLE, WINDOW_STYLE,
+        WS_OVERLAPPEDWINDOW, WTS_SESSION_UNLOCK,
     };
 
     use crate::systeme::gel as facade;
@@ -2037,5 +2221,119 @@ mod tests {
         envoyer(WM_DISPLAYCHANGE, 32);
         envoyer(WM_WTSSESSION_CHANGE, WTS_SESSION_LOCK as usize);
         assert_eq!(verrouiller(&recus).len(), 2);
+    }
+
+    // --- Pointeur (0.4) ---
+
+    fn objets_gdi() -> u32 {
+        // SAFETY : pseudo-poignée du processus courant.
+        unsafe { GetGuiResources(GetCurrentProcess(), GR_GDIOBJECTS) }
+    }
+
+    #[test]
+    fn drapeaux_du_pointeur_recopies() {
+        use ::windows::Win32::UI::WindowsAndMessaging::{CURSOR_SHOWING, CURSOR_SUPPRESSED};
+        assert_eq!(facade::POINTEUR_MONTRE, CURSOR_SHOWING.0);
+        assert_eq!(facade::POINTEUR_SUPPRIME, CURSOR_SUPPRESSED.0);
+    }
+
+    /// Un vrai mouvement de souris (1 px puis retour), qui fait montrer le pointeur par
+    /// Windows quand il était caché faute de mouvement.
+    fn bouger_la_souris() {
+        use ::windows::Win32::UI::Input::KeyboardAndMouse::{
+            SendInput, INPUT, INPUT_0, INPUT_MOUSE, MOUSEEVENTF_MOVE, MOUSEINPUT,
+        };
+        let mouvement = |dx: i32| INPUT {
+            r#type: INPUT_MOUSE,
+            Anonymous: INPUT_0 {
+                mi: MOUSEINPUT {
+                    dx,
+                    dy: 0,
+                    dwFlags: MOUSEEVENTF_MOVE,
+                    ..Default::default()
+                },
+            },
+        };
+        let entrees = [mouvement(1), mouvement(-1)];
+        // SAFETY : deux entrées dont la taille est passée.
+        unsafe {
+            SendInput(&entrees, std::mem::size_of::<INPUT>() as i32);
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+
+    fn drapeaux_du_pointeur() -> u32 {
+        let mut info = CURSORINFO {
+            cbSize: std::mem::size_of::<CURSORINFO>() as u32,
+            ..Default::default()
+        };
+        // SAFETY : CURSORINFO dont la taille est renseignée.
+        unsafe { GetCursorInfo(&mut info) }.unwrap();
+        info.flags.0
+    }
+
+    /// Le pointeur est d'abord rendu visible (pointe posée, vrai mouvement). S'il reste
+    /// caché (session sans souris), le test vérifie ce qui reste vrai (`Ok(None)`, aucune
+    /// fuite) et le dit ; la preuve du pointeur dans l'image appartient à l'essai 11.
+    #[test]
+    fn pointeur_lu_sans_fuite_gdi() {
+        let _s = Seance::ouvrir();
+        let bureau = bureau_virtuel().unwrap();
+        // SAFETY : sans tampon.
+        let _ =
+            unsafe { SetCursorPos(bureau.x + bureau.largeur / 2, bureau.y + bureau.hauteur / 2) };
+        bouger_la_souris();
+        let drapeaux = drapeaux_du_pointeur();
+        let avant_lecture = |n: usize| {
+            for _ in 0..n {
+                let _ = lire_pointeur().unwrap();
+            }
+        };
+        if !pointeur_montre(drapeaux) {
+            println!(
+                "pointeur non montre sur cette machine (drapeaux {drapeaux:#x}) : seules \
+                 l'absence de pointeur et l'absence de fuite sont verifiees"
+            );
+            assert_eq!(lire_pointeur(), Ok(None));
+            avant_lecture(5);
+            let avant = objets_gdi();
+            avant_lecture(200);
+            let apres = objets_gdi();
+            assert!(avant > 0, "GetGuiResources a echoue");
+            assert!(apres <= avant + 4, "fuite GDI : {avant} -> {apres}");
+            return;
+        }
+        let p = lire_pointeur()
+            .unwrap()
+            .expect("pointeur montre mais non lu");
+        assert!(p.largeur > 0 && p.hauteur > 0);
+        let taille = (p.largeur * p.hauteur * 4) as usize;
+        assert_eq!(p.sur_noir.len(), taille);
+        assert_eq!(p.sur_blanc.len(), taille);
+        // La pointe (point chaud) est dans l'image du pointeur.
+        let mut pointe = POINT::default();
+        // SAFETY : un POINT en sortie.
+        unsafe { GetCursorPos(&mut pointe) }.unwrap();
+        let rect = Rect {
+            x: p.origine.0,
+            y: p.origine.1,
+            largeur: p.largeur as i32,
+            hauteur: p.hauteur as i32,
+        };
+        assert!(rect.contient((pointe.x, pointe.y)), "{rect:?} {pointe:?}");
+        // Quelque chose est peint : au moins un pixel n'est pas transparent.
+        let peint = (0..taille / 4).any(|i| {
+            let n = &p.sur_noir[i * 4..i * 4 + 3];
+            let b = &p.sur_blanc[i * 4..i * 4 + 3];
+            n != [0, 0, 0] || b != [255, 255, 255]
+        });
+        assert!(peint, "pointeur entierement transparent");
+        avant_lecture(5);
+        let avant = objets_gdi();
+        avant_lecture(200);
+        let apres = objets_gdi();
+        println!("objets GDI : avant {avant}, apres 200 pointeurs {apres}");
+        assert!(avant > 0, "GetGuiResources a echoue");
+        assert!(apres <= avant + 4, "fuite GDI : {avant} -> {apres}");
     }
 }

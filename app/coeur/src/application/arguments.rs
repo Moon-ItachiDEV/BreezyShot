@@ -12,9 +12,9 @@ pub enum Commande {
     Demarrer,
     /// Demander à l'instance en cours de se fermer proprement.
     Quitter,
-    /// Lancer une capture de ce mode (nom d'action : `zone`, `plein_ecran`, `fenetre` ;
-    /// une valeur inconnue ne fait qu'une ligne au journal). Vide si l'option n'a pas de
-    /// valeur.
+    /// Lancer une capture de ce mode (nom d'action : `zone`, `plein_ecran`, `fenetre`,
+    /// `derniere_zone` ; une valeur inconnue ne fait qu'une ligne au journal). Vide si
+    /// l'option n'a pas de valeur. Le retardateur des réglages vaut aussi ici.
     Capturer(String),
     /// Désinstaller BreezyShot (« Applications installées »).
     Desinstaller,

@@ -13,14 +13,20 @@
 // - `bandeau_termine` { id } quand le message a fini de disparaître.
 // - `bandeau_pret` {} une fois, quand l'écoute de `bandeau:afficher` (et celle du thème,
 //   `interface:theme`, voir commun/theme.js) est en place.
+// - `bandeau:decompte` et `bandeau:decompte_cache` : le décompte du retardateur
+//   (decompte.js). Il partage la fenêtre : une seule chose à la fois. Un message efface le
+//   disque ; un décompte efface la pilule sans `bandeau_termine`.
+// - `bandeau:message_cache` { id } : le cœur a caché le message `id` (avant une capture) ;
+//   la pilule est effacée tout de suite, sans `bandeau_termine`. Un autre `id` : rien.
 // Réussite : part seule après --duree-bandeau-reussite. Info et erreur : restent jusqu'au clic.
 // Sans window.__TAURI__ (aperçu dans un navigateur) : ?demo=reussite|info|erreur
-// (et &tenir pour qu'une réussite ne parte pas).
+// (et &tenir pour qu'une réussite ne parte pas), ou ?demo=decompte.
 //
 // Aucune donnée du message ne passe par innerHTML : textes par textContent, pictogrammes
 // tirés de constantes.
 
 import { suivreTheme } from "../commun/theme.js";
+import { creerDecompte } from "./decompte.js";
 
 const tauri = window.__TAURI__;
 const el = document.getElementById("bandeau");
@@ -151,9 +157,20 @@ function creerCroix() {
   return b;
 }
 
+/** Retire la pilule tout de suite, sans `bandeau_termine` (un décompte la remplace). */
+function effacerMessage() {
+  arreter();
+  courant = null;
+  el.hidden = true;
+  el.classList.remove("sortie");
+}
+
+const decompte = creerDecompte({ appeler, effacerMessage });
+
 export function afficher(brut) {
   const message = valider(brut);
   if (!message) return;
+  decompte.effacer();
   arreter();
   courant = { ...message, minuterie: 0, animation: null, ferme: false, zoneEnvoyee: null };
   const lui = courant;
@@ -258,6 +275,11 @@ if (tauri?.event?.listen) {
   // Une fois l'écoute en place, le cœur peut envoyer le message qui attendait (démarrage).
   Promise.all([
     tauri.event.listen("bandeau:afficher", (evenement) => afficher(evenement?.payload)),
+    tauri.event.listen("bandeau:decompte", (evenement) => decompte.montrer(evenement?.payload)),
+    tauri.event.listen("bandeau:decompte_cache", (e) => decompte.cacher(e?.payload)),
+    tauri.event.listen("bandeau:message_cache", (e) => {
+      if (courant && e?.payload?.id === courant.id) effacerMessage();
+    }),
     suivreTheme(),
   ]).then(
     () => appeler("bandeau_pret", {}),
@@ -280,6 +302,9 @@ if (tauri?.event?.listen) {
   };
   const exemple = EXEMPLES[params.get("demo")];
   if (exemple) afficher({ id: "demo", tenir: params.has("tenir"), ...exemple });
+  if (params.get("demo") === "decompte") {
+    decompte.montrer({ id: "demo", secondes: 3, restant_ms: 3000, diametre: 88 });
+  }
   // Pour les essais dans un navigateur seulement.
-  window.bandeauApercu = { afficher };
+  window.bandeauApercu = { afficher, decompte };
 }

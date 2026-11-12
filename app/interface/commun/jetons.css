@@ -85,6 +85,7 @@
   --duree-reglages-secousse: 300ms;
   --duree-reglages-menu: 200ms;
   --duree-reglages-clignote: 1s;
+  --duree-decompte-chiffre: 300ms;
   --courbe-ressort: cubic-bezier(0.34, 1.4, 0.64, 1);
   --courbe-douce: cubic-bezier(0.2, 0.8, 0.2, 1);
   --courbe-vent: cubic-bezier(0.5, 0, 0.75, 0);
@@ -239,6 +240,17 @@
   --reglages-pouce-rayon: 2px;
   --reglages-champ-bouton-retrait: 2px;
   --reglages-curseur-ecart: 3px;
+  --decompte-ecart: 10px;
+  --decompte-anneau-trait: 2px;
+  --decompte-chiffre-part: 0.5;
+  --decompte-chiffre-graisse: 200;
+  --decompte-chiffre-approche: -0.02em;
+  --decompte-chiffre-echelle: 1.14;
+  --decompte-entree-echelle: 0.92;
+  --decompte-croix: 26px;
+  --decompte-croix-picto: 12px;
+  --decompte-croix-trait: 1.4;
+  --decompte-croix-rotation: 90deg;
   --accent: #0067C0;
   --accent-hover: #1975C5;
   --accent-press: #3183CA;
@@ -308,6 +320,8 @@
   --reglages-segment-ombre: 0 0 0 0.5px var(--stroke-strong), 0 1px 2px rgba(0,0,0,0.10), 0 2px 6px -2px rgba(0,0,0,0.10);
   --reglages-halo: color-mix(in srgb, var(--accent) 18%, transparent);
   --reglages-logo-ombre: drop-shadow(0 2px 6px rgba(240,80,154,0.25));
+  --decompte-fond: color-mix(in srgb, var(--acrylic-solid) 70%, transparent);
+  --decompte-croix-fond: color-mix(in srgb, var(--acrylic-solid) 80%, transparent);
   --shadow-2: 0 0 2px rgba(0,0,0,0.12), 0 1px 2px rgba(0,0,0,0.14);
   --shadow-8: 0 0 2px rgba(0,0,0,0.12), 0 4px 8px rgba(0,0,0,0.14);
   --shadow-16: 0 0 2px rgba(0,0,0,0.12), 0 8px 16px rgba(0,0,0,0.14);

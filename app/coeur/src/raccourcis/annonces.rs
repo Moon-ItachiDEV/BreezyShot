@@ -68,6 +68,7 @@ fn nom_dans_annonce(action: &str) -> String {
         "zone" => "la zone".into(),
         "plein_ecran" => "l'écran".into(),
         "fenetre" => "la fenêtre".into(),
+        "derniere_zone" => "la dernière zone".into(),
         autre => autre.into(),
     }
 }
