@@ -2,8 +2,9 @@
 //!
 //! Windows : la valeur `BreezyShot` de la clé `Run` de l'utilisateur courant, et la
 //! désactivation éventuelle par le gestionnaire des tâches (`StartupApproved\Run`), lue
-//! seulement. C'est la seule écriture de l'app dans le registre (ARCHITECTURE §2) ; elle
-//! reste derrière cette fonction pour pouvoir passer plus tard à l'entrée d'un paquet.
+//! seulement. Avec la clé de désinstallation de l'installateur, c'est la seule écriture
+//! dans le registre (ARCHITECTURE §2) ; elle reste derrière cette fonction pour pouvoir
+//! passer plus tard à l'entrée d'un paquet.
 //! Pendant les essais (`BREEZYSHOT_DOSSIER_ESSAI`), une clé d'essai remplace la vraie : la
 //! vraie clé n'est alors ni lue ni écrite. Hors Windows : `Indisponible`.
 

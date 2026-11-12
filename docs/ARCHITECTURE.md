@@ -732,12 +732,13 @@ Module pur : il reçoit le dossier où écrire, ne connaît ni Tauri ni les autr
   des tâches : `StartupApproved\Run`, affiché éteint, jamais réactivé par l'app),
   `Indisponible` (hors Windows). Avec `BREEZYSHOT_DOSSIER_ESSAI` non vide (même règle que
   les dossiers), la clé est
-  `HKCU\Software\BreezyShot\Essais\Run` (`demarrage: cle d'essai`). L'installateur pourra
-  appeler `demarrage_avec_systeme(Some(false))`.
+  `HKCU\Software\BreezyShot\Essais\Run` (`demarrage: cle d'essai`). La désinstallation
+  la retire par la fermeture que lui donne `application::desinstaller` (§12.5).
 - **Thème** : `fenetres::theme::fixer` émet `interface:theme { theme: "light"|"dark"|null }`
   à toutes les pages et règle le cadre des Réglages (`set_theme`) ; une page prête le reçoit
-  par `theme::envoyer_a` (le bandeau, dans `bandeau_pret`). `commun/theme.js` pose
-  `data-theme` sur `<html>`, que lisent les jetons. Le bandeau suit donc le thème choisi.
+  par `theme::envoyer_a` (le bandeau, la vignette et le souffle, à leur commande « prêt »).
+  `commun/theme.js` pose `data-theme` sur `<html>`, que lisent les jetons. Ces trois pages
+  suivent donc le thème choisi ; l'installateur, processus sans réglages, suit le système.
 - **Habillage provisoire** : `reglages.css` n'utilise que les jetons ; le comportement
   (`reglages.js`) et les essais ne s'appuient que sur les attributs `data-*`, les rôles et
   les noms accessibles, pour que le design puisse être refait sans y toucher.
@@ -1249,7 +1250,8 @@ sous `<E>`, entre parenthèses :
   le dossier WebView2 de l'installateur, et seulement s'il ne contient que `EBWebView`.
 - Réglages, Récents, journal de l'app et captures gardent leurs dossiers (§3.3) : ni une mise à
   jour ni une désinstallation n'y touchent. Le cache WebView2 de l'app
-  (`%LOCALAPPDATA%\BreezyShot\EBWebView`) reste aussi à la désinstallation (accepté).
+  (`%LOCALAPPDATA%\dev.breezyshot.desktop\EBWebView`) reste aussi à la désinstallation
+  (accepté).
 - Registre : `systeme/installation` est la seule écriture du registre de l'installateur, et
   seulement la clé de désinstallation. La valeur `Run` (démarrage avec Windows) appartient aux
   Réglages ; l'installateur ne l'écrit jamais.
@@ -1327,8 +1329,9 @@ l'installateur (pas de désinstallation pendant une installation, ni l'inverse),
 4. seulement si l'exe est parti : raccourci (seulement s'il pointe vers l'exe installé), puis
    valeurs de la clé et la clé si elle est vide ;
 5. dossier installé s'il est vide, dossier WebView2 de l'installateur s'il est reconnu ;
-6. démarrage avec Windows : fermeture injectée par l'Application (`RetirerDemarrage`), qui lit
-   puis retire la valeur `BreezyShot` de `Run` (en essai : `HKCU\Software\BreezyShot\Essais\Run`).
+6. démarrage avec Windows, seulement si l'exe est parti : fermeture donnée par l'Application
+   (`RetirerDemarrage`), qui lit puis retire la valeur `BreezyShot` de `Run` (en essai :
+   `HKCU\Software\BreezyShot\Essais\Run`) ; l'exe resté garde son démarrage.
 
 Sortie 0 si l'exe est parti, 1 sinon.
 
@@ -1371,6 +1374,7 @@ desinstallation inscription: retiree | absente | <geste>, code <n>
 desinstallation inscription: la cle garde des valeurs qui ne sont pas a nous
 desinstallation cache webview: supprime | sans objet | absent
 desinstallation demarrage: retire | absent | <erreur>   (fermeture de l'Application)
+desinstallation demarrage: garde (exe reste)
 desinstallation finie: complete | incomplete
 ```
 

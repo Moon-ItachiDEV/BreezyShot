@@ -770,9 +770,12 @@ pub fn desinstaller_avec(retirer_demarrage: RetirerDemarrage) -> i32 {
             appliquer_retrait(retrait);
         }
     }
-    // Démarrage avec Windows : la fermeture donnée écrit sa propre ligne
+    // Démarrage avec Windows : seulement si l'exe est parti (une app qui reste installée
+    // garde son démarrage). La fermeture donnée écrit sa propre ligne
     // (`desinstallation demarrage: retire|absent`).
-    if let Err(e) = retirer_demarrage() {
+    if !exe_parti {
+        log::info!("desinstallation demarrage: garde (exe reste)");
+    } else if let Err(e) = retirer_demarrage() {
         log::warn!("desinstallation demarrage: {e}");
     }
     log::info!(
