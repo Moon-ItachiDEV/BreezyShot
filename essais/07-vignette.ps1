@@ -740,8 +740,25 @@ public static IntPtr[] FenetresDe(int[] pids) {
             $imgNouv = Lire-Png (@(Fichiers-Png $recents)[-1].FullName)
             $zoneImage = [pscustomobject]@{ X = $c.Carte.X - $principal.X; Y = $c.Carte.Y - $principal.Y; L = $c.Carte.L; H = $c.Carte.H }
             $crop = { param($i, $z) $i.Clone([System.Drawing.Rectangle]::new($z.X, $z.Y, $z.L, $z.H), $i.PixelFormat) }
-            $partPhoto = Part-Differente (& $crop $imgRef $zoneImage) (& $crop $imgNouv $zoneImage)
-            Verifier '(11) zone de la carte : les pixels de la référence (± 6)' ($partPhoto -eq 0) ("{0:P1} des points différents" -f $partPhoto) | Out-Null
+            $cropRef = & $crop $imgRef $zoneImage; $cropNouv = & $crop $imgNouv $zoneImage
+            $partPhoto = Part-Differente $cropRef $cropNouv
+            # Une carte restée sur la photo changerait presque toute la zone ((4) : > 50 %).
+            # Le bureau de la machine n'est pas figé d'une photo à l'autre (un curseur de
+            # texte qui clignote dessous a donné 0,2 % une fois) : seuil à 2 %, et le
+            # détail dit où sont les points différents.
+            $bx0 = 100000; $by0 = 100000; $bx1 = -1; $by1 = -1
+            if ($partPhoto -gt 0) {
+                for ($yy = 2; $yy -lt $cropRef.Height - 2; $yy += 4) {
+                    for ($xx = 2; $xx -lt $cropRef.Width - 2; $xx += 4) {
+                        $pp = $cropRef.GetPixel($xx, $yy); $qq = $cropNouv.GetPixel($xx, $yy)
+                        if ([math]::Abs($pp.R - $qq.R) -gt 6 -or [math]::Abs($pp.G - $qq.G) -gt 6 -or [math]::Abs($pp.B - $qq.B) -gt 6) {
+                            $bx0 = [math]::Min($bx0, $xx); $by0 = [math]::Min($by0, $yy); $bx1 = [math]::Max($bx1, $xx); $by1 = [math]::Max($by1, $yy)
+                        }
+                    }
+                }
+            }
+            $ou = if ($bx1 -ge 0) { " ; points différents entre $bx0,$by0 et $bx1,$by1 de la zone ($($zoneImage.L)x$($zoneImage.H))" } else { '' }
+            Verifier '(11) zone de la carte : celle de la référence (± 6, moins de 2 % des points)' ($partPhoto -lt 0.02) (("{0:P1} des points différents" -f $partPhoto) + $ou) | Out-Null
             # Le souffle part de l'écran entier en plein écran : toute la photo est comparée
             # (grille de 16 px ; l'horloge de la barre des tâches peut changer quelques points).
             $partEntiere = Part-Differente $imgRef $imgNouv 6 16
