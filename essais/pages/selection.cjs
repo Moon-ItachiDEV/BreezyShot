@@ -52,6 +52,11 @@ const L = 1280, H = 400;
   const appels = (p) => p.evaluate(() => __appels.filter(x => x[0] !== 'selection_chargee'));
   const vider = (p) => p.evaluate(() => { __appels.length = 0; });
   let prochain = 1;
+  // La page a traité la charge `id` (elle l'a dit prête) : un geste fait avant serait
+  // ignoré, et une attente fixe dépend de la machine. Sans réponse en 5 s, l'essai continue
+  // et le point qui suit le dira.
+  const attendrePrete = (p, id) => p.waitForFunction(
+    id => __appels.some(a => a[0] === 'selection_prete' && a[1] && a[1].id === id), id, { timeout: 5000 }).catch(() => {});
   // La charge du cœur : tout en pixels réels relatifs à la fenêtre. Les écrans sont donnés
   // ici en pixels CSS et convertis à l'échelle k (par défaut, celle du navigateur) ;
   // cote_min est en pixels réels.
@@ -63,6 +68,7 @@ const L = 1280, H = 400;
   async function montrer(p, ecrans = [{ x: 0, y: 0, largeur: L, hauteur: H }], coteMin = 3, k = p.echelle) {
     const id = prochain++;
     await charge(id, ecrans, coteMin, k)(p);
+    await attendrePrete(p, id);
     await p.waitForTimeout(80);
     await vider(p);
     return id;
@@ -352,6 +358,7 @@ const L = 1280, H = 400;
       p = await page({ echelle: e });
       id = prochain++;
       await p.evaluate(([id, R, RH, ecr]) => __emettre('selection:montrer', { id, numero: id, largeur: R, hauteur: RH, ecrans: ecr, cote_min: 3 }), [id, R, RH, ecr]);
+      await attendrePrete(p, id);
       await p.waitForTimeout(100);
       await geste(p); await p.waitForTimeout(80);
       const vu = await vue(p);
@@ -610,6 +617,7 @@ const L = 1280, H = 400;
     const k = p.echelle;
     R = R || Math.round(L * k); RH = RH || Math.round(H * k);
     await p.evaluate(m => __emettre('selection:montrer', m), { id, numero: numero || id, largeur: R, hauteur: RH, ecrans: ecrans || [{ x: 0, y: 0, largeur: R, hauteur: RH }], cote_min: 3, mode: 'fenetre', fenetres, souris });
+    await attendrePrete(p, id);
     await p.waitForTimeout(100);
     await vider(p);
     return id;

@@ -627,7 +627,8 @@ public static IntPtr[] FenetresDe(int[] pids) {
                 Verifier '(4) délai de 3 s (± 0,5) entre l''entrée et le départ' ([math]::Abs($delai - 3) -le 0.5) ("{0:N3} s" -f $delai) | Out-Null
                 # Après le départ : le motif du témoin, quart par quart (± 12).
                 $m = [int]($cote4 / 4)
-                $points = @(@($m, $m), @(3 * $m, $m), @($m, 3 * $m), @(3 * $m, 3 * $m))
+                $m3 = 3 * $m
+                $points = @(@($m, $m), @($m3, $m), @($m, $m3), @($m3, $m3))
                 $temoinVu = $true; $vus = @()
                 for ($k = 0; $k -lt 4; $k++) {
                     $px = $vide.GetPixel($points[$k][0], $points[$k][1]); $attendu = $couleurs4[$k]

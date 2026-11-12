@@ -461,7 +461,7 @@ public static string Titre(IntPtr h) {
     # « tenu » ou « refuse », puis ferme l'aide (le raccourci est alors rendu).
     function Tenir-Ailleurs([int]$Vk, [int]$Mods, [string]$Nom) {
         $fichier = Join-Path $script:Essai.Dossier "tenu-$Nom.txt"
-        $aide = Start-Process -FilePath $script:Pwsh -PassThru -ArgumentList @('-NoProfile', '-File', (Join-Path $PSScriptRoot 'tenir-raccourci.ps1'), '-Vk', $Vk, '-Mods', $Mods, '-Fichier', $fichier)
+        $aide = Start-Process -FilePath $script:Pwsh -PassThru -WindowStyle Hidden -ArgumentList @('-NoProfile', '-File', (Join-Path $PSScriptRoot 'tenir-raccourci.ps1'), '-Vk', $Vk, '-Mods', $Mods, '-Fichier', $fichier)
         $script:Auxiliaires.Add($aide)
         $limite = [DateTime]::UtcNow.AddSeconds(30)
         while (-not (Test-Path -LiteralPath $fichier) -and [DateTime]::UtcNow -lt $limite) { Start-Sleep -Milliseconds 100 }
@@ -548,8 +548,9 @@ public static string Titre(IntPtr h) {
     Verifier '(5) Ctrl+Maj+2 rendu à Windows (une autre application le tient)' ($t -eq 'tenu') $t | Out-Null
 
     # (6) Ctrl+Maj+8 tenu ailleurs : refus sur la ligne ; puis saisie et Échap.
+    # L'aide tourne sans console : sa fenêtre couvrirait la ligne cliquée ensuite.
     $f = Join-Path $script:Essai.Dossier 'tenu-8.txt'
-    $aide = Start-Process -FilePath $script:Pwsh -PassThru -ArgumentList @('-NoProfile', '-File', (Join-Path $PSScriptRoot 'tenir-raccourci.ps1'), '-Vk', 0x38, '-Mods', 6, '-Fichier', $f)
+    $aide = Start-Process -FilePath $script:Pwsh -PassThru -WindowStyle Hidden -ArgumentList @('-NoProfile', '-File', (Join-Path $PSScriptRoot 'tenir-raccourci.ps1'), '-Vk', 0x38, '-Mods', 6, '-Fichier', $f)
     $script:Auxiliaires.Add($aide)
     $limite = [DateTime]::UtcNow.AddSeconds(30)
     while (-not (Test-Path -LiteralPath $f) -and [DateTime]::UtcNow -lt $limite) { Start-Sleep -Milliseconds 100 }

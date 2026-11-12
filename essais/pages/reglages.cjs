@@ -97,7 +97,7 @@ const SANS_VIGNETTE = { ...VUE, lignes: ['copier', 'dossier', 'modele_nom', 'the
   {
     const p = await page({ vue: SANS_VIGNETTE });
     const montrees = await p.$$eval('[data-reglage]:not([data-reglage="raccourci"])', ls => ls.filter(l => !l.hidden).map(l => l.dataset.reglage));
-    verifier(JSON.stringify(montrees) === JSON.stringify(SANS_VIGNETTE.lignes), '2 sans vignette : seules les lignes de la vue', JSON.stringify(montrees));
+    verifier(JSON.stringify([...montrees].sort()) === JSON.stringify([...SANS_VIGNETTE.lignes].sort()), '2 sans vignette : seules les lignes de la vue', JSON.stringify(montrees));
     const onglets = await p.$$eval('[role="tab"]', os => os.filter(o => !o.hidden).map(o => o.textContent.trim()));
     verifier(JSON.stringify(onglets) === JSON.stringify(['Après la capture', 'Raccourcis', 'Général']), '2 trois rubriques, pas de Capture', JSON.stringify(onglets));
     const interdits = await p.$$('[data-reglage="loupe"],[data-reglage="retardateur"],[data-reglage="pointeur"],[data-reglage="format"]');
@@ -110,7 +110,7 @@ const SANS_VIGNETTE = { ...VUE, lignes: ['copier', 'dossier', 'modele_nom', 'the
   {
     const p = await page();
     const montrees = await p.$$eval('[data-reglage]:not([data-reglage="raccourci"])', ls => ls.filter(l => !l.hidden).map(l => l.dataset.reglage));
-    verifier(JSON.stringify(montrees) === JSON.stringify(REEL.vue.lignes) && ['vignette', 'vignette_duree', 'vignette_coin', 'enregistrer'].every(l => montrees.includes(l)),
+    verifier(JSON.stringify([...montrees].sort()) === JSON.stringify([...REEL.vue.lignes].sort()) && ['vignette', 'vignette_duree', 'vignette_coin', 'enregistrer'].every(l => montrees.includes(l)),
       '2 vue réelle : lignes du cœur, vignette et enregistrement compris', JSON.stringify(montrees));
     const durees = await p.$$eval('[data-controle="vignette_duree"] [role="radio"]', bs => bs.map(b => [b.textContent, b.getAttribute('aria-checked')]));
     const attendues = REEL.vue.durees.map(d => [d === 0 ? 'Toujours' : `${d} s`, String(d === REEL.vue.vignette.duree_s)]);
@@ -119,6 +119,14 @@ const SANS_VIGNETTE = { ...VUE, lignes: ['copier', 'dossier', 'modele_nom', 'the
     verifier(JSON.stringify(coin) === JSON.stringify([REEL.vue.vignette.coin]), '2 coin du cœur coché', JSON.stringify(coin));
     const inter = await p.$$eval('[role="switch"]', bs => Object.fromEntries(bs.map(b => [b.dataset.controle, b.getAttribute('aria-checked')])));
     verifier(inter.vignette === String(REEL.vue.vignette.afficher) && inter.enregistrer === String(REEL.vue.enregistrer), '2 interrupteurs vignette et enregistrement d’après la vue', JSON.stringify(inter));
+    // Habillage : le nom se replie (inerte) sous l'enregistrement éteint, la durée et le coin
+    // sous la vignette éteinte ; allumés, ils reviennent.
+    const repli = () => p.$$eval('[data-repli]', rs => rs.map(r => [r.dataset.repli, r.hasAttribute('data-replie'), r.inert]));
+    verifier(JSON.stringify(await repli()) === JSON.stringify([['enregistrer', true, true], ['vignette', false, false]]), '2 repli : nom replié sous l’enregistrement éteint', JSON.stringify(await repli()));
+    await p.evaluate(() => __emettre('reglages:etat', { ...__vue, enregistrer: true, vignette: { ...__vue.vignette, afficher: false } }));
+    await p.waitForTimeout(50);
+    verifier(JSON.stringify(await repli()) === JSON.stringify([['enregistrer', false, false], ['vignette', true, true]]), '2 repli : nom déplié, durée et coin repliés sous la vignette éteinte', JSON.stringify(await repli()));
+    await p.evaluate(() => __emettre('reglages:etat', __vue)); await p.waitForTimeout(50);
     await p.getByRole('switch', { name: 'Enregistrer automatiquement' }).click(); await p.waitForTimeout(50);
     verifier(JSON.stringify((await dernier(p, 'reglages_changer'))?.[1]) === JSON.stringify({ changement: { cle: 'enregistrer', valeur: !REEL.vue.enregistrer } }), '2 Enregistrer → reglages_changer enregistrer');
     await p.context().close();
@@ -162,7 +170,8 @@ const SANS_VIGNETTE = { ...VUE, lignes: ['copier', 'dossier', 'modele_nom', 'the
 
   // 5. Nom : aperçu à chaque frappe, écriture une fois après la pause ; texte jamais du HTML.
   {
-    const p = await page();
+    // Le nom se replie sous « Enregistrer automatiquement » éteint : la vue l'allume.
+    const p = await page({ vue: { ...VUE, enregistrer: true } });
     await vider(p);
     const champ = p.getByRole('textbox', { name: 'Nom des fichiers' });
     await champ.fill(''); await champ.type('<img src=x onerror="window.__pwn=1">', { delay: 5 });

@@ -59,7 +59,8 @@ app/
     selection/              page de la sélection (étape 5)
     installateur/           page de l'installateur (version 0.3 ; A + C du design validé)
     reglages/               fenêtre des Réglages (étape 10) : html (structure), css
-                            (habillage, jetons seulement), js (comportement)
+                            (habillage, jetons seulement), js (comportement),
+                            habillage.js (affichage seulement)
     barre/                  barre de capture (plus tard)
 design/                     jetons et icônes Moulinet, copiés du design system
 docs/                       ce fichier, TRAVAIL-VALIDE.md, notices d'essai
@@ -691,7 +692,7 @@ Module pur : il reçoit le dossier où écrire, ne connaît ni Tauri ni les autr
 
 ### 6.1 Fenêtre des Réglages (étape 10)
 
-- Fenêtre ordinaire unique (étiquette `reglages`, « Réglages de BreezyShot », 780 × 540,
+- Fenêtre ordinaire unique (étiquette `reglages`, « Réglages de BreezyShot », 680 × 512,
   560 × 420 au moins, redimensionnable, dans la barre des tâches), créée à la demande par le
   menu de l'icône et détruite à la fermeture ; une seconde demande la ramène devant. Elle
   s'ouvre centrée dans la zone utile de l'écran de la souris (`place::centrer`, pixels
@@ -747,9 +748,14 @@ Module pur : il reçoit le dossier où écrire, ne connaît ni Tauri ni les autr
   par `theme::envoyer_a` (le bandeau, la vignette et le souffle, à leur commande « prêt »).
   `commun/theme.js` pose `data-theme` sur `<html>`, que lisent les jetons. Ces trois pages
   suivent donc le thème choisi ; l'installateur, processus sans réglages, suit le système.
-- **Habillage provisoire** : `reglages.css` n'utilise que les jetons ; le comportement
-  (`reglages.js`) et les essais ne s'appuient que sur les attributs `data-*`, les rôles et
-  les noms accessibles, pour que le design puisse être refait sans y toucher.
+- **Habillage (direction B « Épuré »)** : onglets en haut avec un trait qui glisse,
+  contenu centré, presque monochrome. `reglages.css` n'utilise que les jetons ;
+  `habillage.js` ne fait que de l'affichage (place du trait et des pastilles, repli de
+  « Nom des fichiers » sous « Enregistrer automatiquement » et de Durée et Coin sous
+  « Vignette » quand l'interrupteur est éteint : `data-replie` et `inert`) et ne touche à
+  aucun réglage. Le comportement (`reglages.js`) et les essais ne s'appuient que sur les
+  attributs `data-*`, les rôles et les noms accessibles, pour que le design puisse être
+  refait sans y toucher.
 - Lignes du journal (contrat des essais, sans chemin, jamais un texte brut de la page) :
   `menu: reglages`, `reglages fenetre <hwnd>`, `reglages ramenes devant`,
   `reglages non ouverts: <erreur>`, `reglages page prete` (une fois par fenêtre créée),
