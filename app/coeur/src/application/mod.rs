@@ -182,6 +182,9 @@ pub struct Application {
     /// La sortie dont on attend le bilan ; `None` une fois le bilan reçu ou l'échéance
     /// tombée.
     sortie_attendue: Mutex<Option<u64>>,
+    /// Numéro de la dernière demande de capture reçue (raccourci ou clic au menu). Une
+    /// demande du menu, différée de `ATTENTE_MENU`, est caduque si ce numéro a changé.
+    demandes: AtomicU64,
 }
 
 /// Une annonce envoyée au bandeau, dont la situation attend d'être retenue.
@@ -746,27 +749,50 @@ fn afficher_probleme(app: &AppHandle, probleme: Probleme) {
     afficher(app, zone::message_capture_impossible());
 }
 
-/// Lance la capture `mode` après `attente` (menu de l'icône) : un petit fil dort, puis la
-/// demande est postée sur le fil principal. Si l'état n'est plus Repos ni Vignette à
-/// l'échéance, la table ignore la demande.
+/// Note une demande de capture reçue et rend son numéro.
+fn noter_demande(app: &AppHandle) -> u64 {
+    app.state::<Application>()
+        .demandes
+        .fetch_add(1, Ordering::SeqCst)
+        .wrapping_add(1)
+}
+
+/// Lance la capture `mode` après `attente` (menu de l'icône) : le numéro de la demande
+/// est pris au clic, un petit fil dort, puis la demande est postée sur le fil principal.
+/// Toute demande reçue entre-temps (raccourci, autre clic) la rend caduque
+/// (`zone::demande_menu_a_jour`). Si l'état n'est plus Repos ni Vignette à l'échéance,
+/// la table ignore la demande.
 fn lancer_capture_apres(app: &AppHandle, mode: Mode, attente: Duration) {
+    let numero = noter_demande(app);
     let pour_fil = app.clone();
     let lance = std::thread::Builder::new()
         .name("menu-attente".into())
         .spawn(move || {
             std::thread::sleep(attente);
-            // Depuis ce fil, `lancer_capture` poste sur le fil principal.
-            lancer_capture(&pour_fil, mode);
+            let pour_traiter = pour_fil.clone();
+            let poste = pour_fil.run_on_main_thread(move || {
+                let actuelle = pour_traiter
+                    .state::<Application>()
+                    .demandes
+                    .load(Ordering::SeqCst);
+                if zone::demande_menu_a_jour(numero, actuelle) {
+                    demarrer_capture(&pour_traiter, mode);
+                } else {
+                    log::info!("menu: demande perimee");
+                }
+            });
+            if let Err(e) = poste {
+                log::warn!("capture non postee: {e}");
+            }
         });
     if let Err(e) = lance {
         log::warn!("attente du menu impossible ({e}): capture tout de suite");
-        lancer_capture(app, mode);
+        demarrer_capture(app, mode);
     }
 }
 
-/// Demande une capture (raccourci, menu). Fil principal (sinon postée). La table ignore
-/// la demande hors Repos et Vignette (aucun second `figer` tant qu'une capture est en
-/// cours), puis chaque mode suit sa séquence : zone (§3.6), plein écran (§3.7).
+/// Demande une capture par raccourci. Fil principal (sinon postée). La demande est notée
+/// (une demande du menu en attente devient caduque), puis `demarrer_capture`.
 pub fn lancer_capture(app: &AppHandle, mode: Mode) {
     if hors_fil_principal(app) {
         let pour = app.clone();
@@ -775,6 +801,14 @@ pub fn lancer_capture(app: &AppHandle, mode: Mode) {
         }
         return;
     }
+    noter_demande(app);
+    demarrer_capture(app, mode);
+}
+
+/// Démarre une capture (fil principal). La table ignore la demande hors Repos et
+/// Vignette (aucun second `figer` tant qu'une capture est en cours), puis chaque mode
+/// suit sa séquence : zone (§3.6), plein écran (§3.7).
+fn demarrer_capture(app: &AppHandle, mode: Mode) {
     let recu_a = Instant::now();
     if appliquer(app, Declencheur::DemandeCapture(mode)).is_none() {
         log::info!("capture deja en cours: appui ignore");
@@ -1101,6 +1135,7 @@ fn demande_sortie(app: &AppHandle) -> sortie::Demande {
         enregistrer: zone::doit_enregistrer(
             reglages.enregistrer_apres_capture,
             VIGNETTE_CONSTRUITE,
+            !dossier_enregistrement.as_os_str().is_empty(),
         ),
         dossier_enregistrement,
         dossier_affiche,
@@ -1372,10 +1407,14 @@ mod tests {
             action("capturer_zone", "Capturer une zone\tImpr. écran")
         );
         assert_eq!(m[1], action("capturer_plein_ecran", "Capturer l'écran"));
-        // L'annonce du démarrage est celle du §5 : aucun candidat libre pour une action.
+        // L'annonce du démarrage (§5) : une info qui nomme l'action, pas une erreur.
+        assert_eq!(
+            b.annonce().map(|a| (a.erreur, a.titre)),
+            Some((false, "Aucun raccourci pour l'écran".to_string()))
+        );
         assert_eq!(
             ligne_annonce(&decider_annonce(None, &b)).as_deref(),
-            Some("annonce raccourci: aucun_raccourci")
+            Some("annonce raccourci: action_sans_raccourci")
         );
     }
 

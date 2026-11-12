@@ -258,10 +258,19 @@ pub fn ligne_chrono_gel(photo: Duration, total: Duration, visible: Duration) -> 
     )
 }
 
-/// Enregistrer ou non le fichier : toujours tant que la vignette n'existe pas (versions
-/// 0.1 et 0.2, sans l'écrire dans les réglages), sinon d'après le réglage.
-pub fn doit_enregistrer(reglage: bool, vignette_construite: bool) -> bool {
-    reglage || !vignette_construite
+/// Enregistrer ou non le fichier : d'après le réglage, et toujours tant que la vignette
+/// n'existe pas (versions 0.1 et 0.2, sans l'écrire dans les réglages), mais seulement si
+/// un dossier est connu : sans dossier Images, forcer l'enregistrement ferait annoncer
+/// « Impossible d'enregistrer » à chaque capture.
+pub fn doit_enregistrer(reglage: bool, vignette_construite: bool, dossier_connu: bool) -> bool {
+    reglage || (!vignette_construite && dossier_connu)
+}
+
+/// Une demande du menu, différée, part seulement si aucune autre demande de capture
+/// (raccourci, autre clic) n'est arrivée depuis le clic : `prise` est son numéro,
+/// `actuelle` le numéro de la dernière demande reçue.
+pub fn demande_menu_a_jour(prise: u64, actuelle: u64) -> bool {
+    prise == actuelle
 }
 
 /// La souris en pixels réels entiers ; `None` si elle est inconnue ou illisible.
@@ -644,15 +653,27 @@ mod tests {
 
     #[test]
     fn enregistrer_tant_que_la_vignette_n_existe_pas() {
-        assert!(doit_enregistrer(false, false));
-        assert!(doit_enregistrer(true, false));
-        assert!(doit_enregistrer(true, true));
-        assert!(!doit_enregistrer(false, true));
-        // Aujourd'hui (pas de vignette) : toujours enregistré.
-        assert!(doit_enregistrer(
-            false,
-            crate::application::VIGNETTE_CONSTRUITE
-        ));
+        assert!(doit_enregistrer(false, false, true));
+        assert!(doit_enregistrer(true, false, true));
+        assert!(doit_enregistrer(true, true, true));
+        assert!(!doit_enregistrer(false, true, true));
+        // Sans dossier connu, on ne force pas ; un réglage vrai reste demandé (et son
+        // échec annoncé).
+        assert!(!doit_enregistrer(false, false, false));
+        assert!(doit_enregistrer(true, false, false));
+        assert!(!doit_enregistrer(false, true, false));
+        // Aujourd'hui (pas de vignette) : enregistré dès qu'un dossier est connu.
+        let v = crate::application::VIGNETTE_CONSTRUITE;
+        assert!(doit_enregistrer(false, v, true));
+        assert!(!doit_enregistrer(false, v, false));
+    }
+
+    #[test]
+    fn demande_du_menu_caduque() {
+        assert!(demande_menu_a_jour(7, 7));
+        // Un raccourci ou un autre clic entre-temps.
+        assert!(!demande_menu_a_jour(7, 8));
+        assert!(!demande_menu_a_jour(7, 9));
     }
 
     #[test]

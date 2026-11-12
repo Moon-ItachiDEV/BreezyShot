@@ -191,8 +191,11 @@ dans le dossier temporaire du système (`systeme::dossier_secours()`), sous le n
 - Chaque entrée de capture du menu lance la même capture que le raccourci de son mode, mais
   après `ATTENTE_MENU` (350 ms) : un petit fil dort puis poste `lancer_capture` sur le fil
   principal, pour que le menu, que Windows fait disparaître en fondu, ne soit pas sur la
-  photo. Un raccourci n'attend jamais. Si l'état n'est plus Repos ni Vignette à l'échéance,
-  la table ignore la demande. Journal : `menu: capturer <mode>` à la réception.
+  photo. Un raccourci n'attend jamais. Chaque demande (raccourci, clic) prend un numéro ; à
+  l'échéance, si une autre demande est arrivée depuis le clic, celle du menu est caduque
+  (`zone::demande_menu_a_jour`, `menu: demande perimee`). Si l'état n'est plus Repos ni
+  Vignette à l'échéance, la table ignore la demande. Journal : `menu: capturer <mode>` à
+  la réception.
 - Menu (clic droit) : seulement ce qui marche. Étape 1 : « Quitter BreezyShot ». Étape 7 :
   une entrée par mode construit, dans l'ordre `ORDRE_MENU` (« Capturer une zone »,
   [« Capturer une fenêtre » à l'étape 8], « Capturer l'écran »), un séparateur, « Quitter
@@ -247,9 +250,10 @@ sur le fil principal tout ce qui touche à la capture et arriverait d'ailleurs. 
    verrouillée → `EcransChanges`, `SessionVerrouillee`, sans message. Un signal d'un autre
    affichage que celui en cours est ignoré.
 8. Sortie dans un fil `sortie` : `sortie::sortir` avec les réglages lus au démarrage
-   (sauf l'enregistrement : `zone::doit_enregistrer(réglage, VIGNETTE_CONSTRUITE)`, vrai
-   tant que la vignette n'existe pas, versions 0.1 et 0.2 ; le réglage lu n'est pas
-   modifié et le fichier de réglages n'est jamais écrit pour cela), puis
+   (sauf l'enregistrement : `zone::doit_enregistrer(réglage, VIGNETTE_CONSTRUITE,
+   dossier_connu)`, vrai tant que la vignette n'existe pas, versions 0.1 et 0.2, si un
+   dossier d'enregistrement est connu ; le réglage lu n'est pas modifié et le fichier de
+   réglages n'est jamais écrit pour cela), puis
    retour sur le fil principal : journal, `ImagePreteSansVignette` → Repos, annonce dans
    le bandeau. Dossier affiché : « Images › BreezyShot » quand le réglage est absent ou
    vide, sinon `sortie::nom_affiche(dossier)`. « Récents » : `<local>/Recents`.
@@ -299,7 +303,7 @@ recent <ok|echec> fichier <fait|non demande|echec>`, `recents: echec (…)`, `so
 reussite|erreur: <titre>`, `chrono decoupe <ms> sortie <ms> relache-annonce <ms>`,
 `capture impossible: <photo|ecran_fige|selection|muette|lecture|non_disponible|
 sortie_sans_bilan>`, `sortie sans bilan`, `sortie <n>: bilan perime ignore`,
-`menu: capturer <mode>`. Aucun chemin de capture complet, aucun contenu.
+`menu: capturer <mode>`, `menu: demande perimee`. Aucun chemin de capture complet, aucun contenu.
 
 ### 3.7 Capture plein écran (étape 7)
 
@@ -428,8 +432,9 @@ Module pur : il reçoit le dossier où écrire, ne connaît ni Tauri ni les autr
   si la version de Windows est 22631 (23H2) ou plus, sinon libre. Hors Windows : libre.
 - **Message au démarrage** (bandeau, genre « info »), seulement si le premier candidat
   d'une action n'a pas été retenu. **Un seul message par démarrage** (le bandeau n'en montre
-  qu'un à la fois) : d'abord une action restée sans raccourci, sinon la première action, dans
-  l'ordre zone, plein écran, fenêtre, dont le premier candidat n'a pas été retenu. Un candidat
+  qu'un à la fois) : d'abord une action qui avait des candidats et reste sans raccourci,
+  sinon la première action, dans l'ordre zone, plein écran, fenêtre, dont le premier
+  candidat n'a pas été retenu. Un candidat
   recopié dans un message est coupé à 40 caractères. **Une seule fois par situation** : l'Application garde
   la dernière situation annoncée (action, candidat écarté, raison) dans `<local>/etat.json`
   et ne réaffiche le message que si elle change. Quand tout est normal, elle l'efface.
@@ -443,8 +448,12 @@ Module pur : il reçoit le dossier où écrire, ne connaît ni Tauri ni les autr
   - autre candidat refusé par le système ou déjà pris par une autre action : « X est pris.
     Raccourci : Y » ;
   - candidat invalide : « « X » n'est pas un raccourci valide. Raccourci : Y » ;
-  - aucun candidat libre (genre « erreur », reste jusqu'à la croix) : « Aucun raccourci
-    disponible », sans détail.
+  - une action sans aucun candidat libre alors qu'une autre action construite a son
+    raccourci (genre « info ») : « Aucun raccourci pour la zone », « … pour l'écran »,
+    « … pour la fenêtre » (l'action, jamais la touche), raison `action_sans_raccourci` ;
+  - aucune action construite n'a obtenu de raccourci (genre « erreur », reste jusqu'à la
+    croix) : « Aucun raccourci disponible », sans détail, raison `aucun_raccourci`. Les deux
+    codes diffèrent : passer d'une action privée à toutes privées réaffiche l'erreur.
 - **Signal** : `Signal::Presse(action)` et `Signal::Echap`.
 - **Échap global** : `reserver_echap(app, rappel)` le réserve le temps d'une sélection,
   `liberer_echap(app)` le rend. Le plugin fait la réservation sur le fil principal et
