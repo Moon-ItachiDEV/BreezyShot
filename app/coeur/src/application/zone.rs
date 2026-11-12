@@ -112,6 +112,9 @@ pub fn decider(capture: Option<Vue<'_>>, arrivee: Arrivee<'_>) -> Geste {
                     Some(zone) => Geste::Decouper(zone),
                     None => abandon(Declencheur::SelectionAnnulee, None),
                 },
+                // Le mode fenêtre n'est pas encore câblé (toute demande est en mode zone) :
+                // ce signal ne peut pas arriver ; à remplacer au câblage de l'étape 8.
+                SignalSelection::Fenetre { .. } => abandon(Declencheur::SelectionAnnulee, None),
                 SignalSelection::Annulee { .. } => abandon(Declencheur::SelectionAnnulee, None),
                 SignalSelection::Muette { .. } => {
                     abandon(Declencheur::SelectionMuette, Some(Probleme::Muette))
