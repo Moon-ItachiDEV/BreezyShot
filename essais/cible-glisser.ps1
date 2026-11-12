@@ -2,7 +2,8 @@
 # fichiers (AllowDrop, effet « copier »), comme une vraie application. Sans bordure,
 # toujours au-dessus, posée en ($X, $Y), $Cote × $Cote pixels réels. Écrit son HWND dans
 # $FichierHwnd, puis, à chaque dépôt, ajoute les chemins reçus (un par ligne) à
-# $FichierDepots. Tourne jusqu'à être tuée.
+# $FichierDepots. Tourne jusqu'à être tuée. Sa console est cachée une fois la fenêtre
+# montrée (pas de -WindowStyle Hidden : Windows l'appliquerait à la cible elle-même).
 #   pwsh -NoProfile -File essais/cible-glisser.ps1 -X 700 -Y 20 -Cote 300 -FichierHwnd h.txt -FichierDepots d.txt
 
 param(
@@ -19,6 +20,10 @@ $ErrorActionPreference = 'Stop'
 Add-Type -Namespace BreezyShotEssai -Name Cible -MemberDefinition @'
 [DllImport("user32.dll", SetLastError = true)]
 public static extern bool SetProcessDpiAwarenessContext(IntPtr contexte);
+[DllImport("kernel32.dll")]
+public static extern IntPtr GetConsoleWindow();
+[DllImport("user32.dll")]
+public static extern bool ShowWindow(IntPtr h, int commande);
 '@
 try { [void][BreezyShotEssai.Cible]::SetProcessDpiAwarenessContext([IntPtr]::new(-4)) } catch { }
 
@@ -60,5 +65,7 @@ $fenetre.Add_Shown({
         $temporaire = "$FichierHwnd.tmp"
         Set-Content -LiteralPath $temporaire -Value ([long]$fenetre.Handle) -Encoding utf8
         Move-Item -LiteralPath $temporaire -Destination $FichierHwnd -Force
+        $console = [BreezyShotEssai.Cible]::GetConsoleWindow()
+        if ($console -ne [IntPtr]::Zero) { [void][BreezyShotEssai.Cible]::ShowWindow($console, 0) }
     })
 [System.Windows.Forms.Application]::Run($fenetre)

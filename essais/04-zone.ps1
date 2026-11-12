@@ -15,7 +15,8 @@
 # par la relecture de l'étape 5 : F5 et Ctrl+P sans effet, Alt+F4 annule proprement,
 # perte de focus annule, trois captures sans fuite de fenêtres ni de fils ; un glisser qui
 # finit sur le dernier pixel du bureau garde la dernière colonne et la dernière ligne.
-# Cas B : (8) enregistrement après capture. Cas C : (10) dossier impossible.
+# Cas B : (8) vignette coupée et enregistrement faux : copie faite, rien dans Images.
+# Cas C : (10) dossier impossible.
 # (11) À chaque fin : --quitter → arret propre, aucune instance BreezyShot ne reste en vie.
 # Sur tout l'essai : aucune fin « muette » ni « impossible », et chaque « chrono selection
 # prete » a son échelle égale au page-dpr.
@@ -783,19 +784,21 @@ function Fichiers-Png([string]$Dossier) {
             }
             catch { Verifier '(A) déroulement du cas' $false "$_" | Out-Null; Arreter-Tout }
 
-            # ===== Cas B : (8) enregistrement après capture =====================================
+            # ===== Cas B : (8) vignette coupée et enregistrement faux : copie seule ===========
+            # (Le cas A prouve déjà l'enregistrement par le réglage ; ici, le comportement
+            # nouveau de la 0.3 : rien dans Images, copie faite, « Récents » rangé.)
             try {
                 Assurer-Temoin '(8)'
                 $dbb = Dossier-Cas 'b'
-                Ecrire-Reglages -Dossier $dbb -Enregistrer $true -DossierEnregistrement $null
+                Ecrire-Reglages -Dossier $dbb -Enregistrer $false -DossierEnregistrement $null
                 $p = Demarrer-Cas -Dossier $dbb -Quoi '(8)'
                 $null = Capturer -Dossier $dbb -Quoi '(8)' -De $HG -A $BD
-                Verifier '(8) le journal dit « Copié et enregistré »' ((Compter-Lignes -Texte 'sortie annonce reussite: Copié et enregistré' -Dossier $dbb) -eq 1) | Out-Null
-                Verifier '(8) sortie copie faite recent ok fichier fait' ((Compter-Lignes -Texte 'sortie copie faite recent ok fichier fait' -Dossier $dbb) -eq 1) | Out-Null
+                Verifier '(8) le journal dit « Copié dans le presse-papiers »' ((Compter-Lignes -Texte 'sortie annonce reussite: Copié dans le presse-papiers' -FinDeLigne -Dossier $dbb) -eq 1) | Out-Null
+                Verifier '(8) sortie copie faite recent ok fichier non demande' ((Compter-Lignes -Texte 'sortie copie faite recent ok fichier non demande' -Dossier $dbb) -eq 1) | Out-Null
                 $images = @(Fichiers-Png (Join-Path $dbb 'images'))
-                $nom = if ($images.Count -ge 1) { $images[-1].Name } else { '' }
-                Verifier '(8) un fichier dans le dossier, nommé d''après le modèle' (($images.Count -eq 1) -and ($nom -match '^BreezyShot \d{4}-\d{2}-\d{2} à \d{2}\.\d{2}\.\d{2}\.png$')) "$($images.Count) fichier(s) : $nom" | Out-Null
-                if ($images.Count -ge 1) { Verifier-Image '(8) fichier enregistré' (Lire-Png $images[-1].FullName) }
+                Verifier '(8) rien dans Images' ($images.Count -eq 0) "$($images.Count) fichier(s)" | Out-Null
+                Verifier '(8) un PNG dans « Récents »' (@(Fichiers-Png (Join-Path $dbb 'local/Recents')).Count -eq 1) | Out-Null
+                Verifier '(8) aucune vignette (coupée)' ((Compter-Lignes -Texte 'vignette preparee ' -Dossier $dbb) -eq 0) | Out-Null
                 Fermer-Cas $p $dbb '(8)'
             }
             catch { Verifier '(8) déroulement du cas' $false "$_" | Out-Null; Arreter-Tout }

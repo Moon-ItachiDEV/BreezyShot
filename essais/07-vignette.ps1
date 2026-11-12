@@ -4,20 +4,26 @@
 # animations normales.
 #
 # Cas A (BREEZYSHOT_ESSAI_CAPTURABLE=1) : (1) démarrage : fenêtres de la vignette et du
-# souffle créées, cachées, styles outil sans APPWINDOW, pages prêtes. (10) Glisser d'abord :
-# une fenêtre cible (cible-glisser.ps1) reçoit exactement un fichier nommé au modèle, mêmes
-# octets que « Récents » ; glisser tenu plus que la durée puis Échap : annulé, la vignette
-# reste ; lâché sur la carte : annulé. (2) Capture : Decoupe -> Souffle, souffle vu visible
-# puis caché, Souffle -> Vignette, carte au coin bas gauche de la zone utile à 12 px, aucun
-# bandeau, presse-papiers, un PNG dans « Récents », aucun dans Images, premier plan
-# inchangé. (3) WindowFromPoint : la vignette sur la carte, jamais à côté. (4) Délai de 3 s,
-# carte peinte (copie d'écran différente après son départ). (5) Pause au survol. (6) Copier.
-# (7) Enregistrer, puis « deja fait ». (8) Fermer. (9) Supprimer puis Annuler ; Supprimer
-# après Enregistrer : les deux fichiers effacés après 4 s, rien d'autre. (11) Aucune
-# fenêtre BreezyShot dans la photo suivante. (13) Seconde capture pendant le souffle
-# ignorée. (15) Fenêtres et fils stables après 10 vignettes, mémoire notée. (16) --quitter
-# avec une suppression en attente : fichier effacé, arret propre.
-# Cas B (sans la variable) : (12) exclusion réelle des captures.
+# souffle créées, cachées, styles outil sans APPWINDOW, pages prêtes. (10) Glisser d'abord,
+# chaque geste dans son propre try (début, dépôt sur la cible, Échap, dépôt sur soi) : un
+# échec est noté avec ce que le journal a vu, la carte est rendue au repos (ou l'app
+# relancée) et l'essai continue. Une fenêtre cible (cible-glisser.ps1) reçoit exactement un
+# fichier nommé au modèle, mêmes octets que « Récents » ; glisser tenu plus que la durée
+# puis Échap : annulé, la vignette reste ; lâché sur la carte : annulé. (2) Capture :
+# Decoupe -> Souffle, souffle vu visible puis caché, Souffle -> Vignette, carte au coin bas
+# gauche de la zone utile à 12 px, aucun bandeau, presse-papiers, un PNG dans « Récents »,
+# aucun dans Images, premier plan inchangé. (3) WindowFromPoint : la vignette sur la carte,
+# jamais à côté. (4) Délai de 3 s (± 0,5) mesuré au journal ; carte peinte par-dessus un
+# témoin à motif (temoin.ps1). (5) Pause au survol. (6) Copier. (7) Enregistrer, puis
+# « deja fait ». (8) Fermer. (9) Supprimer puis Annuler ; glisser sur soi, Enregistrer,
+# Supprimer : ce « Récents », ce fichier enregistré et ce fichier de glisser effacés après
+# 4 s, aucun autre. (11) Aucune fenêtre BreezyShot dans la photo suivante (zone de la
+# carte, photo entière, aucun bandeau). (13) Seconde capture pendant le souffle ignorée
+# (second appui dès que le souffle est visible). (15) Fenêtres et fils stables après 10
+# vignettes, mémoire notée. (16) --quitter avec une suppression en attente : fichier effacé,
+# arret propre.
+# Cas B (sans la variable) : (12) exclusion réelle des captures (vignette visible pendant
+# la copie d'écran de l'essai).
 # Cas C, D, E : (14) réglages : vignette coupée, coin haut droit, animations réduites.
 #
 # Ce que la machine GitHub ne peut pas vérifier : plusieurs écrans et échelles mêlées, le
@@ -103,12 +109,15 @@ function Ecrire-Reglages([string]$Dossier, [bool]$Afficher = $true, [string]$Coi
 
 function Demarrer-Cas([string]$Dossier, [string]$Quoi, [bool]$Capturable = $true) {
     if ($Capturable) { $env:BREEZYSHOT_ESSAI_CAPTURABLE = '1' }
+    # Comptes d'avant : une relance dans le même dossier attend les lignes de son démarrage.
+    $deja = @{}
+    foreach ($m in @('application +pret$', 'bandeau pret$', 'vignette prete$', 'souffle pret$')) { $deja[$m] = Compter-Motif -Motif $m -Dossier $Dossier }
     try { $proc = Demarrer-App -Dossier $Dossier }
     finally { Remove-Item Env:BREEZYSHOT_ESSAI_CAPTURABLE -ErrorAction SilentlyContinue }
-    $null = Attendre-Motif -Motif 'application +pret$' -Dossier $Dossier -DelaiS 30 -Quoi "$Quoi : démarrage"
-    $null = Attendre-Motif -Motif 'bandeau pret$' -Dossier $Dossier -DelaiS 20 -Quoi "$Quoi : page du bandeau"
-    $null = Attendre-Motif -Motif 'vignette prete$' -Dossier $Dossier -DelaiS 20 -Quoi "$Quoi : page de la vignette"
-    $null = Attendre-Motif -Motif 'souffle pret$' -Dossier $Dossier -DelaiS 20 -Quoi "$Quoi : page du souffle"
+    $null = Attendre-Motif -Motif 'application +pret$' -Dossier $Dossier -DelaiS 30 -Quoi "$Quoi : démarrage" -Fois ($deja['application +pret$'] + 1)
+    $null = Attendre-Motif -Motif 'bandeau pret$' -Dossier $Dossier -DelaiS 20 -Quoi "$Quoi : page du bandeau" -Fois ($deja['bandeau pret$'] + 1)
+    $null = Attendre-Motif -Motif 'vignette prete$' -Dossier $Dossier -DelaiS 20 -Quoi "$Quoi : page de la vignette" -Fois ($deja['vignette prete$'] + 1)
+    $null = Attendre-Motif -Motif 'souffle pret$' -Dossier $Dossier -DelaiS 20 -Quoi "$Quoi : page du souffle" -Fois ($deja['souffle pret$'] + 1)
     return $proc
 }
 
@@ -197,6 +206,17 @@ public static int AppuyerEnGuettant(byte[] mods, byte touche, IntPtr guettee, in
     guet.Join();
     return vues;
 }
+// Appuie, guette la fenêtre toutes les 2 ms (au plus attenteMs) et appuie une seconde fois
+// dès qu'elle est visible : ne dépend pas du temps de lecture du journal. Rend vrai si vue.
+public static bool AppuyerDeuxFoisQuandVisible(byte[] mods, byte touche, IntPtr guettee, int attenteMs) {
+    Appuyer(mods, touche);
+    var limite = DateTime.UtcNow.AddMilliseconds(attenteMs);
+    while (DateTime.UtcNow < limite) {
+        if (IsWindowVisible(guettee)) { Appuyer(mods, touche); return true; }
+        System.Threading.Thread.Sleep(2);
+    }
+    return false;
+}
 // Pose le curseur et envoie un vrai mouvement d'entrée à cet endroit.
 public static void Poser(int x, int y) {
     SetCursorPos(x, y);
@@ -252,8 +272,8 @@ public static IntPtr[] FenetresDe(int[] pids) {
         $REPOS_Y = [int]($utile.Y + $utile.Height / 2)
         $MODELE = '^BreezyShot \d{4}-\d\d-\d\d à \d\d\.\d\d\.\d\d( \(\d+\))?\.png$'
 
-        function Hwnd-Journal([string]$Motif, [string]$Dossier) {
-            $l = Attendre-Motif -Motif "$Motif (\d+)$" -Dossier $Dossier -DelaiS 5 -Quoi $Motif
+        function Hwnd-Journal([string]$Motif, [string]$Dossier, [int]$Fois = 1) {
+            $l = Attendre-Motif -Motif "$Motif (\d+)$" -Dossier $Dossier -DelaiS 5 -Quoi $Motif -Fois $Fois
             if ($l -notmatch "$Motif (\d+)$") { throw "ligne illisible : $l" }
             return [IntPtr][long]$Matches[1]
         }
@@ -275,11 +295,17 @@ public static IntPtr[] FenetresDe(int[] pids) {
             return $b
         }
 
-        # Part des pixels (pris sur une grille) qui diffèrent de plus de $Seuil par canal.
-        function Part-Differente($A, $B, [int]$Seuil = 6) {
+        # L'heure d'une ligne du journal (horodatage ISO en tête), $null si illisible.
+        function Heure-Ligne([string]$Ligne) {
+            if (-not $Ligne) { return $null }
+            try { return [DateTimeOffset]::Parse(($Ligne -split ' ')[0], [Globalization.CultureInfo]::InvariantCulture) } catch { return $null }
+        }
+
+        # Part des pixels (pris sur une grille de $Pas) qui diffèrent de plus de $Seuil par canal.
+        function Part-Differente($A, $B, [int]$Seuil = 6, [int]$Pas = 4) {
             $n = 0; $d = 0
-            for ($y = 2; $y -lt [math]::Min($A.Height, $B.Height) - 2; $y += 4) {
-                for ($x = 2; $x -lt [math]::Min($A.Width, $B.Width) - 2; $x += 4) {
+            for ($y = 2; $y -lt [math]::Min($A.Height, $B.Height) - 2; $y += $Pas) {
+                for ($x = 2; $x -lt [math]::Min($A.Width, $B.Width) - 2; $x += $Pas) {
                     $p = $A.GetPixel($x, $y); $q = $B.GetPixel($x, $y); $n++
                     if ([math]::Abs($p.R - $q.R) -gt $Seuil -or [math]::Abs($p.G - $q.G) -gt $Seuil -or [math]::Abs($p.B - $q.B) -gt $Seuil) { $d++ }
                 }
@@ -360,9 +386,12 @@ public static IntPtr[] FenetresDe(int[] pids) {
             return Attendre-Motif -Motif "vignette fermee $($C.Id) $Raison$" -Dossier $Dossier -DelaiS $DelaiS -Quoi "fermée ($Raison)"
         }
 
+        # Les aides cachent leur console elles-mêmes une fois leur fenêtre montrée (pas de
+        # -WindowStyle Hidden : Windows l'appliquerait au premier ShowWindow, leur fenêtre).
         function Lancer-Aide([string]$Script, [string[]]$Arguments, [string]$Fichier) {
             $aide = Start-Process -FilePath $script:Pwsh -PassThru -ArgumentList (@('-NoProfile', '-File', (Join-Path $PSScriptRoot $Script)) + $Arguments)
             $script:Auxiliaires.Add($aide)
+            $script:DerniereAide = $aide
             $limite = [DateTime]::UtcNow.AddSeconds(30)
             while (-not (Test-Path -LiteralPath $Fichier)) {
                 if ([DateTime]::UtcNow -ge $limite) { throw "$Script : aucun HWND en 30 s" }
@@ -370,6 +399,36 @@ public static IntPtr[] FenetresDe(int[] pids) {
             }
             Start-Sleep -Milliseconds 400
             return [IntPtr][long](Get-Content -LiteralPath $Fichier -Raw).Trim()
+        }
+
+        # Après un point qui a échoué : bouton relâché, Échap, souris au repos, carte partie
+        # (10 s au plus) ; sinon l'app est relancée dans le même dossier et les HWND relus.
+        function Assurer-Repos([string]$Quoi) {
+            try { $V::BoutonHaut(); $V::Touche($ECHAP) } catch { }
+            $V::Poser($REPOS_X, $REPOS_Y)
+            $limite = [DateTime]::UtcNow.AddSeconds(10)
+            while (-not $script:proc.HasExited -and $V::IsWindowVisible($script:hv) -and [DateTime]::UtcNow -lt $limite) { Start-Sleep -Milliseconds 100 }
+            if (-not $script:proc.HasExited -and -not $V::IsWindowVisible($script:hv)) { Start-Sleep -Milliseconds 500; return }
+            Write-Host "$Quoi : carte toujours là ou app arrêtée, relance"
+            if (-not $script:proc.HasExited) { try { Fermer-Cas $script:proc $script:da $Quoi } catch { Write-Host "$Quoi : arrêt forcé ($_)"; Arreter-Tout } }
+            $n = @{}
+            foreach ($f in @('vignette', 'souffle', 'bandeau')) { $n[$f] = Compter-Motif -Motif "$f fenetre \d+$" -Dossier $script:da }
+            $script:proc = Demarrer-Cas -Dossier $script:da -Quoi "$Quoi (relance)"
+            $script:hv = Hwnd-Journal 'vignette fenetre' $script:da ($n['vignette'] + 1)
+            $script:hs = Hwnd-Journal 'souffle fenetre' $script:da ($n['souffle'] + 1)
+            $script:hb = Hwnd-Journal 'bandeau fenetre' $script:da ($n['bandeau'] + 1)
+        }
+
+        # Un geste du glisser (10) : son propre diagnostic ; un échec est noté avec ce qui a
+        # été vu, puis la carte est rendue au repos et l'essai continue.
+        function Geste-Glisser([string]$Nom, [scriptblock]$Geste) {
+            $avant = @(Lignes-Journal $script:da).Count
+            try { & $Geste }
+            catch {
+                $vu = @(Lignes-Depuis $script:da $avant | Where-Object { $_ -match 'vignette (glisser|minuterie|fermee|action)|etat ' } | ForEach-Object { $_ -replace '^\S+\s+\S+\s+\S+\s+', '' }) -join ' | '
+                Verifier "(10) $Nom" $false "$_ ; vu : $vu" | Out-Null
+                Assurer-Repos "(10) $Nom"
+            }
         }
 
         try {
@@ -400,60 +459,91 @@ public static IntPtr[] FenetresDe(int[] pids) {
             $ciX = $cx0 + [int]($COTE_CIBLE / 2); $ciY = $cy0 + [int]($COTE_CIBLE / 2)
             Write-Host "cible $hc à $cx0,$cy0"
 
-            $g = Capturer $da '(10) glisser' $hs
-            $V::Poser($g.Carte.CX, $g.Carte.CY)
-            Start-Sleep -Milliseconds 450
-            $V::BoutonBas()
-            $V::Deplacer($g.Carte.CX, $g.Carte.CY, $g.Carte.CX + 12, $g.Carte.CY - 4, 6, 15)
-            $debutGlisser = Attendre-Motif -Motif "vignette glisser $($g.Id) debut$" -Dossier $da -DelaiS 3 -Quoi '(10) début du glisser'
-            $V::Deplacer($g.Carte.CX + 12, $g.Carte.CY - 4, $ciX, $ciY, 25, 20)
-            Start-Sleep -Milliseconds 300
-            $V::BoutonHaut()
-            $null = Attendre-Motif -Motif "vignette glisser $($g.Id) (depose|annule|refuse.*)$" -Dossier $da -DelaiS 5 -Quoi '(10) fin du glisser'
-            $limite = [DateTime]::UtcNow.AddSeconds(5)
-            while (-not (Test-Path -LiteralPath $depots) -and [DateTime]::UtcNow -lt $limite) { Start-Sleep -Milliseconds 100 }
-            $recus = @()
-            if (Test-Path -LiteralPath $depots) { $recus = @(Get-Content -LiteralPath $depots | Where-Object { $_ -ne '' }) }
-            $dernierRecent = @(Fichiers-Png $recents)[-1]
-            Verifier '(10) la cible a reçu exactement un fichier' ($recus.Count -eq 1) "$($recus.Count) chemin(s)" | Out-Null
-            if ($recus.Count -ge 1) {
-                $nom = [System.IO.Path]::GetFileName($recus[0])
-                Verifier '(10) nommé au modèle' ($nom -match $MODELE) $nom | Out-Null
-                $memes = [System.Linq.Enumerable]::SequenceEqual([System.IO.File]::ReadAllBytes($recus[0]), [System.IO.File]::ReadAllBytes($dernierRecent.FullName))
-                Verifier '(10) mêmes octets que « Récents »' $memes | Out-Null
+            # Chaque geste a son diagnostic ; un échec n'arrête pas l'essai (Geste-Glisser).
+            $script:debutOk = $false
+            $script:depotsAvant = 0
+            Geste-Glisser 'début du glisser' {
+                $script:g = Capturer $script:da '(10) glisser' $script:hs
+                $V::Poser($script:g.Carte.CX, $script:g.Carte.CY)
+                Start-Sleep -Milliseconds 450
+                $V::BoutonBas()
+                $V::Deplacer($script:g.Carte.CX, $script:g.Carte.CY, $script:g.Carte.CX + 12, $script:g.Carte.CY - 4, 6, 15)
+                $null = Attendre-Motif -Motif "vignette glisser $($script:g.Id) (debut|indisponible|refuse.*|annule.*)$" -Dossier $script:da -DelaiS 3 -Quoi 'début du glisser'
+                $fin = Derniere-Ligne -Motif "vignette glisser $($script:g.Id) " -Dossier $script:da
+                if ($fin -notmatch 'debut$') { throw "pas de début : $fin" }
+                $script:debutOk = Verifier '(10) début du glisser' $true
             }
-            Verifier '(10) vignette glisser depose, GlisserReussi' (((Compter-Motif -Motif "vignette glisser $($g.Id) depose$" -Dossier $da) -eq 1) -and ((Compter-Motif -Motif 'etat Vignette -> Repos \(GlisserReussi\)' -Dossier $da) -eq 1)) | Out-Null
-            $null = Attendre-Motif -Motif "vignette terminee $($g.Id)$" -Dossier $da -DelaiS 3 -Quoi '(10) départ'
+            Geste-Glisser 'dépôt sur la cible' {
+                if (-not $script:debutOk) { throw 'non joué : pas de début' }
+                $g = $script:g
+                $V::Deplacer($g.Carte.CX + 12, $g.Carte.CY - 4, $ciX, $ciY, 25, 20)
+                Start-Sleep -Milliseconds 300
+                $V::BoutonHaut()
+                $null = Attendre-Motif -Motif "vignette glisser $($g.Id) (depose|annule|refuse.*)$" -Dossier $script:da -DelaiS 5 -Quoi 'fin du glisser'
+                $limite = [DateTime]::UtcNow.AddSeconds(5)
+                while (-not (Test-Path -LiteralPath $depots) -and [DateTime]::UtcNow -lt $limite) { Start-Sleep -Milliseconds 100 }
+                $recus = @()
+                if (Test-Path -LiteralPath $depots) { $recus = @(Get-Content -LiteralPath $depots | Where-Object { $_ -ne '' }) }
+                $script:depotsAvant = $recus.Count
+                $dernierRecent = @(Fichiers-Png $recents)[-1]
+                $fin = Derniere-Ligne -Motif "vignette glisser $($g.Id) " -Dossier $script:da
+                Verifier '(10) la cible a reçu exactement un fichier' ($recus.Count -eq 1) "$($recus.Count) chemin(s) ; journal : $fin" | Out-Null
+                if ($recus.Count -ge 1) {
+                    $nom = [System.IO.Path]::GetFileName($recus[0])
+                    Verifier '(10) nommé au modèle' ($nom -match $MODELE) $nom | Out-Null
+                    $memes = [System.Linq.Enumerable]::SequenceEqual([System.IO.File]::ReadAllBytes($recus[0]), [System.IO.File]::ReadAllBytes($dernierRecent.FullName))
+                    Verifier '(10) mêmes octets que « Récents »' $memes | Out-Null
+                }
+                Verifier '(10) vignette glisser depose, GlisserReussi' (((Compter-Motif -Motif "vignette glisser $($g.Id) depose$" -Dossier $script:da) -eq 1) -and ((Compter-Motif -Motif 'etat Vignette -> Repos \(GlisserReussi\)' -Dossier $script:da) -eq 1)) "$fin" | Out-Null
+                $null = Attendre-Motif -Motif "vignette terminee $($g.Id)$" -Dossier $script:da -DelaiS 3 -Quoi 'départ après le dépôt'
+            }
+            Assurer-Repos '(10) après le dépôt'
 
             # Glisser tenu plus que la durée (3 s), puis Échap : annulé, la vignette reste.
-            $g = Capturer $da '(10) Échap' $hs
-            $V::Poser($g.Carte.CX, $g.Carte.CY)
-            Start-Sleep -Milliseconds 450
-            $V::BoutonBas()
-            $V::Deplacer($g.Carte.CX, $g.Carte.CY, $g.Carte.CX + 12, $g.Carte.CY, 6, 15)
-            $null = Attendre-Motif -Motif "vignette glisser $($g.Id) debut$" -Dossier $da -DelaiS 3 -Quoi '(10) début (Échap)'
-            $V::Deplacer($g.Carte.CX + 12, $g.Carte.CY, $REPOS_X, $REPOS_Y, 15, 20)
-            Start-Sleep -Milliseconds 4000
-            $V::Touche($ECHAP)
-            Start-Sleep -Milliseconds 200
-            $V::BoutonHaut()
-            $null = Attendre-Motif -Motif "vignette glisser $($g.Id) (depose|annule|refuse.*)$" -Dossier $da -DelaiS 5 -Quoi '(10) fin (Échap)'
-            Verifier '(10) Échap : annulé, pause pendant le glisser' (((Compter-Motif -Motif "vignette glisser $($g.Id) annule$" -Dossier $da) -eq 1) -and ((Compter-Motif -Motif "vignette minuterie $($g.Id) pause glisser$" -Dossier $da) -eq 1)) | Out-Null
-            Start-Sleep -Milliseconds 500
-            Verifier '(10) Échap : la vignette reste après plus que sa durée' ((Compter-Motif -Motif "vignette fermee $($g.Id) " -Dossier $da) -eq 0) | Out-Null
-            # Lâché sur la carte elle-même : annulé.
-            $V::Poser($g.Carte.CX, $g.Carte.CY)
-            Start-Sleep -Milliseconds 450
-            $V::BoutonBas()
-            $V::Deplacer($g.Carte.CX, $g.Carte.CY, $g.Carte.CX + 30, $g.Carte.CY, 10, 20)
-            $null = Attendre-Motif -Motif "vignette glisser $($g.Id) debut$" -Dossier $da -DelaiS 3 -Quoi '(10) début (sur soi)' -Fois 2
-            $V::Deplacer($g.Carte.CX + 30, $g.Carte.CY, $g.Carte.CX - 10, $g.Carte.CY, 10, 20)
-            Start-Sleep -Milliseconds 300
-            $V::BoutonHaut()
-            $null = Attendre-Motif -Motif "vignette glisser $($g.Id) annule$" -Dossier $da -DelaiS 5 -Quoi '(10) lâché sur la carte : annulé' -Fois 2
-            Verifier '(10) lâché sur la carte : annulé, un seul dépôt reçu en tout' (@(Get-Content -LiteralPath $depots | Where-Object { $_ -ne '' }).Count -eq 1) | Out-Null
-            $V::Poser($REPOS_X, $REPOS_Y)
-            $null = Attendre-Fermee $da $g 'delai'
+            Geste-Glisser 'Échap' {
+                $script:g = Capturer $script:da '(10) Échap' $script:hs
+                $g = $script:g
+                $V::Poser($g.Carte.CX, $g.Carte.CY)
+                Start-Sleep -Milliseconds 450
+                $V::BoutonBas()
+                $V::Deplacer($g.Carte.CX, $g.Carte.CY, $g.Carte.CX + 12, $g.Carte.CY, 6, 15)
+                $null = Attendre-Motif -Motif "vignette glisser $($g.Id) debut$" -Dossier $script:da -DelaiS 3 -Quoi 'début (Échap)'
+                $V::Deplacer($g.Carte.CX + 12, $g.Carte.CY, $REPOS_X, $REPOS_Y, 15, 20)
+                Start-Sleep -Milliseconds 4000
+                $V::Touche($ECHAP)
+                Start-Sleep -Milliseconds 200
+                $V::BoutonHaut()
+                $null = Attendre-Motif -Motif "vignette glisser $($g.Id) (depose|annule|refuse.*)$" -Dossier $script:da -DelaiS 5 -Quoi 'fin (Échap)'
+                $fin = Derniere-Ligne -Motif "vignette glisser $($g.Id) " -Dossier $script:da
+                Verifier '(10) Échap : annulé, pause pendant le glisser' (((Compter-Motif -Motif "vignette glisser $($g.Id) annule$" -Dossier $script:da) -eq 1) -and ((Compter-Motif -Motif "vignette minuterie $($g.Id) pause glisser$" -Dossier $script:da) -eq 1)) "$fin" | Out-Null
+                Start-Sleep -Milliseconds 500
+                Verifier '(10) Échap : la vignette reste après plus que sa durée' ((Compter-Motif -Motif "vignette fermee $($g.Id) " -Dossier $script:da) -eq 0) | Out-Null
+            }
+            # Lâché sur la carte elle-même : annulé (carte de l'Échap, ou une nouvelle).
+            Geste-Glisser 'dépôt sur soi' {
+                if (-not $V::IsWindowVisible($script:hv)) { $script:g = Capturer $script:da '(10) sur soi' $script:hs }
+                $g = $script:g
+                $debuts = Compter-Motif -Motif "vignette glisser $($g.Id) debut$" -Dossier $script:da
+                $annules = Compter-Motif -Motif "vignette glisser $($g.Id) annule$" -Dossier $script:da
+                $recusAvant = 0
+                if (Test-Path -LiteralPath $depots) { $recusAvant = @(Get-Content -LiteralPath $depots | Where-Object { $_ -ne '' }).Count }
+                $V::Poser($g.Carte.CX, $g.Carte.CY)
+                Start-Sleep -Milliseconds 450
+                $V::BoutonBas()
+                $V::Deplacer($g.Carte.CX, $g.Carte.CY, $g.Carte.CX + 30, $g.Carte.CY, 10, 20)
+                $null = Attendre-Motif -Motif "vignette glisser $($g.Id) debut$" -Dossier $script:da -DelaiS 3 -Quoi 'début (sur soi)' -Fois ($debuts + 1)
+                $V::Deplacer($g.Carte.CX + 30, $g.Carte.CY, $g.Carte.CX - 10, $g.Carte.CY, 10, 20)
+                Start-Sleep -Milliseconds 300
+                $V::BoutonHaut()
+                $null = Attendre-Motif -Motif "vignette glisser $($g.Id) (depose|annule|refuse.*)$" -Dossier $script:da -DelaiS 5 -Quoi 'fin (sur soi)' -Fois ($debuts + 1)
+                $fin = Derniere-Ligne -Motif "vignette glisser $($g.Id) " -Dossier $script:da
+                $recus = 0
+                if (Test-Path -LiteralPath $depots) { $recus = @(Get-Content -LiteralPath $depots | Where-Object { $_ -ne '' }).Count }
+                Verifier '(10) lâché sur la carte : annulé, aucun dépôt reçu' (((Compter-Motif -Motif "vignette glisser $($g.Id) annule$" -Dossier $script:da) -eq $annules + 1) -and ($recus -eq $recusAvant)) "$fin ; dépôts $recusAvant → $recus" | Out-Null
+                $V::Poser($REPOS_X, $REPOS_Y)
+                $null = Attendre-Fermee $script:da $g 'delai'
+            }
+            Assurer-Repos '(10) fin'
 
             # (2) Une capture ordinaire.
             $pngImagesAvant = @(Fichiers-Png $images).Count
@@ -487,17 +577,45 @@ public static IntPtr[] FenetresDe(int[] pids) {
             $acote = $V::RacineSous($aCoteX, $aCoteY)
             Verifier '(3) souris sur la carte : la vignette ; à côté, dans sa fenêtre : jamais elle' (($sur -eq $hv) -and ($acote -ne $hv)) "sur $sur, à côté $acote, vignette $hv" | Out-Null
 
-            # (4) Délai de 3 s (souris ailleurs) ; la carte était peinte.
+            # (4) Délai de 3 s mesuré au journal, sur une carte jamais survolée (celle de (2) l'a
+            # été en (3)) ; carte peinte : un témoin à motif connu derrière elle.
             $V::Poser($REPOS_X, $REPOS_Y)
-            $peinte = Copie-Ecran $c.Carte
-            $t0 = [DateTime]::UtcNow
             $null = Attendre-Fermee $da $c 'delai'
-            $null = Attendre-Motif -Motif "vignette terminee $($c.Id)$" -Dossier $da -DelaiS 2 -Quoi '(4) terminée'
-            Start-Sleep -Milliseconds 200
-            $vide = Copie-Ecran $c.Carte
-            $part = Part-Differente $peinte $vide
-            Verifier '(4) la carte était peinte (copie d''écran différente après son départ)' ($part -gt 0.5) ("{0:P0} des points" -f $part) | Out-Null
-            Verifier '(4) Vignette -> Repos (DelaiEcoule), fenêtre cachée' (((Compter-Motif -Motif 'etat Vignette -> Repos \(DelaiEcoule\)' -Dossier $da) -ge 1) -and -not $V::IsWindowVisible($hv)) | Out-Null
+            $null = Attendre-Motif -Motif "vignette terminee $($c.Id)$" -Dossier $da -DelaiS 2 -Quoi '(4) carte de (2) partie'
+            $cote4 = [math]::Max(8, [int]$c.Carte.H)
+            $zone4 = [pscustomobject]@{ X = $c.Carte.X; Y = $c.Carte.Y; L = $cote4; H = $cote4 }
+            $couleurs4 = @(@(220, 40, 40), @(40, 170, 60), @(40, 80, 220), @(240, 200, 30))
+            $fichierTemoin = Join-Path $script:Essai.Dossier 'temoin-4.txt'
+            $null = Lancer-Aide 'temoin.ps1' @('-X', $zone4.X, '-Y', $zone4.Y, '-Cote', $cote4, '-Couleurs', (($couleurs4 | ForEach-Object { $_ -join ',' }) -join ';'), '-Fichier', $fichierTemoin, '-CacherConsole') $fichierTemoin
+            $temoin4 = $script:DerniereAide
+            try {
+                $c = Capturer $da '(4)' $hs
+                $V::Poser($REPOS_X, $REPOS_Y)
+                $peinte = Copie-Ecran $zone4
+                $null = Attendre-Fermee $da $c 'delai'
+                $null = Attendre-Motif -Motif "vignette terminee $($c.Id)$" -Dossier $da -DelaiS 2 -Quoi '(4) terminée'
+                Start-Sleep -Milliseconds 200
+                $vide = Copie-Ecran $zone4
+                $entree = Heure-Ligne (Derniere-Ligne -Motif "vignette entree $($c.Id)$" -Dossier $da)
+                $fermee = Heure-Ligne (Derniere-Ligne -Motif "vignette fermee $($c.Id) delai$" -Dossier $da)
+                $delai = if ($entree -and $fermee) { ($fermee - $entree).TotalSeconds } else { -1 }
+                Noter-Mesure -Nom 'délai vignette entree → fermee delai' -Valeur ([math]::Round($delai, 3)) -Unite 's'
+                Verifier '(4) délai de 3 s (± 0,5) entre l''entrée et le départ' ([math]::Abs($delai - 3) -le 0.5) ("{0:N3} s" -f $delai) | Out-Null
+                # Après le départ : le motif du témoin, quart par quart (± 12).
+                $m = [int]($cote4 / 4)
+                $points = @(@($m, $m), @(3 * $m, $m), @($m, 3 * $m), @(3 * $m, 3 * $m))
+                $temoinVu = $true; $vus = @()
+                for ($k = 0; $k -lt 4; $k++) {
+                    $px = $vide.GetPixel($points[$k][0], $points[$k][1]); $attendu = $couleurs4[$k]
+                    $vus += "$($px.R),$($px.G),$($px.B)"
+                    if ([math]::Abs($px.R - $attendu[0]) -gt 12 -or [math]::Abs($px.G - $attendu[1]) -gt 12 -or [math]::Abs($px.B - $attendu[2]) -gt 12) { $temoinVu = $false }
+                }
+                Verifier '(4) après le départ : le motif du témoin' $temoinVu ($vus -join ' ; ') | Out-Null
+                $part = Part-Differente $peinte $vide
+                Verifier '(4) la carte était peinte par-dessus le témoin (> 50 % des points différents)' ($part -gt 0.5) ("{0:P0} des points" -f $part) | Out-Null
+                Verifier '(4) Vignette -> Repos (DelaiEcoule), fenêtre cachée' (((Compter-Motif -Motif 'etat Vignette -> Repos \(DelaiEcoule\)' -Dossier $da) -ge 1) -and -not $V::IsWindowVisible($hv)) | Out-Null
+            }
+            finally { try { $temoin4.Kill() } catch { } }
 
             # (5) Pause au survol : 5 s sur la carte, toujours là ; dehors, fermée ensuite.
             $c = Capturer $da '(5)' $hs
@@ -536,24 +654,49 @@ public static IntPtr[] FenetresDe(int[] pids) {
             $V::Poser($REPOS_X, $REPOS_Y)
             Start-Sleep -Milliseconds 500
 
-            # (9) Supprimer puis Annuler ; puis Enregistrer, Supprimer, 4 s : effacés.
+            # (9) Supprimer puis Annuler ; puis un glisser lâché sur soi (fichier de glisser posé),
+            # Enregistrer, Supprimer, 4 s : ces trois fichiers précis effacés, rien d'autre.
+            $glisserDossier = Join-Path $da 'local/Glisser'
             $c = Capturer $da '(9)' $hs
-            $nRecents = @(Fichiers-Png $recents).Count
+            $recent9 = @(Fichiers-Png $recents)[-1].FullName
             Cliquer-Bouton $da $c 'supprimer'
             $null = Attendre-Motif -Motif "vignette suppression $($c.Id) en attente$" -Dossier $da -DelaiS 3 -Quoi '(9) en attente'
             Start-Sleep -Milliseconds 400
             $V::Cliquer($c.Carte.CX, $c.Carte.CY)   # « Annuler » est au centre de la carte
             $null = Attendre-Motif -Motif "vignette suppression $($c.Id) annulee$" -Dossier $da -DelaiS 3 -Quoi '(9) annulée'
-            Verifier '(9) annulée : fichier toujours là' (@(Fichiers-Png $recents).Count -eq $nRecents) | Out-Null
-            $nImages = @(Fichiers-Png $images).Count
+            Verifier '(9) annulée : le fichier de « Récents » toujours là' (Test-Path -LiteralPath $recent9) | Out-Null
+            $avantGlisser = @(Fichiers-Png $glisserDossier | ForEach-Object FullName)
+            $V::Poser($c.Carte.CX, $c.Carte.CY)
+            Start-Sleep -Milliseconds 450
+            $V::BoutonBas()
+            $V::Deplacer($c.Carte.CX, $c.Carte.CY, $c.Carte.CX + 30, $c.Carte.CY, 10, 20)
+            Start-Sleep -Milliseconds 300
+            $V::Deplacer($c.Carte.CX + 30, $c.Carte.CY, $c.Carte.CX, $c.Carte.CY, 10, 20)
+            Start-Sleep -Milliseconds 300
+            $V::BoutonHaut()
+            $lien9 = $null
+            try {
+                $null = Attendre-Motif -Motif "vignette glisser $($c.Id) (depose|annule|refuse.*)$" -Dossier $da -DelaiS 5 -Quoi '(9) glisser sur soi'
+                $lien9 = @(Fichiers-Png $glisserDossier | Where-Object { $avantGlisser -notcontains $_.FullName })[-1].FullName
+            }
+            catch { Write-Host "(9) glisser : $_" }
+            Verifier '(9) un fichier de glisser posé pour cette capture' (($null -ne $lien9) -and (Test-Path -LiteralPath $lien9)) "$(Derniere-Ligne -Motif "vignette glisser $($c.Id) " -Dossier $da)" | Out-Null
+            $autresRecents = @(Fichiers-Png $recents | ForEach-Object FullName | Where-Object { $_ -ne $recent9 })
+            $autresImages = @(Fichiers-Png $images | ForEach-Object FullName)
+            $autresGlisser = @(Fichiers-Png $glisserDossier | ForEach-Object FullName | Where-Object { $_ -ne $lien9 })
             Cliquer-Bouton $da $c 'enregistrer'
             $null = Attendre-Motif -Motif "vignette enregistrement $($c.Id) fait$" -Dossier $da -DelaiS 5 -Quoi '(9) enregistrée'
+            $image9 = @(Fichiers-Png $images | Where-Object { $autresImages -notcontains $_.FullName })[-1].FullName
             Cliquer-Bouton $da $c 'supprimer'
             $null = Attendre-Motif -Motif "vignette suppression $($c.Id) en attente$" -Dossier $da -DelaiS 3 -Quoi '(9) en attente (2)' -Fois 2
             $V::Poser($REPOS_X, $REPOS_Y)
+            Start-Sleep -Milliseconds 3000
+            Verifier '(9) rien d''effacé avant la fin des 4 s' ((Test-Path -LiteralPath $recent9) -and $image9 -and (Test-Path -LiteralPath $image9)) | Out-Null
             $null = Attendre-Motif -Motif "vignette suppression $($c.Id) faite " -Dossier $da -DelaiS 7 -Quoi '(9) suppression faite'
-            Verifier '(9) CaptureSupprimee, « Récents » et fichier enregistré effacés' (((Compter-Motif -Motif 'etat Vignette -> Repos \(CaptureSupprimee\)' -Dossier $da) -eq 1) -and ((Compter-Motif -Motif "vignette suppression $($c.Id) faite recent ok fichier ok$" -Dossier $da) -eq 1)) | Out-Null
-            Verifier '(9) aucun autre fichier touché' ((@(Fichiers-Png $recents).Count -eq $nRecents - 1) -and (@(Fichiers-Png $images).Count -eq $nImages)) "Récents $(@(Fichiers-Png $recents).Count) (avant $nRecents), Images $(@(Fichiers-Png $images).Count) (avant $nImages)" | Out-Null
+            Verifier '(9) CaptureSupprimee, bilan recent ok fichier ok' (((Compter-Motif -Motif 'etat Vignette -> Repos \(CaptureSupprimee\)' -Dossier $da) -eq 1) -and ((Compter-Motif -Motif "vignette suppression $($c.Id) faite recent ok fichier ok$" -Dossier $da) -eq 1)) | Out-Null
+            Verifier '(9) effacés : ce « Récents », ce fichier enregistré, ce fichier de glisser' ((-not (Test-Path -LiteralPath $recent9)) -and $image9 -and (-not (Test-Path -LiteralPath $image9)) -and ($null -eq $lien9 -or -not (Test-Path -LiteralPath $lien9))) "récent $(Test-Path -LiteralPath $recent9), image $image9, lien $lien9" | Out-Null
+            $restent = @($autresRecents + $autresImages + $autresGlisser | Where-Object { -not (Test-Path -LiteralPath $_) })
+            Verifier '(9) aucun autre fichier touché' ($restent.Count -eq 0) "disparus : $($restent -join ', ')" | Out-Null
 
             # (11) Aucune fenêtre BreezyShot dans la photo suivante.
             $null = Attendre-Motif -Motif "vignette terminee $($c.Id)$" -Dossier $da -DelaiS 3 -Quoi '(11) repos'
@@ -574,19 +717,29 @@ public static IntPtr[] FenetresDe(int[] pids) {
             $crop = { param($i, $z) $i.Clone([System.Drawing.Rectangle]::new($z.X, $z.Y, $z.L, $z.H), $i.PixelFormat) }
             $partPhoto = Part-Differente (& $crop $imgRef $zoneImage) (& $crop $imgNouv $zoneImage)
             Verifier '(11) zone de la carte : les pixels de la référence (± 6)' ($partPhoto -eq 0) ("{0:P1} des points différents" -f $partPhoto) | Out-Null
+            # Le souffle part de l'écran entier en plein écran : toute la photo est comparée
+            # (grille de 16 px ; l'horloge de la barre des tâches peut changer quelques points).
+            $partEntiere = Part-Differente $imgRef $imgNouv 6 16
+            Verifier '(11) photo entière (zone du souffle, du bandeau) : celle de la référence (< 0,5 %)' ($partEntiere -lt 0.005) ("{0:P2} des points différents" -f $partEntiere) | Out-Null
+            Verifier '(11) aucun bandeau montré pendant ces deux captures' (@(Lignes-Depuis $da $c.Debut | Where-Object { $_ -match 'bandeau affiche ' }).Count -eq 0) | Out-Null
             $V::Poser($REPOS_X, $REPOS_Y)
             $dernier = [int]((Derniere-Ligne -Motif 'vignette entree \d+$' -Dossier $da) -replace '^.*vignette entree ', '')
             $null = Attendre-Motif -Motif "vignette fermee $dernier delai$" -Dossier $da -DelaiS 6 -Quoi '(11) fin'
 
-            # (13) Seconde capture pendant le souffle : ignorée.
+            # (13) Seconde capture pendant le souffle : ignorée. Le second appui part dès que la
+            # fenêtre du souffle est visible (guettée toutes les 2 ms), pas au rythme du journal.
             $ignores = Compter-Motif -Motif 'capture deja en cours: appui ignore' -Dossier $da
-            $souffles = Compter-Motif -Motif 'etat Decoupe -> Souffle' -Dossier $da
-            $V::Appuyer($MODS, $TOUCHE_2)
-            $null = Attendre-Motif -Motif 'etat Decoupe -> Souffle' -Dossier $da -DelaiS 5 -Quoi '(13) souffle' -Fois ($souffles + 1)
-            $V::Appuyer($MODS, $TOUCHE_2)
-            Start-Sleep -Milliseconds 800
-            $etat = Derniere-Ligne -Motif 'etat Souffle -> Vignette' -Dossier $da
-            Verifier '(13) appui pendant le souffle : ignoré' ((Compter-Motif -Motif 'capture deja en cours: appui ignore' -Dossier $da) -eq $ignores + 1) | Out-Null
+            $debut13 = @(Lignes-Journal $da).Count
+            $vignettes13 = Compter-Motif -Motif 'etat Souffle -> Vignette' -Dossier $da
+            $vu13 = $V::AppuyerDeuxFoisQuandVisible($MODS, $TOUCHE_2, $hs, 5000)
+            $null = Attendre-Motif -Motif 'etat Souffle -> Vignette' -Dossier $da -DelaiS 5 -Quoi '(13) vignette' -Fois ($vignettes13 + 1)
+            Start-Sleep -Milliseconds 300
+            $l13 = @(Lignes-Depuis $da $debut13)
+            $iSouffle = [array]::FindIndex([string[]]$l13, [Predicate[string]] { param($x) $x -match 'etat Decoupe -> Souffle' })
+            $iIgnore = [array]::FindIndex([string[]]$l13, [Predicate[string]] { param($x) $x -match 'capture deja en cours: appui ignore' })
+            $iVignette = [array]::FindIndex([string[]]$l13, [Predicate[string]] { param($x) $x -match 'etat Souffle -> Vignette' })
+            Verifier '(13) souffle vu visible au second appui' $vu13 | Out-Null
+            Verifier '(13) appui pendant le souffle : ignoré, une seule capture' (((Compter-Motif -Motif 'capture deja en cours: appui ignore' -Dossier $da) -eq $ignores + 1) -and ($iSouffle -ge 0) -and ($iIgnore -gt $iSouffle) -and ($iIgnore -lt $iVignette) -and (@($l13 | Where-Object { $_ -match 'etat Decoupe -> Souffle' }).Count -eq 1)) "souffle $iSouffle, ignoré $iIgnore, vignette $iVignette" | Out-Null
             $dernier = [int]((Derniere-Ligne -Motif 'vignette entree \d+$' -Dossier $da) -replace '^.*vignette entree ', '')
             $null = Attendre-Motif -Motif "vignette fermee $dernier delai$" -Dossier $da -DelaiS 6 -Quoi '(13) fin'
             Start-Sleep -Milliseconds 500
@@ -631,7 +784,10 @@ public static IntPtr[] FenetresDe(int[] pids) {
             $hsB = Hwnd-Journal 'souffle fenetre' $db
             $hvB = Hwnd-Journal 'vignette fenetre' $db
             $c = Capturer $db '(12)' $hsB
+            $visibleAvant = $V::IsWindowVisible($hvB)
             $avecVignette = Copie-Ecran $c.Carte
+            $visibleApres = $V::IsWindowVisible($hvB)
+            Verifier '(12) vignette visible pendant la copie d''écran' ($visibleAvant -and $visibleApres) "avant $visibleAvant, après $visibleApres" | Out-Null
             $null = Attendre-Fermee $db $c 'delai'
             Start-Sleep -Milliseconds 300
             $sansVignette = Copie-Ecran $c.Carte
