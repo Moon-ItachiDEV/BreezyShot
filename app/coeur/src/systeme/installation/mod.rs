@@ -23,6 +23,15 @@ mod plateforme;
 pub const VARIABLE_LIBRE: &str = "BREEZYSHOT_ESSAI_LIBRE_OCTETS";
 /// Variable d'essai : faire comme si WebView2 manquait (essais seulement).
 pub const VARIABLE_SANS_WEBVIEW2: &str = "BREEZYSHOT_ESSAI_SANS_WEBVIEW2";
+/// Variable d'essai : jouer l'envol même si Windows coupe les animations (essais seulement).
+pub const VARIABLE_ANIMATIONS: &str = "BREEZYSHOT_ESSAI_ANIMATIONS";
+
+/// Vrai si `BREEZYSHOT_ESSAI_ANIMATIONS=1` **et** un dossier d'essai est donné : sans effet
+/// hors essai.
+pub fn essai_animations_forcees() -> bool {
+    let essai = std::env::var_os(crate::systeme::VARIABLE_ESSAI).is_some_and(|v| !v.is_empty());
+    essai && std::env::var_os(VARIABLE_ANIMATIONS).is_some_and(|v| v == "1")
+}
 
 /// Taille des blocs de la copie.
 pub const BLOC: usize = 1 << 20;

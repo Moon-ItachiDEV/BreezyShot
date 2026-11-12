@@ -15,6 +15,12 @@ pub const PAS_ENVOL: Duration = Duration::from_millis(16);
 /// Hauteur de l'arc au-dessus du départ, en pixels logiques (le design : 140).
 pub const ARC: f64 = 140.0;
 
+/// Fondu sans déplacement plutôt qu'envol : animations coupées par le système, sauf si un
+/// essai force l'envol (`BREEZYSHOT_ESSAI_ANIMATIONS`).
+pub fn envol_en_fondu(animations_reduites: bool, forcees_par_essai: bool) -> bool {
+    animations_reduites && !forcees_par_essai
+}
+
 /// Rectangle de la fenêtre : carte et marge à l'échelle, bornées à la zone utile, centrées.
 pub fn place_fenetre(zone_utile: Rect, echelle: f64) -> Rect {
     let e = if echelle.is_finite() && echelle > 0.0 {
@@ -133,6 +139,14 @@ mod tests {
             ),
             (784, 680)
         );
+    }
+
+    #[test]
+    fn fondu_ou_envol() {
+        assert!(envol_en_fondu(true, false));
+        assert!(!envol_en_fondu(true, true));
+        assert!(!envol_en_fondu(false, false));
+        assert!(!envol_en_fondu(false, true));
     }
 
     #[test]

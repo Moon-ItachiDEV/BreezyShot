@@ -602,7 +602,9 @@ fn fermer_en_fondu(app: &AppHandle, etat: &Etat) {
 
 /// Envol de la fenêtre vers la zone de notification (ARCHITECTURE §12.4), puis sortie.
 fn voler(app: &AppHandle, etat: &Etat) {
-    let reduit = crate::systeme::animations_reduites();
+    let systeme_reduit = crate::systeme::animations_reduites();
+    let force = sys::essai_animations_forcees();
+    let reduit = envol::envol_en_fondu(systeme_reduit, force);
     let (rect, echelle) = sys::zone_utile_sous_souris().unwrap_or((
         crate::systeme::Rect {
             x: 0,
@@ -621,12 +623,17 @@ fn voler(app: &AppHandle, etat: &Etat) {
         .unwrap_or_else(|| place_fenetre(rect, echelle));
     let cible = installation::cible_envol(sys::zone_de_notification(), rect, echelle);
     if reduit {
+        log::info!("envol: fondu (animations reduites)");
         if let Some(f) = app.try_state::<Installateur>() {
             f.fermer_en_fondu();
         }
         attendre_puis_sortir(app, etat, Duration::from_millis(160), 0);
         return;
     }
+    log::info!(
+        "envol: anime{}",
+        si(systeme_reduit && force, " (force par l'essai)", "")
+    );
     if let Some(f) = app.try_state::<Installateur>() {
         f.envol(envol::DUREE_ENVOL.as_millis() as u64);
     }
