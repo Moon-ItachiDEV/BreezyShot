@@ -564,7 +564,7 @@ public static uint Crc32(byte[] o) {
         $MAJ = [byte[]]@(0x10)
         $AUCUN = [byte[]]@()
         $VK_1 = [byte]0x31; $VK_2 = [byte]0x32; $VK_H = [byte]0x48; $VK_T = [byte]0x54
-        $VK_A = [byte]0x41; $VK_V = [byte]0x56; $VK_Z = [byte]0x5A
+        $VK_A = [byte]0x41; $VK_B = [byte]0x42; $VK_V = [byte]0x56; $VK_Z = [byte]0x5A
         $ECHAP = [byte]0x1B; $ENTREE = [byte]0x0D; $ESPACE = [byte]0x20; $DROITE = [byte]0x27; $SUPPR = [byte]0x2E
         $MOD_CTRL_MAJ = 6                       # RegisterHotKey : MOD_CONTROL | MOD_SHIFT
         $WM_CLOSE = [uint32]0x10
@@ -963,8 +963,8 @@ public static uint Crc32(byte[] o) {
         function Ecran-X($Vue, [double]$X) { return [int][math]::Round($Vue.X + $X * $Vue.S) }
         function Ecran-Y($Vue, [double]$Y) { return [int][math]::Round($Vue.Y + $Y * $Vue.S) }
         # Le bouton « Texte » de la barre du haut de l'éditeur : un bouton de ce nom à la
-        # hauteur de « Enregistrer » (barre du haut). L'instrument « Texte » de la palette
-        # (choisi par Ajouter › Texte) porte le même nom, mais pas à cette hauteur.
+        # hauteur de « Enregistrer » (barre du haut). L'outil « Texte » de la barre
+        # d'annotation porte le même nom, mais pas à cette hauteur.
         function Bouton-Texte([IntPtr]$H, [double]$DelaiS = 5) {
             $enr = Element $H 'Enregistrer' $CT::Button 5
             if ($null -eq $enr) { throw "éditeur : bouton « Enregistrer » introuvable ; $(Elements-Vus $H)" }
@@ -1569,12 +1569,15 @@ public static uint Crc32(byte[] o) {
                 $pp = Lire-Texte
                 Verifier '(14) Espace, Maj+Droite × 2, Entrée : presse-papiers = « BreezyShot reads this »' (($l -match ' 3 mots$') -and ($pp -ceq 'BreezyShot reads this')) "$l ; lu « $(Montrer $pp) »" | Out-Null
                 # Bloc noir sur la deuxième ligne (outil Flou, variante Bloc noir), puis tout.
+                # Le calque s'est fermé à la copie. Barre C (0.5.4) : l'outil Flou se prend au
+                # clavier (B : Flou, Pixeliser), car dans une fenêtre étroite son bouton peut
+                # être hors de la partie visible des outils ; Flou déplié, la barre tient et
+                # « Bloc noir » se voit. Pas d'Échap : sans sélection ni menu, il fermerait
+                # l'éditeur.
                 $v = Ajuster $db $vid $largeur
-                Cliquer-Nom $h 'Ajouter' $CT::Button '(14) Ajouter'
-                Cliquer-Nom $h 'Flou' $CT::MenuItem '(14) Ajouter › Flou'
-                Cliquer-Nom $h 'Flou' $CT::Button '(14) outil Flou'
+                $E::Touche($VK_B)
+                Start-Sleep -Milliseconds 600
                 Cliquer-Nom $h 'Bloc noir' $CT::Button '(14) variante Bloc noir'
-                $E::Touche($ECHAP)
                 Start-Sleep -Milliseconds 300
                 $r2 = $t.Lignes[1]
                 $x0 = $r2.X - $zt.X0 - 4; $y0 = $r2.Y - $zt.Y0 - 3

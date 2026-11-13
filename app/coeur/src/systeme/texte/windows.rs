@@ -25,7 +25,7 @@ use ::windows::Security::Cryptography::CryptographicBuffer;
 use ::windows::Win32::System::Com::CoIncrementMTAUsage;
 
 use super::{
-    Disponibilite, ErreurMoteur, LigneBrute, MotBrut, Place, Reconnu, ATTENTE_MAX,
+    redresser, Disponibilite, ErreurMoteur, LigneBrute, MotBrut, Place, Reconnu, ATTENTE_MAX,
     DERNIERE_CREATION,
 };
 
@@ -141,7 +141,17 @@ pub fn reconnaitre(
             return Err(ErreurMoteur::Moteur("echeance".into()));
         }
     };
-    let lignes = lignes(&resultat).map_err(|e| moteur("resultat", &e))?;
+    let mut lignes = lignes(&resultat).map_err(|e| moteur("resultat", &e))?;
+    // Les boîtes sont celles du texte redressé : sur un texte penché, elles sont ramenées
+    // sur l'image (`null` : texte droit, rien à faire).
+    let angle = resultat
+        .TextAngle()
+        .ok()
+        .and_then(|a| a.Value().ok())
+        .unwrap_or(0.0);
+    for mot in lignes.iter_mut().flat_map(|l| l.mots.iter_mut()) {
+        redresser(mot, angle, largeur, hauteur);
+    }
     Ok(Reconnu { langue, lignes })
 }
 
@@ -165,7 +175,7 @@ fn creer_moteur() -> Result<OcrEngine, ErreurMoteur> {
     }
 }
 
-/// Les lignes et leurs mots, dans l'ordre de lecture du moteur.
+/// Les lignes et leurs mots, dans l'ordre de lecture du moteur (boîtes du texte redressé).
 fn lignes(resultat: &OcrResult) -> Result<Vec<LigneBrute>, Error> {
     let lignes = resultat.Lines()?;
     let mut rendu = Vec::new();

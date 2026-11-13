@@ -23,7 +23,9 @@ use crate::texte::{extrait, Issue, Lu, PETITE_IMAGE};
 pub const CONSTRUIT: bool = true;
 
 /// Le balayage sur la zone lue (elle se teinte et respire le temps de la lecture), et sa
-/// version réduite : l'écran figé reste au moins ce temps après le relâcher.
+/// version réduite : l'écran figé reste au moins ce temps après le relâcher. Ce sont les
+/// jetons `texte-lecture` (la respiration que joue la page) et `texte-lecture-reduite`
+/// (essai d'égalité).
 pub const BALAYAGE: Duration = Duration::from_millis(200);
 pub const BALAYAGE_REDUIT: Duration = Duration::from_millis(120);
 
@@ -36,6 +38,7 @@ pub const ECRAN_FIGE_MAX_LECTURE: Duration = Duration::from_millis(1500);
 /// `SURLIGNE_PAS`, tous les pas ensemble au plus `SURLIGNE_DECALAGE`) ; toutes restent
 /// `SURLIGNE_TENUE`, puis la sélection s'efface en `SURLIGNE_SORTIE`. Animations réduites :
 /// les lignes paraissent ensemble en fondu, `SURLIGNE_REDUIT` pour paraître et pour partir.
+/// Les jetons `texte-surligne-*` du design (essai d'égalité) ; la page les reçoit du cœur.
 pub const SURLIGNE_TRACE: u32 = 260;
 pub const SURLIGNE_PAS: u32 = 40;
 pub const SURLIGNE_DECALAGE: u32 = 160;
@@ -75,7 +78,9 @@ pub struct LectureEnCours {
     pub relache: Instant,
     /// L'écran figé reste au moins ce temps après le relâcher (`balayage`).
     pub minimum: Duration,
-    /// Le résultat arrivé avant `minimum` : montré quand l'écran se libère.
+    /// Le résultat gardé : arrivé avant la fin du balayage (`minimum`), montré à cette fin
+    /// (`balayage_fini`) ; ou celui d'un texte copié dont les lignes sont en train d'être
+    /// surlignées, montré à la fin du surlignage.
     pub fin: Option<Box<FinLecture>>,
 }
 
@@ -230,6 +235,16 @@ pub fn a_surligner(fin: &FinLecture) -> bool {
         (&fin.issue, &fin.copie),
         (Issue::Texte(_), Some(Etape::Faite))
     )
+}
+
+/// Faut-il surligner `fin` maintenant ? Un texte lu et copié (`a_surligner`) de la lecture
+/// en cours, dont aucune fin n'est déjà gardée (une fin gardée attend son balayage ou un
+/// surlignage déjà commencé).
+pub fn surlignable(lecture: &Option<LectureEnCours>, fin: &FinLecture) -> bool {
+    a_surligner(fin)
+        && lecture
+            .as_ref()
+            .is_some_and(|x| x.numero == fin.numero && x.fin.is_none())
 }
 
 /// Le déroulé du surlignage de `lignes` lignes : un pas de `SURLIGNE_PAS` au plus, tous les
@@ -583,6 +598,58 @@ mod tests {
         assert!(!a_surligner(&fin(Issue::Vide, Some(Etape::Faite))));
         assert!(!a_surligner(&fin(Issue::AucuneLangue, None)));
         assert!(!a_surligner(&fin(Issue::Echec("echeance".into()), None)));
+    }
+
+    #[test]
+    fn surligne_seulement_la_lecture_en_cours_sans_fin_gardee() {
+        let t = Instant::now();
+        let copie = || fin(Issue::Texte(lu(&[&["un"]])), Some(Etape::Faite));
+        assert!(surlignable(&en_cours(1, t), &copie()));
+        // Pas un texte copié.
+        assert!(!surlignable(&en_cours(1, t), &fin(Issue::Vide, None)));
+        assert!(!surlignable(
+            &en_cours(1, t),
+            &fin(Issue::Texte(lu(&[&["un"]])), Some(Etape::Echec("x".into())))
+        ));
+        // Une autre lecture, ou plus aucune.
+        assert!(!surlignable(&en_cours(2, t), &copie()));
+        assert!(!surlignable(&None, &copie()));
+        // Une fin déjà gardée (pendant un surlignage, par exemple) : pas une seconde fois.
+        let mut l = en_cours(1, t);
+        if let Some(x) = l.as_mut() {
+            x.fin = Some(Box::new(copie()));
+        }
+        assert!(!surlignable(&l, &copie()));
+    }
+
+    /// Les durées du balayage et du surlignage sont celles des jetons du design
+    /// (`jetons.css`, généré depuis `design/jetons-complements.json`) : la page joue
+    /// `texte-lecture`, et reçoit du cœur les durées du surlignage.
+    #[test]
+    fn durees_egales_aux_jetons() {
+        let ms = |nom: &str| -> u32 {
+            let css = include_str!("../../../interface/commun/jetons.css");
+            let debut = format!("--{nom}:");
+            let ligne = css
+                .lines()
+                .map(str::trim)
+                .find(|l| l.starts_with(&debut))
+                .unwrap_or_else(|| panic!("jeton {nom} absent"));
+            let valeur = ligne[debut.len()..].trim().trim_end_matches(';');
+            valeur
+                .strip_suffix("ms")
+                .and_then(|v| v.parse().ok())
+                .unwrap_or_else(|| panic!("jeton {nom}: {valeur}"))
+        };
+        let duree = |nom| Duration::from_millis(u64::from(ms(nom)));
+        assert_eq!(BALAYAGE, duree("texte-lecture"));
+        assert_eq!(BALAYAGE_REDUIT, duree("texte-lecture-reduite"));
+        assert_eq!(SURLIGNE_TRACE, ms("texte-surligne-trace"));
+        assert_eq!(SURLIGNE_PAS, ms("texte-surligne-pas"));
+        assert_eq!(SURLIGNE_DECALAGE, ms("texte-surligne-decalage"));
+        assert_eq!(SURLIGNE_TENUE, ms("texte-surligne-tenue"));
+        assert_eq!(SURLIGNE_SORTIE, ms("texte-surligne-sortie"));
+        assert_eq!(SURLIGNE_REDUIT, ms("texte-surligne-reduit"));
     }
 
     #[test]
