@@ -70,6 +70,25 @@ jobs:
           cargo test --locked -- --show-output | Tee-Object -FilePath "$env:RUNNER_TEMP/tests-sortie.txt"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
+      - name: Diagnostic d'un test qui ne se charge pas
+        # Seulement si les tests échouent : liste les fonctions importées par l'exécutable
+        # de tests que Windows ne trouve pas (cause d'un STATUS_ENTRYPOINT_NOT_FOUND).
+        if: failure()
+        working-directory: app/coeur
+        run: |
+          $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -property installationPath
+          $dumpbin = Get-ChildItem -Recurse -Filter dumpbin.exe "$vs\VC\Tools\MSVC" | Where-Object { $_.FullName -match 'Hostx64\\x64' } | Select-Object -First 1
+          Add-Type -Name N -Namespace D -MemberDefinition '[DllImport("kernel32", SetLastError=true, CharSet=CharSet.Unicode)] public static extern IntPtr LoadLibraryExW(string n, IntPtr h, uint f); [DllImport("kernel32", CharSet=CharSet.Ansi)] public static extern IntPtr GetProcAddress(IntPtr m, string p);'
+          foreach ($exe in Get-ChildItem target\debug\deps\breezyshot-*.exe) {
+            "== $($exe.Name)"
+            $dll = $null; $manque = 0
+            foreach ($l in & $dumpbin.FullName /nologo /imports $exe.FullName) {
+              if ($l -match '^\s{4}(\S+\.dll)\s*$') { $dll = $Matches[1]; $h = [D.N]::LoadLibraryExW($dll, [IntPtr]::Zero, 0x800); if ($h -eq [IntPtr]::Zero) { "DLL introuvable : $dll" }; continue }
+              if ($dll -and $l -match '^\s+[0-9A-F]+\s+(\S+)\s*$') { if ($h -ne [IntPtr]::Zero -and [D.N]::GetProcAddress($h, $Matches[1]) -eq [IntPtr]::Zero) { "MANQUE : $dll!$($Matches[1])"; $manque++ } }
+            }
+            "fonctions manquantes : $manque"
+          }
+
       - name: Construire breezyshot.exe (release)
         working-directory: app
         run: npx tauri build --no-bundle -- --locked
