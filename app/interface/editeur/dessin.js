@@ -275,38 +275,73 @@ const OMBRES = {
 // Dessine un objet (hors masque, dans le fond, et hors projecteur, peint par `peindreVoile`)
 // dans `ctx`, dont la transformation est déjà posée (échelle de la vue, ou 1 pour l'export).
 // `doc` sert au chiffre des numéros. `enCours` : passages de gomme du geste en cours, en plus
-// de ceux de l'objet.
-export function dessinerObjet(ctx, doc, objet, enCours = null) {
+// de ceux de l'objet. `garder` (la vue seule) : une encre gommée garde son rendu d'une
+// peinture à l'autre tant qu'elle ne change pas (`memoire`).
+export function dessinerObjet(ctx, doc, objet, enCours = null, garder = false) {
   const c = ctx, o = objet;
   if (o.type === "masque" || o.type === "projecteur") return;
   const gommes = enCours?.length ? (o.gommes || []).concat(enCours) : o.gommes;
   c.save();
   c.globalAlpha = o.type === "surligneur" ? SURLIGNEUR_ALPHA : alphaDe(o);
   if (o.type === "surligneur") c.globalCompositeOperation = "multiply";
-  if (gommes?.length) dessinerGomme(c, doc, o, gommes);
+  if (gommes?.length) dessinerGomme(c, doc, o, gommes, garder && !enCours?.length);
   else encre(c, doc, o);
   c.restore();
 }
 
 // ---------- encres gommées ----------
 
-// Un seul calque de travail pour toutes les encres gommées, agrandi au besoin, relâché avec
-// les toiles du document (`relacherCalque`).
-let calque = null;
-function prendreCalque(l, h) {
-  if (!calque || calque.width < l || calque.height < h) {
-    const t = toile(Math.max(l, calque?.width || 0), Math.max(h, calque?.height || 0));
-    relacherCalque();
-    calque = t;
+// Une encre gommée se pose en trois temps : l'encre seule sur le calque de travail, les
+// passages de gomme effacés ; ce calque posé avec l'ombre de ce qui reste sur un rendu
+// transparent ; le rendu posé avec l'opacité et le mélange de l'objet. L'ombre est celle de
+// ce qui reste : effacer un trait n'en laisse pas. Deux toiles de travail pour toutes les
+// encres, agrandies au besoin, relâchées avec les toiles du document (`relacherCalque`).
+const travail = { calque: null, rendu: null };
+function prendre(nom, l, h) {
+  let t = travail[nom];
+  if (!t || t.width < l || t.height < h) {
+    const n = toile(Math.max(l, t?.width || 0), Math.max(h, t?.height || 0));
+    if (t) t.width = t.height = 0;
+    travail[nom] = t = n;
   }
-  const k = calque.getContext("2d");
+  const k = t.getContext("2d");
   k.setTransform(1, 0, 0, 1, 0, 0);
   k.clearRect(0, 0, l, h);
   return k;
 }
+
+// La vue garde le rendu des encres gommées qui n'ont pas changé (l'objet, la transformation,
+// la toile) : flouter l'ombre d'un calque coûte cher (environ 5 ms pour 800 × 560 px sans
+// carte graphique), poser un rendu gardé presque rien. Au plus MEMOIRE_PX pixels ; une place
+// ne se prend qu'à un rendu qui n'a pas servi à la peinture en cours (sinon une vue pleine
+// d'encres gommées chasserait à chaque peinture ce qu'elle va reposer).
+const MEMOIRE_PX = 16e6;
+const memoire = new Map(); // id → { cle, rendu, px, tour }
+let memoirePx = 0;
+let tour = 0; // peintures de la vue
+// Cadre de l'image dans la toile, en px de la toile [x0, y0, x1, y1] (posé par la vue et
+// l'export le temps de dessiner les objets) : le calque d'une encre gommée s'y borne.
+let bornes = null;
+function oublier(id) {
+  const e = memoire.get(id);
+  if (!e) return;
+  memoire.delete(id);
+  memoirePx -= e.px;
+  e.rendu.width = e.rendu.height = 0;
+}
+function placer(px) {
+  for (const [id, e] of memoire) {
+    if (memoirePx + px <= MEMOIRE_PX) break;
+    if (e.tour !== tour) oublier(id);
+  }
+  return memoirePx + px <= MEMOIRE_PX;
+}
 export function relacherCalque() {
-  if (calque) calque.width = calque.height = 0;
-  calque = null;
+  for (const nom of Object.keys(travail)) {
+    if (travail[nom]) travail[nom].width = travail[nom].height = 0;
+    travail[nom] = null;
+  }
+  for (const id of [...memoire.keys()]) oublier(id);
 }
 
 // Efface de `k` les passages de gomme : traits ronds, en ligne brisée (celle que le geste a
@@ -338,31 +373,59 @@ function passerGomme(k, gommes) {
   }
 }
 
-// Une encre gommée : l'encre seule sur un calque (pixels de la toile, borné à la boîte de
-// l'objet), les passages de gomme effacés, puis le calque posé avec l'opacité, le mélange et
-// l'ombre de l'objet. L'ombre est celle de ce qui reste : effacer un trait n'en laisse pas.
-function dessinerGomme(c, doc, o, gommes) {
-  const m = c.getTransform(), b = boite(o);
-  const x0 = Math.max(0, Math.floor(m.e + b.x * m.a) - 1);
-  const y0 = Math.max(0, Math.floor(m.f + b.y * m.d) - 1);
-  const x1 = Math.min(c.canvas.width, Math.ceil(m.e + (b.x + b.largeur) * m.a) + 1);
-  const y1 = Math.min(c.canvas.height, Math.ceil(m.f + (b.y + b.hauteur) * m.d) + 1);
+// Une encre gommée, bornée à la boîte de l'objet en pixels de la toile et au cadre de
+// l'image élargi de la portée de l'ombre : l'ombre d'une encre juste hors du cadre y entre,
+// comme celle d'une encre non gommée. Borner au cadre, pas à la toile : la vue et l'export
+// coupent l'encre au même endroit de l'image et la rendent au bit près pareil.
+function dessinerGomme(c, doc, o, gommes, garder) {
+  const m = c.getTransform(), b = boite(o), om = OMBRES[o.type];
+  const s = Math.hypot(m.a, m.b) || 1;
+  const marge = om ? Math.ceil((2 * om[1] + Math.abs(om[2])) * s) + 1 : 0;
+  const [bx0, by0, bx1, by1] = bornes || [0, 0, c.canvas.width, c.canvas.height];
+  const x0 = Math.max(bx0 - marge, Math.floor(m.e + b.x * m.a) - 1);
+  const y0 = Math.max(by0 - marge, Math.floor(m.f + b.y * m.d) - 1);
+  const x1 = Math.min(bx1 + marge, Math.ceil(m.e + (b.x + b.largeur) * m.a) + 1);
+  const y1 = Math.min(by1 + marge, Math.ceil(m.f + (b.y + b.hauteur) * m.d) + 1);
   const l = x1 - x0, h = y1 - y0;
   if (l <= 0 || h <= 0) return;
-  const k = prendreCalque(l, h);
-  k.save();
-  k.setTransform(m.a, 0, 0, m.d, m.e - x0, m.f - y0);
-  sansOmbres = true;
-  try {
-    encre(k, doc, o);
-  } finally {
-    sansOmbres = false;
+  const cle = garder ? JSON.stringify([o, m.a, m.d, m.e, m.f, bx0, by0, bx1, by1]) : "";
+  const vu = garder ? memoire.get(o.id) : null;
+  let rendu;
+  if (vu && vu.cle === cle) {
+    vu.tour = tour;
+    rendu = vu.rendu;
+  } else {
+    if (vu) oublier(o.id);
+    const k = prendre("calque", l, h);
+    k.save();
+    k.setTransform(m.a, 0, 0, m.d, m.e - x0, m.f - y0);
+    sansOmbres = true;
+    try {
+      encre(k, doc, o);
+    } finally {
+      sansOmbres = false;
+    }
+    passerGomme(k, gommes);
+    k.restore();
+    const garde = garder && placer(l * h);
+    const r = garde ? toile(l, h).getContext("2d") : prendre("rendu", l, h);
+    if (om) {
+      r.shadowColor = om[0];
+      r.shadowBlur = om[1] * s;
+      r.shadowOffsetX = 0;
+      r.shadowOffsetY = om[2] * s;
+    }
+    r.drawImage(travail.calque, 0, 0, l, h, 0, 0, l, h);
+    r.shadowColor = "transparent";
+    rendu = r.canvas;
+    if (garde) {
+      memoire.set(o.id, { cle, rendu, px: l * h, tour });
+      memoirePx += l * h;
+    }
   }
-  passerGomme(k, gommes);
-  k.restore();
-  if (OMBRES[o.type]) poserOmbre(c, ...OMBRES[o.type]);
   c.setTransform(1, 0, 0, 1, 0, 0);
-  c.drawImage(calque, 0, 0, l, h, x0, y0, l, h);
+  sansOmbre(c);
+  c.drawImage(rendu, 0, 0, l, h, x0, y0, l, h);
 }
 
 // Ce que des passages de gomme changent à une encre : "rien" (aucun pixel : passage à côté
@@ -564,7 +627,12 @@ export function composer(doc, fond) {
   c.imageSmoothingEnabled = false;
   c.drawImage(fond, 0, 0);
   c.globalCompositeOperation = "source-over";
-  for (const o of doc.objets) dessinerObjet(c, doc, o);
+  bornes = [k.x, k.y, k.x + k.largeur, k.y + k.hauteur];
+  try {
+    for (const o of doc.objets) dessinerObjet(c, doc, o);
+  } finally {
+    bornes = null;
+  }
   // Même pile de découpes que la vue (le cadre, puis les trous) : Chromium lisse le bord
   // d'une découpe selon celles qui la précèdent, et l'export doit être l'écran au bit près.
   c.beginPath();
@@ -701,6 +769,7 @@ function rectArrondiSuite(c, x, y, w, h, r) {
 // choisie reçoit alors un cadre) }.
 export function peindreVue(ctx, doc, fond, vue, selection, options = {}) {
   const c = ctx, e = vue.echelle, k = cadre(doc);
+  tour++;
   c.save();
   c.setTransform(1, 0, 0, 1, 0, 0);
   c.clearRect(0, 0, c.canvas.width, c.canvas.height);
@@ -724,10 +793,16 @@ export function peindreVue(ctx, doc, fond, vue, selection, options = {}) {
   if (ajout && ajout.type === "masque") masqueEnCours(c, doc, fond, ajout, vue);
   c.setTransform(e, 0, 0, e, vue.x, vue.y);
   const gommes = options.gommes || null;
-  for (const o of doc.objets) {
-    if (o.id !== options.cacher) dessinerObjet(c, doc, o, gommes?.get(o.id));
+  bornes = [Math.max(0, x0), Math.max(0, y0), Math.min(c.canvas.width, x1),
+    Math.min(c.canvas.height, y1)];
+  try {
+    for (const o of doc.objets) {
+      if (o.id !== options.cacher) dessinerObjet(c, doc, o, gommes?.get(o.id), true);
+    }
+    if (ajout && ajout.type !== "masque") dessinerObjet(c, doc, ajout);
+  } finally {
+    bornes = null;
   }
-  if (ajout && ajout.type !== "masque") dessinerObjet(c, doc, ajout);
   peindreVoile(c, projecteurs(doc.objets, ajout, options.cacher), doc.largeur, doc.hauteur);
   c.restore();
   const choisis = new Set(selection || []);
