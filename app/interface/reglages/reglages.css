@@ -350,6 +350,7 @@ svg { display: block; }
 }
 .bouton:hover, .bouton-icone:hover { background: var(--subtle-hover); }
 .bouton:active { transform: scale(0.97); transition-duration: var(--duree-appui); color: var(--text-2); }
+.bouton:disabled { color: var(--text-3); background: none; transform: none; cursor: default; }
 .bouton-icone {
   width: var(--reglages-bouton-hauteur);
   padding: 0;
@@ -397,6 +398,7 @@ svg { display: block; }
   font-size: var(--reglages-champ-texte);
   user-select: text;
 }
+.champ input::placeholder { color: var(--text-3); opacity: 1; }
 .champ .bouton-icone {
   width: var(--reglages-champ-bouton);
   height: var(--reglages-champ-bouton);
@@ -506,6 +508,9 @@ kbd {
   color: var(--text);
   font: var(--texte-body-strong-graisse) var(--reglages-touche-texte) / 1 var(--police-ui);
 }
+
+/* Licence : le champ et « Activer », ou « Pro activé » et « Retirer ». */
+.champ.licence { flex: 0 1 auto; }
 
 /* Général : le logo une seule fois, en haut. */
 .apropos { margin-bottom: var(--reglages-apropos-marge); }

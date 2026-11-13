@@ -130,6 +130,22 @@
 
       <section id="rubrique-general" role="tabpanel" data-rubrique="general" aria-labelledby="onglet-general"
         hidden>
+        <div class="groupe">
+          <div class="ligne large" data-reglage="licence" hidden>
+            <div class="lb"><label class="libelle" id="l-licence" for="licence-texte">Licence</label><p class="refus" data-refus role="status" hidden></p></div>
+            <div class="ctl" data-etat-licence="sans">
+              <div class="champ licence">
+                <input id="licence-texte" type="text" data-controle="licence_texte"
+                  placeholder="Coller la licence" spellcheck="false" autocomplete="off">
+              </div>
+              <button class="bouton" data-controle="activer" disabled>Activer</button>
+            </div>
+            <div class="ctl" data-etat-licence="avec" hidden>
+              <span class="valeur">Pro activé</span>
+              <button class="bouton" data-controle="retirer">Retirer</button>
+            </div>
+          </div>
+        </div>
         <div class="groupe apropos">
           <div class="ligne" data-reglage="version" hidden>
             <svg class="logo" viewBox="0 0 256 256" aria-hidden="true">

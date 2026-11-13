@@ -31,6 +31,11 @@ const VUE = {
     { action: 'derniere_zone', libelle: 'Refaire la dernière zone', touches: ['Ctrl', 'Maj', '4'], modifie: false, refus: null },
   ],
 };
+// Avec licence : la vue du cœur après « Activer » (historique, texte, une langue).
+const VUE_PRO = REEL.vue_pro;
+// La licence d'essai publique (avenant 0.5 « Licence », §2) : le cœur simulé l'accepte, il
+// refuse tout autre texte avec le code `signature`, comme le vrai.
+const LICENCE = fs.readFileSync(path.join(__dirname, '..', 'licence-essai.txt'), 'utf8').trim();
 // Sans Gel (autre système) ni vignette : aucune ligne de la rubrique Capture.
 const SANS_VIGNETTE = { ...VUE, lignes: ['copier', 'dossier', 'modele_nom', 'theme', 'demarrage', 'version'] };
 
@@ -49,20 +54,25 @@ const SANS_VIGNETTE = { ...VUE, lignes: ['copier', 'dossier', 'modele_nom', 'the
     p.erreurs = [];
     p.on('pageerror', e => p.erreurs.push(String(e)));
     p.on('console', m => { if (m.type() === 'error' || m.type() === 'warning') p.erreurs.push(m.text()); });
-    await p.addInitScript(({ vue }) => {
+    await p.addInitScript(({ vue, vueSans, vuePro, licence }) => {
       window.__appels = []; window.__ecouteurs = {}; window.__vue = vue; window.__refus = null;
       document.addEventListener('securitypolicyviolation', e => (window.__csp = (window.__csp || []).concat(e.violatedDirective)));
       window.__TAURI__ = {
         core: { invoke: (c, a) => {
           window.__appels.push([c, a]);
           if (c === 'reglages_apercu_nom') return Promise.resolve({ apercu: `aperçu:${a.modele}` });
+          if (c === 'licence_activer') {
+            if (a.texte.trim() !== licence) return Promise.reject('signature');
+            window.__vue = vuePro; return Promise.resolve({ active: true });
+          }
+          if (c === 'licence_retirer') { window.__vue = vueSans; return Promise.resolve({ active: false }); }
           const refus = window.__refus; window.__refus = null;
           return Promise.resolve({ vue: window.__vue, refus });
         } },
         event: { listen: (n, f) => { window.__ecouteurs[n] = f; return Promise.resolve(() => {}); } },
       };
       window.__emettre = (n, payload) => window.__ecouteurs[n]({ payload });
-    }, { vue: o.vue || VUE });
+    }, { vue: o.vue || VUE, vueSans: REEL.vue, vuePro: VUE_PRO, licence: LICENCE });
     await p.goto(base);
     await p.waitForTimeout(150);
     return p;
@@ -426,6 +436,162 @@ const SANS_VIGNETTE = { ...VUE, lignes: ['copier', 'dossier', 'modele_nom', 'the
       '10 quatre raccourcis, « Refaire la dernière zone » en Ctrl + Maj + 4', JSON.stringify(lignes));
     await p.context().close();
   }
+  // 11. Licence (avenant 0.5 « Licence », §1) : ligne de Général au-dessus de « À propos ».
+  const ligneLicence = (p) => p.$eval('[data-reglage="licence"]', (l) => {
+    const vu = (e) => !!e && !e.closest('[hidden]') && !!e.offsetParent;
+    const champ = l.querySelector('[data-controle="licence_texte"]');
+    const refus = l.querySelector('[data-refus]');
+    return {
+      texte: l.innerText.split('\n').map(t => t.trim()).filter(Boolean),
+      champ: vu(champ), valeur: champ.value, indicatif: champ.placeholder,
+      activer: vu(l.querySelector('[data-controle="activer"]')),
+      inactif: l.querySelector('[data-controle="activer"]').disabled,
+      retirer: vu(l.querySelector('[data-controle="retirer"]')),
+      refus: vu(refus) ? refus.textContent : null,
+      focus: document.activeElement?.dataset?.controle ?? null,
+    };
+  });
+  const raccourcisMontres = (p) => p.$$eval('[data-reglage="raccourci"]', ls => ls.map(l => [l.dataset.action, l.querySelector('[data-valeur="libelle"]').textContent, [...l.querySelectorAll('kbd')].map(k => k.textContent).join('+'), l.querySelector('[data-refus]').hidden]));
+  const quatre = JSON.stringify([['zone', 'Zone', 'Ctrl+Maj+1', true], ['plein_ecran', 'Plein écran', 'Ctrl+Maj+2', true], ['fenetre', 'Fenêtre', 'Ctrl+Maj+3', true], ['derniere_zone', 'Refaire la dernière zone', 'Ctrl+Maj+4', true]]);
+  const six = JSON.stringify(JSON.parse(quatre).concat([['historique', 'Historique', 'Ctrl+Maj+H', true], ['texte', 'Copier le texte', 'Ctrl+Maj+T', true]]));
+  // Couleur d'erreur des champs des Réglages (jeton --danger), lue sur un témoin.
+  const danger = (p) => p.evaluate(() => {
+    const t = document.createElement('span'); t.style.color = 'var(--danger)'; document.body.append(t);
+    const c = getComputedStyle(t).color; t.remove(); return c;
+  });
+  for (const theme of ['light', 'dark']) {
+    const p = await page({ theme, vue: REEL.vue });
+    await onglet(p, 'Général');
+    // Sans licence : le champ « Coller la licence » et « Activer » inactif, rien d'autre.
+    let l = await ligneLicence(p);
+    verifier(JSON.stringify(l.texte) === '["Licence","Activer"]' && l.champ && l.valeur === '' && l.indicatif === 'Coller la licence'
+      && l.activer && l.inactif && !l.retirer && l.refus === null, `11 ${theme} sans licence : champ, « Activer » inactif, rien d'autre`, JSON.stringify(l));
+    const ordre = await p.evaluate(() => {
+      const general = [...document.querySelectorAll('[data-rubrique="general"] [data-reglage]')].filter(e => !e.hidden).map(e => e.dataset.reglage);
+      return general;
+    });
+    verifier(JSON.stringify(ordre) === JSON.stringify(['licence', 'version', 'theme', 'demarrage']), `11 ${theme} « Licence » au-dessus de « À propos »`, JSON.stringify(ordre));
+    const nom = await p.getByRole('textbox', { name: 'Licence' }).count();
+    verifier(nom === 1, `11 ${theme} le champ s'appelle « Licence »`);
+    await p.screenshot({ path: `${SORTIE}/reglages-licence-sans-${theme}.png` });
+    // Bouton inactif tant que le champ est vide (des espaces ne comptent pas).
+    const champ = p.getByRole('textbox', { name: 'Licence' });
+    await champ.fill('   ');
+    const espaces = (await ligneLicence(p)).inactif;
+    await p.getByRole('button', { name: 'Activer' }).click({ force: true }); await p.waitForTimeout(50);
+    await champ.fill('x'); const rempli = (await ligneLicence(p)).inactif;
+    await champ.fill(''); const vide = (await ligneLicence(p)).inactif;
+    verifier(espaces && !rempli && vide && !(await appels(p)).some(a => a[0] === 'licence_activer'),
+      `11 ${theme} « Activer » inactif champ vide ou fait d'espaces, actif sinon, aucun appel`, JSON.stringify([espaces, rempli, vide]));
+    // Refusée : le champ garde le texte collé, prend l'allure d'erreur, « Licence non valide ».
+    const faux = LICENCE.slice(0, -2) + 'AA';
+    await champ.fill(faux);
+    await vider(p);
+    await p.getByRole('button', { name: 'Activer' }).click(); await p.waitForTimeout(100);
+    l = await ligneLicence(p);
+    const a = await appels(p);
+    await p.evaluate(() => Promise.all(document.getAnimations().map(x => x.finished)));
+    const bord = await p.$eval('[data-reglage="licence"] .champ', e => getComputedStyle(e).borderTopColor);
+    verifier(JSON.stringify(a) === JSON.stringify([['licence_activer', { texte: faux }]]) && l.refus === 'Licence non valide'
+      && l.valeur === faux && l.champ && !l.retirer && bord === await danger(p)
+      && JSON.stringify(l.texte) === '["Licence","Licence non valide","Activer"]',
+      `11 ${theme} refusée : « Licence non valide », champ gardé, allure d'erreur`, JSON.stringify([a, l, bord]));
+    await p.screenshot({ path: `${SORTIE}/reglages-licence-refusee-${theme}.png` });
+    // Une vue relue (retour du focus) ne l'efface pas ; changer le texte, si.
+    await p.evaluate(() => __emettre('reglages:etat', __vue)); await p.waitForTimeout(30);
+    const garde = await ligneLicence(p);
+    await champ.press('End'); await champ.press('Backspace');
+    const efface = await ligneLicence(p);
+    verifier(garde.refus === 'Licence non valide' && garde.valeur === faux && efface.refus === null,
+      `11 ${theme} refus gardé par une vue relue, retiré à la frappe`, JSON.stringify([garde.refus, efface.refus]));
+    // Entrée dans le champ : même chemin que le bouton.
+    await vider(p);
+    await champ.press('Enter'); await p.waitForTimeout(50);
+    verifier((await appels(p)).filter(x => x[0] === 'licence_activer').length === 1 && (await ligneLicence(p)).refus === 'Licence non valide',
+      `11 ${theme} Entrée → licence_activer, refusée`);
+    // Acceptée : « Pro activé » et « Retirer », la vue redemandée, les deux raccourcis
+    // apparaissent ; ni numéro ni date dans la page.
+    await champ.fill(`  ${LICENCE} `);
+    await vider(p);
+    await p.getByRole('button', { name: 'Activer' }).click(); await p.waitForTimeout(100);
+    l = await ligneLicence(p);
+    let noms = (await appels(p)).map(x => x[0]);
+    verifier(JSON.stringify(noms) === '["licence_activer","reglages_lire"]', `11 ${theme} acceptée : licence_activer puis reglages_lire`, JSON.stringify(noms));
+    verifier(JSON.stringify(l.texte) === '["Licence","Pro activé","Retirer"]' && !l.champ && !l.activer && l.retirer && l.refus === null
+      && l.valeur === '' && l.focus === 'retirer', `11 ${theme} acceptée : « Pro activé », « Retirer » (focus), rien d'autre`, JSON.stringify(l));
+    const corps = await p.$eval('[data-rubrique="general"][role="tabpanel"]', e => e.innerText);
+    verifier(!/ESSAI|0001|BS1\.|\b20\d\d\b/.test(corps), `11 ${theme} ni numéro, ni date, ni texte de licence dans la page`);
+    await p.screenshot({ path: `${SORTIE}/reglages-licence-active-${theme}.png` });
+    await onglet(p, 'Raccourcis');
+    verifier(JSON.stringify(await raccourcisMontres(p)) === six, `11 ${theme} acceptée : « Historique » et « Copier le texte » après la dernière zone`, JSON.stringify(await raccourcisMontres(p)));
+    await p.screenshot({ path: `${SORTIE}/reglages-raccourcis-pro-${theme}.png` });
+    // Retirée : la vue redemandée, le champ revient vide (focus), les deux lignes partent.
+    await onglet(p, 'Général');
+    await vider(p);
+    await p.getByRole('button', { name: 'Retirer' }).click(); await p.waitForTimeout(100);
+    noms = (await appels(p)).map(x => x[0]);
+    l = await ligneLicence(p);
+    verifier(JSON.stringify(noms) === '["licence_retirer","reglages_lire"]' && JSON.stringify(l.texte) === '["Licence","Activer"]'
+      && l.champ && l.valeur === '' && l.inactif && !l.retirer && l.focus === 'licence_texte',
+      `11 ${theme} retirée : licence_retirer puis reglages_lire, champ vide (focus), « Activer » inactif`, JSON.stringify([noms, l]));
+    await onglet(p, 'Raccourcis');
+    verifier(JSON.stringify(await raccourcisMontres(p)) === quatre, `11 ${theme} retirée : les quatre raccourcis de la 0.4`, JSON.stringify(await raccourcisMontres(p)));
+    const csp = await p.evaluate(() => window.__csp || []);
+    verifier(csp.length === 0 && p.erreurs.length === 0, `11 ${theme} aucune violation de CSP, aucune erreur de console`, JSON.stringify([csp, p.erreurs]));
+    await p.context().close();
+  }
+  {
+    // Ouverte avec une licence déjà en place ; fenêtre étroite, sans et avec licence.
+    const p = await page({ vue: VUE_PRO, largeur: 480, hauteur: 700 });
+    await onglet(p, 'Général');
+    const l = await ligneLicence(p);
+    const larg1 = await p.evaluate(() => [document.documentElement.scrollWidth, innerWidth]);
+    await p.evaluate((v) => __emettre('reglages:etat', v), REEL.vue); await p.waitForTimeout(30);
+    const larg2 = await p.evaluate(() => [document.documentElement.scrollWidth, innerWidth]);
+    const boite = await p.$eval('[data-reglage="licence"] .champ', e => { const r = e.getBoundingClientRect(); return [r.right, innerWidth]; });
+    verifier(JSON.stringify(l.texte) === '["Licence","Pro activé","Retirer"]' && larg1[0] <= larg1[1] && larg2[0] <= larg2[1] && boite[0] <= boite[1],
+      '11 480 px : licence ouverte active, rien ne déborde avec ou sans licence', JSON.stringify([l.texte, larg1, larg2, boite]));
+    await p.screenshot({ path: `${SORTIE}/reglages-licence-etroit.png` });
+    await p.context().close();
+  }
+
+  // 12. Raccourcis de l'historique et du texte (§7.2) : présents seulement quand l'action est
+  // en vigueur ; saisie et Rétablir comme les autres ; une ligne qui part pendant sa saisie
+  // la termine.
+  {
+    const p = await page({ vue: VUE_PRO });
+    await onglet(p, 'Raccourcis');
+    verifier(JSON.stringify(await raccourcisMontres(p)) === six, '12 vue réelle avec licence : six lignes, Ctrl + Maj + H et Ctrl + Maj + T', JSON.stringify(await raccourcisMontres(p)));
+    await vider(p);
+    await p.getByRole('button', { name: 'Copier le texte' }).click(); await p.waitForTimeout(30);
+    await p.keyboard.press('Control+Alt+KeyY'); await p.waitForTimeout(50);
+    const a = await appels(p);
+    verifier(JSON.stringify(a[0]) === JSON.stringify(['reglages_saisie', { action: 'texte', active: true }])
+      && a.find(x => x[0] === 'reglages_raccourci')?.[1]?.action === 'texte' && a.find(x => x[0] === 'reglages_raccourci')?.[1]?.saisie?.code === 'KeyY',
+      '12 « Copier le texte » : saisie puis touche envoyée pour `texte`', JSON.stringify(a));
+    await p.evaluate(() => __emettre('reglages:etat', { ...__vue, raccourcis: __vue.raccourcis.map(r => r.action === 'historique' ? { ...r, modifie: true } : r) }));
+    await vider(p);
+    await p.getByRole('button', { name: 'Rétablir' }).click(); await p.waitForTimeout(30);
+    verifier(JSON.stringify((await dernier(p, 'reglages_retablir'))?.[1]) === JSON.stringify({ action: 'historique' }), '12 Rétablir de « Historique » → reglages_retablir historique');
+    // Sans langue de lecture : « Historique » seule après la dernière zone.
+    await p.evaluate(() => __emettre('reglages:etat', { ...__vue, raccourcis: __vue.raccourcis.filter(r => r.action !== 'texte') }));
+    const cinq = await raccourcisMontres(p);
+    verifier(JSON.stringify(cinq) === JSON.stringify(JSON.parse(six).slice(0, 5)), '12 sans langue : cinq lignes, pas de « Copier le texte »', JSON.stringify(cinq));
+    // La licence retirée pendant la saisie de « Historique » : la saisie finit, la ligne part.
+    await p.evaluate(() => __emettre('reglages:etat', __vue));
+    await p.getByRole('button', { name: 'Historique' }).click(); await p.waitForTimeout(30);
+    await vider(p);
+    await p.evaluate((v) => { __vue = v; __emettre('reglages:etat', { ...v, saisie_en_cours: true }); }, REEL.vue); await p.waitForTimeout(30);
+    const fin = await appels(p);
+    verifier(JSON.stringify(await raccourcisMontres(p)) === quatre && JSON.stringify(fin) === JSON.stringify([['reglages_saisie', { action: 'historique', active: false }]]),
+      '12 ligne partie pendant sa saisie : saisie rendue au cœur, quatre lignes', JSON.stringify(fin));
+    // Elles reviennent dans l'ordre de la vue, sans doublon.
+    await p.evaluate((v) => __emettre('reglages:etat', v), VUE_PRO); await p.waitForTimeout(30);
+    verifier(JSON.stringify(await raccourcisMontres(p)) === six, '12 lignes revenues dans l’ordre, sans doublon');
+    verifier(p.erreurs.length === 0, '12 aucune erreur de console', JSON.stringify(p.erreurs));
+    await p.context().close();
+  }
+
   // Photos de la rubrique Capture à la taille de la fenêtre (680 × 512, échelle 2).
   for (const theme of ['light', 'dark']) {
     const p = await page({ theme, largeur: 680, hauteur: 512, echelle: 2 });

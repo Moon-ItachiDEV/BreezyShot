@@ -12,6 +12,7 @@
       "modele_nom",
       "theme",
       "demarrage",
+      "licence",
       "version"
     ],
     "capture": {
@@ -88,6 +89,124 @@
         "refus": null
       }
     ],
+    "licence_active": false,
+    "version": "7.8.9-essai",
+    "alerte": null,
+    "saisie_en_cours": false
+  },
+  "vue_pro": {
+    "lignes": [
+      "retardateur",
+      "pointeur",
+      "copier",
+      "vignette",
+      "vignette_duree",
+      "vignette_coin",
+      "dossier",
+      "enregistrer",
+      "modele_nom",
+      "theme",
+      "demarrage",
+      "licence",
+      "version"
+    ],
+    "capture": {
+      "retardateur_s": 0,
+      "pointeur": false
+    },
+    "retardateurs": [
+      0,
+      3,
+      5,
+      10
+    ],
+    "copier": true,
+    "enregistrer": false,
+    "vignette": {
+      "afficher": true,
+      "duree_s": 6,
+      "coin": "bas_gauche"
+    },
+    "durees": [
+      3,
+      6,
+      10,
+      0
+    ],
+    "dossier": "Images › BreezyShot",
+    "modele_nom": "BreezyShot {date} à {heure}",
+    "apercu_nom": "BreezyShot 2026-11-12 à 10.42.08.png",
+    "theme": "systeme",
+    "demarrage": "non",
+    "raccourcis": [
+      {
+        "action": "zone",
+        "libelle": "Zone",
+        "touches": [
+          "Ctrl",
+          "Maj",
+          "1"
+        ],
+        "modifie": false,
+        "refus": null
+      },
+      {
+        "action": "plein_ecran",
+        "libelle": "Plein écran",
+        "touches": [
+          "Ctrl",
+          "Maj",
+          "2"
+        ],
+        "modifie": false,
+        "refus": null
+      },
+      {
+        "action": "fenetre",
+        "libelle": "Fenêtre",
+        "touches": [
+          "Ctrl",
+          "Maj",
+          "3"
+        ],
+        "modifie": false,
+        "refus": null
+      },
+      {
+        "action": "derniere_zone",
+        "libelle": "Refaire la dernière zone",
+        "touches": [
+          "Ctrl",
+          "Maj",
+          "4"
+        ],
+        "modifie": false,
+        "refus": null
+      },
+      {
+        "action": "historique",
+        "libelle": "Historique",
+        "touches": [
+          "Ctrl",
+          "Maj",
+          "H"
+        ],
+        "modifie": false,
+        "refus": null
+      },
+      {
+        "action": "texte",
+        "libelle": "Copier le texte",
+        "touches": [
+          "Ctrl",
+          "Maj",
+          "T"
+        ],
+        "modifie": false,
+        "refus": null
+      }
+    ],
+    "licence_active": true,
     "version": "7.8.9-essai",
     "alerte": null,
     "saisie_en_cours": false
