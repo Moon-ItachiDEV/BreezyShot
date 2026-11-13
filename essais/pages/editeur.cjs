@@ -2829,11 +2829,12 @@ const CHARGE = {
         return [r.left + r.width / 2, r.top + r.height / 2];
       });
     await lireTexte(p);
-    const grises = await p.evaluate(() =>
-      ['enregistrer', 'copier', 'fermer'].map(
+    const grises = await p.evaluate(() => [
+      ...['enregistrer', 'copier', 'fermer'].map(
         (a) => document.querySelector(`#barre-haut [data-act="${a}"]`).disabled,
       ),
-    );
+      document.querySelector('#bouton-glisser').disabled,
+    ]);
     await vider(p);
     // Clic sur « Enregistrer » et « Copier » grisés : rien n'est exporté.
     await p.mouse.click(...(await centre('#barre-haut [data-act="enregistrer"]')));
@@ -2849,21 +2850,23 @@ const CHARGE = {
     await uneImage(p);
     const e1 = [await calque(p), (await appels(p, 'editeur_fermer')).length];
     verifier(
-      JSON.stringify(grises) === '[true,true,false]' &&
+      JSON.stringify(grises) === '[true,true,false,true]' &&
         sansExport === 0 &&
         hors &&
         e1[0] === null &&
         e1[1] === 0,
-      '21 choix : « Enregistrer » et « Copier » du haut grisés (clic sans export) ; Échap, ' +
+      '21 choix : « Glisser », « Enregistrer » et « Copier » du haut grisés (clic sans export) ; ' +
+        'Échap, ' +
         'focus hors du calque, ne ferme que le calque',
       JSON.stringify([grises, sansExport, hors, e1]),
     );
-    const apres = await p.evaluate(() =>
-      ['enregistrer', 'copier'].map(
+    const apres = await p.evaluate(() => [
+      ...['enregistrer', 'copier'].map(
         (a) => document.querySelector(`#barre-haut [data-act="${a}"]`).disabled,
       ),
-    );
-    verifier(JSON.stringify(apres) === '[false,false]', '21 calque fermé : barre du haut rendue');
+      document.querySelector('#bouton-glisser').disabled,
+    ]);
+    verifier(JSON.stringify(apres) === '[false,false,false]', '21 calque fermé : barre du haut rendue');
     // Ctrl + A puis focus hors du calque : Ctrl + C copie le texte, jamais l'image ; une
     // touche d'outil (P) est sans effet ; Tab reste dans le calque et sa barre.
     await vider(p);

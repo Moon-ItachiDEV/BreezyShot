@@ -892,19 +892,21 @@ public static int Pixel(byte[] a, int l, int x, int y) {
                 $h = $script:h11; $c = $script:c11
                 $fh = Join-Path $script:Essai.Dossier 'cible-12.txt'
                 $fd = Join-Path $script:Essai.Dossier 'depots-12.txt'
-                $null = Lancer-Aide 'cible-glisser.ps1' @('-X', '780', '-Y', '20', '-Cote', '220', '-FichierHwnd', $fh, '-FichierDepots', $fd) $fh
                 $E::Poser($REPOS_X, $REPOS_Y)
                 # Le bouton de la barre du haut (design/glisser-appli, piste A) : le glisser
-                # réel part de lui.
+                # réel part de lui. La cible, toujours au-dessus, est posée à sa gauche pour ne
+                # jamais le couvrir.
                 $prise = Element $h 'Glisser vers une appli' ([System.Windows.Automation.ControlType]::Button)
                 $q = Centre-Stable $prise
+                $cx = [Math]::Max(0, $q[0] - 520)
+                $null = Lancer-Aide 'cible-glisser.ps1' @('-X', "$cx", '-Y', '20', '-Cote', '220', '-FichierHwnd', $fh, '-FichierDepots', $fd) $fh
                 $debuts = Compter-Motif -Motif "editeur glisser $($c.Id) debut$" -Dossier $da
                 $E::Poser($q[0], $q[1]); Start-Sleep -Milliseconds 100
                 $E::BoutonBas()
                 $E::Deplacer($q[0], $q[1], $q[0] + 12, $q[1] - 6, 6, 20)
                 try {
                     $null = Attendre-Suivante "editeur glisser $($c.Id) debut$" $da $debuts '(13) glisser debut' 10
-                    $E::Deplacer($q[0] + 12, $q[1] - 6, 890, 130, 25, 20)
+                    $E::Deplacer($q[0] + 12, $q[1] - 6, $cx + 110, 130, 25, 20)
                     Start-Sleep -Milliseconds 300
                 }
                 finally { $E::BoutonHaut() }

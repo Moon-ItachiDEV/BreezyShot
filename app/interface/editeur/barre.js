@@ -816,6 +816,7 @@ export function installerBarre(ed) {
   bGlisser.addEventListener("animationend", () => bGlisser.classList.remove("secoue"));
   function glisserEnCours(oui) {
     bGlisser.classList.toggle("glisse", oui);
+    if (!oui) parti = false;
   }
 
   // Menu contextuel d'un objet (« Forme »).
@@ -1074,6 +1075,8 @@ export function installerBarre(ed) {
   function remiseAZero() {
     fermerMenus(false);
     appui = null;
+    parti = false;
+    bGlisser.classList.remove("glisse", "secoue");
     bCopier.classList.remove("done");
     synchroniser();
   }
