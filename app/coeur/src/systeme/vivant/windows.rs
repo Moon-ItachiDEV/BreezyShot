@@ -430,9 +430,10 @@ mod tests {
     const COULEURS: [[u8; 3]; 4] = [[255, 0, 0], [0, 255, 0], [0, 0, 255], [255, 255, 0]];
     /// Couleur de la fenêtre posée par-dessus (aucun carré ne l'a).
     const VOILE: [u8; 3] = [255, 0, 255];
-    /// Décalage depuis le coin de la zone utile : loin des fenêtres d'essai de `gel`
-    /// (posées à 60, 60), pour que leurs tests et ceux-ci ne se gênent pas à l'écran.
-    const DECALAGE: (i32, i32) = (360, 120);
+    /// Décalage depuis le coin haut gauche de la zone utile : en haut à gauche, à côté des
+    /// fenêtres d'essai de `gel` (60, 60, 160 × 160) et loin de celles des tests de
+    /// `defiler` (en bas à droite) ; la fenêtre et son voile tiennent dans 160 × 160.
+    const DECALAGE: (i32, i32) = (260, 40);
 
     fn couleur_attendue(dx: i32, dy: i32) -> [u8; 3] {
         COULEURS[((dy / COTE) * 2 + dx / COTE) as usize]
