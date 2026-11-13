@@ -428,6 +428,20 @@ public static void BoutonBas() {
     mouse_event(0x2, 0, 0, 0, UIntPtr.Zero);
 }
 public static void BoutonHaut() { mouse_event(0x4, 0, 0, 0, UIntPtr.Zero); }
+// Pose la souris, puis attend que ce point soit sur une fenêtre de l'app. Le bandeau laisse
+// passer les clics tant que la souris n'est pas vue sur sa pilule (surveillance toutes les
+// 30 à 60 ms, puis un tour du fil principal) : un clic 40 ms après l'arrivée peut le précéder.
+public static bool PoserSurApp(int x, int y, int ms) {
+    Poser(x, y);
+    POINT p; p.X = x; p.Y = y;
+    DateTime fin = DateTime.UtcNow.AddMilliseconds(ms);
+    do {
+        IntPtr h = GetAncestor(WindowFromPoint(p), 2);
+        if (PidApp != 0 && h != IntPtr.Zero && PidDe(h) == PidApp) return true;
+        System.Threading.Thread.Sleep(20);
+    } while (DateTime.UtcNow < fin);
+    return false;
+}
 public static void Cliquer(int x, int y) {
     Poser(x, y); System.Threading.Thread.Sleep(40);
     BoutonBas(); System.Threading.Thread.Sleep(60); BoutonHaut();
@@ -1298,7 +1312,12 @@ public static uint Crc32(byte[] o) {
                 $pretes = Compter-Motif -Motif 'chrono selection prete \d+' -Dossier $da
                 $annulees = Compter-Motif -Motif 'etat Selection -> Repos \(SelectionAnnulee\)$' -Dossier $da
                 $affiches = Compter-Motif -Motif 'bandeau affiche ' -Dossier $da
-                Cliquer-Element $b
+                $p = Centre-Stable $b
+                if (-not $E::PoserSurApp($p[0], $p[1], 1500)) {
+                    throw "(5) la pilule ne reçoit pas les clics 1,5 s après l'arrivée de la souris en $($p[0]),$($p[1]) ; $(Diagnostic-Journal $da)"
+                }
+                $E::Cliquer($p[0], $p[1])
+                Start-Sleep -Milliseconds 150
                 $E::Poser($REPOS_X, $REPOS_Y)
                 $null = Attendre-Motif -Motif "bandeau action $id reessayer$" -Dossier $da -DelaiS 5 -Quoi '(5) bandeau action reessayer'
                 $null = Attendre-Suivante 'etat Repos -> Gel \(DemandeCapture texte\)$' $da $gels '(5) DemandeCapture texte' 5

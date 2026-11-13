@@ -589,7 +589,9 @@ Vérifications GitHub :
 - Passage 65 : 10 essais Windows sur 13 réussis (voir « Trouvé sur Windows, corrigé »).
 - Passage 66 (`688d7b1`) : tests verts sur Windows, macOS et Linux, 13 essais Windows sur 13.
 - Les corrections de la seconde relecture (`d83e28b`, `6582dac`) sont venues après le
-  passage 66 : c'est le passage de la demande de fusion qui fait foi pour elles.
+  passage 66. Au passage suivant (`67a3095`), avec elles : tests verts sur les trois
+  systèmes, 12 essais Windows sur 13 (un clic de l'essai 13 parti trop tôt, corrigé dans
+  l'essai). C'est le dernier passage de la demande de fusion qui fait foi.
 
 Chaque chantier a été écrit par un agent sur un contrat écrit d'abord, puis relu par un
 agent distinct de l'auteur (effort élevé) : L (licence) et B (données de l'historique)
@@ -680,6 +682,12 @@ personne n'avait relues.
   niveau et réécrit : son point « réglages non réécrits » échouait. Le point (17) de
   l'essai 13 comptait toutes les suppressions en attente, et non celles du motif attendu.
   Trois défauts des essais, aucun de l'app (`3b03c43`).
+- Passage de la demande de fusion (`67a3095`) : 12 essais sur 13. Le point (5) de l'essai 13
+  cliquait « Réessayer » 40 ms après l'arrivée de la souris, alors que le bandeau ne reçoit
+  les clics qu'une fois la souris vue sur sa pilule (surveillance toutes les 30 à 60 ms) :
+  le clic était refusé par la garde de l'essai, une fois sur trois passages. L'essai pose
+  la souris, attend que le point soit sur une fenêtre de l'app, puis clique. Défaut de
+  l'essai, pas de l'app.
 
 ### Mesures sur la machine Windows de GitHub (passage 65)
 
