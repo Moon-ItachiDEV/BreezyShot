@@ -1675,7 +1675,8 @@ public static uint Crc32(byte[] o) {
                 $c = Attendre-Cases $o.H 1 '(17)'
                 Ramener-Devant $o.H '(17)'
                 $nom = (Fichiers-Format $recents)[0].Name
-                $attentes = Compter-Motif -Motif 'historique suppression en attente ' -Dossier $db
+                # Compté avec le motif attendu : (13) a déjà écrit des « en attente 2 ».
+                $attentes = Compter-Motif -Motif 'historique suppression en attente 1$' -Dossier $db
                 Touche-Case $c[0] $AUCUN $SUPPR
                 $null = Attendre-Suivante 'historique suppression en attente 1$' $db $attentes '(17) suppression en attente' 5
                 Fermer-Cas $script:proc $db '(17)'
