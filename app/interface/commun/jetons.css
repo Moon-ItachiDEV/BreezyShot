@@ -116,6 +116,7 @@
   --duree-historique-erreur: 4000ms;
   --duree-historique-reduite: 1ms;
   --texte-balayage: 400ms;
+  --texte-lecture: 200ms;
   --courbe-ressort: cubic-bezier(0.34, 1.4, 0.64, 1);
   --courbe-douce: cubic-bezier(0.2, 0.8, 0.2, 1);
   --courbe-vent: cubic-bezier(0.5, 0, 0.75, 0);
@@ -450,6 +451,7 @@
   --texte-survol: 14%;
   --texte-choix: 30%;
   --texte-teinte: 10%;
+  --texte-surligne: 30%;
   --texte-teinte-editeur: 6%;
   --historique-focus: 2px;
   --historique-focus-ecart: 1px;

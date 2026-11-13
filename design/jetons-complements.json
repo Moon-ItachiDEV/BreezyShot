@@ -960,8 +960,14 @@
    {
     "name": "texte-balayage",
     "value": "400ms",
-    "usage": "Balayage de Copier le texte.",
+    "usage": "Balayage de l'image dans l'éditeur (bouton « Texte »).",
     "origine": "design/historique/index.html, onglet « Copier le texte » ; contrat 0.5 §10."
+   },
+   {
+    "name": "texte-lecture",
+    "value": "200ms",
+    "usage": "Copier le texte : la zone lue se teinte et respire le temps de la lecture (BALAYAGE du cœur).",
+    "origine": "design/copier-texte-animation/index.html, choix A « Surligné » du 13/11 (LECTURE)."
    }
   ]
  },
@@ -2939,8 +2945,14 @@
    {
     "name": "texte-teinte",
     "value": "10%",
-    "usage": "Balayage : teinte d'accent qui s'efface.",
+    "usage": "Copier le texte : teinte d'accent de la zone lue, jusqu'à la fin du surlignage.",
     "origine": "design/historique/index.html, onglet « Copier le texte » ; contrat 0.5 §10."
+   },
+   {
+    "name": "texte-surligne",
+    "value": "30%",
+    "usage": "Copier le texte : part d'accent des lignes copiées surlignées.",
+    "origine": "design/copier-texte-animation/index.html, choix A « Surligné » du 13/11 (.lus i)."
    },
    {
     "name": "texte-teinte-editeur",
