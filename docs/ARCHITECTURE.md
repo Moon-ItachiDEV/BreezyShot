@@ -756,7 +756,12 @@ dernière image gardée ; l'attendu (`defilement::Attendu`) n'est que le décala
 vue par `defiler::decalage_px`), `Aucun` sinon, si une vue est illisible ou a changé de plus
 de 2 px de haut, et toujours dans l'attente de page posée et pour une image reprise
 sans pas (`prendre_une` : position non relue, jamais le lu d'un pas précédent) ; jamais le
-pas commandé. Deux
+pas commandé. Le lu est étalonné une fois par capture (un rectangle de vue qui compte un
+en-tête ou une barre le fausse d'un facteur constant) : la première `Avance(d)` que la mesure
+sans lu redit donne `d / e`, borné à [0,5 ; 2] (`regles::etalon`), appliqué aux lus suivants
+(`regles::lu_etalonne`, journal `defilante: lu etalonne <k>`) ; tant qu'il n'y en a pas, deux
+`Ambigue` de suite avec un lu font remesurer sans lui (`lu de <e> px ambigu deux fois`), et
+une avance ainsi trouvée étalonne aussi. Deux
 images égales donnent `Immobile` (contenu immobile) même avec un lu non nul, sauf une vue
 unie sans ligne porteuse, où `Lu(e)` donne l'avance lue (C, complément). Après chaque pas vers le bas parti et mesuré contre l'image d'avant
 ce pas, l'avance est rendue au défileur (`constater`, 0 compris). Une limite par mémoire

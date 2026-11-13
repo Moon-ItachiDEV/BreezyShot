@@ -945,6 +945,37 @@ pub fn attendu(gardee: Option<Position>, maintenant: Option<Position>) -> Attend
     }
 }
 
+/// Bornes du facteur d'étalonnage du lu (décision du responsable, relecture d'ensemble
+/// point 3) : un rectangle de vue qui compte un en-tête ou une barre fausse le lu d'un
+/// facteur constant, de quelques pour cent ; au-delà de ces bornes, ce n'est plus un biais.
+pub const ETALON_MIN: f64 = 0.5;
+pub const ETALON_MAX: f64 = 2.0;
+/// `Ambigue` de suite avec un lu non étalonné avant de remesurer sans lu.
+pub const AMBIGUES_LUES_MAX: u32 = 2;
+
+/// Le facteur d'étalonnage du lu d'après une avance mesurée sur du contenu (la mesure sans
+/// lu la redit) : `avance / lu`, borné à [`ETALON_MIN`, `ETALON_MAX`]. Rien pour un lu nul
+/// ou négatif, ou une avance nulle. Fonction pure.
+pub fn etalon(avance: u32, lu: i32) -> Option<f64> {
+    (lu > 0 && avance > 0)
+        .then(|| (f64::from(avance) / f64::from(lu)).clamp(ETALON_MIN, ETALON_MAX))
+}
+
+/// Le lu corrigé par l'étalonnage de la capture, s'il y en a un. Fonction pure.
+pub fn lu_etalonne(attendu: Attendu, etalon: Option<f64>) -> Attendu {
+    match (attendu, etalon) {
+        (Attendu::Lu(e), Some(k)) => {
+            let v = (f64::from(e) * k).round();
+            if v.abs() < f64::from(i32::MAX) {
+                Attendu::Lu(v as i32)
+            } else {
+                Attendu::Aucun
+            }
+        }
+        _ => attendu,
+    }
+}
+
 /// Vrai si un cran du moyen en cours fait plus que la zone ne peut recouvrir : chaque pas
 /// perdrait des lignes, le moyen est laissé (B). `Message` envoie des crans partiels : il
 /// n'est jamais laissé pour cela.
@@ -2374,6 +2405,25 @@ mod tests {
             suite(&mut c, Vu::Temps(t0 + DUREE_MAX), t0 + DUREE_MAX),
             vec![Geste::Finir(Fin::Limite)]
         );
+    }
+
+    #[test]
+    fn etalonnage_du_lu() {
+        // Un lu 5 % trop grand : 158 pour une vraie avance de 150.
+        let k = etalon(150, 158).unwrap();
+        assert!((k - 150.0 / 158.0).abs() < 1e-9);
+        assert_eq!(lu_etalonne(Attendu::Lu(158), Some(k)), Attendu::Lu(150));
+        assert_eq!(lu_etalonne(Attendu::Lu(-316), Some(k)), Attendu::Lu(-300));
+        // Borné.
+        assert_eq!(etalon(400, 100), Some(ETALON_MAX));
+        assert_eq!(etalon(10, 100), Some(ETALON_MIN));
+        // Rien sans lu positif ni avance.
+        assert_eq!(etalon(150, 0), None);
+        assert_eq!(etalon(150, -150), None);
+        assert_eq!(etalon(0, 150), None);
+        // Sans étalonnage, ou sans lu : inchangé.
+        assert_eq!(lu_etalonne(Attendu::Lu(158), None), Attendu::Lu(158));
+        assert_eq!(lu_etalonne(Attendu::Aucun, Some(k)), Attendu::Aucun);
     }
 
     #[test]
