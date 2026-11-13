@@ -421,6 +421,22 @@ dans le dossier temporaire du système (`systeme::dossier_secours()`), sous le n
   clic sur une entrée dont l'action ne l'est plus (licence retirée entre-temps) ne fait que
   `menu: entree inconnue <id>`. Le menu est refait quand cette liste change
   (`LicenceChangee`, `TexteDisponible`).
+  **Depuis la 0.5.2 (piste A « Liste », choisie le 13/11/2026)** : sous Windows et macOS, le
+  menu est une fenêtre web (`fenetres::menu`, page `menu/menu.html`), parce que le menu
+  natif ne se style pas. Un clic gauche OU droit sur l'icône (`Evenement::ClicIcone`, avec
+  le rectangle de l'icône) l'ouvre au-dessus d'elle, au-dessus de la barre des tâches, bord
+  droit à 44 px à droite du centre de l'icône, borné à la zone utile (`menu::placer`, pur,
+  testé) ; un second clic le ferme. Il se ferme aussi au choix, sur Échap ou Tab, au clic
+  ailleurs (perte du focus), et quand une capture démarre. La fenêtre est créée cachée à la
+  première ouverture, puis gardée cachée et réutilisée. Groupes : les captures (zone, écran,
+  fenêtre ; la capture défilante s'y ajoutera) ; « Refaire la dernière zone » et « Copier
+  le texte » ; « Historique » et « Réglages » ; « Quitter BreezyShot ». Icônes 16 px
+  (« Curseurs » pour Réglages), raccourcis à droite en `text-2`, faux verre peint
+  (`acrylic-solid`, `shadow-8`). À l'ouverture, le moulinet de l'icône fait un quart de
+  tour (`icone::tourner` : images tournées posées 420 ms, courbe ressort). Journal : `icone:
+  clic`, `menu fenetre <hwnd>`, `menu page prete`, `menu ouvert`, `menu ferme`, puis
+  `menu: <entrée>` comme avant (l'entrée est traitée au tour suivant de la boucle). Sous
+  Linux (Tauri n'y rapporte pas les clics sur l'icône), le menu natif reste.
 - Info-bulle : « BreezyShot ».
 
 ### 3.6 Capture d'une zone (assemblage des étapes 4 à 6)

@@ -702,15 +702,16 @@ personne n'avait relues.
 - Lecture d'une zone dans l'éditeur : 11 ms. Trois aperçus manquants faits en 24 ms.
 - Copier, Enregistrer et glisser depuis l'historique : exacts au pixel.
 
-## Après la 0.5 : une annotation plus naturelle (version 0.5.2)
+## Après la 0.5 : une annotation plus naturelle (version 0.5.3)
 
-Branche `claude/project-thread-9qu6yx`, la version passe à 0.5.2. Demandé par l'utilisateur
-le 13/11 : que la gomme n'efface que là où elle passe, que tout ce qui est annoté se
-comporte de façon logique pour un humain, et que Copier le texte montre ce qu'il copie.
-Choix du même jour, sur des pages à essayer : barre C (`design/annotation-pistes`),
-instruments B (`design/annotation-instruments`) avec une flèche qu'on courbe directement,
-« Surligné » pour Copier le texte (`design/copier-texte-animation`). Ces pages sont dans
-les fichiers du projet, pas dans le dépôt, comme celles des versions précédentes.
+Branche `claude/project-thread-9qu6yx`, la version passe à 0.5.3 (la 0.5.2 est celle du
+menu de l'icône). Demandé par l'utilisateur le 13/11 : que la gomme n'efface que là où
+elle passe, que tout ce qui est annoté se comporte de façon logique pour un humain, et que
+Copier le texte montre ce qu'il copie. Choix du même jour, sur des pages à essayer :
+barre C (`design/annotation-pistes`), instruments B (`design/annotation-instruments`)
+avec une flèche qu'on courbe directement, « Surligné » pour Copier le texte
+(`design/copier-texte-animation`). Ces pages sont dans les fichiers du projet, pas dans le
+dépôt, comme celles des versions précédentes.
 
 Ce qu'elle apporte :
 

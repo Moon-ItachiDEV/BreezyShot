@@ -228,6 +228,7 @@ function Demarrer-Cas([string]$Dossier, [string]$Quoi, [switch]$Vignette, [switc
     $bandeaux = Compter-Motif -Motif 'bandeau pret$' -Dossier $Dossier
     $vignettes = Compter-Motif -Motif 'vignette prete$' -Dossier $Dossier
     $langues = Compter-Motif -Motif 'texte (langues|non pris en charge)' -Dossier $Dossier
+    $script:dossierCas = $Dossier
     try { $proc = Demarrer-App -Dossier $Dossier }
     finally {
         Remove-Item Env:BREEZYSHOT_ESSAI_CAPTURABLE -ErrorAction SilentlyContinue
@@ -843,57 +844,14 @@ public static uint Crc32(byte[] o) {
             if ($E::GetForegroundWindow() -ne $H) { throw "$Quoi : la fenêtre n'est pas revenue au premier plan ($($E::Decrire($E::GetForegroundWindow())))" }
         }
 
-        # --- Menu de l'icône (essai 08) -----------------------------------------------------
-        # Ouvre le vrai menu (message de Windows au clic droit à la fenêtre de l'icône) et le
-        # lit par l'API des menus : { Fenetre, Menu, Textes, Lus }.
-        function Ouvrir-Menu([string]$Quoi) {
-            $icones = $E::Fenetres($script:proc.Id, 'tray_icon_app')
-            if ($icones.Length -lt 1) { throw "$Quoi : aucune fenêtre tray_icon_app (menu de l'icône impossible à ouvrir)" }
-            $avant = @($E::Visibles('#32768') | ForEach-Object { [long]$_ })
-            foreach ($h in $icones) { [void]$E::PostMessage($h, 6002, [IntPtr]::Zero, [IntPtr]0x205) }
-            $limite = [DateTime]::UtcNow.AddSeconds(3)
-            do {
-                foreach ($f in @($E::Visibles('#32768') | Where-Object { $avant -notcontains [long]$_ })) {
-                    $hm = $E::MenuDe($f)
-                    if ($hm -eq [IntPtr]::Zero) { continue }
-                    $t = $E::Textes($hm)
-                    if ($null -ne $t -and $t.Length -gt 0) {
-                        $lus = (@($t) | ForEach-Object { "« $($_ -replace "`t", '<tab>') »" }) -join ', '
-                        return [pscustomobject]@{ Fenetre = $f; Menu = $hm; Textes = @($t); Lus = $lus }
-                    }
-                }
-                Start-Sleep -Milliseconds 50
-            } while ([DateTime]::UtcNow -lt $limite)
-            throw "$Quoi : le menu de l'icône ne s'ouvre pas en 3 s"
+        # --- Menu de l'icône ------------------------------------------------------------------
+        # Le vrai menu (clic droit sur l'icône, menu web lu par UI Automation) : commun.ps1.
+        function Ouvrir-Menu([string]$Quoi, [string]$Dossier = $script:dossierCas) {
+            return (Ouvrir-Menu-Icone $script:proc.Id $Dossier $Quoi)
         }
-        # Échap ferme le menu sans rien choisir (vérifié : la fenêtre du menu part). Comme
-        # les essais 08 et 10, Échap part sans la garde de premier plan : un menu de l'icône
-        # ouvert par message ne donne pas toujours le premier plan à l'app, et le menu ouvert
-        # capte le clavier (rien d'autre ne le reçoit). S'il reste ouvert : WM_CANCELMODE à
-        # la fenêtre de l'icône.
-        function Fermer-Menu($M, [string]$Quoi) {
-            $ouvert = { @($E::Visibles('#32768') | Where-Object { [long]$_ -eq [long]$M.Fenetre }).Count -gt 0 }
-            $E::AppuyerGlobal($AUCUN, $ECHAP)
-            $limite = [DateTime]::UtcNow.AddSeconds(2)
-            while ((& $ouvert) -and [DateTime]::UtcNow -lt $limite) { Start-Sleep -Milliseconds 50 }
-            if (& $ouvert) {
-                Write-Host "$Quoi : Échap n'a pas fermé le menu, WM_CANCELMODE"
-                foreach ($h in $E::Fenetres($script:proc.Id, 'tray_icon_app')) { [void]$E::PostMessage($h, [uint32]0x1F, [IntPtr]::Zero, [IntPtr]::Zero) }
-                $limite = [DateTime]::UtcNow.AddSeconds(2)
-                while ((& $ouvert) -and [DateTime]::UtcNow -lt $limite) { Start-Sleep -Milliseconds 50 }
-            }
-            if (& $ouvert) { throw "$Quoi : ni Échap ni WM_CANCELMODE n'ont fermé le menu" }
-            Start-Sleep -Milliseconds 200
-        }
-        # Clic réel au centre de l'entrée dont le texte vaut exactement $Texte, ou commence
-        # par « $Texte<tab> ».
+        function Fermer-Menu($M, [string]$Quoi) { Fermer-Menu-Icone $M $Quoi }
         function Cliquer-Entree($M, [string]$Texte, [string]$Quoi) {
-            $i = -1
-            for ($k = 0; $k -lt $M.Textes.Count; $k++) { if ($M.Textes[$k] -ceq $Texte -or $M.Textes[$k].StartsWith("$Texte`t", [StringComparison]::Ordinal)) { $i = $k; break } }
-            if ($i -lt 0) { throw "$Quoi : pas d'entrée « $Texte » ($($M.Lus))" }
-            $r = [BreezyShotEssai.Historique+RECT]::new()
-            if (-not $E::GetMenuItemRect([IntPtr]::Zero, $M.Menu, [uint32]$i, [ref]$r)) { throw "$Quoi : rectangle de « $Texte » illisible" }
-            $E::Cliquer([int](($r.Left + $r.Right) / 2), [int](($r.Top + $r.Bottom) / 2))
+            Cliquer-Ligne-Menu $M $Texte $Quoi
             $E::Poser($REPOS_X, $REPOS_Y)
         }
 
@@ -903,7 +861,7 @@ public static uint Crc32(byte[] o) {
             $vus = Compter-Motif -Motif 'menu: reglages$' -Dossier $Dossier
             $fen = Compter-Motif -Motif 'reglages fenetre \d+$' -Dossier $Dossier
             $pretes = Compter-Motif -Motif 'reglages page prete$' -Dossier $Dossier
-            $m = Ouvrir-Menu $Quoi
+            $m = Ouvrir-Menu $Quoi $Dossier
             Cliquer-Entree $m 'Réglages' $Quoi
             $null = Attendre-Suivante 'menu: reglages$' $Dossier $vus "$Quoi : menu: reglages" 5
             $l = Attendre-Suivante 'reglages fenetre (\d+)$' $Dossier $fen "$Quoi : fenêtre des Réglages" 10
@@ -1168,7 +1126,7 @@ public static uint Crc32(byte[] o) {
                 Verifier '(L1) sans licence, la sonde des langues ne tourne pas (aucune ligne texte langues)' ((Compter-Motif -Motif 'texte (langues|non pris en charge)' -Dossier $da) -eq 0) (Derniere-Ligne -Motif 'texte (langues|non pris)' -Dossier $da) | Out-Null
                 $m = Ouvrir-Menu '(L1)'
                 $pro = @($m.Textes | Where-Object { $_.StartsWith('Historique', [StringComparison]::Ordinal) -or $_.StartsWith('Copier le texte', [StringComparison]::Ordinal) })
-                Verifier '(L1) menu sans « Historique » ni « Copier le texte » (8 positions)' (($pro.Count -eq 0) -and ($m.Textes.Count -eq 8)) $m.Lus | Out-Null
+                Verifier '(L1) menu sans « Historique » ni « Copier le texte » (9 positions)' (($pro.Count -eq 0) -and ($m.Textes.Count -eq 9)) $m.Lus | Out-Null
                 Fermer-Menu $m '(L1)'
                 $h = Tenir-Ailleurs $VK_H 'h-sans'
                 $t = Tenir-Ailleurs $VK_T 't-sans'
@@ -1223,11 +1181,13 @@ public static uint Crc32(byte[] o) {
             Point '(2) menu avec la licence' {
                 $m = Ouvrir-Menu '(2)'
                 $t = $m.Textes
-                $ok = ($t.Count -ge 7) -and ($t[4] -ceq "Copier le texte`tCtrl + Maj + T") -and ($t[5] -eq '') -and ($t[6] -ceq "Historique`tCtrl + Maj + H")
-                Verifier '(2) « Copier le texte<tab>Ctrl + Maj + T » en cinquième, séparateur, « Historique<tab>Ctrl + Maj + H »' $ok $m.Lus | Out-Null
+                # Piste A « Liste » : … séparateur, dernière zone, Copier le texte, séparateur,
+                # Historique, Réglages.
+                $ok = ($t.Count -ge 9) -and ($t[5] -ceq "Copier le texte`tCtrl + Maj + T") -and ($t[6] -eq '') -and ($t[7] -ceq "Historique`tCtrl + Maj + H") -and ($t[8] -ceq 'Réglages')
+                Verifier '(2) « Copier le texte<tab>Ctrl + Maj + T » après la dernière zone, séparateur, « Historique<tab>Ctrl + Maj + H » puis « Réglages »' $ok $m.Lus | Out-Null
                 $menus = Compter-Motif -Motif 'menu: ' -Dossier $da
                 Fermer-Menu $m '(2)'
-                Verifier '(2) Échap ferme le menu, aucune entrée choisie' ((Compter-Motif -Motif 'menu: ' -Dossier $da) -eq $menus) | Out-Null
+                Verifier '(2) Échap ferme le menu, aucune entrée choisie' ($script:FermeParEchap -and ((Compter-Motif -Motif 'menu: ' -Dossier $da) -eq $menus)) | Out-Null
             }
 
             # Le témoin de texte, à gauche, sous la place du bandeau.
@@ -1784,7 +1744,7 @@ public static uint Crc32(byte[] o) {
                 Fermer-Reglages $fen $db '(L4)'
                 $m = Ouvrir-Menu '(L4)'
                 $pro = @($m.Textes | Where-Object { $_.StartsWith('Historique', [StringComparison]::Ordinal) -or $_.StartsWith('Copier le texte', [StringComparison]::Ordinal) })
-                Verifier '(L4) entrées « Historique » et « Copier le texte » parties du menu' (($pro.Count -eq 0) -and ($m.Textes.Count -eq 8)) $m.Lus | Out-Null
+                Verifier '(L4) entrées « Historique » et « Copier le texte » parties du menu' (($pro.Count -eq 0) -and ($m.Textes.Count -eq 9)) $m.Lus | Out-Null
                 Fermer-Menu $m '(L4)'
                 Verifier '(L4) Ctrl+Maj+H rendu à Windows' ((Tenir-Ailleurs $VK_H 'h-retiree') -eq 'tenu') | Out-Null
                 Fermer-Cas $script:proc $db '(L4)'

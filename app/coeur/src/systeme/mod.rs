@@ -244,6 +244,15 @@ pub fn identifiant_fenetre(fenetre: &tauri::WebviewWindow) -> Option<isize> {
     plateforme::identifiant_fenetre(fenetre)
 }
 
+/// Vrai là où Tauri rapporte les clics sur l'icône de la zone de notification (tout sauf
+/// Linux) : le menu de l'icône peut y être une fenêtre web.
+pub const CLICS_ICONE_RAPPORTES: bool = !cfg!(target_os = "linux");
+
+/// Vrai si le bouton gauche ou droit de la souris est enfoncé (Windows ; faux ailleurs).
+pub fn bouton_souris_enfonce() -> bool {
+    plateforme::bouton_souris_enfonce()
+}
+
 /// Position de la souris en pixels réels, lue directement (`None` : demander à Tauri).
 pub fn position_souris() -> Option<(f64, f64)> {
     plateforme::position_souris()
