@@ -281,6 +281,15 @@ public static class MenuIcone {
     [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
     [DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y);
     [DllImport("user32.dll")] public static extern bool SetProcessDpiAwarenessContext(IntPtr c);
+    [StructLayout(LayoutKind.Sequential)] public struct POINT { public int X; public int Y; }
+    [DllImport("user32.dll")] static extern IntPtr WindowFromPoint(POINT p);
+    [DllImport("user32.dll")] static extern IntPtr GetAncestor(IntPtr h, uint f);
+    // La fenêtre de premier niveau sous le point (GA_ROOT).
+    public static IntPtr RacineSous(int x, int y) {
+        var p = new POINT(); p.X = x; p.Y = y;
+        IntPtr h = WindowFromPoint(p);
+        return h == IntPtr.Zero ? IntPtr.Zero : GetAncestor(h, 2);
+    }
     [DllImport("user32.dll")] static extern void mouse_event(uint f, int x, int y, uint d, UIntPtr e);
     [DllImport("user32.dll")] static extern void keybd_event(byte vk, byte scan, uint f, UIntPtr e);
     public static IntPtr[] Fenetres(int pid, string classe) {
@@ -343,17 +352,18 @@ function Ouvrir-Menu-Icone([int]$IdProc, [string]$Dossier, [string]$Quoi, $Souri
     # La carte et ses lignes (la page reçoit ses lignes à l'ouverture), dans l'ordre.
     $condMenu = [System.Windows.Automation.PropertyCondition]::new($AE::ControlTypeProperty, $CT::Menu)
     $marcheur = [System.Windows.Automation.TreeWalker]::ControlViewWalker
+    # La page se vide à chaque fermeture : les lignes lues sont celles de cette ouverture.
     $textes = @(); $lignes = @{}; $carte = $null; $vu = 'carte introuvable'
     $limite = [DateTime]::UtcNow.AddSeconds(5)
     do {
         try {
-            $carte = $AE::FromHandle($fen).FindFirst([System.Windows.Automation.TreeScope]::Descendants, $condMenu)
-            if ($null -ne $carte) {
-                $textes = @(); $lignes = @{}
-                $e = $marcheur.GetFirstChild($carte)
+            $trouvee = $AE::FromHandle($fen).FindFirst([System.Windows.Automation.TreeScope]::Descendants, $condMenu)
+            if ($null -ne $trouvee) {
+                $lusIci = @(); $lignesIci = @{}
+                $e = $marcheur.GetFirstChild($trouvee)
                 while ($null -ne $e) {
                     $c = $e.Current
-                    if ($c.ControlType -eq $CT::Separator) { $textes += '' }
+                    if ($c.ControlType -eq $CT::Separator) { $lusIci += '' }
                     elseif ($c.ControlType -eq $CT::MenuItem) {
                         # Le raccourci : le texte de la ligne qui n'est pas son libellé.
                         $racc = $null
@@ -364,13 +374,14 @@ function Ouvrir-Menu-Icone([int]$IdProc, [string]$Dossier, [string]$Quoi, $Souri
                         if (-not $racc -and $c.AcceleratorKey) {
                             $racc = ($c.AcceleratorKey -replace '^Control', 'Ctrl' -replace 'Shift', 'Maj') -replace '\+', ' + '
                         }
-                        $textes += $(if ($racc) { "$($c.Name)`t$racc" } else { $c.Name })
-                        $lignes[$c.Name] = $e
+                        $lusIci += $(if ($racc) { "$($c.Name)`t$racc" } else { $c.Name })
+                        $lignesIci[$c.Name] = $e
                     }
                     $e = $marcheur.GetNextSibling($e)
                 }
-                $vu = "$($textes.Count) positions"
-                if ($lignes.Count -gt 0) { break }
+                # Parcours complet et sans erreur : il fait foi.
+                $vu = "$($lusIci.Count) positions"
+                if ($lignesIci.Count -gt 0) { $textes = $lusIci; $lignes = $lignesIci; $carte = $trouvee; break }
             }
         } catch { $vu = "UI Automation : $($_.Exception.Message)" }
         Start-Sleep -Milliseconds 100
@@ -386,28 +397,42 @@ function Ouvrir-Menu-Icone([int]$IdProc, [string]$Dossier, [string]$Quoi, $Souri
     }
 }
 
+# Clic réel en (x, y), seulement si le menu est montré et sous ce point (jamais de clic
+# hors des fenêtres de l'app).
+function Cliquer-Dans-Menu($Menu, [int]$X, [int]$Y, [string]$Quoi) {
+    $M = [BreezyShotEssai.MenuIcone]
+    if (-not $M::IsWindowVisible($Menu.Fenetre)) { throw "$Quoi : le menu s'est fermé avant le clic" }
+    $sous = $M::RacineSous($X, $Y)
+    if ($sous -ne $Menu.Fenetre) { throw "$Quoi : le menu n'est pas sous le point $X,$Y (fenêtre $sous)" }
+    $M::Cliquer($X, $Y)
+}
+
 # Clic réel au centre de la ligne dont le libellé vaut $Libelle.
 function Cliquer-Ligne-Menu($Menu, [string]$Libelle, [string]$Quoi) {
     $e = $Menu.Lignes[$Libelle]
     if ($null -eq $e) { throw "$Quoi : pas de ligne « $Libelle » au menu ($($Menu.Lus))" }
     $r = $e.Current.BoundingRectangle
     if ($r.IsEmpty -or $r.Width -le 0) { throw "$Quoi : rectangle de « $Libelle » illisible" }
-    [BreezyShotEssai.MenuIcone]::Cliquer([int]($r.X + $r.Width / 2), [int]($r.Y + $r.Height / 2))
+    Cliquer-Dans-Menu $Menu ([int]($r.X + $r.Width / 2)) ([int]($r.Y + $r.Height / 2)) $Quoi
 }
 
 # Ferme le menu sans rien choisir : un clic dans le retrait de la carte (aucune ligne) lui
 # donne le clavier, puis Échap — seulement si le menu est au premier plan (jamais de touche
 # hors des fenêtres de l'app). Sinon, un second clic sur l'icône le referme.
+# $script:FermeParEchap dit ensuite si c'est Échap qui l'a fermé.
+$script:FermeParEchap = $false
 function Fermer-Menu-Icone($Menu, [string]$Quoi) {
     $M = [BreezyShotEssai.MenuIcone]
+    $script:FermeParEchap = $false
     if (-not $M::IsWindowVisible($Menu.Fenetre)) { return }
     $r = $Menu.Rect
-    $M::Cliquer([int]($r.X + $r.L / 2), [int]($r.Y + 2))
+    Cliquer-Dans-Menu $Menu ([int]($r.X + $r.L / 2)) ([int]($r.Y + 2)) $Quoi
     $limite = [DateTime]::UtcNow.AddSeconds(1)
     while ($M::GetForegroundWindow() -ne $Menu.Fenetre -and [DateTime]::UtcNow -lt $limite) { Start-Sleep -Milliseconds 30 }
     if ($M::GetForegroundWindow() -eq $Menu.Fenetre) { $M::Touche(0x1B) }
     $limite = [DateTime]::UtcNow.AddSeconds(2)
     while ($M::IsWindowVisible($Menu.Fenetre) -and [DateTime]::UtcNow -lt $limite) { Start-Sleep -Milliseconds 30 }
+    $script:FermeParEchap = -not $M::IsWindowVisible($Menu.Fenetre)
     if ($M::IsWindowVisible($Menu.Fenetre)) {
         Write-Host "$Quoi : Échap n'a pas fermé le menu, second clic sur l'icône"
         Clic-Icone $Menu.IdProc $Quoi

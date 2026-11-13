@@ -56,7 +56,7 @@ const HAUTEUR = CADRE + (LIGNES.length - seps) * LIGNE + seps * SEP;
         core: { invoke: (c, a) => {
           window.__appels.push([c, a]);
           if (c === 'menu_pret' && refuses < refus) { refuses++; return Promise.reject('pas encore en place'); }
-          return Promise.resolve(c === 'menu_pret' ? { lignes, clavier: false } : null);
+          return Promise.resolve(c === 'menu_pret' ? { lignes } : null);
         } },
         event: { listen: (n, f) => { ecoutes[n] = f; return Promise.resolve(() => {}); } },
       };
@@ -108,11 +108,16 @@ const HAUTEUR = CADRE + (LIGNES.length - seps) * LIGNE + seps * SEP;
   await p.waitForTimeout(50);
   verifier(JSON.stringify(await appels(p, 'menu_choisi')) === JSON.stringify([['menu_choisi', { id: 'reglages' }]]), 'clic sur Réglages : menu_choisi { id: reglages }, une fois');
 
-  // Nouvelle ouverture, au clavier : focus sur la première ligne, flèches, Entrée.
-  await p.evaluate((lignes) => __emettre('menu:ouvrir', { lignes, clavier: true }), LIGNES);
+  // Caché : la carte se vide (rien d'ancien à la prochaine ouverture).
+  await p.evaluate(() => __emettre('menu:vider'));
+  verifier((await p.evaluate(() => document.getElementById('menu').children.length)) === 0, 'menu:vider : carte vide');
+  // Nouvelle ouverture, au clavier : Flèche bas prend la première ligne, puis flèches, Entrée.
+  await p.evaluate((lignes) => __emettre('menu:ouvrir', { lignes }), LIGNES);
   await p.waitForTimeout(50);
   const focus = () => p.evaluate(() => document.activeElement?.dataset?.id || null);
-  verifier(await focus() === 'capturer_zone', 'ouvert au clavier : focus sur la première ligne', await focus());
+  verifier(await focus() === null, 'ouvert : aucune ligne au focus', await focus());
+  await p.keyboard.press('ArrowDown');
+  verifier(await focus() === 'capturer_zone', 'Flèche bas : la première ligne', await focus());
   await p.keyboard.press('ArrowUp');
   verifier(await focus() === 'quitter', 'Flèche haut depuis la première : la dernière', await focus());
   await p.keyboard.press('ArrowDown');
@@ -128,12 +133,12 @@ const HAUTEUR = CADRE + (LIGNES.length - seps) * LIGNE + seps * SEP;
   const choix = (await appels(p, 'menu_choisi')).map(a => a[1].id);
   verifier(JSON.stringify(choix) === JSON.stringify(['reglages', 'capturer_derniere_zone']), 'Entrée : menu_choisi de la ligne au focus', JSON.stringify(choix));
   // Échap ferme sans choisir.
-  await p.evaluate((lignes) => __emettre('menu:ouvrir', { lignes, clavier: false }), LIGNES);
+  await p.evaluate((lignes) => __emettre('menu:ouvrir', { lignes }), LIGNES);
   await p.keyboard.press('Escape');
   await p.waitForTimeout(50);
   verifier((await appels(p, 'menu_fermer')).length === 1 && (await appels(p, 'menu_choisi')).length === 2, 'Échap : menu_fermer, rien de choisi');
   // Ligne mal formée : ignorée sans casser la page.
-  await p.evaluate(() => __emettre('menu:ouvrir', { lignes: [{ id: 3 }, { id: 'reglages', libelle: 'Réglages', raccourci: null, separateur: false }], clavier: false }));
+  await p.evaluate(() => __emettre('menu:ouvrir', { lignes: [{ id: 3 }, { id: 'reglages', libelle: 'Réglages', raccourci: null, separateur: false }] }));
   verifier((await p.evaluate(() => document.querySelectorAll('.ligne').length)) === 1, 'ligne mal formée ignorée');
   await p.context().close();
 

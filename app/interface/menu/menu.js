@@ -3,10 +3,12 @@
 // Contrat avec le cœur (application/fenetre_menu.rs) :
 // - `menu_pret` une fois, quand l'écoute de `menu:ouvrir` et du thème est en place ; rend
 //   les lignes de la première ouverture (ou null).
-// - écoute `menu:ouvrir` { lignes: [{ id, libelle, raccourci, separateur }], clavier }.
+// - écoute `menu:ouvrir` { lignes: [{ id, libelle, raccourci, separateur }] }, et
+//   `menu:vider` (menu caché : la carte se vide, rien d'ancien à la prochaine ouverture).
 // - `menu_choisi` { id } au clic (ou Entrée, Espace) sur une ligne.
 // - `menu_fermer` sur Échap ou Tab.
-// Flèches haut et bas, Début, Fin : d'une ligne à l'autre.
+// Flèches haut et bas (la première pression prend la première ou la dernière ligne),
+// Début, Fin : d'une ligne à l'autre.
 // Sans window.__TAURI__ (aperçu dans un navigateur) : un menu de démonstration.
 //
 // Aucune donnée ne passe par innerHTML : textes par textContent, pictogrammes tirés de
@@ -78,7 +80,7 @@ function appeler(commande, args) {
   if (!tauri?.core?.invoke) return Promise.resolve(null);
   return Promise.resolve(tauri.core.invoke(commande, args)).catch((e) => {
     console.warn(`menu : ${commande} refusé :`, e);
-    return null;
+    throw e;
   });
 }
 
@@ -86,7 +88,10 @@ let choisi = false;
 function choisir(id) {
   if (choisi) return;
   choisi = true;
-  appeler("menu_choisi", { id });
+  // Refusé : la ligne peut être choisie de nouveau.
+  appeler("menu_choisi", { id }).catch(() => {
+    choisi = false;
+  });
 }
 
 function lignes() {
@@ -135,9 +140,11 @@ function montrer(charge) {
   menu.classList.add("entree");
   void menu.offsetWidth;
   menu.classList.remove("entree");
-  const premiere = lignes()[0];
-  if (charge.clavier && premiere) premiere.focus();
-  else if (document.activeElement && document.activeElement !== document.body) document.activeElement.blur();
+  if (document.activeElement && document.activeElement !== document.body) document.activeElement.blur();
+}
+
+function vider() {
+  menu.replaceChildren();
 }
 
 document.addEventListener("keydown", (e) => {
@@ -154,7 +161,7 @@ document.addEventListener("keydown", (e) => {
     tous[e.key === "Home" ? 0 : tous.length - 1]?.focus();
   } else if (e.key === "Escape" || e.key === "Tab") {
     e.preventDefault();
-    appeler("menu_fermer");
+    appeler("menu_fermer").catch(() => {});
   } else if ((e.key === "Enter" || e.key === " ") && i >= 0) {
     e.preventDefault();
     choisir(tous[i].dataset.id);
@@ -164,7 +171,6 @@ document.addEventListener("keydown", (e) => {
 document.addEventListener("contextmenu", (e) => e.preventDefault());
 
 const DEMO = {
-  clavier: false,
   lignes: [
     { id: "capturer_zone", libelle: "Capturer une zone", raccourci: "Ctrl + Maj + 1" },
     { id: "capturer_plein_ecran", libelle: "Capturer l'écran", raccourci: "Ctrl + Maj + 2" },
@@ -186,9 +192,10 @@ async function demarrer() {
     return;
   }
   await suivreTheme();
-  await Promise.resolve(tauri.event.listen("menu:ouvrir", (e) => montrer(e?.payload))).catch((e) =>
-    console.warn("menu : écoute impossible :", e),
-  );
+  await Promise.all([
+    tauri.event.listen("menu:ouvrir", (e) => montrer(e?.payload)),
+    tauri.event.listen("menu:vider", () => vider()),
+  ]).catch((e) => console.warn("menu : écoute impossible :", e));
   direPret();
 }
 

@@ -615,7 +615,7 @@ public static string Titre(IntPtr h) {
     $menus = Compter-Motif -Motif 'menu: (quitter|reglages|capturer|historique)' -Dossier $cas
     Fermer-Menu-Icone $m '(5b)'
     Start-Sleep -Milliseconds 300
-    Verifier '(5b) Échap ferme le menu, aucune entrée choisie' ((Compter-Motif -Motif 'menu: (quitter|reglages|capturer|historique)' -Dossier $cas) -eq $menus) | Out-Null
+    Verifier '(5b) Échap ferme le menu, aucune entrée choisie' ($script:FermeParEchap -and ((Compter-Motif -Motif 'menu: (quitter|reglages|capturer|historique)' -Dossier $cas) -eq $menus)) | Out-Null
 
     # (6) Ctrl+Maj+8 tenu ailleurs : la saisie ne le reçoit pas ; puis Échap.
     # L'aide tourne sans console : sa fenêtre couvrirait la ligne cliquée ensuite.

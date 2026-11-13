@@ -23,7 +23,9 @@ use crate::systeme::Theme;
 /// Vrai là où le menu est la fenêtre web (les clics sur l'icône sont rapportés).
 pub const MENU_WEB: bool = !cfg!(target_os = "linux");
 
-/// L'image posée en ce moment (thème de la barre, taille), pour le quart de tour.
+/// L'image posée en ce moment (thème de la barre, taille), pour le quart de tour. Le verrou
+/// est tenu pendant chaque `set_icon` : un changement de thème et une image du tour ne se
+/// croisent jamais.
 static IMAGE_ACTUELLE: Mutex<Option<(Theme, u32)>> = Mutex::new(None);
 /// Vrai pendant un quart de tour (un second clic ne le relance pas).
 static TOURNE: AtomicBool = AtomicBool::new(false);
@@ -182,10 +184,11 @@ pub fn changer_image(app: &AppHandle, theme: Theme, taille: u32) -> Result<(), S
         return Err("icone absente".into());
     };
     let image = Image::from_bytes(image_png(theme, taille)).map_err(|e| format!("image: {e}"))?;
+    let mut actuelle = IMAGE_ACTUELLE
+        .lock()
+        .map_err(|_| "verrou de l'image".to_string())?;
     icone.set_icon(Some(image)).map_err(|e| e.to_string())?;
-    if let Ok(mut i) = IMAGE_ACTUELLE.lock() {
-        *i = Some((theme, taille));
-    }
+    *actuelle = Some((theme, taille));
     Ok(())
 }
 
@@ -253,7 +256,7 @@ pub fn tourner_rgba(rgba: &[u8], cote: u32, degres: f64) -> Vec<u8> {
 
 /// Le moulinet de l'icône fait un quart de tour (ouverture du menu). Le moulinet est
 /// symétrique d'un quart de tour : la dernière image est l'image d'origine. Un fil à part
-/// pose les images ; rien si un tour est déjà en cours.
+/// cadence les images, posées sur le fil principal ; rien si un tour est déjà en cours.
 pub fn tourner(app: &AppHandle) {
     let Some((theme, taille)) = IMAGE_ACTUELLE.lock().ok().and_then(|i| *i) else {
         return;
@@ -273,18 +276,29 @@ pub fn tourner(app: &AppHandle) {
                 for k in 1..IMAGES_TOUR {
                     let angle = 90.0 * avancement_ressort(f64::from(k) / f64::from(IMAGES_TOUR));
                     let tournee = Image::new_owned(tourner_rgba(&rgba, cote, angle), cote, cote);
-                    let _ = icone.set_icon(Some(tournee));
+                    // Posée sur le fil principal, seulement si l'image n'a pas changé
+                    // entre-temps (thème, taille) ; verrou pris sans attendre (jamais de
+                    // blocage contre `changer_image`).
+                    let pour = icone.clone();
+                    let _ = app.run_on_main_thread(move || {
+                        if let Ok(actuelle) = IMAGE_ACTUELLE.try_lock() {
+                            if *actuelle == Some((theme, taille)) {
+                                let _ = pour.set_icon(Some(tournee));
+                            }
+                        }
+                    });
                     std::thread::sleep(pas);
                 }
-                // L'image du moment (le thème a pu changer pendant le tour).
-                let (t, n) = IMAGE_ACTUELLE
-                    .lock()
-                    .ok()
-                    .and_then(|i| *i)
-                    .unwrap_or((theme, taille));
-                if let Ok(fin) = Image::from_bytes(image_png(t, n)) {
-                    let _ = icone.set_icon(Some(fin));
-                }
+                // L'image du moment (verrou occupé : `changer_image` la pose lui-même).
+                let pour = icone.clone();
+                let _ = app.run_on_main_thread(move || {
+                    if let Ok(actuelle) = IMAGE_ACTUELLE.try_lock() {
+                        let (t, n) = (*actuelle).unwrap_or((theme, taille));
+                        if let Ok(fin) = Image::from_bytes(image_png(t, n)) {
+                            let _ = pour.set_icon(Some(fin));
+                        }
+                    }
+                });
             }
             TOURNE.store(false, Ordering::SeqCst);
         });

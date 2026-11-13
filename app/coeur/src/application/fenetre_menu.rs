@@ -5,8 +5,8 @@
 //! Contrat avec la page :
 //! - `menu_pret` : la page écoute `menu:ouvrir` et le thème ; rend les lignes de la
 //!   première ouverture (ou `null`).
-//! - `menu:ouvrir` { lignes: [{ id, libelle, raccourci, separateur }], clavier } à chaque
-//!   ouverture suivante.
+//! - `menu:ouvrir` { lignes: [{ id, libelle, raccourci, separateur }] } à chaque
+//!   ouverture suivante ; `menu:vider` quand le menu est caché.
 //! - `menu_choisi` { id } : une ligne choisie ; le menu se cache, l'entrée est traitée au
 //!   tour suivant de la boucle (jamais une fenêtre créée dans la commande d'une page).
 //! - `menu_fermer` : Échap ou Tab ; le menu se cache.
@@ -51,7 +51,7 @@ pub fn lignes(entrees: &[EntreeMenu]) -> Vec<Ligne> {
 pub fn clic_icone(app: &AppHandle, rect: Rect) {
     log::info!("icone: clic");
     if menu::ouvert(app) {
-        menu::cacher(app);
+        let _ = menu::cacher(app);
         return;
     }
     if menu::vient_de_fermer() {
@@ -61,8 +61,9 @@ pub fn clic_icone(app: &AppHandle, rect: Rect) {
         log::warn!("menu non ouvert: application pas prete");
         return;
     };
-    icone::tourner(app);
-    menu::ouvrir(app, Some(rect), lignes(&entrees), false);
+    if menu::ouvrir(app, Some(rect), lignes(&entrees)) {
+        icone::tourner(app);
+    }
 }
 
 #[tauri::command]
@@ -74,13 +75,13 @@ pub fn menu_pret(app: AppHandle) -> Option<Ouverture> {
 
 #[tauri::command]
 pub fn menu_choisi(app: AppHandle, id: String) {
-    menu::cacher(&app);
+    let _ = menu::cacher(&app);
     poster_plus_tard(&app, Evenement::Menu(id));
 }
 
 #[tauri::command]
 pub fn menu_fermer(app: AppHandle) {
-    menu::cacher(&app);
+    let _ = menu::cacher(&app);
 }
 
 #[cfg(test)]

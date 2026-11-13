@@ -844,8 +844,8 @@ public static uint Crc32(byte[] o) {
 
         # --- Menu de l'icône ------------------------------------------------------------------
         # Le vrai menu (clic droit sur l'icône, menu web lu par UI Automation) : commun.ps1.
-        function Ouvrir-Menu([string]$Quoi) {
-            return (Ouvrir-Menu-Icone $script:proc.Id $script:dossierCas $Quoi)
+        function Ouvrir-Menu([string]$Quoi, [string]$Dossier = $script:dossierCas) {
+            return (Ouvrir-Menu-Icone $script:proc.Id $Dossier $Quoi)
         }
         function Fermer-Menu($M, [string]$Quoi) { Fermer-Menu-Icone $M $Quoi }
         function Cliquer-Entree($M, [string]$Texte, [string]$Quoi) {
@@ -859,7 +859,7 @@ public static uint Crc32(byte[] o) {
             $vus = Compter-Motif -Motif 'menu: reglages$' -Dossier $Dossier
             $fen = Compter-Motif -Motif 'reglages fenetre \d+$' -Dossier $Dossier
             $pretes = Compter-Motif -Motif 'reglages page prete$' -Dossier $Dossier
-            $m = Ouvrir-Menu $Quoi
+            $m = Ouvrir-Menu $Quoi $Dossier
             Cliquer-Entree $m 'Réglages' $Quoi
             $null = Attendre-Suivante 'menu: reglages$' $Dossier $vus "$Quoi : menu: reglages" 5
             $l = Attendre-Suivante 'reglages fenetre (\d+)$' $Dossier $fen "$Quoi : fenêtre des Réglages" 10
@@ -1185,7 +1185,7 @@ public static uint Crc32(byte[] o) {
                 Verifier '(2) « Copier le texte<tab>Ctrl + Maj + T » après la dernière zone, séparateur, « Historique<tab>Ctrl + Maj + H » puis « Réglages »' $ok $m.Lus | Out-Null
                 $menus = Compter-Motif -Motif 'menu: ' -Dossier $da
                 Fermer-Menu $m '(2)'
-                Verifier '(2) Échap ferme le menu, aucune entrée choisie' ((Compter-Motif -Motif 'menu: ' -Dossier $da) -eq $menus) | Out-Null
+                Verifier '(2) Échap ferme le menu, aucune entrée choisie' ($script:FermeParEchap -and ((Compter-Motif -Motif 'menu: ' -Dossier $da) -eq $menus)) | Out-Null
             }
 
             # Le témoin de texte, à gauche, sous la place du bandeau.

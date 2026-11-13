@@ -1587,11 +1587,12 @@ fn demarrer_capture(app: &AppHandle, mode: Mode) {
         return;
     }
     noter_demande(app);
-    // Un raccourci pressé menu ouvert : le menu part avant la photo.
-    fenetres::menu::cacher(app);
+    // Un raccourci pressé menu ouvert : le menu part avant la photo, et le compositeur est
+    // attendu comme pour le bandeau caché.
+    let menu_cache = fenetres::menu::cacher(app);
     match declencheur {
         Declencheur::DemandeDecompte(_) => commencer_decompte(app, mode, retardateur_s),
-        _ => apres_gel(app, mode, recu_a, false),
+        _ => apres_gel(app, mode, recu_a, menu_cache),
     }
 }
 

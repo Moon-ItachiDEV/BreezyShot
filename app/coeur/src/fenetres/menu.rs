@@ -20,8 +20,12 @@ use crate::systeme;
 pub const ETIQUETTE_MENU: &str = "menu";
 /// Page de la fenêtre, sous `app/interface/`.
 pub const PAGE: &str = "menu/menu.html";
-/// Événement écouté par la page : les lignes à montrer, à chaque ouverture.
+/// Événements écoutés par la page : les lignes à montrer, à chaque ouverture ; vider la
+/// carte (menu caché : la prochaine ouverture ne montre jamais les anciennes lignes).
 pub const EVENEMENT_OUVRIR: &str = "menu:ouvrir";
+pub const EVENEMENT_VIDER: &str = "menu:vider";
+/// Pas de la surveillance des clics hors du menu.
+pub const PAS_SURVEILLANCE: Duration = Duration::from_millis(30);
 
 /// Mesures du menu en pixels logiques, les mêmes que `menu/menu.css`.
 pub const LARGEUR: f64 = 336.0;
@@ -56,8 +60,6 @@ pub struct Ligne {
 #[derive(Debug, Clone, Serialize)]
 pub struct Ouverture {
     pub lignes: Vec<Ligne>,
-    /// Vrai : la page met le focus sur la première ligne (ouvert au clavier).
-    pub clavier: bool,
 }
 
 /// Dernière fermeture (pour `ANTI_REBOND`) et lignes en attente de la page.
@@ -150,13 +152,13 @@ fn creer(app: &AppHandle) -> Result<WebviewWindow, String> {
         .build()
         .map_err(|e| format!("creation: {e}"))?;
     if let Err(e) = systeme::preparer_fenetre_outil_active(&f) {
-        log::warn!("menu: style outil non pose: {e}");
+        log::warn!("menu web: style outil non pose: {e}");
     }
     let pour_focus = app.clone();
     f.on_window_event(move |e| {
         // Un clic ailleurs (ou Alt+Tab) : le menu se ferme, comme un menu natif.
         if let tauri::WindowEvent::Focused(false) = e {
-            cacher(&pour_focus);
+            let _ = cacher(&pour_focus);
         }
     });
     match systeme::identifiant_fenetre(&f) {
@@ -166,10 +168,17 @@ fn creer(app: &AppHandle) -> Result<WebviewWindow, String> {
     Ok(f)
 }
 
-/// Ouvre le menu au-dessus de l'icône (`icone` : son rectangle, pixels réels ; `None` :
-/// sous la souris). La première fois, la fenêtre est créée et la page envoie
-/// `menu_pret` : les lignes lui sont données à ce moment-là.
-pub fn ouvrir(app: &AppHandle, icone: Option<Rect>, lignes: Vec<Ligne>, clavier: bool) {
+/// Vrai si le rectangle donné pour l'icône est inutilisable (Windows ne l'a pas donné).
+pub fn rect_inconnu(r: &Rect) -> bool {
+    (r.largeur <= 1 && r.hauteur <= 1) || (r.x == 0 && r.y == 0)
+}
+
+/// Ouvre le menu au-dessus de l'icône (`icone` : son rectangle, pixels réels ; `None` ou
+/// inconnu : sous la souris). La première fois, la fenêtre est créée et la page envoie
+/// `menu_pret` : les lignes lui sont données à ce moment-là. Rend vrai si le menu est
+/// montré.
+pub fn ouvrir(app: &AppHandle, icone: Option<Rect>, lignes: Vec<Ligne>) -> bool {
+    let icone = icone.filter(|r| !rect_inconnu(r));
     let ancre = icone.or_else(|| {
         super::souris(app).map(|(x, y)| Rect {
             x: x as i32,
@@ -186,18 +195,18 @@ pub fn ouvrir(app: &AppHandle, icone: Option<Rect>, lignes: Vec<Ligne>, clavier:
     });
     let Some(ecran) = ecran_sous(centre, &ecrans(app)) else {
         log::warn!("menu non ouvert: aucun ecran");
-        return;
+        return false;
     };
     let ancre = ancre.unwrap_or(ecran.zone_utile);
     let place = placer(ancre, &ecran, hauteur_carte(&lignes));
-    let charge = Ouverture { lignes, clavier };
+    let charge = Ouverture { lignes };
     let (f, nouvelle) = match fenetre(app) {
         Some(f) => (f, false),
         None => match creer(app) {
             Ok(f) => (f, true),
             Err(e) => {
                 log::warn!("menu non ouvert: {e}");
-                return;
+                return false;
             }
         },
     };
@@ -211,7 +220,7 @@ pub fn ouvrir(app: &AppHandle, icone: Option<Rect>, lignes: Vec<Ligne>, clavier:
     } else {
         theme::envoyer_a(app, ETIQUETTE_MENU);
         if let Err(e) = app.emit_to(ETIQUETTE_MENU, EVENEMENT_OUVRIR, charge) {
-            log::warn!("menu: lignes non envoyees: {e}");
+            log::warn!("menu web: lignes non envoyees: {e}");
         }
     }
     let _ = f.show();
@@ -219,6 +228,47 @@ pub fn ouvrir(app: &AppHandle, icone: Option<Rect>, lignes: Vec<Ligne>, clavier:
         let _ = f.set_focus();
     }
     log::info!("menu ouvert");
+    surveiller_clics(app, place);
+    true
+}
+
+/// Ferme le menu au premier clic hors de lui, même s'il n'a jamais reçu le focus
+/// (Windows peut refuser le premier plan : `Focused(false)` n'arriverait jamais). Un fil
+/// regarde les boutons de la souris tant que le menu est montré.
+fn surveiller_clics(app: &AppHandle, place: Rect) {
+    let app = app.clone();
+    let lance = std::thread::Builder::new()
+        .name("menu-clics".into())
+        .spawn(move || {
+            // Un bouton encore enfoncé à l'ouverture (le clic sur l'icône) ne compte pas.
+            let mut relache = !systeme::bouton_souris_enfonce();
+            loop {
+                std::thread::sleep(PAS_SURVEILLANCE);
+                if !ouvert(&app) {
+                    return;
+                }
+                let enfonce = systeme::bouton_souris_enfonce();
+                if !enfonce {
+                    relache = true;
+                    continue;
+                }
+                if !relache {
+                    continue;
+                }
+                let dedans = systeme::position_souris().is_some_and(|(x, y)| place.contient(x, y));
+                if !dedans {
+                    let pour = app.clone();
+                    let _ = app.run_on_main_thread(move || {
+                        cacher(&pour);
+                    });
+                    return;
+                }
+                relache = false;
+            }
+        });
+    if let Err(e) = lance {
+        log::warn!("menu web: surveillance des clics impossible: {e}");
+    }
 }
 
 /// Les lignes en attente de la page (première ouverture), une seule fois.
@@ -226,19 +276,24 @@ pub fn prendre_en_attente() -> Option<Ouverture> {
     EN_ATTENTE.lock().ok().and_then(|mut a| a.take())
 }
 
-/// Cache le menu (choix fait, Échap, clic ailleurs). Rien s'il est déjà caché.
-pub fn cacher(app: &AppHandle) {
+/// Cache le menu (choix fait, Échap, clic ailleurs) et vide la page. Rend vrai s'il était
+/// montré.
+pub fn cacher(app: &AppHandle) -> bool {
     let Some(f) = fenetre(app) else {
-        return;
+        return false;
     };
     if !f.is_visible().unwrap_or(false) {
-        return;
+        return false;
     }
     if let Ok(mut t) = FERME_A.lock() {
         *t = Some(Instant::now());
     }
     let _ = f.hide();
+    if let Err(e) = app.emit_to(ETIQUETTE_MENU, EVENEMENT_VIDER, ()) {
+        log::warn!("menu web: page non videe: {e}");
+    }
     log::info!("menu ferme");
+    true
 }
 
 #[cfg(test)]
@@ -282,6 +337,34 @@ mod tests {
             },
             echelle,
         }
+    }
+
+    #[test]
+    fn rectangle_de_l_icone_inconnu() {
+        assert!(rect_inconnu(&Rect {
+            x: 0,
+            y: 0,
+            largeur: 0,
+            hauteur: 0
+        }));
+        assert!(rect_inconnu(&Rect {
+            x: 0,
+            y: 0,
+            largeur: 24,
+            hauteur: 40
+        }));
+        assert!(rect_inconnu(&Rect {
+            x: 500,
+            y: 500,
+            largeur: 1,
+            hauteur: 1
+        }));
+        assert!(!rect_inconnu(&Rect {
+            x: 1700,
+            y: 1036,
+            largeur: 24,
+            hauteur: 40
+        }));
     }
 
     #[test]
