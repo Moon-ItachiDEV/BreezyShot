@@ -120,6 +120,23 @@ pub struct Position {
     pub pour_cent: f64,
     /// `VerticalViewSize`, la part visible de la page, de 0 à 100.
     pub vue: f64,
+    /// La hauteur de la vue qui défile, en pixels réels : le rectangle de l'élément UI
+    /// Automation qui porte le `ScrollPattern`, lu avec la position (une barre horizontale
+    /// éventuelle y est comprise).
+    pub hauteur_vue: i32,
+}
+
+/// Le décalage de la page entre deux positions lues, en pixels réels, positif quand la page
+/// est descendue : `(après − avant) / 100 × hauteur_vue × (100 / vue − 1)`, la page faisant
+/// `hauteur_vue × 100 / vue`. `None` si une vue est inutilisable (`vue` hors de ]0, 100[,
+/// hauteur nulle) ou si la hauteur de la vue a changé de plus de 2 px entre les deux (vue
+/// redimensionnée).
+pub fn decalage_px(avant: &Position, apres: &Position) -> Option<i32> {
+    if avant.hauteur_vue <= 0 || (avant.hauteur_vue - apres.hauteur_vue).abs() > 2 {
+        return None;
+    }
+    let d = pixels_entre(*avant, *apres, apres.hauteur_vue)?;
+    (d.abs() < f64::from(i32::MAX)).then(|| d.round() as i32)
 }
 
 /// Ce qu'a fait une demande de pas. Ne dit jamais si la page a bougé : seules les images le
@@ -497,9 +514,13 @@ fn pixels_entre(avant: Position, apres: Position, hauteur_vue: i32) -> Option<f6
 /// Une position lue qui a un sens : la page défile (`VerticallyScrollable`) et le
 /// pourcentage n'est pas `UIA_ScrollPatternNoScroll` (−1).
 #[cfg_attr(not(windows), allow(dead_code))]
-fn position_lue(defilable: bool, pour_cent: f64, vue: f64) -> Option<Position> {
+fn position_lue(defilable: bool, pour_cent: f64, vue: f64, hauteur_vue: i32) -> Option<Position> {
     (defilable && pour_cent.is_finite() && (0.0..=100.0).contains(&pour_cent) && vue.is_finite())
-        .then_some(Position { pour_cent, vue })
+        .then_some(Position {
+            pour_cent,
+            vue,
+            hauteur_vue,
+        })
 }
 
 /// Au-dessous de cette hauteur de zone (pixels réels), le premier pas d'un message posté est
@@ -1024,24 +1045,62 @@ mod tests {
         assert_eq!(e.delta_partiel(150, 240), Some(90));
     }
 
+    fn pos(pour_cent: f64, vue: f64, hauteur_vue: i32) -> Position {
+        Position {
+            pour_cent,
+            vue,
+            hauteur_vue,
+        }
+    }
+
+    #[test]
+    fn decalage_en_pixels_avec_la_hauteur_de_la_vue() {
+        // Vue de 450 px qui montre 10 % de la page : page de 4 500 px, 4 050 px qui
+        // défilent ; 10 % de plus = 405 px.
+        let a = pos(0.0, 10.0, 450);
+        let b = pos(10.0, 10.0, 450);
+        assert_eq!(decalage_px(&a, &b), Some(405));
+        assert_eq!(decalage_px(&b, &a), Some(-405), "vers le haut : négatif");
+        assert_eq!(decalage_px(&a, &a), Some(0));
+        // Vue de 600 px qui montre 25 % : page de 2 400 px, 1 800 qui défilent ; 2,5 % = 45.
+        assert_eq!(
+            decalage_px(&pos(40.0, 25.0, 600), &pos(42.5, 25.0, 600)),
+            Some(45)
+        );
+        // Arrondi au pixel : 0,1 % de 1 800 = 1,8 px.
+        assert_eq!(
+            decalage_px(&pos(0.0, 25.0, 600), &pos(0.1, 25.0, 600)),
+            Some(2)
+        );
+        // La hauteur à 2 px près (arrondis du rectangle) : gardée.
+        assert_eq!(
+            decalage_px(&a, &pos(10.0, 10.0, 452)).map(|d| d / 10),
+            Some(40)
+        );
+    }
+
+    #[test]
+    fn pas_de_decalage_sans_vue_utilisable() {
+        let a = pos(0.0, 10.0, 450);
+        // Toute la page visible, ou vue illisible.
+        assert_eq!(decalage_px(&a, &pos(10.0, 100.0, 450)), None);
+        assert_eq!(decalage_px(&a, &pos(10.0, 0.0, 450)), None);
+        assert_eq!(decalage_px(&a, &pos(10.0, f64::NAN, 450)), None);
+        // Hauteur nulle, ou vue redimensionnée entre les deux.
+        assert_eq!(decalage_px(&pos(0.0, 10.0, 0), &pos(10.0, 10.0, 0)), None);
+        assert_eq!(decalage_px(&a, &pos(10.0, 10.0, 300)), None);
+        assert_eq!(decalage_px(&a, &pos(10.0, 10.0, 447)), None);
+    }
+
     #[test]
     fn pixels_entre_deux_positions() {
-        let a = Position {
-            pour_cent: 0.0,
-            vue: 10.0,
-        };
-        let b = Position {
-            pour_cent: 10.0,
-            vue: 10.0,
-        };
+        let a = pos(0.0, 10.0, 450);
+        let b = pos(10.0, 10.0, 450);
         // Page de 4 500 px pour une vue de 450 : 4 050 px qui défilent, 10 % = 405 px.
         let d = pixels_entre(a, b, 450).unwrap();
         assert!((d - 405.0).abs() < 1e-9, "{d}");
         assert!(pixels_entre(b, a, 450).unwrap() < 0.0);
-        let sans_vue = Position {
-            pour_cent: 10.0,
-            vue: 100.0,
-        };
+        let sans_vue = pos(10.0, 100.0, 450);
         assert_eq!(pixels_entre(a, sans_vue, 450), None);
         assert_eq!(pixels_entre(a, b, 0), None);
     }
@@ -1049,15 +1108,12 @@ mod tests {
     #[test]
     fn position_lue_seulement_si_la_page_defile() {
         assert_eq!(
-            position_lue(true, 42.0, 10.0),
-            Some(Position {
-                pour_cent: 42.0,
-                vue: 10.0
-            })
+            position_lue(true, 42.0, 10.0, 317),
+            Some(pos(42.0, 10.0, 317))
         );
-        assert_eq!(position_lue(true, -1.0, 100.0), None);
-        assert_eq!(position_lue(false, 0.0, 100.0), None);
-        assert_eq!(position_lue(true, f64::NAN, 10.0), None);
+        assert_eq!(position_lue(true, -1.0, 100.0, 317), None);
+        assert_eq!(position_lue(false, 0.0, 100.0, 317), None);
+        assert_eq!(position_lue(true, f64::NAN, 10.0, 317), None);
     }
 
     // --- Molette entendue, molette postée ---
