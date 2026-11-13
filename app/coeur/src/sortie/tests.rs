@@ -1672,7 +1672,10 @@ fn enregistrer_a_tolere_un_disque_sans_vidage() {
 
 // ---------- Historique (contrat 0.5, §3.1) ----------
 
-use super::historique::{dossier_apercus_de, horodatage_du_nom, taille_ihdr};
+use super::historique::{
+    crc32, dossier_apercus_de, filtrer_au_format, horodatage_du_nom, nettoyer_apercus, orphelins,
+    taille_decodee, taille_ihdr, NomsLus, OCTETS_MAX,
+};
 use super::{
     chemin_apercu, chemin_recent, lire_recent, lister_recents, ranger_apercu, supprimer_recent,
     vider, BilanVidage,
@@ -1926,6 +1929,129 @@ fn lire_recent_aller_retour_exact_et_alpha() {
     assert!(lire_recent(&abime).is_err());
 }
 
+/// Compte la plus grosse allocation demandee par le fil courant (tous les tests de ce
+/// binaire passent par lui ; il ne fait que mesurer, puis laisse faire `System`).
+struct MesureAllocations;
+
+thread_local! {
+    static PLUS_GROSSE: Cell<usize> = const { Cell::new(0) };
+}
+
+fn noter_allocation(octets: usize) {
+    // `try_with` : jamais de panique pendant la fin du fil.
+    let _ = PLUS_GROSSE.try_with(|c| c.set(c.get().max(octets)));
+}
+
+// SAFETY : chaque appel est passe tel quel a `System`, qui tient le contrat de `GlobalAlloc`.
+unsafe impl std::alloc::GlobalAlloc for MesureAllocations {
+    unsafe fn alloc(&self, mise: std::alloc::Layout) -> *mut u8 {
+        noter_allocation(mise.size());
+        // SAFETY : meme contrat que l'appelant.
+        unsafe { std::alloc::System.alloc(mise) }
+    }
+
+    unsafe fn alloc_zeroed(&self, mise: std::alloc::Layout) -> *mut u8 {
+        noter_allocation(mise.size());
+        // SAFETY : meme contrat que l'appelant.
+        unsafe { std::alloc::System.alloc_zeroed(mise) }
+    }
+
+    unsafe fn realloc(&self, p: *mut u8, mise: std::alloc::Layout, taille: usize) -> *mut u8 {
+        noter_allocation(taille);
+        // SAFETY : meme contrat que l'appelant.
+        unsafe { std::alloc::System.realloc(p, mise, taille) }
+    }
+
+    unsafe fn dealloc(&self, p: *mut u8, mise: std::alloc::Layout) {
+        // SAFETY : meme contrat que l'appelant.
+        unsafe { std::alloc::System.dealloc(p, mise) }
+    }
+}
+
+#[global_allocator]
+static ALLOCATIONS: MesureAllocations = MesureAllocations;
+
+/// La plus grosse allocation faite par ce fil pendant `f`.
+fn plus_grosse_allocation<T>(f: impl FnOnce() -> T) -> (T, usize) {
+    PLUS_GROSSE.with(|c| c.set(0));
+    let resultat = f();
+    (resultat, PLUS_GROSSE.with(Cell::get))
+}
+
+/// Un bloc PNG : longueur, type, donnees, CRC.
+fn bloc_png(sortie: &mut Vec<u8>, genre: &[u8; 4], donnees: &[u8]) {
+    sortie.extend_from_slice(&(donnees.len() as u32).to_be_bytes());
+    let debut = sortie.len();
+    sortie.extend_from_slice(genre);
+    sortie.extend_from_slice(donnees);
+    let crc = crc32(&sortie[debut..]);
+    sortie.extend_from_slice(&crc.to_be_bytes());
+}
+
+/// Un PNG fait a la main : en-tete `largeur` × `hauteur` RGBA 8 bits, puis un IDAT qui ne
+/// porte que deux lignes nulles (bloc zlib « stocke »), puis IEND. Pour une image de deux
+/// lignes de `largeur` 1, c'est un PNG complet et juste.
+fn png_a_la_main(largeur: u32, hauteur: u32) -> Vec<u8> {
+    let mut octets = vec![0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a];
+    let mut ihdr = Vec::new();
+    ihdr.extend_from_slice(&largeur.to_be_bytes());
+    ihdr.extend_from_slice(&hauteur.to_be_bytes());
+    ihdr.extend_from_slice(&[8, 6, 0, 0, 0]);
+    bloc_png(&mut octets, b"IHDR", &ihdr);
+    // Deux lignes : filtre 0 puis un pixel (0, 0, 0, 255).
+    let brut = [0u8, 0, 0, 0, 255, 0, 0, 0, 0, 255];
+    let (mut a, mut b) = (1u32, 0u32);
+    for &o in &brut {
+        a = (a + u32::from(o)) % 65521;
+        b = (b + a) % 65521;
+    }
+    let longueur = brut.len() as u16;
+    let mut zlib = vec![0x78, 0x01, 0x01];
+    zlib.extend_from_slice(&longueur.to_le_bytes());
+    zlib.extend_from_slice(&(!longueur).to_le_bytes());
+    zlib.extend_from_slice(&brut);
+    zlib.extend_from_slice(&((b << 16) | a).to_be_bytes());
+    bloc_png(&mut octets, b"IDAT", &zlib);
+    bloc_png(&mut octets, b"IEND", &[]);
+    octets
+}
+
+#[test]
+fn lire_recent_juge_l_en_tete_avant_d_allouer() {
+    let d = dossiers();
+    let chemin = d.recents.join("20261113-000000-000.png");
+    // Le PNG fait a la main est juste : une image 1 × 2 opaque, relue.
+    fs::write(&chemin, png_a_la_main(1, 2)).unwrap();
+    let (relu, alpha) = lire_recent(&chemin).expect("png a la main");
+    assert_eq!((relu.largeur, relu.hauteur), (1, 2));
+    assert_eq!(relu.rgba, [0, 0, 0, 255, 0, 0, 0, 255]);
+    assert!(!alpha);
+    // La mesure voit bien une grosse allocation.
+    let (_, vue) = plus_grosse_allocation(|| vec![1u8; 32 << 20]);
+    assert!(vue >= 32 << 20, "{vue}");
+
+    // 16384 × 16384 annonce (1 Gio decode), 1 Ko sur le disque : refuse sans allouer
+    // l'image. Juste au-dessus de la limite aussi.
+    for (largeur, hauteur) in [(16384, 16384), (16384, 8193), (u32::MAX, u32::MAX)] {
+        fs::write(&chemin, png_a_la_main(largeur, hauteur)).unwrap();
+        assert!(fs::metadata(&chemin).unwrap().len() < 1024);
+        let (lu, plus_grosse) = plus_grosse_allocation(|| lire_recent(&chemin));
+        assert!(lu.is_err(), "{largeur} × {hauteur}");
+        assert!(
+            plus_grosse < 8 << 20,
+            "{largeur} × {hauteur} : {plus_grosse} octets alloues"
+        );
+    }
+    // La limite elle-meme : 512 Mio.
+    assert_eq!(OCTETS_MAX, 512 << 20);
+    assert_eq!(taille_decodee(16384, 8192), Some(512 << 20));
+    assert_eq!(taille_decodee(16384, 8193), None);
+    assert_eq!(taille_decodee(16384, 16384), None);
+    assert_eq!(taille_decodee(u32::MAX, u32::MAX), None);
+    assert_eq!(taille_decodee(0, 5), None);
+    assert_eq!(taille_decodee(3, 2), Some(24));
+}
+
 #[test]
 fn apercu_range_relu_et_remplace() {
     let d = dossiers();
@@ -1977,8 +2103,8 @@ fn supprimer_recent_le_png_et_son_apercu_seulement() {
     etrangers_intacts(&d.recents);
     etrangers_intacts(&d.apercus);
 
-    // Deja parti : fait. Nom hors format : refuse, rien de touche.
-    supprimer_recent(&d.recents, &d.apercus, nom).expect("deja parti");
+    // Deja parti : refuse. Nom hors format : refuse, rien de touche.
+    assert!(supprimer_recent(&d.recents, &d.apercus, nom).is_err());
     for faux in ETRANGERS.iter().copied().chain(["../Images/x.png", ""]) {
         assert!(
             supprimer_recent(&d.recents, &d.apercus, faux).is_err(),
@@ -2069,37 +2195,248 @@ fn vider_ne_touche_que_nos_formats() {
     assert_eq!(vider(vide, vide, vide), BilanVidage::default());
 }
 
+/// Les apercus au format exact de `dossier`, tries.
+fn apercus_au_format(dossier: &Path) -> Vec<String> {
+    let mut noms: Vec<String> = noms_du_dossier(dossier)
+        .into_iter()
+        .filter(|n| cle_recent(n).is_some() && dossier.join(n).is_file())
+        .collect();
+    noms.sort();
+    noms
+}
+
 #[test]
-fn nettoyage_a_50_efface_aussi_les_apercus() {
+fn nettoyage_a_50_efface_l_apercu_des_captures_retirees() {
     let d = dossiers();
     let mut dem = demande(d.local.parent().unwrap());
     dem.enregistrer = false;
     dem.dossier_recents = d.recents.clone();
     poser_etrangers(&d.apercus);
-    for i in 0..55 {
-        let nom = format!("20250101-0000{i:02}-000.png");
-        fs::write(d.recents.join(&nom), png_de(&image(2, 2))).unwrap();
-        ranger_apercu(&d.apercus, &nom, &image(1, 1)).unwrap();
+    // 55 captures, chacune avec son apercu ; aucun apercu orphelin.
+    let noms: Vec<String> = (0..55)
+        .map(|i| format!("20250101-0000{i:02}-000.png"))
+        .collect();
+    for nom in &noms {
+        fs::write(d.recents.join(nom), png_de(&image(2, 2))).unwrap();
+        ranger_apercu(&d.apercus, nom, &image(1, 1)).unwrap();
     }
-    // Un apercu sans capture (capture supprimee par la vignette).
-    ranger_apercu(&d.apercus, "20240101-000000-000.png", &image(1, 1)).unwrap();
-
     let neuf = sortir(&image(2, 2), &dem).recent.unwrap().expect("recent");
     let nom_neuf = neuf.file_name().unwrap().to_str().unwrap().to_string();
-    ranger_apercu(&d.apercus, &nom_neuf, &image(1, 1)).unwrap();
 
+    // Les 6 plus anciennes parties, avec leur apercu ; les 49 autres gardent le leur.
     let liste = lister_recents(&d.recents);
     assert_eq!(liste.len(), RECENTS_GARDES);
     assert_eq!(liste[0].nom, nom_neuf);
-    let mut apercus: Vec<String> = noms_du_dossier(&d.apercus)
-        .into_iter()
-        .filter(|n| cle_recent(n).is_some() && d.apercus.join(n).is_file())
-        .collect();
-    apercus.sort();
-    let mut attendus: Vec<String> = liste.iter().map(|e| e.nom.clone()).collect();
-    attendus.sort();
-    assert_eq!(apercus, attendus);
+    for nom in &noms[..6] {
+        assert!(!d.recents.join(nom).exists(), "{nom}");
+        assert!(!d.apercus.join(nom).exists(), "{nom}");
+    }
+    assert_eq!(apercus_au_format(&d.apercus), noms[6..]);
     etrangers_intacts(&d.apercus);
+
+    // Le chemin des captures retirees, seul : un nom donne comme parti perd son apercu
+    // meme si sa capture est encore la (ce n'est donc pas l'effacement des orphelins).
+    let garde = &noms[10];
+    assert!(d.recents.join(garde).is_file());
+    nettoyer_apercus(&d.recents, std::slice::from_ref(garde));
+    assert!(!d.apercus.join(garde).exists());
+    assert!(d.recents.join(garde).is_file());
+    assert_eq!(apercus_au_format(&d.apercus).len(), 48);
+}
+
+#[test]
+fn nettoyage_efface_les_apercus_orphelins() {
+    let d = dossiers();
+    let mut dem = demande(d.local.parent().unwrap());
+    dem.enregistrer = false;
+    dem.dossier_recents = d.recents.clone();
+    poser_etrangers(&d.apercus);
+    // Trois captures, loin de la limite : le nettoyage ne retire aucune capture.
+    let captures = [
+        "20250101-000000-000.png",
+        "20250101-000001-000.png",
+        "20250101-000001-000_2.png",
+    ];
+    for nom in captures {
+        fs::write(d.recents.join(nom), png_de(&image(2, 2))).unwrap();
+        ranger_apercu(&d.apercus, nom, &image(1, 1)).unwrap();
+    }
+    // Deux apercus sans capture (capture supprimee par la vignette, ou a la main).
+    for orphelin in ["20240101-000000-000.png", "20250101-000001-000_3.png"] {
+        ranger_apercu(&d.apercus, orphelin, &image(1, 1)).unwrap();
+    }
+    sortir(&image(2, 2), &dem).recent.unwrap().expect("recent");
+
+    assert_eq!(lister_recents(&d.recents).len(), 4);
+    for nom in captures {
+        assert!(d.recents.join(nom).is_file(), "{nom}");
+    }
+    // Les orphelins seuls sont partis.
+    assert_eq!(apercus_au_format(&d.apercus), captures);
+    etrangers_intacts(&d.apercus);
+}
+
+#[test]
+fn liste_partielle_aucun_apercu_juge_orphelin() {
+    use std::ffi::OsString;
+    use std::io;
+    let entree = |nom: &str, fichier: bool| Ok((OsString::from(nom), Ok(fichier)));
+    let a = "20250101-000000-000.png";
+    let b = "20250101-000001-000.png";
+    // Entrees triees : seuls les fichiers ordinaires au format restent.
+    let lus = filtrer_au_format(
+        [
+            entree(a, true),
+            entree("notes.txt", true),
+            entree("20250101-000002-000.png", false),
+            entree(b, true),
+        ]
+        .into_iter(),
+    );
+    assert_eq!(
+        lus,
+        NomsLus {
+            noms: vec![a.to_string(), b.to_string()],
+            complete: true
+        }
+    );
+    // Une entree en erreur pendant le parcours, ou un type illisible : liste incomplete,
+    // le reste est quand meme lu.
+    let en_erreur = filtrer_au_format(
+        [
+            entree(a, true),
+            Err(io::Error::other("entree illisible")),
+            entree(b, true),
+        ]
+        .into_iter(),
+    );
+    assert_eq!(en_erreur.noms, [a, b]);
+    assert!(!en_erreur.complete);
+    let type_illisible = filtrer_au_format(
+        [
+            entree(a, true),
+            Ok((OsString::from(b), Err(io::Error::other("type")))),
+        ]
+        .into_iter(),
+    );
+    assert_eq!(type_illisible.noms, [a]);
+    assert!(!type_illisible.complete);
+
+    // Les orphelins : seulement avec deux listes completes.
+    let apercus = NomsLus {
+        noms: vec![a.to_string(), b.to_string()],
+        complete: true,
+    };
+    let presents = NomsLus {
+        noms: vec![a.to_string()],
+        complete: true,
+    };
+    assert_eq!(orphelins(&apercus, &presents), [b]);
+    let partiels = NomsLus {
+        noms: vec![a.to_string()],
+        complete: false,
+    };
+    assert!(orphelins(&apercus, &partiels).is_empty());
+    let apercus_partiels = NomsLus {
+        noms: apercus.noms.clone(),
+        complete: false,
+    };
+    assert!(orphelins(&apercus_partiels, &presents).is_empty());
+    // « Recents » absent : liste incomplete, aucun apercu efface.
+    let d = dossiers();
+    ranger_apercu(&d.apercus, a, &image(1, 1)).unwrap();
+    fs::remove_dir(&d.recents).unwrap();
+    nettoyer_apercus(&d.recents, &[]);
+    assert!(d.apercus.join(a).is_file());
+}
+
+#[test]
+fn supprimer_recent_nom_de_la_liste_a_l_octet_pres() {
+    let d = dossiers();
+    // Sous Windows, « …123.png » ouvrirait ce « …123.PNG » : il n'est pas dans la liste.
+    let majuscules = "20261111-194012-123.PNG";
+    let nom = "20261111-194012-123.png";
+    fs::write(d.recents.join(majuscules), png_de(&image(4, 4))).unwrap();
+    ranger_apercu(&d.apercus, nom, &image(2, 2)).unwrap();
+    assert!(lister_recents(&d.recents).is_empty());
+    assert!(supprimer_recent(&d.recents, &d.apercus, nom).is_err());
+    assert!(d.recents.join(majuscules).is_file());
+    assert!(d.apercus.join(nom).is_file());
+    // Au format mais tronque (pas dans la liste) : refuse, garde.
+    let tronque = "20261111-194012-124.png";
+    let complet = png_de(&image(4, 4));
+    fs::write(d.recents.join(tronque), &complet[..complet.len() - 3]).unwrap();
+    ranger_apercu(&d.apercus, tronque, &image(2, 2)).unwrap();
+    assert!(supprimer_recent(&d.recents, &d.apercus, tronque).is_err());
+    assert!(d.recents.join(tronque).is_file());
+    assert!(d.apercus.join(tronque).is_file());
+    // Dans la liste : le PNG et son apercu partent.
+    let liste = "20261111-194012-125.png";
+    fs::write(d.recents.join(liste), &complet).unwrap();
+    ranger_apercu(&d.apercus, liste, &image(2, 2)).unwrap();
+    assert_eq!(lister_recents(&d.recents)[0].nom, liste);
+    supprimer_recent(&d.recents, &d.apercus, liste).expect("supprime");
+    assert!(!d.recents.join(liste).exists());
+    assert!(!d.apercus.join(liste).exists());
+    // Deja parti : refuse, l'apercu laisse par un autre reste (le nettoyage s'en charge).
+    ranger_apercu(&d.apercus, liste, &image(2, 2)).unwrap();
+    assert!(supprimer_recent(&d.recents, &d.apercus, liste).is_err());
+    assert!(d.apercus.join(liste).is_file());
+}
+
+/// Cree le lien symbolique `lien` vers `cible` avec `ln -s` (pas de `cfg` de systeme hors de
+/// `systeme/`, regle d'architecture 3). Vrai si le systeme est de la famille Unix.
+fn lien_symbolique(cible: &Path, lien: &Path) -> bool {
+    if std::env::consts::FAMILY != "unix" {
+        return false;
+    }
+    let fait = std::process::Command::new("ln")
+        .arg("-s")
+        .arg(cible)
+        .arg(lien)
+        .status()
+        .expect("ln");
+    assert!(fait.success(), "ln -s {}", lien.display());
+    assert!(lien.symlink_metadata().unwrap().file_type().is_symlink());
+    true
+}
+
+#[test]
+fn lien_symbolique_ni_liste_ni_suivi() {
+    let d = dossiers();
+    // Des cibles hors de nos dossiers, au format, et un dossier au format avec un fichier.
+    let nom = "20261111-194012-123.png";
+    let image_cible = d.images.join(nom);
+    let octets = png_de(&image(4, 4));
+    fs::write(&image_cible, &octets).unwrap();
+    let dossier_cible = d.images.join("20261111-194012-200.png");
+    fs::create_dir(&dossier_cible).unwrap();
+    fs::write(dossier_cible.join(nom), &octets).unwrap();
+    // Sous Unix seulement (ce que demandait `#[cfg(unix)]`, interdit ici par la regle 3).
+    if !lien_symbolique(&image_cible, &d.recents.join(nom)) {
+        return;
+    }
+    lien_symbolique(&dossier_cible, &d.recents.join("20261111-194012-200.png"));
+    lien_symbolique(&image_cible, &d.apercus.join(nom));
+    lien_symbolique(&image_cible, &d.glisser.join("BreezyShot lien.png"));
+
+    assert!(lister_recents(&d.recents).is_empty());
+    assert!(supprimer_recent(&d.recents, &d.apercus, nom).is_err());
+    assert_eq!(
+        vider(&d.recents, &d.apercus, &d.glisser),
+        BilanVidage::default()
+    );
+    // Les liens restent, leurs cibles sont intactes.
+    for lien in [
+        d.recents.join(nom),
+        d.recents.join("20261111-194012-200.png"),
+        d.apercus.join(nom),
+        d.glisser.join("BreezyShot lien.png"),
+    ] {
+        assert!(lien.symlink_metadata().unwrap().file_type().is_symlink());
+    }
+    assert_eq!(fs::read(&image_cible).unwrap(), octets);
+    assert_eq!(fs::read(dossier_cible.join(nom)).unwrap(), octets);
 }
 
 #[test]

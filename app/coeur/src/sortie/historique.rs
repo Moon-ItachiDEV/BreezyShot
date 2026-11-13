@@ -8,8 +8,9 @@
 //! fil principal.
 
 use std::collections::BTreeSet;
+use std::ffi::OsString;
 use std::fs::{self, File};
-use std::io::{BufReader, ErrorKind, Read, Seek, SeekFrom};
+use std::io::{self, BufReader, ErrorKind, Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 
 use chrono::{DateTime, NaiveDateTime, Utc};
@@ -32,8 +33,9 @@ const SIGNATURE: [u8; 8] = [0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a];
 /// Le dernier bloc de tout PNG complet : longueur 0, `IEND`, son CRC.
 const FIN_PNG: [u8; 12] = [0, 0, 0, 0, b'I', b'E', b'N', b'D', 0xae, 0x42, 0x60, 0x82];
 
-/// Memoire au plus pour relire une capture (8 ecrans 4K cote a cote tiennent dedans).
-const OCTETS_MAX: usize = 1 << 30;
+/// Memoire au plus pour relire une capture, verifiee sur l'en-tete avant toute allocation
+/// (512 Mio : 4 ecrans 8K, ou 16 ecrans 4K, cote a cote).
+pub(super) const OCTETS_MAX: usize = 512 << 20;
 
 /// Cause quand une capture ne peut pas etre relue (jamais de chemin ni de message de crate).
 const CAUSE_LECTURE: &str = "La capture est illisible.";
@@ -68,7 +70,7 @@ pub(super) fn horodatage_du_nom(nom: &str) -> Option<DateTime<Utc>> {
 }
 
 /// CRC-32 des PNG (polynome reflechi 0xEDB88320), bit a bit : il ne sert qu'a 17 octets.
-fn crc32(octets: &[u8]) -> u32 {
+pub(super) fn crc32(octets: &[u8]) -> u32 {
     let mut crc = 0xffff_ffffu32;
     for &o in octets {
         crc ^= u32::from(o);
@@ -122,27 +124,59 @@ fn taille_png(chemin: &Path) -> Option<(u32, u32)> {
     (fin == FIN_PNG).then_some(taille)
 }
 
+/// Les noms au format exact d'un dossier, et si la liste est complete : dossier lu sans
+/// aucune entree en erreur. Une liste partielle sert a montrer ou a effacer ce qu'elle
+/// nomme, jamais a juger qu'un nom manque.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub(super) struct NomsLus {
+    pub(super) noms: Vec<String>,
+    pub(super) complete: bool,
+}
+
 /// Les noms des fichiers ordinaires de `dossier` qui ont le format exact (sans lien
-/// symbolique ni sous-dossier). Dossier absent ou illisible : aucun.
-fn noms_au_format(dossier: &Path) -> Vec<String> {
+/// symbolique ni sous-dossier). Dossier absent ou illisible : aucun, liste incomplete.
+fn noms_au_format(dossier: &Path) -> NomsLus {
     if dossier.as_os_str().is_empty() {
-        return Vec::new();
+        return NomsLus::default();
     }
     let Ok(entrees) = fs::read_dir(dossier) else {
-        return Vec::new();
+        return NomsLus::default();
     };
-    entrees
-        .filter_map(|e| e.ok())
-        .filter(|e| e.file_type().map(|t| t.is_file()).unwrap_or(false))
-        .filter_map(|e| e.file_name().into_string().ok())
-        .filter(|n| cle_recent(n).is_some())
-        .collect()
+    filtrer_au_format(
+        entrees.map(|e| e.map(|e| (e.file_name(), e.file_type().map(|t| t.is_file())))),
+    )
+}
+
+/// Le tri de `noms_au_format`, sur des entrees (nom, est-ce un fichier ordinaire). Une
+/// entree en erreur, ou dont le type n'a pas pu etre lu, rend la liste incomplete.
+pub(super) fn filtrer_au_format(
+    entrees: impl Iterator<Item = io::Result<(OsString, io::Result<bool>)>>,
+) -> NomsLus {
+    let mut lus = NomsLus {
+        noms: Vec::new(),
+        complete: true,
+    };
+    for entree in entrees {
+        let (nom, fichier) = match entree {
+            Ok((nom, Ok(fichier))) => (nom, fichier),
+            Ok((_, Err(_))) | Err(_) => {
+                lus.complete = false;
+                continue;
+            }
+        };
+        match nom.into_string() {
+            Ok(nom) if fichier && cle_recent(&nom).is_some() => lus.noms.push(nom),
+            _ => {}
+        }
+    }
+    lus
 }
 
 /// Les entrees du dossier, la plus recente d'abord (ordre des noms, celui de `cle_recent`) ;
 /// un fichier illisible, tronque ou dont le nom porte une date impossible est ecarte.
 pub fn lister_recents(dossier: &Path) -> Vec<EntreeRecente> {
     let mut liste: Vec<EntreeRecente> = noms_au_format(dossier)
+        .noms
         .into_iter()
         .filter_map(|nom| {
             let horodatage = horodatage_du_nom(&nom)?;
@@ -168,12 +202,18 @@ pub fn chemin_recent(dossier: &Path, nom: &str) -> Option<PathBuf> {
 }
 
 /// Relit un PNG de « Recents » (RGBA 8 bits, ce que `sortir` ecrit) ; le booleen dit s'il a
-/// un alpha < 255. Tout autre PNG, tronque ou abime : une erreur, jamais une panique.
+/// un alpha < 255. Tout autre PNG, tronque ou abime : une erreur, jamais une panique. L'en-tete
+/// est juge (RGBA, 8 bits, taille decodee de `OCTETS_MAX` au plus) avant toute allocation.
 pub fn lire_recent(chemin: &Path) -> Result<(Pixels, bool), String> {
     let f = File::open(chemin).map_err(|_| CAUSE_LECTURE.to_string())?;
     let limites = ::png::Limits { bytes: OCTETS_MAX };
     let decodeur = ::png::Decoder::new_with_limits(BufReader::new(f), limites);
     let mut lecteur = decodeur.read_info().map_err(|_| CAUSE_LECTURE)?;
+    let entete = lecteur.info();
+    if entete.color_type != ::png::ColorType::Rgba || entete.bit_depth != ::png::BitDepth::Eight {
+        return Err(CAUSE_LECTURE.into());
+    }
+    taille_decodee(entete.width, entete.height).ok_or(CAUSE_LECTURE)?;
     let taille = lecteur.output_buffer_size().ok_or(CAUSE_LECTURE)?;
     if taille > OCTETS_MAX {
         return Err(CAUSE_LECTURE.into());
@@ -192,6 +232,16 @@ pub fn lire_recent(chemin: &Path) -> Result<(Pixels, bool), String> {
     png::valider(&pixels).map_err(|_| CAUSE_LECTURE)?;
     let transparence = pixels.rgba.chunks_exact(4).any(|p| p[3] < 255);
     Ok((pixels, transparence))
+}
+
+/// Octets d'une image RGBA 8 bits `largeur` × `hauteur`, si elle est non vide et tient dans
+/// `OCTETS_MAX`.
+pub(super) fn taille_decodee(largeur: u32, hauteur: u32) -> Option<usize> {
+    let octets = u64::from(largeur)
+        .checked_mul(u64::from(hauteur))?
+        .checked_mul(4)?;
+    let octets = usize::try_from(octets).ok()?;
+    (octets > 0 && octets <= OCTETS_MAX).then_some(octets)
 }
 
 /// Ecrit l'apercu de `nom` dans `dossier_apercus` (cree si besoin), alpha garde ; un apercu
@@ -227,17 +277,19 @@ fn effacer(chemin: &Path) -> Result<(), ErrorKind> {
     }
 }
 
-/// Efface le PNG de « Recents » et son apercu, `nom` au format exact seulement. Jamais le
-/// fichier enregistre ni le presse-papiers (R14). Deja absent : fait. L'echec de l'apercu
-/// seul n'est pas un echec (il partira au prochain nettoyage).
+/// Efface le PNG de « Recents » et son apercu. `nom` doit etre, a l'octet pres, un nom que
+/// rend `lister_recents` : sinon refus, rien n'est efface (deja absent compris ; sous
+/// Windows, « …123.png » ne designe jamais un « …123.PNG »). Jamais le fichier enregistre
+/// ni le presse-papiers (R14). L'echec de l'apercu seul n'est pas un echec (il partira au
+/// prochain nettoyage).
 pub fn supprimer_recent(
     dossier_recents: &Path,
     dossier_apercus: &Path,
     nom: &str,
 ) -> Result<(), String> {
     let recent = chemin_recent(dossier_recents, nom).ok_or("nom refuse")?;
-    if recent.is_dir() {
-        return Err("pas un fichier".into());
+    if !lister_recents(dossier_recents).iter().any(|e| e.nom == nom) {
+        return Err("nom refuse".into());
     }
     effacer(&recent).map_err(|_| "suppression refusee".to_string())?;
     if let Some(apercu) = chemin_apercu(dossier_apercus, nom) {
@@ -295,11 +347,11 @@ pub fn vider(
     dossier_glisser: &Path,
 ) -> BilanVidage {
     let mut bilan = BilanVidage::default();
-    for nom in noms_au_format(dossier_recents) {
+    for nom in noms_au_format(dossier_recents).noms {
         bilan.compter(effacer(&dossier_recents.join(nom)));
     }
     let mut reste = BilanVidage::default();
-    for nom in noms_au_format(dossier_apercus) {
+    for nom in noms_au_format(dossier_apercus).noms {
         reste.compter(effacer(&dossier_apercus.join(nom)));
     }
     for nom in png_du_dossier(dossier_glisser) {
@@ -324,15 +376,26 @@ pub(super) fn nettoyer_apercus(dossier_recents: &Path, partis: &[String]) {
         }
     }
     let apercus = noms_au_format(&dossier_apercus);
-    if apercus.is_empty() {
+    if apercus.noms.is_empty() {
         return;
     }
-    let presents: BTreeSet<String> = noms_au_format(dossier_recents).into_iter().collect();
-    if presents.is_empty() && fs::read_dir(dossier_recents).is_err() {
-        // « Recents » illisible : rien ne prouve que les apercus sont orphelins.
-        return;
-    }
-    for nom in apercus.iter().filter(|n| !presents.contains(*n)) {
+    let presents = noms_au_format(dossier_recents);
+    for nom in orphelins(&apercus, &presents) {
         let _ = effacer(&dossier_apercus.join(nom));
     }
+}
+
+/// Les apercus sans capture. Aucun si l'une des deux listes est incomplete (« Recents »
+/// illisible ou lu en partie : rien ne prouve qu'un apercu est orphelin).
+pub(super) fn orphelins<'a>(apercus: &'a NomsLus, presents: &NomsLus) -> Vec<&'a str> {
+    if !apercus.complete || !presents.complete {
+        return Vec::new();
+    }
+    let presents: BTreeSet<&str> = presents.noms.iter().map(String::as_str).collect();
+    apercus
+        .noms
+        .iter()
+        .map(String::as_str)
+        .filter(|n| !presents.contains(n))
+        .collect()
 }
