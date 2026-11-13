@@ -18,8 +18,8 @@ use super::page_reglages::{
     ALERTE_NON_ENREGISTRES,
 };
 use super::{
-    actions_en_vigueur, plateforme_reglages, plus_tard_nomme, pro,
-    refaire_menu as refaire_menu_actuel, zone, Application, VERSION, VIGNETTE_CONSTRUITE,
+    actions_en_vigueur, plateforme_reglages, pro, refaire_menu as refaire_menu_actuel, zone,
+    Application, VERSION, VIGNETTE_CONSTRUITE,
 };
 use crate::fenetres::{reglages as fenetre, theme};
 use crate::raccourcis::{self, Raison};
@@ -225,35 +225,12 @@ fn vue(app: &AppHandle) -> VueReglages {
     page::vue(&r, &contexte)
 }
 
-/// Vrai si les raccourcis et le menu tiennent déjà la liste des actions en vigueur.
-fn listes_a_jour(app: &AppHandle) -> bool {
-    let suivies = etat(app)
-        .actions_suivies
-        .lock()
-        .map(|a| a.clone())
-        .unwrap_or_default();
-    suivies == actions_en_vigueur(app)
-}
-
-/// Combien de tours on attend `Evenement::LicenceChangee` avant de renoncer.
-const TOURS_LISTES: u8 = 3;
-
-/// Après « Activer » ou « Retirer », la page redemande sa vue (`reglages_lire`) alors que
-/// `Evenement::LicenceChangee`, posté au tour suivant, n'a peut-être pas encore pris ou
-/// rendu les raccourcis : une ligne nouvelle dirait « Aucun raccourci ». Tant que les
-/// listes ne suivent pas la licence, la vue est renvoyée au tour suivant (`reglages:etat`),
-/// `TOURS_LISTES` fois au plus. Aucune fenêtre n'est créée ici.
-fn renvoyer_quand_les_listes_suivent(app: &AppHandle, tours: u8) {
-    if listes_a_jour(app) || tours == 0 {
-        return;
+/// Envoie la vue à la page des Réglages si elle est ouverte (`suivre_les_actions` : les
+/// lignes de Réglages › Raccourcis suivent la licence et les langues de lecture).
+pub(super) fn envoyer_vue(app: &AppHandle) {
+    if fenetre::fenetre(app).is_some() {
+        fenetre::emettre_etat(app, vue(app));
     }
-    plus_tard_nomme(app, "reglages-poste", Duration::ZERO, move |app| {
-        if listes_a_jour(app) {
-            fenetre::emettre_etat(app, vue(app));
-        } else {
-            renvoyer_quand_les_listes_suivent(app, tours - 1);
-        }
-    });
 }
 
 fn reponse(app: &AppHandle, refus: Option<Refus>) -> Reponse {
@@ -376,7 +353,6 @@ pub fn reglages_lire(app: AppHandle) -> Reponse {
         log::info!("reglages page prete");
     }
     relire(&app);
-    renvoyer_quand_les_listes_suivent(&app, TOURS_LISTES);
     reponse(&app, None)
 }
 

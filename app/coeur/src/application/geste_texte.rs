@@ -358,6 +358,20 @@ fn finir(app: &AppHandle, fin: FinLecture) {
     log::info!("{}", texte::ligne_chrono(gel_cache, x.relache.elapsed()));
 }
 
+/// Écrans changés ou session verrouillée pendant la Lecture (fil principal) : la lecture
+/// est abandonnée (rien n'est copié, aucun message), l'écran figé et la sélection sont
+/// libérés, retour au Repos. Faux sans lecture en cours.
+pub fn abandonner_lecture(app: &AppHandle) -> bool {
+    let Some(x) = super::lecture_en_cours(app).take() else {
+        return false;
+    };
+    ATTENDUE.oublier();
+    oublier_ecran(x.numero);
+    log::info!("texte abandonne: bureau change");
+    super::appliquer(app, Declencheur::LectureImpossible);
+    true
+}
+
 /// L'image composée de l'éditeur à lire (export `texte` accepté, fil principal ; l'export
 /// en cours est noté, `exportee` n'est pas touchée).
 pub fn lire_export(app: &AppHandle, numero: u64, entete: EnTete, pixels: Pixels) {

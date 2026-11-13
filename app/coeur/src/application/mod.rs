@@ -321,6 +321,8 @@ pub struct Application {
     /// Annonce affichée mais pas encore vue : `(id du message, dossier local, situation)`.
     /// La situation n'est retenue dans `etat.json` qu'une fois le message montré.
     annonce_en_attente: Mutex<Option<AnnonceEnAttente>>,
+    /// L'annonce du démarrage, différée jusqu'au raccourci du texte (`lacher_annonce`).
+    annonce_differee: Mutex<Option<(PathBuf, Bilan)>>,
     /// Le fil principal (celui de la boucle d'événements), noté au démarrage.
     fil_principal: OnceLock<ThreadId>,
     /// Dossiers résolus au démarrage.
@@ -700,13 +702,23 @@ fn demarrer(app: &AppHandle, commande: Commande, inconnus: &[String]) {
         log::warn!("{e}");
     }
 
+    // Annonce du démarrage (une seule fois par situation). Postée pour la boucle lancée,
+    // jamais envoyée depuis `setup` : la création de la sélection (WebView2) y fait
+    // tourner une boucle imbriquée, et un message montré là n'a jamais reçu sa zone. Avec
+    // la licence, elle attend le raccourci du texte (`TexteDisponible`), au plus
+    // `ATTENTE_ANNONCE_TEXTE`.
+    let differee = annonce_attend_texte(pro) && dossiers.is_some();
+    if let (true, Some(d)) = (differee, &dossiers) {
+        if let Ok(mut a) = app.state::<Application>().annonce_differee.lock() {
+            *a = Some((d.local.clone(), bilan.clone()));
+        }
+        borner_annonce(app);
+    }
+
     // Langues de lecture (Copier le texte), dans un petit fil : `pret` n'attend pas.
     geste_texte::lancer_sonde(app);
 
-    // Annonce du démarrage (une seule fois par situation). Postée pour la boucle lancée,
-    // jamais envoyée depuis `setup` : la création de la sélection (WebView2) y fait
-    // tourner une boucle imbriquée, et un message montré là n'a jamais reçu sa zone.
-    if let Some(d) = &dossiers {
+    if let (false, Some(d)) = (differee, &dossiers) {
         poster_plus_tard(
             app,
             Evenement::AnnonceDemarrage {
@@ -842,7 +854,8 @@ fn texte_devenu_disponible(app: &AppHandle, disponible: bool) {
     app.state::<Application>()
         .texte_disponible
         .store(disponible, Ordering::SeqCst);
-    suivre_les_actions(app);
+    let apparues = suivre_les_actions(app);
+    lacher_annonce(app, &apparues);
 }
 
 /// Range la licence en vigueur (`licence.rs`, après vérification et rangement), puis poste
@@ -856,7 +869,8 @@ pub(super) fn poser_licence(app: &AppHandle, licence: Option<crate::licence::Lic
 /// le menu et les raccourcis : une action apparue reçoit son raccourci (`raccourci
 /// <action>: …`), une action partie rend le sien, puis le menu est refait. Rien si la
 /// liste est la même.
-fn suivre_les_actions(app: &AppHandle) {
+fn suivre_les_actions(app: &AppHandle) -> Vec<raccourcis::ChoixAction> {
+    let mut apparues = Vec::new();
     let apres = actions_en_vigueur(app);
     let avant = std::mem::replace(
         &mut *app
@@ -867,7 +881,7 @@ fn suivre_les_actions(app: &AppHandle) {
         apres.clone(),
     );
     if apres == avant {
-        return;
+        return apparues;
     }
     if let Some(r) = app.state::<Application>().reservations.get() {
         for action in apres.iter().filter(|a| !avant.contains(a)) {
@@ -884,6 +898,7 @@ fn suivre_les_actions(app: &AppHandle) {
             if *action == Mode::Texte.nom() {
                 geste_texte::raccourci_reserve(app, &choix);
             }
+            apparues.push(choix);
         }
         for action in avant.iter().filter(|a| !apres.contains(a)) {
             // Liste vide : le raccourci est rendu au système.
@@ -892,6 +907,79 @@ fn suivre_les_actions(app: &AppHandle) {
         }
     }
     refaire_menu(app);
+    // Les lignes de Réglages › Raccourcis suivent tout de suite (licence, langues).
+    fenetre_reglages::envoyer_vue(app);
+    apparues
+}
+
+/// Le bilan du démarrage attend-il le texte ? Oui quand Copier le texte serait construit
+/// si une langue existe (licence en place) : son raccourci n'est connu qu'à
+/// `Evenement::TexteDisponible`.
+pub fn annonce_attend_texte(pro: bool) -> bool {
+    actions_construites(pro, true).contains(&Mode::Texte.nom())
+}
+
+/// Le bilan du démarrage complété des actions réservées après lui (`texte`) : la ligne de
+/// chaque action est remplacée, ou ajoutée. Une seule règle d'annonce ensuite
+/// (`raccourcis::decider_annonce`).
+pub fn bilan_avec(mut bilan: Bilan, apparues: &[raccourcis::ChoixAction]) -> Bilan {
+    for choix in apparues {
+        match bilan.actions.iter_mut().find(|a| a.action == choix.action) {
+            Some(a) => *a = choix.clone(),
+            None => bilan.actions.push(choix.clone()),
+        }
+    }
+    bilan
+}
+
+/// L'annonce du démarrage différée (le bilan attend le texte) part, complétée de
+/// `apparues` ; rien si elle est déjà partie.
+fn lacher_annonce(app: &AppHandle, apparues: &[raccourcis::ChoixAction]) {
+    let differee = app
+        .state::<Application>()
+        .annonce_differee
+        .lock()
+        .ok()
+        .and_then(|mut a| a.take());
+    if let Some((local, bilan)) = differee {
+        poster_plus_tard(
+            app,
+            Evenement::AnnonceDemarrage {
+                local,
+                bilan: bilan_avec(bilan, apparues),
+            },
+        );
+    }
+}
+
+/// Borne de l'attente du texte par l'annonce du démarrage : sans réponse des langues de
+/// lecture, le bilan part sans lui.
+pub const ATTENTE_ANNONCE_TEXTE: Duration = Duration::from_secs(3);
+
+/// Arme la borne de l'annonce différée (fil `annonce-attente`).
+fn borner_annonce(app: &AppHandle) {
+    let pour = app.clone();
+    let lance = std::thread::Builder::new()
+        .name("annonce-attente".into())
+        .spawn(move || {
+            std::thread::sleep(ATTENTE_ANNONCE_TEXTE);
+            let p = pour.clone();
+            let _ = pour.run_on_main_thread(move || {
+                let attend = p
+                    .state::<Application>()
+                    .annonce_differee
+                    .lock()
+                    .is_ok_and(|a| a.is_some());
+                if attend {
+                    log::info!("annonce demarrage: langues non recues");
+                    lacher_annonce(&p, &[]);
+                }
+            });
+        });
+    if let Err(e) = lance {
+        log::warn!("attente de l'annonce impossible ({e}): annonce sans le texte");
+        lacher_annonce(app, &[]);
+    }
 }
 
 /// Prépare l'écran figé, ses filets de sécurité et la sélection (fil principal). Un échec
@@ -1247,6 +1335,9 @@ pub fn traiter(app: &AppHandle, evenement: Evenement) {
         Evenement::Selection(signal) => traiter_zone(app, Arrivee::Selection(&signal)),
         Evenement::Bureau(changement) => {
             log::info!("bureau change pendant la capture: {changement:?}");
+            if geste_texte::abandonner_lecture(app) {
+                return;
+            }
             if !annuler_si_decompte(app, ArriveeDecompte::Bureau(changement)) {
                 traiter_zone(app, Arrivee::Bureau(changement));
             }
@@ -1318,7 +1409,10 @@ pub fn traiter(app: &AppHandle, evenement: Evenement) {
         Evenement::TexteLu(fin) => geste_texte::texte_lu(app, *fin),
         Evenement::TexteEchu(numero) => geste_texte::echu(app, numero),
         Evenement::TexteDisponible(oui) => texte_devenu_disponible(app, oui),
-        Evenement::LicenceChangee => suivre_les_actions(app),
+        // Aucune annonce à l'activation ni au retrait de la licence.
+        Evenement::LicenceChangee => {
+            suivre_les_actions(app);
+        }
     }
 }
 
@@ -4065,6 +4159,90 @@ mod tests {
         assert_eq!(
             ligne_annonce(&decider_annonce(None, &rien)).as_deref(),
             Some("annonce raccourci: aucun_raccourci")
+        );
+    }
+
+    fn choix(action: &str, candidats: &[&str], retenu: Option<&str>) -> raccourcis::ChoixAction {
+        let retenu = retenu.map(|r| raccourcis::analyser(r).expect("raccourci"));
+        raccourcis::ChoixAction {
+            action: action.into(),
+            retenu,
+            // Sans retenu, tous les candidats ont été écartés.
+            ecartes: candidats
+                .iter()
+                .filter(|_| retenu.is_none())
+                .map(|c| raccourcis::Ecarte {
+                    candidat: (*c).into(),
+                    raison: raccourcis::Raison::RefuseParLeSysteme,
+                })
+                .collect(),
+            nb_candidats: candidats.len(),
+        }
+    }
+
+    fn bilan_du_demarrage() -> Bilan {
+        Bilan {
+            actions: vec![
+                choix("zone", &["Ctrl+Maj+1"], Some("Ctrl+Maj+1")),
+                choix("historique", &["Ctrl+Maj+H"], Some("Ctrl+Maj+H")),
+            ],
+        }
+    }
+
+    #[test]
+    fn l_annonce_attend_le_texte_seulement_avec_la_licence() {
+        assert!(annonce_attend_texte(true));
+        assert!(!annonce_attend_texte(false));
+        // Avec la licence, l'historique est dans le bilan du démarrage.
+        assert!(actions_construites(true, false).contains(&ACTION_HISTORIQUE));
+        assert!(!actions_construites(false, false).contains(&ACTION_HISTORIQUE));
+    }
+
+    #[test]
+    fn texte_sans_raccourci_annonce_par_la_regle_commune() {
+        // Tous les candidats pris : « Aucun raccourci pour le texte », une fois.
+        let pris = choix("texte", &["Ctrl+Maj+T"], None);
+        let b = bilan_avec(bilan_du_demarrage(), &[pris]);
+        let d = raccourcis::decider_annonce(None, &b);
+        let titre = d.annonce.as_ref().map(|a| a.titre.clone());
+        assert_eq!(titre.as_deref(), Some("Aucun raccourci pour le texte"));
+        let situation = d.a_retenir.clone().expect("situation");
+        assert_eq!(situation.action, "texte");
+        // Même situation au démarrage suivant : rien.
+        let encore = raccourcis::decider_annonce(Some(&situation), &b);
+        assert_eq!(encore.annonce, None);
+        assert_eq!(encore.a_retenir, Some(situation));
+        // Liste vide (choix de l'utilisateur, mise à niveau) : rien.
+        let vide = bilan_avec(bilan_du_demarrage(), &[choix("texte", &[], None)]);
+        let d = raccourcis::decider_annonce(None, &vide);
+        assert_eq!((d.annonce, d.a_retenir), (None, None));
+        // Retenu : rien ; sans le texte (borne) : le bilan seul.
+        let ok = choix("texte", &["Ctrl+Maj+T"], Some("Ctrl+Maj+T"));
+        let b = bilan_avec(bilan_du_demarrage(), &[ok]);
+        assert_eq!(raccourcis::decider_annonce(None, &b).annonce, None);
+        assert_eq!(bilan_avec(bilan_du_demarrage(), &[]), bilan_du_demarrage());
+    }
+
+    #[test]
+    fn historique_sans_raccourci_annonce_comme_les_autres() {
+        let mut b = bilan_du_demarrage();
+        b.actions[1] = choix("historique", &["Ctrl+Maj+H"], None);
+        let d = raccourcis::decider_annonce(None, &b);
+        let titre = d.annonce.map(|a| a.titre);
+        assert_eq!(titre.as_deref(), Some("Aucun raccourci pour l'historique"));
+    }
+
+    #[test]
+    fn bilan_avec_remplace_la_ligne_de_l_action() {
+        let b = bilan_avec(
+            bilan_du_demarrage(),
+            &[choix("zone", &["Ctrl+Maj+9"], Some("Ctrl+Maj+9"))],
+        );
+        assert_eq!(b.actions.len(), 2);
+        assert_eq!(b.actions[0].nb_candidats, 1);
+        assert_eq!(
+            b.retenu("zone").map(|r| r.canonique()),
+            Some("Ctrl+Maj+9".to_string())
         );
     }
 }
