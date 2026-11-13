@@ -1104,10 +1104,10 @@ public static uint Crc32(byte[] o) {
             Cliquer-Element $b
         }
         # Clic réel sur la case (elle prend le focus), puis la touche.
-        function Touche-Case($C, [byte[]]$Mods, [byte]$Vk) {
+        function Touche-Case($C, [byte[]]$Modifs, [byte]$Vk) {
             Cliquer-Element $C.Case
             Start-Sleep -Milliseconds 200
-            $E::Appuyer($Mods, $Vk)
+            $E::Appuyer($Modifs, $Vk)
         }
         function Fermer-Historique([IntPtr]$H, [string]$Dossier, [string]$Quoi) {
             $n = Compter-Motif -Motif 'historique ferme \(cadre\)$' -Dossier $Dossier
