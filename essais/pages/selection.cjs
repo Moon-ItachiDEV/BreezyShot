@@ -1408,6 +1408,39 @@ const L = 1280, H = 400;
     px = await ligne(p, 360);
     verifier(!ef.entoure && px.every(c => proche(c, VOILE)), '14 b hors de la page : rien d\'entouré, voile partout', JSON.stringify(ef));
 
+    // 14 b bis. Pages tardives (UI Automation en retard, PAGES_TARDIVES_MAX) : deux charges
+    // `suite` de suite, chacune prolongeant la précédente. La page survolée reste entourée à
+    // chaque image, au même endroit (ni clignotement, ni perte) ; la page ajoutée se vise
+    // ensuite ; rien n'est envoyé au cœur.
+    const PAGE2 = { x: 760, y: 80, largeur: 300, hauteur: 200, rayon: 0 };
+    await p.mouse.move(300, 170); await p.waitForTimeout(60);
+    const avantSuites = await etatFenetre(p);
+    await p.evaluate(() => {
+      window.__images = [];
+      window.__guetter = true;
+      const guetter = () => {
+        const f = document.getElementById('fenetre');
+        window.__images.push({ entoure: document.body.classList.contains('entoure'), x: f.style.left, l: f.style.width });
+        if (window.__guetter) requestAnimationFrame(guetter);
+      };
+      requestAnimationFrame(guetter);
+    });
+    await p.waitForTimeout(50);
+    await proposer(p, id, [PAGE]);
+    await p.waitForTimeout(30);
+    await proposer(p, id, [PAGE, PAGE2]);
+    await p.waitForTimeout(120);
+    const images = await p.evaluate(() => { window.__guetter = false; return window.__images; });
+    const xs = [...new Set(images.map(i => `${i.x} ${i.l}`))];
+    const apresSuites = await etatFenetre(p);
+    a = await appels(p);
+    verifier(avantSuites.entoure && avantSuites.x === 200 && images.length >= 3 && images.every(i => i.entoure) && xs.length === 1 && apresSuites.entoure && apresSuites.x === 200 && apresSuites.l === 500 && a.length === 0,
+      '14 b bis deux listes de suite (la seconde prolonge la première) : la page survolée reste entourée à chaque image, au même endroit, rien envoyé', JSON.stringify({ avantSuites, n: images.length, sans: images.filter(i => !i.entoure).length, xs, apresSuites, a }));
+    await p.mouse.move(900, 180); await p.waitForTimeout(60);
+    ef = await etatFenetre(p);
+    verifier(ef.entoure && ef.x === 760 && ef.y === 80 && ef.l === 300 && ef.h === 200, '14 b bis la page ajoutée en retard se vise ensuite', JSON.stringify(ef));
+    await p.mouse.move(900, 360); await p.waitForTimeout(60);
+
     // 14 c. Clic sur rien : rien, on continue. Clic sur la page : selection_cliquee une fois,
     // bon pixel ; la page reste entourée après le filet ordinaire (le cœur garde la fenêtre).
     await p.mouse.click(900, 360); await p.waitForTimeout(60);
