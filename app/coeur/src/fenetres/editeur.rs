@@ -29,6 +29,11 @@ pub const TITRE: &str = "Annoter la capture";
 pub const PAGE: &str = "editeur/editeur.html";
 /// Taille intérieure minimale, pixels logiques.
 pub const TAILLE_MIN: (f64, f64) = (640.0, 440.0);
+/// Largeur intérieure à l'ouverture, au moins, pixels logiques, quand la zone utile le
+/// permet (jeton `editeur-ouverture-largeur`) : la barre d'annotation y tient sans défiler,
+/// quel que soit l'outil déplié (la plus large, Forme dépliée, fait 1071 px, plus le retrait
+/// de 16 px). Réduite ensuite jusqu'à `TAILLE_MIN`, la fenêtre fait défiler les outils.
+pub const LARGEUR_OUVERTURE: f64 = 1088.0;
 /// Ce que la page garde autour de l'image, pixels logiques (avenant §3, barre C) : 36 px de
 /// chaque côté ; barre du haut 52, réserve haute 14, barre d'annotation 80 et sa réserve 34
 /// en bas.
@@ -52,10 +57,10 @@ pub enum Ouverture {
 }
 
 /// Place de la fenêtre pour une image de `image` pixels sur `ecran` (pure, pixels réels) :
-/// image à la taille réelle + `MARGES`, bornée à `TAILLE_MIN` et à `PART_MAX` de la zone
-/// utile, centrée dans la zone utile. Le rectangle est celui de la zone cliente (la
-/// page) ; `ouvrir` met la zone cliente exactement dessus (les bords invisibles de l'ombre
-/// débordent).
+/// image à la taille réelle + `MARGES`, au moins `LARGEUR_OUVERTURE` × `TAILLE_MIN.1`, au
+/// plus `PART_MAX` de la zone utile, centrée dans la zone utile. Le rectangle est celui de
+/// la zone cliente (la page) ; `ouvrir` met la zone cliente exactement dessus (les bords
+/// invisibles de l'ombre débordent).
 pub fn placer(image: (u32, u32), ecran: &Ecran) -> Rect {
     let e = echelle_sure(ecran.echelle);
     let zone = ecran.zone_utile;
@@ -68,7 +73,7 @@ pub fn placer(image: (u32, u32), ecran: &Ecran) -> Rect {
         let voulu = f64::from(image) + marge * e;
         voulu.max(min * e).min(max).round().max(1.0) as u32
     };
-    let largeur = cote(image.0, MARGES.0, TAILLE_MIN.0, max.0);
+    let largeur = cote(image.0, MARGES.0, LARGEUR_OUVERTURE, max.0);
     let hauteur = cote(image.1, MARGES.1, TAILLE_MIN.1, max.1);
     Rect {
         x: (i64::from(zone.x) + (i64::from(zone.largeur) - i64::from(largeur)) / 2) as i32,
@@ -262,16 +267,38 @@ mod tests {
             && i64::from(r.y) + i64::from(r.hauteur) <= i64::from(zone.y) + i64::from(zone.hauteur)
     }
 
+    fn jeton(nom: &str) -> f64 {
+        let css = include_str!("../../../interface/commun/jetons.css");
+        let debut = format!("--{nom}:");
+        let ligne = css
+            .lines()
+            .map(str::trim)
+            .find(|l| l.starts_with(&debut))
+            .unwrap_or_else(|| panic!("jeton {nom} absent"));
+        let valeur = ligne[debut.len()..].trim().trim_end_matches(';');
+        valeur
+            .trim_end_matches("px")
+            .parse()
+            .unwrap_or_else(|_| panic!("jeton {nom} illisible"))
+    }
+
+    #[test]
+    fn largeur_d_ouverture_egale_au_jeton() {
+        assert_eq!(LARGEUR_OUVERTURE, jeton("editeur-ouverture-largeur"));
+        assert!(LARGEUR_OUVERTURE >= TAILLE_MIN.0);
+    }
+
     #[test]
     fn image_petite_juste_trop_grande() {
         let e = ecran(0, 0, 1920, 1080, 1.0);
-        // Petite : la taille minimale, centrée.
+        // Petite : la largeur d'ouverture (la barre dépliée tient) et la hauteur minimale,
+        // centrées.
         let r = placer((100, 80), &e);
-        assert_eq!((r.largeur, r.hauteur), (640, 440));
-        assert_eq!((r.x, r.y), (640, 296));
+        assert_eq!((r.largeur, r.hauteur), (1088, 440));
+        assert_eq!((r.x, r.y), (416, 296));
         // Juste : l'image à la taille réelle, plus les réserves de la page.
-        let r = placer((1000, 600), &e);
-        assert_eq!((r.largeur, r.hauteur), (1072, 780));
+        let r = placer((1100, 600), &e);
+        assert_eq!((r.largeur, r.hauteur), (1172, 780));
         // Trop grande : 90 % de la zone utile.
         let r = placer((3000, 2000), &e);
         assert_eq!((r.largeur, r.hauteur), (1728, 928));
@@ -282,16 +309,26 @@ mod tests {
     #[test]
     fn echelles_de_100_a_200() {
         for (echelle, attendu) in [
-            (1.0, (1072, 780)),
-            (1.25, (1090, 825)),
-            (1.5, (1108, 870)),
-            (2.0, (1280, 960)),
+            (1.0, (2472, 780)),
+            (1.25, (2490, 825)),
+            (1.5, (2508, 870)),
+            (2.0, (2544, 960)),
         ] {
             let e = ecran(0, 0, 3840, 2160, echelle);
-            let r = placer((1000, 600), &e);
+            let r = placer((2400, 600), &e);
             assert_eq!((r.largeur, r.hauteur), attendu, "{echelle}");
             assert!(dans(&r, &e.zone_utile));
         }
+        // Petite image : la largeur d'ouverture suit l'échelle (1088 px logiques).
+        for (echelle, largeur) in [(1.0, 1088), (1.25, 1360), (1.5, 1632), (2.0, 2176)] {
+            let e = ecran(0, 0, 3840, 2160, echelle);
+            assert_eq!(placer((300, 200), &e).largeur, largeur, "{echelle}");
+        }
+        // 1366 × 768 à 125 % : 1360 ne tient pas dans 90 % de la zone utile, 1229 oui.
+        let e = ecran(0, 0, 1366, 768, 1.25);
+        let r = placer((300, 200), &e);
+        assert_eq!(r.largeur, 1229);
+        assert!(dans(&r, &e.zone_utile));
         // 1024 × 768 à 100 % : la capture plein écran tient dans 90 % de la zone utile.
         let e = ecran(0, 0, 1024, 768, 1.0);
         let r = placer((1024, 768), &e);
@@ -304,9 +341,9 @@ mod tests {
         let e = ecran(-1920, -200, 1920, 1080, 1.0);
         let r = placer((400, 300), &e);
         assert!(dans(&r, &e.zone_utile));
-        // 400 + 72 sous la largeur minimale ; 300 + 180 = 480 de haut.
-        assert_eq!((r.largeur, r.hauteur), (640, 480));
-        assert_eq!((r.x, r.y), (-1920 + 640, -200 + 276));
+        // 400 + 72 sous la largeur d'ouverture ; 300 + 180 = 480 de haut.
+        assert_eq!((r.largeur, r.hauteur), (1088, 480));
+        assert_eq!((r.x, r.y), (-1920 + 416, -200 + 276));
         // Barre des tâches à gauche : la zone utile commence à 48.
         let gauche = Ecran {
             rect: Rect {

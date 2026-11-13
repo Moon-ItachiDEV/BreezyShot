@@ -1033,6 +1033,48 @@
     "origine": "design/copier-texte-animation/index.html, choix A « Surligné » du 13/11 (LECTURE)."
    },
    {
+    "name": "texte-lecture-reduite",
+    "value": "120ms",
+    "usage": "Copier le texte, animations réduites : l'écran figé reste au moins ce temps après le relâcher (BALAYAGE_REDUIT du cœur).",
+    "origine": "design/copier-texte-animation/index.html, choix A « Surligné » du 13/11 (animations réduites)."
+   },
+   {
+    "name": "texte-surligne-trace",
+    "value": "260ms",
+    "usage": "Copier le texte : une ligne copiée se tire de gauche à droite (SURLIGNE_TRACE du cœur).",
+    "origine": "design/copier-texte-animation/index.html, choix A « Surligné » du 13/11 (TRACE)."
+   },
+   {
+    "name": "texte-surligne-pas",
+    "value": "40ms",
+    "usage": "Copier le texte : la ligne suivante part au plus ce temps après la précédente (SURLIGNE_PAS du cœur).",
+    "origine": "design/copier-texte-animation/index.html, choix A « Surligné » du 13/11 (PAS)."
+   },
+   {
+    "name": "texte-surligne-decalage",
+    "value": "160ms",
+    "usage": "Copier le texte : tous les pas ensemble, au plus (SURLIGNE_DECALAGE du cœur).",
+    "origine": "design/copier-texte-animation/index.html, choix A « Surligné » du 13/11 (DECALAGE)."
+   },
+   {
+    "name": "texte-surligne-tenue",
+    "value": "220ms",
+    "usage": "Copier le texte : les lignes surlignées restent ce temps (SURLIGNE_TENUE du cœur).",
+    "origine": "design/copier-texte-animation/index.html, choix A « Surligné » du 13/11 (TENUE)."
+   },
+   {
+    "name": "texte-surligne-sortie",
+    "value": "140ms",
+    "usage": "Copier le texte : la sélection s'efface (SURLIGNE_SORTIE du cœur).",
+    "origine": "design/copier-texte-animation/index.html, choix A « Surligné » du 13/11 (SORTIE)."
+   },
+   {
+    "name": "texte-surligne-reduit",
+    "value": "120ms",
+    "usage": "Copier le texte, animations réduites : fondu des lignes, à l'arrivée et au départ (SURLIGNE_REDUIT du cœur).",
+    "origine": "design/copier-texte-animation/index.html, choix A « Surligné » du 13/11 (animations réduites)."
+   },
+   {
     "name": "duree-editeur-pli",
     "value": "360ms",
     "usage": "L'outil choisi se déplie (ressort).",
@@ -2844,6 +2886,18 @@
     "origine": "design/copier-texte-animation/index.html, choix A « Surligné » du 13/11 (.lus i)."
    },
    {
+    "name": "texte-surligne-debord-x",
+    "value": "2px",
+    "usage": "Copier le texte : une ligne surlignée déborde de ses mots à gauche et à droite, comme une sélection de texte.",
+    "origine": "design/copier-texte-animation/index.html, choix A « Surligné » du 13/11 (.lus i)."
+   },
+   {
+    "name": "texte-surligne-debord-y",
+    "value": "1px",
+    "usage": "Copier le texte : une ligne surlignée déborde de ses mots en haut et en bas.",
+    "origine": "design/copier-texte-animation/index.html, choix A « Surligné » du 13/11 (.lus i)."
+   },
+   {
     "name": "texte-teinte-editeur",
     "value": "6%",
     "usage": "Balayage de l'image dans l'éditeur : teinte d'accent qui s'efface.",
@@ -3084,6 +3138,12 @@
     "origine": "design/annotation-pistes/index.html, barre C « Souffle » gardée le 13/11 (.dock[data-suite])."
    },
    {
+    "name": "editeur-ouverture-largeur",
+    "value": "1088px",
+    "usage": "Fenêtre de l'éditeur : largeur à l'ouverture, au moins, quand la zone utile le permet (LARGEUR_OUVERTURE du cœur) : la barre y tient sans défiler, quel que soit l'outil déplié.",
+    "origine": "Relecture du 13/11 (éditeur) : la barre la plus large, Forme dépliée, fait 1071 px, plus le retrait de 16 px."
+   },
+   {
     "name": "editeur-outils-ecart-v",
     "value": "5px",
     "usage": "Marge du haut et du bas de la rangée d'outils.",
@@ -3148,6 +3208,18 @@
     "value": "90px",
     "usage": "Instrument dessiné, hauteur.",
     "origine": "design/annotation-instruments/index.html, dessin B « Couleur » choisi le 13/11 (.ib .inst)."
+   },
+   {
+    "name": "editeur-inst-ombre-y",
+    "value": "1px",
+    "usage": "Instrument dessiné : décalage vertical de son ombre portée.",
+    "origine": "design/annotation-instruments/index.html, dessin B « Couleur » choisi le 13/11 (.inst, drop-shadow)."
+   },
+   {
+    "name": "editeur-inst-ombre-flou",
+    "value": "1.5px",
+    "usage": "Instrument dessiné : flou de son ombre portée.",
+    "origine": "design/annotation-instruments/index.html, dessin B « Couleur » choisi le 13/11 (.inst, drop-shadow)."
    },
    {
     "name": "editeur-inst-gauche",

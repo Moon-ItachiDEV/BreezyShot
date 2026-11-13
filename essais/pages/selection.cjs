@@ -1252,6 +1252,106 @@ const L = 1280, H = 400;
       JSON.stringify({ refusT, bt, st }),
     );
     await p.context().close();
+    // Le filet du balayage seul garde la marge du mode texte (2 s) : le gel peut durer 1,5 s
+    // après le relâcher et le surlignage arriver juste après. Puis la page redevient utilisable.
+    p = await page();
+    const balayerIci = (i, x = 100, y = 100, l = 201, h = 121) =>
+      p.evaluate(
+        ([i, x, y, l, h]) => {
+          __emettre('selection:balayer', { id: i, x, y, largeur: l, hauteur: h, reduites: false });
+          return performance.now();
+        },
+        [i, x, y, l, h],
+      );
+    const jusqua = async (t, ms) =>
+      p.waitForTimeout(Math.max(0, ms - (await p.evaluate((t) => performance.now() - t, t))));
+    id = await montrerTexte(p);
+    await glisser(p, [100, 100], [300, 220]);
+    await vider(p);
+    const tb = await balayerIci(id);
+    await jusqua(tb, 1800);
+    const a1800 = await etatBalayage(p);
+    await jusqua(tb, 2300);
+    const a2300 = await etatBalayage(p);
+    await surligner(p, { id, lignes: LIGNES, reduites: false, ...DEROULE });
+    const tard = await etatSurligne(p);
+    const envoyesFilet = await appels(p);
+    await glisser(p, [400, 100], [600, 250]);
+    const reprise = await termine(p);
+    verifier(
+      a1800.glisse &&
+        a1800.balaye &&
+        !a2300.glisse &&
+        !a2300.balaye &&
+        !tard.surligne &&
+        tard.lignes.length === 0 &&
+        envoyesFilet.length === 0 &&
+        reprise.length === 1,
+      '13 filet du balayage : sélection encore là 1,8 s après, au repos à 2,3 s, rien envoyé ; surlignage tardif ignoré, la page reprend',
+      JSON.stringify({ a1800, a2300, tard: tard.lignes.length, envoyesFilet, reprise }),
+    );
+    // Tout le surlignage tient en 2 s, ou rien : 400 lignes à 2 s d'écart, 4 × 2 s, 2 001 ms.
+    await p.evaluate(() => __emettre('selection:cachee', {}));
+    id = await montrerTexte(p);
+    await glisser(p, [100, 100], [300, 220]);
+    await vider(p);
+    await balayerIci(id);
+    const CINQ_CENTS = Array.from({ length: 500 }, (_, k) => ({ x: 110, y: 100 + (k % 120), largeur: 50, hauteur: 1 }));
+    await surligner(p, { id, lignes: CINQ_CENTS.slice(0, 400), reduites: false, trace: 260, pas: 2000, tenue: 220, sortie: 140 });
+    await surligner(p, { id, lignes: [LIGNES[0]], reduites: false, trace: 2000, pas: 2000, tenue: 2000, sortie: 2000 });
+    await surligner(p, { id, lignes: [LIGNES[0]], reduites: false, trace: 1000, pas: 0, tenue: 861, sortie: 140 });
+    const tropLong = await etatSurligne(p);
+    await surligner(p, { id, lignes: [LIGNES[0]], reduites: false, trace: 1000, pas: 0, tenue: 860, sortie: 140 });
+    const juste = await etatSurligne(p);
+    verifier(
+      !tropLong.surligne &&
+        tropLong.lignes.length === 0 &&
+        juste.surligne &&
+        juste.lignes.length === 1 &&
+        JSON.stringify(juste.sortie) === JSON.stringify([['part', 140, 1860]]),
+      "13 surlignage borné : refusé au-delà de 2 s en tout (400 lignes à 2 s d'écart, 4 × 2 s, 2 001 ms), accepté à 2 000 ms",
+      JSON.stringify({ tropLong, juste }),
+    );
+    // 500 lignes : 400 bandes au plus, et la sortie attend la dernière (260 + 399 × 1 + 220).
+    await p.evaluate(() => __emettre('selection:cachee', {}));
+    id = await montrerTexte(p);
+    await glisser(p, [100, 100], [300, 220]);
+    await vider(p);
+    await balayerIci(id);
+    await surligner(p, { id, lignes: CINQ_CENTS, reduites: false, trace: 260, pas: 1, tenue: 220, sortie: 140 });
+    const bandes = () =>
+      p.evaluate(() => {
+        const l = [...document.querySelectorAll('#zone .lus i')];
+        const t = (a) => [a.animationName, a.effect.getTiming().duration, a.effect.getTiming().delay];
+        return {
+          surligne: document.body.classList.contains('surligne'),
+          n: l.length,
+          derniere: l.length ? l[l.length - 1].getAnimations().map(t) : [],
+          sortie: document.getElementById('scene').getAnimations().map(t),
+        };
+      });
+    const b500 = await bandes();
+    verifier(
+      b500.surligne &&
+        b500.n === 400 &&
+        JSON.stringify(b500.derniere) === JSON.stringify([['tire', 260, 399]]) &&
+        JSON.stringify(b500.sortie) === JSON.stringify([['part', 140, 879]]),
+      '13 surlignage de 500 lignes : 400 bandes, la dernière tirée à 399 ms, sortie après 879 ms',
+      JSON.stringify(b500),
+    );
+    // Pendant le surlignage, Échap, un clic gauche ou droit ne font rien : il continue.
+    await p.keyboard.press('Escape');
+    await p.mouse.click(700, 200);
+    await p.mouse.click(700, 200, { button: 'right' });
+    await p.waitForTimeout(40);
+    const pendantS = await bandes();
+    const envoyesS = await appels(p);
+    verifier(
+      envoyesS.length === 0 && pendantS.surligne && pendantS.n === 400 && pendantS.sortie.length === 1,
+      '13 pendant le surlignage : Échap, clic gauche, clic droit, rien envoyé ; le surlignage continue',
+      JSON.stringify({ envoyesS, pendantS }),
+    );
+    await p.context().close();
   }
   console.log('ECHECS :', echecs);
   console.log('ERREURS PAGE :', JSON.stringify(erreurs));

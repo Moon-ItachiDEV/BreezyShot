@@ -701,3 +701,123 @@ personne n'avait relues.
   après 20 fermetures. Fils 22 puis 22 ; poignées 396 puis 415.
 - Lecture d'une zone dans l'éditeur : 11 ms. Trois aperçus manquants faits en 24 ms.
 - Copier, Enregistrer et glisser depuis l'historique : exacts au pixel.
+
+## Après la 0.5 : une annotation plus naturelle (version 0.5.2)
+
+Branche `claude/project-thread-9qu6yx`, la version passe à 0.5.2. Demandé par l'utilisateur
+le 13/11 : que la gomme n'efface que là où elle passe, que tout ce qui est annoté se
+comporte de façon logique pour un humain, et que Copier le texte montre ce qu'il copie.
+Choix du même jour, sur des pages à essayer : barre C (`design/annotation-pistes`),
+instruments B (`design/annotation-instruments`) avec une flèche qu'on courbe directement,
+« Surligné » pour Copier le texte (`design/copier-texte-animation`). Ces pages sont dans
+les fichiers du projet, pas dans le dépôt, comme celles des versions précédentes.
+
+Ce qu'elle apporte :
+
+- La gomme efface les encres (flèche, ligne, rectangle, ellipse, stylo, surligneur) là où
+  elle passe, et là seulement ; posée sur un texte, un numéro, un flou ou un projecteur
+  qu'aucune encre ne recouvre, elle l'enlève en entier : ce qui est dessus décide. Un geste
+  = un pas d'annulation, aucun s'il n'efface rien ; une encre tout effacée disparaît ; Échap
+  abandonne le geste. Vue et export au bit près.
+- La barre d'annotation : l'outil en main s'y déplie (variantes, trois tailles, six
+  couleurs et « Autre couleur », opacité) ; plus de menu « Ajouter » ni de bulle par-dessus
+  l'image. Flèche, stylo, surligneur et gomme sont dessinés, le corps à la couleur de
+  l'encre. Un objet choisi déplie l'outil qui l'a fait ; ce qu'on y règle va à lui ; une
+  variante le change sur place, au bouton comme à la touche. Un texte en saisie déplie
+  l'outil Texte.
+- L'éditeur s'ouvre assez large pour que la barre dépliée tienne sans défiler (1088 px
+  logiques quand l'écran le permet). Plus étroit, seuls les outils défilent ; Annuler,
+  Rétablir et Plus restent en entier.
+- Une flèche tracée reste choisie : sa poignée du milieu la courbe, le trait passe par la
+  poignée ; ramenée près de la corde, elle redevient droite ; Maj la garde symétrique.
+- Un objet emmené puis ramené à sa place, ou une glissière ramenée à sa valeur, ne laisse
+  aucun pas d'annulation, et le document n'est pas marqué modifié pour autant.
+- Copier le texte : chaque ligne copiée se surligne de gauche à droite, puis la sélection
+  s'efface et « Texte copié » s'affiche ; l'écran figé reste au plus 810 ms de plus. Sur un
+  texte penché, les boîtes des mots sont ramenées sur l'image.
+- La fenêtre de l'éditeur garde 72 × 180 px autour de l'image (barre de 80 px) : l'image
+  tient encore à la taille réelle.
+
+Vérifications, ici sous Linux :
+
+- `cargo test --locked --lib` : 654 tests du cœur réussis, 2 ignorés. `cargo fmt --check`
+  et `cargo clippy --locked --all-targets -- -D warnings` propres, sous Linux et pour la
+  cible Windows (`x86_64-pc-windows-msvc`, vérifiée sans édition de liens : le code de
+  `TextAngle` compile, il n'a pas tourné).
+- Les dix essais de pages, `ECHECS : 0` : `editeur.cjs` 243 points, `editeur-modele.cjs`
+  69, `selection.cjs` 232, `historique.cjs` 122, `reglages.cjs` 107, `vignette.cjs` 43,
+  `bandeau.cjs` 25, `decompte.cjs` 24, `installateur.cjs` 23, `souffle.cjs` 12 ;
+  `jetons.css` à jour.
+- Essais par mutation de la page de sélection : sans le filet de 2 s, sans le plafond de
+  400 lignes ou sans la borne de 2 s du surlignage, un essai échoue.
+- Le passage GitHub de la demande de fusion (tests sur Windows, macOS et Linux, essais
+  Windows sur le vrai `.exe`) fait foi.
+
+Relecture : deux agents distincts de l'auteur (Fable 5.2, effort élevé) ont relu le travail
+avant les corrections. L'un a relu l'éditeur : `document.js`, `outils.js`, `barre.js`,
+`dessin.js` en entier, les parties touchées de la page et de `editeur.rs`, avec des scripts
+Playwright jetables en clair et en sombre, aux échelles 1 et 2, animations réduites
+comprises. L'autre a relu Copier le texte : les fils et les verrous déroulés à la main
+(borne pendant le surlignage, réveil tardif, échec d'émission, écrans changés, arrêt), les
+durées du cœur et de la page, la géométrie, la confidentialité, et des essais par mutation.
+
+### Trouvé par les relectures, corrigé
+
+- Éditeur, important : la barre dépliée (jusqu'à 1 071 px avec Forme) ne tenait pas dans
+  la fenêtre d'une petite capture (640 px au moins) : à 640 px, la plupart des outils et
+  « Plus » étaient hors champ. L'éditeur s'ouvre à 1088 px de large au moins quand
+  l'écran le permet (`LARGEUR_OUVERTURE`, jeton et essai d'égalité) ; plus étroit, seuls
+  les outils défilent, et le fondu n'efface plus le fond ni l'ombre de la barre.
+- Éditeur, important : la gomme pressée sur un numéro ou un texte posé sur une encre
+  trouait l'encre cachée dessous et laissait l'objet. L'objet du dessus décide ; un clic
+  qui tremble n'entame pas ce qu'il couvrait.
+- Éditeur, important : un texte ouvert par double clic avec un autre outil en main
+  montrait le pli de cet outil, qui réglait le texte et la préférence du texte à tort. Le
+  pli montré est celui du texte.
+- Éditeur, mineurs : un surligneur gommé dans sa longueur ne pouvait plus être pris (l'axe
+  est sondé en travers) ; le trait courbé passait à 6 à 8 px de la poignée (le corps suit
+  la courbe jusqu'à la tête, posée sur elle) ; le focus tombait sur la page quand un pli
+  se refermait (il revient au bouton de l'outil) ; une touche de variante avec un objet
+  choisi faisait diverger la barre et l'outil (elle change l'objet, comme le bouton) ; un
+  geste sans pas marquait le document modifié, et la fermeture redemandait « Copier et
+  fermer » après un Copier (la version d'avant le geste revient, un numéro de version
+  n'est jamais repris pour un autre contenu) ; courbes dégénérées (poignée bornée à la
+  moitié du milieu de la corde, aimant mesuré à la corde, tête calculée sur la longueur
+  de la courbe) ; une glissière aller-retour laissait un pas vide ; l'ombre des
+  instruments avait des mesures en dur (jetons).
+- Copier le texte, mineurs : le filet du balayage, le plafond de 400 lignes, Échap et les
+  clics pendant le surlignage n'avaient pas d'essai (une mutation passait) : essais
+  ajoutés ; côté cœur, `surlignable` et `fin_du_balayage` sont des fonctions pures
+  testées. La page bornait chaque durée à 2 s, pas leur somme (un surlignage de
+  13 minutes était accepté) : tout le surlignage tient en 2 s, ou rien. Les durées et les
+  débords étaient recopiés sans jeton : jetons `texte-lecture-reduite` et
+  `texte-surligne-*`, essai d'égalité du cœur. Le journal disait « sans affichage » quand
+  il n'y avait aucune ligne : `selection surlignage sans ligne`. Le filet de la page
+  tombait juste à la borne de 1,5 s, et un surlignage commencé à la borne pouvait être
+  ignoré : il garde 0,5 s de marge. Commentaire de `LectureEnCours.fin` mis à jour.
+- Copier le texte, signalé sans pouvoir le vérifier (pas de Windows) : `OcrResult.TextAngle`
+  n'était pas lu, et les bandes d'un texte penché auraient été décalées. D'après la
+  documentation de Windows, les boîtes sont celles du texte redressé, à tourner de l'angle
+  dans le sens des aiguilles d'une montre autour du centre de l'image : `redresser` le
+  fait, testé sur des boîtes calculées à la main.
+
+### Limites acceptées
+
+- Les passages de gomme ne sont pas simplifiés, et le rendu gardé d'une encre gommée a pour
+  clé un `JSON.stringify` de l'objet à chaque peinture : 17 ms par geste sur une charge
+  synthétique (30 traits de 6 000 points), loin d'un usage réel.
+- Le texte est dans le presse-papiers dès le début du surlignage, mais la fenêtre de
+  sélection garde le clavier jusqu'à sa fin : un Ctrl + V tapé pendant ces 0,5 à 0,8 s est
+  perdu, et un second Ctrl + Maj + T est ignoré.
+- Sur un texte penché, la bande d'une ligne est le rectangle droit qui couvre ses mots
+  tournés : plus haute que la ligne.
+
+### Non vérifié
+
+- Rien n'a été essayé sur un vrai Windows par une personne : gomme, barre, flèche courbée,
+  largeur d'ouverture, surlignage de Copier le texte, à l'utilisateur d'après la liste
+  unique des tests à faire.
+- Aucun essai Windows ne lit un texte penché : le sens de `TextAngle` suit la
+  documentation.
+- Les pages de l'éditeur et de la sélection sont essayées dans Chromium sous Linux, pas
+  dans WebView2.

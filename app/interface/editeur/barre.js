@@ -284,9 +284,11 @@ export function installerBarre(ed) {
     return rangDe(t);
   }
 
-  // L'outil de la sélection : celui du premier objet choisi qui en a un (null : rien de
+  // L'outil de la sélection : le texte en saisie (ouvert d'un double clic, quel que soit
+  // l'outil en main), sinon celui du premier objet choisi qui en a un (null : rien de
   // choisi). L'outil déplié : celui de la sélection, sinon l'outil en main.
   function outilChoisi() {
+    if (ed.outils?.objetEnSaisie()) return "texte";
     for (const o of ed.objetsChoisis()) {
       const t = OUTIL_DE_TYPE[o.type];
       if (t) return t;
@@ -413,6 +415,11 @@ export function installerBarre(ed) {
     let marque = `opacite-${++marqueGlissiere}`;
     i.addEventListener("input", () => regler("opacite", Number(i.value), marque, t));
     i.addEventListener("change", () => {
+      // Tirée puis ramenée à sa valeur de départ dans le même geste : aucun pas.
+      const h = ed.h;
+      if (h?.marque === marque && JSON.stringify(h.doc) === h.passe[h.passe.length - 1]) {
+        ed.abandonner();
+      }
       marque = `opacite-${++marqueGlissiere}`;
       if (ed.outils?.saisieOuverte()) ed.outils.reprendreSaisie();
     });
@@ -420,33 +427,36 @@ export function installerBarre(ed) {
     return g;
   }
 
-  // Barre plus large que la fenêtre : elle défile (molette comprise) et s'estompe du côté
-  // qui cache des outils.
+  // Barre plus large que la fenêtre : les outils défilent (molette comprise, n'importe où
+  // sur la barre) et s'estompent du côté qui en cache ; Annuler, Rétablir et Plus restent.
   function suite() {
-    const g = palette.scrollLeft > 2;
-    const d = palette.scrollLeft + palette.clientWidth < palette.scrollWidth - 2;
-    if (g || d) palette.dataset.suite = g && d ? "deux" : g ? "debut" : "fin";
-    else delete palette.dataset.suite;
+    const g = outilsEl.scrollLeft > 2;
+    const d = outilsEl.scrollLeft + outilsEl.clientWidth < outilsEl.scrollWidth - 2;
+    if (g || d) outilsEl.dataset.suite = g && d ? "deux" : g ? "debut" : "fin";
+    else delete outilsEl.dataset.suite;
   }
   function montrerPli(pli) {
+    // Du côté du bord de la zone, l'outil n'est pas sous le fondu.
     const marge = jetonNombre("editeur-dock-fondu");
     const g = pli.offsetLeft - marge;
     const d = pli.offsetLeft + pli.offsetWidth + marge;
     const behavior = reduites() ? "auto" : "smooth";
-    if (g < palette.scrollLeft) palette.scrollTo({ left: Math.max(0, g), behavior });
-    else if (d > palette.scrollLeft + palette.clientWidth) {
-      palette.scrollTo({ left: d - palette.clientWidth, behavior });
+    // Plus large que la zone : son début (le bouton de l'outil) d'abord.
+    if (g < outilsEl.scrollLeft || d - g > outilsEl.clientWidth) {
+      outilsEl.scrollTo({ left: Math.max(0, g), behavior });
+    } else if (d > outilsEl.scrollLeft + outilsEl.clientWidth) {
+      outilsEl.scrollTo({ left: d - outilsEl.clientWidth, behavior });
     }
     suite();
   }
-  palette.addEventListener("scroll", suite, { passive: true });
+  outilsEl.addEventListener("scroll", suite, { passive: true });
   palette.addEventListener(
     "wheel",
     (e) => {
-      if (e.ctrlKey || palette.scrollWidth <= palette.clientWidth) return;
+      if (e.ctrlKey || outilsEl.scrollWidth <= outilsEl.clientWidth) return;
       if (Math.abs(e.deltaY) <= Math.abs(e.deltaX)) return;
       e.preventDefault();
-      palette.scrollLeft += e.deltaY;
+      outilsEl.scrollLeft += e.deltaY;
     },
     { passive: false },
   );
@@ -460,10 +470,13 @@ export function installerBarre(ed) {
     const p = prefs();
     if (variante) p.variantes[id] = variante;
     p.outil = id;
-    // Prendre un autre outil que celui de la sélection : on va dessiner avec lui. Stylo,
-    // surligneur et gomme ne prennent pas d'objet.
+    // Prendre un autre outil que celui de la sélection, ou une variante d'un outil au
+    // clavier (« L » : Ligne) : on va dessiner avec lui ; l'objet choisi n'est pas changé (le
+    // bouton de la variante, dans son pli, le change). Stylo, surligneur et gomme ne prennent
+    // pas d'objet.
     const choisi = outilChoisi();
-    if (choisi && (choisi !== id || id === "stylo" || id === "surligneur" || id === "gomme")) {
+    const dessiner = choisi !== id || !!variante || ["stylo", "surligneur", "gomme"].includes(id);
+    if (choisi && dessiner) {
       ed.selection = [];
     }
     synchroniser();
@@ -638,6 +651,9 @@ export function installerBarre(ed) {
       const on = t === ouvert;
       pli.toggleAttribute("data-on", on);
       if (!dedans) continue;
+      // Le pli qui se referme gardait le focus (un réglage pris au clavier) : il revient au
+      // bouton de son outil, pas à la page.
+      if (!on && dedans.contains(document.activeElement)) b.focus({ preventScroll: true });
       dedans.inert = !on;
       if (on) synchroniserPli(t, dedans);
     }

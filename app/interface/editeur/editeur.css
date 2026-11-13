@@ -234,8 +234,9 @@ input {
 
 /* Barre d'annotation : barre C « Souffle » (design/annotation-pistes) et instruments B
    « Couleur » (design/annotation-instruments), choisis le 13/11. L'outil déplié s'ouvre dans
-   la barre, rien ne s'ouvre par-dessus l'image ; plus large que la fenêtre, la barre défile
-   et s'estompe du côté qui cache des outils. */
+   la barre, rien ne s'ouvre par-dessus l'image. La fenêtre s'ouvre assez large pour elle
+   (`editeur-ouverture-largeur`) ; plus étroite, seuls les outils défilent (Annuler,
+   Rétablir et Plus restent) et s'estompent du côté qui en cache. */
 .pal {
   position: absolute;
   left: var(--editeur-dock-marge);
@@ -255,20 +256,17 @@ input {
   border: var(--editeur-trait-largeur) solid var(--editeur-verre-bord);
   box-shadow: var(--shadow-16);
   backdrop-filter: blur(var(--editeur-palette-flou)) saturate(1.4);
-  overflow-x: auto;
-  overflow-y: hidden;
-  scrollbar-width: none;
 }
-.pal::-webkit-scrollbar {
+.tools::-webkit-scrollbar {
   display: none;
 }
-.pal[data-suite="fin"] {
+.tools[data-suite="fin"] {
   mask-image: linear-gradient(90deg, #000 calc(100% - var(--editeur-dock-fondu)), transparent);
 }
-.pal[data-suite="debut"] {
+.tools[data-suite="debut"] {
   mask-image: linear-gradient(270deg, #000 calc(100% - var(--editeur-dock-fondu)), transparent);
 }
-.pal[data-suite="deux"] {
+.tools[data-suite="deux"] {
   mask-image: linear-gradient(
     90deg,
     transparent,
@@ -318,12 +316,18 @@ input {
   background: none;
   transform: none;
 }
+/* Les outils : la seule partie de la barre qui défile (repère des plis, `offsetLeft`). */
 .tools {
+  position: relative;
   display: flex;
   align-items: stretch;
   gap: var(--editeur-outils-ecart);
-  flex: none;
+  flex: 0 1 auto;
+  min-width: 0;
   padding: var(--editeur-outils-ecart-v) 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
 }
 .pli {
   display: flex;
@@ -387,7 +391,7 @@ input {
   height: var(--editeur-inst-hauteur);
   transform: translateY(var(--editeur-inst-repos));
   transition: transform var(--duree-editeur-instrument) var(--courbe-ressort);
-  filter: drop-shadow(0 1px 1.5px var(--editeur-inst-ombre));
+  filter: drop-shadow(0 var(--editeur-inst-ombre-y) var(--editeur-inst-ombre-flou) var(--editeur-inst-ombre));
 }
 .ib:hover .inst {
   transform: translateY(var(--editeur-inst-survol));

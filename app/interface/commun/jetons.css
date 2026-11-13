@@ -116,6 +116,13 @@
   --duree-historique-reduite: 1ms;
   --texte-balayage: 400ms;
   --texte-lecture: 200ms;
+  --texte-lecture-reduite: 120ms;
+  --texte-surligne-trace: 260ms;
+  --texte-surligne-pas: 40ms;
+  --texte-surligne-decalage: 160ms;
+  --texte-surligne-tenue: 220ms;
+  --texte-surligne-sortie: 140ms;
+  --texte-surligne-reduit: 120ms;
   --duree-editeur-pli: 360ms;
   --duree-editeur-encre: 220ms;
   --duree-editeur-saut: 340ms;
@@ -422,6 +429,8 @@
   --texte-choix: 30%;
   --texte-teinte: 10%;
   --texte-surligne: 30%;
+  --texte-surligne-debord-x: 2px;
+  --texte-surligne-debord-y: 1px;
   --texte-teinte-editeur: 6%;
   --historique-focus: 2px;
   --historique-focus-ecart: 1px;
@@ -462,6 +471,7 @@
   --editeur-dock-min: 784px;
   --editeur-dock-retrait: 16px;
   --editeur-dock-fondu: 44px;
+  --editeur-ouverture-largeur: 1088px;
   --editeur-outils-ecart-v: 5px;
   --editeur-outil-largeur: 38px;
   --editeur-outil-hauteur: 36px;
@@ -473,6 +483,8 @@
   --editeur-inst-boite: 40px;
   --editeur-inst-largeur: 30px;
   --editeur-inst-hauteur: 90px;
+  --editeur-inst-ombre-y: 1px;
+  --editeur-inst-ombre-flou: 1.5px;
   --editeur-inst-gauche: 5px;
   --editeur-inst-repos: 9px;
   --editeur-inst-survol: 6px;

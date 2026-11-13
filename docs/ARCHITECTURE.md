@@ -1155,8 +1155,10 @@ redimensionnement ; le haut est pris par `WM_NCHITTEST` (`HTTOP`), et tauri-runt
 ajoute son propre gestionnaire de bords (`undecorated_resizing`) au-dessus de la webview.
 `placer` (pure) : l'image à la taille réelle plus `MARGES` 72 × 180 px logiques (36 de
 chaque côté ; barre 52, réserve 14, barre d'annotation 80 et sa réserve 34), au moins
-`TAILLE_MIN`,
-au plus `PART_MAX` (90 %) de la zone utile de l'écran sous la souris, centrée ; `ouvrir`
+`LARGEUR_OUVERTURE` 1088 px logiques de large (jeton `editeur-ouverture-largeur`, essai
+d'égalité : la barre d'annotation y tient sans défiler quel que soit l'outil déplié, la
+plus large, Forme, faisant 1071 px plus 16 de retrait) et 440 de haut, au plus `PART_MAX`
+(90 %) de la zone utile de l'écran sous la souris, centrée ; `ouvrir`
 pose la position, puis la taille, puis décale la fenêtre de l'écart entre position
 intérieure et extérieure : la zone cliente tombe exactement sur la place. La barre du haut
 de la page déplace la fenêtre par `data-tauri-drag-region` : `capabilities/editeur.json`
@@ -1238,16 +1240,23 @@ en codes courts sans chemin (`com:`, `dialogue:`, `options:`, `filtre:`, `extens
 **Modèle et dessin (B).** `interface/editeur/document.js` est le modèle pur, sans DOM ni
 import : document, objets (`ajouter`, `normaliser`, `lisser`, `recadrer`, `touche`,
 `deplacer`, `redimensionner`, `changerVariante`, `dupliquer`, `gommer`, `gommeTouche`),
-historique de 200 pas borné à 32 Mo de JSON, restauré en place. La flèche se courbe à sa
-poignée du milieu (`redimensionner`, poignée `pc`) : la courbe passe par la pointe ;
-tirée à moins de 6 px d'écran du milieu de la corde, la flèche redevient droite (plus de
-`cx`, `cy`) ; Maj : courbe symétrique ; ses bouts tirés gardent la courbe (similitude).
+historique de 200 pas borné à 32 Mo de JSON, restauré en place. Le numéro de version du
+document (`h.version`) n'est jamais repris pour un autre contenu : le cœur s'en sert pour
+« déjà copié », « déjà enregistré » et « déjà rangé » ; un geste abandonné (`abandonner`)
+rend celui d'avant son pas. La flèche se courbe à sa
+poignée du milieu (`redimensionner`, poignée `pc`) : la courbe passe par la poignée, et le
+corps dessiné aussi jusqu'à la tête (`entreePointe` : la tête est posée sur la courbe) ;
+la poignée reste dans la moitié du milieu de la corde, dans sa longueur ; tirée à moins de
+6 px d'écran de la corde, la flèche redevient droite (plus de `cx`, `cy`) ; Maj : courbe
+symétrique ; ses bouts tirés gardent la courbe (similitude).
 `changerVariante` donne à un objet une autre variante de son outil à la même place et aux
 mêmes réglages (rectangle, ellipse, ligne sur la diagonale ; Pixeliser, Flouter, Bloc
 noir ; projecteur rectangle ou ovale). Gomme : les encres (flèche, rectangle, ellipse,
 ligne, stylo, surligneur) gardent leurs passages (`gommes`, traits ronds) et ne sont
 effacées que dessous ; les passages suivent l'objet (déplacer, redimensionner, courber,
-dupliquer) ; texte, numéro, masque et projecteur sont entiers. `dessin.js` peint la vue (`peindreVue`, options `cacher`, `ajout`,
+dupliquer) ; texte, numéro, masque et projecteur sont entiers. Une encre reste prise
+(`touche`) là où il en reste : son axe est sondé en travers (`encreRestePres`), ce qui
+garde un surligneur gommé dans sa longueur. `dessin.js` peint la vue (`peindreVue`, options `cacher`, `ajout`,
 `rayon` pour les coins arrondis à l'écran seulement) et compose l'export (`composer`,
 toile de l'image entière puis le cadre). Masques : Pixeliser (avec un écart de luminosité
 tiré d'une `graine` par masque), Flouter (source entière), Bloc noir (rectangle plein).
@@ -1277,18 +1286,26 @@ remplace la v2 depuis le 12/11/2026)
   foncée ou très pâle) et saute quand elle ou sa taille change. Un objet choisi déplie
   l'outil qui l'a fait, à ses valeurs : ce qu'on y règle va à lui et à la préférence de
   son outil, pas à l'outil en main (un pas, aucun si rien ne change) ; une variante le
-  change (`changerVariante`). Prendre un autre outil, ou Stylo, Surligneur, Gomme, défait
-  la sélection. Fenêtre étroite : la barre défile (molette comprise), estompée du côté
-  caché, et l'outil pris s'y montre en entier. Les préférences d'avant (variante
-  « Courbe », emplacement) sont ignorées.
+  change (`changerVariante`, aussi à la touche de la variante). Prendre un autre outil,
+  une variante, ou Stylo, Surligneur, Gomme, défait la sélection ; reprendre l'outil de
+  l'objet choisi la garde. Un texte en saisie déplie l'outil Texte, quel que soit l'outil
+  en main. Le focus ne se perd jamais dans un pli qui se replie : il revient au bouton de
+  l'outil. Fenêtre étroite (sous 1088 px) : seuls les outils défilent (molette comprise,
+  même sur Annuler ou Plus), estompés du côté caché ; Annuler, Rétablir et Plus restent en
+  entier, le fond et l'ombre de la barre aussi ; l'outil pris s'y montre en entier, ou son
+  début s'il est plus large que la place. Les préférences d'avant (variante « Courbe »,
+  emplacement) sont ignorées.
 - Gestes : un appui sur un objet le sélectionne et le déplace (sauf Stylo, Surligneur,
   Gomme) ; emmené puis ramené à sa place, aucun pas. Une flèche tracée reste choisie : sa
-  poignée du milieu (pleine, à la couleur d'accent) la courbe, la courbe passant par la
-  pointe ; ramenée près du milieu de la corde, elle redevient droite ; Maj : courbe
+  poignée du milieu (pleine, à la couleur d'accent) la courbe, le trait passant par la
+  poignée ; ramenée près de la corde, elle redevient droite ; Maj : courbe
   symétrique. La Gomme efface les encres là où elle passe, et là seulement : un geste = un
   pas (aucun s'il n'efface rien ; une encre tout effacée disparaît ; Échap l'abandonne) ;
-  posée sur un objet entier (texte, numéro, masque, projecteur par son bord), elle
-  l'enlève en entier, caché dès l'appui. Le recadrage se fait aux quatre équerres des
+  posée sur un objet entier (texte, numéro, masque, projecteur par son bord) qu'aucune
+  encre atteinte ne recouvre, elle l'enlève en entier, caché dès l'appui, et ne gomme ce
+  qu'il couvrait qu'une fois vraiment partie (au-delà du seuil de déplacement) ; ce qui
+  est dessus décide, dans l'ordre de `objetSous` (masques, projecteurs, puis annotations).
+  Un geste de glissière aller-retour (opacité revenue à sa valeur) ne fait aucun pas. Le recadrage se fait aux quatre équerres des
   coins de l'image (`recadrer`, `null` à l'image entière) ; le Projecteur se prend par son
   bord.
 - Fermeture : `editeur:fermer_demande` valide le texte en saisie, envoie `editeur_etat`,
@@ -1474,7 +1491,10 @@ eux-mêmes. Le moteur est créé à chaque lecture puis relâché :
 `AucuneLangue`. Au plus `LECTURES_MAX` (2) lectures à la fois (au-delà :
 `Moteur("deja_en_cours")`) ; une place reste prise jusqu'au rappel du moteur, même après
 l'échéance. `RecognizeAsync` est attendu dans le fil appelant, au plus `ATTENTE_MAX` (10 s),
-puis annulé (`Moteur("echeance")`). `MaxImageDimension` est lu une fois. Hors Windows
+puis annulé (`Moteur("echeance")`). Les boîtes des mots sont celles du texte redressé :
+sur un texte penché, `redresser` les tourne de `OcrResult.TextAngle` (degrés, sens des
+aiguilles d'une montre, autour du centre de l'image ; `null` : texte droit) et garde le
+plus petit rectangle droit qui les couvre. `MaxImageDimension` est lu une fois. Hors Windows
 (`autre.rs`) : non pris en charge. `BREEZYSHOT_ESSAI_SANS_TEXTE=1` (essais) : aucune langue.
 `texte::preparer` compose l'alpha sur blanc (BGRA), agrandit ×2 au plus proche voisin une
 image de 1 Mpx ou moins (`PETITE_IMAGE`) si le double tient, et réduit au-delà de
@@ -1515,7 +1535,14 @@ pixels réels du bureau), `Selection::surligner` envoie `selection:surligner { i
 [{ x, y, largeur, hauteur }], reduites, trace, pas, tenue, sortie }` (durées en ms,
 `texte::deroule` : chaque ligne tirée en 260 ms, la suivante 40 ms plus tard, 160 ms de
 décalage en tout au plus ; tenue 220 ms ; la page efface la sélection en 140 ms ; réduit :
-fondus de 120 ms, sans pas ; `selection surlignage <id> <n> lignes`). Pendant ce temps la
+fondus de 120 ms, sans pas ; ce sont les jetons `texte-surligne-*`, et le balayage
+`texte-lecture` et `texte-lecture-reduite`, essai d'égalité ; `selection surlignage <id>
+<n> lignes`). La page refuse un surlignage dont une durée, ou le tout, dépasse 2 s, et
+n'en montre que 400 lignes ; chaque bande déborde de ses mots de 2 px logiques sur les
+côtés et de 1 en haut et en bas (jetons `texte-surligne-debord-x` et `-y`). Son filet
+attend `selection:cachee` 2 s après le balayage (le gel peut rester 1,5 s après le
+relâcher, plus une marge pour un surlignage commencé juste avant) et le surlignage plus
+1,5 s après lui ; puis elle se remet au repos. Pendant ce temps la
 fin est gardée dans la lecture et la borne ne libère plus l'écran ; le fil `texte-surligne`
 le libère au bout de `texte::duree_surlignage` (au plus 810 ms, 30 ms de marge comprise),
 puis `surlignage_fini` montre la fin. Sinon (pas copié, écran déjà libéré, aucune ligne,
@@ -1556,7 +1583,8 @@ vers le presse-papiers (`sortie::copier_texte`).
 **Journal** : `texte langues …|aucune|aucune (essai)`, `texte non pris en charge`, `menu:
 capturer texte`, `raccourci presse: texte`, `DemandeCapture texte`, `zone texte <x>,<y>
 <l>x<h>`, `selection balayage <id>` (ou `selection balayage sans affichage`), `selection
-surlignage <id> <n> lignes` (ou `selection surlignage sans affichage`), `texte moteur
+surlignage <id> <n> lignes` (ou `selection surlignage sans ligne`, `selection surlignage
+sans affichage`), `texte moteur
 cree en <ms> ms`, `texte lu <n> lignes <m> mots en <ms> ms langue <l> facteur <f>`, `texte
 vide en <ms> ms`, `texte impossible: aucune_langue|echeance|moteur (<code>)` (`<code>` :
 `fil`, `deja_en_cours`, `taille`, `decoupe`, ou une étape et son HRESULT), `texte copie`,
@@ -1749,23 +1777,28 @@ non envoye: <e>`, `surlignage sans fil (<e>): fin montree tout de suite`.
   redimensionnement par les bords et le déplacement par la barre de la page ne s'y
   vérifient pas. Hors Windows : démarrage et arrêt seulement.
 - `essais/pages/editeur-modele.cjs` (0.4) : `document.js` et `dessin.js` sous Node 22.15
-  ou plus (`module.registerHooks` pour charger les modules), 67 points : chaque type,
+  ou plus (`module.registerHooks` pour charger les modules), 69 points : chaque type,
   historique (200 pas, borne en octets), touche, boîtes et poignées, alpha exact, masques
   (Pixeliser aligné sur la grille, petits masques, attaque par candidats sur un texte),
   vue à la taille réelle égale à l'export, temps sur 25 Mpx, Projecteur (P1 à P10 : prise
   par le bord, réunion, alpha, coût du voile), gomme (G1 à G11 : passages, encres
-  effacées dessous seulement, passages qui suivent l'objet), flèche courbée à sa poignée
-  (F : courbe par la pointe, aimant droit, Maj, bouts et passages qui suivent),
+  effacées dessous seulement, passages qui suivent l'objet, encre prise là où il en reste),
+  flèche courbée à sa poignée (F : courbe par la poignée, poignée bornée, aimant à la
+  corde, tête sur la courbe, trait qui passe par la poignée, Maj, bouts et passages qui
+  suivent), version gardée par un geste abandonné,
   `changerVariante` (V) ; `ECHECS : 0` attendu. Étape du job `pages`.
 - `essais/pages/editeur.cjs` (0.4) : la page de l'éditeur dans Chromium, cœur simulé et
-  vrai modèle, 225 points : noms et rôles accessibles (contrat de l'essai 12), chaque
-  outil, flèche choisie après le tracé et courbée à sa poignée, Gomme au pixel,
+  vrai modèle, 243 points : noms et rôles accessibles (contrat de l'essai 12), chaque
+  outil, flèche choisie après le tracé et courbée à sa poignée, Gomme au pixel (ce qui
+  est dessus décide, clic qui tremble),
   Projecteur, recadrage par chaque coin, sélection, la barre C (l'outil déplié, ce que
   chaque outil déplie, l'objet choisi qui déplie son outil, variante changée sur l'objet,
   instruments à la couleur de l'encre), couleurs, menu « Fermer » et ses issues,
   « Copier » qui ferme, vignette de prise, règle de `fermer_demande`, un seul export à la
-  fois, clair, sombre, fenêtre étroite (la barre défile), aucune erreur ni violation de
-  CSP. Étape du job `pages`.
+  fois, clair, sombre, largeur d'ouverture (chaque outil déplié tient), fenêtre étroite
+  (seuls les outils défilent, Annuler, Rétablir et Plus restent, l'outil pris se montre),
+  texte en saisie qui déplie son outil, focus gardé quand un pli se replie, glissière
+  aller-retour sans pas, aucune erreur ni violation de CSP. Étape du job `pages`.
 - **Tests de la 0.5** (`cargo test --locked` sous Linux : 641 tests de la bibliothèque
   réussis, 2 ignorés, et les 2 de `tests/architecture.rs`, qui refusent aussi un appel à
   `droits::ouverte` ou à `licence::verifier` hors d'`application`). Tests ajoutés, par
@@ -1809,7 +1842,8 @@ non envoye: <e>`, `surlignage sans fil (<e>): fin montree tout de suite`.
   selon la licence (six avec licence, cinq sans langue, ligne partie pendant sa saisie et
   saisie rendue au cœur). `vue-reglages.json` porte `vue` (sans licence) et `vue_pro`.
 - Pages de Copier le texte (chantier G) : `selection.cjs` (mode texte, `selection:balayer`,
-  `selection:surligner`),
+  `selection:surligner`, filet du balayage, surlignage borné à 2 s et à 400 lignes, Échap
+  et clics sans effet pendant le surlignage),
   `editeur.cjs` (bouton « Texte », export de but `texte`, calque « Choisir le texte » et
   son clavier) et `bandeau.cjs` (erreur brève à `duree_ms`) grandissent avec elles.
 - Essai Windows 13 (`13-historique-texte.ps1`, 0.5), avec la variable capturable, le
@@ -2057,7 +2091,8 @@ largeur, hauteur, reduites }` (pixels réels relatifs à la fenêtre ; sans affi
 `selection balayage sans affichage`), puis, pour un texte copié,
 `Selection::surligner(lignes, reduites, deroule)` → `selection:surligner { id, lignes,
 reduites, trace, pas, tenue, sortie }` (lignes en pixels réels relatifs à la fenêtre ; la
-page tire chaque ligne de gauche à droite puis efface toute la sélection) ; la garde de la
+page tire chaque ligne de gauche à droite puis efface toute la sélection ; sans ligne :
+`selection surlignage sans ligne`, rien n'est envoyé) ; la garde de la
 capture la cache ensuite (§6.4). Un nouvel affichage oublie l'affichage gardé.
 
 ## 10. Sortie (`sortie/`, étape 6)

@@ -403,13 +403,23 @@ pub fn texte_lu(app: &AppHandle, fin: FinLecture) {
 /// Le balayage de la lecture `numero` est fini (fil principal) : son résultat, s'il est
 /// arrivé, est montré. Pendant le surlignage, le résultat gardé attend sa fin.
 fn balayage_fini(app: &AppHandle, numero: u64) {
-    if surlignage_en_cours(&ecran(), numero) {
-        return;
-    }
-    let fin = texte::balayage_fini(&mut super::lecture_en_cours(app), numero);
+    let fin = fin_du_balayage(&ecran(), &mut super::lecture_en_cours(app), numero);
     if let Some(fin) = fin {
         finir(app, fin);
     }
+}
+
+/// La fin gardée à montrer au bout du balayage de la lecture `numero` (pure, testée sans
+/// écran) : aucune pendant son surlignage, que ce réveil tardif couperait sinon.
+fn fin_du_balayage<G>(
+    place: &Option<EcranGarde<G>>,
+    lecture: &mut Option<LectureEnCours>,
+    numero: u64,
+) -> Option<FinLecture> {
+    if surlignage_en_cours(place, numero) {
+        return None;
+    }
+    texte::balayage_fini(lecture, numero)
 }
 
 /// L'échéance de la lecture `numero` est tombée (fil principal) : « Impossible de lire le
@@ -441,15 +451,12 @@ fn finir(app: &AppHandle, fin: FinLecture) {
 /// aucune ligne, sélection absente, fil impossible).
 fn surligner(app: &AppHandle, fin: FinLecture) -> Option<FinLecture> {
     let numero = fin.numero;
-    let en_cours = super::lecture_en_cours(app)
-        .as_ref()
-        .is_some_and(|x| x.numero == numero && x.fin.is_none());
+    if !texte::surlignable(&super::lecture_en_cours(app), &fin) {
+        return Some(fin);
+    }
     let Issue::Texte(lu) = &fin.issue else {
         return Some(fin);
     };
-    if !en_cours || !texte::a_surligner(&fin) {
-        return Some(fin);
-    }
     let Some(zone) = commencer_surlignage(&mut ecran(), numero) else {
         return Some(fin);
     };
@@ -730,6 +737,52 @@ mod tests {
             Some((Some("garde"), ms(1500)))
         );
         renoncer_surlignage(&mut None::<EcranGarde<&str>>, 5);
+    }
+
+    #[test]
+    fn fin_du_balayage_attend_le_surlignage() {
+        let t = Instant::now();
+        let fin = FinLecture {
+            numero: 6,
+            issue: crate::texte::Issue::Vide,
+            copie: None,
+            duree: Duration::ZERO,
+            document: None,
+            facteur: 1.0,
+        };
+        let gardee = || {
+            Some(LectureEnCours {
+                numero: 6,
+                relache: t,
+                minimum: texte::BALAYAGE,
+                fin: Some(Box::new(fin.clone())),
+            })
+        };
+        // Pendant le surlignage, un réveil tardif du balayage ne prend pas la fin gardée.
+        let mut place = rangee(6, t);
+        assert!(commencer_surlignage(&mut place, 6).is_some());
+        let mut lecture = gardee();
+        assert_eq!(fin_du_balayage(&place, &mut lecture, 6), None);
+        assert_eq!(lecture.as_ref().and_then(|x| x.fin.as_deref()), Some(&fin));
+        // Sans surlignage (ou celui d'une autre lecture), elle est rendue, une fois.
+        let mut autre = rangee(7, t);
+        assert!(commencer_surlignage(&mut autre, 7).is_some());
+        assert_eq!(fin_du_balayage(&autre, &mut lecture, 6), Some(fin.clone()));
+        assert_eq!(fin_du_balayage(&autre, &mut lecture, 6), None);
+        let mut lecture = gardee();
+        assert_eq!(
+            fin_du_balayage(&rangee(6, t), &mut lecture, 6),
+            Some(fin.clone())
+        );
+        let mut lecture = gardee();
+        assert_eq!(
+            fin_du_balayage(&None::<EcranGarde<&str>>, &mut lecture, 6),
+            Some(fin)
+        );
+        assert_eq!(
+            fin_du_balayage(&None::<EcranGarde<&str>>, &mut lecture, 5),
+            None
+        );
     }
 
     #[test]

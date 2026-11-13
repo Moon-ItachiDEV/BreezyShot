@@ -907,6 +907,95 @@ const CHARGE = {
     await fin(p, '5');
   }
 
+  // ---------- 5 bis. Gomme : ce qui est dessus décide (relecture du 13/11) ----------
+  {
+    const p = await page();
+    const egal = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+    const etat = (q) =>
+      q.evaluate(() => ({
+        types: __ed.h.doc.objets.map((o) => o.type),
+        g: __ed.h.doc.objets.map((o) => (o.gommes ? o.gommes.length : 0)),
+        pas: __ed.h.passe.length,
+      }));
+    // Un numéro posé à côté d'une flèche puis emmené sur sa queue (il est au-dessus d'elle) ;
+    // appui de la gomme sur lui, en tremblant de 2 px : il part en entier, la flèche qu'il
+    // couvrait n'est pas trouée.
+    await outil(p, 'Flèche');
+    await glisser(p, [100, 60], [300, 60]);
+    await outil(p, 'Numéro');
+    await cliquer(p, 110, 110);
+    await glisser(p, [110, 110], [110, 60]);
+    await outil(p, 'Gomme');
+    let pas = (await etat(p)).pas;
+    const [x, y] = await point(p, 110, 60);
+    await p.mouse.move(x, y);
+    await p.mouse.down();
+    await p.mouse.move(x + 2, y);
+    await p.mouse.up();
+    await uneImage(p);
+    let r = await etat(p);
+    verifier(
+      egal(r.types, ['fleche']) && egal(r.g, [0]) && r.pas === pas + 1,
+      '5 bis gomme posée sur un numéro qui couvre une flèche : le numéro part, la flèche n’est pas trouée (un pas)',
+      JSON.stringify([pas, r]),
+    );
+    // Frottée depuis un numéro posé sur la flèche : le numéro part, puis la flèche est gommée
+    // là où la gomme passe ensuite.
+    await outil(p, 'Numéro');
+    await cliquer(p, 200, 110);
+    await glisser(p, [200, 110], [200, 60]);
+    await outil(p, 'Gomme');
+    pas = (await etat(p)).pas;
+    await glisser(p, [200, 60], [260, 60]);
+    r = await etat(p);
+    verifier(
+      egal(r.types, ['fleche']) && egal(r.g, [1]) && r.pas === pas + 1,
+      '5 bis frottée depuis un numéro posé sur une flèche : le numéro part, la flèche est gommée où la gomme passe (un pas)',
+      JSON.stringify([pas, r]),
+    );
+    // Un numéro, puis une flèche tracée par-dessus : l'appui sur la flèche la gomme, le
+    // numéro reste.
+    await outil(p, 'Numéro');
+    await cliquer(p, 200, 150);
+    await outil(p, 'Flèche');
+    await glisser(p, [120, 150], [300, 150]);
+    await outil(p, 'Gomme');
+    pas = (await etat(p)).pas;
+    await cliquer(p, 200, 150);
+    r = await etat(p);
+    verifier(
+      egal(r.types, ['fleche', 'numero', 'fleche']) && egal(r.g, [1, 0, 1]) && r.pas === pas + 1,
+      '5 bis gomme posée sur une flèche tracée par-dessus un numéro : la flèche est gommée, le numéro reste',
+      JSON.stringify([pas, r]),
+    );
+    // Une flèche tracée sur un flou : l'appui à 6 px d'elle (sur le flou) la gomme, le flou
+    // reste.
+    await outil(p, 'Flou');
+    await glisser(p, [80, 200], [320, 280]);
+    await outil(p, 'Flèche');
+    await glisser(p, [40, 240], [300, 240]);
+    await outil(p, 'Gomme');
+    pas = (await etat(p)).pas;
+    await cliquer(p, 200, 246);
+    r = await etat(p);
+    verifier(
+      egal(r.types, ['fleche', 'numero', 'fleche', 'masque', 'fleche']) &&
+        egal(r.g, [1, 0, 1, 0, 1]) &&
+        r.pas === pas + 1,
+      '5 bis gomme posée près d’une flèche tracée sur un flou : la flèche est gommée, le flou reste',
+      JSON.stringify([pas, r]),
+    );
+    // Sur le flou, loin de toute encre : le flou part en entier.
+    await cliquer(p, 300, 210);
+    r = await etat(p);
+    verifier(
+      egal(r.types, ['fleche', 'numero', 'fleche', 'fleche']) && r.pas === pas + 2,
+      '5 bis gomme posée sur le flou loin des encres : il part en entier (un pas)',
+      JSON.stringify([pas, r]),
+    );
+    await fin(p, '5 bis');
+  }
+
   // ---------- 6. sélection, déplacement, suppression ----------
   {
     const p = await page();
@@ -948,18 +1037,26 @@ const CHARGE = {
       '6 glissé : déplacé de 40 × 20, un pas, rien de créé',
       JSON.stringify(r1),
     );
-    // Emmené puis ramené à sa place dans le même geste : aucun pas.
+    // Emmené puis ramené à sa place dans le même geste : aucun pas, et le document garde sa
+    // version (« Fermer » après un Copier ne redemande rien).
     const [bx, by] = await point(p, 140, 160);
+    const version0 = await p.evaluate(() => __ed.h.version);
     await p.mouse.move(bx, by);
     await p.mouse.down();
     await p.mouse.move(bx + 30, by + 10);
+    await uneImage(p);
+    const pendant = await p.evaluate(() => __ed.h.version);
     await p.mouse.move(bx, by);
     await p.mouse.up();
     await uneImage(p);
+    const version1 = await p.evaluate(() => __ed.h.version);
     verifier(
       (await p.evaluate(() => __ed.h.passe.length)) === pas0 + 1 &&
-        Math.round((await objets(p))[0].x1) === 140,
-      '6 emmené puis ramené à sa place : aucun pas de plus',
+        Math.round((await objets(p))[0].x1) === 140 &&
+        pendant !== version0 &&
+        version1 === version0,
+      '6 emmené puis ramené à sa place : aucun pas de plus, la version d’avant le geste',
+      JSON.stringify([version0, pendant, version1]),
     );
     await p.keyboard.press('Delete');
     await uneImage(p);
@@ -1142,6 +1239,28 @@ const CHARGE = {
       '9 flèche choisie : le pli montre ses valeurs ; « Fin » la règle en un pas, recliqué aucun',
       JSON.stringify([c0, o, pas0, pas1]),
     );
+    // La glissière tirée de 55 à 30 puis ramenée à 55 dans le même geste : aucun pas ; tirée
+    // de 55 à 40 : un pas.
+    const tirer = (valeurs) =>
+      pli(p)
+        .locator('input[type="range"]')
+        .evaluate((i, v) => {
+          for (const x of v) {
+            i.value = x;
+            i.dispatchEvent(new Event('input', { bubbles: true }));
+          }
+          i.dispatchEvent(new Event('change', { bubbles: true }));
+        }, valeurs);
+    const v0 = await p.evaluate(() => [__ed.h.passe.length, __ed.h.version]);
+    await tirer([45, 30, 45, 55]);
+    const v1 = await p.evaluate(() => [__ed.h.passe.length, __ed.h.version, __ed.h.doc.objets[0].opacite]);
+    await tirer([50, 40]);
+    const v2 = await p.evaluate(() => [__ed.h.passe.length, __ed.h.doc.objets[0].opacite]);
+    verifier(
+      v1[0] === v0[0] && v1[1] === v0[1] && v1[2] === 0.55 && v2[0] === v0[0] + 1 && v2[1] === 0.4,
+      '9 glissière tirée puis ramenée à sa valeur dans le même geste : aucun pas, même version ; tirée ailleurs : un pas',
+      JSON.stringify([v0, v1, v2]),
+    );
 
     // Ce que chaque outil déplie (Couleurs : les six et « Autre couleur »).
     const resume = async (nom) => {
@@ -1246,6 +1365,104 @@ const CHARGE = {
       '9 prendre le Stylo : plus rien de choisi, le Stylo se déplie',
     );
     await fin(p, '9');
+  }
+
+  // ---------- 9 bis. texte rouvert d'un double clic, un autre outil en main ----------
+  {
+    const p = await page();
+    await outil(p, 'Texte');
+    await cliquer(p, 150, 150);
+    await p.keyboard.type('Salut');
+    await p.keyboard.press('Enter');
+    await uneImage(p);
+    await outil(p, 'Flèche');
+    const avant = await p.evaluate(() => ({ ...__ed.prefs.couleurs }));
+    const pas0 = await p.evaluate(() => __ed.h.passe.length);
+    const [x, y] = await point(p, 162, 162);
+    await p.mouse.dblclick(x, y);
+    await uneImage(p);
+    const ouvert = { deplie: await deplie(p), saisie: await p.evaluate(() => !!__ed.outils.objetEnSaisie()) };
+    // Le pli du texte : ses tailles (Petit, Moyen, Grand), ses couleurs, son opacité.
+    const pli = await contenuPli(p);
+    await reglage(p, 'Bleu');
+    await reglage(p, 'Grand');
+    const focus = await p.evaluate(() => document.activeElement && document.activeElement.id);
+    await p.keyboard.press('Enter');
+    await uneImage(p);
+    const r = await p.evaluate(() => ({
+      o: __ed.h.doc.objets.map((o) => [o.type, o.couleur, o.taille]),
+      prefs: { ...__ed.prefs.couleurs },
+      pas: __ed.h.passe.length,
+    }));
+    verifier(
+      JSON.stringify(ouvert) === '{"deplie":["texte"],"saisie":true}' &&
+        pli &&
+        JSON.stringify(pli.groupes[0]) === '["Taille",["Petit","Moyen","Grand"]]' &&
+        focus === 'saisie' &&
+        JSON.stringify(r.o) === '[["texte","#0090FF",40]]' &&
+        r.prefs.texte === '#0090FF' &&
+        r.prefs.fleche === avant.fleche &&
+        r.pas === pas0 + 1,
+      '9 bis texte rouvert d’un double clic, Flèche en main : le pli du texte se déplie ; Bleu et Grand vont au texte (un pas), la flèche garde sa couleur',
+      JSON.stringify([ouvert, pli, focus, r, avant.fleche]),
+    );
+    verifier(
+      JSON.stringify(await deplie(p)) === '["fleche"]',
+      '9 bis texte validé : le pli de la Flèche (outil en main) revient',
+    );
+    await fin(p, '9 bis');
+  }
+
+  // ---------- 9 ter. clavier : variante prise au clavier, focus du pli qui se referme ----------
+  {
+    const p = await page();
+    // Une ellipse choisie, touche L : on prend Ligne pour dessiner ; l'ellipse n'est pas
+    // changée et n'est plus choisie ; le pli montre Ligne enfoncée.
+    await variante(p, 'Forme', 'Ellipse');
+    await glisser(p, [60, 60], [160, 140]);
+    await cliquer(p, 60, 100);
+    const avant = await p.evaluate(() => ({ s: __ed.selection.length, pas: __ed.h.passe.length }));
+    await p.keyboard.press('l');
+    await uneImage(p);
+    const apres = await p.evaluate(() => ({
+      types: __ed.h.doc.objets.map((o) => o.type),
+      s: __ed.selection.length,
+      v: __ed.prefs.variantes.forme,
+      pas: __ed.h.passe.length,
+    }));
+    const pliL = await contenuPli(p);
+    verifier(
+      avant.s === 1 &&
+        JSON.stringify(apres.types) === '["ellipse"]' &&
+        apres.s === 0 &&
+        apres.v === 'ligne' &&
+        apres.pas === avant.pas &&
+        pliL &&
+        pliL.enfonces.includes('Ligne'),
+      '9 ter ellipse choisie, touche L : Ligne prise pour dessiner, l’ellipse inchangée et plus choisie, le pli montre Ligne',
+      JSON.stringify([avant, apres, pliL]),
+    );
+    // Flèche en main, l'ellipse choisie : le pli de la Forme ; focus sur « Moyen », Échap :
+    // la sélection part, le pli se referme, le focus va au bouton Forme (pas à la page).
+    await outil(p, 'Flèche');
+    await cliquer(p, 60, 100);
+    const ouvert = await deplie(p);
+    await pli(p).getByRole('button', { name: 'Moyen', exact: true }).focus();
+    await p.keyboard.press('Escape');
+    await uneImage(p);
+    const focus = await p.evaluate(() => {
+      const a = document.activeElement;
+      return { tag: a && a.tagName, outil: a && a.dataset && a.dataset.outil, s: __ed.selection.length };
+    });
+    verifier(
+      JSON.stringify(ouvert) === '["forme"]' &&
+        focus.s === 0 &&
+        focus.outil === 'forme' &&
+        JSON.stringify(await deplie(p)) === '["fleche"]',
+      '9 ter focus sur un réglage du pli de l’objet, Échap : le pli se referme, le focus va au bouton de son outil',
+      JSON.stringify([ouvert, focus]),
+    );
+    await fin(p, '9 ter');
   }
 
   // ---------- 10. couleurs : le changement se voit sur l'instrument ----------
@@ -1879,77 +2096,163 @@ const CHARGE = {
     await fin(p, `16 ${theme}`);
   }
 
-  // ---------- 17. fenêtre étroite : la barre défile ----------
+  // ---------- 17. largeur d'ouverture, fenêtre étroite : seuls les outils défilent ----------
+  {
+    // À la largeur d'ouverture du cœur (jeton editeur-ouverture-largeur, LARGEUR_OUVERTURE),
+    // chaque outil déplié tient dans la barre sans défiler.
+    const largeur = Number.parseFloat(
+      fs.readFileSync(path.join(RACINE, 'commun', 'jetons.css'), 'utf8').match(/--editeur-ouverture-largeur:\s*([\d.]+)px/)[1],
+    );
+    const p = await page({ largeur, hauteur: 600 });
+    const tiennent = [];
+    for (const n of ['Flèche', 'Stylo', 'Surligneur', 'Gomme', 'Texte', 'Forme', 'Numéro', 'Flou', 'Projecteur']) {
+      await outil(p, n);
+      await p
+        .waitForFunction(() => document.getAnimations().every((a) => a.playState !== 'running'), null, {
+          timeout: 3000,
+        })
+        .catch(() => {});
+      const m = await p.evaluate(() => {
+        const o = document.querySelector('#outils');
+        const b = document.querySelector('#palette').getBoundingClientRect();
+        return { defile: o.scrollWidth - o.clientWidth, g: b.left, d: b.right, suite: o.dataset.suite || '' };
+      });
+      tiennent.push([n, m.defile <= 0 && m.g >= 0 && m.d <= largeur && m.suite === '']);
+    }
+    verifier(
+      largeur === 1088 && tiennent.every(([, ok]) => ok),
+      `17 ${largeur} px (largeur d'ouverture) : chaque outil déplié tient dans la barre sans défiler`,
+      JSON.stringify(tiennent),
+    );
+    await fin(p, '17 ouverture');
+  }
   {
     const p = await page({ largeur: 640, hauteur: 440 });
     const mesure = () =>
       p.evaluate(() => {
         const pal = document.querySelector('#palette');
+        const o = document.querySelector('#outils');
         const b = pal.getBoundingClientRect();
+        const zo = o.getBoundingClientRect();
+        // Annuler, Rétablir et Plus : en entier dans la barre, hors de la zone qui défile.
+        const fixes = ['[data-act="annuler"]', '[data-act="retablir"]', '#bouton-plus'].map((s) => {
+          const r = document.querySelector(s).getBoundingClientRect();
+          return r.left >= b.left && r.right <= b.right && (r.right <= zo.left || r.left >= zo.right);
+        });
+        const cs = getComputedStyle(pal);
         return {
           h: b.height,
           g: b.left,
           d: b.right,
           l: innerWidth,
-          defile: pal.scrollWidth - pal.clientWidth,
-          x: pal.scrollLeft,
-          suite: pal.dataset.suite || '',
+          defile: o.scrollWidth - o.clientWidth,
+          x: o.scrollLeft,
+          suite: o.dataset.suite || '',
+          fixes,
+          // Le fond et l'ombre de la barre ne sont jamais estompés.
+          masque: cs.maskImage || cs.webkitMaskImage || 'none',
+          ombre: cs.boxShadow !== 'none',
         };
       });
     const r = await mesure();
     verifier(
-      r.h === 80 && r.g >= 0 && r.d <= r.l && r.defile > 0 && r.x === 0 && r.suite === 'fin',
-      '17 640 × 440 : la barre tient dans la fenêtre et défile, estompée du côté caché',
+      r.h === 80 &&
+        r.g >= 0 &&
+        r.d <= r.l &&
+        r.defile > 0 &&
+        r.x === 0 &&
+        r.suite === 'fin' &&
+        r.fixes.every(Boolean) &&
+        r.masque === 'none' &&
+        r.ombre,
+      '17 640 × 440 : la barre tient dans la fenêtre, seuls les outils défilent, estompés du côté caché ; Annuler, Rétablir, Plus en entier ; fond et ombre gardés',
       JSON.stringify(r),
     );
-    const [cx, cy] = await p.$eval('#palette', (e) => {
+    // La molette, sur Annuler (hors de la zone qui défile), fait défiler les outils.
+    const [cx, cy] = await p.$eval('[data-act="annuler"]', (e) => {
       const b = e.getBoundingClientRect();
       return [b.left + b.width / 2, b.top + b.height / 2];
     });
     await p.mouse.move(cx, cy);
     await p.mouse.wheel(0, 120);
     await p
-      .waitForFunction(() => document.querySelector('#palette').scrollLeft > 0, null, {
+      .waitForFunction(() => document.querySelector('#outils').scrollLeft > 0, null, {
         timeout: 2000,
       })
       .catch(() => {});
     await uneImage(p);
     const r1 = await mesure();
     verifier(
-      r1.x > 0 && r1.suite === 'deux',
-      '17 la molette fait défiler la barre, estompée des deux côtés',
+      r1.x > 0 && r1.suite === 'deux' && r1.fixes.every(Boolean) && r1.masque === 'none',
+      '17 la molette fait défiler les outils, estompés des deux côtés ; Annuler, Rétablir, Plus restent',
       JSON.stringify(r1),
     );
-    // L'outil pris se montre en entier, son pli compris.
+    // L'outil pris se montre en entier, son pli compris ; plus large que la zone, son début.
+    const vuDans = (t) =>
+      p.evaluate((t) => {
+        const o = document.querySelector('#outils').getBoundingClientRect();
+        const x = document.querySelector(`#outils .pli[data-pli="${t}"]`).getBoundingClientRect();
+        const b = document.querySelector(`#outils [data-outil="${t}"]`).getBoundingClientRect();
+        return { zone: [o.left, o.right], pli: [x.left, x.right], bouton: [b.left, b.right] };
+      }, t);
+    // Fin des transitions, puis du défilement doux (absent de getAnimations) : la position
+    // ne bouge plus pendant cinq images.
+    const calme = async () => {
+      await p
+        .waitForFunction(() => document.getAnimations().every((a) => a.playState !== 'running'), null, {
+          timeout: 3000,
+        })
+        .catch(() => {});
+      await p.evaluate(
+        () =>
+          new Promise((ok) => {
+            const o = document.querySelector('#outils');
+            let x = o.scrollLeft;
+            let n = 0;
+            let tours = 0;
+            const tour = () => {
+              n = o.scrollLeft === x ? n + 1 : 0;
+              x = o.scrollLeft;
+              if (n >= 5 || ++tours > 180) ok();
+              else requestAnimationFrame(tour);
+            };
+            requestAnimationFrame(tour);
+          }),
+      );
+    };
     await p.mouse.move(cx, 20);
+    // Flou (pli plus étroit que la zone) : en entier, au bout des outils.
+    await outil(p, 'Flou');
+    await calme();
+    const vu = await vuDans('flou');
+    await reglage(p, 'Bloc noir');
+    verifier(
+      vu.pli[0] >= vu.zone[0] &&
+        vu.pli[1] <= vu.zone[1] &&
+        (await p.evaluate(() => __ed.prefs.variantes.flou)) === 'bloc',
+      '17 Flou pris : son pli se montre en entier parmi les outils ; Bloc noir choisi',
+      JSON.stringify(vu),
+    );
+    // Numéro (pli plus large que la zone à 640 px) : son début, le bouton de l'outil compris.
     await outil(p, 'Numéro');
-    await p
-      .waitForFunction(
-        () => {
-          const pal = document.querySelector('#palette').getBoundingClientRect();
-          const x = document.querySelector('#outils .pli[data-pli="numero"]').getBoundingClientRect();
-          return (
-            x.left >= pal.left &&
-            x.right <= pal.right &&
-            document.getAnimations().every((a) => a.playState !== 'running')
-          );
-        },
-        null,
-        { timeout: 3000 },
-      )
-      .catch(() => {});
-    const vu = await p.evaluate(() => {
-      const pal = document.querySelector('#palette').getBoundingClientRect();
-      const x = document.querySelector('#outils .pli[data-pli="numero"]').getBoundingClientRect();
-      return { pal: [pal.left, pal.right], pli: [x.left, x.right] };
-    });
+    await calme();
+    const vn = await vuDans('numero');
     await reglage(p, 'Noir');
     verifier(
-      vu.pli[0] >= vu.pal[0] &&
-        vu.pli[1] <= vu.pal[1] &&
+      vn.pli[1] - vn.pli[0] > vn.zone[1] - vn.zone[0] &&
+        vn.bouton[0] >= vn.zone[0] &&
+        vn.bouton[1] <= vn.zone[1] &&
         (await p.evaluate(() => __ed.prefs.couleurs.numero)) === '#1A1A1A',
-      '17 Numéro pris : son pli se montre en entier dans la barre ; Noir choisi',
-      JSON.stringify(vu),
+      '17 Numéro pris (pli plus large que la zone) : son début se montre, bouton compris ; Noir choisi',
+      JSON.stringify(vn),
+    );
+    await outil(p, 'Flèche');
+    await calme();
+    const vf = await vuDans('fleche');
+    verifier(
+      vf.bouton[0] >= vf.zone[0] && vf.bouton[1] <= vf.zone[1],
+      '17 Flèche reprise : son bouton se montre (le pli commence par lui)',
+      JSON.stringify(vf),
     );
     await p.screenshot({ path: path.join(SORTIE, 'editeur-etroit.png') });
     await fin(p, '17');

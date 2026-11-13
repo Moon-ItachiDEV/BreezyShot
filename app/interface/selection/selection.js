@@ -96,6 +96,10 @@ let envoi = 0; // numéro de la dernière demande reçue
 let mesure = 0; // numéro de la dernière mesure lancée
 let filet = 0; // minuterie du filet après un envoi
 const FILET_MS = 1500;
+// Mode texte : le gel reste jusqu'à 1,5 s après le relâcher (ECRAN_FIGE_MAX_LECTURE), et un
+// surlignage commencé juste avant cette borne arrive un peu après : le filet du balayage
+// garde cette marge de plus.
+const FILET_TEXTE_MS = FILET_MS + 500;
 // Mode fenêtre.
 let mode = "zone";
 let fenetres = []; // { x, y, largeur, hauteur, rayon }, du premier plan vers le fond
@@ -432,9 +436,13 @@ let lue = null;
 const lus = document.createElement("div");
 lus.className = "lus";
 morceaux.zone.append(lus);
-// Au plus autant de lignes que le cœur en envoie (SURLIGNE_LIGNES_MAX), durées bornées.
+// Au plus autant de lignes que le cœur en envoie (SURLIGNE_LIGNES_MAX) ; chaque durée et tout
+// le surlignage bornés (le cœur ne dépasse jamais 780 ms).
 const LIGNES_MAX = 400;
 const DUREE_MAX = 2000;
+/** Un jeton de dimension, en pixels CSS (0 s'il manque). */
+const jetonPx = (nom) =>
+  parseFloat(getComputedStyle(document.documentElement).getPropertyValue(`--${nom}`)) || 0;
 
 function finBalayage() {
   lue = null;
@@ -469,7 +477,7 @@ export function balayer(m) {
   finBalayage();
   lue = { x: x0, y: y0 };
   // Le gel peut rester jusqu'à 1,5 s après le relâcher : le filet repart d'ici.
-  armerFilet(FILET_MS);
+  armerFilet(FILET_TEXTE_MS);
   corps.classList.toggle("reduit", m.reduites === true);
   void morceaux.zone.offsetWidth; // l'animation repart de zéro
   corps.classList.add("balaye");
@@ -480,19 +488,23 @@ const ligneValide = (l) => l && [l.x, l.y, l.largeur, l.hauteur].every(entier) &
 
 /** `selection:surligner` : les lignes du texte copié (pixels réels de la fenêtre) se
  *  surlignent dans la zone lue, de gauche à droite, l'une après l'autre ; puis toute la
- *  sélection s'efface. Seulement après le balayage de l'affichage en cours. Chaque ligne
- *  déborde de 2 pixels logiques sur les côtés et de 1 en haut et en bas, comme une
- *  sélection de texte ; la zone coupe ce qui dépasse. */
+ *  sélection s'efface. Seulement après le balayage de l'affichage en cours, et si tout le
+ *  surlignage tient en DUREE_MAX. Chaque ligne déborde de ses mots comme une sélection de
+ *  texte (jetons `texte-surligne-debord-x` et `-y`, pixels logiques) ; la zone coupe ce qui
+ *  dépasse. */
 export function surligner(m) {
   const lignes = Array.isArray(m?.lignes) ? m.lignes.filter(ligneValide).slice(0, LIGNES_MAX) : [];
-  const ok = m && m.id === id && id !== null && mode === "texte" && attente && lue !== null &&
-    lignes.length > 0 && [m.trace, m.pas, m.tenue, m.sortie].every(dureeValide);
+  const valides = m && [m.trace, m.pas, m.tenue, m.sortie].every(dureeValide);
+  const sortieA = valides ? m.trace + m.pas * (lignes.length - 1) + m.tenue : Infinity;
+  const ok = valides && m.id === id && id !== null && mode === "texte" && attente &&
+    lue !== null && lignes.length > 0 && sortieA + m.sortie <= DUREE_MAX;
   if (!ok) {
     console.warn("selection : surlignage ignoré");
     return;
   }
-  const dx = Math.round(2 * kx);
-  const dy = Math.round(ky);
+  // Le débord d'une ligne autour de ses mots (jetons), en pixels réels entiers.
+  const dx = Math.round(jetonPx("texte-surligne-debord-x") * kx);
+  const dy = Math.round(jetonPx("texte-surligne-debord-y") * ky);
   const morceau = document.createDocumentFragment();
   lignes.forEach((l, rang) => {
     const i = document.createElement("i");
@@ -502,7 +514,6 @@ export function surligner(m) {
   });
   corps.classList.remove("surligne");
   lus.replaceChildren(morceau);
-  const sortieA = m.trace + m.pas * (lignes.length - 1) + m.tenue;
   const s = corps.style;
   s.setProperty("--surligne-trace", `${m.trace}ms`);
   s.setProperty("--surligne-pas", `${m.pas}ms`);

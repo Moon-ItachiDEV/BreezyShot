@@ -204,11 +204,14 @@ export function installerOutils(ed) {
       };
       ed.gommes = geste.passages;
       passer(p, p);
-      // La gomme posée sur un objet entier (texte, numéro, masque, projecteur), sans encre
-      // dessous : il part en entier, et disparaît dès l'appui.
-      if (!geste.passages.size) {
-        const o = ed.modele.objetSous(ed.h.doc, p, tolerance(), ENTIERS);
-        if (o) ed.gommeEntier = geste.entier = o.id;
+      // Ce qui est dessus décide. La gomme posée sur un objet entier (texte, numéro, masque,
+      // projecteur) qu'aucune encre atteinte ne recouvre : il part en entier, disparaît dès
+      // l'appui, et ce qu'il couvrait n'est pas gommé.
+      const o = ed.modele.objetSous(ed.h.doc, p, tolerance(), ENTIERS);
+      const doc = ed.h.doc;
+      if (o && [...geste.passages.keys()].every((id) => !dessus(doc, ed.objet(id), o))) {
+        geste.passages.clear();
+        ed.gommeEntier = geste.entier = o.id;
       }
       placerRond(e);
       ed.dessiner();
@@ -302,6 +305,11 @@ export function installerOutils(ed) {
 
   // ---------- gomme ----------
   const rayonGomme = () => jetonNombre(`editeur-gomme-rayon-${ed.barre.rang("gomme")}`) / echelleCss();
+  // Vrai si `a` est peint au-dessus de `b` : comme `objetSous`, les masques sous tout, puis
+  // les projecteurs, puis les annotations, chacun dans l'ordre du document.
+  const etage = (o) => (o.type === "masque" ? 0 : o.type === "projecteur" ? 1 : 2);
+  const dessus = (doc, a, b) =>
+    !!a && (etage(a) - etage(b) || doc.objets.indexOf(a) - doc.objets.indexOf(b)) > 0;
   // La gomme passée de `a` à `b` : le passage est noté pour chaque encre atteinte. Un
   // passage se prolonge tant que la gomme reste sur l'encre ; revenue dessus, elle en ouvre
   // un autre (le chemin fait hors de l'encre n'est pas gardé).
@@ -427,6 +435,9 @@ export function installerOutils(ed) {
       placerRond(e);
       const seuil = jetonNombre("editeur-deplacement-seuil");
       if (Math.hypot(e.clientX - g.ecran[0], e.clientY - g.ecran[1]) >= seuil) g.bouge = true;
+      // Posée sur un objet entier, elle ne gomme les encres qu'une fois vraiment partie : un
+      // clic qui tremble enlève l'objet sans trouer ce qu'il couvrait.
+      if (g.entier != null && !g.bouge) return;
       if (Math.hypot(p.x - g.p.x, p.y - g.p.y) < PAS_GOMME / echelleCss()) return;
       passer(g.p, p);
       g.p = p;

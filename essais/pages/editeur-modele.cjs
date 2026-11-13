@@ -297,9 +297,10 @@ async function partieDocument() {
     const fl = exemples()[0], o2 = JSON.parse(JSON.stringify(fl));
     D.redimensionner(fl, o2, 'p2', { x: 300, y: 10 }, 1);
     const c = fl.x2 === 300 && fl.y2 === 10 && fl.x1 === 10;
-    D.redimensionner(fl, JSON.parse(JSON.stringify(fl)), 'pc', { x: 60, y: 0 }, 1);
+    // (La poignée reste dans la moitié du milieu de la corde, de 82,5 à 227,5 ici.)
+    D.redimensionner(fl, JSON.parse(JSON.stringify(fl)), 'pc', { x: 120, y: 0 }, 1);
     const pc2 = D.poignees(fl).find((q) => q[2] === 'pc');
-    const d = fl.cx != null && Math.abs(pc2[0] - 60) < 1e-9 && Math.abs(pc2[1]) < 1e-9;
+    const d = fl.cx != null && Math.abs(pc2[0] - 120) < 1e-9 && Math.abs(pc2[1]) < 1e-9;
     const nu = exemples()[8], o3 = JSON.parse(JSON.stringify(nu));
     D.redimensionner(nu, o3, 'se', { x: 384 + 64, y: 84 + 64 }, 1);
     const e = nu.rayon === 32 && nu.x === 416 && nu.y === 116;
@@ -509,9 +510,15 @@ async function partieDocument() {
     f.gommes = [{ largeur: 40, points: [[250, 280], [250, 320]] }];
     const e = !D.touche(f, { x: 250, y: 300 }, 4) && D.touche(f, { x: 150, y: 300 }, 4)
       && D.touche(f, { x: 390, y: 300 }, 4);
-    verifier(a && b && c && d && e, 'G3 encre gommée : prise là où il en reste, pas dans le '
-      + 'trou (trait, forme pleine, flèche) ; l\'objet du dessous s\'y prend',
-    [a, b, c, d, e].join());
+    // Surligneur épais (34 px) gommé dans sa longueur par une petite gomme (10 px) : ses deux
+    // bords se prennent encore, pas son milieu (relecture du 13/11).
+    const s2 = { type: 'surligneur', points: [[200, 300], [700, 300]], couleur: '#FFD43B',
+      epaisseur: 2, gommes: [{ largeur: 10, points: [[190, 300], [710, 300]] }] };
+    const h = D.touche(s2, { x: 450, y: 289 }, 4) && D.touche(s2, { x: 450, y: 311 }, 4)
+      && !D.touche(s2, { x: 450, y: 300 }, 4);
+    verifier(a && b && c && d && e && h, 'G3 encre gommée : prise là où il en reste, pas dans le '
+      + 'trou (trait, forme pleine, flèche, surligneur gommé dans sa longueur) ; l\'objet du '
+      + 'dessous s\'y prend', [a, b, c, d, e, h].join());
   }
   // (G4) Les passages de gomme suivent l'objet : déplacer, dupliquer, redimensionner.
   {
@@ -602,10 +609,13 @@ async function partieDocument() {
     const avant = json(doc), v = h.version;
     for (let i = 1; i <= 5; i++) D.modifier(h, (d) => { d.objets[0].x1 = 50 + i; }, 'geste');
     const a = h.passe.length === 2 && !D.peutRetablir(h);
+    // Le document reprend sa version d'avant le geste (rien n'a changé pour « Fermer ») ; le
+    // pas suivant prend un numéro jamais donné (v + 1 à v + 5 ont nommé le geste).
     const b = D.abandonner(h) && json(doc) === avant && h.passe.length === 1
-      && h.futur.length === 1 && h.version === v + 6;
+      && h.futur.length === 1 && h.version === v;
     D.retablir(h);
-    const c = doc.objets.length === 2 && !D.abandonner(h) === false;
+    const c = doc.objets.length === 2 && h.version === v + 6 && !D.abandonner(h) === false
+      && h.version === v + 7;
     // Après annuler ou rétablir, plus rien n'est écarté.
     const doc2 = D.nouveauDocument(100, 100), h2 = D.creerHistorique(doc2);
     D.modifier(h2, (d) => D.ajouter(d, exemples()[2]));
@@ -658,6 +668,42 @@ async function partieDocument() {
     verifier(a && b && c && d && e && k, 'F flèche courbée à sa poignée du milieu : la courbe '
       + 'passe par la pointe, aimant droit de 6 px d\'écran, Maj symétrique, bouts et passages '
       + 'qui suivent', [a, b, c, d, e, k].join());
+  }
+  // (F2) Relecture du 13/11 : la poignée tirée le long de la corde, au-delà d'un bout, reste
+  // dans la moitié du milieu (la courbe ne dépasse pas le bout, la pointe ne se retourne
+  // pas) ; tirée sur la corde même, la flèche est droite ; la pointe d'une courbe se mesure
+  // sur la courbe (corde de 40 px, courbe de plus de 400 px : pointe entière) ; le corps
+  // s'arrête à l'entrée de la pointe.
+  {
+    const droite = { type: 'fleche', x1: 0, y1: 0, x2: 100, y2: 0, double: false,
+      couleur: '#E5484D', epaisseur: 1, opacite: 1 };
+    const pres = (u, v) => Math.abs(u - v) < 1e-9;
+    const f1 = JSON.parse(json(droite));
+    D.redimensionner(f1, droite, 'pc', { x: 160, y: 10 }, 1);
+    const f2 = JSON.parse(json(droite));
+    D.redimensionner(f2, droite, 'pc', { x: -60, y: -30 }, 1);
+    const a = pres(f1.cx, 100) && pres(f1.cy, 20) && pres(f2.cx, 0) && pres(f2.cy, -60);
+    // La pointe ne revient jamais vers le départ : (bout − contrôle) · corde ≥ 0.
+    const b = (f1.x2 - f1.cx) * (f1.x2 - f1.x1) >= 0 && (f2.x2 - f2.cx) * (f2.x2 - f2.x1) >= 0;
+    const f3 = JSON.parse(json(droite));
+    D.redimensionner(f3, droite, 'pc', { x: 160, y: 0 }, 1);
+    const f3b = JSON.parse(json(droite));
+    D.redimensionner(f3b, droite, 'pc', { x: 20, y: 5 }, 1);
+    const c = !('cx' in f3) && !('cx' in f3b);
+    const courte = { ...droite, x2: 40, cx: 20, cy: -400 };
+    const longue = { ...droite, x2: 400 };
+    const d = D.longueurPointe(courte) === D.longueurPointe(longue)
+      && D.longueurPointe({ ...droite, x2: 40 }) < D.longueurPointe(longue);
+    const f4 = { ...droite, cx: 50, cy: 80 }, hl = D.longueurPointe(f4);
+    const t = D.entreePointe(f4, hl * 0.7);
+    const point = (q, u) => [(1 - u) ** 2 * q.x1 + 2 * (1 - u) * u * q.cx + u * u * q.x2,
+      (1 - u) ** 2 * q.y1 + 2 * (1 - u) * u * q.cy + u * u * q.y2];
+    const [px, py] = point(f4, t), [qx, qy] = point(f4, t + 1e-4);
+    const e = t > 0.8 && t < 1 && Math.abs(Math.hypot(px - 100, py) - hl * 0.7) < 1e-4
+      && Math.hypot(qx - 100, qy) < hl * 0.7;
+    verifier(a && b && c && d && e, 'F2 poignée bornée à la moitié du milieu de la corde, droite '
+      + 'sur la corde, pointe mesurée sur la courbe, corps arrêté à l\'entrée de la pointe',
+      [a, b, c, d, e, json([f1, f2, t])].join());
   }
   // (V) Une autre variante pour l'objet choisi : même place, mêmes réglages.
   {
@@ -1742,6 +1788,36 @@ async function partieDessin(nav) {
     `G12 vue 3840 × 2160, 20 traits gommés sur 50 : ${r.gardes} ms par peinture (rendus `
     + `gardés), ${r.redessines} ms (tout redessiné), sans gomme ${r.sans} ms ; 50 traits `
     + `gommés : ${r.cinquante} ms`, JSON.stringify(r));
+
+  // (F7) La flèche courbée est dessinée sur la courbe du modèle : dans la colonne de la
+  // poignée du milieu, le milieu de l'encre pleine est la poignée, à 1 px près, à chaque
+  // épaisseur (relecture du 13/11 : 6 à 8 px d'écart avant).
+  r = await p.evaluate(async () => {
+    const L = 400, H = 300, im = await preparer(L, H);
+    const res = [];
+    for (const epaisseur of [0, 1, 2]) {
+      const q = { type: 'fleche', x1: 60, y1: 220, x2: 340, y2: 220, double: false,
+        couleur: '#E5484D', epaisseur, opacite: 1 };
+      const f = { ...q };
+      D.redimensionner(f, q, 'pc', { x: 240, y: 80 }, 1);
+      const [hx, hy] = D.poignees(f).find((x) => x[2] === 'pc');
+      const s = exporter(im, docAvec(L, H, [f]));
+      const x = Math.round(hx);
+      let haut = -1, bas = -1;
+      for (let y = 0; y < H; y++) {
+        const i = (y * L + x) * 4;
+        if (s.rgba[i] === 229 && s.rgba[i + 1] === 72 && s.rgba[i + 2] === 77) {
+          if (haut < 0) haut = y;
+          bas = y;
+        }
+      }
+      res.push({ epaisseur, hy, milieu: (haut + bas + 1) / 2, haut, bas });
+    }
+    return res;
+  });
+  verifier(r.every((x) => x.haut > 0 && Math.abs(x.milieu - x.hy) <= 1),
+    'F7 flèche courbée : l\'encre passe par la poignée du milieu (à 1 px près), aux trois épaisseurs',
+    JSON.stringify(r));
 
   // (g) Temps : Pixeliser sur une grande image (toute l'image masquée) ; composer 5760 × 1080
   // avec 50 objets (borne du contrat : 1 000 ms).

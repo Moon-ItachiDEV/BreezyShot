@@ -30,7 +30,9 @@
 // entame pas.
 // Historique : { doc, passe, futur, version, marque }. Annuler et rétablir remplacent les
 // objets du document par des copies : la page les cherche par `id`, jamais par référence
-// gardée d'un pas à l'autre.
+// gardée d'un pas à l'autre. `version` nomme un état du document : jamais le même numéro
+// pour deux contenus différents (le cœur s'en sert pour « déjà copié », « déjà enregistré ») ;
+// un geste abandonné rend au document la version qu'il avait.
 
 export const POLICE = '"Segoe UI Variable Text","Segoe UI",system-ui,-apple-system,sans-serif';
 // Épaisseurs (px de l'image), réexportées par `dessin.js` : ici pour que `document.js` ne
@@ -63,7 +65,10 @@ export function nouveauDocument(largeur, hauteur) {
 // ---------- historique ----------
 
 export function creerHistorique(doc) {
-  return { doc, passe: [], futur: [], version: 0, marque: null, ecarte: null };
+  // `numeros` : le dernier numéro de version donné ; `avant` : la version d'avant le dernier
+  // pas (null : inconnue).
+  return { doc, passe: [], futur: [], version: 0, marque: null, ecarte: null, numeros: 0,
+    avant: null };
 }
 
 // `fn(doc)` ; même `marque` (non nulle) que la modification précédente : un seul pas
@@ -84,21 +89,31 @@ export function modifier(h, fn, marque = null) {
     if (h.passe.length > PAS_MAX) h.passe.shift();
     h.ecarte = h.futur;
     h.futur = [];
+    h.avant = h.version;
     borner(h);
   }
   h.marque = marque ?? null;
-  h.version += 1;
+  h.version = nouvelleVersion(h);
 }
 
-// Un geste abandonné (Échap) : le dernier pas est défait sans rester à rétablir, et ce qui
-// était à rétablir avant lui le redevient. Rend vrai si un pas a été défait.
+// Un numéro de version jamais donné.
+function nouvelleVersion(h) {
+  h.numeros = Math.max(h.numeros ?? 0, h.version) + 1;
+  return h.numeros;
+}
+
+// Un geste abandonné (Échap, ou revenu à son départ) : le dernier pas est défait sans
+// rester à rétablir, et ce qui était à rétablir avant lui le redevient. Le document reprend
+// la version qu'il avait avant ce pas (même contenu, même numéro : rien n'a changé pour
+// « Fermer ») ; inconnue, un numéro neuf. Rend vrai si un pas a été défait.
 export function abandonner(h) {
   if (!h.passe.length) return false;
   remettre(h.doc, h.passe.pop());
   h.futur = h.ecarte || [];
   h.ecarte = null;
   h.marque = null;
-  h.version += 1;
+  h.version = h.avant ?? nouvelleVersion(h);
+  h.avant = null;
   return true;
 }
 
@@ -132,7 +147,8 @@ export function annuler(h) {
   remettre(h.doc, h.passe.pop());
   h.ecarte = null;
   h.marque = null;
-  h.version += 1;
+  h.avant = null;
+  h.version = nouvelleVersion(h);
   return true;
 }
 
@@ -143,7 +159,8 @@ export function retablir(h) {
   remettre(h.doc, h.futur.pop());
   h.ecarte = null;
   h.marque = null;
-  h.version += 1;
+  h.avant = null;
+  h.version = nouvelleVersion(h);
   return true;
 }
 
@@ -337,10 +354,40 @@ function enveloppe(pts, marge) {
   return rectDe(a - marge, b - marge, c + marge, d + marge);
 }
 
-// Longueur de la pointe d'une flèche (design : W·3,4 + 14, au plus 55 % de la longueur).
+// Longueur de la pointe d'une flèche (design : W·3,4 + 14, au plus 55 % de la longueur ;
+// courbe : la longueur de la courbe, pas celle de la corde).
 export function longueurPointe(o) {
-  const W = trait(o), L = Math.hypot(o.x2 - o.x1, o.y2 - o.y1);
+  const W = trait(o);
+  const L = o.cx != null ? longueurCourbe(o) : Math.hypot(o.x2 - o.x1, o.y2 - o.y1);
   return Math.min(L * 0.55, W * 3.4 + 14);
+}
+// Longueur d'une courbe de flèche (64 cordes).
+function longueurCourbe(o) {
+  let l = 0, [x, y] = [o.x1, o.y1];
+  for (let i = 1; i <= 64; i++) {
+    const [a, b] = pointFleche(o, i / 64);
+    l += Math.hypot(a - x, b - y);
+    x = a; y = b;
+  }
+  return l;
+}
+// Où le corps d'une flèche courbe entre dans sa pointe : le plus grand t dont le point de la
+// courbe est à `d` au moins du bout (0 si aucun). Le dessin s'arrête là, sur la courbe même.
+export function entreePointe(o, d) {
+  const loin = (t) => {
+    const [x, y] = pointFleche(o, t);
+    return Math.hypot(x - o.x2, y - o.y2) >= d;
+  };
+  const N = 64;
+  let i = N - 1;
+  while (i > 0 && !loin(i / N)) i--;
+  if (!loin(i / N)) return 0;
+  let g = i / N, h = (i + 1) / N;
+  for (let k = 0; k < 24; k++) {
+    const m = (g + h) / 2;
+    if (loin(m)) g = m; else h = m;
+  }
+  return g;
 }
 
 // Boîte de la forme elle-même (sans ombre) : poignées, contour de sélection, redimensionner.
@@ -612,9 +659,11 @@ function gomme(o, x, y) {
   return false;
 }
 
-// Reste-t-il de l'encre à portée de `p` ? Un point de la ligne d'encre que la gomme n'a pas
-// atteint, à la distance de prise de l'objet (celle de `toucheForme`) ; si `p` est lui-même
-// dans un trou de gomme, à la tolérance seulement (le bord de ce qui reste).
+// Reste-t-il de l'encre à portée de `p` ? Un point de l'encre que la gomme n'a pas atteint,
+// sur sa ligne ou en travers (un trait gommé dans sa longueur garde ses bords), à la
+// distance de prise de l'objet (celle de `toucheForme`) ; si `p` est lui-même dans un trou
+// de gomme, à la tolérance seulement (le bord de ce qui reste).
+const TRAVERS = [0, -0.4, 0.4, -0.8, 0.8]; // en demi-largeurs de l'encre
 function encreRestePres(o, p, tol) {
   const trou = gomme(o, p.x, p.y);
   if (dansPlein(o, p)) return !trou;
@@ -624,17 +673,21 @@ function encreRestePres(o, p, tol) {
     // La pointe d'une flèche est plus large que sa prise.
     const d = trou ? Math.max(tol, 1) : Math.max(prise, demi);
     const pas = Math.max(1, demi / 2);
+    const reste = (x, y) => Math.hypot(p.x - x, p.y - y) < d && !gomme(o, x, y);
     if (l.length === 1) {
-      if (Math.hypot(p.x - l[0][0], p.y - l[0][1]) < d && !gomme(o, l[0][0], l[0][1])) return true;
+      const [x, y] = l[0];
+      if (TRAVERS.some((k) => reste(x + demi * k, y) || reste(x, y + demi * k))) return true;
       continue;
     }
     for (let i = 1; i < l.length; i++) {
       const [x1, y1] = l[i - 1], [x2, y2] = l[i];
       if (distSegment(p.x, p.y, x1, y1, x2, y2) >= d) continue;
-      const n = Math.max(1, Math.ceil(Math.hypot(x2 - x1, y2 - y1) / pas));
+      const long = Math.hypot(x2 - x1, y2 - y1);
+      const nx = long ? -(y2 - y1) / long : 0, ny = long ? (x2 - x1) / long : 1;
+      const n = Math.max(1, Math.ceil(long / pas));
       for (let j = 0; j <= n; j++) {
         const x = x1 + ((x2 - x1) * j) / n, y = y1 + ((y2 - y1) * j) / n;
-        if (Math.hypot(p.x - x, p.y - y) < d && !gomme(o, x, y)) return true;
+        if (TRAVERS.some((k) => reste(x + nx * demi * k, y + ny * demi * k))) return true;
       }
     }
   }
@@ -726,17 +779,22 @@ export function redimensionner(objet, origine, poignee, point, echelleVue, contr
     return;
   }
   if (poignee === "pc") {
-    // La poignée du milieu courbe la flèche : la courbe passe par la pointe. Tirée près du
-    // milieu de la corde, la flèche redevient droite ; Maj : courbe symétrique (la pointe
-    // sur la médiatrice). Les passages de gomme suivent l'encre.
+    // La poignée du milieu courbe la flèche : la courbe passe par la pointe. Le long de la
+    // corde, elle reste dans sa moitié du milieu (la courbe ne dépasse jamais un bout, la
+    // pointe ne se retourne pas) ; ramenée près de la corde, la flèche redevient droite ;
+    // Maj : courbe symétrique (la pointe sur la médiatrice). Les passages de gomme suivent
+    // l'encre.
     const mx = (q.x1 + q.x2) / 2, my = (q.y1 + q.y2) / 2;
-    let { x, y } = p;
-    if (contraint) {
-      const ux = q.x2 - q.x1, uy = q.y2 - q.y1, l = Math.hypot(ux, uy) || 1;
-      const ecart = ((x - mx) * -uy + (y - my) * ux) / l;
-      x = mx - (uy / l) * ecart; y = my + (ux / l) * ecart;
-    }
-    if (Math.hypot(x - mx, y - my) < AIMANT_DROIT / s) {
+    const ux = q.x2 - q.x1, uy = q.y2 - q.y1, l = Math.hypot(ux, uy) || 1;
+    // Le long de la corde (depuis son milieu) et le long de sa normale ; la poignée telle
+    // quelle si rien ne la ramène.
+    const brut = ((p.x - mx) * ux + (p.y - my) * uy) / l;
+    const long = contraint ? 0 : borne(brut, -l / 4, l / 4);
+    const ecart = ((p.x - mx) * -uy + (p.y - my) * ux) / l;
+    const libre = !contraint && long === brut;
+    const x = libre ? p.x : mx + (ux / l) * long - (uy / l) * ecart;
+    const y = libre ? p.y : my + (uy / l) * long + (ux / l) * ecart;
+    if (Math.abs(ecart) < AIMANT_DROIT / s) {
       delete o.cx; delete o.cy;
     } else {
       o.cx = 2 * x - mx; o.cy = 2 * y - my;
