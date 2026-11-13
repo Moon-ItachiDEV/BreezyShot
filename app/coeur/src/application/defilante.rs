@@ -413,6 +413,11 @@ impl Fin {
 pub struct Course {
     conduite: Conduite,
     perdue: bool,
+    /// Un cran de l'utilisateur dans la zone a été vu : « Trop vite » ne parle que de sa
+    /// molette, jamais d'un passage en `Main` décidé par l'app (contrat §3, D10, U5).
+    molette_vue: bool,
+    /// « Trop vite » est montré.
+    trop_vite_montre: bool,
     fin: Option<Fin>,
     debut: Instant,
     /// La dernière image qui a apporté des lignes (ou le passage en `Main`).
@@ -454,6 +459,8 @@ impl Course {
         Course {
             conduite: Conduite::Attente,
             perdue: false,
+            molette_vue: false,
+            trop_vite_montre: false,
             fin: None,
             debut,
             derniere_nouvelle: debut,
@@ -629,6 +636,7 @@ pub fn suite(course: &mut Course, vu: Vu, maintenant: Instant) -> Vec<Geste> {
         Vu::Entree => finir(course, Fin::Entree),
         Vu::Molette { dans_zone: false } => Vec::new(),
         Vu::Molette { dans_zone: true } => {
+            course.molette_vue = true;
             if course.conduite != Conduite::Main {
                 // Définitif : aucun pas n'est plus demandé ; un pas en route finit (D9).
                 course.passer_main(maintenant);
@@ -882,7 +890,10 @@ fn suite_main(
             Mesure::Avance(_) | Mesure::Immobile => {
                 // La dernière image gardée est retrouvée : la capture reprend là.
                 course.perdue = false;
-                gestes.push(Geste::Message(None));
+                if course.trop_vite_montre {
+                    course.trop_vite_montre = false;
+                    gestes.push(Geste::Message(None));
+                }
             }
             // Un recul peut être faux sur une page perdue (liste hors de portée, C) : il ne
             // cache pas « Trop vite ».
@@ -900,7 +911,12 @@ fn suite_main(
         Mesure::Perdue => {
             course.perdue = true;
             course.en_bas_depuis = None;
-            gestes.push(Geste::Message(Some(TEXTE_TROP_VITE)));
+            // Seulement si la molette de l'utilisateur a conduit : un passage en `Main` décidé
+            // par l'app reste silencieux (l'aperçu qui ne grandit pas suffit).
+            if course.molette_vue {
+                course.trop_vite_montre = true;
+                gestes.push(Geste::Message(Some(TEXTE_TROP_VITE)));
+            }
         }
         // Sans position lue, aucune fin seule en `Main` (D15).
         Mesure::Immobile if en_bas_lu(position) => {
@@ -1960,6 +1976,40 @@ mod tests {
         // Plus de départ automatique.
         assert!(suite(&mut c, Vu::Temps(t0 + ms(900)), t0 + ms(900)).is_empty());
         assert_eq!(c.conduite(), Conduite::Main);
+    }
+
+    #[test]
+    fn trop_vite_seulement_apres_la_molette() {
+        // Auto, une avance, puis des pertes au plus petit pas jusqu'au passage en `Main`
+        // décidé par l'app : aucune perte ne montre « Trop vite » sans cran de l'utilisateur.
+        let t0 = Instant::now();
+        let mut c = en_auto(t0);
+        let t = t0 + ms(600);
+        suite(&mut c, Vu::Image(Mesure::Avance(200), None), t);
+        let mut n = 0;
+        while c.conduite() == Conduite::Auto {
+            let g = suite(&mut c, Vu::Image(Mesure::Perdue, None), t);
+            assert!(!g.iter().any(|g| matches!(g, Geste::Message(_))), "{g:?}");
+            n += 1;
+            assert!(n < 20);
+        }
+        let g = suite(&mut c, Vu::Image(Mesure::Perdue, None), t);
+        assert_eq!(g, vec![Geste::Prendre(PRISE_MAIN)]);
+        assert!(c.perdue());
+        // Retrouvée : rien à cacher, rien n'a été montré.
+        assert_eq!(
+            suite(&mut c, Vu::Image(Mesure::Avance(40), None), t),
+            vec![Geste::Apercu, Geste::Prendre(PRISE_MAIN)]
+        );
+        // Puis l'utilisateur fait défiler, trop loin : le message.
+        suite(&mut c, Vu::Molette { dans_zone: true }, t);
+        assert_eq!(
+            suite(&mut c, Vu::Image(Mesure::Perdue, None), t),
+            vec![
+                Geste::Message(Some(TEXTE_TROP_VITE)),
+                Geste::Prendre(PRISE_MAIN)
+            ]
+        );
     }
 
     #[test]

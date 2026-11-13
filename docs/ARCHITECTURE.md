@@ -777,8 +777,9 @@ lue en bas la fait finir, ou `IMMOBILES_LUS_MAX` (3) de suite au plus petit pas,
 comptent alors comme des images immobiles ordinaires (contenu fixe dans une vue dont
 l'application dit qu'elle défile : sinon jusqu'à la limite de 10 min). Rien n'est alors constaté au défileur
 (`defilante: immobile avec un lu de <e> px: pas reduit`). Un cran de molette dans la zone passe à `Main` (définitif) : une image à chaque
-cran et toutes les 50 ms ; « Trop vite » sur une image perdue, caché quand l'image gardée
-est retrouvée. Une seule fin (bouton, Entrée, en bas, limite), puis `Finit` (la fenêtre
+cran et toutes les 50 ms ; « Trop vite » sur une image perdue, seulement si un cran de
+l'utilisateur dans la zone a été vu (un passage en `Main` décidé par l'app reste muet),
+caché quand l'image gardée est retrouvée. Une seule fin (bouton, Entrée, en bas, limite), puis `Finit` (la fenêtre
 part tout de suite) et `Assemblee`, vers la sortie commune (`lancer_sortie`, relâchement =
 l'instant du clic ou d'Entrée).
 
