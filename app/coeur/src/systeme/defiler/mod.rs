@@ -193,8 +193,9 @@ pub struct Position {
 /// Le décalage de la page entre deux positions lues, en pixels réels, positif quand la page
 /// est descendue : `(après − avant) / 100 × hauteur_vue × (100 / vue − 1)`, la page faisant
 /// `hauteur_vue × 100 / vue`. `None` si une vue est inutilisable (`vue` hors de ]0, 100[,
-/// hauteur nulle) ou si la hauteur de la vue a changé de plus de 2 px entre les deux (vue
-/// redimensionnée).
+/// hauteur nulle), si la hauteur de la vue a changé de plus de 2 px entre les deux (vue
+/// redimensionnée), ou si la hauteur de la page a changé de plus de `PAGE_CHANGEE_PX`
+/// (image paresseuse, chargement à l'infini : voir `pixels_entre`).
 pub fn decalage_px(avant: &Position, apres: &Position) -> Option<i32> {
     if avant.hauteur_vue <= 0 || (avant.hauteur_vue - apres.hauteur_vue).abs() > 2 {
         return None;
@@ -558,18 +559,42 @@ impl Etalon {
     }
 }
 
+/// Au-delà de cet écart (pixels réels) entre les hauteurs de page des deux lectures, la
+/// page a changé de hauteur : les deux pour cent ne sont plus sur la même échelle. Même
+/// tolérance que pour la hauteur de la vue (arrondis du rectangle) ; en deçà, l'erreur du
+/// décalage est d'au plus cet écart, sous les 3 lignes que la mesure tolère autour du lu.
+const PAGE_CHANGEE_PX: f64 = 2.0;
+
+/// La hauteur de la page, en pixels, pour une vue de `hauteur_vue` pixels qui en montre
+/// `vue` pour cent ; `None` sans vue utilisable.
+fn hauteur_page(vue: f64, hauteur_vue: i32) -> Option<f64> {
+    (vue > 0.0 && vue < 100.0 && hauteur_vue > 0)
+        .then(|| f64::from(hauteur_vue) * 100.0 / vue)
+        .filter(|h| h.is_finite())
+}
+
 /// Pixels parcourus entre deux positions lues, pour une vue de `hauteur_vue` pixels : la
 /// page fait `hauteur_vue × 100 / vue`, la partie qui défile `hauteur_vue × (100 / vue −
-/// 1)`. `None` sans vue utilisable.
+/// 1)`. `None` sans vue utilisable (avant comme après), ou si la page a changé de hauteur
+/// entre les deux lectures (plus de `PAGE_CHANGEE_PX`).
+///
+/// Une page qui change de hauteur n'est pas corrigée : les pour cent ne disent pas où elle a
+/// grandi. Grandie au-dessous de la vue (chargement à l'infini), la position en pixels
+/// serait `pour_cent × (page − vue)` à chaque lecture ; grandie au-dessus (image paresseuse,
+/// avec l'ancrage du défilement de Chromium), la position change sans que rien ne bouge
+/// dans la vue. Le lu serait juste dans un cas et faux de toute la croissance dans l'autre :
+/// sans lu, la mesure décide sur les images seules, comme pour une app sans position.
 #[cfg_attr(not(windows), allow(dead_code))]
 fn pixels_entre(avant: Position, apres: Position, hauteur_vue: i32) -> Option<f64> {
-    let vue = apres.vue;
-    if !(vue > 0.0 && vue < 100.0) || hauteur_vue <= 0 {
+    let page_avant = hauteur_page(avant.vue, hauteur_vue)?;
+    let page_apres = hauteur_page(apres.vue, hauteur_vue)?;
+    if (page_apres - page_avant).abs() > PAGE_CHANGEE_PX {
         return None;
     }
     if avant.pour_cent < 0.0 || apres.pour_cent < 0.0 {
         return None;
     }
+    let vue = apres.vue;
     let defilable = hauteur_vue as f64 * (100.0 / vue - 1.0);
     let d = (apres.pour_cent - avant.pour_cent) / 100.0 * defilable;
     d.is_finite().then_some(d)
@@ -1164,6 +1189,46 @@ mod tests {
         assert_eq!(decalage_px(&pos(0.0, 10.0, 0), &pos(10.0, 10.0, 0)), None);
         assert_eq!(decalage_px(&a, &pos(10.0, 10.0, 300)), None);
         assert_eq!(decalage_px(&a, &pos(10.0, 10.0, 447)), None);
+    }
+
+    #[test]
+    fn pas_de_decalage_quand_la_page_change_de_hauteur() {
+        // La géométrie de la relecture finale (P1) : vue de 600 px, parcours de 6 000 px
+        // (page de 6 600), image gardée à y = 1 200 ; la page grandit de 200 px pendant le
+        // pas suivant, qui la descend de 300 px. Lu sur la seule vue d'après, le décalage
+        // serait de 340 px au lieu de 300 (erreur `y0 × ΔH / S0` = 40 px) : rien n'est lu.
+        let lecture =
+            |y: f64, parcours: f64| pos(y * 100.0 / parcours, 60_000.0 / (parcours + 600.0), 600);
+        let gardee = lecture(1200.0, 6000.0);
+        let apres = lecture(1500.0, 6200.0);
+        assert_eq!(
+            decalage_px(&gardee, &apres),
+            None,
+            "la page a grandi de 200 px"
+        );
+        assert_eq!(
+            decalage_px(&apres, &gardee),
+            None,
+            "ni quand elle rapetisse"
+        );
+        // Même page : le lu est exact.
+        assert_eq!(
+            decalage_px(&gardee, &lecture(1500.0, 6000.0)),
+            Some(300),
+            "page stable"
+        );
+        // Un pixel de page (arrondis) : lu, l'erreur reste sous ces 2 px.
+        let d = decalage_px(&gardee, &lecture(1500.0, 6001.0)).unwrap();
+        assert!((d - 300).abs() <= 2, "{d}");
+        // Trois pixels de plus : plus lu.
+        assert_eq!(decalage_px(&gardee, &lecture(1500.0, 6003.0)), None);
+        // La vue d'avant compte autant que celle d'après : illisible avant, rien de lu.
+        assert_eq!(decalage_px(&pos(0.0, 100.0, 600), &gardee), None);
+        assert_eq!(decalage_px(&pos(0.0, f64::NAN, 600), &gardee), None);
+        assert_eq!(
+            decalage_px(&pos(0.0, 1e-320, 600), &pos(1.0, 1e-320, 600)),
+            None
+        );
     }
 
     #[test]
