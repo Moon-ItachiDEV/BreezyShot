@@ -94,8 +94,9 @@ app/
                             l'export) ; la page : editeur.html (structure, rôles,
                             noms), editeur.css (habillage, jetons seulement),
                             editeur.js (entrée : charge, image, vue, sorties,
-                            fermeture), barre.js (barre, palette, menus, bulle de
-                            l'outil), outils.js (gestes sur la scène) ; texte.js
+                            fermeture), barre.js (barre du haut, barre
+                            d'annotation et ses plis, instruments, menus),
+                            outils.js (gestes sur la scène) ; texte.js
                             (0.5, §6.4 : bouton « Texte », calque « Choisir le texte »)
     historique/             fenêtre de l'historique (0.5) : historique.html, .css, .js,
                             grille.js (cases, clavier), temps.js (âge des captures, pur)
@@ -1150,8 +1151,9 @@ droite et en bas ; `round(dpi / 96)` en haut sous Windows 11, 2 px à 150 %, 0 s
 10) qui portent le
 redimensionnement ; le haut est pris par `WM_NCHITTEST` (`HTTOP`), et tauri-runtime-wry
 ajoute son propre gestionnaire de bords (`undecorated_resizing`) au-dessus de la webview.
-`placer` (pure) : l'image à la taille réelle plus `MARGES` 72 × 172 px logiques (36 de
-chaque côté ; barre 52, réserve 14, palette 72 et sa réserve 34), au moins `TAILLE_MIN`,
+`placer` (pure) : l'image à la taille réelle plus `MARGES` 72 × 180 px logiques (36 de
+chaque côté ; barre 52, réserve 14, barre d'annotation 80 et sa réserve 34), au moins
+`TAILLE_MIN`,
 au plus `PART_MAX` (90 %) de la zone utile de l'écran sous la souris, centrée ; `ouvrir`
 pose la position, puis la taille, puis décale la fenêtre de l'écart entre position
 intérieure et extérieure : la zone cliente tombe exactement sur la place. La barre du haut
@@ -1233,8 +1235,17 @@ en codes courts sans chemin (`com:`, `dialogue:`, `options:`, `filtre:`, `extens
 
 **Modèle et dessin (B).** `interface/editeur/document.js` est le modèle pur, sans DOM ni
 import : document, objets (`ajouter`, `normaliser`, `lisser`, `recadrer`, `touche`,
-`deplacer`, `redimensionner`, `dupliquer`), historique de 200 pas borné à 32 Mo de JSON,
-restauré en place. `dessin.js` peint la vue (`peindreVue`, options `cacher`, `ajout`,
+`deplacer`, `redimensionner`, `changerVariante`, `dupliquer`, `gommer`, `gommeTouche`),
+historique de 200 pas borné à 32 Mo de JSON, restauré en place. La flèche se courbe à sa
+poignée du milieu (`redimensionner`, poignée `pc`) : la courbe passe par la pointe ;
+tirée à moins de 6 px d'écran du milieu de la corde, la flèche redevient droite (plus de
+`cx`, `cy`) ; Maj : courbe symétrique ; ses bouts tirés gardent la courbe (similitude).
+`changerVariante` donne à un objet une autre variante de son outil à la même place et aux
+mêmes réglages (rectangle, ellipse, ligne sur la diagonale ; Pixeliser, Flouter, Bloc
+noir ; projecteur rectangle ou ovale). Gomme : les encres (flèche, rectangle, ellipse,
+ligne, stylo, surligneur) gardent leurs passages (`gommes`, traits ronds) et ne sont
+effacées que dessous ; les passages suivent l'objet (déplacer, redimensionner, courber,
+dupliquer) ; texte, numéro, masque et projecteur sont entiers. `dessin.js` peint la vue (`peindreVue`, options `cacher`, `ajout`,
 `rayon` pour les coins arrondis à l'écran seulement) et compose l'export (`composer`,
 toile de l'image entière puis le cadre). Masques : Pixeliser (avec un écart de luminosité
 tiré d'une `graine` par masque), Flouter (source entière), Bloc noir (rectangle plein).
@@ -1251,16 +1262,33 @@ remplace la v2 depuis le 12/11/2026)
   partout sauf sur les boutons. À gauche « Fermer » ; à droite « Enregistrer » et « Copier »
   (copier PUIS fermer : coche, puis le chemin « copier et fermer » ; en échec la fenêtre
   reste). `Ctrl + C` copie sans fermer.
-- Palette flottante du bas : « Annuler », « Rétablir », les instruments dessinés (« Flèche »,
-  « Stylo », « Surligneur », « Gomme », puis l'emplacement de l'outil pris dans
-  « Ajouter » : « Texte », « Forme », « Numéro », « Flou », « Projecteur »), six pastilles
-  et « Autre couleur », « Plus » (« Enregistrer sous », « Glisser vers une appli »).
-  Recliquer l'instrument choisi ouvre la bulle « Réglages de l'outil » (variantes, trois
-  tailles, opacité).
+- Barre d'annotation du bas (barre C et instruments B, choisis le 13/11/2026 :
+  `design/annotation-pistes`, `design/annotation-instruments`) : « Annuler », « Rétablir »,
+  les neuf outils (« Flèche », « Stylo », « Surligneur », « Gomme » dessinés, un
+  séparateur, « Texte », « Forme », « Numéro », « Flou », « Projecteur »), « Plus »
+  (« Enregistrer sous », « Glisser vers une appli »). L'outil en main se déplie dans la
+  barre : ses variantes (Forme : Rectangle, Ellipse, Ligne ; Flou : Pixeliser, Flouter,
+  Bloc noir ; Projecteur : Rectangle, Ovale), ses trois tailles, ses six couleurs et
+  « Autre couleur », son opacité (20 à 100 % par 5 ; une glissière tirée = un pas) ; rien
+  ne s'ouvre par-dessus l'image. Les outils repliés gardent un trait de leur couleur ; un
+  instrument a le corps à la couleur de son encre (liseré marqué pour une encre très
+  foncée ou très pâle) et saute quand elle ou sa taille change. Un objet choisi déplie
+  l'outil qui l'a fait, à ses valeurs : ce qu'on y règle va à lui et à la préférence de
+  son outil, pas à l'outil en main (un pas, aucun si rien ne change) ; une variante le
+  change (`changerVariante`). Prendre un autre outil, ou Stylo, Surligneur, Gomme, défait
+  la sélection. Fenêtre étroite : la barre défile (molette comprise), estompée du côté
+  caché, et l'outil pris s'y montre en entier. Les préférences d'avant (variante
+  « Courbe », emplacement) sont ignorées.
 - Gestes : un appui sur un objet le sélectionne et le déplace (sauf Stylo, Surligneur,
-  Gomme) ; la Gomme supprime ce qu'elle touche, un geste = un pas d'annulation ; le
-  recadrage se fait aux quatre équerres des coins de l'image (`recadrer`, `null` à l'image
-  entière) ; le Projecteur se prend par son bord.
+  Gomme) ; emmené puis ramené à sa place, aucun pas. Une flèche tracée reste choisie : sa
+  poignée du milieu (pleine, à la couleur d'accent) la courbe, la courbe passant par la
+  pointe ; ramenée près du milieu de la corde, elle redevient droite ; Maj : courbe
+  symétrique. La Gomme efface les encres là où elle passe, et là seulement : un geste = un
+  pas (aucun s'il n'efface rien ; une encre tout effacée disparaît ; Échap l'abandonne) ;
+  posée sur un objet entier (texte, numéro, masque, projecteur par son bord), elle
+  l'enlève en entier, caché dès l'appui. Le recadrage se fait aux quatre équerres des
+  coins de l'image (`recadrer`, `null` à l'image entière) ; le Projecteur se prend par son
+  bord.
 - Fermeture : `editeur:fermer_demande` valide le texte en saisie, envoie `editeur_etat`,
   puis répond ; « demander » ouvre le menu « Fermer » (« Copier et fermer », « Fermer sans
   copier » = `force`) ; le refermer vaut `editeur_garder`.
@@ -1719,17 +1747,23 @@ non envoye: <e>`, `surlignage sans fil (<e>): fin montree tout de suite`.
   redimensionnement par les bords et le déplacement par la barre de la page ne s'y
   vérifient pas. Hors Windows : démarrage et arrêt seulement.
 - `essais/pages/editeur-modele.cjs` (0.4) : `document.js` et `dessin.js` sous Node 22.15
-  ou plus (`module.registerHooks` pour charger les modules), 53 points : chaque type,
+  ou plus (`module.registerHooks` pour charger les modules), 67 points : chaque type,
   historique (200 pas, borne en octets), touche, boîtes et poignées, alpha exact, masques
   (Pixeliser aligné sur la grille, petits masques, attaque par candidats sur un texte),
   vue à la taille réelle égale à l'export, temps sur 25 Mpx, Projecteur (P1 à P10 : prise
-  par le bord, réunion, alpha, coût du voile) ; `ECHECS : 0` attendu. Étape du job `pages`.
+  par le bord, réunion, alpha, coût du voile), gomme (G1 à G11 : passages, encres
+  effacées dessous seulement, passages qui suivent l'objet), flèche courbée à sa poignée
+  (F : courbe par la pointe, aimant droit, Maj, bouts et passages qui suivent),
+  `changerVariante` (V) ; `ECHECS : 0` attendu. Étape du job `pages`.
 - `essais/pages/editeur.cjs` (0.4) : la page de l'éditeur dans Chromium, cœur simulé et
-  vrai modèle, 145 points : noms et rôles accessibles (contrat de l'essai 12), chaque
-  outil, Gomme, Projecteur, recadrage par chaque coin, sélection, bulle de l'outil,
-  couleurs, menu « Fermer » et ses issues, « Copier » qui ferme, vignette de prise, règle
-  de `fermer_demande`, un seul export à la fois, clair, sombre, fenêtre étroite, aucune
-  erreur ni violation de CSP. Étape du job `pages`.
+  vrai modèle, 225 points : noms et rôles accessibles (contrat de l'essai 12), chaque
+  outil, flèche choisie après le tracé et courbée à sa poignée, Gomme au pixel,
+  Projecteur, recadrage par chaque coin, sélection, la barre C (l'outil déplié, ce que
+  chaque outil déplie, l'objet choisi qui déplie son outil, variante changée sur l'objet,
+  instruments à la couleur de l'encre), couleurs, menu « Fermer » et ses issues,
+  « Copier » qui ferme, vignette de prise, règle de `fermer_demande`, un seul export à la
+  fois, clair, sombre, fenêtre étroite (la barre défile), aucune erreur ni violation de
+  CSP. Étape du job `pages`.
 - **Tests de la 0.5** (`cargo test --locked` sous Linux : 641 tests de la bibliothèque
   réussis, 2 ignorés, et les 2 de `tests/architecture.rs`, qui refusent aussi un appel à
   `droits::ouverte` ou à `licence::verifier` hors d'`application`). Tests ajoutés, par

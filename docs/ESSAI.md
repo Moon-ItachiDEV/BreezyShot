@@ -11,9 +11,11 @@ installées.
 
 Enregistrer dans Images › BreezyShot : bouton « Enregistrer » de la vignette, ou par le réglage.
 
-Annoter : bouton « Annoter » de la vignette. Flèche, stylo, surligneur, gomme ; « + » :
-texte, forme, numéro, flou, projecteur. Recadrer : tirer un coin de l'image. « Copier »
-copie et ferme ; « … » : Enregistrer sous, Glisser vers une appli.
+Annoter : bouton « Annoter » de la vignette. Flèche, stylo, surligneur, gomme, texte,
+forme, numéro, flou, projecteur : l'outil pris montre ses réglages dans la barre. Courber
+une flèche : tirer son point du milieu. La gomme efface là où elle passe. Recadrer : tirer
+un coin de l'image. « Copier » copie et ferme ; « … » : Enregistrer sous, Glisser vers une
+appli.
 
 Échap ou clic droit annule. Pour quitter : clic droit sur l'icône, près de l'horloge.
 
