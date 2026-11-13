@@ -1,6 +1,6 @@
 //! Copier le texte, côté gestes (contrat 0.5, §5) : la lecture dans le fil `texte`, son
-//! échéance, l'écran figé gardé le temps du balayage, le résultat. Les décisions sont dans
-//! `texte.rs`.
+//! échéance, l'écran figé gardé le temps du balayage, le surlignage des lignes copiées, le
+//! résultat. Les décisions sont dans `texte.rs`.
 //!
 //! Points d'accroche de `mod.rs` : `lancer_sonde` (démarrage, fil `texte-langues`, qui
 //! poste `Evenement::TexteDisponible`), `zone_choisie` (zone choisie en mode texte),
@@ -10,7 +10,8 @@
 //!
 //! Aucune lecture ni copie sur le fil principal. L'écran figé (sa `GardeEcran`) est rangé
 //! à part, dans `ECRAN` : le fil `texte-ecran` le libère à `ECRAN_FIGE_MAX_LECTURE` sans
-//! passer par la boucle, même si la lecture ne rend rien.
+//! passer par la boucle, même si la lecture ne rend rien ; pendant un surlignage, c'est le
+//! fil `texte-surligne` qui le libère, à la fin du surlignage.
 
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{mpsc, Mutex};
@@ -40,12 +41,16 @@ static NUMERO: AtomicU64 = AtomicU64::new(0);
 /// alors) ou l'échéance la prend, jamais les deux ; une lecture abandonnée ne copie jamais.
 static ATTENDUE: Attendue = Attendue::new();
 
-/// L'écran figé d'une lecture : sa garde (prise à la libération) et quand il a été caché.
+/// L'écran figé d'une lecture : sa garde (prise à la libération), quand il a été caché, la
+/// zone lue (pixels réels du bureau) et si ses lignes sont en train d'être surlignées (la
+/// borne ne libère alors plus l'écran).
 struct EcranGarde<G = GardeEcran> {
     numero: u64,
     relache: Instant,
     garde: Option<G>,
     cache_apres: Option<Duration>,
+    zone: Rect,
+    surligne: bool,
 }
 
 /// Prend la garde de l'écran figé de la lecture `numero` (pure, testée sans écran) : la
@@ -62,6 +67,44 @@ fn prendre_garde<G>(
         .cache_apres
         .get_or_insert_with(|| maintenant.saturating_duration_since(e.relache));
     Some((e.garde.take(), apres))
+}
+
+/// La borne `ECRAN_FIGE_MAX_LECTURE` de la lecture `numero` : comme `prendre_garde`, sauf
+/// pendant le surlignage (rien n'est pris : sa fin libère l'écran).
+fn prendre_garde_a_la_borne<G>(
+    place: &mut Option<EcranGarde<G>>,
+    numero: u64,
+    maintenant: Instant,
+) -> Option<(Option<G>, Duration)> {
+    if surlignage_en_cours(place, numero) {
+        return None;
+    }
+    prendre_garde(place, numero, maintenant)
+}
+
+/// Le surlignage de la lecture `numero` peut commencer si son écran figé est encore montré
+/// (ni libéré à la borne, ni par un changement d'écrans) et pas déjà surligné : il est
+/// alors noté (la borne ne libère plus l'écran) et la zone lue est rendue.
+fn commencer_surlignage<G>(place: &mut Option<EcranGarde<G>>, numero: u64) -> Option<Rect> {
+    let e = place
+        .as_mut()
+        .filter(|e| e.numero == numero && e.garde.is_some() && !e.surligne)?;
+    e.surligne = true;
+    Some(e.zone)
+}
+
+/// Le surlignage de la lecture `numero` n'a pas pu être joué : la borne reprend la main.
+fn renoncer_surlignage<G>(place: &mut Option<EcranGarde<G>>, numero: u64) {
+    if let Some(e) = place.as_mut().filter(|e| e.numero == numero) {
+        e.surligne = false;
+    }
+}
+
+/// Vrai pendant le surlignage de la lecture `numero`.
+fn surlignage_en_cours<G>(place: &Option<EcranGarde<G>>, numero: u64) -> bool {
+    place
+        .as_ref()
+        .is_some_and(|e| e.numero == numero && e.surligne)
 }
 
 /// Écrans changés : la garde de l'écran de la lecture en cours, si elle est encore là ; la
@@ -99,6 +142,14 @@ fn liberer_ecran(numero: u64) -> Option<Duration> {
     // Hors du verrou : la garde cache l'écran figé et la sélection, libère Échap.
     drop(garde);
     Some(apres)
+}
+
+/// La borne de la lecture `numero` (fil `texte-ecran`) : son écran figé est libéré, sauf
+/// pendant le surlignage.
+fn liberer_ecran_a_la_borne(numero: u64) {
+    let prise = prendre_garde_a_la_borne(&mut ecran(), numero, Instant::now());
+    // Hors du verrou, comme `liberer_ecran`.
+    drop(prise);
 }
 
 /// Libère l'écran figé de la lecture `numero` et l'oublie.
@@ -145,7 +196,8 @@ pub fn lancer_sonde(app: &AppHandle) {
 
 /// Zone choisie en mode texte (fil principal, état Sélection, capture encore rangée) :
 /// Lecture, découpe (l'écran figé reste montré), Échap libéré, balayage, lecture dans le
-/// fil `texte` et son échéance, écran figé gardé de `balayage` à `ECRAN_FIGE_MAX_LECTURE`.
+/// fil `texte` et son échéance, écran figé gardé de `balayage` à `ECRAN_FIGE_MAX_LECTURE`
+/// (ou jusqu'à la fin du surlignage commencé avant).
 pub fn zone_choisie(app: &AppHandle, zone: Rect) {
     let relache = Instant::now();
     let Some(capture) = super::ranger_capture(app, None) else {
@@ -187,6 +239,8 @@ pub fn zone_choisie(app: &AppHandle, zone: Rect) {
         relache,
         garde: Some(garde),
         cache_apres: None,
+        zone,
+        surligne: false,
     });
     drop(ancien);
     *super::lecture_en_cours(app) = Some(LectureEnCours {
@@ -206,7 +260,8 @@ pub fn zone_choisie(app: &AppHandle, zone: Rect) {
 }
 
 /// Le fil `texte-ecran` : au bout du balayage, le résultat déjà arrivé est montré (fil
-/// principal) ; à la borne, l'écran figé est libéré d'ici, quoi qu'il arrive.
+/// principal) ; à la borne, l'écran figé est libéré d'ici, quoi qu'il arrive, sauf pendant
+/// le surlignage (le fil `texte-surligne` le libère à sa fin).
 fn garder_ecran(app: &AppHandle, numero: u64, relache: Instant, minimum: Duration) -> bool {
     let pour = app.clone();
     let lance = std::thread::Builder::new()
@@ -222,7 +277,7 @@ fn garder_ecran(app: &AppHandle, numero: u64, relache: Instant, minimum: Duratio
                 return;
             }
             dormir_jusqu_a(relache + texte::ECRAN_FIGE_MAX_LECTURE);
-            liberer_ecran(numero);
+            liberer_ecran_a_la_borne(numero);
         });
     if let Err(e) = lance {
         log::warn!("garde de l'ecran fige impossible ({e}): ecran libere");
@@ -346,12 +401,25 @@ pub fn texte_lu(app: &AppHandle, fin: FinLecture) {
 }
 
 /// Le balayage de la lecture `numero` est fini (fil principal) : son résultat, s'il est
-/// arrivé, est montré.
+/// arrivé, est montré. Pendant le surlignage, le résultat gardé attend sa fin.
 fn balayage_fini(app: &AppHandle, numero: u64) {
-    let fin = texte::balayage_fini(&mut super::lecture_en_cours(app), numero);
+    let fin = fin_du_balayage(&ecran(), &mut super::lecture_en_cours(app), numero);
     if let Some(fin) = fin {
         finir(app, fin);
     }
+}
+
+/// La fin gardée à montrer au bout du balayage de la lecture `numero` (pure, testée sans
+/// écran) : aucune pendant son surlignage, que ce réveil tardif couperait sinon.
+fn fin_du_balayage<G>(
+    place: &Option<EcranGarde<G>>,
+    lecture: &mut Option<LectureEnCours>,
+    numero: u64,
+) -> Option<FinLecture> {
+    if surlignage_en_cours(place, numero) {
+        return None;
+    }
+    texte::balayage_fini(lecture, numero)
 }
 
 /// L'échéance de la lecture `numero` est tombée (fil principal) : « Impossible de lire le
@@ -367,9 +435,83 @@ pub fn echu(app: &AppHandle, numero: u64) {
     }
 }
 
-/// Fin d'une lecture du raccourci (fil principal) : l'écran figé libéré s'il ne l'est pas
-/// encore, journal, Repos, bandeau.
+/// Fin d'une lecture du raccourci (fil principal) : un texte copié est d'abord surligné sur
+/// la zone, l'écran figé encore montré (`surligner`) ; sinon, ou à la fin du surlignage,
+/// `conclure`.
 fn finir(app: &AppHandle, fin: FinLecture) {
+    if let Some(fin) = surligner(app, fin) {
+        conclure(app, fin);
+    }
+}
+
+/// Surligne les lignes du texte copié de `fin` si son écran figé est encore montré
+/// (`selection:surligner`) : la fin est gardée dans la lecture, le fil `texte-surligne`
+/// libère l'écran au bout du surlignage puis la montre (`surlignage_fini`). Rend la fin à
+/// montrer tout de suite si rien n'est surligné (pas un texte copié, écran déjà libéré,
+/// aucune ligne, sélection absente, fil impossible).
+fn surligner(app: &AppHandle, fin: FinLecture) -> Option<FinLecture> {
+    let numero = fin.numero;
+    if !texte::surlignable(&super::lecture_en_cours(app), &fin) {
+        return Some(fin);
+    }
+    let Issue::Texte(lu) = &fin.issue else {
+        return Some(fin);
+    };
+    let Some(zone) = commencer_surlignage(&mut ecran(), numero) else {
+        return Some(fin);
+    };
+    let lignes = texte::lignes_lues(lu, zone);
+    let reduites = super::reduites_editeur(app);
+    let deroule = texte::deroule(lignes.len(), reduites);
+    let joue = app
+        .try_state::<Selection>()
+        .is_some_and(|s| s.surligner(&lignes, reduites, deroule));
+    if !joue || !attendre_surlignage(app, numero, texte::duree_surlignage(lignes.len(), reduites)) {
+        renoncer_surlignage(&mut ecran(), numero);
+        return Some(fin);
+    }
+    match super::lecture_en_cours(app).as_mut() {
+        Some(x) if x.numero == numero => {
+            x.fin = Some(Box::new(fin));
+            None
+        }
+        _ => Some(fin),
+    }
+}
+
+/// Le fil `texte-surligne` : au bout de `duree`, l'écran figé et la sélection sont libérés
+/// d'ici, quoi qu'il arrive, puis la fin gardée est montrée (fil principal). Faux si le fil
+/// n'a pas pu partir.
+fn attendre_surlignage(app: &AppHandle, numero: u64, duree: Duration) -> bool {
+    let pour = app.clone();
+    let lance = std::thread::Builder::new()
+        .name("texte-surligne".into())
+        .spawn(move || {
+            std::thread::sleep(duree);
+            liberer_ecran(numero);
+            let p = pour.clone();
+            let _ = pour.run_on_main_thread(move || surlignage_fini(&p, numero));
+        });
+    if let Err(e) = lance {
+        log::warn!("surlignage sans fil ({e}): fin montree tout de suite");
+        return false;
+    }
+    true
+}
+
+/// Le surlignage de la lecture `numero` est fini (fil principal) : sa fin gardée est
+/// montrée.
+fn surlignage_fini(app: &AppHandle, numero: u64) {
+    renoncer_surlignage(&mut ecran(), numero);
+    let fin = texte::balayage_fini(&mut super::lecture_en_cours(app), numero);
+    if let Some(fin) = fin {
+        conclure(app, fin);
+    }
+}
+
+/// Montre la fin d'une lecture du raccourci (fil principal) : l'écran figé libéré s'il ne
+/// l'est pas encore, journal, Repos, bandeau.
+fn conclure(app: &AppHandle, fin: FinLecture) {
     let Some(x) = texte::terminer(&mut super::lecture_en_cours(app), fin.numero) else {
         return;
     };
@@ -516,6 +658,13 @@ mod tests {
             relache,
             garde: Some("garde"),
             cache_apres: None,
+            zone: Rect {
+                x: -100,
+                y: 20,
+                largeur: 300,
+                hauteur: 80,
+            },
+            surligne: false,
         })
     }
 
@@ -535,6 +684,105 @@ mod tests {
             Some((None, ms(1500)))
         );
         assert!(prendre_garde(&mut None::<EcranGarde<&str>>, 3, t).is_none());
+    }
+
+    #[test]
+    fn surlignage_seulement_l_ecran_encore_montre_et_une_fois() {
+        let t = Instant::now();
+        let ms = Duration::from_millis;
+        let zone = Rect {
+            x: -100,
+            y: 20,
+            largeur: 300,
+            hauteur: 80,
+        };
+        let mut place = rangee(3, t);
+        assert_eq!(commencer_surlignage(&mut place, 2,), None, "autre lecture");
+        assert!(!surlignage_en_cours(&place, 3));
+        assert_eq!(commencer_surlignage(&mut place, 3), Some(zone));
+        assert!(surlignage_en_cours(&place, 3));
+        assert!(!surlignage_en_cours(&place, 2));
+        // Déjà commencé : pas une seconde fois.
+        assert_eq!(commencer_surlignage(&mut place, 3), None);
+        // Pendant le surlignage, la borne ne prend rien ; la fin du surlignage, si.
+        assert_eq!(prendre_garde_a_la_borne(&mut place, 3, t + ms(1500)), None);
+        assert!(place.as_ref().is_some_and(|e| e.garde.is_some()));
+        assert_eq!(
+            prendre_garde(&mut place, 3, t + ms(1900)),
+            Some((Some("garde"), ms(1900)))
+        );
+        // Écran déjà libéré (borne, écrans changés) : pas de surlignage.
+        let mut libere = rangee(4, t);
+        assert_eq!(
+            prendre_garde_a_la_borne(&mut libere, 4, t + ms(1500)),
+            Some((Some("garde"), ms(1500)))
+        );
+        assert_eq!(commencer_surlignage(&mut libere, 4), None);
+        assert_eq!(commencer_surlignage(&mut None::<EcranGarde<&str>>, 4), None);
+    }
+
+    #[test]
+    fn surlignage_abandonne_rend_la_main_a_la_borne() {
+        let t = Instant::now();
+        let ms = Duration::from_millis;
+        let mut place = rangee(5, t);
+        assert!(commencer_surlignage(&mut place, 5).is_some());
+        // Une autre lecture ne touche rien.
+        renoncer_surlignage(&mut place, 6);
+        assert!(surlignage_en_cours(&place, 5));
+        renoncer_surlignage(&mut place, 5);
+        assert!(!surlignage_en_cours(&place, 5));
+        assert_eq!(
+            prendre_garde_a_la_borne(&mut place, 5, t + ms(1500)),
+            Some((Some("garde"), ms(1500)))
+        );
+        renoncer_surlignage(&mut None::<EcranGarde<&str>>, 5);
+    }
+
+    #[test]
+    fn fin_du_balayage_attend_le_surlignage() {
+        let t = Instant::now();
+        let fin = FinLecture {
+            numero: 6,
+            issue: crate::texte::Issue::Vide,
+            copie: None,
+            duree: Duration::ZERO,
+            document: None,
+            facteur: 1.0,
+        };
+        let gardee = || {
+            Some(LectureEnCours {
+                numero: 6,
+                relache: t,
+                minimum: texte::BALAYAGE,
+                fin: Some(Box::new(fin.clone())),
+            })
+        };
+        // Pendant le surlignage, un réveil tardif du balayage ne prend pas la fin gardée.
+        let mut place = rangee(6, t);
+        assert!(commencer_surlignage(&mut place, 6).is_some());
+        let mut lecture = gardee();
+        assert_eq!(fin_du_balayage(&place, &mut lecture, 6), None);
+        assert_eq!(lecture.as_ref().and_then(|x| x.fin.as_deref()), Some(&fin));
+        // Sans surlignage (ou celui d'une autre lecture), elle est rendue, une fois.
+        let mut autre = rangee(7, t);
+        assert!(commencer_surlignage(&mut autre, 7).is_some());
+        assert_eq!(fin_du_balayage(&autre, &mut lecture, 6), Some(fin.clone()));
+        assert_eq!(fin_du_balayage(&autre, &mut lecture, 6), None);
+        let mut lecture = gardee();
+        assert_eq!(
+            fin_du_balayage(&rangee(6, t), &mut lecture, 6),
+            Some(fin.clone())
+        );
+        let mut lecture = gardee();
+        assert_eq!(
+            fin_du_balayage(&None::<EcranGarde<&str>>, &mut lecture, 6),
+            Some(fin)
+        );
+        assert_eq!(
+            fin_du_balayage(&None::<EcranGarde<&str>>, &mut lecture, 5),
+            None
+        );
     }
 
     #[test]

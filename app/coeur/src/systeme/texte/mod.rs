@@ -64,6 +64,37 @@ pub struct MotBrut {
     pub hauteur: f32,
 }
 
+/// Ramène la boîte de `mot` sur l'image donnée au moteur (`largeur × hauteur`) quand le
+/// texte y est penché de `angle` degrés (dans le sens des aiguilles d'une montre, autour du
+/// centre de l'image). Windows donne les boîtes du texte redressé (`OcrWord.BoundingRect` :
+/// « when the value of TextAngle property is 0 ») et dit de tourner le texte reconnu de
+/// `OcrResult.TextAngle`, dans le sens des aiguilles d'une montre, pour le poser sur l'image
+/// d'origine. La boîte devient le plus petit rectangle droit qui couvre la boîte tournée. Un
+/// angle nul ou non fini ne change rien.
+pub fn redresser(mot: &mut MotBrut, angle: f64, largeur: u32, hauteur: u32) {
+    if angle == 0.0 || !angle.is_finite() {
+        return;
+    }
+    let (s, c) = angle.to_radians().sin_cos();
+    let (cx, cy) = (f64::from(largeur) / 2.0, f64::from(hauteur) / 2.0);
+    let (g, h) = (f64::from(mot.x), f64::from(mot.y));
+    let (d, b) = (g + f64::from(mot.largeur), h + f64::from(mot.hauteur));
+    // Les quatre coins tournés autour du centre (y vers le bas : sens des aiguilles).
+    let coins = [(g, h), (d, h), (g, b), (d, b)].map(|(x, y)| {
+        let (dx, dy) = (x - cx, y - cy);
+        (cx + dx * c - dy * s, cy + dx * s + dy * c)
+    });
+    let min = |v: [f64; 4]| v.into_iter().fold(f64::INFINITY, f64::min);
+    let max = |v: [f64; 4]| v.into_iter().fold(f64::NEG_INFINITY, f64::max);
+    let xs = coins.map(|p| p.0);
+    let ys = coins.map(|p| p.1);
+    let (gauche, haut) = (min(xs), min(ys));
+    mot.x = gauche as f32;
+    mot.y = haut as f32;
+    mot.largeur = (max(xs) - gauche) as f32;
+    mot.hauteur = (max(ys) - haut) as f32;
+}
+
 /// Une ligne reconnue : son texte tel que le moteur l'assemble, et ses mots.
 #[derive(Clone, PartialEq)]
 pub struct LigneBrute {
@@ -242,6 +273,71 @@ mod tests {
             reconnaitre(&[255; 16], 2, 2),
             Err(ErreurMoteur::AucuneLangue)
         );
+    }
+
+    fn boite(x: f32, y: f32, largeur: f32, hauteur: f32) -> MotBrut {
+        MotBrut {
+            texte: "mot".into(),
+            x,
+            y,
+            largeur,
+            hauteur,
+        }
+    }
+
+    fn proche(a: &MotBrut, b: &MotBrut) -> bool {
+        [
+            (a.x, b.x),
+            (a.y, b.y),
+            (a.largeur, b.largeur),
+            (a.hauteur, b.hauteur),
+        ]
+        .iter()
+        .all(|(u, v)| (u - v).abs() < 1e-3)
+    }
+
+    #[test]
+    fn boites_du_texte_penche_ramenees_sur_l_image() {
+        // Angle nul ou non fini : rien ne change.
+        for angle in [0.0, f64::NAN, f64::INFINITY] {
+            let mut m = boite(10.0, 20.0, 30.0, 8.0);
+            redresser(&mut m, angle, 200, 100);
+            assert_eq!(m, boite(10.0, 20.0, 30.0, 8.0), "{angle}");
+        }
+        // Un quart de tour autour du centre (100, 50), dans le sens des aiguilles : le mot
+        // à droite du centre passe dessous, couché devient debout.
+        let mut m = boite(120.0, 46.0, 40.0, 8.0);
+        redresser(&mut m, 90.0, 200, 100);
+        assert!(proche(&m, &boite(96.0, 70.0, 8.0, 40.0)), "{m:?}");
+        // Un demi-tour : la boîte passe à l'opposé du centre, même taille.
+        let mut m = boite(10.0, 10.0, 30.0, 8.0);
+        redresser(&mut m, 180.0, 200, 100);
+        assert!(proche(&m, &boite(160.0, 82.0, 30.0, 8.0)), "{m:?}");
+        // Un petit angle : la boîte couvre le mot tourné (un peu plus grande), son centre
+        // tourne autour de celui de l'image ; dans l'autre sens, l'inverse.
+        let mut m = boite(150.0, 46.0, 40.0, 8.0);
+        redresser(&mut m, 10.0, 200, 100);
+        let (s, c) = 10f64.to_radians().sin_cos();
+        let (cx, cy) = (100.0 + 70.0 * c, 50.0 + 70.0 * s);
+        let (l, h) = (40.0 * c + 8.0 * s, 40.0 * s + 8.0 * c);
+        let attendu = boite(
+            (cx - l / 2.0) as f32,
+            (cy - h / 2.0) as f32,
+            l as f32,
+            h as f32,
+        );
+        assert!(proche(&m, &attendu), "{m:?} {attendu:?}");
+        let mut n = boite(150.0, 46.0, 40.0, 8.0);
+        redresser(&mut n, -10.0, 200, 100);
+        assert!(
+            proche(
+                &n,
+                &boite(m.x, 100.0 - m.y - m.hauteur, m.largeur, m.hauteur)
+            ),
+            "{n:?}"
+        );
+        // Le texte n'est pas touché.
+        assert_eq!(n.texte, "mot");
     }
 
     #[test]

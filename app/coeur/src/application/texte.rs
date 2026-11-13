@@ -11,21 +11,44 @@ use std::time::{Duration, Instant};
 use serde::Serialize;
 
 use super::etats::Declencheur;
+use crate::fenetres::selection::Surlignage;
 use crate::fenetres::{Action, Genre, Message};
 use crate::sortie::Etape;
 use crate::systeme::texte::Disponibilite;
+use crate::systeme::Rect;
 use crate::texte::{extrait, Issue, Lu, PETITE_IMAGE};
 
 /// Vrai quand Copier le texte est construit (chantier E) : seulement alors l'action
 /// `texte` est construite (si une licence est active et qu'une langue existe).
 pub const CONSTRUIT: bool = true;
 
-/// Le balayage sur la zone lue, et sa version réduite.
-pub const BALAYAGE: Duration = Duration::from_millis(400);
+/// Le balayage sur la zone lue (elle se teinte et respire le temps de la lecture), et sa
+/// version réduite : l'écran figé reste au moins ce temps après le relâcher. Ce sont les
+/// jetons `texte-lecture` (la respiration que joue la page) et `texte-lecture-reduite`
+/// (essai d'égalité).
+pub const BALAYAGE: Duration = Duration::from_millis(200);
 pub const BALAYAGE_REDUIT: Duration = Duration::from_millis(120);
 
-/// L'écran figé n'est jamais gardé plus longtemps après le relâcher.
+/// L'écran figé n'attend jamais la lecture plus longtemps après le relâcher. Un surlignage
+/// commencé avant va jusqu'à sa fin (`duree_surlignage`, au plus 810 ms).
 pub const ECRAN_FIGE_MAX_LECTURE: Duration = Duration::from_millis(1500);
+
+/// Le surlignage des lignes d'un texte copié (choix « Surligné », 13/11) : chaque ligne se
+/// tire de gauche à droite en `SURLIGNE_TRACE`, la suivante un pas plus tard (au plus
+/// `SURLIGNE_PAS`, tous les pas ensemble au plus `SURLIGNE_DECALAGE`) ; toutes restent
+/// `SURLIGNE_TENUE`, puis la sélection s'efface en `SURLIGNE_SORTIE`. Animations réduites :
+/// les lignes paraissent ensemble en fondu, `SURLIGNE_REDUIT` pour paraître et pour partir.
+/// Les jetons `texte-surligne-*` du design (essai d'égalité) ; la page les reçoit du cœur.
+pub const SURLIGNE_TRACE: u32 = 260;
+pub const SURLIGNE_PAS: u32 = 40;
+pub const SURLIGNE_DECALAGE: u32 = 160;
+pub const SURLIGNE_TENUE: u32 = 220;
+pub const SURLIGNE_SORTIE: u32 = 140;
+pub const SURLIGNE_REDUIT: u32 = 120;
+/// Après la sortie : l'événement met quelques millisecondes à atteindre la page.
+pub const SURLIGNE_MARGE: Duration = Duration::from_millis(30);
+/// Au plus ce nombre de lignes surlignées (les suivantes ne le sont pas).
+pub const SURLIGNE_LIGNES_MAX: usize = 400;
 
 /// L'action du bandeau « Aucun texte trouvé ».
 pub const ACTION_REESSAYER: &str = "reessayer";
@@ -55,7 +78,9 @@ pub struct LectureEnCours {
     pub relache: Instant,
     /// L'écran figé reste au moins ce temps après le relâcher (`balayage`).
     pub minimum: Duration,
-    /// Le résultat arrivé avant `minimum` : montré quand l'écran se libère.
+    /// Le résultat gardé : arrivé avant la fin du balayage (`minimum`), montré à cette fin
+    /// (`balayage_fini`) ; ou celui d'un texte copié dont les lignes sont en train d'être
+    /// surlignées, montré à la fin du surlignage.
     pub fin: Option<Box<FinLecture>>,
 }
 
@@ -201,6 +226,88 @@ pub fn balayage(reduites: bool) -> Duration {
     } else {
         BALAYAGE
     }
+}
+
+/// Faut-il surligner les lignes de cette fin ? Seulement un texte lu et copié : rien de
+/// copié, rien à montrer sur la zone (le bandeau dit l'erreur tout de suite).
+pub fn a_surligner(fin: &FinLecture) -> bool {
+    matches!(
+        (&fin.issue, &fin.copie),
+        (Issue::Texte(_), Some(Etape::Faite))
+    )
+}
+
+/// Faut-il surligner `fin` maintenant ? Un texte lu et copié (`a_surligner`) de la lecture
+/// en cours, dont aucune fin n'est déjà gardée (une fin gardée attend son balayage ou un
+/// surlignage déjà commencé).
+pub fn surlignable(lecture: &Option<LectureEnCours>, fin: &FinLecture) -> bool {
+    a_surligner(fin)
+        && lecture
+            .as_ref()
+            .is_some_and(|x| x.numero == fin.numero && x.fin.is_none())
+}
+
+/// Le déroulé du surlignage de `lignes` lignes : un pas de `SURLIGNE_PAS` au plus, tous les
+/// pas ensemble au plus `SURLIGNE_DECALAGE` (au-delà de 161 lignes, toutes ensemble).
+/// Animations réduites : toutes ensemble, en fondu.
+pub fn deroule(lignes: usize, reduites: bool) -> Surlignage {
+    if reduites {
+        return Surlignage {
+            trace: SURLIGNE_REDUIT,
+            pas: 0,
+            tenue: SURLIGNE_TENUE,
+            sortie: SURLIGNE_REDUIT,
+        };
+    }
+    let ecarts = u32::try_from(lignes.saturating_sub(1)).unwrap_or(u32::MAX);
+    // Une seule ligne : aucun pas.
+    let pas = SURLIGNE_DECALAGE
+        .checked_div(ecarts)
+        .map_or(0, |p| p.min(SURLIGNE_PAS));
+    Surlignage {
+        trace: SURLIGNE_TRACE,
+        pas,
+        tenue: SURLIGNE_TENUE,
+        sortie: SURLIGNE_SORTIE,
+    }
+}
+
+/// Le temps que l'écran figé reste montré pour un surlignage de `lignes` lignes (marge
+/// comprise).
+pub fn duree_surlignage(lignes: usize, reduites: bool) -> Duration {
+    deroule(lignes, reduites).duree(lignes) + SURLIGNE_MARGE
+}
+
+/// Les lignes d'un texte lu sur `zone` (pixels réels du bureau) : pour chaque ligne, le plus
+/// petit rectangle qui couvre ses mots, en pixels réels du bureau, dans l'ordre de lecture,
+/// au plus `SURLIGNE_LIGNES_MAX`. Les mots sont en pixels de l'image de la zone, bornés à
+/// elle (`depuis_reconnu`), ceux d'une ligne à la suite ; un mot sans surface est sauté.
+pub fn lignes_lues(lu: &Lu, zone: Rect) -> Vec<Rect> {
+    // Bords gauche, haut, droit et bas (exclus) de chaque ligne, et son numéro.
+    let mut lignes: Vec<(u32, [i64; 4])> = Vec::new();
+    for m in &lu.mots {
+        if m.largeur == 0 || m.hauteur == 0 {
+            continue;
+        }
+        let g = i64::from(zone.x) + i64::from(m.x);
+        let h = i64::from(zone.y) + i64::from(m.y);
+        let bords = [g, h, g + i64::from(m.largeur), h + i64::from(m.hauteur)];
+        if let Some((_, b)) = lignes.last_mut().filter(|(n, _)| *n == m.ligne) {
+            b[0] = b[0].min(bords[0]);
+            b[1] = b[1].min(bords[1]);
+            b[2] = b[2].max(bords[2]);
+            b[3] = b[3].max(bords[3]);
+        } else if lignes.len() == SURLIGNE_LIGNES_MAX {
+            break;
+        } else {
+            lignes.push((m.ligne, bords));
+        }
+    }
+    let borne = |v: i64| v.clamp(i64::from(i32::MIN), i64::from(i32::MAX)) as i32;
+    lignes
+        .into_iter()
+        .map(|(_, [g, h, d, b])| Rect::depuis_bords(borne(g), borne(h), borne(d), borne(b)))
+        .collect()
 }
 
 /// Vrai si l'écran figé doit être libéré, `ecoule` après le relâcher : à la borne
@@ -481,6 +588,162 @@ mod tests {
         )
     }
 
+    #[test]
+    fn seul_un_texte_copie_est_surligne() {
+        let texte = || Issue::Texte(lu(&[&["un"]]));
+        assert!(a_surligner(&fin(texte(), Some(Etape::Faite))));
+        assert!(!a_surligner(&fin(texte(), Some(Etape::Echec("x".into())))));
+        assert!(!a_surligner(&fin(texte(), Some(Etape::NonDemandee))));
+        assert!(!a_surligner(&fin(texte(), None)));
+        assert!(!a_surligner(&fin(Issue::Vide, Some(Etape::Faite))));
+        assert!(!a_surligner(&fin(Issue::AucuneLangue, None)));
+        assert!(!a_surligner(&fin(Issue::Echec("echeance".into()), None)));
+    }
+
+    #[test]
+    fn surligne_seulement_la_lecture_en_cours_sans_fin_gardee() {
+        let t = Instant::now();
+        let copie = || fin(Issue::Texte(lu(&[&["un"]])), Some(Etape::Faite));
+        assert!(surlignable(&en_cours(1, t), &copie()));
+        // Pas un texte copié.
+        assert!(!surlignable(&en_cours(1, t), &fin(Issue::Vide, None)));
+        assert!(!surlignable(
+            &en_cours(1, t),
+            &fin(Issue::Texte(lu(&[&["un"]])), Some(Etape::Echec("x".into())))
+        ));
+        // Une autre lecture, ou plus aucune.
+        assert!(!surlignable(&en_cours(2, t), &copie()));
+        assert!(!surlignable(&None, &copie()));
+        // Une fin déjà gardée (pendant un surlignage, par exemple) : pas une seconde fois.
+        let mut l = en_cours(1, t);
+        if let Some(x) = l.as_mut() {
+            x.fin = Some(Box::new(copie()));
+        }
+        assert!(!surlignable(&l, &copie()));
+    }
+
+    /// Les durées du balayage et du surlignage sont celles des jetons du design
+    /// (`jetons.css`, généré depuis `design/jetons-complements.json`) : la page joue
+    /// `texte-lecture`, et reçoit du cœur les durées du surlignage.
+    #[test]
+    fn durees_egales_aux_jetons() {
+        let ms = |nom: &str| -> u32 {
+            let css = include_str!("../../../interface/commun/jetons.css");
+            let debut = format!("--{nom}:");
+            let ligne = css
+                .lines()
+                .map(str::trim)
+                .find(|l| l.starts_with(&debut))
+                .unwrap_or_else(|| panic!("jeton {nom} absent"));
+            let valeur = ligne[debut.len()..].trim().trim_end_matches(';');
+            valeur
+                .strip_suffix("ms")
+                .and_then(|v| v.parse().ok())
+                .unwrap_or_else(|| panic!("jeton {nom}: {valeur}"))
+        };
+        let duree = |nom| Duration::from_millis(u64::from(ms(nom)));
+        assert_eq!(BALAYAGE, duree("texte-lecture"));
+        assert_eq!(BALAYAGE_REDUIT, duree("texte-lecture-reduite"));
+        assert_eq!(SURLIGNE_TRACE, ms("texte-surligne-trace"));
+        assert_eq!(SURLIGNE_PAS, ms("texte-surligne-pas"));
+        assert_eq!(SURLIGNE_DECALAGE, ms("texte-surligne-decalage"));
+        assert_eq!(SURLIGNE_TENUE, ms("texte-surligne-tenue"));
+        assert_eq!(SURLIGNE_SORTIE, ms("texte-surligne-sortie"));
+        assert_eq!(SURLIGNE_REDUIT, ms("texte-surligne-reduit"));
+    }
+
+    #[test]
+    fn deroule_du_surlignage() {
+        let d = |trace, pas, tenue, sortie| Surlignage {
+            trace,
+            pas,
+            tenue,
+            sortie,
+        };
+        // Une ligne : pas de pas ; jusqu'à cinq lignes, 40 ms ; ensuite 160 ms en tout.
+        assert_eq!(deroule(1, false), d(260, 0, 220, 140));
+        assert_eq!(deroule(2, false), d(260, 40, 220, 140));
+        assert_eq!(deroule(5, false), d(260, 40, 220, 140));
+        assert_eq!(deroule(6, false), d(260, 32, 220, 140));
+        assert_eq!(deroule(161, false), d(260, 1, 220, 140));
+        assert_eq!(deroule(162, false), d(260, 0, 220, 140));
+        assert_eq!(deroule(usize::MAX, false), d(260, 0, 220, 140));
+        // Animations réduites : toutes ensemble, fondus de 120 ms.
+        for n in [0, 1, 3, 400] {
+            assert_eq!(deroule(n, true), d(120, 0, 220, 120));
+        }
+        let ms = Duration::from_millis;
+        assert_eq!(duree_surlignage(1, false), ms(650));
+        assert_eq!(duree_surlignage(3, false), ms(730));
+        assert_eq!(duree_surlignage(3, true), ms(490));
+        // Jamais plus de 810 ms ajoutées à l'écran figé.
+        let max = (0..=SURLIGNE_LIGNES_MAX + 2)
+            .flat_map(|n| [duree_surlignage(n, false), duree_surlignage(n, true)])
+            .max();
+        assert_eq!(max, Some(ms(810)));
+    }
+
+    #[test]
+    fn lignes_lues_en_pixels_du_bureau() {
+        // Mots à x = 10 j, y = 20 i, 8 × 12 (voir `lu`).
+        let l = lu(&[&["un", "deux", "trois"], &["quatre"], &["cinq", "six"]]);
+        let zone = Rect {
+            x: -1900,
+            y: 300,
+            largeur: 200,
+            hauteur: 200,
+        };
+        let r = |x, y, largeur, hauteur| Rect {
+            x,
+            y,
+            largeur,
+            hauteur,
+        };
+        assert_eq!(
+            lignes_lues(&l, zone),
+            vec![
+                r(-1900, 300, 28, 12),
+                r(-1900, 320, 8, 12),
+                r(-1900, 340, 18, 12)
+            ]
+        );
+        // Les boîtes de mots de hauteurs différentes : la ligne les couvre toutes.
+        let mut l = lu(&[&["a", "b"]]);
+        l.mots[1].y = 3;
+        l.mots[1].hauteur = 20;
+        assert_eq!(lignes_lues(&l, zone), vec![r(-1900, 300, 18, 23)]);
+        // Un mot sans surface est sauté ; une ligne qui n'a que lui aussi.
+        let mut l = lu(&[&["a", "b"], &["c"]]);
+        l.mots[1].largeur = 0;
+        l.mots[2].hauteur = 0;
+        assert_eq!(lignes_lues(&l, zone), vec![r(-1900, 300, 8, 12)]);
+        assert!(lignes_lues(&lu(&[]), zone).is_empty());
+    }
+
+    #[test]
+    fn lignes_lues_au_plus_le_maximum() {
+        let mots: Vec<Vec<&str>> = (0..SURLIGNE_LIGNES_MAX + 5).map(|_| vec!["m"]).collect();
+        let refs: Vec<&[&str]> = mots.iter().map(Vec::as_slice).collect();
+        let mut l = lu(&refs);
+        // Les boîtes de `lu` sont bornées à 200 × 200 : on les replace une par ligne.
+        for (i, m) in l.mots.iter_mut().enumerate() {
+            m.y = i as u32;
+            m.hauteur = 1;
+        }
+        let zone = Rect {
+            x: 0,
+            y: 0,
+            largeur: 200,
+            hauteur: 1000,
+        };
+        let lignes = lignes_lues(&l, zone);
+        assert_eq!(lignes.len(), SURLIGNE_LIGNES_MAX);
+        assert_eq!(
+            lignes.last().map(|r| r.y),
+            Some(SURLIGNE_LIGNES_MAX as i32 - 1)
+        );
+    }
+
     fn fin(issue: Issue, copie: Option<Etape>) -> FinLecture {
         FinLecture {
             numero: 1,
@@ -495,7 +758,7 @@ mod tests {
     #[test]
     fn ecran_garde_entre_le_balayage_et_la_borne() {
         let ms = Duration::from_millis;
-        assert_eq!(balayage(false), ms(400));
+        assert_eq!(balayage(false), ms(200));
         assert_eq!(balayage(true), ms(120));
         // Lecture rendue avant la fin du balayage : l'écran reste.
         assert!(!liberer_ecran(ms(100), ms(400), true));

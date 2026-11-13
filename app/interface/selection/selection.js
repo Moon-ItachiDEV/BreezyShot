@@ -1,6 +1,7 @@
 // Sélection d'une zone (étape 5) ou d'une fenêtre (étape 8). La page montre et rapporte, le
 // cœur décide (ARCHITECTURE.md §2.5). Elle ne dessine que le voile et le rectangle, ou le
-// contour de la fenêtre survolée : ni texte, ni viseur, ni taille, ni poignée, ni animation.
+// contour de la fenêtre survolée : ni texte, ni viseur, ni taille, ni poignée ; seul le mode
+// texte s'anime, une fois la zone choisie (lecture, puis lignes copiées surlignées).
 //
 // Échelle k (pixels réels par pixel CSS) : devicePixelRatio, l'échelle de rendu vraie, quand
 // il explique la taille réelle de la fenêtre (envoyée par le cœur) à 1 px CSS près sur chaque
@@ -37,11 +38,17 @@
 // - Mode texte (Copier le texte, 0.5) : une zone, exactement comme le mode zone ; seul le nom
 //   change (« Copier le texte : sélectionnez une zone »). Après `selection_terminee`, le cœur
 //   envoie `selection:balayer` { id, x, y, largeur, hauteur, reduites } (pixels réels entiers
-//   relatifs à la fenêtre, comme `selection_terminee`) : la zone est posée là et joue le
-//   balayage (respiration, bande claire, teinte `accent`, --texte-balayage) ; `reduites` :
-//   --duree-reduite, sans bande ni mouvement. Le filet repart de ce moment. Rien n'est
-//   envoyé : le cœur cache la fenêtre quand la lecture et le balayage sont finis.
-// - `selection_chargee` {} une fois, quand les deux écoutes sont en place.
+//   relatifs à la fenêtre, comme `selection_terminee`) : la zone est posée là, se teinte
+//   (`accent`, --texte-teinte) et respire (--texte-lecture) le temps de la lecture ;
+//   `reduites` : la teinte seule, sans mouvement. La teinte reste jusqu'à la fin. Le filet
+//   repart de ce moment. Si le texte est copié, le cœur envoie ensuite `selection:surligner`
+//   { id, lignes: [{ x, y, largeur, hauteur }], reduites, trace, pas, tenue, sortie } (lignes
+//   en pixels réels entiers relatifs à la fenêtre, durées en ms) : la ligne de rang r se
+//   surligne de gauche à droite de r × pas à r × pas + trace (`reduites` : fondu, pas nul) ;
+//   après tenue, toute la sélection s'efface en sortie. Le filet repart de là, augmenté du
+//   surlignage. Rien n'est envoyé : le cœur cache la fenêtre à la fin de la lecture, ou du
+//   surlignage.
+// - `selection_chargee` {} une fois, quand les écoutes sont en place.
 // Gestes : glisser du bouton gauche ; Maj tenue : carré ; Espace tenue : la zone se déplace ;
 // Échap ou clic droit : annuler. Une zone reste sur l'écran où le glisser a commencé.
 // Sous `cote_min` de côté, ce n'est pas une zone : le rectangle s'efface et on continue.
@@ -89,6 +96,10 @@ let envoi = 0; // numéro de la dernière demande reçue
 let mesure = 0; // numéro de la dernière mesure lancée
 let filet = 0; // minuterie du filet après un envoi
 const FILET_MS = 1500;
+// Mode texte : le gel reste jusqu'à 1,5 s après le relâcher (ECRAN_FIGE_MAX_LECTURE), et un
+// surlignage commencé juste avant cette borne arrive un peu après : le filet du balayage
+// garde cette marge de plus.
+const FILET_TEXTE_MS = FILET_MS + 500;
 // Mode fenêtre.
 let mode = "zone";
 let fenetres = []; // { x, y, largeur, hauteur, rayon }, du premier plan vers le fond
@@ -419,19 +430,40 @@ function nommer() {
   }
 }
 
-// Le balayage du mode texte : la bande (créée une fois) et sa minuterie.
-const bande = document.createElement("i");
-bande.className = "bande";
-morceaux.zone.append(bande);
-let balayage = 0;
+// Le mode texte : la zone lue (coin, pixels réels de la scène) et les lignes copiées,
+// surlignées dans la zone (conteneur créé une fois).
+let lue = null;
+const lus = document.createElement("div");
+lus.className = "lus";
+morceaux.zone.append(lus);
+// Au plus autant de lignes que le cœur en envoie (SURLIGNE_LIGNES_MAX) ; chaque durée et tout
+// le surlignage bornés (le cœur ne dépasse jamais 780 ms).
+const LIGNES_MAX = 400;
+const DUREE_MAX = 2000;
+/** Un jeton de dimension, en pixels CSS (0 s'il manque). */
+const jetonPx = (nom) =>
+  parseFloat(getComputedStyle(document.documentElement).getPropertyValue(`--${nom}`)) || 0;
+
 function finBalayage() {
-  clearTimeout(balayage);
-  balayage = 0;
-  corps.classList.remove("balaye", "reduit");
+  lue = null;
+  lus.replaceChildren();
+  corps.classList.remove("balaye", "reduit", "surligne");
 }
 
-/** `selection:balayer` : la zone lue (pixels réels de la fenêtre) joue le balayage. Seulement
- *  en mode texte, pour l'affichage en cours, une fois la zone envoyée. */
+/** Le filet du mode texte : sans `selection:cachee` dans `ms`, la page redevient utilisable. */
+function armerFilet(ms) {
+  clearTimeout(filet);
+  const tour = envoi;
+  filet = setTimeout(() => {
+    if (tour !== envoi || !attente) return;
+    attente = false;
+    repos();
+  }, ms);
+}
+
+/** `selection:balayer` : la zone lue (pixels réels de la fenêtre) se teinte et respire le
+ *  temps de la lecture. Seulement en mode texte, pour l'affichage en cours, une fois la zone
+ *  envoyée. */
 export function balayer(m) {
   const ok = m && m.id === id && id !== null && mode === "texte" && attente &&
     [m.x, m.y, m.largeur, m.hauteur].every(entier) && m.largeur > 0 && m.hauteur > 0;
@@ -443,19 +475,54 @@ export function balayer(m) {
   const y0 = borne(m.y, 0, hauteur);
   poserZone(x0, y0, borne(m.x + m.largeur, x0, largeur), borne(m.y + m.hauteur, y0, hauteur));
   finBalayage();
+  lue = { x: x0, y: y0 };
   // Le gel peut rester jusqu'à 1,5 s après le relâcher : le filet repart d'ici.
-  clearTimeout(filet);
-  const tour = envoi;
-  filet = setTimeout(() => {
-    if (tour !== envoi || !attente) return;
-    attente = false;
-    repos();
-  }, FILET_MS);
+  armerFilet(FILET_TEXTE_MS);
   corps.classList.toggle("reduit", m.reduites === true);
   void morceaux.zone.offsetWidth; // l'animation repart de zéro
   corps.classList.add("balaye");
-  const duree = parseFloat(getComputedStyle(morceaux.zone).getPropertyValue("--duree-balayage"));
-  balayage = setTimeout(finBalayage, duree || 0);
+}
+
+const dureeValide = (v) => entier(v) && v >= 0 && v <= DUREE_MAX;
+const ligneValide = (l) => l && [l.x, l.y, l.largeur, l.hauteur].every(entier) && l.largeur > 0 && l.hauteur > 0;
+
+/** `selection:surligner` : les lignes du texte copié (pixels réels de la fenêtre) se
+ *  surlignent dans la zone lue, de gauche à droite, l'une après l'autre ; puis toute la
+ *  sélection s'efface. Seulement après le balayage de l'affichage en cours, et si tout le
+ *  surlignage tient en DUREE_MAX. Chaque ligne déborde de ses mots comme une sélection de
+ *  texte (jetons `texte-surligne-debord-x` et `-y`, pixels logiques) ; la zone coupe ce qui
+ *  dépasse. */
+export function surligner(m) {
+  const lignes = Array.isArray(m?.lignes) ? m.lignes.filter(ligneValide).slice(0, LIGNES_MAX) : [];
+  const valides = m && [m.trace, m.pas, m.tenue, m.sortie].every(dureeValide);
+  const sortieA = valides ? m.trace + m.pas * (lignes.length - 1) + m.tenue : Infinity;
+  const ok = valides && m.id === id && id !== null && mode === "texte" && attente &&
+    lue !== null && lignes.length > 0 && sortieA + m.sortie <= DUREE_MAX;
+  if (!ok) {
+    console.warn("selection : surlignage ignoré");
+    return;
+  }
+  // Le débord d'une ligne autour de ses mots (jetons), en pixels réels entiers.
+  const dx = Math.round(jetonPx("texte-surligne-debord-x") * kx);
+  const dy = Math.round(jetonPx("texte-surligne-debord-y") * ky);
+  const morceau = document.createDocumentFragment();
+  lignes.forEach((l, rang) => {
+    const i = document.createElement("i");
+    poser(i, l.x - dx - lue.x, l.y - dy - lue.y, l.largeur + 2 * dx, l.hauteur + 2 * dy);
+    i.style.setProperty("--rang", String(rang));
+    morceau.append(i);
+  });
+  corps.classList.remove("surligne");
+  lus.replaceChildren(morceau);
+  const s = corps.style;
+  s.setProperty("--surligne-trace", `${m.trace}ms`);
+  s.setProperty("--surligne-pas", `${m.pas}ms`);
+  s.setProperty("--surligne-sortie-a", `${sortieA}ms`);
+  s.setProperty("--surligne-sortie", `${m.sortie}ms`);
+  corps.classList.toggle("reduit", m.reduites === true);
+  armerFilet(sortieA + m.sortie + FILET_MS);
+  void lus.offsetWidth; // les animations partent de zéro
+  corps.classList.add("surligne");
 }
 
 /** Au plus un dessin par image. */
@@ -633,6 +700,7 @@ if (tauri?.event?.listen) {
     tauri.event.listen("selection:montrer", (evenement) => montrer(evenement?.payload)),
     tauri.event.listen("selection:cachee", () => cachee()),
     tauri.event.listen("selection:balayer", (evenement) => balayer(evenement?.payload)),
+    tauri.event.listen("selection:surligner", (evenement) => surligner(evenement?.payload)),
   ]).then(
     () => appeler("selection_chargee", {}),
     (e) => console.warn("selection : écoute impossible :", e),
@@ -650,5 +718,5 @@ if (tauri?.event?.listen) {
     });
   }
   // Pour les essais dans un navigateur seulement.
-  window.selectionApercu = { montrer, cachee, balayer };
+  window.selectionApercu = { montrer, cachee, balayer, surligner };
 }

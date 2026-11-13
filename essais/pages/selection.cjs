@@ -894,21 +894,26 @@ const L = 1280, H = 400;
 
   {
     // 13. Mode texte (0.5, §2.3) : une zone comme le mode zone, avec le nom « Copier le texte :
-    // sélectionnez une zone » ; `selection:balayer` joue 400 ms (120 ms réduit, sans bande).
+    // sélectionnez une zone » ; `selection:balayer` teinte la zone et la fait respirer 200 ms
+    // (réduit : la teinte seule) ; `selection:surligner` (13/11, choix « Surligné ») tire
+    // chaque ligne copiée de gauche à droite, l'une après l'autre, puis efface la sélection.
     async function montrerTexte(p, numero = null) {
       const i = prochain++;
       await p.evaluate(
-        ([i, n]) =>
+        ([i, n, k]) => {
+          const l = Math.round(innerWidth * k),
+            h = Math.round(innerHeight * k);
           __emettre('selection:montrer', {
             id: i,
             numero: n ?? i,
-            largeur: innerWidth,
-            hauteur: innerHeight,
-            ecrans: [{ x: 0, y: 0, largeur: innerWidth, hauteur: innerHeight }],
+            largeur: l,
+            hauteur: h,
+            ecrans: [{ x: 0, y: 0, largeur: l, hauteur: h }],
             cote_min: 3,
             mode: 'texte',
-          }),
-        [i, numero],
+          });
+        },
+        [i, numero, p.echelle],
       );
       await attendrePrete(p, i);
       await p.waitForTimeout(80);
@@ -917,19 +922,55 @@ const L = 1280, H = 400;
     }
     const etatBalayage = (p) =>
       p.evaluate(() => {
-        const z = document.getElementById('zone'),
-          b = z.querySelector('.bande');
+        const z = document.getElementById('zone');
         return {
           balaye: document.body.classList.contains('balaye'),
-          bande: getComputedStyle(b).display,
+          bande: z.querySelector('.bande') !== null,
           anims: z
-            .getAnimations({ subtree: true })
+            .getAnimations()
             .map((a) => [a.animationName, a.effect.getTiming().duration])
             .sort(),
+          teinte: getComputedStyle(z).backgroundColor,
           zone: [z.style.left, z.style.top, z.style.width, z.style.height],
           glisse: document.body.classList.contains('glisse'),
         };
       });
+    const etatSurligne = (p) =>
+      p.evaluate(() => {
+        const z = document.getElementById('zone'),
+          scene = document.getElementById('scene'),
+          lignes = [...z.querySelectorAll('.lus i')];
+        return {
+          surligne: document.body.classList.contains('surligne'),
+          affiche: getComputedStyle(z.querySelector('.lus')).display,
+          lignes: lignes.map((i) => [i.style.left, i.style.top, i.style.width, i.style.height]),
+          anims: lignes.flatMap((i) =>
+            i.getAnimations().map((a) => {
+              const t = a.effect.getTiming();
+              return [a.animationName, t.duration, t.delay];
+            }),
+          ),
+          fond: lignes.length ? getComputedStyle(lignes[0]).backgroundColor : '',
+          sortie: scene.getAnimations().map((a) => {
+            const t = a.effect.getTiming();
+            return [a.animationName, t.duration, t.delay];
+          }),
+          opacite: getComputedStyle(scene).opacity,
+          glisse: document.body.classList.contains('glisse'),
+        };
+      });
+    // Les lignes d'un texte copié dans la zone (100, 100, 201, 121) : pixels réels de la fenêtre.
+    const LIGNES = [
+      { x: 110, y: 110, largeur: 150, hauteur: 14 },
+      { x: 110, y: 130, largeur: 90, hauteur: 14 },
+      { x: 110, y: 150, largeur: 120, hauteur: 14 },
+    ];
+    const DEROULE = { trace: 260, pas: 40, tenue: 220, sortie: 140 };
+    const surligner = (p, charge) =>
+      p.evaluate((c) => {
+        __emettre('selection:surligner', c);
+        return performance.now();
+      }, charge);
     p = await page();
     const nomDe = () =>
       p.evaluate(() => [
@@ -975,6 +1016,9 @@ const L = 1280, H = 400;
       JSON.stringify(t),
     );
     await vider(p);
+    // Surligner avant le balayage : rien (la zone lue n'est pas encore posée).
+    await surligner(p, { id, lignes: LIGNES, reduites: false, ...DEROULE });
+    const avantBalayage = await etatSurligne(p);
     const relache = Date.now();
     await p.waitForTimeout(600); // le cœur balaie après la découpe : le filet du relâcher court
     // Balayage d'un autre affichage : ignoré.
@@ -1003,46 +1047,103 @@ const L = 1280, H = 400;
       return performance.now();
     }, id);
     const pendant = await etatBalayage(p);
+    await p.waitForTimeout(100);
     await p.screenshot({ path: `${SORTIE}/selection-texte-balayage.png` });
-    await p
-      .waitForFunction(() => !document.body.classList.contains('balaye'), null, { timeout: 2000 })
-      .catch(() => {});
-    const duree = await p.evaluate((t0) => performance.now() - t0, t0);
+    await p.waitForTimeout(300);
     const apres = await etatBalayage(p);
     verifier(
       !ignore.balaye &&
+        !avantBalayage.surligne &&
+        avantBalayage.lignes.length === 0 &&
         pendant.balaye &&
-        pendant.bande === 'block' &&
+        !pendant.bande &&
         JSON.stringify(pendant.anims) ===
           JSON.stringify([
-            ['efface', 400],
-            ['respire', 400],
-            ['traverse', 400],
+            ['respire', 200],
+            ['teinte', 150],
           ]) &&
         JSON.stringify(pendant.zone) === JSON.stringify(['100px', '100px', '201px', '121px']) &&
         pendant.glisse,
-      '13 selection:balayer : respiration, bande et teinte de 400 ms sur la zone (autre id : rien)',
-      JSON.stringify({ ignore, pendant }),
+      '13 selection:balayer : la zone se teinte et respire 200 ms, sans bande (autre id, surligner avant : rien)',
+      JSON.stringify({ ignore, avantBalayage, pendant }),
     );
-    // Borne basse seulement : la fin elle-même est prouvée par `apres.balaye` faux.
     verifier(
-      duree >= 390 && !apres.balaye && apres.glisse && (await appels(p)).length === 0,
-      "13 balayage fini après 400 ms : la zone reste, rien n'est envoyé",
-      JSON.stringify({ duree, apres }),
+      apres.balaye &&
+        apres.anims.length === 0 &&
+        apres.teinte !== 'rgba(0, 0, 0, 0)' &&
+        apres.glisse &&
+        (await appels(p)).length === 0,
+      "13 lecture : la teinte reste après la respiration, rien n'est envoyé",
+      JSON.stringify(apres),
     );
-    // Le gel peut durer 1,5 s après le relâcher : le filet repart du balayage.
-    await p.waitForTimeout(Math.max(0, 1750 - (Date.now() - relache)));
-    const tenu = await etatZone(p);
+    // Surlignage : autre affichage, durée fausse ou aucune ligne valable : ignoré.
+    await surligner(p, { id: id + 1000, lignes: LIGNES, reduites: false, ...DEROULE });
+    await surligner(p, { id, lignes: LIGNES, reduites: false, ...DEROULE, trace: -1 });
+    await surligner(p, { id, lignes: LIGNES, reduites: false, ...DEROULE, sortie: 99999 });
+    await surligner(p, { id, lignes: LIGNES, reduites: false, ...DEROULE, pas: 1.5 });
+    await surligner(p, { id, lignes: [{ x: 110, y: 110, largeur: 0, hauteur: 14 }], reduites: false, ...DEROULE });
+    await surligner(p, { id, lignes: [], reduites: false, ...DEROULE });
+    const refuse = await etatSurligne(p);
+    const t2 = await surligner(p, {
+      id,
+      lignes: [...LIGNES, { x: 'x', y: 0, largeur: 5, hauteur: 5 }],
+      reduites: false,
+      ...DEROULE,
+    });
+    const tire = await etatSurligne(p);
+    await p.waitForTimeout(300);
+    await p.screenshot({ path: `${SORTIE}/selection-texte-surligne.png` });
+    const tenue = await etatSurligne(p);
+    // La sortie finit à 560 + 140 ms : la sélection est alors effacée, encore montrée.
+    await p.waitForFunction(() => getComputedStyle(document.getElementById('scene')).opacity === '0', null, { timeout: 3000 }).catch(() => {});
+    const efface = await p.evaluate((t2) => performance.now() - t2, t2);
+    const finie = await etatSurligne(p);
     verifier(
-      tenu.glisse,
-      '13 filet reparti au balayage : zone encore montrée 1,75 s après le relâcher',
-      JSON.stringify(tenu),
+      !refuse.surligne &&
+        refuse.lignes.length === 0 &&
+        tire.surligne &&
+        tire.affiche === 'block' &&
+        JSON.stringify(tire.lignes) ===
+          JSON.stringify([
+            ['8px', '9px', '154px', '16px'],
+            ['8px', '29px', '94px', '16px'],
+            ['8px', '49px', '124px', '16px'],
+          ]) &&
+        JSON.stringify(tire.anims) ===
+          JSON.stringify([
+            ['tire', 260, 0],
+            ['tire', 260, 40],
+            ['tire', 260, 80],
+          ]) &&
+        JSON.stringify(tire.sortie) === JSON.stringify([['part', 140, 560]]) &&
+        tire.fond !== 'rgba(0, 0, 0, 0)',
+      '13 selection:surligner : une bande par ligne (2 px de plus sur les côtés, 1 en haut et en bas), tirée en 260 ms, 40 ms après la précédente ; sortie de 140 ms après 560 ms (autre id, durée fausse, aucune ligne : rien)',
+      JSON.stringify({ refuse, tire }),
+    );
+    verifier(
+      tenue.surligne && tenue.opacite === '1' && efface >= 690 && efface < 1500 && finie.glisse && finie.lignes.length === 3 && (await appels(p)).length === 0,
+      "13 surlignage : la sélection reste nette pendant la tenue, s'efface à 700 ms, rien n'est envoyé",
+      JSON.stringify({ tenue: tenue.opacite, efface, finie }),
+    );
+    // Le filet repart du surlignage : la page ne se remet pas au repos à 1,5 s du balayage.
+    await p.waitForTimeout(Math.max(0, 1700 - (await p.evaluate((t0) => performance.now() - t0, t0))));
+    const tenu = await etatSurligne(p);
+    verifier(
+      tenu.glisse && tenu.surligne && tenu.opacite === '0',
+      '13 filet reparti au surlignage : sélection encore là (effacée) 1,7 s après le balayage',
+      JSON.stringify({ tenu, depuisRelache: Date.now() - relache }),
     );
     await p.evaluate(() => __emettre('selection:cachee', {}));
-    // Animations réduites : 120 ms, sans bande ni mouvement.
+    const cachee = await etatSurligne(p);
+    verifier(
+      !cachee.surligne && cachee.lignes.length === 0 && cachee.opacite === '1' && cachee.sortie.length === 0 && !(await etatBalayage(p)).balaye,
+      '13 selection:cachee : lignes retirées, sélection de nouveau opaque pour la suivante',
+      JSON.stringify(cachee),
+    );
+    // Animations réduites : la teinte seule, puis les lignes ensemble en fondu.
     id = await montrerTexte(p);
     await glisser(p, [400, 100], [600, 300]);
-    const t1 = await p.evaluate((i) => {
+    await p.evaluate((i) => {
       __emettre('selection:balayer', {
         id: i,
         x: 400,
@@ -1051,22 +1152,52 @@ const L = 1280, H = 400;
         hauteur: 201,
         reduites: true,
       });
-      return performance.now();
     }, id);
     const reduit = await etatBalayage(p);
-    await p
-      .waitForFunction(() => !document.body.classList.contains('balaye'), null, { timeout: 2000 })
-      .catch(() => {});
-    const dureeR = await p.evaluate((t1) => performance.now() - t1, t1);
-    // Borne haute gardée : elle prouve la durée réduite (120 ms et non 400).
+    await surligner(p, {
+      id,
+      lignes: [
+        { x: 410, y: 110, largeur: 100, hauteur: 20 },
+        { x: 410, y: 140, largeur: 60, hauteur: 20 },
+      ],
+      reduites: true,
+      trace: 120,
+      pas: 0,
+      tenue: 220,
+      sortie: 120,
+    });
+    const reduitS = await etatSurligne(p);
     verifier(
       reduit.balaye &&
-        reduit.bande === 'none' &&
+        !reduit.bande &&
         reduit.anims.length === 0 &&
-        dureeR >= 110 &&
-        dureeR < 390,
-      '13 animations réduites : 120 ms, sans bande ni mouvement',
-      JSON.stringify({ reduit, dureeR }),
+        reduit.teinte !== 'rgba(0, 0, 0, 0)' &&
+        JSON.stringify(reduitS.anims) ===
+          JSON.stringify([
+            ['parait', 120, 0],
+            ['parait', 120, 0],
+          ]) &&
+        JSON.stringify(reduitS.sortie) === JSON.stringify([['part', 120, 340]]),
+      '13 animations réduites : teinte immobile, lignes ensemble en fondu de 120 ms, sortie de 120 ms',
+      JSON.stringify({ reduit, reduitS }),
+    );
+    // Échelle 1,5 : les bandes débordent de 3 et 2 pixels réels.
+    await p.evaluate(() => __emettre('selection:cachee', {}));
+    await p.context().close();
+    p = await page({ echelle: 1.5 });
+    id = await montrerTexte(p);
+    await glisser(p, [100, 100], [300, 220]);
+    await p.evaluate((i) => {
+      __emettre('selection:balayer', { id: i, x: 150, y: 150, largeur: 301, hauteur: 181, reduites: false });
+    }, id);
+    await surligner(p, { id, lignes: [{ x: 160, y: 170, largeur: 200, hauteur: 21 }], reduites: false, ...DEROULE });
+    const k15 = await etatSurligne(p);
+    verifier(
+      JSON.stringify(k15.lignes) === JSON.stringify([['7px', '18px', '206px', '25px']]) &&
+        JSON.stringify(k15.anims) === JSON.stringify([['tire', 260, 0]]) &&
+        JSON.stringify(k15.sortie) === JSON.stringify([['part', 140, 480]]),
+      '13 surlignage à 150 % : débord de 3 et 2 pixels réels, une ligne sans pas',
+      JSON.stringify(k15),
     );
     // Échap en mode texte : une annulation, comme une zone.
     await p.evaluate(() => __emettre('selection:cachee', {}));
@@ -1105,13 +1236,120 @@ const L = 1280, H = 400;
         }),
       id,
     );
+    await surligner(p, {
+      id,
+      lignes: [{ x: 110, y: 110, largeur: 60, hauteur: 12 }],
+      reduites: false,
+      ...DEROULE,
+    });
     await p.waitForTimeout(50);
     const refusT = await p.evaluate(() => window.__refus);
     const bt = await etatBalayage(p);
+    const st = await etatSurligne(p);
     verifier(
-      refusT.length === 0 && bt.balaye && bt.anims.length === 3,
-      "13 mode texte, sombre, CSP de l'app : aucun refus",
-      JSON.stringify({ refusT, bt }),
+      refusT.length === 0 && bt.balaye && st.surligne && st.lignes.length === 1 && st.anims.length === 1,
+      "13 mode texte, sombre, CSP de l'app : balayage et surlignage sans refus",
+      JSON.stringify({ refusT, bt, st }),
+    );
+    await p.context().close();
+    // Le filet du balayage seul garde la marge du mode texte (2 s) : le gel peut durer 1,5 s
+    // après le relâcher et le surlignage arriver juste après. Puis la page redevient utilisable.
+    p = await page();
+    const balayerIci = (i, x = 100, y = 100, l = 201, h = 121) =>
+      p.evaluate(
+        ([i, x, y, l, h]) => {
+          __emettre('selection:balayer', { id: i, x, y, largeur: l, hauteur: h, reduites: false });
+          return performance.now();
+        },
+        [i, x, y, l, h],
+      );
+    const jusqua = async (t, ms) =>
+      p.waitForTimeout(Math.max(0, ms - (await p.evaluate((t) => performance.now() - t, t))));
+    id = await montrerTexte(p);
+    await glisser(p, [100, 100], [300, 220]);
+    await vider(p);
+    const tb = await balayerIci(id);
+    await jusqua(tb, 1800);
+    const a1800 = await etatBalayage(p);
+    await jusqua(tb, 2300);
+    const a2300 = await etatBalayage(p);
+    await surligner(p, { id, lignes: LIGNES, reduites: false, ...DEROULE });
+    const tard = await etatSurligne(p);
+    const envoyesFilet = await appels(p);
+    await glisser(p, [400, 100], [600, 250]);
+    const reprise = await termine(p);
+    verifier(
+      a1800.glisse &&
+        a1800.balaye &&
+        !a2300.glisse &&
+        !a2300.balaye &&
+        !tard.surligne &&
+        tard.lignes.length === 0 &&
+        envoyesFilet.length === 0 &&
+        reprise.length === 1,
+      '13 filet du balayage : sélection encore là 1,8 s après, au repos à 2,3 s, rien envoyé ; surlignage tardif ignoré, la page reprend',
+      JSON.stringify({ a1800, a2300, tard: tard.lignes.length, envoyesFilet, reprise }),
+    );
+    // Tout le surlignage tient en 2 s, ou rien : 400 lignes à 2 s d'écart, 4 × 2 s, 2 001 ms.
+    await p.evaluate(() => __emettre('selection:cachee', {}));
+    id = await montrerTexte(p);
+    await glisser(p, [100, 100], [300, 220]);
+    await vider(p);
+    await balayerIci(id);
+    const CINQ_CENTS = Array.from({ length: 500 }, (_, k) => ({ x: 110, y: 100 + (k % 120), largeur: 50, hauteur: 1 }));
+    await surligner(p, { id, lignes: CINQ_CENTS.slice(0, 400), reduites: false, trace: 260, pas: 2000, tenue: 220, sortie: 140 });
+    await surligner(p, { id, lignes: [LIGNES[0]], reduites: false, trace: 2000, pas: 2000, tenue: 2000, sortie: 2000 });
+    await surligner(p, { id, lignes: [LIGNES[0]], reduites: false, trace: 1000, pas: 0, tenue: 861, sortie: 140 });
+    const tropLong = await etatSurligne(p);
+    await surligner(p, { id, lignes: [LIGNES[0]], reduites: false, trace: 1000, pas: 0, tenue: 860, sortie: 140 });
+    const juste = await etatSurligne(p);
+    verifier(
+      !tropLong.surligne &&
+        tropLong.lignes.length === 0 &&
+        juste.surligne &&
+        juste.lignes.length === 1 &&
+        JSON.stringify(juste.sortie) === JSON.stringify([['part', 140, 1860]]),
+      "13 surlignage borné : refusé au-delà de 2 s en tout (400 lignes à 2 s d'écart, 4 × 2 s, 2 001 ms), accepté à 2 000 ms",
+      JSON.stringify({ tropLong, juste }),
+    );
+    // 500 lignes : 400 bandes au plus, et la sortie attend la dernière (260 + 399 × 1 + 220).
+    await p.evaluate(() => __emettre('selection:cachee', {}));
+    id = await montrerTexte(p);
+    await glisser(p, [100, 100], [300, 220]);
+    await vider(p);
+    await balayerIci(id);
+    await surligner(p, { id, lignes: CINQ_CENTS, reduites: false, trace: 260, pas: 1, tenue: 220, sortie: 140 });
+    const bandes = () =>
+      p.evaluate(() => {
+        const l = [...document.querySelectorAll('#zone .lus i')];
+        const t = (a) => [a.animationName, a.effect.getTiming().duration, a.effect.getTiming().delay];
+        return {
+          surligne: document.body.classList.contains('surligne'),
+          n: l.length,
+          derniere: l.length ? l[l.length - 1].getAnimations().map(t) : [],
+          sortie: document.getElementById('scene').getAnimations().map(t),
+        };
+      });
+    const b500 = await bandes();
+    verifier(
+      b500.surligne &&
+        b500.n === 400 &&
+        JSON.stringify(b500.derniere) === JSON.stringify([['tire', 260, 399]]) &&
+        JSON.stringify(b500.sortie) === JSON.stringify([['part', 140, 879]]),
+      '13 surlignage de 500 lignes : 400 bandes, la dernière tirée à 399 ms, sortie après 879 ms',
+      JSON.stringify(b500),
+    );
+    // Pendant le surlignage, Échap, un clic gauche ou droit ne font rien : il continue.
+    await p.keyboard.press('Escape');
+    await p.mouse.click(700, 200);
+    await p.mouse.click(700, 200, { button: 'right' });
+    await p.waitForTimeout(40);
+    const pendantS = await bandes();
+    const envoyesS = await appels(p);
+    verifier(
+      envoyesS.length === 0 && pendantS.surligne && pendantS.n === 400 && pendantS.sortie.length === 1,
+      '13 pendant le surlignage : Échap, clic gauche, clic droit, rien envoyé ; le surlignage continue',
+      JSON.stringify({ envoyesS, pendantS }),
     );
     await p.context().close();
   }

@@ -1,7 +1,8 @@
 /* Éditeur d'annotation : habillage « Éditeur épuré », piste B « Fenêtre »
-   (design/editeur-epure/index.html, règles communes et .dir-b), par les jetons seulement
-   (commun/jetons.css, jetons « editeur-* »). La fenêtre n'a pas de cadre Windows : la barre
-   du haut est la barre de la fenêtre. */
+   (design/editeur-epure/index.html, règles communes et .dir-b), barre d'annotation C et
+   instruments B (design/annotation-pistes, design/annotation-instruments), par les jetons
+   seulement (commun/jetons.css, jetons « editeur-* »). La fenêtre n'a pas de cadre Windows :
+   la barre du haut est la barre de la fenêtre. */
 
 * {
   box-sizing: border-box;
@@ -33,12 +34,6 @@ input {
 }
 .defs {
   position: absolute;
-}
-.argent-bord {
-  stop-color: var(--editeur-argent-bord);
-}
-.argent-milieu {
-  stop-color: var(--editeur-argent-milieu);
 }
 .ico {
   width: var(--editeur-picto);
@@ -81,8 +76,8 @@ input {
 .pb,
 .tl,
 .mi,
-.opt,
-.dot {
+.sz,
+.sw {
   all: unset;
   box-sizing: border-box;
   cursor: pointer;
@@ -204,8 +199,31 @@ input {
 .scene[data-curseur="pt"] .vue {
   cursor: pointer;
 }
-.scene[data-curseur="cell"] .vue {
-  cursor: cell;
+.scene[data-curseur="gomme"] .vue {
+  cursor: none;
+}
+/* Le rond de la gomme : il suit le pointeur, à la taille de la gomme. */
+.rond-gomme {
+  position: absolute;
+  left: 0;
+  top: 0;
+  z-index: 2;
+  box-sizing: border-box;
+  pointer-events: none;
+  border-radius: 50%;
+  border: var(--editeur-gomme-trait) solid var(--editeur-gomme-cercle);
+  background: var(--editeur-gomme-fond);
+  box-shadow: 0 0 0 var(--editeur-trait-largeur) var(--editeur-gomme-halo);
+  transition:
+    scale var(--duree-editeur-appui),
+    background-color var(--duree-editeur-appui);
+}
+.rond-gomme.appui {
+  scale: 0.92;
+  background: var(--editeur-gomme-fond-appui);
+}
+.rond-gomme[hidden] {
+  display: none;
 }
 .scene[data-curseur="grab"] .vue {
   cursor: grab;
@@ -214,44 +232,83 @@ input {
   cursor: grabbing;
 }
 
-/* Palette du bas */
+/* Barre d'annotation : barre C « Souffle » (design/annotation-pistes) et instruments B
+   « Couleur » (design/annotation-instruments), choisis le 13/11. L'outil déplié s'ouvre dans
+   la barre, rien ne s'ouvre par-dessus l'image. La fenêtre s'ouvre assez large pour elle
+   (`editeur-ouverture-largeur`) ; plus étroite, seuls les outils défilent (Annuler,
+   Rétablir et Plus restent) et s'estompent du côté qui en cache. */
 .pal {
   position: absolute;
-  left: 50%;
-  bottom: var(--editeur-palette-bas);
-  transform: translateX(-50%);
+  left: var(--editeur-dock-marge);
+  right: var(--editeur-dock-marge);
+  bottom: var(--editeur-dock-bas);
   z-index: 5;
+  width: fit-content;
+  min-width: min(var(--editeur-dock-min), calc(100% - var(--editeur-dock-retrait)));
+  max-width: calc(100% - var(--editeur-dock-retrait));
+  margin-inline: auto;
   display: flex;
-  align-items: center;
-  gap: var(--editeur-palette-ecart);
-  height: var(--editeur-palette-hauteur);
-  padding: 0 var(--editeur-palette-marge);
-  border-radius: var(--editeur-palette-rayon);
+  align-items: stretch;
+  height: var(--editeur-dock-hauteur);
+  padding: 0 var(--editeur-dock-marge);
+  border-radius: var(--editeur-dock-rayon);
   background: var(--editeur-verre);
   border: var(--editeur-trait-largeur) solid var(--editeur-verre-bord);
-  box-shadow: var(--shadow-28);
-  backdrop-filter: blur(var(--editeur-palette-flou)) saturate(1.5);
-  max-width: calc(100% - var(--editeur-palette-retrait));
+  box-shadow: var(--shadow-16);
+  backdrop-filter: blur(var(--editeur-palette-flou)) saturate(1.4);
 }
-.pb {
-  width: var(--editeur-bouton-palette);
-  height: var(--editeur-bouton-palette);
-  border-radius: 50%;
+.tools::-webkit-scrollbar {
+  display: none;
+}
+.tools[data-suite="fin"] {
+  mask-image: linear-gradient(90deg, #000 calc(100% - var(--editeur-dock-fondu)), transparent);
+}
+.tools[data-suite="debut"] {
+  mask-image: linear-gradient(270deg, #000 calc(100% - var(--editeur-dock-fondu)), transparent);
+}
+.tools[data-suite="deux"] {
+  mask-image: linear-gradient(
+    90deg,
+    transparent,
+    #000 var(--editeur-dock-fondu),
+    #000 calc(100% - var(--editeur-dock-fondu)),
+    transparent
+  );
+}
+.dv {
+  width: var(--editeur-trait-largeur);
+  height: var(--editeur-separateur-hauteur);
+  background: var(--editeur-trait-fort);
+  flex: none;
+  align-self: center;
+  margin: 0 var(--editeur-separateur-marge-dock);
+}
+/* Annuler, Rétablir, Plus, et les outils à pictogramme. */
+.pb,
+.ip {
+  position: relative;
+  width: var(--editeur-outil-largeur);
+  height: var(--editeur-outil-hauteur);
+  border-radius: var(--editeur-outil-rayon);
   display: grid;
   place-items: center;
-  color: var(--text);
   flex: none;
+  align-self: center;
+  color: var(--text);
   transition:
     background-color var(--duree-editeur-survol),
+    color var(--duree-editeur-encre),
     transform var(--duree-editeur-appui),
     opacity var(--duree-editeur-survol);
 }
 .pb:hover,
+.ip:hover,
 .pb[aria-expanded="true"] {
   background: var(--editeur-survol);
 }
-.pb:active {
-  transform: scale(0.92);
+.pb:active,
+.ip:active {
+  transform: scale(0.97);
 }
 .pb:disabled {
   opacity: 0.3;
@@ -259,158 +316,371 @@ input {
   background: none;
   transform: none;
 }
-.pb.fill {
-  background: var(--editeur-survol);
-}
-.pb.fill:hover,
-.pb.fill[aria-expanded="true"] {
-  background: color-mix(in srgb, var(--editeur-survol) 100%, var(--text) 6%);
-}
-.dv {
-  width: var(--editeur-trait-largeur);
-  height: var(--editeur-separateur-hauteur);
-  background: var(--editeur-trait-fort);
-  flex: none;
-  margin: 0 var(--editeur-separateur-marge);
-}
+/* Les outils : la seule partie de la barre qui défile (repère des plis, `offsetLeft`). */
 .tools {
+  position: relative;
   display: flex;
-  align-self: stretch;
-  align-items: flex-end;
+  align-items: stretch;
   gap: var(--editeur-outils-ecart);
-  overflow-x: auto;
-  overflow-y: clip;
-  scrollbar-width: none;
-  padding: 0 var(--editeur-outils-marge);
+  flex: 0 1 auto;
   min-width: 0;
-  mask-image: linear-gradient(#000 82%, transparent);
+  padding: var(--editeur-outils-ecart-v) 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
 }
-.tools::-webkit-scrollbar {
-  display: none;
-}
-.tl {
-  position: relative;
-  width: var(--editeur-instrument-place);
-  height: 100%;
-  flex: none;
+.pli {
   display: flex;
-  justify-content: center;
-  align-items: flex-start;
-  padding-top: var(--editeur-instrument-haut);
-  border-radius: var(--editeur-instrument-rayon);
-  color: var(--c, var(--editeur-instrument-neutre));
-}
-.tl:focus-visible {
-  outline-offset: calc(0px - var(--editeur-focus));
-}
-.tl[hidden] {
-  display: none;
-}
-.inst {
-  width: var(--editeur-instrument-largeur);
-  height: var(--editeur-instrument-hauteur);
-  transform: translateY(var(--editeur-instrument-repos));
-  transition: transform var(--duree-editeur-instrument) var(--courbe-ressort);
-  filter: drop-shadow(var(--editeur-instrument-ombre));
-}
-.tl:hover .inst {
-  transform: translateY(var(--editeur-instrument-survol));
-}
-.tl[aria-pressed="true"] .inst {
-  transform: translateY(var(--editeur-instrument-leve));
-}
-.tl.in .inst {
-  animation: monte var(--duree-editeur-instrument-entree) var(--courbe-ressort);
-}
-@keyframes monte {
-  from {
-    transform: translateY(var(--editeur-instrument-entree));
-  }
-}
-.inst > :not(.em) {
-  stroke: var(--editeur-instrument-bord);
-  stroke-width: 0.6;
-}
-.inst .b {
-  fill: var(--editeur-instrument-corps);
-}
-.inst .t {
-  fill: var(--editeur-instrument-bout);
-}
-.inst .gomme {
-  fill: var(--editeur-gomme-bout);
-}
-.inst .ombre-bout {
-  fill: var(--editeur-instrument-ombre-bout);
-}
-.inst .lumiere {
-  fill: var(--editeur-projecteur-lumiere);
-}
-.inst .coeur {
-  fill: var(--editeur-projecteur-coeur);
-}
-.inst .em {
-  fill: none;
-  stroke: var(--editeur-instrument-relief);
-  stroke-width: 1.2;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-}
-
-/* Pastilles de couleur */
-.cols {
-  display: grid;
-  grid-template-columns: repeat(4, var(--editeur-pastille));
-  gap: var(--editeur-pastilles-ecart-v) var(--editeur-pastilles-ecart-h);
+  align-items: stretch;
   flex: none;
-  padding: 0 var(--editeur-outils-marge);
+  border-radius: var(--editeur-pli-rayon);
+  transition:
+    background-color var(--duree-editeur-encre),
+    box-shadow var(--duree-editeur-encre);
 }
-.pop .cols {
-  padding: var(--editeur-pop-marge);
+.pli[data-on] {
+  background: var(--editeur-survol);
+  box-shadow: inset 0 0 0 var(--editeur-trait-largeur) var(--editeur-trait);
 }
-.dot {
-  width: var(--editeur-pastille);
-  height: var(--editeur-pastille);
-  border-radius: 50%;
-  background: var(--c);
-  box-shadow: var(--editeur-pastille-bord);
-  position: relative;
-  transition: transform var(--duree-editeur-survol) var(--courbe-ressort);
+/* L'outil en main et l'outil déplié : à la couleur d'accent. Replié, un outil à couleur
+   garde un trait de sa couleur. */
+.ip[aria-pressed="true"],
+.pli[data-on] .ip {
+  color: var(--accent-text);
 }
-.dot:hover {
-  transform: scale(1.1);
-}
-.dot:disabled {
-  opacity: 0.35;
-  cursor: default;
-  transform: none;
-}
-.dot[aria-pressed="true"]::after {
+.ip::after {
   content: "";
   position: absolute;
-  inset: calc(0px - var(--editeur-pastille-anneau-ecart));
-  border-radius: 50%;
-  border: var(--editeur-pastille-anneau) solid var(--text);
+  left: 50%;
+  bottom: var(--editeur-encre-bas);
+  width: var(--editeur-encre-largeur);
+  height: var(--editeur-encre-hauteur);
+  border-radius: var(--editeur-encre-hauteur);
+  background: var(--ink, transparent);
+  transform: translateX(-50%);
+  transition:
+    opacity var(--duree-editeur-survol),
+    background-color var(--duree-editeur-encre);
 }
-.dot.wheel {
+.pli[data-on] .ip::after {
+  opacity: 0;
+}
+/* Encre très foncée ou très pâle, proche du fond de la barre : liseré plus marqué. */
+.ip[data-ton="f"]::after {
+  box-shadow: 0 0 0 var(--editeur-trait-largeur) var(--editeur-inst-trait-fonce);
+}
+.ip[data-ton="p"]::after {
+  box-shadow: 0 0 0 var(--editeur-trait-largeur) var(--editeur-inst-trait-pale);
+}
+
+/* Instruments dessinés : l'instrument en main se lève, le bas s'efface dans la barre. */
+.ib {
+  position: relative;
+  width: var(--editeur-inst-boite);
+  flex: none;
+  overflow: hidden;
+  border-radius: var(--editeur-pli-rayon);
+  mask-image: linear-gradient(#000 var(--editeur-inst-fondu), transparent 100%);
+}
+.ib .inst {
+  --encre: var(--editeur-instrument-neutre);
+  position: absolute;
+  left: var(--editeur-inst-gauche);
+  top: 0;
+  width: var(--editeur-inst-largeur);
+  height: var(--editeur-inst-hauteur);
+  transform: translateY(var(--editeur-inst-repos));
+  transition: transform var(--duree-editeur-instrument) var(--courbe-ressort);
+  filter: drop-shadow(0 var(--editeur-inst-ombre-y) var(--editeur-inst-ombre-flou) var(--editeur-inst-ombre));
+}
+.ib:hover .inst {
+  transform: translateY(var(--editeur-inst-survol));
+}
+.ib[aria-pressed="true"] .inst {
+  transform: translateY(var(--editeur-inst-leve));
+}
+.inst .i-encre {
+  fill: var(--encre);
+  stroke: var(--editeur-inst-trait-encre);
+  stroke-width: 0.6;
+  transition:
+    fill var(--duree-editeur-encre) var(--courbe-douce),
+    stroke var(--duree-editeur-encre) var(--courbe-douce);
+}
+.inst.encre-foncee .i-encre {
+  stroke: var(--editeur-inst-trait-fonce);
+  stroke-width: 0.8;
+}
+.inst.encre-pale .i-encre {
+  stroke: var(--editeur-inst-trait-pale);
+  stroke-width: 0.8;
+}
+.inst .i-reflet {
+  fill: url(#i-reflet);
+}
+.inst .i-facette-encre {
+  fill: var(--editeur-inst-facette-encre);
+}
+.inst .i-facette {
+  fill: var(--editeur-inst-facette);
+}
+.inst .i-corps,
+.inst .i-prise,
+.inst .i-bague,
+.inst .i-gomme {
+  stroke: var(--editeur-inst-trait);
+  stroke-width: 0.7;
+}
+.inst .i-corps {
+  fill: url(#i-corps);
+}
+.inst .i-prise {
+  fill: url(#i-prise);
+}
+.inst .i-bague {
+  fill: var(--editeur-inst-bague);
+}
+.inst .i-gomme {
+  fill: var(--editeur-inst-gomme);
+}
+.inst .i-gomme-reflet {
+  fill: url(#i-reflet);
+  opacity: 0.5;
+}
+/* Reflet blanc sur la face du biseau du surligneur (dessin, pas thème). */
+.inst .i-lumiere {
+  fill: #fff;
+  opacity: 0.3;
+}
+.inst .i-entaille {
+  fill: none;
+  stroke: var(--editeur-inst-entaille);
+  stroke-width: 0.5;
+}
+.inst .i-arete {
+  stroke-width: 0.45;
+}
+.corps-0 {
+  stop-color: var(--editeur-inst-corps-0);
+}
+.corps-1 {
+  stop-color: var(--editeur-inst-corps-1);
+}
+.corps-2 {
+  stop-color: var(--editeur-inst-corps-2);
+}
+.corps-3 {
+  stop-color: var(--editeur-inst-corps-3);
+}
+.prise-0 {
+  stop-color: var(--editeur-inst-prise-0);
+}
+.prise-1 {
+  stop-color: var(--editeur-inst-prise-1);
+}
+.prise-2 {
+  stop-color: var(--editeur-inst-prise-2);
+}
+/* La pointe suit la taille de l'outil ; l'instrument saute quand elle ou sa couleur change. */
+.inst .tp {
+  transform-box: fill-box;
+  transform-origin: 50% 100%;
+  transition: transform var(--duree-editeur-bout) var(--courbe-ressort);
+}
+.inst.o-stylo[data-t="0"] .tp {
+  transform: scaleX(0.7);
+}
+.inst.o-stylo[data-t="2"] .tp {
+  transform: scaleX(1.34);
+}
+.inst.o-fleche[data-t="0"] .tp {
+  transform: scale(0.84);
+}
+.inst.o-fleche[data-t="2"] .tp {
+  transform: scale(1.14);
+}
+.inst.saute {
+  animation: saute var(--duree-editeur-saut) var(--courbe-ressort);
+}
+@keyframes saute {
+  40% {
+    translate: 0 var(--editeur-inst-saut);
+  }
+}
+
+/* Le pli de l'outil déplié : variantes, tailles, couleurs, opacité. */
+.pli .in {
+  display: grid;
+  grid-template-columns: 0fr;
+  transition: grid-template-columns var(--duree-editeur-pli) var(--courbe-ressort);
+}
+.pli[data-on] .in {
+  grid-template-columns: 1fr;
+}
+.pli .in > div {
+  overflow: hidden;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--editeur-separateur-marge-dock);
+}
+.grp {
+  display: flex;
+  align-items: center;
+  gap: var(--editeur-outils-ecart);
+  flex: none;
+}
+.grp[hidden] {
+  display: none;
+}
+.pli .in .grp:first-child {
+  padding-left: var(--editeur-pli-marge);
+}
+.grp.cols {
+  gap: var(--editeur-nuances-ecart);
+  padding: 0 var(--editeur-pli-marge-couleurs) 0 var(--editeur-separateur-marge-dock);
+}
+.sz {
+  width: var(--editeur-cran);
+  height: var(--editeur-cran);
+  border-radius: var(--editeur-cran-rayon);
+  display: grid;
+  place-items: center;
+  flex: none;
+  color: var(--text-2);
+  transition:
+    background-color var(--duree-editeur-survol),
+    color var(--duree-editeur-survol);
+}
+.sz:hover {
+  background: var(--editeur-survol);
+}
+.sz[aria-pressed="true"] {
+  background: var(--text);
+  color: var(--editeur-scene);
+}
+.sz b {
+  display: block;
+  border-radius: 50%;
+  background: currentColor;
+}
+.sz .t0 {
+  width: var(--editeur-taille-0);
+  height: var(--editeur-taille-0);
+}
+.sz .t1 {
+  width: var(--editeur-taille-1);
+  height: var(--editeur-taille-1);
+}
+.sz .t2 {
+  width: var(--editeur-taille-2);
+  height: var(--editeur-taille-2);
+}
+.sz .s0 {
+  width: var(--editeur-taille-surligneur-0);
+  height: var(--editeur-taille-surligneur-0);
+}
+.sz .s1 {
+  width: var(--editeur-taille-surligneur-1);
+  height: var(--editeur-taille-surligneur-1);
+}
+.sz .s2 {
+  width: var(--editeur-taille-surligneur-2);
+  height: var(--editeur-taille-surligneur-2);
+}
+.sz .g0 {
+  width: var(--editeur-taille-gomme-0);
+  height: var(--editeur-taille-gomme-0);
+}
+.sz .g1 {
+  width: var(--editeur-taille-gomme-1);
+  height: var(--editeur-taille-gomme-1);
+}
+.sz .g2 {
+  width: var(--editeur-taille-gomme-2);
+  height: var(--editeur-taille-gomme-2);
+}
+.sz .n0 {
+  width: var(--editeur-taille-numero-0);
+  height: var(--editeur-taille-numero-0);
+}
+.sz .n1 {
+  width: var(--editeur-taille-numero-1);
+  height: var(--editeur-taille-numero-1);
+}
+.sz .n2 {
+  width: var(--editeur-taille-numero-2);
+  height: var(--editeur-taille-numero-2);
+}
+.sz .a {
+  font-weight: 700;
+  line-height: 1;
+}
+.sz .a0 {
+  font-size: var(--editeur-taille-texte-0);
+}
+.sz .a1 {
+  font-size: var(--editeur-taille-texte-1);
+}
+.sz .a2 {
+  font-size: var(--editeur-taille-texte-2);
+}
+.sz .f0 {
+  opacity: 0.45;
+}
+.sz .f1 {
+  opacity: 0.7;
+}
+.sw {
+  position: relative;
+  width: var(--editeur-nuance);
+  height: var(--editeur-nuance);
+  border-radius: var(--editeur-nuance-rayon);
+  background: var(--c);
+  border: var(--editeur-trait-largeur) solid
+    color-mix(in srgb, var(--text) var(--editeur-nuance-bord), transparent);
+  flex: none;
+  transition: transform var(--duree-editeur-survol) var(--courbe-ressort);
+}
+.sw:hover {
+  transform: scale(1.1);
+}
+.sw[aria-pressed="true"] {
+  box-shadow:
+    0 0 0 var(--editeur-nuance-anneau) var(--acrylic-solid),
+    0 0 0 calc(var(--editeur-nuance-anneau) * 2) var(--text);
+}
+.sw.roue {
   background: var(--editeur-roue);
 }
-.dot.wheel i {
+.sw.roue i {
   position: absolute;
   inset: var(--editeur-roue-centre);
-  border-radius: 50%;
+  border-radius: calc(var(--editeur-nuance-rayon) / 2);
   background: var(--c);
   box-shadow: var(--editeur-roue-centre-bord);
   display: none;
 }
-.dot.wheel.has i {
+.sw.roue.has i {
   display: block;
 }
-.cur {
-  display: none;
+.op {
+  display: flex;
+  align-items: center;
+  gap: var(--editeur-glissiere-ecart);
+  flex: none;
+  padding-right: var(--editeur-pli-marge-couleurs);
+  color: var(--text-2);
 }
-.cur .dot {
-  pointer-events: none;
+.op .ico {
+  width: var(--editeur-picto-petit);
+  height: var(--editeur-picto-petit);
+}
+.op input[type="range"] {
+  width: var(--editeur-opacite-largeur);
+  accent-color: var(--accent);
+  margin: 0;
+  height: var(--editeur-glissiere-hauteur);
 }
 .cc {
   position: absolute;
@@ -422,7 +692,7 @@ input {
   bottom: 0;
 }
 
-/* Menus et bulles */
+/* Menus */
 .pop {
   position: absolute;
   z-index: 20;
@@ -461,116 +731,12 @@ input {
 .mi:focus-visible {
   background: var(--editeur-survol);
 }
-.pop .mi:focus-visible,
-.pop .opt:focus-visible {
+.pop .mi:focus-visible {
   outline-offset: calc(0px - var(--editeur-focus));
 }
 .mi.danger {
   color: var(--editeur-danger);
 }
-.row {
-  display: flex;
-  align-items: center;
-  gap: var(--editeur-palette-ecart);
-  padding: var(--editeur-ligne-marge);
-}
-.row + .row {
-  border-top: var(--editeur-trait-largeur) solid var(--editeur-trait);
-}
-.opt {
-  width: var(--editeur-bouton-palette);
-  height: var(--editeur-bouton-palette);
-  border-radius: var(--editeur-menu-rayon);
-  display: grid;
-  place-items: center;
-  color: var(--text-2);
-}
-.opt:hover {
-  background: var(--editeur-survol);
-}
-.opt[aria-pressed="true"] {
-  background: var(--text);
-  color: var(--editeur-scene);
-}
-.opt b {
-  display: block;
-  border-radius: 50%;
-  background: currentColor;
-}
-.opt .t0 {
-  width: var(--editeur-taille-0);
-  height: var(--editeur-taille-0);
-}
-.opt .t1 {
-  width: var(--editeur-taille-1);
-  height: var(--editeur-taille-1);
-}
-.opt .t2 {
-  width: var(--editeur-taille-2);
-  height: var(--editeur-taille-2);
-}
-.opt .s0 {
-  width: var(--editeur-taille-surligneur-0);
-  height: var(--editeur-taille-surligneur-0);
-}
-.opt .s1 {
-  width: var(--editeur-taille-surligneur-1);
-  height: var(--editeur-taille-surligneur-1);
-}
-.opt .s2 {
-  width: var(--editeur-taille-surligneur-2);
-  height: var(--editeur-taille-surligneur-2);
-}
-.opt .n0 {
-  width: var(--editeur-taille-numero-0);
-  height: var(--editeur-taille-numero-0);
-}
-.opt .n1 {
-  width: var(--editeur-taille-numero-1);
-  height: var(--editeur-taille-numero-1);
-}
-.opt .n2 {
-  width: var(--editeur-taille-numero-2);
-  height: var(--editeur-taille-numero-2);
-}
-.opt .a {
-  font-weight: 700;
-}
-.opt .a0 {
-  font-size: var(--editeur-taille-texte-0);
-}
-.opt .a1 {
-  font-size: var(--editeur-taille-texte-1);
-}
-.opt .a2 {
-  font-size: var(--editeur-taille-texte-2);
-}
-.opt .f0 {
-  opacity: 0.45;
-}
-.opt .f1 {
-  opacity: 0.7;
-}
-.rng {
-  display: flex;
-  align-items: center;
-  gap: var(--editeur-glissiere-ecart);
-  padding: var(--editeur-glissiere-marge-v) var(--editeur-glissiere-marge-h);
-  width: 100%;
-}
-.rng .ico {
-  width: var(--editeur-picto-petit);
-  height: var(--editeur-picto-petit);
-  color: var(--text-2);
-}
-input[type="range"] {
-  flex: 1;
-  min-width: var(--editeur-glissiere-largeur);
-  accent-color: var(--accent);
-  margin: 0;
-  height: var(--editeur-glissiere-hauteur);
-}
-
 /* Message, étiquette du zoom */
 .msg,
 .etiquette-zoom {
@@ -642,7 +808,7 @@ input[type="range"] {
   position: absolute;
   z-index: 9;
   right: var(--editeur-vignette-droite);
-  bottom: calc(var(--editeur-palette-hauteur) + var(--editeur-vignette-ecart));
+  bottom: calc(var(--editeur-dock-hauteur) + var(--editeur-vignette-ecart));
   width: var(--editeur-vignette-largeur);
   padding: var(--editeur-pop-marge);
   border-radius: var(--editeur-vignette-rayon);
@@ -693,41 +859,6 @@ input[type="range"] {
 }
 .saisie[hidden] {
   display: none;
-}
-
-/* Fenêtre étroite (moins de 620 px) : pastilles repliées dans « Couleur ». */
-@media (max-width: 620px) {
-  .pal > .cols {
-    display: none;
-  }
-  .cur {
-    display: grid;
-  }
-  .cur.none {
-    display: none;
-  }
-  .pal {
-    gap: 0;
-    padding: 0 var(--editeur-palette-marge-etroite);
-    height: var(--editeur-palette-hauteur-etroite);
-    bottom: var(--editeur-palette-bas-etroit);
-  }
-  .pal .pb {
-    width: var(--editeur-bouton-etroit);
-    height: var(--editeur-bouton-etroit);
-  }
-  .pal .dv {
-    margin: 0 var(--editeur-separateur-marge-etroite);
-  }
-  .tools {
-    padding: 0 var(--editeur-outils-marge-etroite);
-  }
-  .tl {
-    width: var(--editeur-instrument-place-etroite);
-  }
-  .ghost {
-    bottom: calc(var(--editeur-palette-hauteur-etroite) + var(--editeur-vignette-ecart));
-  }
 }
 
 /* Copier le texte (contrat 0.5, §2.4 ; design/historique, « .ov.ed », « .w », « .ocrbar ») :
@@ -897,17 +1028,33 @@ input[type="range"] {
   height: var(--editeur-copier-hauteur);
 }
 /* Anneau de focus : `all: unset` des boutons l'efface ; celui de toute la page, remis
-   (« Copier » du haut garde son écart, .ok:focus-visible plus haut). */
+   (« Copier » du haut garde son écart, .ok:focus-visible plus haut). Dans la barre
+   d'annotation, qui défile et coupe ce qui dépasse : en dedans ; l'instrument dessiné, en
+   ombre intérieure (son masque efface le bas). */
 .bt:focus-visible,
 .rb:focus-visible,
 .ok:focus-visible,
-.tl:focus-visible {
+.pb:focus-visible,
+.ip:focus-visible,
+.sz:focus-visible,
+.sw:focus-visible {
   outline: var(--editeur-focus) solid var(--accent);
 }
 .bt:focus-visible,
-.rb:focus-visible,
-.tl:focus-visible {
+.rb:focus-visible {
   outline-offset: var(--editeur-focus);
+}
+.pb:focus-visible,
+.ip:focus-visible,
+.sz:focus-visible {
+  outline-offset: calc(0px - var(--editeur-focus));
+}
+.sw:focus-visible {
+  outline-offset: var(--editeur-nuance-anneau-ecart);
+}
+.ib:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 var(--editeur-focus) var(--accent);
 }
 
 /* Animations réduites : réglage du système ou `reduites` de la charge (data-reduites). */

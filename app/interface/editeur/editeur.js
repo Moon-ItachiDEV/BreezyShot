@@ -65,6 +65,8 @@ const ed = {
   selection: [],
   prefs: null,
   enCours: null, // objet en cours de tracé (peint par peindreVue, option `ajout`), ou null
+  gommes: null, // Map id → passages de la gomme en cours (option `gommes`), ou null
+  gommeEntier: null, // id de l'objet entier pris par la gomme en cours (caché), ou null
   surcouche: null, // fonction (ctx) de outils.js : poignées, recadrage, cadre, pipette
   affiche: false,
   exportee: null, // dernière version exportée avec succès
@@ -75,14 +77,13 @@ const ed = {
 
 // Couleurs de contenu : celles de dessin.js, par leur nom.
 const couleurDessin = (nom) => dessin.COULEURS.find((c) => c[1] === nom)[0];
-// `emplacement` : l'outil venu de « Ajouter » (vide : l'emplacement n'est pas montré) ;
 // `autre` : la couleur libre gardée (« Autre couleur »). Couleur, taille (rang 0 à 2) et
-// opacité : par outil, comme la maquette (S.col, S.w, S.a).
+// opacité : par outil, comme la maquette (S.col, S.w, S.a). Les préférences d'avant la barre
+// C (`emplacement`, variante « Courbe » de la flèche) sont ignorées.
 const rouge = couleurDessin("Rouge");
 export const DEFAUTS = {
   outil: "fleche",
-  emplacement: "",
-  variantes: { fleche: "droite", forme: "rectangle", flou: "pixeliser", projecteur: "rectangle" },
+  variantes: { forme: "rectangle", flou: "pixeliser", projecteur: "rectangle" },
   couleurs: {
     fleche: rouge,
     stylo: rouge,
@@ -91,7 +92,7 @@ export const DEFAUTS = {
     forme: rouge,
     numero: rouge,
   },
-  tailles: { fleche: 1, stylo: 1, surligneur: 1, texte: 1, forme: 1, numero: 1, flou: 1 },
+  tailles: { fleche: 1, stylo: 1, surligneur: 1, gomme: 1, texte: 1, forme: 1, numero: 1, flou: 1 },
   opacites: { fleche: 100, stylo: 100, texte: 100, forme: 100, numero: 100 },
   autre: "",
 };
@@ -117,6 +118,7 @@ function lirePreferences(texte) {
       if (lu[k] === undefined || typeof lu[k] !== typeof DEFAUTS[k]) continue;
       p[k] = PAR_OUTIL.includes(k) ? { ...p[k], ...lu[k] } : lu[k];
     }
+    delete p.variantes.fleche;
     if (!OUTILS_CONNUS.includes(p.outil)) p.outil = DEFAUTS.outil;
   } catch {
     // Préférences illisibles : les défauts.
@@ -145,6 +147,10 @@ ed.annuler = () => {
   if (!modele.peutAnnuler(ed.h)) return;
   modele.annuler(ed.h);
   apresChangement();
+};
+// Un geste abandonné (Échap) : son pas est défait, sans rester à rétablir.
+ed.abandonner = () => {
+  if (ed.h && modele.abandonner(ed.h)) apresChangement();
 };
 ed.retablir = () => {
   if (!ed.h || ed.outils?.gesteEnCours() || ed.outils?.saisieOuverte()) return;
@@ -391,6 +397,11 @@ function optionsVue() {
   if (ajout) options.ajout = ajout;
   const enEdition = ed.outils?.idEnEdition();
   if (enEdition) options.cacher = enEdition;
+  else if (ed.gommeEntier != null) options.cacher = ed.gommeEntier;
+  // Les passages de la gomme du geste en cours (aperçu : le document n'a pas encore changé).
+  if (ed.gommes?.size) options.gommes = ed.gommes;
+  // Sans poignées (stylo, surligneur, gomme en main), une flèche choisie reçoit un cadre.
+  if (ed.outils && !ed.outils.poignees()) options.cadres = true;
   return options;
 }
 function peindre() {
@@ -425,6 +436,7 @@ function relacherToiles() {
   }
   ed.fond = null;
   ed.ctxFond = null;
+  dessin.relacherCalque();
 }
 
 async function charger(charge) {

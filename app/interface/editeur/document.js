@@ -22,9 +22,17 @@
 //              l'image, percé de la réunion des projecteurs, peint après tous les objets
 // epaisseur et intensite : 0 | 1 | 2. opacite : de 0 à 1 (1 : opaque ; absente : 1 ; une
 // valeur au-dessus de 1 est lue en pour cent).
+// Encres (fleche, rectangle, ellipse, ligne, crayon, surligneur) : champ en plus
+//   gommes?: [{ largeur, points: [[x, y], …] }]   passages de la gomme, en px de l'image :
+//              l'encre est effacée sous chaque passage (trait rond de `largeur`), et là
+//              seulement. Ils suivent l'objet (déplacer, redimensionner, dupliquer).
+// Les autres objets (texte, numero, masque, projecteur) sont entiers : la gomme ne les
+// entame pas.
 // Historique : { doc, passe, futur, version, marque }. Annuler et rétablir remplacent les
 // objets du document par des copies : la page les cherche par `id`, jamais par référence
-// gardée d'un pas à l'autre.
+// gardée d'un pas à l'autre. `version` nomme un état du document : jamais le même numéro
+// pour deux contenus différents (le cœur s'en sert pour « déjà copié », « déjà enregistré ») ;
+// un geste abandonné rend au document la version qu'il avait.
 
 export const POLICE = '"Segoe UI Variable Text","Segoe UI",system-ui,-apple-system,sans-serif';
 // Épaisseurs (px de l'image), réexportées par `dessin.js` : ici pour que `document.js` ne
@@ -35,6 +43,11 @@ const PAS_MAX = 200;
 const OCTETS_MAX = 32 * 1024 * 1024; // JSON de l'historique (passé et futur) au plus
 const DECALAGE_COPIE = 16;
 const RECTANGULAIRES = { rectangle: 1, ellipse: 1, masque: 1, projecteur: 1 };
+const ENCRES = { fleche: 1, rectangle: 1, ellipse: 1, ligne: 1, crayon: 1, surligneur: 1 };
+const ANGLE = Math.PI / 12; // Maj : pas de 15°
+// Poignée du milieu d'une flèche tirée à moins de 6 px d'écran du milieu de la corde : la
+// flèche redevient droite.
+const AIMANT_DROIT = 6;
 
 // Marges des ombres et des traits autour de la forme (px de l'image), d'après le dessin :
 // une ombre de flou b décalée de d s'étend jusqu'à 1,5 b + d (écart type b / 2, trois écarts).
@@ -52,7 +65,10 @@ export function nouveauDocument(largeur, hauteur) {
 // ---------- historique ----------
 
 export function creerHistorique(doc) {
-  return { doc, passe: [], futur: [], version: 0, marque: null };
+  // `numeros` : le dernier numéro de version donné ; `avant` : la version d'avant le dernier
+  // pas (null : inconnue).
+  return { doc, passe: [], futur: [], version: 0, marque: null, ecarte: null, numeros: 0,
+    avant: null };
 }
 
 // `fn(doc)` ; même `marque` (non nulle) que la modification précédente : un seul pas
@@ -71,11 +87,34 @@ export function modifier(h, fn, marque = null) {
   if (!suite) {
     h.passe.push(avant);
     if (h.passe.length > PAS_MAX) h.passe.shift();
+    h.ecarte = h.futur;
     h.futur = [];
+    h.avant = h.version;
     borner(h);
   }
   h.marque = marque ?? null;
-  h.version += 1;
+  h.version = nouvelleVersion(h);
+}
+
+// Un numéro de version jamais donné.
+function nouvelleVersion(h) {
+  h.numeros = Math.max(h.numeros ?? 0, h.version) + 1;
+  return h.numeros;
+}
+
+// Un geste abandonné (Échap, ou revenu à son départ) : le dernier pas est défait sans
+// rester à rétablir, et ce qui était à rétablir avant lui le redevient. Le document reprend
+// la version qu'il avait avant ce pas (même contenu, même numéro : rien n'a changé pour
+// « Fermer ») ; inconnue, un numéro neuf. Rend vrai si un pas a été défait.
+export function abandonner(h) {
+  if (!h.passe.length) return false;
+  remettre(h.doc, h.passe.pop());
+  h.futur = h.ecarte || [];
+  h.ecarte = null;
+  h.marque = null;
+  h.version = h.avant ?? nouvelleVersion(h);
+  h.avant = null;
+  return true;
 }
 
 // Octets de JSON gardés par l'historique.
@@ -106,8 +145,10 @@ export function annuler(h) {
   h.futur.push(JSON.stringify(h.doc));
   borner(h);
   remettre(h.doc, h.passe.pop());
+  h.ecarte = null;
   h.marque = null;
-  h.version += 1;
+  h.avant = null;
+  h.version = nouvelleVersion(h);
   return true;
 }
 
@@ -116,8 +157,10 @@ export function retablir(h) {
   h.passe.push(JSON.stringify(h.doc));
   borner(h);
   remettre(h.doc, h.futur.pop());
+  h.ecarte = null;
   h.marque = null;
-  h.version += 1;
+  h.avant = null;
+  h.version = nouvelleVersion(h);
   return true;
 }
 
@@ -243,6 +286,52 @@ function milieuCourbe(o) {
   return [0.25 * o.x1 + 0.5 * o.cx + 0.25 * o.x2, 0.25 * o.y1 + 0.5 * o.cy + 0.25 * o.y2];
 }
 
+// Point et tangente (unitaire) de la flèche en t, droite ou courbe (une flèche droite est la
+// courbe dont le point de contrôle est le milieu de la corde).
+function pointFleche(o, t) {
+  const cx = o.cx ?? (o.x1 + o.x2) / 2, cy = o.cy ?? (o.y1 + o.y2) / 2, u = 1 - t;
+  return [u * u * o.x1 + 2 * u * t * cx + t * t * o.x2, u * u * o.y1 + 2 * u * t * cy + t * t * o.y2];
+}
+function tangenteFleche(o, t) {
+  const cx = o.cx ?? (o.x1 + o.x2) / 2, cy = o.cy ?? (o.y1 + o.y2) / 2;
+  let dx = 2 * (1 - t) * (cx - o.x1) + 2 * t * (o.x2 - cx);
+  let dy = 2 * (1 - t) * (cy - o.y1) + 2 * t * (o.y2 - cy);
+  if (!dx && !dy) { dx = o.x2 - o.x1; dy = o.y2 - o.y1; }
+  const l = Math.hypot(dx, dy);
+  return l ? [dx / l, dy / l] : [1, 0];
+}
+// Le point `a` vu de la flèche : t du point de la courbe le plus proche, écart le long de la
+// normale, et dépassement le long de la tangente (au-delà d'un bout seulement).
+function surFleche(o, a) {
+  const d2 = (t) => {
+    const [x, y] = pointFleche(o, t);
+    return (x - a[0]) ** 2 + (y - a[1]) ** 2;
+  };
+  const N = 32;
+  let t = 0, m = Infinity;
+  for (let i = 0; i <= N; i++) {
+    const v = d2(i / N);
+    if (v < m) { m = v; t = i / N; }
+  }
+  let g = Math.max(0, t - 1 / N), h = Math.min(1, t + 1 / N);
+  for (let i = 0; i < 24; i++) {
+    const u = g + (h - g) / 3, v = h - (h - g) / 3;
+    if (d2(u) < d2(v)) h = v; else g = u;
+  }
+  t = (g + h) / 2;
+  const [x, y] = pointFleche(o, t), [tx, ty] = tangenteFleche(o, t);
+  return [t, (a[0] - x) * -ty + (a[1] - y) * tx, (a[0] - x) * tx + (a[1] - y) * ty];
+}
+// Les passages de gomme de la flèche `q` portés sur la flèche `o` (même bouts, autre
+// courbe) : chaque point garde sa place le long de l'encre et son écart à elle.
+function gommesSurFleche(q, o) {
+  return gommesPar(q, (a) => {
+    const [t, n, e] = surFleche(q, a);
+    const [x, y] = pointFleche(o, t), [tx, ty] = tangenteFleche(o, t);
+    return [x - ty * n + tx * e, y + tx * n + ty * e];
+  });
+}
+
 // Points extrêmes d'une courbe quadratique (bouts et sommets par axe).
 function extremesCourbe(o) {
   const pts = [[o.x1, o.y1], [o.x2, o.y2]];
@@ -265,10 +354,40 @@ function enveloppe(pts, marge) {
   return rectDe(a - marge, b - marge, c + marge, d + marge);
 }
 
-// Longueur de la pointe d'une flèche (design : W·3,4 + 14, au plus 55 % de la longueur).
+// Longueur de la pointe d'une flèche (design : W·3,4 + 14, au plus 55 % de la longueur ;
+// courbe : la longueur de la courbe, pas celle de la corde).
 export function longueurPointe(o) {
-  const W = trait(o), L = Math.hypot(o.x2 - o.x1, o.y2 - o.y1);
+  const W = trait(o);
+  const L = o.cx != null ? longueurCourbe(o) : Math.hypot(o.x2 - o.x1, o.y2 - o.y1);
   return Math.min(L * 0.55, W * 3.4 + 14);
+}
+// Longueur d'une courbe de flèche (64 cordes).
+function longueurCourbe(o) {
+  let l = 0, [x, y] = [o.x1, o.y1];
+  for (let i = 1; i <= 64; i++) {
+    const [a, b] = pointFleche(o, i / 64);
+    l += Math.hypot(a - x, b - y);
+    x = a; y = b;
+  }
+  return l;
+}
+// Où le corps d'une flèche courbe entre dans sa pointe : le plus grand t dont le point de la
+// courbe est à `d` au moins du bout (0 si aucun). Le dessin s'arrête là, sur la courbe même.
+export function entreePointe(o, d) {
+  const loin = (t) => {
+    const [x, y] = pointFleche(o, t);
+    return Math.hypot(x - o.x2, y - o.y2) >= d;
+  };
+  const N = 64;
+  let i = N - 1;
+  while (i > 0 && !loin(i / N)) i--;
+  if (!loin(i / N)) return 0;
+  let g = i / N, h = (i + 1) / N;
+  for (let k = 0; k < 24; k++) {
+    const m = (g + h) / 2;
+    if (loin(m)) g = m; else h = m;
+  }
+  return g;
 }
 
 // Boîte de la forme elle-même (sans ombre) : poignées, contour de sélection, redimensionner.
@@ -379,7 +498,12 @@ export function touche(objet, point, tolerance, strict) {
   void strict;
   const p = Array.isArray(point) ? { x: point[0], y: point[1] } : point;
   const tol = tolerance ?? 0;
-  const o = objet;
+  if (!toucheForme(objet, p, tol)) return false;
+  // Une encre gommée ne se prend que là où il en reste.
+  return !objet.gommes?.length || encreRestePres(objet, p, tol);
+}
+
+function toucheForme(o, p, tol) {
   if (o.type === "fleche" || o.type === "ligne") {
     const pts = o.cx != null ? pointsCourbe(o) : [[o.x1, o.y1], [o.x2, o.y2]];
     return distPolyligne(p, pts) < Math.max(trait(o) * 1.6, tol);
@@ -419,6 +543,166 @@ export function touche(objet, point, tolerance, strict) {
   return true;
 }
 
+// ---------- gomme ----------
+
+// Vrai pour un objet que la gomme efface là où elle passe ; les autres sont entiers.
+export function estEncre(objet) {
+  return !!ENCRES[objet.type];
+}
+
+function croises(ax, ay, bx, by, cx, cy, dx, dy) {
+  const cote = (px, py, qx, qy, rx, ry) => (qx - px) * (ry - py) - (qy - py) * (rx - px);
+  const a = cote(cx, cy, dx, dy, ax, ay), b = cote(cx, cy, dx, dy, bx, by);
+  const c = cote(ax, ay, bx, by, cx, cy), d = cote(ax, ay, bx, by, dx, dy);
+  return ((a > 0 && b < 0) || (a < 0 && b > 0)) && ((c > 0 && d < 0) || (c < 0 && d > 0));
+}
+
+function distSegments(ax, ay, bx, by, cx, cy, dx, dy) {
+  if (croises(ax, ay, bx, by, cx, cy, dx, dy)) return 0;
+  return Math.min(distSegment(ax, ay, cx, cy, dx, dy), distSegment(bx, by, cx, cy, dx, dy),
+    distSegment(cx, cy, ax, ay, bx, by), distSegment(dx, dy, ax, ay, bx, by));
+}
+
+// Les lignes d'encre d'un objet : [{ points, demi }], `demi` la demi-largeur du trait autour
+// de la ligne. La pointe d'une flèche : deux tronçons, du bout (étroit) à sa base (large).
+function lignesEncre(o) {
+  switch (o.type) {
+    case "crayon":
+      return [{ points: o.points, demi: trait(o) / 2 }];
+    case "surligneur":
+      return [{ points: o.points, demi: traitSurligneur(o) / 2 }];
+    case "ligne":
+      return [{ points: [[o.x1, o.y1], [o.x2, o.y2]], demi: trait(o) / 2 }];
+    case "fleche": {
+      const hl = longueurPointe(o);
+      const corps = o.cx != null ? pointsCourbe(o) : [[o.x1, o.y1], [o.x2, o.y2]];
+      const r = [{ points: corps, demi: trait(o) * 0.6 }];
+      const pointe = (tx, ty, vx, vy) => {
+        const l = Math.hypot(vx, vy) || 1, ux = vx / l, uy = vy / l;
+        const m = [tx - ux * hl * 0.5, ty - uy * hl * 0.5];
+        r.push({ points: [[tx, ty], m], demi: hl * 0.26 });
+        r.push({ points: [m, [tx - ux * hl, ty - uy * hl]], demi: hl * 0.52 });
+      };
+      pointe(o.x2, o.y2, o.x2 - (o.cx ?? o.x1), o.y2 - (o.cy ?? o.y1));
+      if (o.double) pointe(o.x1, o.y1, o.x1 - (o.cx ?? o.x2), o.y1 - (o.cy ?? o.y2));
+      return r;
+    }
+    case "rectangle": {
+      const b = norme(o), x2 = b.x + b.largeur, y2 = b.y + b.hauteur;
+      return [{ points: [[b.x, b.y], [x2, b.y], [x2, y2], [b.x, y2], [b.x, b.y]],
+        demi: trait(o) / 2 }];
+    }
+    case "ellipse": {
+      const b = norme(o), rx = b.largeur / 2, ry = b.hauteur / 2, pts = [];
+      for (let i = 0; i <= 48; i++) {
+        const t = (i / 48) * 2 * Math.PI;
+        pts.push([b.x + rx + rx * Math.cos(t), b.y + ry + ry * Math.sin(t)]);
+      }
+      return [{ points: pts, demi: trait(o) / 2 }];
+    }
+    default:
+      return [];
+  }
+}
+
+// L'intérieur d'une forme pleine.
+function dansPlein(o, p) {
+  if (!o.plein || (o.type !== "rectangle" && o.type !== "ellipse")) return false;
+  const b = norme(o);
+  if (o.type === "rectangle") {
+    return p.x >= b.x && p.x <= b.x + b.largeur && p.y >= b.y && p.y <= b.y + b.hauteur;
+  }
+  const rx = b.largeur / 2 || 1, ry = b.hauteur / 2 || 1;
+  return Math.hypot((p.x - b.x - rx) / rx, (p.y - b.y - ry) / ry) <= 1;
+}
+
+// La gomme (rond de `rayon`) passée de `a` à `b` ({ x, y }, px de l'image) atteint-elle
+// l'encre de l'objet ? Large d'un pixel : un passage noté sans rien effacer est écarté à la
+// fin du geste (`effetGomme` de dessin.js), un passage manqué ne se rattrape pas.
+export function gommeTouche(objet, a, b, rayon) {
+  const o = objet;
+  if (!estEncre(o)) return false;
+  const gx = Math.min(a.x, b.x), gy = Math.min(a.y, b.y);
+  const hx = Math.max(a.x, b.x), hy = Math.max(a.y, b.y);
+  for (const { points: p, demi } of lignesEncre(o)) {
+    const portee = rayon + demi + 1;
+    if (p.length === 1) {
+      if (distSegment(p[0][0], p[0][1], a.x, a.y, b.x, b.y) <= portee) return true;
+      continue;
+    }
+    for (let i = 1; i < p.length; i++) {
+      const [x1, y1] = p[i - 1], [x2, y2] = p[i];
+      if (Math.max(x1, x2) < gx - portee || Math.min(x1, x2) > hx + portee
+        || Math.max(y1, y2) < gy - portee || Math.min(y1, y2) > hy + portee) continue;
+      if (distSegments(a.x, a.y, b.x, b.y, x1, y1, x2, y2) <= portee) return true;
+    }
+  }
+  return dansPlein(o, a) || dansPlein(o, b);
+}
+
+// Ajoute des passages de gomme à l'objet `id` (une encre). À appeler dans `modifier`.
+export function gommer(doc, id, passages) {
+  const o = doc.objets.find((x) => x.id === id);
+  if (!o || !estEncre(o)) return;
+  const neufs = [];
+  for (const g of passages || []) {
+    if (!g?.points?.length || !(g.largeur > 0)) continue;
+    neufs.push({ largeur: centieme(g.largeur), points: g.points.map(arrondirPoint) });
+  }
+  if (neufs.length) o.gommes = (o.gommes || []).concat(neufs);
+}
+
+// Le point (x, y) est-il sous un passage de gomme de l'objet ?
+function gomme(o, x, y) {
+  const p = { x, y };
+  for (const g of o.gommes) if (distPolyligne(p, g.points) <= g.largeur / 2) return true;
+  return false;
+}
+
+// Reste-t-il de l'encre à portée de `p` ? Un point de l'encre que la gomme n'a pas atteint,
+// sur sa ligne ou en travers (un trait gommé dans sa longueur garde ses bords), à la
+// distance de prise de l'objet (celle de `toucheForme`) ; si `p` est lui-même dans un trou
+// de gomme, à la tolérance seulement (le bord de ce qui reste). En travers, jusqu'au bord :
+// un surligneur de 24 px gommé au milieu par la gomme de 20 px garde 2 px de chaque côté.
+const TRAVERS = [0, -0.2, 0.2, -0.4, 0.4, -0.6, 0.6, -0.8, 0.8, -0.95, 0.95]; // en demi-largeurs
+function encreRestePres(o, p, tol) {
+  const trou = gomme(o, p.x, p.y);
+  if (dansPlein(o, p)) return !trou;
+  const prise = o.type === "fleche" || o.type === "ligne" ? Math.max(trait(o) * 1.6, tol)
+    : o.type === "surligneur" ? traitSurligneur(o) / 2 + 2 : Math.max(trait(o), tol);
+  for (const { points: l, demi } of lignesEncre(o)) {
+    // La pointe d'une flèche est plus large que sa prise.
+    const d = trou ? Math.max(tol, 1) : Math.max(prise, demi);
+    const pas = Math.max(1, demi / 2);
+    const reste = (x, y) => Math.hypot(p.x - x, p.y - y) < d && !gomme(o, x, y);
+    if (l.length === 1) {
+      const [x, y] = l[0];
+      if (TRAVERS.some((k) => reste(x + demi * k, y) || reste(x, y + demi * k))) return true;
+      continue;
+    }
+    for (let i = 1; i < l.length; i++) {
+      const [x1, y1] = l[i - 1], [x2, y2] = l[i];
+      if (distSegment(p.x, p.y, x1, y1, x2, y2) >= d) continue;
+      const long = Math.hypot(x2 - x1, y2 - y1);
+      const nx = long ? -(y2 - y1) / long : 0, ny = long ? (x2 - x1) / long : 1;
+      const n = Math.max(1, Math.ceil(long / pas));
+      for (let j = 0; j <= n; j++) {
+        const x = x1 + ((x2 - x1) * j) / n, y = y1 + ((y2 - y1) * j) / n;
+        if (TRAVERS.some((k) => reste(x + nx * demi * k, y + ny * demi * k))) return true;
+      }
+    }
+  }
+  return false;
+}
+
+// Les passages de gomme de `q` transformés point par point (`fn`), leur largeur × `k`.
+function gommesPar(q, fn, k = 1) {
+  return q.gommes.map((g) => ({
+    largeur: centieme(g.largeur * k),
+    points: g.points.map((a) => arrondirPoint(fn(a))),
+  }));
+}
+
 // L'objet du dessus sous `point`, ou null. Les annotations d'abord, puis les projecteurs
 // (une zone éclairée laisse prendre ce qu'elle montre), puis les masques (sous tout).
 // `filtreType` : null, un type (« fleche »…) ou une liste de types.
@@ -456,37 +740,89 @@ export function deplacer(objet, origine, dx, dy) {
   }
   if (q.cx != null) { objet.cx = q.cx + dx; objet.cy = q.cy + dy; }
   if ("x" in q) { objet.x = q.x + dx; objet.y = q.y + dy; }
+  if (q.gommes) objet.gommes = gommesPar(q, (a) => [a[0] + dx, a[1] + dy]);
 }
 
 // `point` : la pointe en px de l'image ; `echelleVue` : px d'écran CSS par px de l'image
-// (les tailles mini du design, 12 et 10 px, sont des px d'écran).
-export function redimensionner(objet, origine, poignee, point, echelleVue) {
+// (les tailles mini du design, 12 et 10 px, sont des px d'écran). `contraint` (Maj tenue) :
+// un bout de flèche ou de ligne tourne par pas de 15° autour de l'autre ; un coin garde les
+// proportions de l'objet. Les passages de gomme suivent l'encre.
+export function redimensionner(objet, origine, poignee, point, echelleVue, contraint = false) {
   const o = objet, q = origine, s = echelleVue || 1;
   const p = Array.isArray(point) ? { x: point[0], y: point[1] } : point;
   if (poignee === "p1" || poignee === "p2") {
     const fx = poignee === "p1" ? q.x2 : q.x1, fy = poignee === "p1" ? q.y2 : q.y1;
     const mini = 12 / s;
     let { x, y } = p;
+    if (contraint) {
+      const an = Math.round(Math.atan2(y - fy, x - fx) / ANGLE) * ANGLE;
+      const l = Math.hypot(x - fx, y - fy);
+      x = fx + Math.cos(an) * l; y = fy + Math.sin(an) * l;
+    }
     if (Math.hypot(x - fx, y - fy) < mini) {
       const an = Math.atan2(y - fy, x - fx) || 0;
       x = fx + Math.cos(an) * mini; y = fy + Math.sin(an) * mini;
     }
     if (poignee === "p1") { o.x1 = x; o.y1 = y; } else { o.x2 = x; o.y2 = y; }
+    if (q.gommes || q.cx != null) {
+      // La similitude qui porte l'ancien segment sur le nouveau : une flèche courbe garde sa
+      // courbe, les passages de gomme suivent l'encre.
+      const ux = q.x2 - q.x1, uy = q.y2 - q.y1, d = ux * ux + uy * uy || 1;
+      const vx = o.x2 - o.x1, vy = o.y2 - o.y1;
+      const re = (vx * ux + vy * uy) / d, im = (vy * ux - vx * uy) / d;
+      const porter = (a) => {
+        const dx = a[0] - q.x1, dy = a[1] - q.y1;
+        return [o.x1 + re * dx - im * dy, o.y1 + im * dx + re * dy];
+      };
+      if (q.cx != null) [o.cx, o.cy] = porter([q.cx, q.cy]);
+      if (q.gommes) o.gommes = gommesPar(q, porter, Math.hypot(re, im));
+    }
     return;
   }
   if (poignee === "pc") {
-    o.cx = 2 * p.x - 0.5 * (q.x1 + q.x2); o.cy = 2 * p.y - 0.5 * (q.y1 + q.y2);
+    // La poignée du milieu courbe la flèche : la courbe passe par la pointe. Le long de la
+    // corde, elle reste dans sa moitié du milieu (la courbe ne dépasse jamais un bout, la
+    // pointe ne se retourne pas) ; ramenée près de la corde, la flèche redevient droite ;
+    // Maj : courbe symétrique (la pointe sur la médiatrice). Les passages de gomme suivent
+    // l'encre.
+    const mx = (q.x1 + q.x2) / 2, my = (q.y1 + q.y2) / 2;
+    const ux = q.x2 - q.x1, uy = q.y2 - q.y1, l = Math.hypot(ux, uy) || 1;
+    // Le long de la corde (depuis son milieu) et le long de sa normale ; la poignée telle
+    // quelle si rien ne la ramène.
+    const brut = ((p.x - mx) * ux + (p.y - my) * uy) / l;
+    const long = contraint ? 0 : borne(brut, -l / 4, l / 4);
+    const ecart = ((p.x - mx) * -uy + (p.y - my) * ux) / l;
+    const libre = !contraint && long === brut;
+    const x = libre ? p.x : mx + (ux / l) * long - (uy / l) * ecart;
+    const y = libre ? p.y : my + (uy / l) * long + (ux / l) * ecart;
+    if (Math.abs(ecart) < AIMANT_DROIT / s) {
+      delete o.cx; delete o.cy;
+    } else {
+      o.cx = 2 * x - mx; o.cy = 2 * y - my;
+    }
+    if (q.gommes) o.gommes = gommesSurFleche(q, o);
     return;
   }
   const b = boiteForme(q);
   const ax = poignee[1] === "w" ? b.x + b.largeur : b.x;
   const ay = poignee[0] === "n" ? b.y + b.hauteur : b.y;
   if (RECTANGULAIRES[q.type]) {
-    const mini = 10 / s, dx = p.x - ax, dy = p.y - ay;
+    const mini = 10 / s;
+    let dx = p.x - ax, dy = p.y - ay;
+    if (contraint && b.largeur > 0 && b.hauteur > 0) {
+      const k = Math.max(Math.abs(dx) / b.largeur, Math.abs(dy) / b.hauteur,
+        mini / Math.min(b.largeur, b.hauteur));
+      dx = (dx < 0 ? -1 : 1) * k * b.largeur; dy = (dy < 0 ? -1 : 1) * k * b.hauteur;
+    }
     o.x1 = ax; o.y1 = ay;
     o.x2 = ax + (Math.abs(dx) < mini ? (dx < 0 ? -mini : mini) : dx);
     o.y2 = ay + (Math.abs(dy) < mini ? (dy < 0 ? -mini : mini) : dy);
     normaliser(o);
+    if (q.gommes) {
+      const n = norme(o), kx = n.largeur / (b.largeur || 1), ky = n.hauteur / (b.hauteur || 1);
+      o.gommes = gommesPar(q, (a) => [n.x + (a[0] - b.x) * kx, n.y + (a[1] - b.y) * ky],
+        Math.sqrt(kx * ky));
+    }
     return;
   }
   let sx = Math.abs(p.x - ax) / Math.max(1, b.largeur);
@@ -506,11 +842,45 @@ export function redimensionner(objet, origine, poignee, point, echelleVue) {
     return;
   }
   if (q.points) {
-    const nx = Math.min(ax, p.x), ny = Math.min(ay, p.y);
     sx = Math.max(sx, 0.15); sy = Math.max(sy, 0.15);
-    o.points = q.points.map((a) => arrondirPoint([nx + (a[0] - b.x) * sx,
-      ny + (a[1] - b.y) * sy]));
+    if (contraint) sx = sy = Math.max(sx, sy);
+    // Le tracé reste du côté de la pointe, calé sur le coin opposé.
+    const nx = p.x < ax ? ax - b.largeur * sx : ax, ny = p.y < ay ? ay - b.hauteur * sy : ay;
+    const place = (a) => [nx + (a[0] - b.x) * sx, ny + (a[1] - b.y) * sy];
+    o.points = q.points.map((a) => arrondirPoint(place(a)));
+    if (q.gommes) o.gommes = gommesPar(q, place, Math.sqrt(sx * sy));
   }
+}
+
+// Une autre variante du même outil pour un objet choisi, à la même place et aux mêmes
+// réglages : rectangle, ellipse ou ligne (la ligne suit la diagonale de la boîte) ;
+// pixeliser, flouter ou bloc ; projecteur rectangle ou ovale. Rend vrai si l'objet change.
+const FORMES = ["rectangle", "ellipse", "ligne"];
+const MASQUES = ["pixeliser", "flouter", "bloc"];
+export function changerVariante(objet, variante) {
+  const o = objet;
+  if (o.type === "masque") {
+    if (!MASQUES.includes(variante) || o.sorte === variante) return false;
+    o.sorte = variante;
+    return true;
+  }
+  if (o.type === "projecteur") {
+    if ((variante !== "rectangle" && variante !== "ovale") || o.forme === variante) return false;
+    o.forme = variante;
+    return true;
+  }
+  if (!FORMES.includes(o.type) || !FORMES.includes(variante) || o.type === variante) return false;
+  o.type = variante;
+  if (variante === "ligne") {
+    delete o.plein;
+    delete o.arrondi;
+  } else {
+    o.plein ??= false;
+    if (variante === "rectangle") o.arrondi ??= 6;
+    else delete o.arrondi;
+    normaliser(o);
+  }
+  return true;
 }
 
 // ---------- ordre, copies, numéros ----------

@@ -75,6 +75,10 @@ pub const EVENEMENT_CACHEE: &str = "selection:cachee";
 /// Événement écouté par la page (Copier le texte, 0.5) : `{ id, x, y, largeur, hauteur,
 /// reduites }`, la zone lue en pixels réels relatifs au coin de la fenêtre.
 pub const EVENEMENT_BALAYER: &str = "selection:balayer";
+/// Événement écouté par la page (Copier le texte, 13/11) : `{ id, lignes: [RectFenetre],
+/// reduites, trace, pas, tenue, sortie }`, les lignes d'un texte copié en pixels réels
+/// relatifs au coin de la fenêtre, et le déroulé de leur surlignage (`Surlignage`).
+pub const EVENEMENT_SURLIGNER: &str = "selection:surligner";
 /// Sans `selection_prete` dans ce délai, la sélection est cachée (`Signal::Muette`).
 pub const DELAI_PRETE: Duration = Duration::from_secs(2);
 /// Tolérance, en pixels réels, pour un point venu de la page juste au bord de la fenêtre.
@@ -655,6 +659,39 @@ struct ChargeBalayer {
     reduites: bool,
 }
 
+/// Le déroulé du surlignage des lignes d'un texte copié, en millisecondes : la ligne de rang
+/// `r` (à partir de 0) se tire de gauche à droite de `r × pas` à `r × pas + trace` ; toutes
+/// restent `tenue`, puis la sélection s'efface en `sortie`. `pas` à 0 : toutes ensemble.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub struct Surlignage {
+    pub trace: u32,
+    pub pas: u32,
+    pub tenue: u32,
+    pub sortie: u32,
+}
+
+impl Surlignage {
+    /// Du premier trait à la fin de la sortie, pour `lignes` lignes.
+    pub fn duree(&self, lignes: usize) -> Duration {
+        let ecarts = u64::try_from(lignes.saturating_sub(1)).unwrap_or(u64::MAX);
+        let ms = u64::from(self.trace)
+            .saturating_add(u64::from(self.pas).saturating_mul(ecarts))
+            .saturating_add(u64::from(self.tenue))
+            .saturating_add(u64::from(self.sortie));
+        Duration::from_millis(ms)
+    }
+}
+
+/// Ce que reçoit la page avec `selection:surligner`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+struct ChargeSurligner {
+    id: u64,
+    lignes: Vec<RectFenetre>,
+    reduites: bool,
+    #[serde(flatten)]
+    deroule: Surlignage,
+}
+
 /// L'état de la sélection : une petite machine pure, testée sans fenêtre.
 #[derive(Debug, Default)]
 struct Etat {
@@ -797,6 +834,26 @@ impl Etat {
             largeur: r.largeur,
             hauteur: r.hauteur,
             reduites,
+        })
+    }
+
+    /// La charge du surlignage de `lignes` (pixels réels du bureau) sur l'affichage gardé ;
+    /// `None` s'il n'y en a pas, ou sans ligne.
+    fn charge_surligner(
+        &self,
+        lignes: &[Rect],
+        reduites: bool,
+        deroule: Surlignage,
+    ) -> Option<ChargeSurligner> {
+        let g = self.gardee?;
+        if lignes.is_empty() {
+            return None;
+        }
+        Some(ChargeSurligner {
+            id: g.id,
+            lignes: lignes.iter().map(|&r| vers_page(r, g.fenetre)).collect(),
+            reduites,
+            deroule,
         })
     }
 
@@ -953,6 +1010,14 @@ impl Selection {
     /// fenêtre montrée jusqu'à `cacher`. Fil principal. Sans affichage gardé : rien.
     pub fn balayer(&self, zone: Rect, reduites: bool) {
         self.interne.balayer(zone, reduites);
+    }
+
+    /// Copier le texte (13/11) : surligne les `lignes` d'un texte copié (pixels réels du
+    /// bureau) selon `deroule` (`selection:surligner`) ; la page efface la sélection à la
+    /// fin, le cœur la cache ensuite. Fil principal. Faux sans affichage gardé, sans ligne,
+    /// ou si l'événement n'a pas pu partir : rien n'est joué.
+    pub fn surligner(&self, lignes: &[Rect], reduites: bool, deroule: Surlignage) -> bool {
+        self.interne.surligner(lignes, reduites, deroule)
     }
 
     /// Vrai entre `montrer` et la fin de l'affichage.
@@ -1214,6 +1279,32 @@ impl Interne {
         {
             Ok(()) => log::info!("selection balayage {}", charge.id),
             Err(e) => log::warn!("selection balayage {} non envoye: {e}", charge.id),
+        }
+    }
+
+    fn surligner(&self, lignes: &[Rect], reduites: bool, deroule: Surlignage) -> bool {
+        if lignes.is_empty() {
+            // Un texte dont aucun mot n'a de surface : rien à surligner.
+            log::info!("selection surlignage sans ligne");
+            return false;
+        }
+        let Some(charge) = self.etat().charge_surligner(lignes, reduites, deroule) else {
+            log::info!("selection surlignage sans affichage");
+            return false;
+        };
+        let (id, n) = (charge.id, charge.lignes.len());
+        match self
+            .app
+            .emit_to(ETIQUETTE_SELECTION, EVENEMENT_SURLIGNER, charge)
+        {
+            Ok(()) => {
+                log::info!("selection surlignage {id} {n} lignes");
+                true
+            }
+            Err(e) => {
+                log::warn!("selection surlignage {id} non envoye: {e}");
+                false
+            }
         }
     }
 
@@ -2382,6 +2473,89 @@ mod tests {
         assert_eq!(e.tout_oublier(), Some(77));
         assert_eq!(e.charge_balayer(r(0, 0, 10, 10), false), None);
         assert_eq!(e.tout_oublier(), None);
+    }
+
+    #[test]
+    fn surlignage_des_lignes_sur_l_affichage_garde() {
+        let mut e = Etat::default();
+        let mut d = demande();
+        d.bureau = r(-1920, 0, 3840, 1080);
+        d.mode = Mode::Texte;
+        let deroule = Surlignage {
+            trace: 260,
+            pas: 40,
+            tenue: 220,
+            sortie: 140,
+        };
+        let lignes = [r(-90, 12, 120, 14), r(-90, 32, 80, 14)];
+        // Sans affichage gardé : rien.
+        assert_eq!(e.charge_surligner(&lignes, false, deroule), None);
+        let (id, _) = e.commencer(&d, Some(77), Some(5), Instant::now());
+        let zone = Signal::Zone {
+            id,
+            depart: (-100, 10),
+            arrivee: (99, 59),
+        };
+        let a = e.terminer(id).expect("affichage");
+        assert!(e.garder_si_texte(&a, &zone));
+        // Les lignes en pixels de la page (origine au coin de la fenêtre), dans l'ordre.
+        let charge = e.charge_surligner(&lignes, false, deroule).expect("charge");
+        assert_eq!(
+            charge,
+            ChargeSurligner {
+                id,
+                lignes: vec![
+                    RectFenetre {
+                        x: 1830,
+                        y: 12,
+                        largeur: 120,
+                        hauteur: 14
+                    },
+                    RectFenetre {
+                        x: 1830,
+                        y: 32,
+                        largeur: 80,
+                        hauteur: 14
+                    },
+                ],
+                reduites: false,
+                deroule,
+            }
+        );
+        // Le déroulé à plat, à côté des lignes : ce que lit la page.
+        let json = serde_json::to_value(&charge).expect("json");
+        assert_eq!(json["trace"], 260);
+        assert_eq!(json["pas"], 40);
+        assert_eq!(json["tenue"], 220);
+        assert_eq!(json["sortie"], 140);
+        assert_eq!(json["reduites"], false);
+        assert_eq!(json["lignes"][1]["largeur"], 80);
+        assert!(json.get("deroule").is_none());
+        // Sans ligne : rien à jouer.
+        assert_eq!(e.charge_surligner(&[], false, deroule), None);
+        assert_eq!(e.tout_oublier(), Some(77));
+        assert_eq!(e.charge_surligner(&lignes, false, deroule), None);
+    }
+
+    #[test]
+    fn duree_du_surlignage() {
+        let d = Surlignage {
+            trace: 260,
+            pas: 40,
+            tenue: 220,
+            sortie: 140,
+        };
+        let ms = Duration::from_millis;
+        assert_eq!(d.duree(0), ms(620));
+        assert_eq!(d.duree(1), ms(620));
+        assert_eq!(d.duree(5), ms(780));
+        let enorme = Surlignage {
+            trace: u32::MAX,
+            pas: u32::MAX,
+            tenue: u32::MAX,
+            sortie: u32::MAX,
+        };
+        assert!(enorme.duree(usize::MAX) > ms(u64::from(u32::MAX)));
     }
 
     #[test]
