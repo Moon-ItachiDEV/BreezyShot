@@ -206,11 +206,35 @@ pub struct Controle {
     ecran: Mutex<Option<Rect>>,
     /// Vrai après `detruire` : `Drop` n'a plus rien à faire.
     detruite: AtomicBool,
+    /// Numéro de détenteur (`DETENTEUR` à `creer` ou `retrouver`) : seul le dernier
+    /// détenteur de la fenêtre peut la faire détruire par `Drop`.
+    detenteur: u64,
+}
+
+/// Dernier détenteur de la fenêtre de contrôle (`creer` et `retrouver` l'avancent).
+static DETENTEUR: AtomicU64 = AtomicU64::new(0);
+
+fn nouveau_detenteur() -> u64 {
+    DETENTEUR.fetch_add(1, Ordering::SeqCst) + 1
+}
+
+/// `Drop` d'un `Controle` lâché sans `detruire` : la fenêtre n'est détruite que si elle vit
+/// encore et que ce `Controle` en est le dernier détenteur (une fenêtre reprise par
+/// `retrouver` n'est pas détruite par l'ancien).
+fn drop_detruit(detruite: bool, vivante: bool, detenteur: u64, dernier: u64) -> bool {
+    !detruite && vivante && detenteur == dernier
+}
+
+/// Une fenêtre `defilante` trouvée peut-elle être reprise ? Seulement si elle est exclue
+/// des captures (ou en essai capturable, `BREEZYSHOT_ESSAI_CAPTURABLE=1`).
+fn reprenable(capturable: bool, exclue: bool) -> bool {
+    capturable || exclue
 }
 
 /// Crée la fenêtre de contrôle, cachée (fil principal, jamais dans un rappel de page :
 /// toujours postée à un tour suivant de la boucle). Journal : `defilante fenetre <hwnd>`,
-/// `defilante exclue des captures: …`. Une fenêtre qui existe encore : une erreur.
+/// `defilante exclue des captures: …`. Une fenêtre qui existe encore : une erreur (la
+/// reprendre par `retrouver`).
 pub fn creer(app: &AppHandle) -> Result<Controle, String> {
     if app.get_webview_window(ETIQUETTE_DEFILANTE).is_some() {
         return Err("fenetre de controle deja creee".into());
@@ -224,6 +248,57 @@ pub fn creer(app: &AppHandle) -> Result<Controle, String> {
         partage: Arc::new(Partage::default()),
         ecran: Mutex::new(None),
         detruite: AtomicBool::new(false),
+        detenteur: nouveau_detenteur(),
+    })
+}
+
+/// Reprend une fenêtre `defilante` encore vivante (R1 : « créée ou retrouvée »), sur le fil
+/// principal : cachée, clics traversants, exclusion des captures reposée et relue, état de
+/// la souris neuf (le fil `defilante-souris` repart à `montrer`). L'ancien `Controle`, s'il
+/// existe encore, ne la détruira plus en étant lâché. `None` s'il n'y en a pas, ou si
+/// l'exclusion n'a pas pu être posée (la fenêtre est alors détruite : `creer` en refera
+/// une). Journal : `defilante fenetre <hwnd> retrouvee`,
+/// `defilante exclue des captures: oui|non|non (essai)`.
+pub fn retrouver(app: &AppHandle) -> Option<Controle> {
+    let fenetre = app.get_webview_window(ETIQUETTE_DEFILANTE)?;
+    super::cacher(&fenetre);
+    let identifiant = systeme::identifiant_fenetre(&fenetre);
+    if let Some(h) = identifiant {
+        log::info!("defilante fenetre {h} retrouvee");
+    }
+    let capturable = systeme::essai_capturable();
+    let exclue = !capturable && systeme::exclure_des_captures(&fenetre);
+    log::info!(
+        "{EXCLUSION} des captures: {}",
+        if capturable {
+            "non (essai)"
+        } else if exclue {
+            "oui"
+        } else {
+            "non"
+        }
+    );
+    if !reprenable(capturable, exclue) {
+        if let Err(e) = fenetre.destroy() {
+            log::warn!("defilante: fenetre non detruite: {e}");
+        }
+        return None;
+    }
+    let vivante = Arc::new(AtomicBool::new(true));
+    let pour_destruction = Arc::clone(&vivante);
+    fenetre.on_window_event(move |e| {
+        if matches!(e, tauri::WindowEvent::Destroyed) {
+            pour_destruction.store(false, Ordering::SeqCst);
+        }
+    });
+    Some(Controle {
+        app: app.clone(),
+        identifiant,
+        vivante,
+        partage: Arc::new(Partage::default()),
+        ecran: Mutex::new(None),
+        detruite: AtomicBool::new(false),
+        detenteur: nouveau_detenteur(),
     })
 }
 
@@ -391,14 +466,24 @@ impl Drop for Controle {
             s.pilule = None;
         }
         self.partage.affichage.fetch_add(1, Ordering::SeqCst);
-        if !self.vivante.load(Ordering::SeqCst) {
+        let detenteur = self.detenteur;
+        let encore = move |vivante: &AtomicBool| {
+            drop_detruit(
+                false,
+                vivante.load(Ordering::SeqCst),
+                detenteur,
+                DETENTEUR.load(Ordering::SeqCst),
+            )
+        };
+        if !encore(&self.vivante) {
             return;
         }
         log::warn!("defilante: fenetre lachee sans detruire");
         let app = self.app.clone();
         let vivante = Arc::clone(&self.vivante);
         let poste = self.app.run_on_main_thread(move || {
-            if !vivante.load(Ordering::SeqCst) {
+            // Reprise par `retrouver` entre-temps : elle n'est plus à nous.
+            if !encore(&vivante) {
                 return;
             }
             if let Some(f) = app.get_webview_window(ETIQUETTE_DEFILANTE) {
@@ -510,6 +595,25 @@ mod tests {
         assert!(!recoit_apres_geste(true, false, true, 5, 5));
         // Pilule retirée.
         assert!(!recoit_apres_geste(true, true, false, 5, 5));
+    }
+
+    #[test]
+    fn seul_le_dernier_detenteur_detruit_en_etant_lache() {
+        assert!(drop_detruit(false, true, 4, 4));
+        // Fenêtre reprise par `retrouver` (détenteur 5) : l'ancien (4) ne la détruit pas.
+        assert!(!drop_detruit(false, true, 4, 5));
+        // Déjà détruite par `detruire`, ou par Tauri.
+        assert!(!drop_detruit(true, true, 4, 4));
+        assert!(!drop_detruit(false, false, 4, 4));
+        let (a, b) = (nouveau_detenteur(), nouveau_detenteur());
+        assert!(b > a);
+    }
+
+    #[test]
+    fn reprise_seulement_exclue_ou_en_essai() {
+        assert!(reprenable(false, true));
+        assert!(reprenable(true, false));
+        assert!(!reprenable(false, false));
     }
 
     #[test]
