@@ -935,7 +935,10 @@ fn suite_main(
 /// du responsable) : le décalage observé, d'après la position lue à l'image gardée et
 /// maintenant, en pixels réels de la vue qui défile (`defiler::decalage_px`, B) ; une
 /// position inchangée donne `Lu(0)`. `Lu` seulement si les deux positions ont été lues ;
-/// sinon, ou si la vue a changé de hauteur, `Aucun` : les pixels commandés ne sont jamais
+/// sinon, ou si la vue ou la page ont changé de hauteur entre les deux (vue redimensionnée,
+/// image paresseuse, chargement à l'infini : les pour cent ne se comparent plus), `Aucun` :
+/// l'image est mesurée sans lu, et la position gardée repart juste à la prochaine image
+/// gardée. Les pixels commandés ne sont jamais
 /// passés à la mesure (C, seconde reprise R1 et R3). Dans une vue unie, un `Lu(e)` non nul
 /// fait rendre `Avance(e)` (C, complément) : il ne vient donc que d'une vraie lecture.
 pub fn attendu(gardee: Option<Position>, maintenant: Option<Position>) -> Attendu {

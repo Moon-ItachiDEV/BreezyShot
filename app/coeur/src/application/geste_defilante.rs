@@ -2832,4 +2832,235 @@ mod tests {
         });
         assert_eq!(fins.count(), 0);
     }
+
+    // --- Le fil avec la vraie mesure et le vrai assemblage (relecture finale, P1) ---
+    //
+    // Une page de texte synthétique sans période (lignes de 20 px, longueur et encre tirées
+    // d'un hachage) ; la position imite UI Automation : `pour_cent = y / parcours`,
+    // `vue = zone / page`, `hauteur_vue = zone × biais`. Un pas fait la moitié de la zone :
+    // deux pas de suite sortent de la portée de la mesure, comme en vrai (les faux du dessus
+    // n'ont qu'une ligne et une portée de 90 lignes).
+
+    const TEXTE_L: u32 = 160;
+    const TEXTE_V: i32 = 300;
+
+    fn hachage(a: u32, b: u32, c: u32) -> u32 {
+        let mut x = a
+            .wrapping_mul(0x9E37_79B1)
+            .wrapping_add(b.wrapping_mul(0x85EB_CA77))
+            .wrapping_add(c.wrapping_mul(0xC2B2_AE3D));
+        x ^= x >> 15;
+        x = x.wrapping_mul(0x2C1B_3C6D);
+        x ^= x >> 12;
+        x = x.wrapping_mul(0x297A_2D39);
+        x ^ (x >> 15)
+    }
+
+    /// Les lignes `y..y + hauteur` de la page de texte, blanches au-dessus de `blanc`.
+    fn lignes_de_texte(y: i32, hauteur: i32, blanc: i32) -> Pixels {
+        let mut rgba = Vec::with_capacity((TEXTE_L * hauteur as u32 * 4) as usize);
+        for r in 0..hauteur {
+            let yp = (y + r) as u32;
+            let bande = yp / 20;
+            let fin = 30 + hachage(bande, 0, 3) % 120;
+            for x in 0..TEXTE_L {
+                let encre = (yp as i32) >= blanc
+                    && (3..15).contains(&(yp % 20))
+                    && (10..10 + fin).contains(&x)
+                    && !hachage(bande, x / 6, 1).is_multiple_of(3)
+                    && !hachage(x, yp, 2).is_multiple_of(4);
+                let c = if encre { 30 } else { 250 };
+                rgba.extend_from_slice(&[c, c, c, 255]);
+            }
+        }
+        Pixels {
+            largeur: TEXTE_L,
+            hauteur: hauteur as u32,
+            rgba,
+        }
+    }
+
+    struct PageTexte {
+        y: i32,
+        /// Hauteur de la page moins la vue.
+        parcours: i32,
+        pas: u32,
+        /// (numéro du pas, pixels ajoutés au bas de la page pendant ce pas).
+        grossit: Option<(u32, i32)>,
+        /// Lignes blanches en haut de la page.
+        blanc: i32,
+    }
+
+    struct SourceTexte(Arc<Mutex<PageTexte>>);
+
+    impl Source for SourceTexte {
+        fn prendre(&mut self, dest: &mut Pixels) -> Result<Duration, String> {
+            let p = self.0.lock().unwrap();
+            *dest = lignes_de_texte(p.y, TEXTE_V, p.blanc);
+            Ok(Duration::from_millis(1))
+        }
+    }
+
+    struct PiloteTexte {
+        page: Arc<Mutex<PageTexte>>,
+        /// `hauteur_vue` annoncée / hauteur réelle de la vue.
+        biais: f64,
+    }
+
+    impl Pilote for PiloteTexte {
+        fn moyen(&self) -> Option<Moyen> {
+            Some(Moyen::Message)
+        }
+        fn abandonner(&mut self) -> Option<Moyen> {
+            None
+        }
+        fn descendre(&mut self, pixels: i32) -> Result<Envoi, String> {
+            let mut p = self.page.lock().unwrap();
+            p.pas += 1;
+            if let Some((n, dh)) = p.grossit {
+                if p.pas == n {
+                    p.parcours += dh;
+                }
+            }
+            p.y = (p.y + pixels).clamp(0, p.parcours);
+            Ok(Envoi::Envoye)
+        }
+        fn position(&self) -> Option<Position> {
+            let p = self.page.lock().unwrap();
+            Some(Position {
+                pour_cent: f64::from(p.y) * 100.0 / f64::from(p.parcours),
+                vue: f64::from(TEXTE_V) * 100.0 / f64::from(p.parcours + TEXTE_V),
+                hauteur_vue: (f64::from(TEXTE_V) * self.biais).round() as i32,
+            })
+        }
+        fn constater(&mut self, _: u32) {}
+        fn avance_par_cran(&self) -> Option<u32> {
+            None
+        }
+    }
+
+    struct Bilan {
+        /// La capture a fini seule (aucun « Terminer » de l'essai).
+        seule: bool,
+        image: Arc<Pixels>,
+        /// La hauteur de la page entière à la fin.
+        page: i32,
+        y: i32,
+        messages: Vec<Option<&'static str>>,
+    }
+
+    /// Une capture défilante de la page de texte, avec la vraie mesure et le vrai
+    /// assemblage. Si plus aucun pas ne part pendant 3 s (la capture a calé), l'essai
+    /// clique « Terminer ».
+    fn capturer_texte(parcours: i32, grossit: Option<(u32, i32)>, blanc: i32, biais: f64) -> Bilan {
+        let page = Arc::new(Mutex::new(PageTexte {
+            y: 0,
+            parcours,
+            pas: 0,
+            grossit,
+            blanc,
+        }));
+        let (envoi, reception) = mpsc::channel();
+        let (vers_essai, signaux) = mpsc::channel();
+        let arret = Arc::new(AtomicBool::new(false));
+        let premiere = lignes_de_texte(0, TEXTE_V, blanc);
+        let d = Depart {
+            numero: 1,
+            zone: Rect {
+                x: 0,
+                y: 0,
+                largeur: TEXTE_L as i32,
+                hauteur: TEXTE_V,
+            },
+            fenetre: None,
+            relache: Instant::now(),
+            ecrans: Vec::new(),
+            apercu: Arc::new(Mutex::new(None)),
+            apercu_taille: (84, 200),
+            reception,
+            envoi: envoi.clone(),
+            arret: Arc::clone(&arret),
+            verrouillages: 0,
+        };
+        let sortie = Sortie {
+            arret: Arc::clone(&arret),
+            poster: Box::new(move |s| {
+                let _ = vers_essai.send(s);
+            }),
+        };
+        let source = SourceTexte(Arc::clone(&page));
+        let pilote = PiloteTexte {
+            page: Arc::clone(&page),
+            biais,
+        };
+        let assemblage = Assemblage::nouveau(&premiere, regles::limite(TEXTE_L)).unwrap();
+        let fil = std::thread::spawn(move || {
+            Fil::nouveau(
+                d,
+                sortie,
+                source,
+                Some(pilote),
+                VraiAtelier(Some(assemblage)),
+                premiere,
+                Duration::ZERO,
+                Vec::new,
+                || 0,
+            )
+            .courir();
+        });
+        let debut = Instant::now();
+        let mut dernier_pas = (0, Instant::now());
+        let mut seule = true;
+        let mut messages = Vec::new();
+        let image = loop {
+            assert!(
+                debut.elapsed() < Duration::from_secs(120),
+                "le fil doit finir"
+            );
+            match signaux.recv_timeout(Duration::from_millis(50)) {
+                Ok(Signal::Assemblee { pixels, .. }) => break pixels,
+                Ok(Signal::Message { texte, .. }) => messages.push(texte),
+                Ok(Signal::Impossible { .. } | Signal::Annulee { .. }) => {
+                    panic!("la capture doit rendre une image")
+                }
+                _ => {}
+            }
+            let pas = page.lock().unwrap().pas;
+            if pas != dernier_pas.0 {
+                dernier_pas = (pas, Instant::now());
+            } else if seule && dernier_pas.1.elapsed() > Duration::from_secs(3) {
+                seule = false;
+                envoi.send(Commande::Terminer(Instant::now())).unwrap();
+            }
+        };
+        fil.join().unwrap();
+        let p = page.lock().unwrap();
+        Bilan {
+            seule,
+            image,
+            page: p.parcours + TEXTE_V,
+            y: p.y,
+            messages,
+        }
+    }
+
+    #[test]
+    fn fil_la_page_grandit_pendant_la_capture() {
+        // Relecture finale, P1 : la page grandit de 100 px pendant le cinquième pas, l'image
+        // gardée étant à y = 600 sur un parcours de 2 400 px. Lu sur la seule vue d'après,
+        // le décalage serait faux de 600 × 100 / 2 400 = 25 px : la capture calait, image
+        // tronquée, sans rien dire. Ce pas se mesure maintenant sans lu, et la capture va
+        // seule jusqu'au bas de la page grandie, au pixel près.
+        let b = capturer_texte(2400, Some((5, 100)), 0, 1.0);
+        assert!(b.seule, "la capture doit finir seule en bas");
+        assert_eq!(b.page, 2800);
+        assert_eq!(b.y, 2500, "la page est allée au bas");
+        assert_eq!(b.image.hauteur as i32, b.page);
+        // Pas d'`assert_eq!` : l'image entière irait au journal.
+        assert!(
+            *b.image == lignes_de_texte(0, b.page, 0),
+            "toute la page, au pixel près"
+        );
+        assert!(b.messages.is_empty(), "{:?}", b.messages);
+    }
 }
