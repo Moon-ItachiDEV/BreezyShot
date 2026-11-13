@@ -21,7 +21,7 @@ use crate::fenetres::Rect;
 use crate::systeme::Theme;
 
 /// Vrai là où le menu est la fenêtre web (les clics sur l'icône sont rapportés).
-pub const MENU_WEB: bool = !cfg!(target_os = "linux");
+pub const MENU_WEB: bool = crate::systeme::CLICS_ICONE_RAPPORTES;
 
 /// L'image posée en ce moment (thème de la barre, taille), pour le quart de tour. Le verrou
 /// est tenu pendant chaque `set_icon` : un changement de thème et une image du tour ne se
