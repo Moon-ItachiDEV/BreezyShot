@@ -398,7 +398,8 @@ const L = 1280, H = 400;
       p = await page({ echelle: e, l, h });
       id = prochain++;
       await p.evaluate(([id, R, RH, ecr]) => __emettre('selection:montrer', { id, numero: id, largeur: R, hauteur: RH, ecrans: ecr, cote_min: 3 }), [id, R, RH, ecr]);
-      await p.waitForTimeout(120);
+      // Prête (mesure faite) plutôt qu'une pause fixe : sous charge, 120 ms ne suffisaient pas.
+      await attendrePrete(p, id);
       await geste(p); await p.waitForTimeout(80);
       const vu = await vue(p);
       if (nom === 'borne') await p.screenshot({ path: `${SORTIE}/selection-sale-${Math.round(e * 10000)}-${l}.png` });
@@ -891,6 +892,229 @@ const L = 1280, H = 400;
   await p.context().close();
   console.log('POINTS DU MODE FENETRE :', nf);
 
+  {
+    // 13. Mode texte (0.5, §2.3) : une zone comme le mode zone, avec le nom « Copier le texte :
+    // sélectionnez une zone » ; `selection:balayer` joue 400 ms (120 ms réduit, sans bande).
+    async function montrerTexte(p, numero = null) {
+      const i = prochain++;
+      await p.evaluate(
+        ([i, n]) =>
+          __emettre('selection:montrer', {
+            id: i,
+            numero: n ?? i,
+            largeur: innerWidth,
+            hauteur: innerHeight,
+            ecrans: [{ x: 0, y: 0, largeur: innerWidth, hauteur: innerHeight }],
+            cote_min: 3,
+            mode: 'texte',
+          }),
+        [i, numero],
+      );
+      await attendrePrete(p, i);
+      await p.waitForTimeout(80);
+      await vider(p);
+      return i;
+    }
+    const etatBalayage = (p) =>
+      p.evaluate(() => {
+        const z = document.getElementById('zone'),
+          b = z.querySelector('.bande');
+        return {
+          balaye: document.body.classList.contains('balaye'),
+          bande: getComputedStyle(b).display,
+          anims: z
+            .getAnimations({ subtree: true })
+            .map((a) => [a.animationName, a.effect.getTiming().duration])
+            .sort(),
+          zone: [z.style.left, z.style.top, z.style.width, z.style.height],
+          glisse: document.body.classList.contains('glisse'),
+        };
+      });
+    p = await page();
+    const nomDe = () =>
+      p.evaluate(() => [
+        document.body.getAttribute('role'),
+        document.body.getAttribute('aria-label'),
+      ]);
+    id = await montrer(p);
+    const nomZone = await nomDe();
+    const pxZone = await ligne(p, 200);
+    id = await montrerTexte(p);
+    const nomTexte = await nomDe();
+    const pxTexte = await ligne(p, 200);
+    const txt = await p.evaluate(
+      () => document.body.innerText.trim() + '|' + document.body.textContent.trim(),
+    );
+    verifier(
+      nomZone[0] === null &&
+        nomZone[1] === null &&
+        nomTexte[0] === 'application' &&
+        nomTexte[1] === 'Copier le texte : sélectionnez une zone',
+      '13 mode texte : nom « Copier le texte : sélectionnez une zone » (aucun en mode zone)',
+      JSON.stringify([nomZone, nomTexte]),
+    );
+    verifier(
+      txt === '|' &&
+        JSON.stringify(pxZone) === JSON.stringify(pxTexte) &&
+        (await p.evaluate(() => getComputedStyle(document.documentElement).cursor)) === 'crosshair',
+      '13 mode texte : même voile, croix, aucun texte affiché',
+      txt,
+    );
+    await glisser(p, [100, 100], [300, 220]);
+    t = await termine(p);
+    verifier(
+      t.length === 1 &&
+        JSON.stringify(t[0][1]) ===
+          JSON.stringify({
+            id,
+            numero: id,
+            depart: { x: 100, y: 100 },
+            arrivee: { x: 300, y: 220 },
+          }),
+      '13 mode texte : selection_terminee comme une zone',
+      JSON.stringify(t),
+    );
+    await vider(p);
+    const relache = Date.now();
+    await p.waitForTimeout(600); // le cœur balaie après la découpe : le filet du relâcher court
+    // Balayage d'un autre affichage : ignoré.
+    await p.evaluate(
+      (i) =>
+        __emettre('selection:balayer', {
+          id: i + 1000,
+          x: 100,
+          y: 100,
+          largeur: 201,
+          hauteur: 121,
+          reduites: false,
+        }),
+      id,
+    );
+    const ignore = await etatBalayage(p);
+    const t0 = await p.evaluate((i) => {
+      __emettre('selection:balayer', {
+        id: i,
+        x: 100,
+        y: 100,
+        largeur: 201,
+        hauteur: 121,
+        reduites: false,
+      });
+      return performance.now();
+    }, id);
+    const pendant = await etatBalayage(p);
+    await p.screenshot({ path: `${SORTIE}/selection-texte-balayage.png` });
+    await p
+      .waitForFunction(() => !document.body.classList.contains('balaye'), null, { timeout: 2000 })
+      .catch(() => {});
+    const duree = await p.evaluate((t0) => performance.now() - t0, t0);
+    const apres = await etatBalayage(p);
+    verifier(
+      !ignore.balaye &&
+        pendant.balaye &&
+        pendant.bande === 'block' &&
+        JSON.stringify(pendant.anims) ===
+          JSON.stringify([
+            ['efface', 400],
+            ['respire', 400],
+            ['traverse', 400],
+          ]) &&
+        JSON.stringify(pendant.zone) === JSON.stringify(['100px', '100px', '201px', '121px']) &&
+        pendant.glisse,
+      '13 selection:balayer : respiration, bande et teinte de 400 ms sur la zone (autre id : rien)',
+      JSON.stringify({ ignore, pendant }),
+    );
+    // Borne basse seulement : la fin elle-même est prouvée par `apres.balaye` faux.
+    verifier(
+      duree >= 390 && !apres.balaye && apres.glisse && (await appels(p)).length === 0,
+      "13 balayage fini après 400 ms : la zone reste, rien n'est envoyé",
+      JSON.stringify({ duree, apres }),
+    );
+    // Le gel peut durer 1,5 s après le relâcher : le filet repart du balayage.
+    await p.waitForTimeout(Math.max(0, 1750 - (Date.now() - relache)));
+    const tenu = await etatZone(p);
+    verifier(
+      tenu.glisse,
+      '13 filet reparti au balayage : zone encore montrée 1,75 s après le relâcher',
+      JSON.stringify(tenu),
+    );
+    await p.evaluate(() => __emettre('selection:cachee', {}));
+    // Animations réduites : 120 ms, sans bande ni mouvement.
+    id = await montrerTexte(p);
+    await glisser(p, [400, 100], [600, 300]);
+    const t1 = await p.evaluate((i) => {
+      __emettre('selection:balayer', {
+        id: i,
+        x: 400,
+        y: 100,
+        largeur: 201,
+        hauteur: 201,
+        reduites: true,
+      });
+      return performance.now();
+    }, id);
+    const reduit = await etatBalayage(p);
+    await p
+      .waitForFunction(() => !document.body.classList.contains('balaye'), null, { timeout: 2000 })
+      .catch(() => {});
+    const dureeR = await p.evaluate((t1) => performance.now() - t1, t1);
+    // Borne haute gardée : elle prouve la durée réduite (120 ms et non 400).
+    verifier(
+      reduit.balaye &&
+        reduit.bande === 'none' &&
+        reduit.anims.length === 0 &&
+        dureeR >= 110 &&
+        dureeR < 390,
+      '13 animations réduites : 120 ms, sans bande ni mouvement',
+      JSON.stringify({ reduit, dureeR }),
+    );
+    // Échap en mode texte : une annulation, comme une zone.
+    await p.evaluate(() => __emettre('selection:cachee', {}));
+    id = await montrerTexte(p);
+    await p.keyboard.press('Escape');
+    await p.waitForTimeout(40);
+    a = await appels(p);
+    verifier(
+      JSON.stringify(a) ===
+        JSON.stringify([['selection_annulee', { id, numero: id, cause: 'echap' }]]),
+      '13 mode texte : Échap annule une fois',
+      JSON.stringify(a),
+    );
+    // Retour au mode zone : plus de nom.
+    id = await montrer(p);
+    const nomRetour = await nomDe();
+    verifier(
+      nomRetour[0] === null && nomRetour[1] === null,
+      '13 retour au mode zone : plus de nom',
+      JSON.stringify(nomRetour),
+    );
+    await p.context().close();
+    // Mode texte sous la CSP de l'app, en sombre : aucun refus.
+    p = await page({ csp: true, theme: 'dark' });
+    id = await montrerTexte(p);
+    await glisser(p, [100, 100], [200, 200]);
+    await p.evaluate(
+      (i) =>
+        __emettre('selection:balayer', {
+          id: i,
+          x: 100,
+          y: 100,
+          largeur: 101,
+          hauteur: 101,
+          reduites: false,
+        }),
+      id,
+    );
+    await p.waitForTimeout(50);
+    const refusT = await p.evaluate(() => window.__refus);
+    const bt = await etatBalayage(p);
+    verifier(
+      refusT.length === 0 && bt.balaye && bt.anims.length === 3,
+      "13 mode texte, sombre, CSP de l'app : aucun refus",
+      JSON.stringify({ refusT, bt }),
+    );
+    await p.context().close();
+  }
   console.log('ECHECS :', echecs);
   console.log('ERREURS PAGE :', JSON.stringify(erreurs));
   if (erreurs.length) echecs++;

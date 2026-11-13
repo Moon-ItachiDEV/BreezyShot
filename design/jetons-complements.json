@@ -2859,6 +2859,12 @@
     "origine": "design/historique/index.html, onglet « Copier le texte » ; contrat 0.5 §10."
    },
    {
+    "name": "texte-teinte-editeur",
+    "value": "6%",
+    "usage": "Balayage de l'image dans l'éditeur : teinte d'accent qui s'efface.",
+    "origine": "design/historique/index.html, .ov.ed .zone.scan::before."
+   },
+   {
     "name": "historique-focus",
     "value": "2px",
     "usage": "Contour de focus.",

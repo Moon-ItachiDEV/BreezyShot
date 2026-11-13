@@ -1644,6 +1644,688 @@ const CHARGE = {
     await fin(p, '20 gomme');
   }
 
+  // ---------- 21. Copier le texte (contrat 0.5, §2.4, §5.6, §12.2) ----------
+  // Le cœur simulé rend les boîtes de 7 mots sur 3 lignes, en pixels de l'image composée ;
+  // jamais un texte. Les points sont pris à la place des mots, calculée depuis `__ed.vue`.
+  const MOTS = [
+    { x: 40, y: 40, largeur: 60, hauteur: 20, ligne: 0 },
+    { x: 110, y: 40, largeur: 50, hauteur: 20, ligne: 0 },
+    { x: 170, y: 40, largeur: 80, hauteur: 20, ligne: 0 },
+    { x: 40, y: 80, largeur: 70, hauteur: 20, ligne: 1 },
+    { x: 120, y: 80, largeur: 60, hauteur: 20, ligne: 1 },
+    { x: 40, y: 120, largeur: 50, hauteur: 20, ligne: 2 },
+    { x: 100, y: 120, largeur: 90, hauteur: 20, ligne: 2 },
+  ];
+  const centreMot = (i) => [MOTS[i].x + MOTS[i].largeur / 2, MOTS[i].y + MOTS[i].hauteur / 2];
+  const calque = (p) =>
+    p.evaluate(() => {
+      const c = document.querySelector('.calque-texte');
+      return c && { choix: c.classList.contains('choix'), nom: c.getAttribute('aria-label') };
+    });
+  // « Texte », l'export de but texte, puis `editeur:texte` ; attend le calque de choix (ou
+  // sa fin). Rend le numéro de l'export.
+  const lireTexte = async (p, o = {}) => {
+    const avant = await p.evaluate(() => __exports.length);
+    await bouton(p, 'Texte').click();
+    await p.waitForFunction((n) => __exports.length > n, avant, { timeout: 3000 }).catch(() => {});
+    const numero = await p.evaluate(() => __exports.at(-1).numero);
+    await p.evaluate(
+      ([numero, o, mots]) =>
+        __emettre('editeur:texte', { id: 7, numero, etat: o.etat || 'lu', mots: o.mots || mots }),
+      [numero, o, MOTS],
+    );
+    if (o.attendre !== false)
+      await p
+        .waitForFunction(() => document.querySelector('.calque-texte.choix'), null, {
+          timeout: 3000,
+        })
+        .catch(() => {});
+    await uneImage(p);
+    return numero;
+  };
+  const copies = (p) =>
+    p.evaluate(() => __appels.filter((a) => a[0] === 'editeur_copier_texte').map((a) => a[1]));
+  // Boîtes affichées (pixels CSS de la page) et boîtes attendues depuis la vue.
+  const boites = (p) =>
+    p.$$eval('.calque-texte .mot', (bs) =>
+      bs.map((b) => {
+        const r = b.getBoundingClientRect();
+        return [r.left, r.top, r.width, r.height];
+      }),
+    );
+  const attendues = async (p) => {
+    const r = [];
+    for (const m of MOTS) {
+      const [x0, y0] = await point(p, m.x, m.y);
+      const [x1, y1] = await point(p, m.x + m.largeur, m.y + m.hauteur);
+      r.push([x0, y0, x1 - x0, y1 - y0]);
+    }
+    return r;
+  };
+  const justes = (a, b) =>
+    a.length === b.length && a.every((v, i) => v.every((x, j) => Math.abs(x - b[i][j]) < 0.02));
+  {
+    const p = await page({ charge: { texte: true } });
+    const haut = await p.$$eval('#barre-haut > button', (bs) =>
+      bs.map((b) => [b.getAttribute('aria-label') || b.textContent.trim(), b.title]),
+    );
+    verifier(
+      JSON.stringify(haut) ===
+        '[["Fermer","Fermer"],["Texte","Copier le texte"],["Enregistrer","Enregistrer"],["Copier","Copier"]]' &&
+        (await p.getByRole('button', { name: 'Texte', exact: true }).count()) === 1,
+      '21 « Texte » (infobulle « Copier le texte ») entre Fermer et Enregistrer',
+      JSON.stringify(haut),
+    );
+    // R7 : un Bloc noir posé ; l'image lue est l'image composée, la vue du document.
+    await ajouter(p, 'Flou');
+    await variante(p, 'Flou', 'Bloc noir');
+    await p.keyboard.press('Escape');
+    await glisser(p, [30, 70], [200, 110]);
+    await vider(p);
+    const t0 = await p.evaluate(() => performance.now());
+    await bouton(p, 'Texte').click();
+    await p.waitForFunction(() => __exports.length > 0, null, { timeout: 3000 }).catch(() => {});
+    const ex = await p.evaluate(() => {
+      const e = __exports.at(-1);
+      const img = __ed.dessin.composer(__ed.h.doc, __ed.fond);
+      const corps = new Uint8Array(window.__dernierCorps);
+      let egal = corps.length === img.rgba.length;
+      for (let i = 0; egal && i < corps.length; i++) egal = corps[i] === img.rgba[i];
+      // Le Bloc noir (de 30,70 à 200,110) : uni et sombre dans l'image lue.
+      const px = (x, y) => [
+        ...corps.slice((y * img.largeur + x) * 4, (y * img.largeur + x) * 4 + 4),
+      ];
+      const noir = [px(100, 90), px(150, 100), px(60, 75)].every(
+        (v) => v.join() === px(100, 90).join() && v[0] < 30 && v[3] === 255,
+      );
+      return {
+        masques: __ed.h.doc.objets.map((o) => o.type + ':' + (o.sorte || o.variante || '')),
+        but: e.entetes['x-editeur-but'],
+        egal,
+        noir,
+        grise: [...document.querySelectorAll('#barre-haut button')].find(
+          (b) => b.textContent.trim() === 'Texte',
+        ).disabled,
+        calque: !!document.querySelector('.calque-texte[role="application"]'),
+        numero: e.numero,
+      };
+    });
+    verifier(
+      ex.but === 'texte' && ex.egal && ex.noir && ex.grise && ex.calque,
+      '21 clic : export de but texte = l’image composée (Bloc noir compris, R7), « Texte » grisé, balayage',
+      JSON.stringify(ex),
+    );
+    const anim = await p.evaluate(() =>
+      document
+        .querySelector('.calque-texte .balayage')
+        .getAnimations({ subtree: true })
+        .map((a) => [a.animationName, a.effect.getTiming().duration])
+        .sort(),
+    );
+    await p.evaluate(
+      ([n, mots]) => __emettre('editeur:texte', { id: 7, numero: n, etat: 'lu', mots }),
+      [ex.numero, MOTS.map((m) => ({ ...m, texte: 'SECRET' }))],
+    );
+    await p
+      .waitForFunction(() => document.querySelector('.calque-texte.choix'), null, { timeout: 3000 })
+      .catch(() => {});
+    const dt = await p.evaluate((t0) => performance.now() - t0, t0);
+    const c1 = await calque(p);
+    const etat = await p.evaluate(() => ({
+      n: document.querySelectorAll('.calque-texte .mot').length,
+      copier: document.querySelector('.barre-texte [data-texte="copier"]').disabled,
+      texte: document.querySelector('.calque-texte').innerText.replace(/\s+/g, ' ').trim(),
+      secret: document.documentElement.outerHTML.includes('SECRET'),
+      focus: document.activeElement === document.querySelector('.calque-texte'),
+      grise: [...document.querySelectorAll('#barre-haut button')].find(
+        (b) => b.textContent.trim() === 'Texte',
+      ).disabled,
+      exportee: __ed.exportee,
+    }));
+    verifier(
+      JSON.stringify(anim) === '[["efface",400],["respire",400],["traverse",400]]' && dt >= 390,
+      '21 balayage de 400 ms avant le choix',
+      JSON.stringify([anim, dt]),
+    );
+    verifier(
+      c1.choix &&
+        c1.nom === 'Choisir le texte' &&
+        etat.n === 7 &&
+        etat.copier &&
+        etat.focus &&
+        !etat.grise &&
+        etat.exportee === null,
+      '21 editeur:texte : calque « Choisir le texte », 7 boîtes, « Copier » grisé, export fini sans « exporté »',
+      JSON.stringify([c1, etat]),
+    );
+    verifier(
+      etat.texte === 'Copier Tout copier' && !etat.secret,
+      '21 la page ne contient jamais de texte reconnu',
+      JSON.stringify(etat),
+    );
+    const tb = p.getByRole('toolbar', { name: 'Texte', exact: true });
+    const noms = await tb
+      .getByRole('button')
+      .evaluateAll((bs) => bs.map((b) => b.getAttribute('aria-label') || b.textContent.trim()));
+    verifier(
+      (await p.getByRole('application', { name: 'Choisir le texte', exact: true }).count()) === 1 &&
+        JSON.stringify(noms) === '["Copier","Tout copier","Fermer"]',
+      '21 noms et rôles : calque « Choisir le texte », barre « Texte » : Copier, Tout copier, Fermer',
+      JSON.stringify(noms),
+    );
+    verifier(
+      justes(await boites(p), await attendues(p)),
+      '21 boîtes à la place des mots (échelle 1)',
+    );
+    // Survol : 14 % d'accent ; zoom et déplacement ignorés pendant le choix.
+    const [sx, sy] = await point(p, ...centreMot(1));
+    await p.mouse.move(sx, sy);
+    await uneImage(p);
+    const survol = await p.$$eval('.calque-texte .mot', (bs) =>
+      bs.map((b) => b.classList.contains('survol')),
+    );
+    const vue0 = await p.evaluate(() => JSON.stringify(__ed.vue));
+    await p.mouse.wheel(0, -300);
+    await p.keyboard.down('Control');
+    await p.mouse.wheel(0, -300);
+    await p.keyboard.press('Equal');
+    await p.keyboard.press('Digit1');
+    await p.keyboard.up('Control');
+    await p.keyboard.press('Space');
+    await p.keyboard.press('Shift+ArrowLeft');
+    await uneImage(p);
+    const vue1 = await p.evaluate(() => JSON.stringify(__ed.vue));
+    verifier(
+      JSON.stringify(survol) === '[false,true,false,false,false,false,false]' && vue0 === vue1,
+      '21 survol d’un mot ; molette, Ctrl + molette, Ctrl + = et Ctrl + 1 sans effet sur la vue',
+      JSON.stringify([survol, vue0, vue1]),
+    );
+    await p.screenshot({ path: path.join(SORTIE, 'editeur-texte-choix-clair.png') });
+    // Tirer du mot 2 au mot 5, puis « Copier ».
+    await glisser(p, centreMot(2), centreMot(5));
+    const ch = await p.$$eval('.calque-texte .mot', (bs) =>
+      bs.map((b) => b.classList.contains('choisi')),
+    );
+    await p.getByRole('button', { name: 'Copier', exact: true }).last().click();
+    await uneImage(p);
+    const c2 = await copies(p);
+    verifier(
+      JSON.stringify(ch) === '[false,false,true,true,true,true,false]' &&
+        JSON.stringify(c2) === JSON.stringify([{ id: 7, numero: ex.numero, debut: 2, fin: 5 }]) &&
+        !(await calque(p)),
+      '21 tirer du mot 2 au mot 5 puis « Copier » : {debut: 2, fin: 5}, le calque se ferme',
+      JSON.stringify([ch, c2]),
+    );
+    await p.evaluate(
+      (n) => __emettre('editeur:texte_copie', { id: 7, numero: n, etat: 'fait' }),
+      ex.numero,
+    );
+    await uneImage(p);
+    const m1 = await p.$eval('#message', (m) => [
+      m.textContent.trim(),
+      m.classList.contains('on'),
+      m.classList.contains('echec'),
+    ]);
+    verifier(
+      JSON.stringify(m1) === '["Texte copié",true,false]',
+      '21 editeur:texte_copie fait : « Texte copié »',
+      JSON.stringify(m1),
+    );
+    // Clavier : Espace, Maj + Droite × 2, Entrée → {0, 2}.
+    await vider(p);
+    let n = await lireTexte(p);
+    await p.keyboard.press('Space');
+    await p.keyboard.press('Shift+ArrowRight');
+    await p.keyboard.press('Shift+ArrowRight');
+    const curseur = await p.$$eval('.calque-texte .mot', (bs) =>
+      bs.map((b) => b.classList.contains('curseur')),
+    );
+    await p.keyboard.press('Enter');
+    await uneImage(p);
+    let c = await copies(p);
+    verifier(
+      JSON.stringify(c) === JSON.stringify([{ id: 7, numero: n, debut: 0, fin: 2 }]) &&
+        curseur[2] &&
+        curseur.filter(Boolean).length === 1,
+      '21 Espace, Maj + Droite × 2, Entrée : {0, 2} (curseur sur le mot 2)',
+      JSON.stringify([c, curseur]),
+    );
+    // Bas, Bas (ligne au plus près), Maj + Haut, Entrée.
+    await vider(p);
+    n = await lireTexte(p);
+    for (const k of ['ArrowRight', 'ArrowRight', 'ArrowDown', 'Shift+ArrowDown'])
+      await p.keyboard.press(k);
+    await p.keyboard.press('Enter');
+    c = await copies(p);
+    verifier(
+      JSON.stringify(c) === JSON.stringify([{ id: 7, numero: n, debut: 4, fin: 6 }]),
+      '21 flèches : ligne du dessous au plus près, Maj étend : {4, 6}',
+      JSON.stringify(c),
+    );
+    // Entrée sans choix : tout ; Ctrl + A puis Ctrl + C : tout ; « Tout copier ».
+    await vider(p);
+    n = await lireTexte(p);
+    await p.keyboard.press('Enter');
+    await vider(p);
+    const n2 = await lireTexte(p);
+    await p.keyboard.press('Control+a');
+    await p.keyboard.press('Control+c');
+    const n3 = await lireTexte(p);
+    await p.getByRole('button', { name: 'Tout copier', exact: true }).click();
+    c = await copies(p);
+    const exportsCopier = await p.evaluate(
+      () => __exports.filter((e) => e.entetes['x-editeur-but'] === 'copier').length,
+    );
+    verifier(
+      JSON.stringify(c) ===
+        JSON.stringify([
+          { id: 7, numero: n2, debut: 0, fin: 6 },
+          { id: 7, numero: n3, debut: 0, fin: 6 },
+        ]) && exportsCopier === 0,
+      '21 Ctrl + A puis Ctrl + C, « Tout copier » : tout (Ctrl + C ne copie pas l’image)',
+      JSON.stringify(c),
+    );
+    // Échap : sort sans rien copier ni fermer la fenêtre ; « Fermer » aussi.
+    await vider(p);
+    await lireTexte(p);
+    await p.keyboard.press('Escape');
+    await uneImage(p);
+    const e1 = [
+      await calque(p),
+      await appels(p, 'editeur_copier_texte'),
+      await appels(p, 'editeur_fermer'),
+    ];
+    await lireTexte(p);
+    await p.getByRole('button', { name: 'Fermer', exact: true }).last().click();
+    const e2 = [await calque(p), await appels(p, 'editeur_copier_texte')];
+    verifier(
+      e1[0] === null &&
+        e1[1].length === 0 &&
+        e1[2].length === 0 &&
+        e2[0] === null &&
+        e2[1].length === 0,
+      '21 Échap et « Fermer » : le calque se ferme, rien n’est copié, la fenêtre reste',
+      JSON.stringify([e1, e2]),
+    );
+    // Copie en échec, lecture en échec, rien trouvé (4 s, sans « Réessayer »).
+    await p.evaluate(() => __emettre('editeur:texte_copie', { id: 7, numero: 1, etat: 'echec' }));
+    const m2 = await p.$eval('#message', (m) => m.textContent.trim());
+    await lireTexte(p, { etat: 'echec', attendre: false });
+    await p
+      .waitForFunction(() => !document.querySelector('.calque-texte'), null, { timeout: 3000 })
+      .catch(() => {});
+    const m3 = await p.$eval('#message', (m) => m.textContent.trim());
+    await lireTexte(p, { etat: 'vide', mots: [], attendre: false });
+    await p
+      .waitForFunction(() => !document.querySelector('.calque-texte'), null, { timeout: 3000 })
+      .catch(() => {});
+    const tv = await p.evaluate(() => performance.now());
+    const m4 = await p.$eval('#message', (m) => [
+      m.textContent.trim(),
+      m.classList.contains('on'),
+      m.classList.contains('echec'),
+    ]);
+    const reessayer = await p.getByText('Réessayer').count();
+    await p.waitForTimeout(3600);
+    const encore = await p.$eval('#message', (m) => m.classList.contains('on'));
+    await p
+      .waitForFunction(() => !document.querySelector('#message').classList.contains('on'), null, {
+        timeout: 1500,
+      })
+      .catch(() => {});
+    const tf = await p.evaluate((tv) => performance.now() - tv, tv);
+    verifier(
+      m2 === 'Impossible de copier' && m3 === 'Impossible de lire le texte',
+      '21 copie en échec : « Impossible de copier » ; lecture en échec : « Impossible de lire le texte »',
+      JSON.stringify([m2, m3]),
+    );
+    verifier(
+      JSON.stringify(m4) === '["Aucun texte trouvé",true,true]' &&
+        reessayer === 0 &&
+        encore &&
+        tf >= 3900 &&
+        tf < 6000, // borne haute large : la pilule part seule, sans clic
+      '21 vide : « Aucun texte trouvé » 4 s, sans « Réessayer »',
+      JSON.stringify([m4, reessayer, encore, tf]),
+    );
+    // Un résultat d'un autre document ou d'un autre numéro : rien.
+    await vider(p);
+    await bouton(p, 'Texte').click();
+    await p
+      .waitForFunction(() => __appels.some((a) => a[0] === 'editeur_exporter'), null, {
+        timeout: 3000,
+      })
+      .catch(() => {});
+    const nn = await p.evaluate(() => __exports.at(-1).numero);
+    await p.evaluate((n) => {
+      __emettre('editeur:texte', { id: 8, numero: n, etat: 'lu', mots: [] });
+      __emettre('editeur:texte', { id: 7, numero: n + 50, etat: 'vide', mots: [] });
+    }, nn);
+    await p.waitForTimeout(500);
+    const autre = [await calque(p), await p.$eval('#message', (m) => m.classList.contains('on'))];
+    await p.keyboard.press('Escape');
+    verifier(
+      autre[0] && !autre[0].choix && autre[1] === false,
+      '21 editeur:texte d’un autre document ou d’un autre numéro : ignoré',
+      JSON.stringify(autre),
+    );
+    await fin(p, '21 texte');
+  }
+  {
+    // Sans `texte` dans la charge : aucun bouton, rien de créé.
+    const p = await page({ charge: { texte: false } });
+    const r = await p.evaluate(() => ({
+      t: [...document.querySelectorAll('button')].filter(
+        (b) => b.textContent.trim() === 'Texte' && b.closest('#barre-haut'),
+      ).length,
+      titre: [...document.querySelectorAll('[title="Copier le texte"]')].length,
+    }));
+    verifier(
+      r.t === 0 && r.titre === 0,
+      '21 texte: false : pas de bouton « Texte »',
+      JSON.stringify(r),
+    );
+    // Document remplacé par une charge avec texte : le bouton paraît ; puis sans : il part.
+    await p.evaluate(() =>
+      __emettre('editeur:charger', { ...window.__charge, id: 7, texte: true }),
+    );
+    await p
+      .waitForFunction(() => document.querySelector('#barre-haut [data-texte="lancer"]'), null, {
+        timeout: 3000,
+      })
+      .catch(() => {});
+    const avec = await p.locator('#barre-haut [data-texte="lancer"]').count();
+    await p.evaluate(() =>
+      __emettre('editeur:charger', { ...window.__charge, id: 7, texte: false }),
+    );
+    await uneImage(p);
+    const sans = await p.locator('#barre-haut [data-texte="lancer"]').count();
+    verifier(
+      avec === 1 && sans === 0,
+      '21 le bouton suit la charge (paraît, puis part)',
+      JSON.stringify([avec, sans]),
+    );
+    await fin(p, '21 sans texte');
+  }
+  {
+    // Le clavier appartient au calque, où que soit le focus ; barre du haut grisée.
+    const p = await page({ charge: { texte: true } });
+    const centre = (sel) =>
+      p.$eval(sel, (b) => {
+        const r = b.getBoundingClientRect();
+        return [r.left + r.width / 2, r.top + r.height / 2];
+      });
+    await lireTexte(p);
+    const grises = await p.evaluate(() =>
+      ['enregistrer', 'copier', 'fermer'].map(
+        (a) => document.querySelector(`#barre-haut [data-act="${a}"]`).disabled,
+      ),
+    );
+    await vider(p);
+    // Clic sur « Enregistrer » et « Copier » grisés : rien n'est exporté.
+    await p.mouse.click(...(await centre('#barre-haut [data-act="enregistrer"]')));
+    await p.mouse.click(...(await centre('#barre-haut [data-act="copier"]')));
+    await uneImage(p);
+    const sansExport = (await appels(p, 'editeur_exporter')).length;
+    // Focus hors du calque (vide de la barre du haut) : Échap ne ferme que le calque.
+    await p.mouse.click(...(await centre('#barre-haut .sp')));
+    const hors = await p.evaluate(
+      () => !document.querySelector('.calque-texte').contains(document.activeElement),
+    );
+    await p.keyboard.press('Escape');
+    await uneImage(p);
+    const e1 = [await calque(p), (await appels(p, 'editeur_fermer')).length];
+    verifier(
+      JSON.stringify(grises) === '[true,true,false]' &&
+        sansExport === 0 &&
+        hors &&
+        e1[0] === null &&
+        e1[1] === 0,
+      '21 choix : « Enregistrer » et « Copier » du haut grisés (clic sans export) ; Échap, ' +
+        'focus hors du calque, ne ferme que le calque',
+      JSON.stringify([grises, sansExport, hors, e1]),
+    );
+    const apres = await p.evaluate(() =>
+      ['enregistrer', 'copier'].map(
+        (a) => document.querySelector(`#barre-haut [data-act="${a}"]`).disabled,
+      ),
+    );
+    verifier(JSON.stringify(apres) === '[false,false]', '21 calque fermé : barre du haut rendue');
+    // Ctrl + A puis focus hors du calque : Ctrl + C copie le texte, jamais l'image ; une
+    // touche d'outil (P) est sans effet ; Tab reste dans le calque et sa barre.
+    await vider(p);
+    const n = await lireTexte(p);
+    await p.keyboard.press('Control+a');
+    await p.mouse.click(...(await centre('#barre-haut .sp')));
+    const outil0 = await p.evaluate(() => __ed.prefs.outil);
+    await p.keyboard.press('p');
+    const outil1 = await p.evaluate(() => __ed.prefs.outil);
+    const tabs = [];
+    for (const k of ['Tab', 'Tab', 'Tab', 'Shift+Tab', 'Shift+Tab']) {
+      await p.keyboard.press(k);
+      tabs.push(
+        await p.evaluate((n) => {
+          const a = document.activeElement;
+          return a.classList.contains('calque-texte')
+            ? 'calque'
+            : a.getAttribute('aria-label') || a.textContent.trim();
+        }),
+      );
+    }
+    const anneau = await p.evaluate(() => {
+      const s = getComputedStyle(document.activeElement);
+      return [document.activeElement.textContent.trim(), s.outlineStyle, s.outlineWidth];
+    });
+    await p.keyboard.press('Shift+Tab'); // le calque
+    await p.keyboard.press('Shift+Tab'); // la croix, en boucle
+    const anneauCroix = await p.evaluate(() => {
+      const s = getComputedStyle(document.activeElement);
+      return [document.activeElement.getAttribute('aria-label'), s.outlineStyle, s.outlineWidth];
+    });
+    await p.mouse.click(...(await centre('#barre-haut .sp')));
+    await p.keyboard.press('Control+c');
+    await uneImage(p);
+    const c = await copies(p);
+    const images = (await appels(p, 'editeur_exporter')).filter(
+      (a) => a[2]['x-editeur-but'] !== 'texte',
+    ).length;
+    verifier(
+      JSON.stringify(c) === JSON.stringify([{ id: 7, numero: n, debut: 0, fin: 6 }]) &&
+        images === 0 &&
+        outil0 === outil1,
+      '21 focus hors du calque : Ctrl + C copie le texte choisi (pas l’image), P sans effet',
+      JSON.stringify([c, images, outil0, outil1]),
+    );
+    verifier(
+      JSON.stringify(tabs) === '["Copier","Tout copier","Fermer","Tout copier","Copier"]',
+      '21 Tab et Maj + Tab restent dans le calque et sa barre',
+      JSON.stringify(tabs),
+    );
+    verifier(
+      JSON.stringify(anneau) === '["Copier","solid","2px"]' &&
+        JSON.stringify(anneauCroix) === '["Fermer","solid","2px"]',
+      '21 anneau de focus sur « Copier » et la croix',
+      JSON.stringify([anneau, anneauCroix]),
+    );
+    // « Fermer » de la barre du haut : le calque se ferme, puis la fenêtre est demandée.
+    await vider(p);
+    await lireTexte(p);
+    await p.mouse.click(...(await centre('#barre-haut [data-act="fermer"]')));
+    await attendreAppel(p, 'editeur_fermer');
+    verifier(
+      (await calque(p)) === null && (await appels(p, 'editeur_fermer')).length === 1,
+      '21 « Fermer » pendant le choix : le calque se ferme, puis la fenêtre suit son cours',
+    );
+    await fin(p, '21 clavier');
+  }
+  {
+    // Résultat reçu avant le numéro de l'export : montré ; ou, après Échap, l'export finit.
+    const p = await page({ charge: { texte: true } });
+    await p.evaluate(() => {
+      const orig = __TAURI__.core.invoke;
+      __TAURI__.core.invoke = (c, a, o) => {
+        const r = orig(c, a, o);
+        if (c !== 'editeur_exporter') return r;
+        return r.then((n) => new Promise((ok) => (window.__lacher = () => ok(n))));
+      };
+    });
+    const avantNumero = async (escape) => {
+      await p.evaluate(() => (window.__lacher = null));
+      await bouton(p, 'Texte').click();
+      await p.waitForFunction(() => window.__lacher, null, { timeout: 3000 }).catch(() => {});
+      await p.evaluate((mots) => {
+        const n = __exports.at(-1).numero;
+        __emettre('editeur:texte', { id: 7, numero: n, etat: 'lu', mots });
+      }, MOTS);
+      if (escape) await p.keyboard.press('Escape');
+      await p.evaluate(() => window.__lacher());
+      await p.waitForTimeout(600);
+      return p.evaluate(() => ({
+        calque: document.querySelector('.calque-texte.choix') ? 'choix' : null,
+        bloque: __ed.exportEnCours(),
+        grise: document.querySelector('#barre-haut [data-texte="lancer"]').disabled,
+      }));
+    };
+    const r1 = await avantNumero(false);
+    await p.keyboard.press('Escape');
+    const r2 = await avantNumero(true);
+    verifier(
+      JSON.stringify(r1) === '{"calque":"choix","bloque":false,"grise":false}' &&
+        JSON.stringify(r2) === '{"calque":null,"bloque":false,"grise":false}',
+      '21 editeur:texte avant le numéro : choix montré ; puis Échap : l’export ne reste pas bloqué',
+      JSON.stringify([r1, r2]),
+    );
+    // Rejet de editeur_copier_texte : « Impossible de copier ».
+    await p.evaluate(() => {
+      const orig = __TAURI__.core.invoke;
+      __TAURI__.core.invoke = (c, a, o) =>
+        c === 'editeur_copier_texte' ? Promise.reject(new Error('refus')) : orig(c, a, o);
+    });
+    await avantNumero(false);
+    await p.getByRole('button', { name: 'Tout copier', exact: true }).click();
+    await p
+      .waitForFunction(() => document.querySelector('#message').classList.contains('on'))
+      .catch(() => {});
+    const m = await p.$eval('#message', (m) => m.textContent.trim());
+    verifier(
+      m === 'Impossible de copier',
+      '21 editeur_copier_texte rejeté : « Impossible de copier »',
+      m,
+    );
+    await fin(p, '21 avant le numéro');
+  }
+  {
+    // Recadrage : les boîtes sont en pixels de l'image composée (le cadre).
+    const p = await page({ charge: { texte: true } });
+    await p.evaluate(() =>
+      __ed.modifier((d) => __ed.modele.recadrer(d, { x: 30, y: 20, largeur: 300, hauteur: 200 })),
+    );
+    await uneImage(p);
+    await lireTexte(p);
+    const cadre = await p.evaluate(() => __ed.modele.cadre(__ed.h.doc));
+    const b = await boites(p);
+    const att = [];
+    for (const m of MOTS) {
+      const [x0, y0] = await point(p, cadre.x + m.x, cadre.y + m.y);
+      const [x1, y1] = await point(p, cadre.x + m.x + m.largeur, cadre.y + m.y + m.hauteur);
+      att.push([x0, y0, x1 - x0, y1 - y0]);
+    }
+    verifier(
+      cadre.x === 30 && cadre.y === 20 && justes(b, att),
+      '21 recadrage : boîtes justes (décalées du cadre)',
+      JSON.stringify([cadre, b[0], att[0]]),
+    );
+    await fin(p, '21 recadrage');
+  }
+  // Boîtes justes aux échelles 1,25, 1,5 et 2, et après un changement de taille.
+  for (const echelle of [1.25, 1.5, 2]) {
+    const p = await page({ charge: { texte: true }, echelle });
+    await lireTexte(p);
+    const ok1 = justes(await boites(p), await attendues(p));
+    await p.setViewportSize({ width: 900, height: 640 });
+    await p.waitForFunction(() => innerWidth === 900, null, { timeout: 3000 }).catch(() => {});
+    await uneImage(p);
+    await uneImage(p);
+    const b2 = await boites(p);
+    const a2 = await attendues(p);
+    verifier(
+      ok1 && justes(b2, a2),
+      `21 boîtes justes à ${echelle}, et replacées après changement de taille`,
+      JSON.stringify([b2[0], a2[0]]),
+    );
+    // Tirer à cette échelle : mots 1 à 3.
+    await vider(p);
+    await glisser(p, centreMot(1), centreMot(3));
+    await p.keyboard.press('Enter');
+    const c = await copies(p);
+    verifier(
+      c.length === 1 && c[0].debut === 1 && c[0].fin === 3,
+      `21 tirer à ${echelle} : {1, 3}`,
+      JSON.stringify(c),
+    );
+    await fin(p, `21 échelle ${echelle}`);
+  }
+  {
+    // Barre de l'éditeur à 640 px de large, en sombre, animations réduites (120 ms) ; barre
+    // flottante dans la fenêtre.
+    const p = await page({
+      charge: { texte: true, reduites: true },
+      largeur: 640,
+      hauteur: 480,
+      theme: 'dark',
+    });
+    const r = await p.evaluate(() => {
+      const bs = [...document.querySelectorAll('#barre-haut > button')].map((b) =>
+        b.getBoundingClientRect(),
+      );
+      const lib = [...document.querySelectorAll('#barre-haut span')].find(
+        (s) => s.textContent === 'Texte',
+      );
+      const h = document.querySelector('#barre-haut').getBoundingClientRect();
+      return {
+        n: bs.length,
+        rangee: bs.every((b) => b.top >= h.top && b.bottom <= h.bottom),
+        ordre: bs.every((b, i) => i === 0 || bs[i - 1].right <= b.left),
+        dedans: bs.every((b) => b.left >= 0 && b.right <= 640),
+        lib:
+          lib && lib.scrollWidth <= lib.clientWidth + 0.5 && lib.getBoundingClientRect().width > 20,
+        deborde: document.documentElement.scrollWidth > innerWidth,
+      };
+    });
+    verifier(
+      r.n === 4 && r.rangee && r.ordre && r.dedans && r.lib && !r.deborde,
+      '21 barre du haut à 640 px : quatre boutons sur une rangée, rien ne déborde',
+      JSON.stringify(r),
+    );
+    const t0 = await p.evaluate(() => performance.now());
+    await lireTexte(p);
+    const dt = await p.evaluate((t0) => performance.now() - t0, t0);
+    const b = await p.evaluate(() => {
+      const r = document.querySelector('.barre-texte').getBoundingClientRect();
+      const choisi = document.querySelector('.calque-texte .mot');
+      choisi.classList.add('choisi');
+      return {
+        r: [r.left, r.top, r.right, r.bottom],
+        bande: getComputedStyle(document.querySelector('.bande')).display,
+        fond: getComputedStyle(choisi).backgroundColor,
+      };
+    });
+    verifier(
+      dt < 380 &&
+        b.r[0] >= 0 &&
+        b.r[2] <= 640 &&
+        b.r[1] >= 52 &&
+        b.r[3] <= 480 &&
+        b.bande === 'none' &&
+        b.fond !== 'rgba(0, 0, 0, 0)',
+      '21 640 × 480 sombre, réduit : choix après 120 ms, sans bande ; barre dans la fenêtre ; mot choisi teinté',
+      JSON.stringify([dt, b]),
+    );
+    await uneImage(p);
+    await p.screenshot({ path: path.join(SORTIE, 'editeur-texte-640-sombre.png') });
+    await fin(p, '21 640');
+  }
+
   // Image de longueur fausse : la page la refuse (editeur_fermer avec force).
   {
     const p = await page();
