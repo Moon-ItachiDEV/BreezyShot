@@ -585,6 +585,19 @@ pub fn sortie_pour(etat: &EtatEditeur, but: But, version: u64) -> Sortie {
     }
 }
 
+/// Le résultat de la lecture `numero` (bouton « Texte ») arrive : vrai, et l'export en
+/// cours oublié, si c'est elle qu'on attend. `exportee` n'est jamais touchée (lire
+/// n'exporte pas : le document reste « modifié »).
+pub fn prendre_lecture(etat: &mut EtatEditeur, numero: u64) -> bool {
+    let attendue = etat
+        .export
+        .is_some_and(|x| x.numero == numero && x.but == But::Texte);
+    if attendue {
+        etat.export = None;
+    }
+    attendue
+}
+
 /// Que faire d'un Annoter selon l'éditeur ouvert : ouvrir s'il n'y en a pas ; remplacer
 /// si sa page n'est pas encore prête (elle recevra le nouveau document à `editeur_pret`) ;
 /// sinon toujours demander à la page (décision du responsable : l'état gardé par
@@ -1222,14 +1235,31 @@ mod tests {
         assert_eq!(sortie_pour(&e, But::Texte, 1), rien);
         let plan = plan_export(But::Texte, rien).expect("plan");
         assert!(!plan.copier && !plan.enregistrer && !plan.ranger_recents && !plan.dialogue);
-        // Un bilan de but texte ne touche à aucune version notée : le document reste
-        // « modifié ».
-        e.noter_export(&fin(
-            But::Texte,
-            1,
-            Some(bilan(Etape::Faite, None, EtapeFichier::NonDemande)),
-        ));
-        assert_eq!((e.exportee, e.enregistree, e.rangee), (None, None, None));
+        // Le vrai chemin : l'export noté par `accepter_export`, puis la lecture rendue.
+        e.exportee = Some(1);
+        let t = Instant::now();
+        let texte = EnTete {
+            but: But::Texte,
+            ..en_tete(40, 30)
+        };
+        assert_eq!(accepter_export(&e, &texte, 40 * 30 * 4, t), Ok(()));
+        let x = |numero, but| ExportEnCours {
+            numero,
+            but,
+            version: 3,
+            debut: t,
+            dialogue: false,
+        };
+        e.export = Some(x(5, But::Texte));
+        assert!(!prendre_lecture(&mut e, 4), "autre numero");
+        assert!(prendre_lecture(&mut e, 5));
+        assert_eq!(e.export, None);
+        assert!(!prendre_lecture(&mut e, 5), "une seule fois");
+        // Un export d'un autre but au même numéro n'est pas une lecture.
+        e.export = Some(x(6, But::Copier));
+        assert!(!prendre_lecture(&mut e, 6));
+        assert_eq!(e.export, Some(x(6, But::Copier)));
+        assert_eq!((e.exportee, e.enregistree, e.rangee), (Some(1), None, None));
         assert_eq!(e.texte, None);
     }
 

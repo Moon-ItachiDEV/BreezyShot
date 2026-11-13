@@ -11,15 +11,15 @@
 //! à part, dans `ECRAN` : le fil `texte-ecran` le libère à `ECRAN_FIGE_MAX_LECTURE` sans
 //! passer par la boucle, même si la lecture ne rend rien.
 
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{mpsc, Mutex};
 use std::time::{Duration, Instant};
 
 use tauri::{AppHandle, Manager};
 
-use super::editeur::{But, EnTete};
+use super::editeur::{self, EnTete};
 use super::etats::Declencheur;
-use super::texte::{self, FinLecture, LectureEnCours};
+use super::texte::{self, Arrivee, Attendue, FinLecture, LectureEnCours};
 use super::{zone, CaptureEnCours, Evenement, GardeEcran};
 use crate::capture;
 use crate::fenetres::editeur as fenetre_editeur;
@@ -33,8 +33,9 @@ use crate::texte::{self as lecture, Issue};
 /// Dernier numéro de lecture donné (raccourci et menu).
 static NUMERO: AtomicU64 = AtomicU64::new(0);
 
-/// L'annonce « Aucun raccourci pour le texte » est faite une fois par lancement.
-static ANNONCE_FAITE: AtomicBool = AtomicBool::new(false);
+/// La lecture du raccourci dont le résultat est attendu : le fil `texte` (qui copie
+/// alors) ou l'échéance la prend, jamais les deux ; une lecture abandonnée ne copie jamais.
+static ATTENDUE: Attendue = Attendue::new();
 
 /// L'écran figé d'une lecture : sa garde (prise à la libération) et quand il a été caché.
 struct EcranGarde {
@@ -55,6 +56,11 @@ fn ecran() -> std::sync::MutexGuard<'static, Option<EcranGarde>> {
 /// Libère l'écran figé de la lecture `numero` s'il est encore montré (sûr de n'importe
 /// quel fil). Rend le délai, depuis le relâcher, auquel il a été caché ; `None` si cet
 /// écran n'est pas (ou plus) celui rangé.
+///
+/// Course connue, laissée : un fil suspendu entre le `take` et le `drop` de la garde,
+/// repris après le début d'une capture suivante, cacherait l'écran figé de celle-ci
+/// (`gel::cacher_ecran_fige` ne connaît pas de numéro) ; la sélection, elle, ne cache que
+/// si aucun affichage n'est en cours.
 fn liberer_ecran(numero: u64) -> Option<Duration> {
     let (garde, apres) = {
         let mut place = ecran();
@@ -105,18 +111,10 @@ pub fn lancer_sonde(app: &AppHandle) {
 }
 
 /// Le raccourci de `texte` vient d'être réservé (ou non) à l'arrivée des langues de
-/// lecture ou de la licence : sans raccourci, l'annonce « Aucun raccourci pour le texte »,
-/// une fois par lancement.
-pub fn raccourci_reserve(app: &AppHandle, choix: &ChoixAction) {
-    let Some(message) = texte::annonce_sans_raccourci(choix) else {
-        return;
-    };
-    if ANNONCE_FAITE.swap(true, Ordering::SeqCst) {
-        return;
-    }
-    log::info!("annonce raccourci: action_sans_raccourci");
-    super::afficher(app, message);
-}
+/// lecture ou de la licence. Rien n'est annoncé d'ici : une seule règle d'annonce pour
+/// toutes les actions, celle du bilan du démarrage (`raccourcis::decider_annonce`), que
+/// l'assemblage fait attendre `Evenement::TexteDisponible`.
+pub fn raccourci_reserve(_app: &AppHandle, _choix: &ChoixAction) {}
 
 /// Zone choisie en mode texte (fil principal, état Sélection, capture encore rangée) :
 /// Lecture, découpe (l'écran figé reste montré), Échap libéré, balayage, lecture dans le
@@ -170,13 +168,19 @@ pub fn zone_choisie(app: &AppHandle, zone: Rect) {
         minimum,
         fin: None,
     });
-    garder_ecran(app, numero, relache, minimum);
+    ATTENDUE.poser(numero);
+    if !garder_ecran(app, numero, relache, minimum) {
+        // Sans fil de garde : le résultat sera montré dès son arrivée.
+        if let Some(x) = super::lecture_en_cours(app).as_mut() {
+            x.minimum = Duration::ZERO;
+        }
+    }
     lancer_lecture(app, numero, None, pixels);
 }
 
 /// Le fil `texte-ecran` : au bout du balayage, le résultat déjà arrivé est montré (fil
 /// principal) ; à la borne, l'écran figé est libéré d'ici, quoi qu'il arrive.
-fn garder_ecran(app: &AppHandle, numero: u64, relache: Instant, minimum: Duration) {
+fn garder_ecran(app: &AppHandle, numero: u64, relache: Instant, minimum: Duration) -> bool {
     let pour = app.clone();
     let lance = std::thread::Builder::new()
         .name("texte-ecran".into())
@@ -196,7 +200,9 @@ fn garder_ecran(app: &AppHandle, numero: u64, relache: Instant, minimum: Duratio
     if let Err(e) = lance {
         log::warn!("garde de l'ecran fige impossible ({e}): ecran libere");
         liberer_ecran(numero);
+        return false;
     }
+    true
 }
 
 /// La lecture de `pixels` dans le fil `texte` (la copie aussi, pour le raccourci), puis
@@ -220,6 +226,13 @@ fn lancer_lecture(app: &AppHandle, numero: u64, document: Option<u64>, pixels: P
             if let Some(d) = systeme::texte::derniere_creation() {
                 log::info!("{}", texte::ligne_moteur(d));
             }
+            // Raccourci : seule la lecture encore attendue rend son résultat (et copie) ;
+            // l'échéance tombée ou la lecture oubliée, rien n'est copié ni montré.
+            if document.is_none() && !ATTENDUE.prendre(numero) {
+                log::info!("texte lu {numero}: resultat perime ignore");
+                let _ = fini.send(());
+                return;
+            }
             let copie = match (&issue, document) {
                 (Issue::Texte(lu), None) => Some(sortie::copier_texte(&lecture::assembler(
                     lu,
@@ -235,20 +248,13 @@ fn lancer_lecture(app: &AppHandle, numero: u64, document: Option<u64>, pixels: P
                 document,
                 facteur,
             };
-            super::traiter(&pour, Evenement::TexteLu(Box::new(fin)));
+            // Avant le résultat : l'échéance se termine sans rien dire.
             let _ = fini.send(());
+            super::traiter(&pour, Evenement::TexteLu(Box::new(fin)));
         });
     if let Err(e) = lance {
         log::warn!("fil de lecture impossible: {e}");
-        let fin = FinLecture {
-            numero,
-            issue: Issue::Echec("fil".into()),
-            copie: None,
-            duree: Duration::ZERO,
-            document,
-            facteur: 1.0,
-        };
-        texte_lu(app, fin);
+        arret_de_fil(app, numero, document);
         return;
     }
     // L'échéance : finie dès que la lecture a rendu ; un fil arrêté sans rien dire (canal
@@ -257,19 +263,42 @@ fn lancer_lecture(app: &AppHandle, numero: u64, document: Option<u64>, pixels: P
     let echeance = std::thread::Builder::new()
         .name("texte-echeance".into())
         .spawn(move || {
-            if attente.recv_timeout(lecture::DELAI_LECTURE).is_ok() {
-                return;
-            }
-            match document {
-                None => super::traiter(&pour_echeance, Evenement::TexteEchu(numero)),
-                Some(id) => {
-                    let p = pour_echeance.clone();
-                    let _ = pour_echeance.run_on_main_thread(move || echu_editeur(&p, id, numero));
+            let p = pour_echeance.clone();
+            match (attente.recv_timeout(lecture::DELAI_LECTURE), document) {
+                (Ok(()), _) => {}
+                (Err(mpsc::RecvTimeoutError::Timeout), None) => {
+                    super::traiter(&pour_echeance, Evenement::TexteEchu(numero));
+                }
+                (Err(mpsc::RecvTimeoutError::Timeout), Some(id)) => {
+                    let _ = pour_echeance.run_on_main_thread(move || {
+                        echu_editeur(&p, id, numero, texte::CAUSE_ECHEANCE);
+                    });
+                }
+                // Canal fermé sans réponse : le fil `texte` s'est arrêté (panique).
+                (Err(mpsc::RecvTimeoutError::Disconnected), _) => {
+                    let _ = pour_echeance.run_on_main_thread(move || {
+                        arret_de_fil(&p, numero, document);
+                    });
                 }
             }
         });
     if let Err(e) = echeance {
         log::warn!("echeance de lecture non armee: {e}");
+        arret_de_fil(app, numero, document);
+    }
+}
+
+/// Un fil de la lecture `numero` n'a pas pu être lancé ou s'est arrêté (fil principal) :
+/// la lecture finit tout de suite en échec `fil` (jamais d'état Lecture sans fin).
+fn arret_de_fil(app: &AppHandle, numero: u64, document: Option<u64>) {
+    match document {
+        Some(id) => echu_editeur(app, id, numero, texte::CAUSE_FIL),
+        None => {
+            let fin = texte::echeance(&super::lecture_en_cours(app), numero, texte::CAUSE_FIL);
+            if let Some(fin) = fin {
+                finir(app, fin);
+            }
+        }
     }
 }
 
@@ -280,63 +309,45 @@ pub fn texte_lu(app: &AppHandle, fin: FinLecture) {
         lu_editeur(app, id, fin);
         return;
     }
-    let mut fin = Some(fin);
-    {
-        let mut lecture = super::lecture_en_cours(app);
-        let numero = fin.as_ref().map_or(0, |f| f.numero);
-        let Some(x) = lecture.as_mut().filter(|x| x.numero == numero) else {
-            log::info!("texte lu {numero}: resultat perime ignore");
-            return;
-        };
-        if !texte::liberer_ecran(x.relache.elapsed(), x.minimum, true) {
-            x.fin = fin.take().map(Box::new);
-        }
-    }
-    if let Some(fin) = fin {
-        finir(app, fin);
+    let numero = fin.numero;
+    let suite = texte::arrivee(&mut super::lecture_en_cours(app), fin, Instant::now());
+    match suite {
+        Arrivee::Finir(fin) => finir(app, fin),
+        Arrivee::Gardee => {}
+        Arrivee::Perimee => log::info!("texte lu {numero}: resultat perime ignore"),
     }
 }
 
 /// Le balayage de la lecture `numero` est fini (fil principal) : son résultat, s'il est
 /// arrivé, est montré.
 fn balayage_fini(app: &AppHandle, numero: u64) {
-    let fin = super::lecture_en_cours(app)
-        .as_mut()
-        .filter(|x| x.numero == numero)
-        .and_then(|x| x.fin.take());
+    let fin = texte::balayage_fini(&mut super::lecture_en_cours(app), numero);
     if let Some(fin) = fin {
-        finir(app, *fin);
+        finir(app, fin);
     }
 }
 
 /// L'échéance de la lecture `numero` est tombée (fil principal) : « Impossible de lire le
 /// texte ». Un résultat déjà arrivé (gardé pour la fin du balayage) l'emporte.
 pub fn echu(app: &AppHandle, numero: u64) {
-    let attendue = super::lecture_en_cours(app)
-        .as_ref()
-        .is_some_and(|x| x.numero == numero && x.fin.is_none());
-    if !attendue {
+    // Le fil `texte` a pris le résultat (il arrive) : l'échéance ne dit rien.
+    if !ATTENDUE.prendre(numero) {
         return;
     }
-    finir(
-        app,
-        FinLecture {
-            numero,
-            issue: Issue::Echec(texte::CAUSE_ECHEANCE.into()),
-            copie: None,
-            duree: lecture::DELAI_LECTURE,
-            document: None,
-            facteur: 1.0,
-        },
-    );
+    let fin = texte::echeance(&super::lecture_en_cours(app), numero, texte::CAUSE_ECHEANCE);
+    if let Some(fin) = fin {
+        finir(app, fin);
+    }
 }
 
 /// Fin d'une lecture du raccourci (fil principal) : l'écran figé libéré s'il ne l'est pas
 /// encore, journal, Repos, bandeau.
 fn finir(app: &AppHandle, fin: FinLecture) {
-    let Some(x) = super::lecture_en_cours(app).take_if(|x| x.numero == fin.numero) else {
+    let Some(x) = texte::terminer(&mut super::lecture_en_cours(app), fin.numero) else {
         return;
     };
+    // Plus rien d'attendu : un résultat tardif ne copie pas.
+    ATTENDUE.prendre(fin.numero);
     let gel_cache = oublier_ecran(fin.numero).unwrap_or_else(|| x.relache.elapsed());
     log::info!("{}", texte::ligne_issue(&fin.issue, fin.duree, fin.facteur));
     if let Some(ligne) = texte::ligne_copie(fin.copie.as_ref()) {
@@ -355,16 +366,7 @@ pub fn lire_export(app: &AppHandle, numero: u64, entete: EnTete, pixels: Pixels)
 
 /// Vrai (et l'export oublié) si `numero` est la lecture attendue par l'éditeur `id`.
 fn prendre_lecture_editeur(app: &AppHandle, id: u64, numero: u64) -> bool {
-    super::avec_editeur(app, Some(id), |e| {
-        let attendue = e
-            .export
-            .is_some_and(|x| x.numero == numero && x.but == But::Texte);
-        if attendue {
-            e.export = None;
-        }
-        attendue
-    })
-    .unwrap_or(false)
+    super::avec_editeur(app, Some(id), |e| editeur::prendre_lecture(e, numero)).unwrap_or(false)
 }
 
 /// Résultat d'une lecture de l'éditeur (fil principal) : la lecture gardée, les boîtes
@@ -388,11 +390,11 @@ fn lu_editeur(app: &AppHandle, id: u64, fin: FinLecture) {
 }
 
 /// L'échéance de la lecture `numero` de l'éditeur `id` (fil principal).
-fn echu_editeur(app: &AppHandle, id: u64, numero: u64) {
+fn echu_editeur(app: &AppHandle, id: u64, numero: u64, cause: &str) {
     if !prendre_lecture_editeur(app, id, numero) {
         return;
     }
-    let issue = Issue::Echec(texte::CAUSE_ECHEANCE.into());
+    let issue = Issue::Echec(cause.into());
     log::info!(
         "{}",
         texte::ligne_editeur(id, numero, &issue, lecture::DELAI_LECTURE)
@@ -428,7 +430,7 @@ pub(super) fn copier_extrait(
             drop(extrait);
             match etape {
                 Etape::Faite => rendre_copie(&pour, id, numero, Ok(mots)),
-                Etape::Echec(c) => rendre_copie(&pour, id, numero, Err(c.as_str())),
+                Etape::Echec(c) => rendre_copie(&pour, id, numero, Err(texte::code_court(&c))),
                 Etape::NonDemandee => rendre_copie(&pour, id, numero, Err("non_demandee")),
             }
         });
@@ -455,6 +457,7 @@ fn rendre_copie(app: &AppHandle, id: u64, numero: u64, issue: Result<usize, &str
 /// Arrêt de l'app : la lecture en cours est oubliée, son écran figé libéré.
 pub fn arreter(app: &AppHandle) {
     super::lecture_en_cours(app).take();
+    ATTENDUE.oublier();
     let ancien = ecran().take();
     drop(ancien);
 }

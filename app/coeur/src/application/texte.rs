@@ -5,13 +5,13 @@
 //! journal ne portent que des nombres et des codes, la page de l'éditeur ne reçoit que les
 //! boîtes des mots.
 
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use serde::Serialize;
 
 use super::etats::Declencheur;
 use crate::fenetres::{Action, Genre, Message};
-use crate::raccourcis::ChoixAction;
 use crate::sortie::Etape;
 use crate::systeme::texte::Disponibilite;
 use crate::texte::{extrait, Issue, Lu, PETITE_IMAGE};
@@ -45,6 +45,8 @@ pub const EVENEMENT_EDITEUR_TEXTE_COPIE: &str = "editeur:texte_copie";
 
 /// Cause d'une lecture dont l'échéance est tombée.
 pub const CAUSE_ECHEANCE: &str = "echeance";
+/// Cause d'une lecture dont un fil n'a pas pu être lancé ou s'est arrêté (panique).
+pub const CAUSE_FIL: &str = "fil";
 
 /// La lecture en cours depuis le raccourci (état Lecture), du relâcher au résultat.
 #[derive(Debug, Clone, PartialEq)]
@@ -71,6 +73,113 @@ pub struct FinLecture {
     pub document: Option<u64>,
     /// Le facteur de la préparation (`facteur_de`), pour le journal.
     pub facteur: f32,
+}
+
+/// Ce que devient le résultat d'une lecture du raccourci à son arrivée.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Arrivee {
+    /// Pas la lecture en cours (finie, oubliée, ou une autre) : ignoré.
+    Perimee,
+    /// Arrivé avant la fin du balayage : gardé jusqu'à `balayage_fini`.
+    Gardee,
+    /// À montrer tout de suite (`finir`).
+    Finir(FinLecture),
+}
+
+/// Le résultat `fin` arrive, `maintenant` (machine pure de l'état Lecture).
+pub fn arrivee(
+    lecture: &mut Option<LectureEnCours>,
+    fin: FinLecture,
+    maintenant: Instant,
+) -> Arrivee {
+    let Some(x) = lecture
+        .as_mut()
+        .filter(|x| x.numero == fin.numero && x.fin.is_none())
+    else {
+        return Arrivee::Perimee;
+    };
+    let ecoule = maintenant.saturating_duration_since(x.relache);
+    if liberer_ecran(ecoule, x.minimum, true) {
+        Arrivee::Finir(fin)
+    } else {
+        x.fin = Some(Box::new(fin));
+        Arrivee::Gardee
+    }
+}
+
+/// Le balayage de la lecture `numero` est fini : son résultat gardé, s'il y en a un.
+pub fn balayage_fini(lecture: &mut Option<LectureEnCours>, numero: u64) -> Option<FinLecture> {
+    lecture
+        .as_mut()
+        .filter(|x| x.numero == numero)
+        .and_then(|x| x.fin.take())
+        .map(|f| *f)
+}
+
+/// L'échéance (ou l'arrêt d'un fil, `cause`) de la lecture `numero` : l'échec à montrer,
+/// si aucun résultat n'est arrivé ; un résultat gardé l'emporte.
+pub fn echeance(lecture: &Option<LectureEnCours>, numero: u64, cause: &str) -> Option<FinLecture> {
+    lecture
+        .as_ref()
+        .filter(|x| x.numero == numero && x.fin.is_none())
+        .map(|_| FinLecture {
+            numero,
+            issue: Issue::Echec(cause.into()),
+            copie: None,
+            duree: crate::texte::DELAI_LECTURE,
+            document: None,
+            facteur: 1.0,
+        })
+}
+
+/// Retire la lecture `numero` (sa fin est montrée) ; `None` si ce n'est pas elle.
+pub fn terminer(lecture: &mut Option<LectureEnCours>, numero: u64) -> Option<LectureEnCours> {
+    lecture.take_if(|x| x.numero == numero)
+}
+
+/// Qui rend le résultat de la lecture attendue : le fil `texte` (et alors il copie) ou
+/// l'échéance, jamais les deux. `poser` à la zone choisie ; le premier `prendre` gagne.
+#[derive(Debug, Default)]
+pub struct Attendue(AtomicU64);
+
+impl Attendue {
+    pub const fn new() -> Attendue {
+        Attendue(AtomicU64::new(0))
+    }
+
+    /// La lecture `numero` est attendue (0 : aucune).
+    pub fn poser(&self, numero: u64) {
+        self.0.store(numero, Ordering::SeqCst);
+    }
+
+    /// Vrai pour le premier qui prend la lecture `numero` ; ensuite aucune n'est attendue.
+    pub fn prendre(&self, numero: u64) -> bool {
+        numero != 0
+            && self
+                .0
+                .compare_exchange(numero, 0, Ordering::SeqCst, Ordering::SeqCst)
+                .is_ok()
+    }
+
+    /// Plus rien n'est attendu (fin montrée, arrêt).
+    pub fn oublier(&self) {
+        self.0.store(0, Ordering::SeqCst);
+    }
+}
+
+/// Un code court ASCII pour le journal à partir d'une cause (une phrase devient
+/// `presse_papiers`).
+pub fn code_court(cause: &str) -> &str {
+    let court = !cause.is_empty()
+        && cause.len() <= 32
+        && cause
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'_');
+    if court {
+        cause
+    } else {
+        "presse_papiers"
+    }
 }
 
 /// La durée du balayage (minimum de l'écran figé).
@@ -149,16 +258,6 @@ pub fn message_fin(fin: &FinLecture) -> Message {
     }
 }
 
-/// L'annonce « Aucun raccourci pour le texte » quand l'action `texte` apparaît sans
-/// raccourci (liste vide comprise : cas de la mise à niveau qui trouve `Ctrl+Maj+T` déjà
-/// donné). `None` si un raccourci est retenu.
-pub fn annonce_sans_raccourci(choix: &ChoixAction) -> Option<Message> {
-    choix
-        .retenu
-        .is_none()
-        .then(|| message(Genre::Info, "Aucun raccourci pour le texte", ""))
-}
-
 /// Vrai si une langue de lecture existe.
 pub fn disponible(d: &Disponibilite) -> bool {
     matches!(d, Disponibilite::Langues(l) if !l.is_empty())
@@ -212,7 +311,7 @@ pub fn ligne_moteur(d: Duration) -> String {
 pub fn ligne_copie(copie: Option<&Etape>) -> Option<String> {
     match copie? {
         Etape::Faite => Some("texte copie".into()),
-        Etape::Echec(c) => Some(format!("texte copie echec ({c})")),
+        Etape::Echec(c) => Some(format!("texte copie echec ({})", code_court(c))),
         Etape::NonDemandee => None,
     }
 }
@@ -589,24 +688,123 @@ mod tests {
         assert_eq!(extrait_choisi(Some(&garde), 7, 0, 4, "\n"), Err("bornes"));
     }
 
+    fn en_cours(numero: u64, relache: Instant) -> Option<LectureEnCours> {
+        Some(LectureEnCours {
+            numero,
+            relache,
+            minimum: BALAYAGE,
+            fin: None,
+        })
+    }
+
     #[test]
-    fn annonce_sans_raccourci_pour_le_texte() {
-        let choix = ChoixAction {
-            action: "texte".into(),
-            retenu: None,
-            ecartes: Vec::new(),
-            nb_candidats: 0,
-        };
-        let m = annonce_sans_raccourci(&choix).expect("annonce");
+    fn resultat_garde_jusqu_a_la_fin_du_balayage() {
+        let t = Instant::now();
+        let ms = Duration::from_millis;
+        let mut l = en_cours(1, t);
+        // Arrivé à 100 ms : gardé ; l'échéance ne l'emporte pas sur lui.
+        let f = fin(Issue::Vide, None);
+        assert_eq!(arrivee(&mut l, f.clone(), t + ms(100)), Arrivee::Gardee);
+        assert_eq!(echeance(&l, 1, CAUSE_ECHEANCE), None);
+        // Un second résultat du même numéro est périmé.
+        assert_eq!(arrivee(&mut l, f.clone(), t + ms(150)), Arrivee::Perimee);
+        assert_eq!(balayage_fini(&mut l, 2), None);
+        assert_eq!(balayage_fini(&mut l, 1), Some(f.clone()));
+        assert_eq!(balayage_fini(&mut l, 1), None);
+        assert!(terminer(&mut l, 2).is_none());
+        assert!(terminer(&mut l, 1).is_some());
+        assert!(l.is_none());
+        // Plus de lecture : tout est périmé.
+        assert_eq!(arrivee(&mut l, f, t + ms(500)), Arrivee::Perimee);
+        assert_eq!(echeance(&l, 1, CAUSE_ECHEANCE), None);
+    }
+
+    #[test]
+    fn resultat_apres_le_balayage_ou_la_borne() {
+        let t = Instant::now();
+        let ms = Duration::from_millis;
+        let f = fin(Issue::Vide, None);
+        let mut l = en_cours(1, t);
         assert_eq!(
-            (m.genre, m.titre.as_str()),
-            (Genre::Info, "Aucun raccourci pour le texte")
+            arrivee(&mut l, f.clone(), t + ms(400)),
+            Arrivee::Finir(f.clone())
         );
-        let retenu = ChoixAction {
-            retenu: crate::raccourcis::analyser("Ctrl+Maj+T").ok(),
-            ..choix
-        };
-        assert!(retenu.retenu.is_some());
-        assert_eq!(annonce_sans_raccourci(&retenu), None);
+        // Minimum au-delà de la borne : fini à 1,5 s quand même.
+        let mut l = Some(LectureEnCours {
+            minimum: Duration::from_secs(5),
+            ..en_cours(1, t).unwrap()
+        });
+        assert_eq!(arrivee(&mut l, f.clone(), t + ms(1499)), Arrivee::Gardee);
+        let mut l = Some(LectureEnCours {
+            minimum: Duration::from_secs(5),
+            ..en_cours(1, t).unwrap()
+        });
+        assert_eq!(arrivee(&mut l, f.clone(), t + ms(1500)), Arrivee::Finir(f));
+        // Autre numéro : périmé, rien n'est gardé.
+        let mut l = en_cours(2, t);
+        assert_eq!(arrivee(&mut l, fin(Issue::Vide, None), t), Arrivee::Perimee);
+        assert!(l.as_ref().is_some_and(|x| x.fin.is_none()));
+    }
+
+    #[test]
+    fn echeance_avant_le_resultat() {
+        let t = Instant::now();
+        let mut l = en_cours(1, t);
+        let e = echeance(&l, 1, CAUSE_ECHEANCE).expect("echec");
+        assert_eq!(e.issue, Issue::Echec("echeance".into()));
+        assert_eq!(declencheur(&e.issue), Declencheur::LectureImpossible);
+        assert_eq!(echeance(&l, 2, CAUSE_ECHEANCE), None);
+        let p = echeance(&l, 1, CAUSE_FIL).expect("fil");
+        assert_eq!(
+            ligne_issue(&p.issue, p.duree, 1.0),
+            "texte impossible: moteur (fil)"
+        );
+        assert!(terminer(&mut l, 1).is_some());
+        // Le résultat arrivé ensuite est périmé.
+        let tard = fin(Issue::Texte(lu(&[&["a"]])), None);
+        assert_eq!(arrivee(&mut l, tard, t), Arrivee::Perimee);
+    }
+
+    #[test]
+    fn un_seul_gagne_le_resultat() {
+        let a = Attendue::new();
+        assert!(!a.prendre(1), "rien d'attendu");
+        a.poser(3);
+        assert!(!a.prendre(2));
+        // Le fil `texte` et l'échéance à 10 s pile : un seul des deux.
+        assert!(a.prendre(3));
+        assert!(!a.prendre(3));
+        a.poser(4);
+        a.oublier();
+        assert!(!a.prendre(4), "lecture abandonnee : rien n'est copie");
+        assert!(!a.prendre(0));
+        // Deux fils en même temps.
+        let a = std::sync::Arc::new(Attendue::new());
+        a.poser(9);
+        let gagnes: usize = (0..8)
+            .map(|_| {
+                let a = std::sync::Arc::clone(&a);
+                std::thread::spawn(move || a.prendre(9))
+            })
+            .collect::<Vec<_>>()
+            .into_iter()
+            .map(|h| usize::from(h.join().unwrap_or(false)))
+            .sum();
+        assert_eq!(gagnes, 1);
+    }
+
+    #[test]
+    fn codes_courts() {
+        assert_eq!(code_court("occupe"), "occupe");
+        assert_eq!(code_court("deja_en_cours"), "deja_en_cours");
+        assert_eq!(
+            code_court("Le presse-papiers est occupé."),
+            "presse_papiers"
+        );
+        assert_eq!(code_court(""), "presse_papiers");
+        assert_eq!(
+            ligne_copie(Some(&Etape::Echec("Accès refusé".into()))).as_deref(),
+            Some("texte copie echec (presse_papiers)")
+        );
     }
 }
