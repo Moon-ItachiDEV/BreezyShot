@@ -217,8 +217,12 @@ pub fn fenetres_bloquees(app: &AppHandle) -> bool {
 }
 
 /// La séquence du mode, en Gel : contrôles, photo sans pointeur (D1), écran figé,
-/// Sélection en mode défilante, Échap réservé (le chemin commun).
+/// Sélection en mode défilante, Échap réservé (le chemin commun). UI Automation se prépare
+/// pour la recherche des pages dès maintenant, sans être attendu (ses fils et leurs
+/// clients sont créés à la première visée, jamais sans licence, puis gardés tant qu'ils
+/// servent).
 pub fn capturer(app: &AppHandle, recu_a: Instant, bandeau_cache: bool) {
+    defiler::preparer_pages();
     super::capturer_avec_selection(app, recu_a, Mode::Defilante, bandeau_cache);
 }
 
@@ -337,25 +341,40 @@ fn creer_controle(app: &AppHandle, numero: u64, essai: u32) {
 }
 
 /// Le fil `defilante-pages` : les pages qui défilent dans les premières fenêtres (S4),
-/// coupées à leur écran (D2), puis `Signal::Pages`. Jamais attendu.
+/// coupées à leur écran (D2), puis `Signal::Pages` ; de nouveau, la liste grandie, quand
+/// des pages arrivent après le budget (UI Automation en retard, au plus
+/// `defiler::PAGES_TARDIVES_MAX`). Une liste n'est postée que si elle diffère de la
+/// précédente ; chacune commence par la précédente (les indices déjà proposés restent les
+/// mêmes pages). Jamais attendu.
 fn chercher_pages(app: &AppHandle, numero: u64, selection: u64, ecrans: Vec<EcranInfo>) {
     let pour = app.clone();
+    let demandee = Instant::now();
     let lance = std::thread::Builder::new()
         .name("defilante-pages".into())
         .spawn(move || {
             let debut = Instant::now();
             let fenetres = capture::fenetres();
-            let trouvees = defiler::pages(&fenetres, regles::FENETRES_FOUILLEES);
-            let pages = regles::pages_proposees(&trouvees, &ecrans);
-            poster(
-                &pour,
-                Signal::Pages {
-                    numero,
-                    selection,
-                    pages,
-                    duree: debut.elapsed(),
-                },
-            );
+            let depart = defiler::Depart {
+                demandee,
+                fil: debut,
+            };
+            let mut derniere: Option<Vec<(Rect, isize)>> = None;
+            defiler::chercher_pages(&fenetres, regles::FENETRES_FOUILLEES, depart, |trouvees| {
+                let pages = regles::pages_proposees(trouvees, &ecrans);
+                if derniere.as_ref() == Some(&pages) {
+                    return;
+                }
+                derniere = Some(pages.clone());
+                poster(
+                    &pour,
+                    Signal::Pages {
+                        numero,
+                        selection,
+                        pages,
+                        duree: debut.elapsed(),
+                    },
+                );
+            });
         });
     if let Err(e) = lance {
         // Sans pages, le clic ne vise rien : on trace (D2).
@@ -363,7 +382,9 @@ fn chercher_pages(app: &AppHandle, numero: u64, selection: u64, ecrans: Vec<Ecra
     }
 }
 
-/// Pages trouvées : proposées à la Sélection si la visée est encore la même.
+/// Pages trouvées : proposées à la Sélection si la visée est encore la même (pas encore
+/// lancée). Une liste tardive remplace la précédente, qu'elle prolonge : la Sélection la
+/// prend sans revenir au repos (même charge), la page survolée reste entourée.
 fn pages_trouvees(
     app: &AppHandle,
     numero: u64,

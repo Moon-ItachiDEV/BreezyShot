@@ -29,9 +29,12 @@
 //! d'une page (ni titre, ni adresse, ni chemin) : seulement des classes de fenêtre, des
 //! nombres et des codes.
 
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use super::gel::{FenetreInfo, Rect};
+
+mod pages;
+pub use pages::PAGES_TARDIVES_MAX;
 
 #[cfg(windows)]
 #[path = "windows.rs"]
@@ -45,9 +48,9 @@ mod plateforme;
 /// molette reconnaît ainsi les crans de l'app parmi ceux de l'utilisateur (R4).
 pub const MARQUE: usize = 0x4252_5A59;
 
-/// Temps donné à `pages` pour les 8 premières fenêtres (S4 : 300 ms après la photo). Les
-/// fenêtres filles sont lues avant (quelques millisecondes) ; UI Automation n'a que ce qui
-/// reste, et ce qu'il n'a pas rendu à temps est laissé.
+/// Temps donné à la recherche des pages pour sa première liste (S4 : 300 ms). Les fenêtres
+/// filles sont lues avant (quelques millisecondes) ; UI Automation n'a que ce qui reste. Ce
+/// qu'il rend plus tard est encore proposé, jusqu'à `PAGES_TARDIVES_MAX` (`chercher_pages`).
 pub const BUDGET_PAGES: Duration = Duration::from_millis(300);
 
 /// Une page qui défile, trouvée dans une fenêtre visible.
@@ -61,13 +64,74 @@ pub struct PageTrouvee {
     pub fenetre: isize,
 }
 
-/// Les pages qui défilent dans les `max` premières fenêtres de `fenetres` (du premier plan
-/// vers le fond), dans le même ordre (S4, §18 : fenêtres filles d'abord, UI Automation en
-/// complément, au plus `BUDGET_PAGES`). Dans une même fenêtre, la plus petite d'abord (la
-/// plus précise sous la souris). À appeler hors du fil principal (fil `defilante-pages`) ;
-/// la sélection ne l'attend jamais. Vide ailleurs que sous Windows.
+/// Les instants d'avant la recherche, pour le journal : la demande (fil principal, avant
+/// le lancement du fil `defilante-pages`) et le début du fil (avant la liste des fenêtres).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Depart {
+    pub demandee: Instant,
+    pub fil: Instant,
+}
+
+impl Depart {
+    /// Les deux instants à maintenant (tests, appel direct).
+    pub fn maintenant() -> Depart {
+        let t = Instant::now();
+        Depart {
+            demandee: t,
+            fil: t,
+        }
+    }
+}
+
+/// Prépare UI Automation pour la recherche des pages (bassin de fils MTA, chacun avec son
+/// client, créés une fois et gardés tant qu'ils servent) sans attendre. À appeler au début
+/// d'une visée défilante (jamais sans licence : contrat §6) ; `chercher_pages` le fait de
+/// toute façon. Rien ailleurs que sous Windows.
+pub fn preparer_pages() {
+    plateforme::preparer_pages()
+}
+
+/// Cherche les pages qui défilent dans les `max` premières fenêtres de `fenetres` (du
+/// premier plan vers le fond) (S4, §18 : fenêtres filles d'abord, UI Automation en
+/// complément, une fenêtre par fil du bassin : une fenêtre lente ne retient pas les autres).
+/// `rappel` reçoit la première liste dès que toutes les fenêtres ont répondu, au plus tard
+/// à `BUDGET_PAGES` (même vide), puis chaque fois que des pages arrivées en retard la font
+/// grandir, jusqu'à `PAGES_TARDIVES_MAX` : une liste reçue commence toujours par la
+/// précédente (les pages tardives sont ajoutées à la fin, `pages.rs`). Dans une même
+/// fenêtre, la plus petite d'abord (la plus précise sous la souris). Rend quand plus rien
+/// ne viendra (au plus `PAGES_TARDIVES_MAX` après le début). À appeler hors du fil
+/// principal (fil `defilante-pages`) ; la sélection ne l'attend jamais. Ailleurs que sous
+/// Windows, une seule liste, vide.
+pub fn chercher_pages(
+    fenetres: &[FenetreInfo],
+    max: usize,
+    depart: Depart,
+    mut rappel: impl FnMut(&[PageTrouvee]),
+) {
+    plateforme::chercher_pages(fenetres, max, depart, &mut rappel)
+}
+
+/// La première liste de `chercher_pages` (sans les pages tardives) : rend au plus tard à
+/// `BUDGET_PAGES`.
 pub fn pages(fenetres: &[FenetreInfo], max: usize) -> Vec<PageTrouvee> {
-    plateforme::pages(fenetres, max)
+    let (tx, rx) = std::sync::mpsc::channel();
+    let mut premiere = Some(tx);
+    let fenetres = fenetres.to_vec();
+    // La recherche continue après la première liste (les pages tardives) : dans un fil à
+    // elle, qui finit seul.
+    let lance = std::thread::Builder::new()
+        .name("defilante-pages-premiere".into())
+        .spawn(move || {
+            chercher_pages(&fenetres, max, Depart::maintenant(), |l| {
+                if let Some(tx) = premiere.take() {
+                    let _ = tx.send(l.to_vec());
+                }
+            })
+        });
+    match lance {
+        Ok(_) => rx.recv().unwrap_or_default(),
+        Err(_) => Vec::new(),
+    }
 }
 
 /// Un moyen de faire défiler.
@@ -614,40 +678,50 @@ fn presque_egaux(a: Rect, b: Rect) -> bool {
 }
 
 /// La liste des pages (pure) : `bords[i]` est le rectangle de la fenêtre `i` (premier plan
-/// d'abord), `trouvees[i]` ses pages. Chaque page est coupée à sa fenêtre, puis à ce que les
-/// fenêtres devant elle laissent voir (`retirer`) ; trop petite, en double ou couverte, elle
-/// part. Dans une fenêtre, la plus petite d'abord ; les fenêtres restent dans leur ordre.
-#[cfg_attr(not(windows), allow(dead_code))]
+/// d'abord), `trouvees[i]` ses pages (`pages_de_fenetre`). Les fenêtres restent dans leur
+/// ordre. C'est la liste qu'un `Suivi` propose quand toutes les fenêtres ont répondu avant
+/// le budget (`pages.rs`).
+#[cfg(test)]
 fn assembler(bords: &[Rect], trouvees: &[Vec<PageTrouvee>]) -> Vec<PageTrouvee> {
-    let mut liste = Vec::new();
-    for (i, pages) in trouvees.iter().enumerate() {
-        let Some(&bord) = bords.get(i) else {
-            break;
-        };
-        let mut gardees: Vec<PageTrouvee> = Vec::new();
-        for page in pages {
-            let mut rect = page.rect.intersection(bord);
-            for devant in &bords[..i] {
-                rect = rect.and_then(|r| retirer(r, *devant));
-            }
-            let Some(rect) = rect else {
-                continue;
-            };
-            if rect.largeur < COTE_TROUVE_MIN || rect.hauteur < COTE_TROUVE_MIN {
-                continue;
-            }
-            if gardees.iter().any(|g| presque_egaux(g.rect, rect)) {
-                continue;
-            }
-            gardees.push(PageTrouvee {
-                rect,
-                fenetre: page.fenetre,
-            });
+    trouvees
+        .iter()
+        .enumerate()
+        .take(bords.len())
+        .flat_map(|(i, pages)| pages_de_fenetre(bords, i, pages))
+        .collect()
+}
+
+/// Les pages gardées de la fenêtre `i` (pure) : chacune coupée à sa fenêtre (`bords[i]`),
+/// puis à ce que les fenêtres devant elle (`bords[..i]`) laissent voir (`retirer`) ; trop
+/// petite, en double ou couverte, elle part. La plus petite d'abord. Ne dépend que des
+/// bords et de ces pages : deux fenêtres n'ont jamais de page au même endroit.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn pages_de_fenetre(bords: &[Rect], i: usize, pages: &[PageTrouvee]) -> Vec<PageTrouvee> {
+    let Some(&bord) = bords.get(i) else {
+        return Vec::new();
+    };
+    let mut gardees: Vec<PageTrouvee> = Vec::new();
+    for page in pages {
+        let mut rect = page.rect.intersection(bord);
+        for devant in &bords[..i] {
+            rect = rect.and_then(|r| retirer(r, *devant));
         }
-        gardees.sort_by_key(|p| p.rect.largeur as i64 * p.rect.hauteur as i64);
-        liste.extend(gardees);
+        let Some(rect) = rect else {
+            continue;
+        };
+        if rect.largeur < COTE_TROUVE_MIN || rect.hauteur < COTE_TROUVE_MIN {
+            continue;
+        }
+        if gardees.iter().any(|g| presque_egaux(g.rect, rect)) {
+            continue;
+        }
+        gardees.push(PageTrouvee {
+            rect,
+            fenetre: page.fenetre,
+        });
     }
-    liste
+    gardees.sort_by_key(|p| p.rect.largeur as i64 * p.rect.hauteur as i64);
+    gardees
 }
 
 /// Une fenêtre fille qui est une page par sa seule classe : le rendu de Chromium (Edge,
