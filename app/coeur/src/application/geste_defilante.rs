@@ -1309,7 +1309,10 @@ struct Fil<S: Source, P: Pilote, A: Atelier> {
     /// Le facteur d'étalonnage du lu de cette capture (`regles::etalon`), dès qu'une avance
     /// a été mesurée sur du contenu.
     etalon: Option<f64>,
-    /// `Ambigue` de suite avec un lu non étalonné.
+    /// `Ambigue` avec un lu non étalonné depuis la dernière image gardée (ou depuis la
+    /// dernière mesure refaite sans lu). Les images perdues entre deux ne les séparent pas :
+    /// après un `Ambigue` dont la position bouge, la course redescend d'un pas entier, et
+    /// l'image suivante est souvent hors de portée (relecture finale, P2).
     ambigues_lues: u32,
     /// Les pixels commandés depuis la dernière image gardée.
     commande_depuis_gardee: i32,
@@ -1832,6 +1835,7 @@ impl<S: Source, P: Pilote, A: Atelier> Fil<S, P, A> {
             std::mem::swap(&mut self.reference, &mut self.image);
             self.position_gardee = position;
             self.commande_depuis_gardee = 0;
+            self.ambigues_lues = 0;
         }
         if mesure == Mesure::Perdue {
             self.perdues += 1;
@@ -1848,8 +1852,13 @@ impl<S: Source, P: Pilote, A: Atelier> Fil<S, P, A> {
 
     /// Étalonnage du lu (relecture d'ensemble, point 3), tant qu'il n'y en a pas : une
     /// `Avance(d)` que la mesure sans lu redit (sur du contenu, le lu n'a pas décidé) donne
-    /// le facteur `d / e` ; deux `Ambigue` de suite avec le lu font remesurer sans lui, et
-    /// une avance ainsi trouvée étalonne aussi.
+    /// le facteur `d / e` ; deux `Ambigue` avec le lu contre la même image gardée (pas
+    /// forcément de suite : une `Perdue` peut venir entre deux) font remesurer sans lui, et
+    /// une avance ainsi trouvée étalonne aussi. Ce repli joue à chaque fois, tant que le lu
+    /// n'est pas étalonné, pas seulement au premier pas (relecture finale, P2). Sans boucle :
+    /// chaque repli remet le compte à zéro, et la course borne les images ambiguës et
+    /// perdues (`AMBIGUES_MAX`, `PERDUES_AUTO_MAX`). La mesure sans lu ne rend une avance
+    /// que sur un décalage que rien ne sépare des autres (C) : jamais d'avance inventée.
     fn etalonner(&mut self, e: i32, mesure: Mesure, fixes: Fixes) -> (Mesure, Attendu) {
         match mesure {
             Mesure::Avance(d) => {
@@ -1875,12 +1884,18 @@ impl<S: Source, P: Pilote, A: Atelier> Fil<S, P, A> {
                 if let Mesure::Avance(d) = sans {
                     self.noter_etalon(d, e);
                 }
-                (sans, Attendu::Aucun)
+                // Immobile sans lu alors que le lu dit que la page a bougé : jamais le bas
+                // sur la foi de la seule mesure refaite (`Vu::ImmobileLu`, N4).
+                let retenu = if sans == Mesure::Immobile {
+                    Attendu::Lu(e)
+                } else {
+                    Attendu::Aucun
+                };
+                (sans, retenu)
             }
-            _ => {
-                self.ambigues_lues = 0;
-                (mesure, Attendu::Lu(e))
-            }
+            // Une image perdue, immobile ou en recul n'est pas gardée : le compte des
+            // `Ambigue` contre la même image gardée continue.
+            _ => (mesure, Attendu::Lu(e)),
         }
     }
 
@@ -2745,7 +2760,9 @@ mod tests {
         // Le rectangle de la vue compte un en-tête : le lu est 17 % trop petit (vue 0,12 %
         // au lieu de 0,1 %), et l'atelier rend `Ambigue` pour un lu à plus de 3 lignes de la
         // vraie avance. Deux `Ambigue` de suite : remesuré sans lu, l'avance trouvée étalonne
-        // le lu ; ensuite, chaque lu corrigé tombe juste.
+        // le lu ; ensuite, chaque lu corrigé tombe juste. (Avec ces faux, deux pas restent
+        // dans la portée : `fil_lu_biaise_etalonne_apres_un_haut_blanc` prend la vraie
+        // mesure, où ils en sortent.)
         let p = page(999);
         let mut pi = pilote(&p, &[Moyen::Message], true);
         pi.vue = Some(0.12);
@@ -2864,7 +2881,7 @@ mod tests {
         assert_eq!(fins.count(), 0);
     }
 
-    // --- Le fil avec la vraie mesure et le vrai assemblage (relecture finale, P1) ---
+    // --- Le fil avec la vraie mesure et le vrai assemblage (relecture finale, P1 et P2) ---
     //
     // Une page de texte synthétique sans période (lignes de 20 px, longueur et encre tirées
     // d'un hachage) ; la position imite UI Automation : `pour_cent = y / parcours`,
@@ -3091,6 +3108,39 @@ mod tests {
         assert!(
             *b.image == lignes_de_texte(0, b.page, 0),
             "toute la page, au pixel près"
+        );
+        assert!(b.messages.is_empty(), "{:?}", b.messages);
+    }
+
+    #[test]
+    fn fil_lu_biaise_etalonne_apres_un_haut_blanc() {
+        // Relecture finale, P2 : le lu est 10 % trop grand et les 450 premières lignes de la
+        // page sont blanches. Les deux premiers pas tombent dans le blanc (le lu y décide,
+        // sans étalonner) ; au troisième, le texte arrive et contredit le lu (`Ambigue`), la
+        // course redescend d'un pas entier, hors de portée (`Perdue`), puis remonte : un
+        // second `Ambigue` contre la même image gardée. Avant, une `Perdue` entre deux
+        // remettait le compte à zéro et la capture calait après trois images.
+        let b = capturer_texte(2400, None, 450, 1.1);
+        assert!(b.seule, "la capture doit finir seule en bas");
+        assert_eq!(b.y, 2400, "la page est allée au bas");
+        let h = b.image.hauteur as i32;
+        // Le blanc du haut a été franchi d'après le lu encore biaisé : 15 lignes de trop par
+        // pas dans le blanc (relecture finale, m1 : connu, ni texte coupé ni doublé).
+        let trop = h - b.page;
+        assert!((0..=30).contains(&trop), "{h} pour {} px", b.page);
+        // Tout le texte, exact, sous le blanc.
+        let texte = (b.page - 450) as usize;
+        let largeur = (TEXTE_L * 4) as usize;
+        let attendu = lignes_de_texte(450, texte as i32, 450);
+        assert!(
+            b.image.rgba[(h as usize - texte) * largeur..] == attendu.rgba[..],
+            "le texte sous le blanc, au pixel près"
+        );
+        assert!(
+            b.image.rgba[..(h as usize - texte) * largeur]
+                .chunks(4)
+                .all(|p| p == [250, 250, 250, 255]),
+            "au-dessus, seulement du blanc"
         );
         assert!(b.messages.is_empty(), "{:?}", b.messages);
     }
