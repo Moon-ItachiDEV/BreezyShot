@@ -18,7 +18,7 @@ jobs:
   windows:
     name: Windows (tests, .exe, essais)
     runs-on: windows-latest
-    timeout-minutes: 45
+    timeout-minutes: 60
     defaults:
       run:
         shell: pwsh
@@ -92,7 +92,7 @@ jobs:
   pages:
     name: Pages (bandeau, sélection, vignette dans Chromium)
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
 
