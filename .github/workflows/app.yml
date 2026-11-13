@@ -18,7 +18,7 @@ jobs:
   windows:
     name: Windows (tests, .exe, essais)
     runs-on: windows-latest
-    timeout-minutes: 45
+    timeout-minutes: 60
     defaults:
       run:
         shell: pwsh
@@ -69,8 +69,8 @@ jobs:
         run: npx tauri build --no-bundle -- --locked
 
       - name: Essais
-        # 01 à 12 ; une étape bloquée ne doit pas manger tout le job.
-        timeout-minutes: 30
+        # 01 à 13 ; une étape bloquée ne doit pas manger tout le job.
+        timeout-minutes: 45
         run: ./essais/lancer.ps1 -Exe app/coeur/target/release/breezyshot.exe -Sortie essais-resultats
 
       - name: Envoyer le .exe
@@ -92,7 +92,7 @@ jobs:
   pages:
     name: Pages (bandeau, sélection, vignette dans Chromium)
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
 
@@ -161,6 +161,12 @@ jobs:
           NODE_PATH: ${{ github.workspace }}/app/node_modules
           SORTIE: ${{ github.workspace }}/essais-resultats/pages
         run: node essais/pages/editeur.cjs
+
+      - name: Essai de la page de l'historique
+        env:
+          NODE_PATH: ${{ github.workspace }}/app/node_modules
+          SORTIE: ${{ github.workspace }}/essais-resultats/pages
+        run: node essais/pages/historique.cjs
 
       - name: Envoyer les captures de la page
         if: always()

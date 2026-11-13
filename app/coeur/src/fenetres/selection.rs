@@ -45,6 +45,8 @@
 //! - Avant le rappel d'un signal de fin : le premier plan est rendu à la fenêtre notée
 //!   (avant le masquage, tant que l'app a encore le droit de le donner), la fenêtre est
 //!   cachée, puis `selection:cachee` part vers la page.
+//! - Mode texte (0.5) : la zone choisie laisse la fenêtre montrée (le premier plan n'est
+//!   pas encore rendu) pour le balayage (`balayer`) ; `cacher` la cache ensuite.
 //! - Aucun verrou n'est tenu pendant un appel à Tauri, un `emit` ou le rappel.
 //! - Sous Windows la fenêtre est montrée et cachée par `systeme`, jamais par tao : `show()`
 //!   de tao réécrit les styles étendus (window_state.rs, `apply_diff`) et remettrait la
@@ -70,6 +72,9 @@ pub const ETIQUETTE_SELECTION: &str = "selection";
 pub const EVENEMENT_MONTRER: &str = "selection:montrer";
 /// Événement écouté par la page : la fenêtre est cachée, retour au repos.
 pub const EVENEMENT_CACHEE: &str = "selection:cachee";
+/// Événement écouté par la page (Copier le texte, 0.5) : `{ id, x, y, largeur, hauteur,
+/// reduites }`, la zone lue en pixels réels relatifs au coin de la fenêtre.
+pub const EVENEMENT_BALAYER: &str = "selection:balayer";
 /// Sans `selection_prete` dans ce délai, la sélection est cachée (`Signal::Muette`).
 pub const DELAI_PRETE: Duration = Duration::from_secs(2);
 /// Tolérance, en pixels réels, pour un point venu de la page juste au bord de la fenêtre.
@@ -86,6 +91,8 @@ pub enum Mode {
     #[default]
     Zone,
     Fenetre,
+    /// Copier le texte (0.5) : une zone, comme `Zone`, avec le nom et le voile du texte.
+    Texte,
 }
 
 impl Mode {
@@ -94,6 +101,7 @@ impl Mode {
         match self {
             Mode::Zone => "zone",
             Mode::Fenetre => "fenetre",
+            Mode::Texte => "texte",
         }
     }
 }
@@ -130,7 +138,7 @@ pub struct Demande {
 /// celui de `Demande::fenetres`.
 fn fenetres_de(demande: &Demande) -> Vec<FenetreProposee> {
     match demande.mode {
-        Mode::Zone => Vec::new(),
+        Mode::Zone | Mode::Texte => Vec::new(),
         Mode::Fenetre => demande
             .fenetres
             .iter()
@@ -434,6 +442,7 @@ fn garde_mode(mode: Mode, attendu: Mode) -> Result<(), String> {
     match (mode, attendu) {
         (Mode::Zone, Mode::Fenetre) => Err("clic en mode zone".into()),
         (Mode::Fenetre, Mode::Zone) => Err("zone en mode fenetre".into()),
+        (Mode::Texte, Mode::Fenetre) => Err("clic en mode texte".into()),
         _ => Ok(()),
     }
 }
@@ -624,12 +633,36 @@ impl Affichage {
     }
 }
 
+/// Un affichage en mode texte fini par sa zone, gardé à l'écran pour le balayage jusqu'à
+/// `cacher` (Copier le texte, 0.5).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Gardee {
+    id: u64,
+    /// Rectangle réel de la fenêtre (repère de la zone envoyée à la page).
+    fenetre: Rect,
+    /// La fenêtre au premier plan avant l'affichage, à qui le rendre.
+    avant: Option<isize>,
+}
+
+/// Ce que reçoit la page avec `selection:balayer`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+struct ChargeBalayer {
+    id: u64,
+    x: i32,
+    y: i32,
+    largeur: i32,
+    hauteur: i32,
+    reduites: bool,
+}
+
 /// L'état de la sélection : une petite machine pure, testée sans fenêtre.
 #[derive(Debug, Default)]
 struct Etat {
     dernier_id: u64,
     dernier_numero: u64,
     en_cours: Option<Affichage>,
+    /// Mode texte : l'affichage fini par sa zone et encore montré (balayage).
+    gardee: Option<Gardee>,
     page_chargee: bool,
 }
 
@@ -647,8 +680,12 @@ impl Etat {
         self.dernier_id += 1;
         let id = self.dernier_id;
         let ancien = self.en_cours.take();
+        let gardee = self.gardee.take();
         let avant = if devant.is_some() && devant == nous {
-            ancien.as_ref().and_then(|a| a.avant)
+            ancien
+                .as_ref()
+                .and_then(|a| a.avant)
+                .or(gardee.and_then(|g| g.avant))
         } else {
             devant
         };
@@ -724,6 +761,43 @@ impl Etat {
     fn terminer(&mut self, id: u64) -> Option<Affichage> {
         self.courant(id)?;
         self.en_cours.take()
+    }
+
+    /// Fin d'un affichage (déjà retiré par `terminer`) : vrai s'il reste montré, gardé pour
+    /// le balayage (mode texte, zone choisie) ; sinon il est à cacher tout de suite.
+    fn garder_si_texte(&mut self, affichage: &Affichage, signal: &Signal) -> bool {
+        let garder = affichage.mode == Mode::Texte && matches!(signal, Signal::Zone { .. });
+        if garder {
+            self.gardee = Some(Gardee {
+                id: affichage.id,
+                fenetre: affichage.fenetre,
+                avant: affichage.avant,
+            });
+        }
+        garder
+    }
+
+    /// `cacher` : l'affichage en cours ou gardé est oublié ; rend la fenêtre à qui rendre
+    /// le premier plan.
+    fn tout_oublier(&mut self) -> Option<isize> {
+        let en_cours = self.en_cours.take().and_then(|a| a.avant);
+        let gardee = self.gardee.take().and_then(|g| g.avant);
+        en_cours.or(gardee)
+    }
+
+    /// La charge du balayage de `zone` (pixels réels du bureau) sur l'affichage gardé ;
+    /// `None` s'il n'y en a pas.
+    fn charge_balayer(&self, zone: Rect, reduites: bool) -> Option<ChargeBalayer> {
+        let g = self.gardee?;
+        let r = vers_page(zone, g.fenetre);
+        Some(ChargeBalayer {
+            id: g.id,
+            x: r.x,
+            y: r.y,
+            largeur: r.largeur,
+            hauteur: r.hauteur,
+            reduites,
+        })
     }
 
     /// `selection_prete` : la durée depuis `montrer`, la première fois seulement.
@@ -872,6 +946,13 @@ impl Selection {
     /// même si rien n'est montré. N'émet aucun signal.
     pub fn cacher(&self) {
         self.interne.cacher();
+    }
+
+    /// Copier le texte (0.5) : joue le balayage sur `zone` (pixels réels du bureau) une fois
+    /// la zone choisie (`selection:balayer`). En mode texte, la zone choisie laisse la
+    /// fenêtre montrée jusqu'à `cacher`. Fil principal. Sans affichage gardé : rien.
+    pub fn balayer(&self, zone: Rect, reduites: bool) {
+        self.interne.balayer(zone, reduites);
     }
 
     /// Vrai entre `montrer` et la fin de l'affichage.
@@ -1087,7 +1168,11 @@ impl Interne {
         let Some(affichage) = self.etat().terminer(id) else {
             return;
         };
-        self.masquer(affichage.avant);
+        // Mode texte, zone choisie : la fenêtre reste pour le balayage, `cacher` la cache.
+        let gardee = self.etat().garder_si_texte(&affichage, &signal);
+        if !gardee {
+            self.masquer(affichage.avant);
+        }
         if let Some(fin) = decrire_fin(&signal) {
             log::info!("selection fin {id} {fin}");
         }
@@ -1098,7 +1183,7 @@ impl Interne {
     /// (un masquage posté directement à Windows pourrait cacher l'affichage suivant) ; la
     /// fenêtre n'est cachée sans attendre que si cet envoi échoue (boucle arrêtée).
     fn cacher(self: &Arc<Self>) {
-        let avant = self.etat().en_cours.take().and_then(|a| a.avant);
+        let avant = self.etat().tout_oublier();
         if self.sur_fil_principal() {
             self.masquer(avant);
             return;
@@ -1115,6 +1200,20 @@ impl Interne {
             if let Some(h) = self.identifiant {
                 systeme::cacher_fenetre_async(h);
             }
+        }
+    }
+
+    fn balayer(&self, zone: Rect, reduites: bool) {
+        let Some(charge) = self.etat().charge_balayer(zone, reduites) else {
+            log::info!("selection balayage sans affichage");
+            return;
+        };
+        match self
+            .app
+            .emit_to(ETIQUETTE_SELECTION, EVENEMENT_BALAYER, charge)
+        {
+            Ok(()) => log::info!("selection balayage {}", charge.id),
+            Err(e) => log::warn!("selection balayage {} non envoye: {e}", charge.id),
         }
     }
 
@@ -2251,5 +2350,81 @@ mod tests {
         fn partageable<T: Send + Sync + 'static>() {}
         partageable::<Selection>();
         partageable::<Signal>();
+    }
+
+    #[test]
+    fn mode_texte_garde_la_fenetre_pour_le_balayage() {
+        let mut e = Etat::default();
+        let mut d = demande();
+        d.bureau = r(-1920, 0, 3840, 1080);
+        d.mode = Mode::Texte;
+        let (id, _) = e.commencer(&d, Some(77), Some(5), Instant::now());
+        let zone = Signal::Zone {
+            id,
+            depart: (-100, 10),
+            arrivee: (99, 59),
+        };
+        let a = e.terminer(id).expect("affichage");
+        assert!(e.garder_si_texte(&a, &zone), "zone en mode texte : gardee");
+        // La zone en pixels de la page (origine au coin de la fenêtre).
+        assert_eq!(
+            e.charge_balayer(r(-100, 10, 200, 50), true),
+            Some(ChargeBalayer {
+                id,
+                x: 1820,
+                y: 10,
+                largeur: 200,
+                hauteur: 50,
+                reduites: true,
+            })
+        );
+        // `cacher` oublie l'affichage gardé et rend le premier plan à celle d'avant.
+        assert_eq!(e.tout_oublier(), Some(77));
+        assert_eq!(e.charge_balayer(r(0, 0, 10, 10), false), None);
+        assert_eq!(e.tout_oublier(), None);
+    }
+
+    #[test]
+    fn hors_mode_texte_ou_annulation_rien_n_est_garde() {
+        for (mode, annule) in [(Mode::Zone, false), (Mode::Texte, true)] {
+            let mut e = Etat::default();
+            let mut d = demande();
+            d.mode = mode;
+            let (id, _) = e.commencer(&d, None, None, Instant::now());
+            let signal = if annule {
+                Signal::Annulee {
+                    id,
+                    cause: Cause::Echap,
+                }
+            } else {
+                Signal::Zone {
+                    id,
+                    depart: (0, 0),
+                    arrivee: (9, 9),
+                }
+            };
+            let a = e.terminer(id).expect("affichage");
+            assert!(!e.garder_si_texte(&a, &signal), "{mode:?}");
+            assert_eq!(e.charge_balayer(r(0, 0, 10, 10), false), None);
+        }
+    }
+
+    #[test]
+    fn un_nouvel_affichage_oublie_l_affichage_garde() {
+        let mut e = Etat::default();
+        let mut d = demande();
+        d.mode = Mode::Texte;
+        let (id, _) = e.commencer(&d, Some(77), Some(5), Instant::now());
+        let a = e.terminer(id).expect("affichage");
+        let zone = Signal::Zone {
+            id,
+            depart: (0, 0),
+            arrivee: (9, 9),
+        };
+        assert!(e.garder_si_texte(&a, &zone));
+        // La sélection elle-même au premier plan : la fenêtre d'avant est reprise.
+        let (id2, _) = e.commencer(&demande(), Some(5), Some(5), Instant::now());
+        assert_eq!(e.charge_balayer(r(0, 0, 10, 10), false), None);
+        assert_eq!(e.terminer(id2).and_then(|a| a.avant), Some(77));
     }
 }

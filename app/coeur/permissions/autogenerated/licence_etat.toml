@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-licence-etat"
+description = "Enables the licence_etat command without any pre-configured scope."
+commands.allow = ["licence_etat"]
+
+[[permission]]
+identifier = "deny-licence-etat"
+description = "Denies the licence_etat command without any pre-configured scope."
+commands.deny = ["licence_etat"]

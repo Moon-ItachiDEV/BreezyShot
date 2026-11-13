@@ -730,6 +730,186 @@ input[type="range"] {
   }
 }
 
+/* Copier le texte (contrat 0.5, §2.4 ; design/historique, « .ov.ed », « .w », « .ocrbar ») :
+   bouton « Texte » de la barre du haut, calque de balayage et de choix des mots. Les jetons
+   `texte-*` (balayage, teinte de l'éditeur, survol, choix) viennent de design/historique. */
+.rb.lib {
+  width: auto;
+  display: flex;
+  gap: var(--editeur-message-ecart);
+  padding: 0 var(--editeur-menu-marge) 0 var(--editeur-message-marge-icone);
+  white-space: nowrap;
+}
+.rb:disabled {
+  opacity: 0.3;
+  cursor: default;
+  background: none;
+  transform: none;
+}
+.ok:disabled {
+  opacity: 0.3;
+  cursor: default;
+  transform: none;
+}
+.calque-texte {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: var(--editeur-barre-hauteur);
+  bottom: 0;
+  z-index: 10;
+  outline: none;
+  cursor: progress;
+}
+.calque-texte.choix {
+  cursor: text;
+}
+.balayage {
+  --duree-balayage: var(--texte-balayage);
+  position: absolute;
+  overflow: hidden;
+  pointer-events: none;
+  border-radius: var(--editeur-image-rayon);
+}
+.calque-texte.reduit .balayage {
+  --duree-balayage: var(--duree-reduite);
+}
+.balayage .bande {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 60%;
+  background: linear-gradient(
+    100deg,
+    transparent,
+    rgb(255 255 255 / 0.08) 30%,
+    rgb(255 255 255 / 0.55) 50%,
+    rgb(255 255 255 / 0.08) 70%,
+    transparent
+  );
+  transform: translateX(-110%);
+  mix-blend-mode: screen;
+}
+.balayage.joue {
+  animation: respire var(--duree-balayage) var(--courbe-ressort);
+}
+.balayage.joue .bande {
+  animation: traverse var(--duree-balayage) var(--courbe-ressort) forwards;
+}
+.balayage.joue::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: color-mix(in srgb, var(--accent) var(--texte-teinte-editeur), transparent);
+  animation: efface var(--duree-balayage) var(--courbe-douce) forwards;
+}
+.calque-texte.reduit .balayage.joue,
+.calque-texte.reduit .balayage.joue::before {
+  animation: none;
+}
+.calque-texte.reduit .bande {
+  display: none;
+}
+@keyframes respire {
+  from {
+    transform: scale(0.985);
+  }
+}
+@keyframes traverse {
+  to {
+    transform: translateX(190%);
+  }
+}
+@keyframes efface {
+  to {
+    opacity: 0;
+  }
+}
+.mots {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.mot {
+  position: absolute;
+  border-radius: 2px;
+  transition: background-color var(--duree-editeur-appui) linear;
+}
+.mot.survol {
+  background: color-mix(in srgb, var(--accent) var(--texte-survol), transparent);
+}
+.mot.choisi {
+  background: color-mix(in srgb, var(--accent) var(--texte-choix), transparent);
+}
+.mot.curseur {
+  box-shadow: inset 1.5px 0 0 var(--accent);
+}
+.barre-texte {
+  position: absolute;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px;
+  border-radius: var(--editeur-instrument-rayon);
+  background: var(--acrylic-solid);
+  border: var(--editeur-trait-largeur) solid var(--acrylic-stroke);
+  box-shadow: var(--shadow-28);
+  cursor: default;
+  white-space: nowrap;
+  animation: barre-texte var(--duree-editeur-copier-fermer-reduite) var(--courbe-ressort);
+}
+@keyframes barre-texte {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+.bt {
+  all: unset;
+  box-sizing: border-box;
+  cursor: pointer;
+  height: var(--editeur-copier-hauteur);
+  padding: 0 var(--editeur-menu-marge);
+  border-radius: var(--editeur-bouton-haut-rayon);
+  display: flex;
+  align-items: center;
+  color: var(--text);
+  transition: background-color var(--duree-editeur-survol);
+}
+.bt:hover {
+  background: var(--editeur-survol);
+}
+.bt.accent {
+  background: var(--accent);
+  color: var(--on-accent);
+}
+.bt.accent:hover {
+  background: var(--accent-hover);
+}
+.bt:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+.rb.petit {
+  width: var(--editeur-copier-hauteur);
+  height: var(--editeur-copier-hauteur);
+}
+/* Anneau de focus : `all: unset` des boutons l'efface ; celui de toute la page, remis
+   (« Copier » du haut garde son écart, .ok:focus-visible plus haut). */
+.bt:focus-visible,
+.rb:focus-visible,
+.ok:focus-visible,
+.tl:focus-visible {
+  outline: var(--editeur-focus) solid var(--accent);
+}
+.bt:focus-visible,
+.rb:focus-visible,
+.tl:focus-visible {
+  outline-offset: var(--editeur-focus);
+}
+
 /* Animations réduites : réglage du système ou `reduites` de la charge (data-reduites). */
 @media (prefers-reduced-motion: reduce) {
   *,

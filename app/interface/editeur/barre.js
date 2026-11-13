@@ -390,6 +390,7 @@ export function installerBarre(ed) {
     if (fermerEtait && garder) ed.garder();
   }
   function ouvrir(p, bouton) {
+    ed.texte?.fermer();
     fermerMenus();
     ouvreur = bouton;
     p.classList.add("ouvert");
@@ -655,6 +656,7 @@ export function installerBarre(ed) {
   // Menu contextuel d'un objet (« Forme »).
   function ouvrirMenuObjet(e) {
     const r = fenetre.getBoundingClientRect();
+    ed.texte?.fermer();
     fermerMenus();
     menuObjet.classList.add("ouvert");
     const l = menuObjet.offsetWidth;
@@ -796,6 +798,7 @@ export function installerBarre(ed) {
     });
   }
 
+  let deplacement = false; // Espace tenue déplace la vue
   document.addEventListener("keydown", (e) => {
     const t = e.target;
     if (enSaisie(t)) return;
@@ -822,6 +825,7 @@ export function installerBarre(ed) {
     // Espace : déplacer la vue si le focus n'est pas sur un bouton (qu'il activerait).
     if (e.key === " " && !ctl && !t.closest?.("button, [role='menuitem'], [role='button']")) {
       e.preventDefault();
+      deplacement = true;
       ed.outils.espace(true);
       return;
     }
@@ -879,13 +883,21 @@ export function installerBarre(ed) {
       choisirOutil(m[0], m[1]);
     }
   });
+  // Espace relâchée : annulée seulement si elle déplaçait la vue ou si la cible n'est pas un
+  // bouton (sinon le bouton qui a le focus ne serait jamais activé, 0.5).
   document.addEventListener("keyup", (e) => {
     if (e.key === " ") {
+      const actif = deplacement;
+      deplacement = false;
       ed.outils.espace(false);
-      e.preventDefault();
+      const bouton = e.target.closest?.("button, [role='menuitem'], [role='button']");
+      if (actif || !bouton) e.preventDefault();
     }
   });
-  window.addEventListener("blur", () => ed.outils.espace(false));
+  window.addEventListener("blur", () => {
+    deplacement = false;
+    ed.outils.espace(false);
+  });
 
   // ---------- synchronisation ----------
   function synchroniser() {

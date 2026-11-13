@@ -1,4 +1,5 @@
-/* Sélection d'une zone (étape 5) ou d'une fenêtre (étape 8). Toutes les couleurs viennent de ../commun/jetons.css ;
+/* Sélection d'une zone (étape 5), d'une fenêtre (étape 8) ou du texte à lire (0.5). Toutes
+   les couleurs viennent de ../commun/jetons.css ;
    la page force le thème clair (le voile ne dépend pas du thème). */
 
 html,
@@ -110,4 +111,56 @@ body.entoure #fenetre {
 
 body.entoure #plein {
   display: none;
+}
+
+/* Copier le texte (0.5) : la zone lue joue le balayage du design (design/historique,
+   « .zone.scan ») : respiration, bande claire de gauche à droite, teinte `accent` qui
+   s'efface. Animations réduites : la teinte seule, immobile, --duree-reduite. */
+#zone {
+  --duree-balayage: var(--texte-balayage);
+}
+#zone .bande {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 60%;
+  display: none;
+  background: linear-gradient(100deg, transparent, rgb(255 255 255 / 0.08) 30%,
+    rgb(255 255 255 / 0.55) 50%, rgb(255 255 255 / 0.08) 70%, transparent);
+  transform: translateX(-110%);
+  mix-blend-mode: screen;
+}
+body.balaye #zone {
+  background: color-mix(in srgb, var(--accent) var(--texte-teinte), transparent);
+  animation:
+    respire var(--duree-balayage) var(--courbe-ressort),
+    efface var(--duree-balayage) var(--courbe-douce) forwards;
+}
+body.balaye #zone .bande {
+  display: block;
+  animation: traverse var(--duree-balayage) var(--courbe-ressort) forwards;
+}
+body.balaye.reduit #zone {
+  --duree-balayage: var(--duree-reduite);
+  animation: none;
+}
+body.balaye.reduit #zone .bande {
+  display: none;
+}
+@keyframes respire {
+  from {
+    transform: scale(0.985);
+  }
+}
+@keyframes traverse {
+  to {
+    transform: translateX(190%);
+  }
+}
+/* La teinte s'efface ; le trait de la zone (ombre intérieure) reste. */
+@keyframes efface {
+  to {
+    background-color: transparent;
+  }
 }

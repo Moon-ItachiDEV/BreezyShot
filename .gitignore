@@ -6,9 +6,6 @@ app/node_modules/
 # Résultats des essais lancés en local
 essais-resultats/
 
-# Place réservée au futur code Pro (dépôt privé séparé)
-app/pro/
-
 # Divers
 .DS_Store
 Thumbs.db

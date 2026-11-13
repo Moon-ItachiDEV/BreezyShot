@@ -9,6 +9,7 @@
 
 pub mod decompte;
 pub mod editeur;
+pub mod historique;
 pub mod installateur;
 mod place;
 pub mod reglages;
@@ -86,6 +87,38 @@ pub struct Message {
     pub titre: String,
     pub detail: String,
     pub actions: Vec<Action>,
+    /// Une erreur qui part seule après ce délai, croix gardée (0.5, « Aucun texte
+    /// trouvé ») ; `None` : la règle du genre (Réussite seule, Info et Erreur à la croix).
+    pub duree_ms: Option<u32>,
+}
+
+impl Message {
+    /// Une erreur qui part seule après `duree_ms`, avec ses actions et sa croix.
+    pub fn erreur_breve(titre: &str, actions: Vec<Action>, duree_ms: u32) -> Message {
+        Message {
+            genre: Genre::Erreur,
+            titre: titre.into(),
+            detail: String::new(),
+            actions,
+            duree_ms: Some(duree_ms),
+        }
+    }
+}
+
+/// Marge du filet au-delà de `duree_ms` : la page part d'elle-même à `duree_ms`.
+pub const MARGE_DUREE: Duration = Duration::from_secs(1);
+
+/// Filet d'un message : la règle du genre (`cacher_d_office`), et pour un message à durée,
+/// caché d'office `MARGE_DUREE` après sa durée si la page ne l'a pas fait.
+pub fn cacher_message_d_office(
+    a_croix: bool,
+    duree_ms: Option<u32>,
+    depuis_affichage: Duration,
+    zone_recue: bool,
+) -> bool {
+    let echue = duree_ms
+        .is_some_and(|d| depuis_affichage >= Duration::from_millis(u64::from(d)) + MARGE_DUREE);
+    cacher_d_office(a_croix, depuis_affichage, zone_recue) || echue
 }
 
 /// Ce que la page envoie (`bandeau:afficher`).
@@ -96,6 +129,7 @@ struct Charge<'a> {
     titre: &'a str,
     detail: &'a str,
     actions: &'a [Action],
+    duree_ms: Option<u32>,
 }
 
 /// Ce que le module signale à l'Application.
@@ -440,6 +474,7 @@ impl Bandeau {
                     titre: &message.titre,
                     detail: &message.detail,
                     actions: &message.actions,
+                    duree_ms: message.duree_ms,
                 };
                 self.app
                     .emit_to(ETIQUETTE_BANDEAU, EVENEMENT_AFFICHER, charge)
@@ -489,7 +524,11 @@ impl Bandeau {
                     };
                     let a_croix = c.contenu.a_croix();
                     let depuis = c.depuis_affichage(Instant::now());
-                    if cacher_d_office(a_croix, depuis, c.zone.is_some()) {
+                    let duree = match &c.contenu {
+                        Contenu::Message(m) => m.duree_ms,
+                        Contenu::Decompte(_) => None,
+                    };
+                    if cacher_message_d_office(a_croix, duree, depuis, c.zone.is_some()) {
                         drop(etat);
                         let pour = app.clone();
                         let _ = app.run_on_main_thread(move || {
@@ -907,7 +946,42 @@ mod tests {
             titre: "t".into(),
             detail: String::new(),
             actions: Vec::new(),
+            duree_ms: None,
         }
+    }
+
+    #[test]
+    fn erreur_breve_part_seule_apres_sa_duree() {
+        let m = Message::erreur_breve("Aucun texte trouvé", Vec::new(), 4000);
+        assert_eq!((m.genre, m.duree_ms), (Genre::Erreur, Some(4000)));
+        assert!(m.genre.a_croix());
+        let zone = true;
+        assert!(!cacher_message_d_office(
+            true,
+            Some(4000),
+            Duration::from_secs(4),
+            zone
+        ));
+        assert!(cacher_message_d_office(
+            true,
+            Some(4000),
+            Duration::from_secs(5),
+            zone
+        ));
+        // Sans durée : la règle du genre, inchangée.
+        assert!(!cacher_message_d_office(
+            true,
+            None,
+            Duration::from_secs(60),
+            zone
+        ));
+        assert!(cacher_message_d_office(true, None, DELAI_ZONE_MAX, false));
+        assert!(cacher_message_d_office(
+            false,
+            None,
+            DELAI_REUSSITE_MAX,
+            zone
+        ));
     }
 
     fn decompte() -> Decompte {

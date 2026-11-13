@@ -14,7 +14,9 @@
   est aussi la barre de la fenêtre sans cadre, la scène, la palette, les menus et bulles. Le
   comportement (editeur.js, barre.js, outils.js) ne vise que les identifiants, les data-*, les
   rôles et les noms ; l'habillage est dans editeur.css (jetons seulement). Pictogrammes et
-  instruments : ceux de design/editeur-epure/index.html.
+  instruments : ceux de design/editeur-epure/index.html (`i-ocr` : design/historique). Le
+  bouton « Texte » et le calque « Choisir le texte » sont créés par texte.js, seulement si
+  la charge le permet.
 -->
 <svg width="0" height="0" class="defs" aria-hidden="true">
   <defs>
@@ -22,6 +24,9 @@
       <stop offset=".45" class="argent-milieu"/><stop offset="1" class="argent-bord"/>
     </linearGradient>
     <symbol id="i-x" viewBox="0 0 20 20"><path d="M5.5 5.5l9 9M14.5 5.5l-9 9"/></symbol>
+    <symbol id="i-ocr" viewBox="0 0 20 20"><path d="M3 7V4.5A1.5 1.5 0 0 1 4.5 3H7M13 3h2.5A1.5
+      1.5 0 0 1 17 4.5V7M17 13v2.5a1.5 1.5 0 0 1-1.5 1.5H13M7 17H4.5A1.5 1.5 0 0 1 3 15.5V13"/>
+      <path d="M7 7.2h6M10 7.2v6"/></symbol>
     <symbol id="i-save" viewBox="0 0 20 20"><path d="M10 3v9M6.5 8.5 10 12l3.5-3.5"/>
       <path d="M3.5 13v2a2 2 0 0 0 2 2h9a2 2 0 0 0 2-2v-2"/></symbol>
     <symbol id="i-copy" viewBox="0 0 20 20"><rect x="6.5" y="6.5" width="10" height="10"

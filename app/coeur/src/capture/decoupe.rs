@@ -135,6 +135,52 @@ pub fn arrondir(pixels: &mut Pixels, rayon: i32, coins: [bool; 4]) {
     }
 }
 
+/// Taille que l'aperçu de l'historique doit couvrir (une case 16:10).
+const APERCU_HISTORIQUE: (u32, u32) = (400, 250);
+
+/// L'aperçu d'une case de l'historique (contrat 0.5, §3.1) : la partie 16:10 du haut à
+/// gauche (ce que montre la case), réduite pour couvrir 400 × 250, jamais agrandie. Pur.
+/// Une image vide ou incohérente est rendue telle quelle.
+pub fn apercu_historique(pixels: &Pixels) -> Pixels {
+    let (l, h) = (pixels.largeur, pixels.hauteur);
+    let coherent = pixels.rgba.len() as u64 == u64::from(l) * u64::from(h) * 4;
+    if !coherent || l == 0 || h == 0 {
+        return pixels.clone();
+    }
+    // La plus grande partie 16:10 calée en haut à gauche (arrondie au pixel).
+    let (pl, ph) = if u64::from(l) * 10 >= u64::from(h) * 16 {
+        let pl = (u64::from(h) * 16 + 5) / 10;
+        (pl.clamp(1, u64::from(l)) as u32, h)
+    } else {
+        let ph = (u64::from(l) * 10 + 8) / 16;
+        (l, ph.clamp(1, u64::from(h)) as u32)
+    };
+    let partie = if (pl, ph) == (l, h) {
+        pixels.clone()
+    } else {
+        let rangee = pl as usize * 4;
+        let mut rgba = Vec::with_capacity(rangee * ph as usize);
+        for ligne in pixels.rgba.chunks_exact(l as usize * 4).take(ph as usize) {
+            rgba.extend_from_slice(&ligne[..rangee]);
+        }
+        Pixels {
+            largeur: pl,
+            hauteur: ph,
+            rgba,
+        }
+    };
+    // Couvrir 400 × 250 : le plus petit facteur qui garde les deux côtés au moins à la
+    // cible. Déjà plus petite d'un côté : jamais agrandie, rendue telle quelle.
+    let (cl, ch) = APERCU_HISTORIQUE;
+    if pl <= cl || ph <= ch {
+        return partie;
+    }
+    let k = (f64::from(cl) / f64::from(pl)).max(f64::from(ch) / f64::from(ph));
+    let nl = ((f64::from(pl) * k).round() as u32).clamp(cl, pl);
+    let nh = ((f64::from(ph) * k).round() as u32).clamp(ch, ph);
+    reduire_a(&partie, nl, nh)
+}
+
 /// Réduit l'image pour qu'aucun côté ne dépasse `cote_max` (aperçu de la vignette) :
 /// chaque pixel d'arrivée est la moyenne des pixels de départ qu'il couvre (boîtes),
 /// couleurs pondérées par l'alpha, alpha gardé. Une image déjà assez petite, vide ou
@@ -148,6 +194,14 @@ pub fn reduire(pixels: &Pixels, cote_max: u32) -> Pixels {
     let k = f64::from(cote_max) / f64::from(l.max(h));
     let nl = ((f64::from(l) * k).round() as u32).clamp(1, cote_max);
     let nh = ((f64::from(h) * k).round() as u32).clamp(1, cote_max);
+    reduire_a(pixels, nl, nh)
+}
+
+/// Réduit des pixels cohérents à `nl × nh` (au plus leur taille, au moins 1), par la
+/// moyenne des boîtes de `reduire`.
+fn reduire_a(pixels: &Pixels, nl: u32, nh: u32) -> Pixels {
+    let (l, h) = (pixels.largeur, pixels.hauteur);
+    let (nl, nh) = (nl.clamp(1, l.max(1)), nh.clamp(1, h.max(1)));
     let mut rgba = vec![0u8; nl as usize * nh as usize * 4];
     for y in 0..nh {
         let y0 = (u64::from(y) * u64::from(h) / u64::from(nh)) as u32;
@@ -466,5 +520,107 @@ mod tests {
             rgba: vec![0; 4],
         };
         assert_eq!(reduire(&p, 2).largeur, 10);
+    }
+
+    /// Image dont chaque pixel dit sa place : (x mod 256, y mod 256, 7, 255).
+    fn grille(l: u32, h: u32) -> Pixels {
+        let mut rgba = Vec::with_capacity((l * h * 4) as usize);
+        for y in 0..h {
+            for x in 0..l {
+                rgba.extend_from_slice(&[(x % 256) as u8, (y % 256) as u8, 7, 255]);
+            }
+        }
+        Pixels {
+            largeur: l,
+            hauteur: h,
+            rgba,
+        }
+    }
+
+    #[test]
+    fn apercu_historique_ecran_1080p() {
+        // 1920 × 1080 : partie 1728 × 1080, puis 400 × 250.
+        let a = apercu_historique(&grille(1920, 1080));
+        assert_eq!((a.largeur, a.hauteur), (400, 250));
+        assert_eq!(a.rgba.len(), 400 * 250 * 4);
+        // Rouge = x : le dernier pixel vient de la colonne 1727 au plus (partie 16:10, pas
+        // l'image entière réduite, qui irait jusqu'à 1919 mod 256 = 127 sur la fin).
+        let dernier = &a.rgba[(399 * 4) as usize..(400 * 4) as usize];
+        let attendu = ((1728 - 3)..1728).map(|x| (x % 256) as u32).sum::<u32>() / 3;
+        assert!(
+            u32::from(dernier[0]).abs_diff(attendu) <= 40,
+            "{dernier:?} {attendu}"
+        );
+    }
+
+    #[test]
+    fn apercu_historique_partie_du_haut_a_gauche() {
+        // Très large : 5760 × 1080 (trois écrans) → partie 1728 × 1080 → 400 × 250.
+        let large = grille(5760, 1080);
+        let a = apercu_historique(&large);
+        assert_eq!((a.largeur, a.hauteur), (400, 250));
+        // Même résultat que la partie 1728 × 1080 seule : la droite n'y entre pas.
+        assert_eq!(a, apercu_historique(&grille(1728, 1080)));
+        // Très haute : 400 × 4000 → partie 400 × 250, sans réduction : les pixels mêmes du
+        // haut de l'image.
+        let haute = grille(400, 4000);
+        let a = apercu_historique(&haute);
+        assert_eq!((a.largeur, a.hauteur), (400, 250));
+        assert_eq!(a.rgba[..], haute.rgba[..400 * 250 * 4]);
+    }
+
+    #[test]
+    fn apercu_historique_jamais_agrandi() {
+        // Plus petite que 400 × 250 : coupée en 16:10, jamais agrandie.
+        let a = apercu_historique(&grille(300, 200));
+        assert_eq!((a.largeur, a.hauteur), (300, 188));
+        let a = apercu_historique(&grille(320, 200));
+        assert_eq!(a, grille(320, 200));
+        // Un côté sous la cible : la partie telle quelle.
+        let a = apercu_historique(&grille(1000, 240));
+        assert_eq!((a.largeur, a.hauteur), (384, 240));
+        // Cas limites sans panique.
+        for (l, h) in [(1u32, 1u32), (1, 5000), (5000, 1), (2, 1)] {
+            let a = apercu_historique(&grille(l, h));
+            assert!(a.largeur >= 1 && a.hauteur >= 1, "{l}x{h}");
+            assert_eq!(a.rgba.len() as u32, a.largeur * a.hauteur * 4, "{l}x{h}");
+        }
+        // Vide ou incohérente : rendue telle quelle.
+        let vide = Pixels {
+            largeur: 0,
+            hauteur: 0,
+            rgba: Vec::new(),
+        };
+        assert_eq!(apercu_historique(&vide), vide);
+        let mut abimee = grille(800, 500);
+        abimee.rgba.pop();
+        assert_eq!(apercu_historique(&abimee), abimee);
+    }
+
+    #[test]
+    fn apercu_historique_couvre_toujours_la_case() {
+        // Quelle que soit la taille au-delà de 400 × 250, les deux côtés couvrent la case et
+        // la forme reste 16:10 au pixel près.
+        for (l, h) in [
+            (1001u32, 1000u32),
+            (641, 401),
+            (4096, 2160),
+            (2560, 1600),
+            (799, 3000),
+        ] {
+            let a = apercu_historique(&grille(l, h));
+            assert!(
+                a.largeur >= 400 && a.hauteur >= 250,
+                "{l}x{h} → {}x{}",
+                a.largeur,
+                a.hauteur
+            );
+            assert!(
+                a.largeur <= 401 && a.hauteur <= 251,
+                "{l}x{h} → {}x{}",
+                a.largeur,
+                a.hauteur
+            );
+        }
     }
 }

@@ -82,13 +82,24 @@ pub struct Raccourcis {
     pub fenetre: Vec<String>,
     /// Refaire la dernière zone (version 3).
     pub derniere_zone: Vec<String>,
+    /// Ouvrir l'historique (version 4).
+    pub historique: Vec<String>,
+    /// Copier le texte (version 4).
+    pub texte: Vec<String>,
     /// Actions que cette version ne connaît pas, gardées telles quelles pour la réécriture.
     pub(in crate::reglages) autres: Map<String, Value>,
 }
 
 impl Raccourcis {
     /// Les noms d'action connus, dans l'ordre où ils sont écrits.
-    pub const ACTIONS: [&'static str; 4] = ["zone", "plein_ecran", "fenetre", "derniere_zone"];
+    pub const ACTIONS: [&'static str; 6] = [
+        "zone",
+        "plein_ecran",
+        "fenetre",
+        "derniere_zone",
+        "historique",
+        "texte",
+    ];
 
     /// Les candidats d'une action connue, `None` pour une action inconnue.
     pub fn candidats(&self, action: &str) -> Option<&[String]> {
@@ -97,6 +108,8 @@ impl Raccourcis {
             "plein_ecran" => Some(&self.plein_ecran),
             "fenetre" => Some(&self.fenetre),
             "derniere_zone" => Some(&self.derniere_zone),
+            "historique" => Some(&self.historique),
+            "texte" => Some(&self.texte),
             _ => None,
         }
     }
@@ -107,6 +120,8 @@ impl Raccourcis {
             "plein_ecran" => Some(&mut self.plein_ecran),
             "fenetre" => Some(&mut self.fenetre),
             "derniere_zone" => Some(&mut self.derniere_zone),
+            "historique" => Some(&mut self.historique),
+            "texte" => Some(&mut self.texte),
             _ => None,
         }
     }
@@ -120,6 +135,8 @@ impl Raccourcis {
                 plein_ecran: liste(&["Ctrl+Maj+2"]),
                 fenetre: liste(&["Ctrl+Maj+3"]),
                 derniere_zone: liste(&["Ctrl+Maj+4"]),
+                historique: liste(&["Ctrl+Maj+H"]),
+                texte: liste(&["Ctrl+Maj+T"]),
                 autres: Map::new(),
             },
             // Provisoire : les raccourcis du Mac restent à choisir (Cmd+Maj+3, 4 et 5 sont
@@ -129,6 +146,8 @@ impl Raccourcis {
                 plein_ecran: liste(&["Cmd+Maj+2"]),
                 fenetre: liste(&["Cmd+Maj+6"]),
                 derniere_zone: liste(&["Cmd+Maj+7"]),
+                historique: liste(&["Cmd+Maj+8"]),
+                texte: liste(&["Cmd+Maj+9"]),
                 autres: Map::new(),
             },
         }

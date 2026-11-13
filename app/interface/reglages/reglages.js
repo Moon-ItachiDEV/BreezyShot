@@ -11,7 +11,11 @@
 // - `reglages_saisie` { action, active } → Reponse (le cœur rend ses raccourcis au système
 //   le temps de la saisie, sinon il les recevrait avant la page) ;
 // - `reglages_raccourci` { action, saisie: { ctrl, maj, alt, win, cle, code } } → Reponse ;
-// - `reglages_retablir` { action } → Reponse.
+// - `reglages_retablir` { action } → Reponse ;
+// - `licence_activer` { texte } → { active } ou rejet (code du refus : la page dit
+//   « Licence non valide », rien d'autre), `licence_retirer` {} → { active } : après l'un ou
+//   l'autre, la page redemande sa vue (`reglages_lire`), qui dit `licence_active` et les
+//   lignes de Réglages › Raccourcis en vigueur.
 // Reponse = { vue, refus: { ligne, texte } | null }. Événements : `reglages:etat` (une vue),
 // `interface:theme` (commun/theme.js).
 //
@@ -28,6 +32,7 @@ const $$ = (s, r = document) => Array.from(r.querySelectorAll(s));
 const ATTENTE_NOM_MS = 400;
 const THEMES = { systeme: null, clair: "light", sombre: "dark" };
 const MODIFICATEURS = ["Control", "Shift", "Alt", "Meta", "AltGraph", "OS"];
+const LICENCE_REFUSEE = "Licence non valide";
 
 let vue = null;
 let saisie = null; // action en cours de saisie
@@ -100,6 +105,14 @@ function poserSegments(nom, valeurs, texte) {
 function poserRaccourcis(liste) {
   const conteneur = $('[data-liste="raccourcis"]');
   const modele = $('template[data-modele="raccourci"]');
+  // Une action qui n'est plus en vigueur (licence retirée) perd sa ligne.
+  const voulues = new Set(liste.map((r) => r.action));
+  for (const l of $$('[data-reglage="raccourci"]', conteneur)) {
+    if (!voulues.has(l.dataset.action)) {
+      if (saisie === l.dataset.action) finirSaisie(true);
+      l.remove();
+    }
+  }
   for (const r of liste) {
     let ligne = $(`[data-reglage="raccourci"][data-action="${CSS.escape(r.action)}"]`, conteneur);
     if (!ligne) {
@@ -110,6 +123,9 @@ function poserRaccourcis(liste) {
       $('[data-controle="saisie"]', ligne).setAttribute("aria-labelledby", id);
       conteneur.append(ligne);
     }
+    // Dans l'ordre de la vue ; une ligne déjà à sa place n'est pas déplacée (clic gardé).
+    const place = conteneur.children[liste.indexOf(r)];
+    if (place !== ligne) conteneur.insertBefore(ligne, place || null);
     $('[data-valeur="libelle"]', ligne).textContent = r.libelle;
     $('[data-controle="retablir"]', ligne).hidden = !r.modifie;
     const refus = $("[data-refus]", ligne);
@@ -188,10 +204,71 @@ function afficher(v) {
   numero.textContent = v.version;
   $('[data-valeur="version"]').replaceChildren(nomApp, " ", numero);
   poserRaccourcis(v.raccourcis);
+  poserLicence(v.licence_active === true);
   const alerte = $("[data-alerte]");
   alerte.textContent = v.alerte || "";
   alerte.hidden = !v.alerte;
 }
+
+// Licence : le champ et « Activer » sans licence, « Pro activé » et « Retirer » avec. Le
+// texte collé reste dans le champ tant qu'il n'est pas accepté.
+const champLicence = $('[data-controle="licence_texte"]');
+const boutonActiver = $('[data-controle="activer"]');
+const boutonRetirer = $('[data-controle="retirer"]');
+let licenceEnCours = false;
+// Le dernier texte essayé a été refusé : dit jusqu'à ce que le champ change (une vue relue
+// au retour du focus ne l'efface pas).
+let licenceRefusee = false;
+function poserLicence(active) {
+  $('[data-etat-licence="sans"]').hidden = active;
+  $('[data-etat-licence="avec"]').hidden = !active;
+  if (active) {
+    champLicence.value = "";
+    licenceRefusee = false;
+  }
+  const p = $('[data-reglage="licence"] [data-refus]');
+  p.textContent = licenceRefusee ? LICENCE_REFUSEE : "";
+  p.hidden = !licenceRefusee;
+  boutonActiver.disabled = licenceEnCours || champLicence.value.trim() === "";
+}
+// Après Activer ou Retirer : la vue est redemandée, puis le focus va au contrôle montré.
+function apresLicence(cible) {
+  return appeler("reglages_lire").then((r) => {
+    licenceEnCours = false;
+    recevoir(r);
+    if (vue) poserLicence(vue.licence_active === true);
+    if (!cible.closest("[hidden]")) cible.focus();
+  });
+}
+function activerLicence() {
+  const texte = champLicence.value;
+  if (licenceEnCours || texte.trim() === "" || !tauri?.core?.invoke) return;
+  licenceEnCours = true;
+  boutonActiver.disabled = true;
+  Promise.resolve()
+    .then(() => tauri.core.invoke("licence_activer", { texte }))
+    .then(
+      () => apresLicence(boutonRetirer),
+      () => {
+        licenceEnCours = false;
+        licenceRefusee = true;
+        poserLicence(false);
+      },
+    );
+}
+champLicence.addEventListener("input", () => {
+  licenceRefusee = false;
+  poserLicence(false);
+});
+champLicence.addEventListener("keydown", (e) => {
+  if (e.key === "Enter") activerLicence();
+});
+boutonActiver.addEventListener("click", activerLicence);
+boutonRetirer.addEventListener("click", () => {
+  if (licenceEnCours) return;
+  licenceEnCours = true;
+  appeler("licence_retirer").then(() => apresLicence(champLicence));
+});
 
 function changer(cle, valeur) {
   return appeler("reglages_changer", { changement: { cle, valeur } }).then(recevoir);
@@ -445,7 +522,8 @@ if (tauri?.event?.listen) {
 } else {
   afficher({
     lignes: ["retardateur", "pointeur", "copier", "vignette", "vignette_duree",
-      "vignette_coin", "dossier", "enregistrer", "modele_nom", "theme", "demarrage", "version"],
+      "vignette_coin", "dossier", "enregistrer", "modele_nom", "theme", "demarrage", "licence",
+      "version"],
     capture: { retardateur_s: 0, pointeur: false },
     retardateurs: [0, 3, 5, 10],
     copier: true,
@@ -469,6 +547,7 @@ if (tauri?.event?.listen) {
         refus: null,
       },
     ],
+    licence_active: false,
     version: "0.0.0",
     alerte: null,
     saisie_en_cours: false,

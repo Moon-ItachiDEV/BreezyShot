@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-historique-tout-effacer"
+description = "Enables the historique_tout_effacer command without any pre-configured scope."
+commands.allow = ["historique_tout_effacer"]
+
+[[permission]]
+identifier = "deny-historique-tout-effacer"
+description = "Denies the historique_tout_effacer command without any pre-configured scope."
+commands.deny = ["historique_tout_effacer"]

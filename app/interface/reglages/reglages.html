@@ -159,6 +159,25 @@
               aria-checked="false"><svg class="sw-picto sw-non" viewBox="0 0 14 14" aria-hidden="true"><path d="M3.5 3.5l7 7M10.5 3.5l-7 7"/></svg><svg class="sw-picto sw-oui" viewBox="0 0 14 14" aria-hidden="true"><path d="M2.5 7.5 5.5 10.5 11.5 3.5"/></svg><span class="sw-bouton" aria-hidden="true"><svg viewBox="0 0 12 12"><path d="M2.2 6.4 4.8 9 9.8 3.2"/></svg></span></button>
           </div>
         </div>
+        <div class="groupe">
+          <div class="ligne large" data-reglage="licence" hidden>
+            <div class="lb">
+              <label class="libelle" id="l-licence" for="licence-texte">Licence</label>
+              <p class="refus" data-refus role="status" hidden></p>
+            </div>
+            <div class="ctl" data-etat-licence="sans">
+              <div class="champ licence">
+                <input id="licence-texte" type="text" data-controle="licence_texte"
+                  placeholder="Coller la licence" spellcheck="false" autocomplete="off">
+              </div>
+              <button class="bouton" data-controle="activer" disabled>Activer</button>
+            </div>
+            <div class="ctl" data-etat-licence="avec" hidden>
+              <span class="valeur">Pro activé</span>
+              <button class="bouton" data-controle="retirer">Retirer</button>
+            </div>
+          </div>
+        </div>
       </section>
     </main>
   </div>

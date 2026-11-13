@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-historique-glisser"
+description = "Enables the historique_glisser command without any pre-configured scope."
+commands.allow = ["historique_glisser"]
+
+[[permission]]
+identifier = "deny-historique-glisser"
+description = "Denies the historique_glisser command without any pre-configured scope."
+commands.deny = ["historique_glisser"]

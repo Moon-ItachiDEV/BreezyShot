@@ -7,6 +7,12 @@
 //! 3. libérer ce qu'il tient dans `arreter` (raccourcis, fenêtres) ;
 //! 4. ajouter ses entrées de menu dans `entrees_menu`.
 //!
+//! 0.5 : l'historique (`geste_historique`, `fenetre_historique`, décisions dans
+//! `historique.rs`) et Copier le texte (`geste_texte`, décisions dans `texte.rs`) ne
+//! touchent ce fichier que par leurs points d'accroche. Une fonction Pro n'est construite
+//! que si `droits::ouverte` le dit, ici seulement (`actions_construites`), d'après la
+//! licence en vigueur (`licence.rs`, `Evenement::LicenceChangee`).
+//!
 //! Retardateur (0.4) : `demarrer_capture` entre en Décompte (`commencer_decompte`), le fil
 //! `decompte` poste `DecompteFini`, puis la séquence du mode part (`apres_gel`) ;
 //! `decompte.rs` décide (fonctions pures). Dernière zone : `capturer_derniere_zone`.
@@ -22,11 +28,17 @@ pub mod editeur;
 pub mod etat;
 pub mod etats;
 pub mod fenetre_editeur;
+pub mod fenetre_historique;
 pub mod fenetre_reglages;
+pub mod geste_historique;
+pub mod geste_texte;
+pub mod historique;
 pub mod icone;
 pub mod installateur;
 pub mod journal;
+pub mod licence;
 pub mod page_reglages;
+pub mod texte;
 pub mod vignette;
 pub mod zone;
 
@@ -41,6 +53,7 @@ use std::time::{Duration, Instant};
 use tauri::{AppHandle, Manager, RunEvent};
 
 use crate::capture;
+use crate::droits::{self, Fonction};
 use crate::fenetres::selection::{self, Selection};
 use crate::fenetres::vignette::{self as carte, Vignette};
 use crate::fenetres::{self, Bandeau, Genre, Message};
@@ -83,17 +96,47 @@ pub const VIGNETTE_CONSTRUITE: bool = true;
 /// montre Annoter qu'à partir de là (seulement ce qui marche).
 pub const EDITEUR_CONSTRUIT: bool = true;
 
-/// Les actions dont la capture existe : seules celles-ci reçoivent un raccourci (§5) et
-/// une entrée au menu.
-pub const ACTIONS_CONSTRUITES: [&str; 4] = ["zone", "plein_ecran", "fenetre", "derniere_zone"];
+/// Les actions de capture de la 0.4, toujours construites.
+pub const ACTIONS_DE_CAPTURE: [&str; 4] = ["zone", "plein_ecran", "fenetre", "derniere_zone"];
 
-/// L'ordre des entrées de capture dans le menu de l'icône (celui des raccourcis 1 à 4).
-/// Seuls les modes construits (`ACTIONS_CONSTRUITES`) y paraissent.
-pub const ORDRE_MENU: [Mode; 4] = [
+/// Nom d'action du raccourci de l'historique, et identifiant de son entrée de menu.
+pub const ACTION_HISTORIQUE: &str = "historique";
+pub const MENU_HISTORIQUE: &str = "historique";
+
+/// Les actions construites : seules celles-ci reçoivent un raccourci (§5), une entrée au
+/// menu, une ligne dans Réglages › Raccourcis (et, pour `texte`, le bouton de l'éditeur).
+/// `historique` si l'historique est construit et ouvert (`droits`) ; `texte` si Copier le
+/// texte est construit, ouvert, et si une langue de lecture existe (R10).
+pub fn actions_construites(pro: bool, texte_disponible: bool) -> Vec<&'static str> {
+    actions_selon(
+        pro,
+        historique::CONSTRUIT,
+        texte::CONSTRUIT && texte_disponible,
+    )
+}
+
+/// Règle pure de `actions_construites` : `avec_historique`, `avec_texte` disent ce qui est
+/// construit (et la langue), `pro` qu'une licence valide est en place ; les droits sont lus
+/// ici et nulle part ailleurs.
+pub fn actions_selon(pro: bool, avec_historique: bool, avec_texte: bool) -> Vec<&'static str> {
+    let mut actions = ACTIONS_DE_CAPTURE.to_vec();
+    if avec_historique && droits::ouverte(Fonction::Historique, pro) {
+        actions.push(ACTION_HISTORIQUE);
+    }
+    if avec_texte && droits::ouverte(Fonction::Texte, pro) {
+        actions.push(Mode::Texte.nom());
+    }
+    actions
+}
+
+/// L'ordre des entrées de capture dans le menu de l'icône (celui des raccourcis 1 à 4,
+/// puis Copier le texte). Seuls les modes construits y paraissent.
+pub const ORDRE_MENU: [Mode; 5] = [
     Mode::Zone,
     Mode::PleinEcran,
     Mode::Fenetre,
     Mode::DerniereZone,
+    Mode::Texte,
 ];
 
 /// Tout ce qui arrive à l'Application : signaux des modules, du système, du menu.
@@ -118,7 +161,12 @@ pub enum Evenement {
     /// L'échéance de la sortie numéro `n` est tombée (ou son fil s'est arrêté).
     SortieEchue(u64),
     /// Annonce du démarrage, postée par `demarrer` pour un tour de la boucle déjà lancée.
-    AnnonceDemarrage { local: PathBuf, bilan: Bilan },
+    /// `sans_texte` : la borne de l'attente a gagné, le bilan part sans le texte.
+    AnnonceDemarrage {
+        local: PathBuf,
+        bilan: Bilan,
+        sans_texte: bool,
+    },
     /// Signal de la vignette ou de son souffle.
     Vignette(carte::Signal),
     /// Copier ou Enregistrer de la vignette est fini (rendu par son fil).
@@ -142,6 +190,16 @@ pub enum Evenement {
     EditeurExportEchu(u64),
     /// Le glisser du document `id`, reposté hors du gestionnaire de la page.
     EditeurGlisser { id: u64, chemin: PathBuf },
+    /// Signal de l'historique (0.5), traité par `geste_historique::traiter`.
+    Historique(geste_historique::Signal),
+    /// Une lecture de texte est finie (rendue par le fil `texte`).
+    TexteLu(Box<texte::FinLecture>),
+    /// L'échéance de la lecture numéro `n` est tombée.
+    TexteEchu(u64),
+    /// Résultat de la recherche des langues de lecture, au démarrage.
+    TexteDisponible(bool),
+    /// La licence a été activée ou retirée (`licence.rs`) : listes refaites.
+    LicenceChangee,
 }
 
 /// Ce que le fil d'une action de la vignette rend au fil principal.
@@ -268,6 +326,8 @@ pub struct Application {
     /// Annonce affichée mais pas encore vue : `(id du message, dossier local, situation)`.
     /// La situation n'est retenue dans `etat.json` qu'une fois le message montré.
     annonce_en_attente: Mutex<Option<AnnonceEnAttente>>,
+    /// L'annonce du démarrage, différée jusqu'au raccourci du texte (`lacher_annonce`).
+    annonce_differee: Mutex<Option<(PathBuf, Bilan)>>,
     /// Le fil principal (celui de la boucle d'événements), noté au démarrage.
     fil_principal: OnceLock<ThreadId>,
     /// Dossiers résolus au démarrage.
@@ -320,6 +380,16 @@ pub struct Application {
     editeur_suivant: Mutex<Option<(editeur::Document, Instant)>>,
     /// Le filet de la page de l'éditeur : fermé à `editeur_pret`, il finit son fil.
     filet_page: Mutex<Option<Sender<()>>>,
+    /// L'historique ouvert (fil principal ; `None` : fenêtre fermée).
+    historique: Mutex<Option<historique::EtatHistorique>>,
+    /// La lecture de texte en cours (état Lecture).
+    lecture: Mutex<Option<texte::LectureEnCours>>,
+    /// Une langue de lecture existe (`Evenement::TexteDisponible`) ; faux jusque-là.
+    texte_disponible: AtomicBool,
+    /// La licence en vigueur (`licence.rs`) ; `None` : pas de Pro.
+    licence: Mutex<Option<crate::licence::Licence>>,
+    /// Les actions construites que tiennent le menu et les raccourcis (`suivre_les_actions`).
+    actions_suivies: Mutex<Vec<&'static str>>,
 }
 
 /// Une annonce envoyée au bandeau, dont la situation attend d'être retenue.
@@ -420,7 +490,19 @@ fn lancer_app(contexte: tauri::Context, commande: Commande, inconnus: Vec<String
             fenetre_editeur::editeur_etat,
             fenetre_editeur::editeur_exporter,
             fenetre_editeur::editeur_fermer,
-            fenetre_editeur::editeur_garder
+            fenetre_editeur::editeur_garder,
+            fenetre_editeur::editeur_copier_texte,
+            fenetre_historique::historique_pret,
+            fenetre_historique::historique_apercu,
+            fenetre_historique::historique_action,
+            fenetre_historique::historique_annuler,
+            fenetre_historique::historique_tout_effacer,
+            fenetre_historique::historique_glisser,
+            fenetre_historique::historique_affiche,
+            fenetre_historique::historique_fermer,
+            licence::licence_etat,
+            licence::licence_activer,
+            licence::licence_retirer
         ])
         .setup(move |app| {
             demarrer(app.handle(), commande, &inconnus);
@@ -538,7 +620,14 @@ fn demarrer(app: &AppHandle, commande: Commande, inconnus: &[String]) {
         }
         None => Reglages::par_defaut(plateforme),
     };
-    let candidats = table_candidats(&reglages);
+    // La licence d'abord : les actions Pro en dépendent. Les langues de lecture ne sont pas
+    // encore connues : `texte` attend `Evenement::TexteDisponible`.
+    licence::charger(app);
+    let pro = pro(app);
+    if let Ok(mut suivies) = app.state::<Application>().actions_suivies.lock() {
+        *suivies = actions_construites(pro, false);
+    }
+    let candidats = table_candidats(&reglages, &actions_construites(pro, false));
     fenetre_reglages::retenir_theme(&reglages);
     log::info!("theme interface: {}", reglages.theme.texte());
     if systeme::demarrage::cle_d_essai() {
@@ -601,7 +690,7 @@ fn demarrer(app: &AppHandle, commande: Commande, inconnus: &[String]) {
         app,
         theme,
         taille,
-        &entrees_menu(|mode| bilan.libelle_menu(mode.nom())),
+        &entrees_menu(&actions_construites(pro, false), |a| bilan.libelle_menu(a)),
         |app, id| traiter(app, Evenement::Menu(id)),
     ) {
         Ok(()) => log::info!(
@@ -620,13 +709,27 @@ fn demarrer(app: &AppHandle, commande: Commande, inconnus: &[String]) {
 
     // Annonce du démarrage (une seule fois par situation). Postée pour la boucle lancée,
     // jamais envoyée depuis `setup` : la création de la sélection (WebView2) y fait
-    // tourner une boucle imbriquée, et un message montré là n'a jamais reçu sa zone.
-    if let Some(d) = &dossiers {
+    // tourner une boucle imbriquée, et un message montré là n'a jamais reçu sa zone. Avec
+    // la licence, elle attend le raccourci du texte (`TexteDisponible`), au plus
+    // `ATTENTE_ANNONCE_TEXTE`.
+    let differee = annonce_attend_texte(pro) && dossiers.is_some();
+    if let (true, Some(d)) = (differee, &dossiers) {
+        if let Ok(mut a) = app.state::<Application>().annonce_differee.lock() {
+            *a = Some((d.local.clone(), bilan.clone()));
+        }
+        borner_annonce(app);
+    }
+
+    // Langues de lecture (Copier le texte), dans un petit fil : `pret` n'attend pas.
+    geste_texte::lancer_sonde(app);
+
+    if let (false, Some(d)) = (differee, &dossiers) {
         poster_plus_tard(
             app,
             Evenement::AnnonceDemarrage {
                 local: d.local.clone(),
                 bilan: bilan.clone(),
+                sans_texte: false,
             },
         );
     }
@@ -665,8 +768,256 @@ fn mode_journal(mode: &str) -> &str {
 /// journal (ARCHITECTURE §3.4). Sans `ATTENTE_MENU` : la demande est directe.
 fn capturer_cli(app: &AppHandle, mode: &str) {
     match Mode::depuis_nom(mode) {
-        Some(m) => lancer_capture(app, m),
+        Some(m) if mode_construit(app, m) => lancer_capture(app, m),
+        Some(_) => log::warn!("--capturer: mode non construit"),
         None => log::warn!("--capturer: mode inconnu"),
+    }
+}
+
+/// L'historique ouvert, sous son verrou (repris s'il est empoisonné). Fil principal ;
+/// verrou jamais tenu pendant un appel à Tauri ou à un module.
+pub(super) fn historique_ouvert(
+    app: &AppHandle,
+) -> std::sync::MutexGuard<'_, Option<historique::EtatHistorique>> {
+    app.state::<Application>()
+        .inner()
+        .historique
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+}
+
+/// La lecture de texte en cours, sous son verrou (repris s'il est empoisonné).
+pub(super) fn lecture_en_cours(
+    app: &AppHandle,
+) -> std::sync::MutexGuard<'_, Option<texte::LectureEnCours>> {
+    app.state::<Application>()
+        .inner()
+        .lecture
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+}
+
+/// Vrai si une langue de lecture existe (`Evenement::TexteDisponible`).
+fn texte_disponible(app: &AppHandle) -> bool {
+    app.state::<Application>()
+        .texte_disponible
+        .load(Ordering::SeqCst)
+}
+
+/// Vrai si une licence valide est en place.
+pub(super) fn pro(app: &AppHandle) -> bool {
+    licence_en_vigueur(app).is_some()
+}
+
+/// La licence en vigueur, sous son verrou (repris s'il est empoisonné).
+pub(super) fn licence_en_vigueur(
+    app: &AppHandle,
+) -> std::sync::MutexGuard<'_, Option<crate::licence::Licence>> {
+    app.state::<Application>()
+        .inner()
+        .licence
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+}
+
+/// Les actions construites en ce moment (licence et langues de lecture comprises).
+pub(super) fn actions_en_vigueur(app: &AppHandle) -> Vec<&'static str> {
+    actions_construites(pro(app), texte_disponible(app))
+}
+
+/// Vrai si le mode `mode` est une action construite en ce moment.
+fn mode_construit(app: &AppHandle, mode: Mode) -> bool {
+    actions_en_vigueur(app).contains(&mode.nom())
+}
+
+/// Vrai si Copier le texte est construit en ce moment : le bouton « Texte » de l'éditeur
+/// découle de la même liste que le menu et les raccourcis (avenant 0.5, §2.2).
+pub(super) fn texte_construit(app: &AppHandle) -> bool {
+    mode_construit(app, Mode::Texte)
+}
+
+/// Les entrées du menu en ce moment : actions construites, raccourcis tenus.
+pub(super) fn menu_actuel(app: &AppHandle) -> Option<Vec<EntreeMenu>> {
+    let bilan = app.state::<Application>().reservations.get()?.bilan();
+    Some(entrees_menu(&actions_en_vigueur(app), |a| {
+        bilan.libelle_menu(a)
+    }))
+}
+
+/// Refait le menu de l'icône d'après `menu_actuel`.
+pub(super) fn refaire_menu(app: &AppHandle) {
+    if let Some(entrees) = menu_actuel(app) {
+        if let Err(e) = icone::changer_menu(app, &entrees) {
+            log::warn!("menu non refait: {e}");
+        }
+    }
+}
+
+/// Résultat de la recherche des langues de lecture : retenu ; si Copier le texte devient
+/// une action construite, son raccourci est réservé (`raccourci texte: …`) et le menu
+/// refait. Pas de surveillance ensuite : une langue installée compte au prochain démarrage.
+fn texte_devenu_disponible(app: &AppHandle, disponible: bool) {
+    app.state::<Application>()
+        .texte_disponible
+        .store(disponible, Ordering::SeqCst);
+    let apparues = suivre_les_actions(app);
+    lacher_annonce(app, &apparues, false);
+}
+
+/// Range la licence en vigueur (`licence.rs`, après vérification et rangement), puis poste
+/// `Evenement::LicenceChangee`, qui refait les listes au tour suivant.
+pub(super) fn poser_licence(app: &AppHandle, licence: Option<crate::licence::Licence>) {
+    *licence_en_vigueur(app) = licence;
+    poster_plus_tard(app, Evenement::LicenceChangee);
+}
+
+/// Les actions construites ont pu changer (langues, licence) depuis la liste que tiennent
+/// le menu et les raccourcis : une action apparue reçoit son raccourci (`raccourci
+/// <action>: …`), une action partie rend le sien, puis le menu est refait. Rien si la
+/// liste est la même.
+fn suivre_les_actions(app: &AppHandle) -> Vec<raccourcis::ChoixAction> {
+    let mut apparues = Vec::new();
+    let apres = actions_en_vigueur(app);
+    let avant = std::mem::replace(
+        &mut *app
+            .state::<Application>()
+            .actions_suivies
+            .lock()
+            .unwrap_or_else(|e| e.into_inner()),
+        apres.clone(),
+    );
+    if apres == avant {
+        return apparues;
+    }
+    if let Some(r) = app.state::<Application>().reservations.get() {
+        for action in apres.iter().filter(|a| !avant.contains(a)) {
+            let candidats = reglages_lus(app)
+                .raccourcis
+                .candidats(action)
+                .unwrap_or_default()
+                .to_vec();
+            let choix = r.changer(app, action, &candidats, systeme::impr_ecran_reserve());
+            match &choix.retenu {
+                Some(x) => log::info!("raccourci {action}: {}", x.canonique()),
+                None => log::info!("raccourci {action}: aucun"),
+            }
+            apparues.push(choix);
+        }
+        for action in avant.iter().filter(|a| !apres.contains(a)) {
+            // Liste vide : le raccourci est rendu au système.
+            r.changer(app, action, &[], systeme::impr_ecran_reserve());
+            log::info!("raccourci {action} rendu");
+        }
+    }
+    refaire_menu(app);
+    // Les lignes de Réglages › Raccourcis suivent tout de suite (licence, langues).
+    fenetre_reglages::envoyer_vue(app);
+    apparues
+}
+
+/// Le bilan du démarrage attend-il le texte ? Oui quand Copier le texte serait construit
+/// si une langue existe (licence en place) : son raccourci n'est connu qu'à
+/// `Evenement::TexteDisponible`.
+pub fn annonce_attend_texte(pro: bool) -> bool {
+    actions_construites(pro, true).contains(&Mode::Texte.nom())
+}
+
+/// Le bilan du démarrage complété des actions réservées après lui (`texte`) : la ligne de
+/// chaque action est remplacée, ou ajoutée. Une seule règle d'annonce ensuite
+/// (`raccourcis::decider_annonce`).
+pub fn bilan_avec(mut bilan: Bilan, apparues: &[raccourcis::ChoixAction]) -> Bilan {
+    for choix in apparues {
+        match bilan.actions.iter_mut().find(|a| a.action == choix.action) {
+            Some(a) => *a = choix.clone(),
+            None => bilan.actions.push(choix.clone()),
+        }
+    }
+    bilan
+}
+
+/// L'annonce du démarrage différée (le bilan attend le texte) part, complétée de
+/// `apparues` ; rien si elle est déjà partie.
+fn lacher_annonce(app: &AppHandle, apparues: &[raccourcis::ChoixAction], sans_texte: bool) {
+    let differee = app
+        .state::<Application>()
+        .annonce_differee
+        .lock()
+        .ok()
+        .and_then(|mut a| a.take());
+    if let Some((local, bilan)) = differee {
+        poster_plus_tard(
+            app,
+            Evenement::AnnonceDemarrage {
+                local,
+                bilan: bilan_au_depart(bilan, apparues, &actions_en_vigueur(app)),
+                sans_texte,
+            },
+        );
+    }
+}
+
+/// Borne de l'attente du texte par l'annonce du démarrage : sans réponse des langues de
+/// lecture, le bilan part sans lui.
+pub const ATTENTE_ANNONCE_TEXTE: Duration = Duration::from_secs(3);
+
+/// Arme la borne de l'annonce différée (fil `annonce-attente`).
+fn borner_annonce(app: &AppHandle) {
+    let pour = app.clone();
+    let lance = std::thread::Builder::new()
+        .name("annonce-attente".into())
+        .spawn(move || {
+            std::thread::sleep(ATTENTE_ANNONCE_TEXTE);
+            let p = pour.clone();
+            let _ = pour.run_on_main_thread(move || {
+                let attend = p
+                    .state::<Application>()
+                    .annonce_differee
+                    .lock()
+                    .is_ok_and(|a| a.is_some());
+                if attend {
+                    log::info!("annonce demarrage: langues non recues");
+                    lacher_annonce(&p, &[], true);
+                }
+            });
+        });
+    if let Err(e) = lance {
+        log::warn!("attente de l'annonce impossible ({e}): annonce sans le texte");
+        lacher_annonce(app, &[], true);
+    }
+}
+
+/// Le bilan qui part : complété des actions apparues, puis réduit aux actions en vigueur
+/// au moment de partir (licence retirée pendant l'attente : ni `historique` ni `texte`).
+pub fn bilan_au_depart(
+    bilan: Bilan,
+    apparues: &[raccourcis::ChoixAction],
+    en_vigueur: &[&str],
+) -> Bilan {
+    let mut b = bilan_avec(bilan, apparues);
+    b.actions
+        .retain(|a| en_vigueur.contains(&a.action.as_str()));
+    b
+}
+
+/// La règle commune (`raccourcis::decider_annonce`) ; si le bilan part sans le texte
+/// (borne), la situation retenue pour `texte` n'est ni effacée ni remplacée par « tout
+/// normal ».
+pub fn decider_annonce_demarrage(
+    derniere: Option<&raccourcis::Situation>,
+    bilan: &Bilan,
+    sans_texte: bool,
+) -> Decision {
+    let d = raccourcis::decider_annonce(derniere, bilan);
+    let garder = sans_texte
+        && d.a_retenir.is_none()
+        && derniere.is_some_and(|s| s.action == Mode::Texte.nom());
+    if garder {
+        Decision {
+            annonce: None,
+            a_retenir: derniere.cloned(),
+        }
+    } else {
+        d
     }
 }
 
@@ -773,9 +1124,9 @@ pub fn plateforme_reglages(s: Systeme) -> Plateforme {
 }
 
 /// La table `action → candidats` donnée au choix des raccourcis : seulement les actions
-/// construites.
-pub fn table_candidats(reglages: &Reglages) -> BTreeMap<String, Vec<String>> {
-    ACTIONS_CONSTRUITES
+/// construites (`actions`).
+pub fn table_candidats(reglages: &Reglages, actions: &[&str]) -> BTreeMap<String, Vec<String>> {
+    actions
         .iter()
         .map(|a| {
             let liste = reglages.raccourcis.candidats(a).unwrap_or_default();
@@ -794,9 +1145,9 @@ pub fn ligne_annonce(decision: &Decision) -> Option<String> {
 }
 
 /// Lit la dernière situation, décide, montre l'annonce éventuelle, écrit ou efface.
-fn annoncer_raccourcis(app: &AppHandle, local: &std::path::Path, bilan: &Bilan) {
+fn annoncer_raccourcis(app: &AppHandle, local: &std::path::Path, bilan: &Bilan, sans_texte: bool) {
     let derniere = etat::lire_situation(local);
-    let decision = raccourcis::decider_annonce(derniere.as_ref(), bilan);
+    let decision = decider_annonce_demarrage(derniere.as_ref(), bilan, sans_texte);
     if let Some(ligne) = ligne_annonce(&decision) {
         log::info!("{ligne}");
     }
@@ -812,6 +1163,7 @@ fn annoncer_raccourcis(app: &AppHandle, local: &std::path::Path, bilan: &Bilan) 
                 titre: annonce.titre.clone(),
                 detail: annonce.detail.clone(),
                 actions: Vec::new(),
+                duree_ms: None,
             },
         );
         // Retenue au premier `bandeau_zone` de ce message (Signal::MessageMontre).
@@ -837,7 +1189,7 @@ fn retenir_situation(local: &std::path::Path, situation: Option<&raccourcis::Sit
 }
 
 /// Montre un message dans le bandeau, s'il existe. Rend son `id`.
-fn afficher(app: &AppHandle, message: Message) -> Option<u64> {
+pub(super) fn afficher(app: &AppHandle, message: Message) -> Option<u64> {
     match app.try_state::<Bandeau>() {
         Some(bandeau) => Some(bandeau.afficher(message)),
         None => {
@@ -848,10 +1200,10 @@ fn afficher(app: &AppHandle, message: Message) -> Option<u64> {
 }
 
 /// Les modes de capture au menu, dans l'ordre du menu : ceux qui sont construits.
-pub fn modes_au_menu() -> Vec<Mode> {
+pub fn modes_au_menu(actions: &[&str]) -> Vec<Mode> {
     ORDRE_MENU
         .into_iter()
-        .filter(|m| ACTIONS_CONSTRUITES.contains(&m.nom()))
+        .filter(|m| actions.contains(&m.nom()))
         .collect()
 }
 
@@ -872,30 +1224,47 @@ pub fn libelle_menu(mode: Mode) -> &'static str {
         Mode::PleinEcran => "Capturer l'écran",
         Mode::Fenetre => "Capturer une fenêtre",
         Mode::DerniereZone => "Refaire la dernière zone",
+        Mode::Texte => "Copier le texte",
     }
 }
 
 /// Texte de l'entrée d'un mode, avec le raccourci actif à droite (tabulation : aligné à
 /// droite par les menus Windows) ; sans raccourci retenu, le libellé seul.
 pub fn texte_capturer(mode: Mode, raccourci: Option<&str>) -> String {
+    avec_raccourci(libelle_menu(mode), raccourci)
+}
+
+/// Un libellé de menu, avec le raccourci après une tabulation s'il y en a un.
+fn avec_raccourci(libelle: &str, raccourci: Option<&str>) -> String {
     match raccourci {
-        Some(r) => format!("{}\t{r}", libelle_menu(mode)),
-        None => libelle_menu(mode).into(),
+        Some(r) => format!("{libelle}\t{r}"),
+        None => libelle.into(),
     }
 }
 
-/// Les entrées du menu de l'icône, dans l'ordre : les modes construits (`raccourci` donne
-/// le raccourci actif d'un mode), un séparateur, « Réglages », un séparateur, « Quitter
+/// Les entrées du menu de l'icône, dans l'ordre : les modes construits parmi `actions`
+/// (`raccourci` donne le raccourci actif d'une action), un séparateur, « Historique » et un
+/// séparateur si l'historique est construit, « Réglages », un séparateur, « Quitter
 /// BreezyShot ». Seulement ce qui marche.
-pub fn entrees_menu(raccourci: impl Fn(Mode) -> Option<String>) -> Vec<EntreeMenu> {
-    let mut entrees: Vec<EntreeMenu> = modes_au_menu()
+pub fn entrees_menu(
+    actions: &[&str],
+    raccourci: impl Fn(&str) -> Option<String>,
+) -> Vec<EntreeMenu> {
+    let mut entrees: Vec<EntreeMenu> = modes_au_menu(actions)
         .into_iter()
         .map(|mode| EntreeMenu::Action {
             id: id_menu(mode),
-            texte: texte_capturer(mode, raccourci(mode).as_deref()),
+            texte: texte_capturer(mode, raccourci(mode.nom()).as_deref()),
         })
         .collect();
     entrees.push(EntreeMenu::Separateur);
+    if actions.contains(&ACTION_HISTORIQUE) {
+        entrees.push(EntreeMenu::Action {
+            id: MENU_HISTORIQUE.into(),
+            texte: avec_raccourci("Historique", raccourci(ACTION_HISTORIQUE).as_deref()),
+        });
+        entrees.push(EntreeMenu::Separateur);
+    }
     entrees.push(EntreeMenu::Action {
         id: MENU_REGLAGES.into(),
         texte: "Réglages".into(),
@@ -928,6 +1297,11 @@ pub fn traiter(app: &AppHandle, evenement: Evenement) {
             | Evenement::EditeurExportFait(_)
             | Evenement::EditeurExportEchu(_)
             | Evenement::EditeurGlisser { .. }
+            | Evenement::Historique(_)
+            | Evenement::TexteLu(_)
+            | Evenement::TexteEchu(_)
+            | Evenement::TexteDisponible(_)
+            | Evenement::LicenceChangee
             | Evenement::Fenetres(fenetres::Signal::ActionBandeau { .. })
     );
     if de_capture && hors_fil_principal(app) {
@@ -980,11 +1354,16 @@ pub fn traiter(app: &AppHandle, evenement: Evenement) {
                 log::info!("menu: reglages");
                 fenetre_reglages::ouvrir(app);
             }
-            (_, Some(mode)) => {
+            // Sans `ATTENTE_MENU` : rien n'est photographié.
+            (MENU_HISTORIQUE, _) if actions_en_vigueur(app).contains(&ACTION_HISTORIQUE) => {
+                log::info!("menu: historique");
+                geste_historique::ouvrir(app);
+            }
+            (_, Some(mode)) if mode_construit(app, mode) => {
                 log::info!("menu: capturer {}", mode.nom());
                 lancer_capture_apres(app, mode, ATTENTE_MENU);
             }
-            (autre, None) => log::warn!("menu: entree inconnue {autre}"),
+            (autre, _) => log::warn!("menu: entree inconnue {autre}"),
         },
         Evenement::Raccourci(raccourcis::Signal::Echap) => {
             log::info!("echap global presse");
@@ -995,6 +1374,9 @@ pub fn traiter(app: &AppHandle, evenement: Evenement) {
         Evenement::Selection(signal) => traiter_zone(app, Arrivee::Selection(&signal)),
         Evenement::Bureau(changement) => {
             log::info!("bureau change pendant la capture: {changement:?}");
+            if geste_texte::bureau_change(app) {
+                return;
+            }
             if !annuler_si_decompte(app, ArriveeDecompte::Bureau(changement)) {
                 traiter_zone(app, Arrivee::Bureau(changement));
             }
@@ -1007,7 +1389,11 @@ pub fn traiter(app: &AppHandle, evenement: Evenement) {
                 log::warn!("sortie {}: bilan perime ignore", fin.numero);
             }
         }
-        Evenement::AnnonceDemarrage { local, bilan } => annoncer_raccourcis(app, &local, &bilan),
+        Evenement::AnnonceDemarrage {
+            local,
+            bilan,
+            sans_texte,
+        } => annoncer_raccourcis(app, &local, &bilan, sans_texte),
         Evenement::CaptureCli(mode) => capturer_cli(app, &mode),
         Evenement::SortieEchue(numero) => {
             if prendre_sortie_attendue(app, numero) {
@@ -1018,9 +1404,11 @@ pub fn traiter(app: &AppHandle, evenement: Evenement) {
         }
         Evenement::Raccourci(raccourcis::Signal::Presse(action)) => {
             log::info!("raccourci presse: {action}");
+            let construite = actions_en_vigueur(app).contains(&action.as_str());
             match Mode::depuis_nom(&action) {
-                Some(mode) => lancer_capture(app, mode),
-                None => log::warn!("raccourci: action inconnue {action}"),
+                Some(mode) if construite => lancer_capture(app, mode),
+                None if construite && action == ACTION_HISTORIQUE => geste_historique::ouvrir(app),
+                _ => log::warn!("raccourci: action inconnue {action}"),
             }
         }
         Evenement::Fenetres(fenetres::Signal::MessageMontre { id }) => {
@@ -1036,13 +1424,18 @@ pub fn traiter(app: &AppHandle, evenement: Evenement) {
         Evenement::Fenetres(fenetres::Signal::ActionBandeau { id, action }) => {
             // La page ferme un message elle-même ; seule la croix du décompte agit.
             log::info!("bandeau action {id} {action}");
-            annuler_si_decompte(
+            let decompte = annuler_si_decompte(
                 app,
                 ArriveeDecompte::Action {
                     id,
                     action: &action,
                 },
             );
+            // « Réessayer » de « Aucun texte trouvé » : Copier le texte, tout de suite (le
+            // bandeau est caché avant la photo).
+            if !decompte && action == texte::ACTION_REESSAYER && texte_construit(app) {
+                lancer_capture(app, Mode::Texte);
+            }
         }
         Evenement::Vignette(signal) => traiter_vignette(app, signal),
         Evenement::ActionFaite(fin) => action_faite(app, *fin),
@@ -1055,11 +1448,21 @@ pub fn traiter(app: &AppHandle, evenement: Evenement) {
         Evenement::EditeurExportFait(fin) => finir_export(app, *fin),
         Evenement::EditeurExportEchu(numero) => export_echu(app, numero),
         Evenement::EditeurGlisser { id, chemin } => lancer_glisser_editeur(app, id, &chemin),
+        Evenement::Historique(signal) => geste_historique::traiter(app, signal),
+        Evenement::TexteLu(fin) => geste_texte::texte_lu(app, *fin),
+        Evenement::TexteEchu(numero) => geste_texte::echu(app, numero),
+        Evenement::TexteDisponible(oui) => texte_devenu_disponible(app, oui),
+        // Aucune annonce à l'activation ni au retrait de la licence.
+        Evenement::LicenceChangee => {
+            suivre_les_actions(app);
+            // Première activation : les langues de lecture (une fois par lancement).
+            geste_texte::lancer_sonde(app);
+        }
     }
 }
 
 /// Applique un déclencheur à l'automate. Rend le nouvel état, `None` s'il est ignoré.
-fn appliquer(app: &AppHandle, declencheur: Declencheur) -> Option<Etat> {
+pub(super) fn appliquer(app: &AppHandle, declencheur: Declencheur) -> Option<Etat> {
     match app.state::<Application>().automate.lock() {
         Ok(mut a) => a.traiter(declencheur),
         Err(_) => {
@@ -1070,7 +1473,7 @@ fn appliquer(app: &AppHandle, declencheur: Declencheur) -> Option<Etat> {
 }
 
 /// L'état de l'automate, `None` s'il est inaccessible.
-fn etat_automate(app: &AppHandle) -> Option<Etat> {
+pub(super) fn etat_automate(app: &AppHandle) -> Option<Etat> {
     app.state::<Application>()
         .automate
         .lock()
@@ -1174,6 +1577,7 @@ fn apres_gel(app: &AppHandle, mode: Mode, recu_a: Instant, bandeau_cache: bool) 
         Mode::Fenetre => capturer_avec_selection(app, recu_a, Mode::Fenetre, bandeau_cache),
         Mode::PleinEcran => capturer_plein_ecran(app, recu_a, bandeau_cache),
         Mode::DerniereZone => capturer_derniere_zone(app, recu_a, bandeau_cache),
+        Mode::Texte => capturer_avec_selection(app, recu_a, Mode::Texte, bandeau_cache),
     }
 }
 
@@ -1361,9 +1765,10 @@ fn annuler_decompte(app: &AppHandle, cause: Cause) {
 /// compositeur attendu (borné) si l'un d'eux était montré ou si `deja_cache` (le décompte
 /// caché juste avant), puis la photo, avec le pointeur si le réglage le veut. Erreur →
 /// `GelImpossible` (Repos) et bandeau d'erreur ; rend `None`.
-fn photographier(app: &AppHandle, deja_cache: bool) -> Option<capture::Gel> {
-    // Lu avant l'attente du compositeur : rien entre l'attente et la photo.
-    let avec_pointeur = reglages_lus(app).capture.pointeur;
+pub(super) fn photographier(app: &AppHandle, deja_cache: bool, mode: Mode) -> Option<capture::Gel> {
+    // Lu avant l'attente du compositeur : rien entre l'attente et la photo. Copier le
+    // texte ne prend jamais le pointeur.
+    let avec_pointeur = reglages_lus(app).capture.pointeur && mode != Mode::Texte;
     let vignette_cachee = fermer_vignette(app, "capture");
     let bandeau_cache = app.try_state::<Bandeau>().is_some_and(|b| b.cacher());
     if (bandeau_cache || vignette_cachee || deja_cache)
@@ -1391,7 +1796,7 @@ fn photographier(app: &AppHandle, deja_cache: bool) -> Option<capture::Gel> {
 
 /// La souris en pixels réels du bureau, lue tout de suite (`fenetres::souris` : le seul
 /// repli de l'app).
-fn souris_bureau(app: &AppHandle) -> Option<(i32, i32)> {
+pub(super) fn souris_bureau(app: &AppHandle) -> Option<(i32, i32)> {
     zone::point_souris(fenetres::souris(app))
 }
 
@@ -1412,7 +1817,7 @@ fn poser_pointeur(gel_pris: &capture::Gel, pixels: &mut gel::Pixels, zone: syste
 /// montré : ni écran figé, ni sélection, ni Échap réservé, ni garde.
 fn capturer_plein_ecran(app: &AppHandle, recu_a: Instant, bandeau_cache: bool) {
     let souris = souris_bureau(app);
-    let Some(gel_pris) = photographier(app, bandeau_cache) else {
+    let Some(gel_pris) = photographier(app, bandeau_cache, Mode::PleinEcran) else {
         return;
     };
     let Some((ecran, origine)) = capture::ecran_de_capture(souris, &gel_pris.ecrans) else {
@@ -1481,7 +1886,7 @@ fn capturer_avec_selection(app: &AppHandle, recu_a: Instant, mode: Mode, bandeau
         return;
     }
     // 2 et 3. Bandeau caché, compositeur attendu, la photo.
-    let Some(gel_pris) = photographier(app, bandeau_cache) else {
+    let Some(gel_pris) = photographier(app, bandeau_cache, mode) else {
         return;
     };
     montrer_selection(app, recu_a, mode, gel_pris);
@@ -1495,7 +1900,7 @@ fn capturer_derniere_zone(app: &AppHandle, recu_a: Instant, bandeau_cache: bool)
     if !pret_pour_selection(app) {
         return;
     }
-    let Some(gel_pris) = photographier(app, bandeau_cache) else {
+    let Some(gel_pris) = photographier(app, bandeau_cache, Mode::DerniereZone) else {
         return;
     };
     let derniere = app
@@ -1552,6 +1957,8 @@ fn montrer_selection(app: &AppHandle, recu_a: Instant, mode: Mode, gel_pris: cap
             selection::Mode::Fenetre,
             zone::fenetres_proposees(&liste, &gel_pris.ecrans),
         )
+    } else if mode == Mode::Texte {
+        (selection::Mode::Texte, Vec::new())
     } else {
         (selection::Mode::Zone, Vec::new())
     };
@@ -1651,7 +2058,7 @@ fn reserver_echap(app: &AppHandle) {
 }
 
 /// Libère Échap s'il est réservé, sur le fil principal.
-fn liberer_echap(app: &AppHandle) {
+pub(super) fn liberer_echap(app: &AppHandle) {
     if !app
         .state::<Application>()
         .echap_reserve
@@ -1675,7 +2082,7 @@ fn liberer_echap(app: &AppHandle) {
 
 /// Retire la capture en cours, cache tout (garde), revient au Repos, montre l'erreur.
 /// Sans capture en cours (déjà terminée par un autre signal), ne fait rien.
-fn abandonner(app: &AppHandle, declencheur: Declencheur, probleme: Option<Probleme>) {
+pub(super) fn abandonner(app: &AppHandle, declencheur: Declencheur, probleme: Option<Probleme>) {
     let Some(mut capture) = ranger_capture(app, None) else {
         return;
     };
@@ -1689,9 +2096,10 @@ fn abandonner(app: &AppHandle, declencheur: Declencheur, probleme: Option<Proble
 
 /// Un signal pendant une capture de zone (fil principal) : décision pure, puis gestes.
 fn traiter_zone(app: &AppHandle, arrivee: Arrivee<'_>) {
-    let geste = {
+    let (geste, texte) = {
         let c = capture_en_cours(app);
-        zone::decider(
+        let texte = c.as_ref().is_some_and(|c| c.mode == selection::Mode::Texte);
+        let geste = zone::decider(
             c.as_ref().map(|c| Vue {
                 selection: c.selection,
                 ecrans: &c.gel.ecrans,
@@ -1699,7 +2107,8 @@ fn traiter_zone(app: &AppHandle, arrivee: Arrivee<'_>) {
                 fenetres: &c.fenetres,
             }),
             arrivee,
-        )
+        );
+        (geste, texte)
     };
     match geste {
         Geste::Rien => {}
@@ -1707,6 +2116,8 @@ fn traiter_zone(app: &AppHandle, arrivee: Arrivee<'_>) {
             declencheur,
             probleme,
         } => abandonner(app, declencheur, probleme),
+        // Copier le texte : la zone est lue, jamais découpée comme une capture.
+        Geste::Decouper(zone) if texte => geste_texte::zone_choisie(app, zone),
         Geste::Decouper(zone) => decouper(app, zone, None),
         Geste::DecouperFenetre { zone, rayon, coins } => decouper(app, zone, Some((rayon, coins))),
     }
@@ -1768,7 +2179,7 @@ fn decouper(app: &AppHandle, zone: systeme::Rect, fenetre: Option<(i32, [bool; 4
 
 /// Ce que la sortie doit faire, d'après les réglages en vigueur ; `transparence` :
 /// garder l'alpha (fenêtre aux coins arrondis).
-fn demande_sortie(app: &AppHandle, transparence: bool) -> sortie::Demande {
+pub(super) fn demande_sortie(app: &AppHandle, transparence: bool) -> sortie::Demande {
     let reglages = reglages_lus(app);
     let dossiers = dossiers_lus(app);
     let images = dossiers.as_ref().and_then(|d| d.images.clone());
@@ -1798,7 +2209,7 @@ fn demande_sortie(app: &AppHandle, transparence: bool) -> sortie::Demande {
 }
 
 /// Les réglages lus au démarrage (ceux par défaut s'ils manquent).
-fn reglages_lus(app: &AppHandle) -> Reglages {
+pub(super) fn reglages_lus(app: &AppHandle) -> Reglages {
     app.state::<Application>()
         .reglages
         .lock()
@@ -1808,7 +2219,7 @@ fn reglages_lus(app: &AppHandle) -> Reglages {
 }
 
 /// Les dossiers résolus au démarrage.
-fn dossiers_lus(app: &AppHandle) -> Option<Dossiers> {
+pub(super) fn dossiers_lus(app: &AppHandle) -> Option<Dossiers> {
     app.state::<Application>()
         .dossiers
         .lock()
@@ -1878,7 +2289,11 @@ fn sortir_et_mesurer(
 }
 
 /// `sortie::sortir`, et un bilan d'échec si elle panique.
-fn sortir_ou_echec(numero: u64, pixels: &gel::Pixels, demande: &sortie::Demande) -> sortie::Bilan {
+pub(super) fn sortir_ou_echec(
+    numero: u64,
+    pixels: &gel::Pixels,
+    demande: &sortie::Demande,
+) -> sortie::Bilan {
     std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         sortie::sortir(pixels, demande)
     }))
@@ -1935,6 +2350,7 @@ fn lancer_sortie(
                 relache,
                 quoi,
             );
+            geste_historique::apres_sortie(&pour_fil, &fin.pixels, &fin.bilan);
             let pour_traiter = pour_fil.clone();
             let rendu = pour_fil
                 .run_on_main_thread(move || traiter(&pour_traiter, Evenement::SortieFaite(fin)));
@@ -1948,6 +2364,7 @@ fn lancer_sortie(
         // libre, la garde ne surveille plus).
         log::warn!("fil de sortie impossible ({e}): sortie sur le fil principal");
         let fin = sortir_et_mesurer(numero, &pixels, demande, duree_decoupe, relache, quoi);
+        geste_historique::apres_sortie(app, &fin.pixels, &fin.bilan);
         traiter(app, Evenement::SortieFaite(fin));
         return;
     }
@@ -2054,7 +2471,7 @@ fn montrer_vignette(app: &AppHandle, fin: FinSortie, annonce: Annonce, apercu: A
 }
 
 /// La capture montrée, sous son verrou (repris s'il est empoisonné).
-fn montree(app: &AppHandle) -> std::sync::MutexGuard<'_, Option<CaptureMontree>> {
+pub(super) fn montree(app: &AppHandle) -> std::sync::MutexGuard<'_, Option<CaptureMontree>> {
     app.state::<Application>()
         .inner()
         .montree
@@ -2072,7 +2489,7 @@ fn avec_montree<R>(
 }
 
 /// Retire la capture montrée si c'est la carte `id`.
-fn retirer_montree(app: &AppHandle, id: u64) -> Option<CaptureMontree> {
+pub(super) fn retirer_montree(app: &AppHandle, id: u64) -> Option<CaptureMontree> {
     montree(app).take_if(|c| c.id == id)
 }
 
@@ -2325,6 +2742,7 @@ fn lancer_suppression(app: &AppHandle, id: u64, suppression: sortie::Suppression
             let (ligne, message) =
                 vignette::bilan_suppression(id, &suppression, &resultats, tardive);
             log::info!("{ligne}");
+            geste_historique::rafraichir(&pour_fil);
             compter_suppression(&pour_fil, false);
             let Some(message) = message else {
                 return;
@@ -2402,7 +2820,7 @@ fn quitter(app: &AppHandle, mut c: CaptureMontree, arret: bool) {
 
 /// `<local>/Recents` et `<local>/Glisser` ; vides sans dossier local (rien n'est alors
 /// effacé ni posé).
-fn dossiers_vignette(app: &AppHandle) -> (PathBuf, PathBuf) {
+pub(super) fn dossiers_vignette(app: &AppHandle) -> (PathBuf, PathBuf) {
     match dossiers_lus(app) {
         Some(d) => (
             d.local.join(zone::SOUS_DOSSIER_RECENTS),
@@ -2417,7 +2835,7 @@ fn dossiers_vignette(app: &AppHandle) -> (PathBuf, PathBuf) {
 /// La raison de fermeture de l'arrêt de l'app.
 const RAISON_ARRET: &str = "arret";
 
-fn fermer_vignette(app: &AppHandle, raison: &str) -> bool {
+pub(super) fn fermer_vignette(app: &AppHandle, raison: &str) -> bool {
     let capture = montree(app).take();
     let cachee = app.try_state::<Vignette>().is_some_and(|v| v.cacher());
     if let Some(c) = capture {
@@ -2460,13 +2878,14 @@ fn demander_glisser(app: &AppHandle, id: u64) {
 }
 
 /// Les fenêtres de BreezyShot sur lesquelles un dépôt ne compte pas.
-fn nos_fenetres(app: &AppHandle) -> Vec<isize> {
+pub(super) fn nos_fenetres(app: &AppHandle) -> Vec<isize> {
     let mut liste: Vec<isize> = app
         .try_state::<Vignette>()
         .map(|v| v.identifiants().into_iter().flatten().collect())
         .unwrap_or_default();
     liste.extend(app.try_state::<Bandeau>().and_then(|b| b.identifiant()));
     liste.extend(fenetres::editeur::identifiant(app));
+    liste.extend(fenetres::historique::identifiant(app));
     liste
 }
 
@@ -2549,7 +2968,7 @@ const ECRAN_DE_SECOURS: fenetres::Ecran = fenetres::Ecran {
 };
 
 /// `f` sur l'éditeur ouvert ; avec `id`, seulement si c'est son document.
-fn avec_editeur<R>(
+pub(super) fn avec_editeur<R>(
     app: &AppHandle,
     id: Option<u64>,
     f: impl FnOnce(&mut editeur::EtatEditeur) -> R,
@@ -2651,7 +3070,7 @@ fn annoter(app: &AppHandle, id: u64) {
 }
 
 /// Une capture pour l'éditeur : ouvrir, remplacer ou demander (§4.3).
-fn recevoir_document(app: &AppHandle, document: editeur::Document, demande_a: Instant) {
+pub(super) fn recevoir_document(app: &AppHandle, document: editeur::Document, demande_a: Instant) {
     let arrivee = {
         let garde = app
             .state::<Application>()
@@ -2694,21 +3113,40 @@ fn ramener_editeur(app: &AppHandle, id: u64) {
 }
 
 /// Fait `f` sur le fil principal à un tour suivant de la boucle (jamais tout de suite).
-fn plus_tard(app: &AppHandle, attente: Duration, f: impl FnOnce(&AppHandle) + Send + 'static) {
+pub(super) fn plus_tard(
+    app: &AppHandle,
+    attente: Duration,
+    f: impl FnOnce(&AppHandle) + Send + 'static,
+) {
+    plus_tard_nomme(app, "editeur-poste", attente, f);
+}
+
+/// `plus_tard` par un fil nommé `nom` (`historique-poste`…). Rend faux si le fil n'a pas pu
+/// être lancé (rien ne sera fait).
+pub(super) fn plus_tard_nomme(
+    app: &AppHandle,
+    nom: &str,
+    attente: Duration,
+    f: impl FnOnce(&AppHandle) + Send + 'static,
+) -> bool {
     let pour_fil = app.clone();
-    let lance = std::thread::Builder::new()
-        .name("editeur-poste".into())
-        .spawn(move || {
-            if !attente.is_zero() {
-                std::thread::sleep(attente);
-            }
-            let pour = pour_fil.clone();
-            if let Err(e) = pour_fil.run_on_main_thread(move || f(&pour)) {
-                log::warn!("editeur: geste non poste: {e}");
-            }
-        });
-    if let Err(e) = lance {
-        log::warn!("editeur: geste non poste ({e})");
+    let prefixe = nom.trim_end_matches("-poste").to_string();
+    let pour_journal = prefixe.clone();
+    let lance = std::thread::Builder::new().name(nom.into()).spawn(move || {
+        if !attente.is_zero() {
+            std::thread::sleep(attente);
+        }
+        let pour = pour_fil.clone();
+        if let Err(e) = pour_fil.run_on_main_thread(move || f(&pour)) {
+            log::warn!("{pour_journal}: geste non poste: {e}");
+        }
+    });
+    match lance {
+        Ok(_) => true,
+        Err(e) => {
+            log::warn!("{prefixe}: geste non poste ({e})");
+            false
+        }
     }
 }
 
@@ -2891,7 +3329,10 @@ fn desarmer_filet_page(app: &AppHandle) {
 fn charger_editeur(app: &AppHandle) {
     let reduites = reduites_editeur(app);
     let preferences = preferences_editeur(app);
-    if let Some(c) = avec_editeur(app, None, |e| editeur::charge(e, reduites, preferences)) {
+    let texte = texte_construit(app);
+    if let Some(c) = avec_editeur(app, None, |e| {
+        editeur::charge(e, reduites, preferences, texte)
+    }) {
         fenetres::editeur::emettre(app, fenetres::editeur::EVENEMENT_CHARGER, c);
     }
 }
@@ -3085,6 +3526,11 @@ fn exporter_editeur(app: &AppHandle, requete: &tauri::ipc::Request<'_>) -> Resul
         hauteur: e.hauteur,
         rgba: corps.to_vec(),
     };
+    // « Texte » (0.5) : l'image composée est lue, rien n'est exporté (`exportee` reste).
+    if e.but == editeur::But::Texte {
+        geste_texte::lire_export(app, numero, e, pixels);
+        return Ok(numero);
+    }
     let base = demande_sortie(app, transparence);
     let demande = sortie::Demande {
         copier: plan.copier,
@@ -3136,8 +3582,8 @@ fn lancer_export(
                 });
             };
             let bilan = exporter_dans_le_fil(
-                e.id,
-                numero,
+                &pour_fil,
+                (e.id, numero),
                 pixels,
                 &demande,
                 dialogue.map(|d| (d, dialogue_ferme)),
@@ -3200,8 +3646,8 @@ fn lancer_export(
 /// part quand la sortie commence. `None` : rien n'a été tenté (dialogue annulé ou déjà
 /// ouvert). Les pixels sont rendus avant le retour.
 fn exporter_dans_le_fil(
-    id: u64,
-    numero: u64,
+    app: &AppHandle,
+    (id, numero): (u64, u64),
     pixels: gel::Pixels,
     demande: &sortie::Demande,
     dialogue: Option<(Dialogue, impl FnOnce())>,
@@ -3253,6 +3699,8 @@ fn exporter_dans_le_fil(
     if let Some(chemin) = choisi {
         bilan.enregistrement = sortie::enregistrer_a(&pixels, &chemin, demande.transparence);
     }
+    // Une version rangée dans « Récents » : son aperçu, la liste de l'historique à jour.
+    geste_historique::apres_sortie(app, &pixels, &bilan);
     drop(pixels);
     Some(bilan)
 }
@@ -3388,6 +3836,8 @@ fn arreter(app: &AppHandle) {
     }
     // Décompte en cours : annulé (fil arrêté, disque caché, Échap rendu), aucune photo.
     annuler_decompte(app, Cause::Arret);
+    // Lecture de texte en cours : oubliée (son résultat arrivera trop tard).
+    geste_texte::arreter(app);
     // Capture en cours : la garde cache tout et libère Échap. Puis la sélection est
     // fermée avant la destruction de l'écran figé, et l'image du bureau rendue.
     let capture = ranger_capture(app, None);
@@ -3416,6 +3866,8 @@ fn arreter(app: &AppHandle) {
     {
         log::info!("editeur: capture {} abandonnee", d.id);
     }
+    // Historique : suppressions en attente faites, fenêtre détruite.
+    geste_historique::arreter(app);
     // Réglages fermés d'abord : la fin d'une saisie ne doit pas reprendre des raccourcis
     // après leur libération. Puis libérer les raccourcis, fermer les autres fenêtres.
     fenetres::reglages::fermer(app);
@@ -3464,11 +3916,12 @@ mod tests {
 
     #[test]
     fn menu_avec_les_quatre_raccourcis() {
-        let m = entrees_menu(|mode| match mode {
-            Mode::Zone => Some("Ctrl + Maj + 1".into()),
-            Mode::PleinEcran => Some("Ctrl + Maj + 2".into()),
-            Mode::Fenetre => Some("Ctrl + Maj + 3".into()),
-            Mode::DerniereZone => Some("Ctrl + Maj + 4".into()),
+        let m = entrees_menu(&ACTIONS_DE_CAPTURE, |a| match a {
+            "zone" => Some("Ctrl + Maj + 1".into()),
+            "plein_ecran" => Some("Ctrl + Maj + 2".into()),
+            "fenetre" => Some("Ctrl + Maj + 3".into()),
+            "derniere_zone" => Some("Ctrl + Maj + 4".into()),
+            _ => None,
         });
         assert_eq!(
             m,
@@ -3490,7 +3943,7 @@ mod tests {
 
     #[test]
     fn menu_sans_raccourci() {
-        let m = entrees_menu(|_| None);
+        let m = entrees_menu(&ACTIONS_DE_CAPTURE, |_| None);
         assert_eq!(
             m,
             [
@@ -3505,7 +3958,9 @@ mod tests {
             ]
         );
         // Un seul raccourci retenu : les autres entrées restent, sans raccourci.
-        let m = entrees_menu(|mode| (mode == Mode::Zone).then(|| "Impr. écran".to_string()));
+        let m = entrees_menu(&ACTIONS_DE_CAPTURE, |a| {
+            (a == "zone").then(|| "Impr. écran".to_string())
+        });
         assert_eq!(
             m[0],
             action("capturer_zone", "Capturer une zone\tImpr. écran")
@@ -3526,7 +3981,7 @@ mod tests {
         assert_eq!(mode_du_menu(MENU_QUITTER), None);
         assert_eq!(mode_du_menu("capturer_autre"), None);
         assert_eq!(
-            modes_au_menu(),
+            modes_au_menu(&ACTIONS_DE_CAPTURE),
             [
                 Mode::Zone,
                 Mode::PleinEcran,
@@ -3534,18 +3989,64 @@ mod tests {
                 Mode::DerniereZone
             ]
         );
+        assert_eq!(modes_au_menu(&actions_selon(true, true, true)), ORDRE_MENU);
+        assert_eq!(id_menu(Mode::Texte), "capturer_texte");
         assert_eq!(id_menu(Mode::DerniereZone), "capturer_derniere_zone");
         assert_eq!(texte_capturer(Mode::Fenetre, None), "Capturer une fenêtre");
     }
 
     #[test]
-    fn actions_construites() {
+    fn liste_des_actions_construites() {
+        let base = ["zone", "plein_ecran", "fenetre", "derniere_zone"];
+        assert_eq!(ACTIONS_DE_CAPTURE, base);
+        assert_eq!(actions_selon(true, false, false), base);
         assert_eq!(
-            ACTIONS_CONSTRUITES,
-            ["zone", "plein_ecran", "fenetre", "derniere_zone"]
+            actions_selon(true, true, false),
+            [
+                "zone",
+                "plein_ecran",
+                "fenetre",
+                "derniere_zone",
+                "historique"
+            ]
         );
-        for a in ACTIONS_CONSTRUITES {
-            assert!(Mode::depuis_nom(a).is_some(), "{a}");
+        assert_eq!(
+            actions_selon(true, false, true),
+            ["zone", "plein_ecran", "fenetre", "derniere_zone", "texte"]
+        );
+        assert_eq!(
+            actions_selon(true, true, true),
+            [
+                "zone",
+                "plein_ecran",
+                "fenetre",
+                "derniere_zone",
+                "historique",
+                "texte"
+            ]
+        );
+        // Sans langue de lecture, jamais `texte` ; `historique` suit sa construction.
+        assert!(!actions_construites(true, false).contains(&"texte"));
+        assert_eq!(
+            actions_construites(true, false).contains(&"historique"),
+            historique::CONSTRUIT
+        );
+        assert_eq!(
+            actions_construites(true, true).contains(&"texte"),
+            texte::CONSTRUIT
+        );
+        // Sans licence : les quatre captures seulement, quoi qu'il soit construit.
+        assert_eq!(actions_selon(false, true, true), base);
+        assert_eq!(actions_construites(false, true), base);
+        assert_eq!(
+            entrees_menu(&actions_construites(false, true), |_| None),
+            entrees_menu(&ACTIONS_DE_CAPTURE, |_| None)
+        );
+        for a in actions_selon(true, true, true) {
+            assert!(
+                Mode::depuis_nom(a).is_some() || a == ACTION_HISTORIQUE,
+                "{a}"
+            );
         }
         // `--capturer derniere_zone` est accepté sans code de plus.
         assert_eq!(mode_journal("derniere_zone"), "derniere_zone");
@@ -3555,7 +4056,7 @@ mod tests {
     #[test]
     fn seules_les_actions_construites_sont_proposees() {
         let r = Reglages::par_defaut(Plateforme::Windows);
-        let t = table_candidats(&r);
+        let t = table_candidats(&r, &ACTIONS_DE_CAPTURE);
         assert_eq!(t.len(), 4);
         assert_eq!(t["zone"], ["ImprEcran", "Ctrl+Maj+1"]);
         assert_eq!(t["plein_ecran"], ["Ctrl+Maj+2"]);
@@ -3567,10 +4068,13 @@ mod tests {
     /// raccourci, l'annonce nomme l'action.
     #[test]
     fn derniere_zone_sans_raccourci() {
-        let t = table_candidats(&Reglages::par_defaut(Plateforme::Windows));
+        let t = table_candidats(
+            &Reglages::par_defaut(Plateforme::Windows),
+            &ACTIONS_DE_CAPTURE,
+        );
         let b = choisir(&t, false, |r| r.canonique() != "Ctrl+Maj+4");
         assert_eq!(b.libelle_menu("derniere_zone"), None);
-        let m = entrees_menu(|mode| b.libelle_menu(mode.nom()));
+        let m = entrees_menu(&ACTIONS_DE_CAPTURE, |a| b.libelle_menu(a));
         assert_eq!(
             m[3],
             action("capturer_derniere_zone", "Refaire la dernière zone")
@@ -3590,7 +4094,7 @@ mod tests {
     #[test]
     fn raccourcis_reserves_a_plus_tard_jamais_pris() {
         for p in [Plateforme::Windows, Plateforme::Mac, Plateforme::Autre] {
-            let t = table_candidats(&Reglages::par_defaut(p));
+            let t = table_candidats(&Reglages::par_defaut(p), &ACTIONS_DE_CAPTURE);
             let b = choisir(&t, false, |_| true);
             for a in &b.actions {
                 let retenu = a.retenu.as_ref().map(|r| r.canonique());
@@ -3605,11 +4109,14 @@ mod tests {
     /// plein écran n'en a aucun et reste au menu sans raccourci affiché.
     #[test]
     fn plein_ecran_sans_raccourci() {
-        let t = table_candidats(&Reglages::par_defaut(Plateforme::Windows));
+        let t = table_candidats(
+            &Reglages::par_defaut(Plateforme::Windows),
+            &ACTIONS_DE_CAPTURE,
+        );
         let b = choisir(&t, false, |r| r.canonique() != "Ctrl+Maj+2");
         assert_eq!(b.libelle_menu("zone").as_deref(), Some("Impr. écran"));
         assert_eq!(b.libelle_menu("plein_ecran"), None);
-        let m = entrees_menu(|mode| b.libelle_menu(mode.nom()));
+        let m = entrees_menu(&ACTIONS_DE_CAPTURE, |a| b.libelle_menu(a));
         assert_eq!(
             m[0],
             action("capturer_zone", "Capturer une zone\tImpr. écran")
@@ -3626,6 +4133,47 @@ mod tests {
         );
     }
 
+    /// Menu de la 0.5 (§2.1, §7.3) : Copier le texte en cinquième, puis l'historique entre
+    /// deux séparateurs ; sans langue, pas de Copier le texte.
+    #[test]
+    fn menu_avec_historique_et_texte() {
+        let raccourci = |a: &str| match a {
+            "historique" => Some("Ctrl + Maj + H".to_string()),
+            "texte" => Some("Ctrl + Maj + T".to_string()),
+            _ => None,
+        };
+        let m = entrees_menu(&actions_selon(true, true, true), raccourci);
+        assert_eq!(
+            m,
+            [
+                action("capturer_zone", "Capturer une zone"),
+                action("capturer_plein_ecran", "Capturer l'écran"),
+                action("capturer_fenetre", "Capturer une fenêtre"),
+                action("capturer_derniere_zone", "Refaire la dernière zone"),
+                action("capturer_texte", "Copier le texte\tCtrl + Maj + T"),
+                EntreeMenu::Separateur,
+                action(MENU_HISTORIQUE, "Historique\tCtrl + Maj + H"),
+                EntreeMenu::Separateur,
+                action(MENU_REGLAGES, "Réglages"),
+                EntreeMenu::Separateur,
+                action(MENU_QUITTER, "Quitter BreezyShot"),
+            ]
+        );
+        let sans_texte = entrees_menu(&actions_selon(true, true, false), raccourci);
+        assert_eq!(sans_texte.len(), m.len() - 1);
+        assert!(!sans_texte.contains(&action("capturer_texte", "Copier le texte\tCtrl + Maj + T")));
+        assert_eq!(
+            sans_texte[5],
+            action(MENU_HISTORIQUE, "Historique\tCtrl + Maj + H")
+        );
+        // Sans historique ni texte : le menu de la 0.4.
+        assert_eq!(
+            entrees_menu(&actions_selon(true, false, false), raccourci),
+            entrees_menu(&ACTIONS_DE_CAPTURE, |_| None)
+        );
+        assert_eq!(mode_du_menu(MENU_HISTORIQUE), None);
+    }
+
     #[test]
     fn plateformes() {
         assert_eq!(plateforme_reglages(Systeme::Windows), Plateforme::Windows);
@@ -3635,7 +4183,10 @@ mod tests {
 
     #[test]
     fn lignes_d_annonce() {
-        let t = table_candidats(&Reglages::par_defaut(Plateforme::Windows));
+        let t = table_candidats(
+            &Reglages::par_defaut(Plateforme::Windows),
+            &ACTIONS_DE_CAPTURE,
+        );
         let normal = choisir(&t, false, |_| true);
         assert_eq!(ligne_annonce(&decider_annonce(None, &normal)), None);
         let reserve = choisir(&t, true, |_| true);
@@ -3653,6 +4204,136 @@ mod tests {
         assert_eq!(
             ligne_annonce(&decider_annonce(None, &rien)).as_deref(),
             Some("annonce raccourci: aucun_raccourci")
+        );
+    }
+
+    fn choix(action: &str, candidats: &[&str], retenu: Option<&str>) -> raccourcis::ChoixAction {
+        let retenu = retenu.map(|r| raccourcis::analyser(r).expect("raccourci"));
+        raccourcis::ChoixAction {
+            action: action.into(),
+            retenu,
+            // Sans retenu, tous les candidats ont été écartés.
+            ecartes: candidats
+                .iter()
+                .filter(|_| retenu.is_none())
+                .map(|c| raccourcis::Ecarte {
+                    candidat: (*c).into(),
+                    raison: raccourcis::Raison::RefuseParLeSysteme,
+                })
+                .collect(),
+            nb_candidats: candidats.len(),
+        }
+    }
+
+    fn bilan_du_demarrage() -> Bilan {
+        Bilan {
+            actions: vec![
+                choix("zone", &["Ctrl+Maj+1"], Some("Ctrl+Maj+1")),
+                choix("historique", &["Ctrl+Maj+H"], Some("Ctrl+Maj+H")),
+            ],
+        }
+    }
+
+    #[test]
+    fn l_annonce_attend_le_texte_seulement_avec_la_licence() {
+        assert!(annonce_attend_texte(true));
+        assert!(!annonce_attend_texte(false));
+        // Avec la licence, l'historique est dans le bilan du démarrage.
+        assert!(actions_construites(true, false).contains(&ACTION_HISTORIQUE));
+        assert!(!actions_construites(false, false).contains(&ACTION_HISTORIQUE));
+    }
+
+    #[test]
+    fn texte_sans_raccourci_annonce_par_la_regle_commune() {
+        // Tous les candidats pris : « Aucun raccourci pour le texte », une fois.
+        let pris = choix("texte", &["Ctrl+Maj+T"], None);
+        let b = bilan_avec(bilan_du_demarrage(), &[pris]);
+        let d = raccourcis::decider_annonce(None, &b);
+        let titre = d.annonce.as_ref().map(|a| a.titre.clone());
+        assert_eq!(titre.as_deref(), Some("Aucun raccourci pour le texte"));
+        let situation = d.a_retenir.clone().expect("situation");
+        assert_eq!(situation.action, "texte");
+        // Même situation au démarrage suivant : rien.
+        let encore = raccourcis::decider_annonce(Some(&situation), &b);
+        assert_eq!(encore.annonce, None);
+        assert_eq!(encore.a_retenir, Some(situation));
+        // Liste vide (choix de l'utilisateur, mise à niveau) : rien.
+        let vide = bilan_avec(bilan_du_demarrage(), &[choix("texte", &[], None)]);
+        let d = raccourcis::decider_annonce(None, &vide);
+        assert_eq!((d.annonce, d.a_retenir), (None, None));
+        // Retenu : rien ; sans le texte (borne) : le bilan seul.
+        let ok = choix("texte", &["Ctrl+Maj+T"], Some("Ctrl+Maj+T"));
+        let b = bilan_avec(bilan_du_demarrage(), &[ok]);
+        assert_eq!(raccourcis::decider_annonce(None, &b).annonce, None);
+        assert_eq!(bilan_avec(bilan_du_demarrage(), &[]), bilan_du_demarrage());
+    }
+
+    #[test]
+    fn historique_sans_raccourci_annonce_comme_les_autres() {
+        let mut b = bilan_du_demarrage();
+        b.actions[1] = choix("historique", &["Ctrl+Maj+H"], None);
+        let d = raccourcis::decider_annonce(None, &b);
+        let titre = d.annonce.map(|a| a.titre);
+        assert_eq!(titre.as_deref(), Some("Aucun raccourci pour l'historique"));
+    }
+
+    #[test]
+    fn bilan_avec_remplace_la_ligne_de_l_action() {
+        let b = bilan_avec(
+            bilan_du_demarrage(),
+            &[choix("zone", &["Ctrl+Maj+9"], Some("Ctrl+Maj+9"))],
+        );
+        assert_eq!(b.actions.len(), 2);
+        assert_eq!(b.actions[0].nb_candidats, 1);
+        assert_eq!(
+            b.retenu("zone").map(|r| r.canonique()),
+            Some("Ctrl+Maj+9".to_string())
+        );
+    }
+
+    #[test]
+    fn licence_retiree_pendant_l_attente_le_bilan_perd_le_pro() {
+        let texte = choix("texte", &["Ctrl+Maj+T"], None);
+        let sans = actions_construites(false, true);
+        let b = bilan_au_depart(bilan_du_demarrage(), std::slice::from_ref(&texte), &sans);
+        assert_eq!(
+            b.actions
+                .iter()
+                .map(|a| a.action.as_str())
+                .collect::<Vec<_>>(),
+            vec!["zone"]
+        );
+        assert_eq!(raccourcis::decider_annonce(None, &b).annonce, None);
+        // Licence toujours là : rien de retiré.
+        let b = bilan_au_depart(
+            bilan_du_demarrage(),
+            &[texte],
+            &actions_construites(true, true),
+        );
+        assert_eq!(b.actions.len(), 3);
+    }
+
+    #[test]
+    fn borne_gagnee_la_situation_du_texte_reste() {
+        let pris = choix("texte", &["Ctrl+Maj+T"], None);
+        let avec = bilan_avec(bilan_du_demarrage(), &[pris]);
+        let situation = raccourcis::decider_annonce(None, &avec)
+            .a_retenir
+            .expect("situation");
+        // Sans le texte (borne) : ni effacée ni remplacée, aucune annonce.
+        let d = decider_annonce_demarrage(Some(&situation), &bilan_du_demarrage(), true);
+        assert_eq!(d.annonce, None);
+        assert_eq!(d.a_retenir, Some(situation.clone()));
+        // Bilan complet « tout normal » : effacée, comme pour toutes les actions.
+        let d = decider_annonce_demarrage(Some(&situation), &bilan_du_demarrage(), false);
+        assert_eq!((d.annonce, d.a_retenir), (None, None));
+        // Une autre action en défaut l'emporte, borne ou non (une seule situation retenue).
+        let mut b = bilan_du_demarrage();
+        b.actions[1] = choix("historique", &["Ctrl+Maj+H"], None);
+        let d = decider_annonce_demarrage(Some(&situation), &b, true);
+        assert_eq!(
+            d.a_retenir.map(|s| s.action),
+            Some("historique".to_string())
         );
     }
 }

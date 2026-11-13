@@ -9,9 +9,12 @@ param(
     [Parameter(Mandatory)][string]$Exe,
     [string]$Sortie = 'essais-resultats',
     # Un essai qui n'a pas fini dans ce délai est arrêté (lui et tout ce qu'il a lancé) et
-    # compte comme échoué : les suivants se jouent quand même.
+    # compte comme échoué : les suivants se jouent quand même. L'essai 13 (historique, texte
+    # et licence, six à sept minutes s'il réussit) a au moins 900 s.
     [int]$LimiteS = 600
 )
+
+$LIMITES_PROPRES = @{ '13-historique-texte' = 900 }
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
@@ -29,6 +32,7 @@ if ($essais.Count -eq 0) { throw "aucun essai trouvé dans $PSScriptRoot" }
 $bilans = [System.Collections.Generic.List[object]]::new()
 foreach ($fichier in $essais) {
     $nom = [System.IO.Path]::GetFileNameWithoutExtension($fichier.Name)
+    $limite = if ($LIMITES_PROPRES.ContainsKey($nom)) { [math]::Max($LimiteS, $LIMITES_PROPRES[$nom]) } else { $LimiteS }
     $chrono = [System.Diagnostics.Stopwatch]::StartNew()
     $avant = @(Get-Process | ForEach-Object { $_.Id })
     $json = Join-Path $sortieComplete "$nom.json"
@@ -37,11 +41,11 @@ foreach ($fichier in $essais) {
         '-Exe', "`"$exeComplet`"", '-Sortie', "`"$sortieComplete`"")
     $processus = Start-Process -FilePath $pwsh -ArgumentList $arguments -NoNewWindow -PassThru
     $null = $processus.Handle   # sans quoi ExitCode reste vide après la fin
-    if ($processus.WaitForExit($LimiteS * 1000)) {
+    if ($processus.WaitForExit($limite * 1000)) {
         $code = $processus.ExitCode
     }
     else {
-        Write-Host "$nom : pas fini en $LimiteS s, arrêté."
+        Write-Host "$nom : pas fini en $limite s, arrêté."
         try { $processus.Kill($true) } catch { Write-Host "$nom : arrêt impossible ($_)" }
         $code = -1
         # L'essai arrêté n'a pas rangé les journaux de l'app : ils sont pris dans son dossier.
@@ -83,6 +87,7 @@ foreach ($fichier in $essais) {
             Reussi = ($code -eq 0) -and ($null -ne $bilan) -and $bilan.Reussi
             Code   = $code
             DureeS = [math]::Round($chrono.Elapsed.TotalSeconds, 1)
+            LimiteS = $limite
             Bilan  = $bilan
         })
 }
@@ -102,7 +107,7 @@ foreach ($b in $bilans) {
     $lignes.Add("### $($b.Nom)")
     $lignes.Add('')
     if ($null -eq $b.Bilan) {
-        $cause = if ($b.Code -eq -1) { "arrêté après $LimiteS s" } else { "code $($b.Code)" }
+        $cause = if ($b.Code -eq -1) { "arrêté après $($b.LimiteS) s" } else { "code $($b.Code)" }
         $lignes.Add("Pas de bilan : l'essai s'est arrêté avant la fin ($cause).")
         continue
     }
