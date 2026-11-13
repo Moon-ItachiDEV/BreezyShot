@@ -1,0 +1,160 @@
+{
+  "mica": {
+    "backdrop_filter": true,
+    "mesures": [
+      {
+        "animation": "entree-vignette",
+        "duree_ms": 300,
+        "ecart_max_ms": 80,
+        "ecart_median_ms": 18,
+        "images": 12,
+        "images_sautees": 2
+      },
+      {
+        "animation": "appui-bouton",
+        "duree_ms": 350,
+        "ecart_max_ms": 24,
+        "ecart_median_ms": 17,
+        "images": 20,
+        "images_sautees": 0
+      },
+      {
+        "animation": "sortie-coup-de-vent",
+        "duree_ms": 280,
+        "ecart_max_ms": 21,
+        "ecart_median_ms": 17,
+        "images": 17,
+        "images_sautees": 0
+      },
+      {
+        "animation": "entree-vignette",
+        "duree_ms": 300,
+        "ecart_max_ms": 20,
+        "ecart_median_ms": 17,
+        "images": 18,
+        "images_sautees": 0
+      },
+      {
+        "animation": "appui-bouton",
+        "duree_ms": 350,
+        "ecart_max_ms": 55,
+        "ecart_median_ms": 17,
+        "images": 14,
+        "images_sautees": 3
+      },
+      {
+        "animation": "sortie-coup-de-vent",
+        "duree_ms": 280,
+        "ecart_max_ms": 21,
+        "ecart_median_ms": 17,
+        "images": 17,
+        "images_sautees": 0
+      },
+      {
+        "animation": "entree-vignette",
+        "duree_ms": 300,
+        "ecart_max_ms": 18,
+        "ecart_median_ms": 17,
+        "images": 19,
+        "images_sautees": 0
+      },
+      {
+        "animation": "appui-bouton",
+        "duree_ms": 350,
+        "ecart_max_ms": 18,
+        "ecart_median_ms": 17,
+        "images": 22,
+        "images_sautees": 0
+      },
+      {
+        "animation": "sortie-coup-de-vent",
+        "duree_ms": 280,
+        "ecart_max_ms": 20,
+        "ecart_median_ms": 17,
+        "images": 17,
+        "images_sautees": 0
+      }
+    ],
+    "moteur": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko)",
+    "ressort_cubic_bezier": true
+  },
+  "verre": {
+    "backdrop_filter": true,
+    "mesures": [
+      {
+        "animation": "entree-vignette",
+        "duree_ms": 300,
+        "ecart_max_ms": 81,
+        "ecart_median_ms": 18,
+        "images": 12,
+        "images_sautees": 2
+      },
+      {
+        "animation": "appui-bouton",
+        "duree_ms": 350,
+        "ecart_max_ms": 23,
+        "ecart_median_ms": 17,
+        "images": 20,
+        "images_sautees": 0
+      },
+      {
+        "animation": "sortie-coup-de-vent",
+        "duree_ms": 280,
+        "ecart_max_ms": 20,
+        "ecart_median_ms": 17,
+        "images": 17,
+        "images_sautees": 0
+      },
+      {
+        "animation": "entree-vignette",
+        "duree_ms": 300,
+        "ecart_max_ms": 21,
+        "ecart_median_ms": 17,
+        "images": 18,
+        "images_sautees": 0
+      },
+      {
+        "animation": "appui-bouton",
+        "duree_ms": 350,
+        "ecart_max_ms": 57,
+        "ecart_median_ms": 16,
+        "images": 13,
+        "images_sautees": 3
+      },
+      {
+        "animation": "sortie-coup-de-vent",
+        "duree_ms": 280,
+        "ecart_max_ms": 20,
+        "ecart_median_ms": 17,
+        "images": 18,
+        "images_sautees": 0
+      },
+      {
+        "animation": "entree-vignette",
+        "duree_ms": 300,
+        "ecart_max_ms": 18,
+        "ecart_median_ms": 17,
+        "images": 19,
+        "images_sautees": 0
+      },
+      {
+        "animation": "appui-bouton",
+        "duree_ms": 350,
+        "ecart_max_ms": 19,
+        "ecart_median_ms": 17,
+        "images": 22,
+        "images_sautees": 0
+      },
+      {
+        "animation": "sortie-coup-de-vent",
+        "duree_ms": 280,
+        "ecart_max_ms": 21,
+        "ecart_median_ms": 17,
+        "images": 17,
+        "images_sautees": 0
+      }
+    ],
+    "moteur": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko)",
+    "ressort_cubic_bezier": true
+  }
+}
