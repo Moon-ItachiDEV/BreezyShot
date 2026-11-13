@@ -31,7 +31,7 @@ const VUE = {
     { action: 'derniere_zone', libelle: 'Refaire la dernière zone', touches: ['Ctrl', 'Maj', '4'], modifie: false, refus: null },
   ],
 };
-// Avec licence : la vue du cœur après « Activer » (historique, texte, une langue).
+// Avec licence : la vue du cœur après « Activer » (défilante, historique, texte, une langue).
 const VUE_PRO = REEL.vue_pro;
 // La licence d'essai publique (avenant 0.5 « Licence », §2) : le cœur simulé l'accepte, il
 // refuse tout autre texte avec le code `signature`, comme le vrai.
@@ -478,7 +478,8 @@ const SANS_VIGNETTE = { ...VUE, lignes: ['copier', 'dossier', 'modele_nom', 'the
     ['fenetre', 'Fenêtre', 'Ctrl+Maj+3', true],
     ['derniere_zone', 'Refaire la dernière zone', 'Ctrl+Maj+4', true],
   ]);
-  const six = JSON.stringify(JSON.parse(quatre).concat([
+  const sept = JSON.stringify(JSON.parse(quatre).concat([
+    ['defilante', 'Capture défilante', 'Ctrl+Maj+5', true],
     ['historique', 'Historique', 'Ctrl+Maj+H', true],
     ['texte', 'Copier le texte', 'Ctrl+Maj+T', true],
   ]));
@@ -551,7 +552,7 @@ const SANS_VIGNETTE = { ...VUE, lignes: ['copier', 'dossier', 'modele_nom', 'the
     const entree = (await appels(p)).filter(x => x[0] === 'licence_activer').length;
     verifier(entree === 1 && (await ligneLicence(p)).refus === 'Licence non valide',
       `11 ${theme} Entrée → licence_activer, refusée`);
-    // Acceptée : « Pro activé » et « Retirer », la vue redemandée, les deux raccourcis
+    // Acceptée : « Pro activé » et « Retirer », la vue redemandée, les trois raccourcis
     // apparaissent ; ni numéro ni date dans la page.
     await champ.fill(`  ${LICENCE} `);
     await vider(p);
@@ -569,11 +570,11 @@ const SANS_VIGNETTE = { ...VUE, lignes: ['copier', 'dossier', 'modele_nom', 'the
     await p.screenshot({ path: `${SORTIE}/reglages-licence-active-${theme}.png` });
     await onglet(p, 'Raccourcis');
     let montres = await raccourcisMontres(p);
-    verifier(json(montres) === six,
-      `11 ${theme} acceptée : « Historique » et « Copier le texte » après la dernière zone`,
+    verifier(json(montres) === sept,
+      `11 ${theme} acceptée : « Capture défilante » en cinquième, « Historique » et « Copier le texte » après`,
       json(montres));
     await p.screenshot({ path: `${SORTIE}/reglages-raccourcis-pro-${theme}.png` });
-    // Retirée : la vue redemandée, le champ revient vide (focus), les deux lignes partent.
+    // Retirée : la vue redemandée, le champ revient vide (focus), les trois lignes partent.
     await onglet(p, 'Général');
     await vider(p);
     await p.getByRole('button', { name: 'Retirer' }).click(); await p.waitForTimeout(100);
@@ -612,15 +613,44 @@ const SANS_VIGNETTE = { ...VUE, lignes: ['copier', 'dossier', 'modele_nom', 'the
     await p.context().close();
   }
 
-  // 12. Raccourcis de l'historique et du texte (§7.2) : présents seulement quand l'action est
+  // 12. Raccourcis de la défilante, de l'historique et du texte (§7.2) : présents seulement quand l'action est
   // en vigueur ; saisie et Rétablir comme les autres ; une ligne qui part pendant sa saisie
   // la termine. Le cœur simulé refuse une action qui n'est pas en vigueur, comme le vrai.
   {
     const p = await page({ vue: VUE_PRO });
     await onglet(p, 'Raccourcis');
     let montres = await raccourcisMontres(p);
-    verifier(json(montres) === six,
-      '12 vue réelle avec licence : six lignes, Ctrl + Maj + H et Ctrl + Maj + T', json(montres));
+    verifier(json(montres) === sept,
+      '12 vue réelle avec licence : sept lignes, Ctrl + Maj + 5, Ctrl + Maj + H et Ctrl + Maj + T', json(montres));
+    // « Capture défilante » : saisie, touche envoyée, refus dit sous la ligne, « Aucun
+    // raccourci », Rétablir, comme les autres lignes.
+    await vider(p);
+    await p.getByRole('button', { name: 'Capture défilante' }).click(); await p.waitForTimeout(30);
+    await p.keyboard.press('Control+Alt+Digit5'); await p.waitForTimeout(50);
+    let ad = await appels(p);
+    const toucheD = ad.find(x => x[0] === 'reglages_raccourci')?.[1];
+    verifier(json(ad[0]) === json(['reglages_saisie', { action: 'defilante', active: true }])
+      && toucheD?.action === 'defilante' && toucheD?.saisie?.code === 'Digit5' && toucheD?.saisie?.ctrl && toucheD?.saisie?.alt,
+    '12 « Capture défilante » : saisie puis touche envoyée pour `defilante`', json(ad));
+    await p.evaluate(() => __emettre('reglages:etat', {
+      ...__vue,
+      raccourcis: __vue.raccourcis.map(r => (r.action === 'defilante'
+        ? { ...r, touches: [], modifie: true, refus: 'Aucun raccourci' } : r)),
+    }));
+    await p.waitForTimeout(30);
+    const ligneD = await p.$eval('[data-reglage="raccourci"][data-action="defilante"]', l => [
+      l.querySelectorAll('kbd').length, l.querySelector('[data-refus]').hidden,
+      l.querySelector('[data-refus]').textContent,
+      !l.querySelector('[data-controle="retablir"]').hidden,
+      [...l.parentElement.children].indexOf(l),
+    ]);
+    verifier(json(ligneD) === json([0, false, 'Aucun raccourci', true, 4]),
+      '12 « Capture défilante » sans raccourci : « Aucun raccourci », Rétablir, cinquième', json(ligneD));
+    await vider(p);
+    await p.getByRole('button', { name: 'Rétablir' }).click(); await p.waitForTimeout(30);
+    verifier(json((await dernier(p, 'reglages_retablir'))?.[1]) === json({ action: 'defilante' }),
+      '12 Rétablir de « Capture défilante » → reglages_retablir defilante');
+    await p.evaluate(() => __emettre('reglages:etat', __vue)); await p.waitForTimeout(30);
     await vider(p);
     await p.getByRole('button', { name: 'Copier le texte' }).click(); await p.waitForTimeout(30);
     await p.keyboard.press('Control+Alt+KeyY'); await p.waitForTimeout(50);
@@ -638,13 +668,13 @@ const SANS_VIGNETTE = { ...VUE, lignes: ['copier', 'dossier', 'modele_nom', 'the
     await p.getByRole('button', { name: 'Rétablir' }).click(); await p.waitForTimeout(30);
     verifier(json((await dernier(p, 'reglages_retablir'))?.[1]) === json({ action: 'historique' }),
       '12 Rétablir de « Historique » → reglages_retablir historique');
-    // Sans langue de lecture : « Historique » seule après la dernière zone.
+    // Sans langue de lecture : « Capture défilante » et « Historique » après la dernière zone.
     await p.evaluate(() => __emettre('reglages:etat', {
       ...__vue, raccourcis: __vue.raccourcis.filter(r => r.action !== 'texte'),
     }));
-    const cinq = await raccourcisMontres(p);
-    verifier(json(cinq) === json(JSON.parse(six).slice(0, 5)),
-      '12 sans langue : cinq lignes, pas de « Copier le texte »', json(cinq));
+    const six = await raccourcisMontres(p);
+    verifier(json(six) === json(JSON.parse(sept).slice(0, 6)),
+      '12 sans langue : six lignes, pas de « Copier le texte »', json(six));
     // La licence retirée pendant la saisie de « Historique » : la ligne part, la saisie est
     // rendue au cœur, qui reprend les raccourcis (fin de saisie jamais refusée).
     await p.evaluate(() => __emettre('reglages:etat', __vue));
@@ -674,7 +704,7 @@ const SANS_VIGNETTE = { ...VUE, lignes: ['copier', 'dossier', 'modele_nom', 'the
     // Elles reviennent dans l'ordre de la vue, sans doublon.
     await p.evaluate((v) => { __vue = v; __emettre('reglages:etat', v); }, VUE_PRO);
     await p.waitForTimeout(30);
-    verifier(json(await raccourcisMontres(p)) === six,
+    verifier(json(await raccourcisMontres(p)) === sept,
       '12 lignes revenues dans l’ordre, sans doublon');
     verifier(p.erreurs.length === 0, '12 aucune erreur de console', json(p.erreurs));
     await p.context().close();

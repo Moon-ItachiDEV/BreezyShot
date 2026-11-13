@@ -184,6 +184,17 @@
         "refus": null
       },
       {
+        "action": "defilante",
+        "libelle": "Capture défilante",
+        "touches": [
+          "Ctrl",
+          "Maj",
+          "5"
+        ],
+        "modifie": false,
+        "refus": null
+      },
+      {
         "action": "historique",
         "libelle": "Historique",
         "touches": [
