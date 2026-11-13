@@ -1321,8 +1321,9 @@ nom dans `<local>/Apercus/` (`SOUS_DOSSIER_APERCUS`) : la partie 16:10 du haut �
 réduite pour couvrir 400 × 250, jamais agrandie (`capture::apercu_historique`). L'aperçu est
 fait après chaque sortie qui a rangé un fichier dans « Récents », dans le fil de la sortie
 ou de l'export de l'éditeur (`geste_historique::apres_sortie`), seulement si l'historique
-est une action en vigueur (`historique::apercu_a_la_sortie` : avec une licence ; sans
-elle, rien n'est écrit dans `Apercus`, la capture suit le chemin de la 0.4) ; ceux qui
+est une action en vigueur ou si sa fenêtre est ouverte (`historique::apercu_a_la_sortie` :
+avec une licence, ou une fenêtre restée ouverte après son retrait ; sans licence et fenêtre
+fermée, rien n'est écrit dans `Apercus`, la capture suit le chemin de la 0.4) ; ceux qui
 manquent sont faits à l'ouverture, dans le fil `historique`, du plus récent au plus ancien,
 chacun annoncé par `historique:apercu`. Le nettoyage à 50 efface aussi les aperçus des
 captures parties et les aperçus orphelins (§10).
@@ -1714,7 +1715,7 @@ impossible: <e>`, `selection balayage <id> non envoye: <e>`.
   couleurs, menu « Fermer » et ses issues, « Copier » qui ferme, vignette de prise, règle
   de `fermer_demande`, un seul export à la fois, clair, sombre, fenêtre étroite, aucune
   erreur ni violation de CSP. Étape du job `pages`.
-- **Tests de la 0.5** (`cargo test --locked` sous Linux : 633 tests de la bibliothèque
+- **Tests de la 0.5** (`cargo test --locked` sous Linux : 641 tests de la bibliothèque
   réussis, 2 ignorés, et les 2 de `tests/architecture.rs`, qui refusent aussi un appel à
   `droits::ouverte` ou à `licence::verifier` hors d'`application`). Tests ajoutés, par
   fichier : `licence/tests.rs` 17 (licence d'essai acceptée, octet changé dans la charge ou
@@ -1723,17 +1724,20 @@ impossible: <e>`, `selection balayage <id> non envoye: <e>`.
   lecture bornée) ; `application/licence.rs` 4 ; `droits.rs` 1 (chaque variante nommée) ;
   `texte/tests.rs` 22 (préparation, ×2, réduction, boîtes ramenées et bornées, séparateurs,
   assemblage, extraits, `Debug` sans le texte) ; `systeme/texte/mod.rs` 6, dont 5 sous
-  Linux ; `sortie/texte.rs` 4 ; `application/texte.rs` 12 (machine de la Lecture,
-  `Attendue` disputée par 8 fils, facteur, messages, lignes) ; `application/historique.rs`
-  11 ; `fenetres/historique.rs` 4 (`placer`) ; `sortie/tests.rs` 16 (liste, en-tête IHDR,
+  Linux ; `sortie/texte.rs` 4 ; `application/texte.rs` 14 (machine de la Lecture,
+  `Attendue` disputée par 8 fils, facteur, messages, lignes, écrans changés, sonde avec la
+  licence) ; `application/historique.rs` 13 (dont aperçu seulement avec l'historique, Tout
+  effacer) ; `fenetres/historique.rs` 4 (`placer`) ; `sortie/tests.rs` 16 (liste, en-tête IHDR,
   `lire_recent` qui juge l'en-tête avant d'allouer, aperçus, `supprimer_recent`, `vider`,
   nettoyage à 50, liste partielle, lien symbolique) ; `capture/decoupe.rs` 4
   (`apercu_historique`) ; `reglages/tests.rs` 6 de plus (version 4, mise à niveau 3→4,
   touche déjà donnée, synonymes) ; `application/etats.rs` 5 de plus (§3.1) ;
-  `application/mod.rs` 5 de plus (actions construites, menu, annonce commune,
-  `bilan_avec`) ; `application/page_reglages.rs` 2 ; `fenetres/selection.rs` 3 (affichage
-  gardé pour le balayage) ; `fenetres/mod.rs`, `application/zone.rs` et
-  `application/editeur.rs` 1 chacun.
+  `application/mod.rs` 7 de plus (actions construites, menu, annonce commune,
+  `bilan_avec`, licence retirée pendant l'attente, borne gagnée) ;
+  `application/page_reglages.rs` 2 ; `application/geste_texte.rs` 2 (garde de l'écran figé
+  prise une seule fois, écrans changés) ; `fenetres/selection.rs` 3 (affichage gardé pour le
+  balayage) ; `fenetres/mod.rs`, `application/zone.rs` et `application/editeur.rs` 1
+  chacun.
 - Test Windows (machine GitHub) `windows_lit_deux_fois_une_image_blanche`
   (`systeme/texte/mod.rs`) : `disponibilite()` rend des langues (il échoue sans langue),
   `dimension_max()` d'au moins 200, puis le vrai moteur lit deux fois de suite une image
@@ -1746,8 +1750,8 @@ impossible: <e>`, `selection balayage <id> non envoye: <e>`.
   suppression et Annuler, nouvelle capture fenêtre ouverte, « Plus d'options », « Tout
   effacer » et liste vide, aperçu manquant redemandé, case non annotable, glisser à 4 px et
   pas à 3 px, animations réduites, F5, Ctrl + P et Ctrl + molette sans effet, fenêtre de 480
-  × 360, clair et sombre, 50 cases avec `historique_affiche` envoyé une fois. Son étape
-  dans le job `pages` de `app.yml` n'est pas encore écrite.
+  × 360, clair et sombre, 50 cases avec `historique_affiche` envoyé une fois. Étape du
+  job `pages`.
 - `essais/pages/reglages.cjs` (107 points, grandi en 0.5) : point 11, la ligne « Licence »
   (sans licence, refusée avec le champ gardé, acceptée puis `reglages_lire`, retirée,
   « Activer » inactif champ vide, clair et sombre) ; point 12, les lignes de raccourcis
@@ -1756,15 +1760,44 @@ impossible: <e>`, `selection balayage <id> non envoye: <e>`.
 - Pages de Copier le texte (chantier G) : `selection.cjs` (mode texte, `selection:balayer`),
   `editeur.cjs` (bouton « Texte », export de but `texte`, calque « Choisir le texte » et
   son clavier) et `bandeau.cjs` (erreur brève à `duree_ms`) grandissent avec elles.
-- Essai Windows 13 :
+- Essai Windows 13 (`13-historique-texte.ps1`, 0.5), avec la variable capturable, le
+  témoin `temoin-texte.ps1` (anglais ASCII, trois lignes noires en Segoe UI 20 px, une
+  ligne de 12 px, une partie blanche) et la garde de l'essai 12. Ctrl+Maj+H et Ctrl+Maj+T
+  ne sont jamais tapés tant que l'app ne les tient pas : l'essai prouve qu'ils sont libres
+  en les tenant lui-même (`tenir-raccourci.ps1`). La langue en-US doit être sur la
+  machine : sans elle, l'essai échoue. Licence : (L1) sans licence, `licence absente`, menu
+  de la 0.4, raccourcis libres, aucune recherche des langues ; (L2) licence à signature
+  changée collée dans Réglages › Général, clic réel sur « Activer » : `licence refusee
+  signature`, « Licence non valide », le champ garde le texte ; (L3) la licence de
+  `essais/licence-essai.txt` : `licence active ESSAI-0001`, raccourcis et langues sans
+  redémarrage, « Pro activé », `licence.txt` rangé. Cas A, Copier le texte (1 à 8) :
+  menu, lecture des trois lignes et presse-papiers exact en CR LF, écran figé guetté puis
+  caché, ligne de 12 px notée, zone blanche (« Aucun texte trouvé » parti seul entre 3,8 et
+  5 s), « Réessayer » puis Échap, ni décompte ni pointeur, Ctrl+Maj+2 ignoré pendant la
+  lecture, écran entier, dix lectures. Cas B, historique (9 à 18) : aperçus faits, ouverture
+  par Ctrl+Maj+H et par le menu (une seule fenêtre), Copier et Enregistrer au pixel près
+  puis `deja fait`, Supprimer, Ctrl+Z et l'effacement 5 s après, Annoter et « Texte » dans
+  l'éditeur (un Bloc noir cache sa ligne, R7), glisser réel vers `cible-glisser.ps1`, Tout
+  effacer, trois fermetures (page, cadre, arrêt), mémoire et poignées sur 20 ouvertures ;
+  (L4) « Retirer » : `licence retiree`, raccourcis rendus, entrées du menu parties,
+  `licence.txt` effacé ou vidé, puis `licence absente` au redémarrage. Cas C, migration de
+  la 0.4 : réglages v3 où zone vaut Ctrl+Maj+T passés en v4, `raccourci texte: aucun`,
+  `historique apercus faits 3`. Cas D, sans langue (`BREEZYSHOT_ESSAI_SANS_TEXTE=1`) : ni
+  « Copier le texte » ni « Texte », « Historique » gardé. `lancer.ps1` lui donne 900 s.
+  Mesuré au passage 65 (machine GitHub) : repos sans licence 174,1 Mo, avec licence
+  190,3 Mo ; lecture des trois lignes 225 ms (budget 400), du relâcher à « Texte copié »
+  244 ms, écran entier 534 ms (budget 1 000) ; app 11,6 puis 12,6 Mo après dix lectures ;
+  Ctrl+Maj+H à l'historique affiché 188 ms (budget 700), 20 ouvertures entre 185 et 209
+  ms ; historique ouvert 226,3 Mo, 186,3 Mo dix secondes après 20 fermetures ; poignées 396
+  puis 415.
 - `essais/` : un script par étape (`01-socle.ps1`, `02-reglages.ps1`, `03-raccourci.ps1`,
   `04-zone.ps1`, `05-plein-ecran.ps1`, `06-fenetre.ps1`, `07-vignette.ps1`,
   `08-reglages-fenetre.ps1`, `09-installateur.ps1`, `10-confort.ps1`,
-  `11-pointeur.ps1`, `12-editeur.ps1`), tous les `NN-*.ps1` pris dans l'ordre sans liste écrite
-  (les essais 01 à 12 tournent sans licence),
-  lancés par `essais/lancer.ps1` sur le .exe de release (un essai pas fini en 600 s est
-  arrêté, avec ce qu'il a lancé, et compte comme échoué, les journaux de l'app qu'il
-  laisse rangés avec les autres ; un bilan resté d'un passage d'avant est effacé avant
+  `11-pointeur.ps1`, `12-editeur.ps1`, `13-historique-texte.ps1`), tous les `NN-*.ps1`
+  pris dans l'ordre sans liste écrite (les essais 01 à 12 tournent sans licence), lancés
+  par `essais/lancer.ps1` sur le .exe de release (un essai pas fini en 600 s, 900 s pour
+  l'essai 13, est arrêté, avec ce qu'il a lancé, et compte comme échoué, les journaux de
+  l'app qu'il laisse rangés avec les autres ; un bilan resté d'un passage d'avant est effacé avant
   l'essai ; après chaque essai, une app ou une aide restée ouverte est arrêtée et nommée,
   sinon elle retient la sortie de l'étape jusqu'à sa limite de temps, et de WebView2
   seuls les processus de l'app le sont). `Terminer-Essai` range les journaux de l'app, ceux

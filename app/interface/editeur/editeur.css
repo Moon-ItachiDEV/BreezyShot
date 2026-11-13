@@ -896,10 +896,17 @@ input[type="range"] {
   width: var(--editeur-copier-hauteur);
   height: var(--editeur-copier-hauteur);
 }
-/* Anneau de focus : `all: unset` des boutons l'efface ; celui de toute la page, remis. */
+/* Anneau de focus : `all: unset` des boutons l'efface ; celui de toute la page, remis
+   (« Copier » du haut garde son écart, .ok:focus-visible plus haut). */
 .bt:focus-visible,
-.rb:focus-visible {
+.rb:focus-visible,
+.ok:focus-visible,
+.tl:focus-visible {
   outline: var(--editeur-focus) solid var(--accent);
+}
+.bt:focus-visible,
+.rb:focus-visible,
+.tl:focus-visible {
   outline-offset: var(--editeur-focus);
 }
 

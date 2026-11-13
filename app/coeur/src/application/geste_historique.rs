@@ -383,9 +383,10 @@ pub fn apres_sortie(app: &AppHandle, pixels: &Pixels, bilan: &sortie::Bilan) {
     let Some(nom) = historique::nom_du_chemin(chemin) else {
         return;
     };
-    // Sans l'historique en vigueur (pas de licence) : le chemin de la 0.4, aucun aperçu ;
-    // les manquants se font à l'ouverture de l'historique.
-    let avec_apercu = historique::apercu_a_la_sortie(&super::actions_en_vigueur(app));
+    // Sans l'historique en vigueur (pas de licence) et fenêtre fermée : le chemin de la
+    // 0.4, aucun aperçu ; les manquants se font à l'ouverture de l'historique.
+    let ouverte = super::historique_ouvert(app).is_some();
+    let avec_apercu = historique::apercu_a_la_sortie(&super::actions_en_vigueur(app), ouverte);
     if let Some(apercus) = chemin.parent().and_then(apercus_de).filter(|_| avec_apercu) {
         let apercu = capture::apercu_historique(pixels);
         if sortie::ranger_apercu(&apercus, &nom, &apercu).is_err() {
