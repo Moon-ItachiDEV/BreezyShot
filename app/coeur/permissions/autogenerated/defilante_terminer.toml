@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-defilante-terminer"
+description = "Enables the defilante_terminer command without any pre-configured scope."
+commands.allow = ["defilante_terminer"]
+
+[[permission]]
+identifier = "deny-defilante-terminer"
+description = "Denies the defilante_terminer command without any pre-configured scope."
+commands.deny = ["defilante_terminer"]

@@ -1,4 +1,5 @@
-/* Sélection d'une zone (étape 5), d'une fenêtre (étape 8) ou du texte à lire (0.5). Toutes
+/* Sélection d'une zone (étape 5), d'une fenêtre (étape 8), du texte à lire (0.5) ou, en
+   capture défilante (0.6), d'une zone ou d'une page (le tracé et le contour). Toutes
    les couleurs viennent de ../commun/jetons.css ;
    la page force le thème clair (le voile ne dépend pas du thème). */
 
@@ -80,7 +81,8 @@ body.glisse #plein {
   display: none;
 }
 
-/* Mode fenêtre : la flèche normale, pas la croix. */
+/* Mode fenêtre : la flèche normale, pas la croix (le mode défilante garde la croix : il
+   trace aussi). */
 html.mode-fenetre,
 html.mode-fenetre body {
   cursor: default;
@@ -113,54 +115,70 @@ body.entoure #plein {
   display: none;
 }
 
-/* Copier le texte (0.5) : la zone lue joue le balayage du design (design/historique,
-   « .zone.scan ») : respiration, bande claire de gauche à droite, teinte `accent` qui
-   s'efface. Animations réduites : la teinte seule, immobile, --duree-reduite. */
-#zone {
-  --duree-balayage: var(--texte-balayage);
-}
-#zone .bande {
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  left: 0;
-  width: 60%;
-  display: none;
-  background: linear-gradient(100deg, transparent, rgb(255 255 255 / 0.08) 30%,
-    rgb(255 255 255 / 0.55) 50%, rgb(255 255 255 / 0.08) 70%, transparent);
-  transform: translateX(-110%);
-  mix-blend-mode: screen;
-}
+/* Copier le texte : la zone lue se teinte (`accent`) et respire le temps de la lecture
+   (--texte-lecture, choix « Surligné » du 13/11, design/copier-texte-animation) ; la teinte
+   reste jusqu'à la fin. Animations réduites : la teinte seule, immobile. */
 body.balaye #zone {
   background: color-mix(in srgb, var(--accent) var(--texte-teinte), transparent);
   animation:
-    respire var(--duree-balayage) var(--courbe-ressort),
-    efface var(--duree-balayage) var(--courbe-douce) forwards;
-}
-body.balaye #zone .bande {
-  display: block;
-  animation: traverse var(--duree-balayage) var(--courbe-ressort) forwards;
+    respire var(--texte-lecture) var(--courbe-ressort),
+    teinte var(--duree-survol) var(--courbe-douce) backwards;
 }
 body.balaye.reduit #zone {
-  --duree-balayage: var(--duree-reduite);
   animation: none;
-}
-body.balaye.reduit #zone .bande {
-  display: none;
 }
 @keyframes respire {
   from {
     transform: scale(0.985);
   }
 }
-@keyframes traverse {
-  to {
-    transform: translateX(190%);
+@keyframes teinte {
+  from {
+    background-color: transparent;
   }
 }
-/* La teinte s'efface ; le trait de la zone (ombre intérieure) reste. */
-@keyframes efface {
+
+/* Puis, si le texte est copié, ses lignes se surlignent dans la zone : chacune tirée de
+   gauche à droite (--surligne-trace), la suivante --surligne-pas plus tard ; après la
+   tenue, toute la sélection s'efface (--surligne-sortie), juste avant que le cœur la cache.
+   Les durées viennent du cœur (`selection:surligner`) ; animations réduites : les lignes
+   paraissent ensemble en fondu (pas nul). La zone (contain: strict) coupe ce qui dépasse. */
+#zone .lus {
+  position: absolute;
+  inset: 0;
+  display: none;
+}
+body.surligne #zone .lus {
+  display: block;
+}
+#zone .lus i {
+  position: absolute;
+  border-radius: calc(var(--trait, 1px) * 2);
+  background: color-mix(in srgb, var(--accent) var(--texte-surligne), transparent);
+  animation: tire var(--surligne-trace) var(--courbe-douce) calc(var(--rang) * var(--surligne-pas)) both;
+}
+body.surligne.reduit #zone .lus i {
+  animation-name: parait;
+  animation-timing-function: linear;
+}
+body.surligne #scene {
+  animation: part var(--surligne-sortie) linear var(--surligne-sortie-a) forwards;
+}
+@keyframes tire {
+  from {
+    clip-path: inset(0 100% 0 0);
+  }
   to {
-    background-color: transparent;
+    clip-path: inset(0);
+  }
+}
+@keyframes parait {
+  from {
+    opacity: 0;
+  }
+}
+@keyframes part {
+  to {
+    opacity: 0;
   }
 }

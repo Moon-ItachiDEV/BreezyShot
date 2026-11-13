@@ -7,12 +7,14 @@
 pub enum Fonction {
     Historique,
     Texte,
+    /// La capture défilante (0.6).
+    Defilante,
 }
 
 /// Vrai si `f` est ouverte. `pro` : une licence valide est en place.
 pub fn ouverte(f: Fonction, pro: bool) -> bool {
     match f {
-        Fonction::Historique | Fonction::Texte => pro,
+        Fonction::Historique | Fonction::Texte | Fonction::Defilante => pro,
     }
 }
 
@@ -23,9 +25,9 @@ mod tests {
     /// Chaque variante est nommée : en ajouter une oblige à relire ce test.
     #[test]
     fn pro_ouvre_tout_et_rien_sans_licence() {
-        for f in [Fonction::Historique, Fonction::Texte] {
+        for f in [Fonction::Historique, Fonction::Texte, Fonction::Defilante] {
             match f {
-                Fonction::Historique | Fonction::Texte => {
+                Fonction::Historique | Fonction::Texte | Fonction::Defilante => {
                     assert!(ouverte(f, true), "{f:?}");
                     assert!(!ouverte(f, false), "{f:?}");
                 }

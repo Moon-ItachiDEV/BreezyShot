@@ -11,6 +11,7 @@
 use std::path::{Path, PathBuf};
 
 mod composition;
+pub mod defiler;
 pub mod demarrage;
 mod dossier;
 pub mod gel;
@@ -18,6 +19,7 @@ pub mod glisser;
 pub mod installation;
 pub mod presse_papiers;
 pub mod texte;
+pub mod vivant;
 pub use composition::attendre_composition;
 pub use demarrage::{demarrage_avec_systeme, mettre_a_jour_chemin, EtatDemarrage};
 pub use dossier::{choisir_dossier, choisir_fichier_png};
@@ -228,6 +230,12 @@ pub fn exclure_des_captures(fenetre: &tauri::WebviewWindow) -> bool {
     plateforme::exclure_des_captures(fenetre)
 }
 
+/// Retire l'exclusion des captures et dit si la fenêtre y est de nouveau visible (relu
+/// auprès du système). Hors Windows, rien n'est jamais exclu : `true`.
+pub fn inclure_dans_les_captures(fenetre: &tauri::WebviewWindow) -> bool {
+    plateforme::inclure_dans_les_captures(fenetre)
+}
+
 /// Cache la fenêtre sans passer par tao (Windows : `ShowWindow(SW_HIDE)`).
 pub fn cacher_sans_tao(fenetre: &tauri::WebviewWindow) -> Result<bool, String> {
     plateforme::cacher_sans_tao(fenetre)
@@ -242,6 +250,15 @@ pub fn preparer_fenetre_outil(fenetre: &tauri::WebviewWindow) -> Result<bool, St
 /// Identifiant système de la fenêtre (Windows : le HWND), pour le journal.
 pub fn identifiant_fenetre(fenetre: &tauri::WebviewWindow) -> Option<isize> {
     plateforme::identifiant_fenetre(fenetre)
+}
+
+/// Vrai là où Tauri rapporte les clics sur l'icône de la zone de notification (tout sauf
+/// Linux) : le menu de l'icône peut y être une fenêtre web.
+pub const CLICS_ICONE_RAPPORTES: bool = !cfg!(target_os = "linux");
+
+/// Vrai si le bouton gauche ou droit de la souris est enfoncé (Windows ; faux ailleurs).
+pub fn bouton_souris_enfonce() -> bool {
+    plateforme::bouton_souris_enfonce()
 }
 
 /// Position de la souris en pixels réels, lue directement (`None` : demander à Tauri).

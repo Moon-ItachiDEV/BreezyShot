@@ -306,7 +306,7 @@ public static int EcartsTemoin(byte[] o, int stride, int x, int y, int l, int h,
         $utile = [System.Windows.Forms.Screen]::PrimaryScreen.WorkingArea
         Write-Host "écran principal $principal ; GetSystemMetrics ${cx}x$cy ; zone utile $utile"
         Verifier 'écran principal : Screen et GetSystemMetrics donnent la même taille' (($principal.Width -eq $cx) -and ($principal.Height -eq $cy)) "Screen $($principal.Width)x$($principal.Height), GetSystemMetrics ${cx}x$cy" | Out-Null
-        $TAILLE = "$($principal.Width)x$($principal.Height)"
+        $TAILLE_ECRAN = "$($principal.Width)x$($principal.Height)"
 
         # Le témoin : en haut au milieu de la zone utile de l'écran principal, sous la place
         # de la pilule du bandeau (64 px du haut), pour que le point (5) prouve quelque chose.
@@ -418,7 +418,7 @@ public static int EcartsTemoin(byte[] o, int stride, int x, int y, int l, int h,
             if ($null -eq $Image) { Verifier $Nom $false 'aucune image' | Out-Null; return }
             if ($null -eq $Ecran) { Verifier $Nom $false 'ligne « plein ecran » illisible' | Out-Null; return }
             $taille = "$($Image.Width)x$($Image.Height)"
-            if (-not (Verifier "$Nom : taille de l'écran principal ($TAILLE)" ($taille -eq $TAILLE) "obtenu $taille")) { return }
+            if (-not (Verifier "$Nom : taille de l'écran principal ($TAILLE_ECRAN)" ($taille -eq $TAILLE_ECRAN) "obtenu $taille")) { return }
             $moitie = [int]($COTE / 2)
             $ecarts = [System.Collections.Generic.List[string]]::new()
             $places = @(@(0, 0), @($moitie, 0), @(0, $moitie), @($moitie, $moitie))
@@ -554,7 +554,7 @@ public static int EcartsTemoin(byte[] o, int stride, int x, int y, int l, int h,
                 $t1 = $c1.Lignes -join "`n"
                 Verifier '(2) etat Repos -> Gel (DemandeCapture plein_ecran)' ($t1.Contains('etat Repos -> Gel (DemandeCapture plein_ecran)')) | Out-Null
                 Verifier '(2) etat Gel -> Decoupe (PhotoPrise plein_ecran)' ($t1.Contains('etat Gel -> Decoupe (PhotoPrise plein_ecran)')) | Out-Null
-                Verifier '(2) plein ecran … souris : l''écran principal' (($null -ne $c1.Ecran) -and ($c1.Ecran.Origine -eq 'souris') -and ($c1.Ecran.X -eq $principal.X) -and ($c1.Ecran.Y -eq $principal.Y) -and ("$($c1.Ecran.L)x$($c1.Ecran.H)" -eq $TAILLE)) "$($c1.LigneEcran)" | Out-Null
+                Verifier '(2) plein ecran … souris : l''écran principal' (($null -ne $c1.Ecran) -and ($c1.Ecran.Origine -eq 'souris') -and ($c1.Ecran.X -eq $principal.X) -and ($c1.Ecran.Y -eq $principal.Y) -and ("$($c1.Ecran.L)x$($c1.Ecran.H)" -eq $TAILLE_ECRAN)) "$($c1.LigneEcran)" | Out-Null
                 Verifier '(2) chrono gel photo … total … (sans visible)' (@($c1.Lignes | Where-Object { $_ -match 'chrono gel photo \d+ total \d+$' }).Count -eq 1) | Out-Null
                 Verifier '(2) etat Decoupe -> Repos (ImagePreteSansVignette)' ($t1.Contains('etat Decoupe -> Repos (ImagePreteSansVignette)')) | Out-Null
                 Verifier '(2) sortie annonce reussite: Copié et enregistré' ($t1.Contains('sortie annonce reussite: Copié et enregistré')) | Out-Null
@@ -594,7 +594,7 @@ public static int EcartsTemoin(byte[] o, int stride, int x, int y, int l, int h,
                     try {
                         Verifier-Image '(5) second PNG' $image2 $c2.Ecran
                         $taille2 = "$($image2.Width)x$($image2.Height)"
-                        if ($taille2 -eq $TAILLE) {
+                        if ($taille2 -eq $TAILLE_ECRAN) {
                             $ob = Octets-Image $image2
                             $ex = $c2.Ecran.X; $ey = $c2.Ecran.Y
                             $diff = [BreezyShotEssai.PleinEcran]::EcartsTemoin($ob.Octets, $ob.Stride, ($ix - $ex), ($iy - $ey), $il, $ih, ($TX - $ex), ($TY - $ey), $COTE, $COULEURS_PLAT)
@@ -602,7 +602,7 @@ public static int EcartsTemoin(byte[] o, int stride, int x, int y, int l, int h,
                             Verifier '(5) sous la fenêtre du bandeau, la seconde image a les couleurs du témoin (bandeau absent)' ($diff -eq 0) "$diff pixel(s) différents sur ${il}x$ih" | Out-Null
                         }
                         else {
-                            Verifier '(5) comparaison sous la fenêtre du bandeau' $false "image $taille2, écran $TAILLE" | Out-Null
+                            Verifier '(5) comparaison sous la fenêtre du bandeau' $false "image $taille2, écran $TAILLE_ECRAN" | Out-Null
                         }
                     }
                     finally { $image2.Dispose() }

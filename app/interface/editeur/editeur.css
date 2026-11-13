@@ -204,8 +204,31 @@ input {
 .scene[data-curseur="pt"] .vue {
   cursor: pointer;
 }
-.scene[data-curseur="cell"] .vue {
-  cursor: cell;
+.scene[data-curseur="gomme"] .vue {
+  cursor: none;
+}
+/* Le rond de la gomme : il suit le pointeur, à la taille de la gomme. */
+.rond-gomme {
+  position: absolute;
+  left: 0;
+  top: 0;
+  z-index: 2;
+  box-sizing: border-box;
+  pointer-events: none;
+  border-radius: 50%;
+  border: var(--editeur-gomme-trait) solid var(--editeur-gomme-cercle);
+  background: var(--editeur-gomme-fond);
+  box-shadow: 0 0 0 var(--editeur-trait-largeur) var(--editeur-gomme-halo);
+  transition:
+    scale var(--duree-editeur-appui),
+    background-color var(--duree-editeur-appui);
+}
+.rond-gomme.appui {
+  scale: 0.92;
+  background: var(--editeur-gomme-fond-appui);
+}
+.rond-gomme[hidden] {
+  display: none;
 }
 .scene[data-curseur="grab"] .vue {
   cursor: grab;
@@ -520,6 +543,18 @@ input {
 .opt .s2 {
   width: var(--editeur-taille-surligneur-2);
   height: var(--editeur-taille-surligneur-2);
+}
+.opt .g0 {
+  width: var(--editeur-taille-gomme-0);
+  height: var(--editeur-taille-gomme-0);
+}
+.opt .g1 {
+  width: var(--editeur-taille-gomme-1);
+  height: var(--editeur-taille-gomme-1);
+}
+.opt .g2 {
+  width: var(--editeur-taille-gomme-2);
+  height: var(--editeur-taille-gomme-2);
 }
 .opt .n0 {
   width: var(--editeur-taille-numero-0);

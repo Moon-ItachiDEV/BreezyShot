@@ -1,7 +1,7 @@
 //! Ce que `charger` a constaté, et pourquoi `ecrire` a refusé.
 //!
 //! Les textes (`Display`) sont des lignes de journal : français simple, sans accents, comme
-//! les autres lignes que lisent les essais (« arret propre », « seconde instance refusee »).
+//! les autres lignes que lisent les essais (« arret propre », « seconde instance: reglages ouverts »).
 
 use std::fmt;
 use std::io;

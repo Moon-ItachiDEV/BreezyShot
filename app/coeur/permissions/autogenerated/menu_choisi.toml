@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-menu-choisi"
+description = "Enables the menu_choisi command without any pre-configured scope."
+commands.allow = ["menu_choisi"]
+
+[[permission]]
+identifier = "deny-menu-choisi"
+description = "Denies the menu_choisi command without any pre-configured scope."
+commands.deny = ["menu_choisi"]

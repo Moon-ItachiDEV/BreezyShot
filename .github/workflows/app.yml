@@ -18,7 +18,7 @@ jobs:
   windows:
     name: Windows (tests, .exe, essais)
     runs-on: windows-latest
-    timeout-minutes: 60
+    timeout-minutes: 80
     defaults:
       run:
         shell: pwsh
@@ -62,15 +62,23 @@ jobs:
         env:
           # Sur cette machine le presse-papiers existe : son test ne doit pas pouvoir sauter.
           BREEZYSHOT_PRESSE_PAPIERS_OBLIGATOIRE: "1"
-        run: cargo test --locked -- --show-output
+          # Les tests UI Automation de B ne peuvent pas se replier sur la molette ici.
+          BREEZYSHOT_AUTOMATION_OBLIGATOIRE: "1"
+        # La sortie est gardée : l'essai 14 en recopie les lignes `vivant: …` (mesures du
+        # chantier A, faites ici en construction de test).
+        run: |
+          cargo test --locked -- --show-output | Tee-Object -FilePath "$env:RUNNER_TEMP/tests-sortie.txt"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Construire breezyshot.exe (release)
         working-directory: app
         run: npx tauri build --no-bundle -- --locked
 
       - name: Essais
-        # 01 à 13 ; une étape bloquée ne doit pas manger tout le job.
-        timeout-minutes: 45
+        # 01 à 14 ; une étape bloquée ne doit pas manger tout le job.
+        timeout-minutes: 60
+        env:
+          BREEZYSHOT_SORTIE_TESTS: ${{ runner.temp }}/tests-sortie.txt
         run: ./essais/lancer.ps1 -Exe app/coeur/target/release/breezyshot.exe -Sortie essais-resultats
 
       - name: Envoyer le .exe
@@ -167,6 +175,18 @@ jobs:
           NODE_PATH: ${{ github.workspace }}/app/node_modules
           SORTIE: ${{ github.workspace }}/essais-resultats/pages
         run: node essais/pages/historique.cjs
+
+      - name: Essai de la page de la capture défilante
+        env:
+          NODE_PATH: ${{ github.workspace }}/app/node_modules
+          SORTIE: ${{ github.workspace }}/essais-resultats/pages
+        run: node essais/pages/defilante.cjs
+
+      - name: Essai de la page du menu de l'icône
+        env:
+          NODE_PATH: ${{ github.workspace }}/app/node_modules
+          SORTIE: ${{ github.workspace }}/essais-resultats/pages
+        run: node essais/pages/menu.cjs
 
       - name: Envoyer les captures de la page
         if: always()

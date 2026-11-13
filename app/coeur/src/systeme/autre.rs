@@ -52,6 +52,10 @@ pub fn exclure_des_captures(_fenetre: &tauri::WebviewWindow) -> bool {
     false
 }
 
+pub fn inclure_dans_les_captures(_fenetre: &tauri::WebviewWindow) -> bool {
+    true
+}
+
 pub fn cacher_sans_tao(_fenetre: &tauri::WebviewWindow) -> Result<bool, String> {
     Ok(false)
 }
@@ -65,6 +69,10 @@ pub fn identifiant_fenetre(_fenetre: &tauri::WebviewWindow) -> Option<isize> {
 }
 
 /// Hors Windows : l'appelant demande à Tauri.
+pub fn bouton_souris_enfonce() -> bool {
+    false
+}
+
 pub fn position_souris() -> Option<(f64, f64)> {
     None
 }

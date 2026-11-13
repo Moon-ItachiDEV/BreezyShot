@@ -590,38 +590,261 @@ const CHARGE = {
     await fin(p, '4');
   }
 
-  // ---------- 5. Gomme : chaque objet touché supprimé, un geste = un pas ----------
+  // ---------- 5. Gomme au pixel : seulement là où elle passe, un geste = un pas ----------
   {
     const p = await page();
+    // Un pixel de la vue, à un point de l'image.
+    const pixel = (q, x, y) =>
+      q.evaluate(
+        ([a, b]) => {
+          const v = __ed.vue;
+          const c = new OffscreenCanvas(1, 1).getContext('2d', { willReadFrequently: true });
+          c.drawImage(
+            document.querySelector('#vue'),
+            -Math.round(v.x + a * v.echelle),
+            -Math.round(v.y + b * v.echelle),
+          );
+          return Array.from(c.getImageData(0, 0, 1, 1).data);
+        },
+        [x, y],
+      );
+    const egal = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+    const etat = (q) =>
+      q.evaluate(() => ({
+        types: __ed.h.doc.objets.map((o) => o.type),
+        g: __ed.h.doc.objets.map((o) => (o.gommes ? o.gommes.length : 0)),
+        pas: __ed.h.passe.length,
+        apercu: __ed.gommes ? __ed.gommes.size : null,
+      }));
+    const nu = [await pixel(p, 100, 50), await pixel(p, 100, 150), await pixel(p, 75, 50)];
     await glisser(p, [50, 50], [150, 50]);
     await glisser(p, [50, 150], [150, 150]);
     await glisser(p, [50, 250], [150, 250]);
-    const pas0 = await p.evaluate(() => __ed.h.passe.length);
-    await outil(p, 'Gomme');
-    const curseur = await p.evaluate(() => {
-      const t = document.querySelector('#vue');
-      t.dispatchEvent(new PointerEvent('pointermove', { bubbles: true, clientX: 1, clientY: 1 }));
-      return null;
-    });
-    void curseur;
+    const trace = [await pixel(p, 100, 50), await pixel(p, 75, 50)];
+    const pas0 = (await etat(p)).pas;
+    await p.keyboard.press('g');
+    await uneImage(p);
+    verifier(JSON.stringify(await choisi(p)) === '["Gomme"]', '5 touche G : Gomme');
+
+    // Le rond suit le pointeur, à la taille de la gomme ; le pointeur du système est caché.
     const [gx, gy] = await point(p, 100, 20);
     const [hx, hy] = await point(p, 100, 180);
-    await glisserCss(p, gx, gy, hx, hy);
-    const r = await p.evaluate(() => ({
-      n: __ed.h.doc.objets.length,
-      pas: __ed.h.passe.length,
-      cur: document.querySelector('#scene').dataset.curseur,
-    }));
+    await p.mouse.move(gx, gy);
+    await uneImage(p);
+    const rond = await p.evaluate(() => {
+      const r = document.querySelector('#curseur-gomme');
+      const b = r.getBoundingClientRect();
+      return {
+        cache: r.hidden,
+        l: r.style.width,
+        cx: b.left + b.width / 2,
+        cy: b.top + b.height / 2,
+        cur: document.querySelector('#scene').dataset.curseur,
+        pointeur: getComputedStyle(document.querySelector('#vue')).cursor,
+      };
+    });
     verifier(
-      r.n === 1 && r.pas === pas0 + 1,
-      '5 Gomme : deux objets touchés supprimés en un seul pas',
+      !rond.cache &&
+        rond.cur === 'gomme' &&
+        rond.pointeur === 'none' &&
+        rond.l === '20px' &&
+        Math.abs(rond.cx - gx) < 1 &&
+        Math.abs(rond.cy - gy) < 1,
+      '5 Gomme : le rond de 20 px suit le pointeur',
+      JSON.stringify([rond, gx, gy]),
+    );
+
+    // Pendant le geste : l'aperçu est au pixel, le document n'a pas bougé.
+    await p.mouse.down();
+    for (let i = 1; i <= 8; i++) await p.mouse.move(gx + ((hx - gx) * i) / 8, gy + ((hy - gy) * i) / 8);
+    await uneImage(p);
+    const pendant = await etat(p);
+    const apercu = await pixel(p, 100, 50);
+    const appui = await p.$eval('#curseur-gomme', (r) => r.classList.contains('appui'));
+    await p.mouse.up();
+    await uneImage(p);
+    let r = await etat(p);
+    verifier(
+      pendant.apercu === 2 && pendant.pas === pas0 && egal(pendant.g, [0, 0, 0]) && appui &&
+        egal(apercu, nu[0]),
+      '5 Gomme, pendant le geste : aperçu au pixel, document intact',
+      JSON.stringify([pendant, apercu, nu[0], appui]),
+    );
+    verifier(
+      egal(r.types, ['fleche', 'fleche', 'fleche']) &&
+        egal(r.g, [1, 1, 0]) &&
+        r.pas === pas0 + 1 &&
+        r.apercu === null,
+      '5 Gomme : les deux flèches frottées restent, trouées, en un seul pas',
       JSON.stringify([pas0, r]),
     );
-    await bouton(p, 'Gomme').click();
-    verifier(!(await ouvert(p, '#reglages-outil')), '5 Gomme recliquée : aucune bulle');
+    const apres = [await pixel(p, 100, 50), await pixel(p, 100, 150), await pixel(p, 75, 50)];
+    verifier(
+      egal(apres[0], nu[0]) &&
+        egal(apres[1], nu[1]) &&
+        !egal(trace[0], nu[0]) &&
+        egal(apres[2], trace[1]) &&
+        !egal(trace[1], nu[2]),
+      '5 Gomme : le fond revient là où elle passe (sans ombre), le trait reste à côté',
+      JSON.stringify([nu, trace, apres]),
+    );
+
+    // Annuler et rétablir : le passage entier, d'un coup.
     await p.keyboard.press('Control+z');
     await uneImage(p);
-    verifier((await objets(p)).length === 3, '5 Annuler : les deux objets reviennent');
+    r = await etat(p);
+    const defait = await pixel(p, 100, 50);
+    await p.keyboard.press('Control+y');
+    await uneImage(p);
+    const refait = await etat(p);
+    verifier(
+      egal(r.g, [0, 0, 0]) && egal(defait, trace[0]) && egal(refait.g, [1, 1, 0]) &&
+        refait.pas === pas0 + 1 && egal(await pixel(p, 100, 50), nu[0]),
+      '5 Annuler rend les deux traits entiers, Rétablir les troue de nouveau',
+      JSON.stringify([r, defait, refait]),
+    );
+
+    // Frotter dans le vide, ou dans un trou avec une gomme plus petite : rien ne change,
+    // aucun pas.
+    await glisser(p, [300, 20], [300, 280]);
+    await outil(p, 'Gomme');
+    await p.locator('#reglages-outil').getByRole('button', { name: 'Petite', exact: true }).click();
+    await p.keyboard.press('Escape');
+    await uneImage(p);
+    const petite = await p.evaluate(() => __ed.prefs.tailles.gomme);
+    await glisser(p, [100, 44], [100, 56]);
+    r = await etat(p);
+    verifier(
+      petite === 0 && egal(r.g, [1, 1, 0]) && r.pas === pas0 + 1,
+      '5 Gomme dans le vide ou dans un trou : aucun pas',
+      JSON.stringify([petite, r]),
+    );
+
+    // Échap pendant le geste : rien n'est gommé.
+    const [ex, ey] = await point(p, 100, 230);
+    await p.mouse.move(ex, ey);
+    await p.mouse.down();
+    await p.mouse.move(ex, ey + 20);
+    await p.mouse.move(ex, ey + 40);
+    await uneImage(p);
+    const avantEchap = (await etat(p)).apercu;
+    await p.keyboard.press('Escape');
+    await uneImage(p);
+    const echap = await etat(p);
+    await p.mouse.up();
+    await uneImage(p);
+    r = await etat(p);
+    verifier(
+      avantEchap === 1 && echap.apercu === null && egal(r.g, [1, 1, 0]) && r.pas === pas0 + 1 &&
+        JSON.stringify(await choisi(p)) === '["Gomme"]',
+      '5 Échap pendant le geste : rien de gommé, aucun pas, la Gomme reste en main',
+      JSON.stringify([avantEchap, echap, r]),
+    );
+
+    // Le trou ne se prend pas ; ce qui reste du trait se prend.
+    await outil(p, 'Flèche');
+    const rondCache = await p.$eval('#curseur-gomme', (e) => e.hidden);
+    await cliquer(p, 100, 50);
+    const dansTrou = await p.evaluate(() => [...__ed.selection]);
+    await cliquer(p, 70, 50);
+    const surReste = await p.evaluate(() => [...__ed.selection]);
+    await p.keyboard.press('Escape');
+    r = await etat(p);
+    verifier(
+      rondCache && egal(dansTrou, []) && egal(surReste, [1]) && r.types.length === 3,
+      '5 un trait troué : le trou ne se prend pas, le reste se prend ; autre outil, plus de rond',
+      JSON.stringify([rondCache, dansTrou, surReste, r]),
+    );
+
+    // Objets entiers (numéro) : la gomme qui passe dessus ne leur fait rien ; posée dessus,
+    // elle les enlève en entier (clic ou frottement), cachés dès l'appui.
+    await ajouter(p, 'Numéro');
+    await cliquer(p, 300, 100);
+    await cliquer(p, 340, 60);
+    await outil(p, 'Gomme');
+    const pas1 = (await etat(p)).pas;
+    await glisser(p, [260, 100], [380, 100]);
+    const frotte = await etat(p);
+    await cliquer(p, 300, 100);
+    const clique = await etat(p);
+    verifier(
+      egal(frotte.types, ['fleche', 'fleche', 'fleche', 'numero', 'numero']) &&
+        frotte.pas === pas1 &&
+        egal(frotte.g, [1, 1, 0, 0, 0]) &&
+        egal(clique.types, ['fleche', 'fleche', 'fleche', 'numero']) && clique.pas === pas1 + 1,
+      '5 Numéro : intact sous la gomme qui passe, enlevé par un clic de la gomme (un pas)',
+      JSON.stringify([pas1, frotte, clique]),
+    );
+    const [nx, ny] = await point(p, 340, 60);
+    const plein = await pixel(p, 340, 60);
+    await p.mouse.move(nx, ny);
+    await p.mouse.down();
+    await uneImage(p);
+    const pris = await p.evaluate(() => [__ed.gommeEntier, __ed.h.doc.objets.length]);
+    const cache = await pixel(p, 340, 60);
+    await p.mouse.move(nx + 15, ny + 4);
+    await p.mouse.move(nx + 30, ny + 8);
+    await p.mouse.up();
+    await uneImage(p);
+    r = await etat(p);
+    verifier(
+      pris[0] != null && pris[1] === 4 && !egal(cache, plein) &&
+        egal(r.types, ['fleche', 'fleche', 'fleche']) && r.pas === pas1 + 2 &&
+        (await p.evaluate(() => __ed.gommeEntier)) === null,
+      '5 Numéro frotté depuis lui-même : caché dès l’appui, enlevé au relâchement (un pas)',
+      JSON.stringify([pris, cache, plein, r]),
+    );
+    // Un clic sur un trait n'enlève que le point touché.
+    await cliquer(p, 60, 250);
+    r = await etat(p);
+    verifier(
+      egal(r.g, [1, 1, 1]) && r.pas === pas1 + 3 &&
+        (await p.evaluate(() => __ed.h.doc.objets[2].gommes[0].points.length)) === 1,
+      '5 clic de la gomme sur un trait : un point effacé, le trait reste',
+      JSON.stringify(r),
+    );
+
+    // Gomme recliquée : ses trois tailles. La bulle ouverte, le geste part quand même.
+    await outil(p, 'Stylo');
+    await glisser(p, [300, 200], [320, 200]);
+    await outil(p, 'Gomme');
+    await outil(p, 'Gomme');
+    await calme(p);
+    const tailles = await p
+      .locator('#reglages-outil')
+      .getByRole('button')
+      .evaluateAll((bs) => bs.filter((b) => b.offsetParent).map((b) => b.getAttribute('aria-label')));
+    await p.locator('#reglages-outil').getByRole('button', { name: 'Grande', exact: true }).click();
+    await uneImage(p);
+    const grande = await p.evaluate(() => __ed.prefs.tailles.gomme);
+    const bulle = await ouvert(p, '#reglages-outil');
+    const pas2 = (await etat(p)).pas;
+    await glisser(p, [280, 200], [340, 200]);
+    r = await etat(p);
+    verifier(
+      egal(tailles, ['Petite', 'Moyenne', 'Grande']) && grande === 2 && bulle &&
+        (await p.$eval('#curseur-gomme', (e) => e.style.width)) === '40px',
+      '5 Gomme recliquée : Petite, Moyenne, Grande ; Grande = rond de 40 px',
+      JSON.stringify([tailles, grande, bulle]),
+    );
+    verifier(
+      !(await ouvert(p, '#reglages-outil')) && egal(r.types, ['fleche', 'fleche', 'fleche']) &&
+        r.pas === pas2 + 1,
+      '5 bulle ouverte : le geste la ferme et gomme ; un trait tout effacé disparaît (un pas)',
+      JSON.stringify([pas2, r]),
+    );
+    await p.keyboard.press('Control+z');
+    await uneImage(p);
+    r = await etat(p);
+    verifier(
+      egal(r.types, ['fleche', 'fleche', 'fleche', 'crayon']) && egal(r.g, [1, 1, 1, 0]),
+      '5 Annuler : le trait tout effacé revient entier',
+      JSON.stringify(r),
+    );
+    // Le pointeur sorti de l'image : plus de rond.
+    await p.mouse.move(5, 5);
+    await uneImage(p);
+    verifier(await p.$eval('#curseur-gomme', (e) => e.hidden), '5 pointeur sorti de la vue : rond caché');
     await fin(p, '5');
   }
 
@@ -2461,6 +2684,183 @@ const CHARGE = {
       JSON.stringify(r),
     );
     await fin(p, '19');
+  }
+
+  // ---------- 22. gestes revus : Échap, Maj, trait redressé, Ctrl + A, couleur, bornes ----------
+  {
+    const p = await page();
+    const hist = (q) =>
+      q.evaluate(() => ({ pas: __ed.h.passe.length, futur: __ed.h.futur.length }));
+    await ajouter(p, 'Forme');
+    await glisser(p, [100, 100], [200, 180]);
+    await outil(p, 'Flèche');
+    await glisser(p, [20, 250], [120, 250]);
+    await p.keyboard.press('Control+z');
+    await uneImage(p);
+    const h0 = await hist(p);
+
+    // Échap pendant un déplacement : l'objet revient, aucun pas, « Rétablir » gardé.
+    const [ax, ay] = await point(p, 100, 140);
+    await p.mouse.move(ax, ay);
+    await p.mouse.down();
+    await p.mouse.move(ax + 20, ay + 10);
+    await p.mouse.move(ax + 40, ay + 20);
+    await uneImage(p);
+    const enRoute = await p.evaluate(() => Math.round(__ed.h.doc.objets[0].x1));
+    await p.keyboard.press('Escape');
+    await uneImage(p);
+    const revenu = await p.evaluate(() => __ed.h.doc.objets[0].x1);
+    await p.mouse.move(ax + 60, ay + 30);
+    await p.mouse.up();
+    await uneImage(p);
+    const h1 = await hist(p);
+    verifier(
+      enRoute === 140 && revenu === 100 && h1.pas === h0.pas && h1.futur === 1 &&
+        (await p.evaluate(() => __ed.h.doc.objets[0].x1)) === 100,
+      '22 Échap pendant un déplacement : retour au départ, aucun pas, Rétablir gardé',
+      JSON.stringify([enRoute, revenu, h0, h1]),
+    );
+
+    // Échap pendant un tracé : rien n'est créé.
+    await outil(p, 'Stylo');
+    const [sx, sy] = await point(p, 250, 40);
+    await p.mouse.move(sx, sy);
+    await p.mouse.down();
+    await p.mouse.move(sx + 30, sy + 10);
+    await p.mouse.move(sx + 60, sy + 5);
+    await p.keyboard.press('Escape');
+    await p.mouse.up();
+    await uneImage(p);
+    const h2 = await hist(p);
+    verifier(
+      (await objets(p, 'crayon')).length === 0 && h2.pas === h0.pas && h2.futur === 1,
+      '22 Échap pendant un tracé : rien de créé, aucun pas',
+      JSON.stringify(h2),
+    );
+
+    // Stylo avec Maj : un segment droit, par 15°.
+    const droit = (o) => {
+      const [a, b] = [o.points[0], o.points[o.points.length - 1]];
+      const L = Math.hypot(b[0] - a[0], b[1] - a[1]);
+      const ecart = Math.max(
+        ...o.points.map(
+          (q) => Math.abs((b[0] - a[0]) * (a[1] - q[1]) - (a[0] - q[0]) * (b[1] - a[1])) / L,
+        ),
+      );
+      return { L, ecart, angle: (Math.atan2(b[1] - a[1], b[0] - a[0]) * 180) / Math.PI };
+    };
+    await p.mouse.move(sx, sy);
+    await p.mouse.down();
+    await p.keyboard.down('Shift');
+    await p.mouse.move(sx + 40, sy + 14);
+    await p.mouse.move(sx + 90, sy + 20);
+    await p.mouse.up();
+    await p.keyboard.up('Shift');
+    await uneImage(p);
+    let d = droit((await objets(p, 'crayon'))[0]);
+    verifier(
+      d.ecart < 0.01 && Math.abs(d.angle - 15) < 0.01 && d.L > 80,
+      '22 Stylo avec Maj : segment droit, à 15°',
+      JSON.stringify(d),
+    );
+
+    // Surligneur tenu immobile en fin de trait : presque droit, il se redresse (ici sur l'axe).
+    await outil(p, 'Surligneur');
+    const [ux, uy] = await point(p, 250, 120);
+    await p.mouse.move(ux, uy);
+    await p.mouse.down();
+    await p.mouse.move(ux + 30, uy + 2);
+    await p.mouse.move(ux + 60, uy - 1);
+    await p.mouse.move(ux + 100, uy + 3);
+    await p
+      .waitForFunction(() => __ed.enCours && __ed.enCours.points.length === 2, null, {
+        timeout: 2000,
+      })
+      .catch(() => {});
+    await p.mouse.up();
+    await uneImage(p);
+    d = droit((await objets(p, 'surligneur'))[0]);
+    verifier(
+      d.ecart < 0.01 && Math.abs(d.angle) < 0.01 && d.L > 95,
+      '22 Surligneur tenu immobile : trait redressé, calé à l’horizontale',
+      JSON.stringify(d),
+    );
+    // Un trait qui tourne n'est pas redressé.
+    await p.mouse.move(ux, uy + 60);
+    await p.mouse.down();
+    await p.mouse.move(ux + 40, uy + 60);
+    await p.mouse.move(ux + 60, uy + 100);
+    await p.mouse.move(ux + 100, uy + 100);
+    await sansAppel(p, 'jamais', {});
+    const courbe = await p.evaluate(() => __ed.enCours.points.length);
+    await p.mouse.up();
+    await uneImage(p);
+    verifier(courbe > 2, '22 un trait qui tourne reste à main levée', String(courbe));
+
+    // Maj sur la poignée d'une flèche : par 15°.
+    await outil(p, 'Flèche');
+    await glisser(p, [20, 220], [120, 220]);
+    await cliquer(p, 70, 220);
+    const [px, py] = await point(p, 120, 220);
+    await p.mouse.move(px, py);
+    await p.mouse.down();
+    await p.keyboard.down('Shift');
+    await p.mouse.move(px - 5, py + 20);
+    await p.mouse.move(px - 10, py + 40);
+    await p.mouse.up();
+    await p.keyboard.up('Shift');
+    await uneImage(p);
+    const f = (await objets(p, 'fleche')).pop();
+    const angle = (Math.atan2(f.y2 - f.y1, f.x2 - f.x1) * 180) / Math.PI;
+    verifier(
+      f.x1 === 20 && f.y1 === 220 && Math.abs(angle / 15 - Math.round(angle / 15)) < 1e-6 &&
+        Math.abs(angle - 30) < 8,
+      '22 Maj sur la poignée d’une flèche : bout calé par 15°',
+      JSON.stringify([f, angle]),
+    );
+
+    // La couleur choisie va à l'objet choisi et à SON outil, pas à l'outil en main.
+    await p.keyboard.press('Escape');
+    await cliquer(p, 290, 120);
+    const choisiAvant = await p.evaluate(() => __ed.selection.map((i) => __ed.objet(i).type));
+    await bouton(p, 'Bleu').click();
+    await uneImage(p);
+    const c = await p.evaluate(() => ({
+      o: __ed.h.doc.objets.find((o) => o.type === 'surligneur').couleur,
+      surligneur: __ed.prefs.couleurs.surligneur,
+      fleche: __ed.prefs.couleurs.fleche,
+    }));
+    verifier(
+      JSON.stringify(choisiAvant) === '["surligneur"]' &&
+        JSON.stringify(c) === '{"o":"#0090FF","surligneur":"#0090FF","fleche":"#E5484D"}',
+      '22 couleur : pour l’objet choisi et son outil (le Surligneur), pas pour la Flèche en main',
+      JSON.stringify([choisiAvant, c]),
+    );
+
+    // Ctrl + A : tout est choisi.
+    await p.keyboard.press('Escape');
+    await p.keyboard.press('Control+a');
+    await uneImage(p);
+    const tout = await p.evaluate(() => [__ed.selection.length, __ed.h.doc.objets.length]);
+    verifier(tout[0] === tout[1] && tout[0] >= 5, '22 Ctrl + A : tout est choisi', String(tout));
+    await p.keyboard.press('Escape');
+
+    // Un objet tiré hors de l'image y garde 12 px : il reste attrapable.
+    await cliquer(p, 100, 140);
+    const [bx, by] = await point(p, 100, 140);
+    await p.mouse.move(bx, by);
+    await p.mouse.down();
+    await p.mouse.move(bx + 300, by);
+    await p.mouse.move(bx + 900, by);
+    await p.mouse.up();
+    await uneImage(p);
+    const x1 = await p.evaluate(() => __ed.h.doc.objets[0].x1);
+    verifier(
+      x1 > 380 && x1 <= 388.5,
+      '22 objet tiré hors de l’image : 12 px y restent',
+      String(x1),
+    );
+    await fin(p, '22');
   }
 
   await nav.close();

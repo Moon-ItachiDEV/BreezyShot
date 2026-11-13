@@ -411,6 +411,30 @@
     "origine": "design/editeur-epure/index.html, piste B (instSVG, .tl[data-t=erase])."
    },
    {
+    "name": "editeur-gomme-cercle",
+    "value": "rgba(20,20,22,0.72)",
+    "usage": "Rond de la gomme sous le pointeur : trait (sur l'image, sans thème).",
+    "origine": "Fil « Rendre l'annotation plus naturelle » (13/11/2026) : gomme au pixel."
+   },
+   {
+    "name": "editeur-gomme-halo",
+    "value": "rgba(255,255,255,0.85)",
+    "usage": "Rond de la gomme : liseré clair, lisible sur une image sombre.",
+    "origine": "Fil « Rendre l'annotation plus naturelle » (13/11/2026) : gomme au pixel."
+   },
+   {
+    "name": "editeur-gomme-fond",
+    "value": "rgba(255,255,255,0.22)",
+    "usage": "Rond de la gomme : fond.",
+    "origine": "Fil « Rendre l'annotation plus naturelle » (13/11/2026) : gomme au pixel."
+   },
+   {
+    "name": "editeur-gomme-fond-appui",
+    "value": "rgba(255,255,255,0.42)",
+    "usage": "Rond de la gomme : fond pendant qu'elle efface.",
+    "origine": "Fil « Rendre l'annotation plus naturelle » (13/11/2026) : gomme au pixel."
+   },
+   {
     "name": "editeur-projecteur-lumiere",
     "value": "#FFE7A3",
     "usage": "Lentille du projecteur.",
@@ -532,6 +556,12 @@
     "value": "#FFFFFF",
     "usage": "Croix du bouton Fermer survolé.",
     "origine": "design/historique/index.html, .capb button:hover."
+   },
+   {
+    "name": "defilante-apercu-ombre",
+    "value": "0 0 0 1px rgba(255,255,255,0.55), 0 8px 16px rgba(0,0,0,0.35)",
+    "usage": "Liseré clair et ombre de l'aperçu en direct de la capture défilante (les mêmes dans les deux thèmes, comme tout ce qui est posé sur l'écran).",
+    "origine": "design/defilante/index.html, .prev box-shadow."
    }
   ]
  },
@@ -850,6 +880,12 @@
     "origine": "design/editeur-epure/index.html, piste B (contrat 0.4 (gardé))."
    },
    {
+    "name": "duree-editeur-redresser",
+    "value": "600ms",
+    "usage": "Stylo, surligneur : pointeur immobile avant qu'un trait presque droit se redresse.",
+    "origine": "Fil « Rendre l'annotation plus naturelle » (13/11/2026)."
+   },
+   {
     "name": "duree-editeur-reduite",
     "value": "1ms",
     "usage": "Animations réduites.",
@@ -930,8 +966,14 @@
    {
     "name": "texte-balayage",
     "value": "400ms",
-    "usage": "Balayage de Copier le texte.",
+    "usage": "Balayage de l'image dans l'éditeur (bouton « Texte »).",
     "origine": "design/historique/index.html, onglet « Copier le texte » ; contrat 0.5 §10."
+   },
+   {
+    "name": "texte-lecture",
+    "value": "200ms",
+    "usage": "Copier le texte : la zone lue se teinte et respire le temps de la lecture (BALAYAGE du cœur).",
+    "origine": "design/copier-texte-animation/index.html, choix A « Surligné » du 13/11 (LECTURE)."
    }
   ]
  },
@@ -2325,6 +2367,48 @@
     "origine": "design/editeur-epure/index.html, piste B (openToolPop)."
    },
    {
+    "name": "editeur-taille-gomme-0",
+    "value": "8px",
+    "usage": "Gomme, Petite (bulle de l'outil).",
+    "origine": "Fil « Rendre l'annotation plus naturelle » (13/11/2026) : gomme au pixel."
+   },
+   {
+    "name": "editeur-taille-gomme-1",
+    "value": "13px",
+    "usage": "Gomme, Moyenne (bulle de l'outil).",
+    "origine": "Fil « Rendre l'annotation plus naturelle » (13/11/2026) : gomme au pixel."
+   },
+   {
+    "name": "editeur-taille-gomme-2",
+    "value": "18px",
+    "usage": "Gomme, Grande (bulle de l'outil).",
+    "origine": "Fil « Rendre l'annotation plus naturelle » (13/11/2026) : gomme au pixel."
+   },
+   {
+    "name": "editeur-gomme-rayon-0",
+    "value": "5px",
+    "usage": "Gomme, Petite : rayon (écran).",
+    "origine": "Fil « Rendre l'annotation plus naturelle » (13/11/2026) : gomme au pixel."
+   },
+   {
+    "name": "editeur-gomme-rayon-1",
+    "value": "10px",
+    "usage": "Gomme, Moyenne : rayon (écran).",
+    "origine": "Fil « Rendre l'annotation plus naturelle » (13/11/2026) : gomme au pixel."
+   },
+   {
+    "name": "editeur-gomme-rayon-2",
+    "value": "20px",
+    "usage": "Gomme, Grande : rayon (écran).",
+    "origine": "Fil « Rendre l'annotation plus naturelle » (13/11/2026) : gomme au pixel."
+   },
+   {
+    "name": "editeur-gomme-trait",
+    "value": "1.5px",
+    "usage": "Rond de la gomme : trait.",
+    "origine": "Fil « Rendre l'annotation plus naturelle » (13/11/2026) : gomme au pixel."
+   },
+   {
     "name": "editeur-taille-texte-0",
     "value": "12px",
     "usage": "Texte, premier A.",
@@ -2563,6 +2647,18 @@
     "value": "3px",
     "usage": "Déplacement d'un objet : seuil.",
     "origine": "design/editeur-epure/index.html, piste B (pointermove, 3 px)."
+   },
+   {
+    "name": "editeur-deplacement-reste",
+    "value": "12px",
+    "usage": "Déplacement d'un objet : ce qui reste de sa boîte dans l'image (écran).",
+    "origine": "Fil « Rendre l'annotation plus naturelle » (13/11/2026)."
+   },
+   {
+    "name": "editeur-redresser-min",
+    "value": "24px",
+    "usage": "Stylo, surligneur : longueur à partir de laquelle un trait tenu se redresse (écran).",
+    "origine": "Fil « Rendre l'annotation plus naturelle » (13/11/2026)."
    },
    {
     "name": "editeur-glisser-seuil",
@@ -2855,8 +2951,14 @@
    {
     "name": "texte-teinte",
     "value": "10%",
-    "usage": "Balayage : teinte d'accent qui s'efface.",
+    "usage": "Copier le texte : teinte d'accent de la zone lue, jusqu'à la fin du surlignage.",
     "origine": "design/historique/index.html, onglet « Copier le texte » ; contrat 0.5 §10."
+   },
+   {
+    "name": "texte-surligne",
+    "value": "30%",
+    "usage": "Copier le texte : part d'accent des lignes copiées surlignées.",
+    "origine": "design/copier-texte-animation/index.html, choix A « Surligné » du 13/11 (.lus i)."
    },
    {
     "name": "texte-teinte-editeur",
@@ -3055,6 +3157,78 @@
     "value": "4px",
     "usage": "Pilule : marge après le texte.",
     "origine": "design/historique/index.html, .msg b."
+   },
+   {
+    "name": "defilante-apercu-largeur",
+    "value": "84px",
+    "usage": "Largeur de l'aperçu en direct, à côté de la zone (le cœur la donne en pixels réels ; valeur par défaut de la page).",
+    "origine": "design/defilante/index.html, .prev width:84px ; contrat 0.6 §12."
+   },
+   {
+    "name": "defilante-ecart",
+    "value": "12px",
+    "usage": "Écart entre la zone et l'aperçu en direct (placement fait par le cœur, §10).",
+    "origine": "design/defilante/index.html, pl=z.x+z.w+12 ; contrat 0.6 §12."
+   },
+   {
+    "name": "defilante-trait",
+    "value": "1px",
+    "usage": "Épaisseur du trait blanc autour de la zone, tracé dehors (écart E8 du contrat 0.6).",
+    "origine": "design/defilante/index.html, .zone border:1px solid var(--sel)."
+   },
+   {
+    "name": "defilante-pilule-marge",
+    "value": "4px",
+    "usage": "Marge intérieure de la pilule « Terminer », autour du bouton.",
+    "origine": "design/defilante/index.html, .pill padding:4px."
+   },
+   {
+    "name": "defilante-bouton-hauteur",
+    "value": "32px",
+    "usage": "Hauteur du bouton « Terminer » (aussi son interligne).",
+    "origine": "design/defilante/index.html, .pill button height:32px ; line-height 32px."
+   },
+   {
+    "name": "defilante-bouton-marge",
+    "value": "16px",
+    "usage": "Marge horizontale du bouton « Terminer ».",
+    "origine": "design/defilante/index.html, .pill button padding:0 16px."
+   },
+   {
+    "name": "defilante-bouton-largeur",
+    "value": "90px",
+    "usage": "Largeur minimale du bouton « Terminer » : « Terminer » en Segoe UI 600 14 px avec ses deux marges de 16 px, pour que la pilule ait la taille connue du cœur (TAILLE_PILULE_LOGIQUE, 100 × 42).",
+    "origine": "design/defilante/index.html, .pill button (largeur du texte mesurée) ; contrat 0.6 §10 (placement de la pilule par le cœur)."
+   },
+   {
+    "name": "defilante-appui-echelle",
+    "value": "0.97",
+    "usage": "Bouton « Terminer » appuyé.",
+    "origine": "design/defilante/index.html, .pill button:active transform:scale(.97)."
+   },
+   {
+    "name": "defilante-pilule-entree-decalage",
+    "value": "8px",
+    "usage": "Départ vertical de l'entrée en ressort de la pilule (elle monte vers sa place, sous la zone).",
+    "origine": "Contrat 0.6 §12 (entrée de la pilule en courbe-ressort) ; la maquette n'anime pas la pilule : valeur choisie, plus courte que celle du bandeau (-12px) puisque la pilule est près de la zone."
+   },
+   {
+    "name": "defilante-message-haut",
+    "value": "14px",
+    "usage": "Distance du haut de l'écran au message « Trop vite. Remontez un peu. ».",
+    "origine": "design/defilante/index.html, .msg top:14px ; contrat 0.6 §10."
+   },
+   {
+    "name": "defilante-message-marge-haut",
+    "value": "7px",
+    "usage": "Marge verticale du message (forme hud).",
+    "origine": "design/defilante/index.html, .msg padding:7px 14px."
+   },
+   {
+    "name": "defilante-message-marge-cote",
+    "value": "14px",
+    "usage": "Marge horizontale du message (forme hud).",
+    "origine": "design/defilante/index.html, .msg padding:7px 14px."
    }
   ]
  },

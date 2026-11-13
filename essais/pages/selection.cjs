@@ -894,21 +894,26 @@ const L = 1280, H = 400;
 
   {
     // 13. Mode texte (0.5, §2.3) : une zone comme le mode zone, avec le nom « Copier le texte :
-    // sélectionnez une zone » ; `selection:balayer` joue 400 ms (120 ms réduit, sans bande).
+    // sélectionnez une zone » ; `selection:balayer` teinte la zone et la fait respirer 200 ms
+    // (réduit : la teinte seule) ; `selection:surligner` (13/11, choix « Surligné ») tire
+    // chaque ligne copiée de gauche à droite, l'une après l'autre, puis efface la sélection.
     async function montrerTexte(p, numero = null) {
       const i = prochain++;
       await p.evaluate(
-        ([i, n]) =>
+        ([i, n, k]) => {
+          const l = Math.round(innerWidth * k),
+            h = Math.round(innerHeight * k);
           __emettre('selection:montrer', {
             id: i,
             numero: n ?? i,
-            largeur: innerWidth,
-            hauteur: innerHeight,
-            ecrans: [{ x: 0, y: 0, largeur: innerWidth, hauteur: innerHeight }],
+            largeur: l,
+            hauteur: h,
+            ecrans: [{ x: 0, y: 0, largeur: l, hauteur: h }],
             cote_min: 3,
             mode: 'texte',
-          }),
-        [i, numero],
+          });
+        },
+        [i, numero, p.echelle],
       );
       await attendrePrete(p, i);
       await p.waitForTimeout(80);
@@ -917,19 +922,55 @@ const L = 1280, H = 400;
     }
     const etatBalayage = (p) =>
       p.evaluate(() => {
-        const z = document.getElementById('zone'),
-          b = z.querySelector('.bande');
+        const z = document.getElementById('zone');
         return {
           balaye: document.body.classList.contains('balaye'),
-          bande: getComputedStyle(b).display,
+          bande: z.querySelector('.bande') !== null,
           anims: z
-            .getAnimations({ subtree: true })
+            .getAnimations()
             .map((a) => [a.animationName, a.effect.getTiming().duration])
             .sort(),
+          teinte: getComputedStyle(z).backgroundColor,
           zone: [z.style.left, z.style.top, z.style.width, z.style.height],
           glisse: document.body.classList.contains('glisse'),
         };
       });
+    const etatSurligne = (p) =>
+      p.evaluate(() => {
+        const z = document.getElementById('zone'),
+          scene = document.getElementById('scene'),
+          lignes = [...z.querySelectorAll('.lus i')];
+        return {
+          surligne: document.body.classList.contains('surligne'),
+          affiche: getComputedStyle(z.querySelector('.lus')).display,
+          lignes: lignes.map((i) => [i.style.left, i.style.top, i.style.width, i.style.height]),
+          anims: lignes.flatMap((i) =>
+            i.getAnimations().map((a) => {
+              const t = a.effect.getTiming();
+              return [a.animationName, t.duration, t.delay];
+            }),
+          ),
+          fond: lignes.length ? getComputedStyle(lignes[0]).backgroundColor : '',
+          sortie: scene.getAnimations().map((a) => {
+            const t = a.effect.getTiming();
+            return [a.animationName, t.duration, t.delay];
+          }),
+          opacite: getComputedStyle(scene).opacity,
+          glisse: document.body.classList.contains('glisse'),
+        };
+      });
+    // Les lignes d'un texte copié dans la zone (100, 100, 201, 121) : pixels réels de la fenêtre.
+    const LIGNES = [
+      { x: 110, y: 110, largeur: 150, hauteur: 14 },
+      { x: 110, y: 130, largeur: 90, hauteur: 14 },
+      { x: 110, y: 150, largeur: 120, hauteur: 14 },
+    ];
+    const DEROULE = { trace: 260, pas: 40, tenue: 220, sortie: 140 };
+    const surligner = (p, charge) =>
+      p.evaluate((c) => {
+        __emettre('selection:surligner', c);
+        return performance.now();
+      }, charge);
     p = await page();
     const nomDe = () =>
       p.evaluate(() => [
@@ -975,6 +1016,9 @@ const L = 1280, H = 400;
       JSON.stringify(t),
     );
     await vider(p);
+    // Surligner avant le balayage : rien (la zone lue n'est pas encore posée).
+    await surligner(p, { id, lignes: LIGNES, reduites: false, ...DEROULE });
+    const avantBalayage = await etatSurligne(p);
     const relache = Date.now();
     await p.waitForTimeout(600); // le cœur balaie après la découpe : le filet du relâcher court
     // Balayage d'un autre affichage : ignoré.
@@ -1003,46 +1047,103 @@ const L = 1280, H = 400;
       return performance.now();
     }, id);
     const pendant = await etatBalayage(p);
+    await p.waitForTimeout(100);
     await p.screenshot({ path: `${SORTIE}/selection-texte-balayage.png` });
-    await p
-      .waitForFunction(() => !document.body.classList.contains('balaye'), null, { timeout: 2000 })
-      .catch(() => {});
-    const duree = await p.evaluate((t0) => performance.now() - t0, t0);
+    await p.waitForTimeout(300);
     const apres = await etatBalayage(p);
     verifier(
       !ignore.balaye &&
+        !avantBalayage.surligne &&
+        avantBalayage.lignes.length === 0 &&
         pendant.balaye &&
-        pendant.bande === 'block' &&
+        !pendant.bande &&
         JSON.stringify(pendant.anims) ===
           JSON.stringify([
-            ['efface', 400],
-            ['respire', 400],
-            ['traverse', 400],
+            ['respire', 200],
+            ['teinte', 150],
           ]) &&
         JSON.stringify(pendant.zone) === JSON.stringify(['100px', '100px', '201px', '121px']) &&
         pendant.glisse,
-      '13 selection:balayer : respiration, bande et teinte de 400 ms sur la zone (autre id : rien)',
-      JSON.stringify({ ignore, pendant }),
+      '13 selection:balayer : la zone se teinte et respire 200 ms, sans bande (autre id, surligner avant : rien)',
+      JSON.stringify({ ignore, avantBalayage, pendant }),
     );
-    // Borne basse seulement : la fin elle-même est prouvée par `apres.balaye` faux.
     verifier(
-      duree >= 390 && !apres.balaye && apres.glisse && (await appels(p)).length === 0,
-      "13 balayage fini après 400 ms : la zone reste, rien n'est envoyé",
-      JSON.stringify({ duree, apres }),
+      apres.balaye &&
+        apres.anims.length === 0 &&
+        apres.teinte !== 'rgba(0, 0, 0, 0)' &&
+        apres.glisse &&
+        (await appels(p)).length === 0,
+      "13 lecture : la teinte reste après la respiration, rien n'est envoyé",
+      JSON.stringify(apres),
     );
-    // Le gel peut durer 1,5 s après le relâcher : le filet repart du balayage.
-    await p.waitForTimeout(Math.max(0, 1750 - (Date.now() - relache)));
-    const tenu = await etatZone(p);
+    // Surlignage : autre affichage, durée fausse ou aucune ligne valable : ignoré.
+    await surligner(p, { id: id + 1000, lignes: LIGNES, reduites: false, ...DEROULE });
+    await surligner(p, { id, lignes: LIGNES, reduites: false, ...DEROULE, trace: -1 });
+    await surligner(p, { id, lignes: LIGNES, reduites: false, ...DEROULE, sortie: 99999 });
+    await surligner(p, { id, lignes: LIGNES, reduites: false, ...DEROULE, pas: 1.5 });
+    await surligner(p, { id, lignes: [{ x: 110, y: 110, largeur: 0, hauteur: 14 }], reduites: false, ...DEROULE });
+    await surligner(p, { id, lignes: [], reduites: false, ...DEROULE });
+    const refuse = await etatSurligne(p);
+    const t2 = await surligner(p, {
+      id,
+      lignes: [...LIGNES, { x: 'x', y: 0, largeur: 5, hauteur: 5 }],
+      reduites: false,
+      ...DEROULE,
+    });
+    const tire = await etatSurligne(p);
+    await p.waitForTimeout(300);
+    await p.screenshot({ path: `${SORTIE}/selection-texte-surligne.png` });
+    const tenue = await etatSurligne(p);
+    // La sortie finit à 560 + 140 ms : la sélection est alors effacée, encore montrée.
+    await p.waitForFunction(() => getComputedStyle(document.getElementById('scene')).opacity === '0', null, { timeout: 3000 }).catch(() => {});
+    const efface = await p.evaluate((t2) => performance.now() - t2, t2);
+    const finie = await etatSurligne(p);
     verifier(
-      tenu.glisse,
-      '13 filet reparti au balayage : zone encore montrée 1,75 s après le relâcher',
-      JSON.stringify(tenu),
+      !refuse.surligne &&
+        refuse.lignes.length === 0 &&
+        tire.surligne &&
+        tire.affiche === 'block' &&
+        JSON.stringify(tire.lignes) ===
+          JSON.stringify([
+            ['8px', '9px', '154px', '16px'],
+            ['8px', '29px', '94px', '16px'],
+            ['8px', '49px', '124px', '16px'],
+          ]) &&
+        JSON.stringify(tire.anims) ===
+          JSON.stringify([
+            ['tire', 260, 0],
+            ['tire', 260, 40],
+            ['tire', 260, 80],
+          ]) &&
+        JSON.stringify(tire.sortie) === JSON.stringify([['part', 140, 560]]) &&
+        tire.fond !== 'rgba(0, 0, 0, 0)',
+      '13 selection:surligner : une bande par ligne (2 px de plus sur les côtés, 1 en haut et en bas), tirée en 260 ms, 40 ms après la précédente ; sortie de 140 ms après 560 ms (autre id, durée fausse, aucune ligne : rien)',
+      JSON.stringify({ refuse, tire }),
+    );
+    verifier(
+      tenue.surligne && tenue.opacite === '1' && efface >= 690 && efface < 1500 && finie.glisse && finie.lignes.length === 3 && (await appels(p)).length === 0,
+      "13 surlignage : la sélection reste nette pendant la tenue, s'efface à 700 ms, rien n'est envoyé",
+      JSON.stringify({ tenue: tenue.opacite, efface, finie }),
+    );
+    // Le filet repart du surlignage : la page ne se remet pas au repos à 1,5 s du balayage.
+    await p.waitForTimeout(Math.max(0, 1700 - (await p.evaluate((t0) => performance.now() - t0, t0))));
+    const tenu = await etatSurligne(p);
+    verifier(
+      tenu.glisse && tenu.surligne && tenu.opacite === '0',
+      '13 filet reparti au surlignage : sélection encore là (effacée) 1,7 s après le balayage',
+      JSON.stringify({ tenu, depuisRelache: Date.now() - relache }),
     );
     await p.evaluate(() => __emettre('selection:cachee', {}));
-    // Animations réduites : 120 ms, sans bande ni mouvement.
+    const cachee = await etatSurligne(p);
+    verifier(
+      !cachee.surligne && cachee.lignes.length === 0 && cachee.opacite === '1' && cachee.sortie.length === 0 && !(await etatBalayage(p)).balaye,
+      '13 selection:cachee : lignes retirées, sélection de nouveau opaque pour la suivante',
+      JSON.stringify(cachee),
+    );
+    // Animations réduites : la teinte seule, puis les lignes ensemble en fondu.
     id = await montrerTexte(p);
     await glisser(p, [400, 100], [600, 300]);
-    const t1 = await p.evaluate((i) => {
+    await p.evaluate((i) => {
       __emettre('selection:balayer', {
         id: i,
         x: 400,
@@ -1051,22 +1152,52 @@ const L = 1280, H = 400;
         hauteur: 201,
         reduites: true,
       });
-      return performance.now();
     }, id);
     const reduit = await etatBalayage(p);
-    await p
-      .waitForFunction(() => !document.body.classList.contains('balaye'), null, { timeout: 2000 })
-      .catch(() => {});
-    const dureeR = await p.evaluate((t1) => performance.now() - t1, t1);
-    // Borne haute gardée : elle prouve la durée réduite (120 ms et non 400).
+    await surligner(p, {
+      id,
+      lignes: [
+        { x: 410, y: 110, largeur: 100, hauteur: 20 },
+        { x: 410, y: 140, largeur: 60, hauteur: 20 },
+      ],
+      reduites: true,
+      trace: 120,
+      pas: 0,
+      tenue: 220,
+      sortie: 120,
+    });
+    const reduitS = await etatSurligne(p);
     verifier(
       reduit.balaye &&
-        reduit.bande === 'none' &&
+        !reduit.bande &&
         reduit.anims.length === 0 &&
-        dureeR >= 110 &&
-        dureeR < 390,
-      '13 animations réduites : 120 ms, sans bande ni mouvement',
-      JSON.stringify({ reduit, dureeR }),
+        reduit.teinte !== 'rgba(0, 0, 0, 0)' &&
+        JSON.stringify(reduitS.anims) ===
+          JSON.stringify([
+            ['parait', 120, 0],
+            ['parait', 120, 0],
+          ]) &&
+        JSON.stringify(reduitS.sortie) === JSON.stringify([['part', 120, 340]]),
+      '13 animations réduites : teinte immobile, lignes ensemble en fondu de 120 ms, sortie de 120 ms',
+      JSON.stringify({ reduit, reduitS }),
+    );
+    // Échelle 1,5 : les bandes débordent de 3 et 2 pixels réels.
+    await p.evaluate(() => __emettre('selection:cachee', {}));
+    await p.context().close();
+    p = await page({ echelle: 1.5 });
+    id = await montrerTexte(p);
+    await glisser(p, [100, 100], [300, 220]);
+    await p.evaluate((i) => {
+      __emettre('selection:balayer', { id: i, x: 150, y: 150, largeur: 301, hauteur: 181, reduites: false });
+    }, id);
+    await surligner(p, { id, lignes: [{ x: 160, y: 170, largeur: 200, hauteur: 21 }], reduites: false, ...DEROULE });
+    const k15 = await etatSurligne(p);
+    verifier(
+      JSON.stringify(k15.lignes) === JSON.stringify([['7px', '18px', '206px', '25px']]) &&
+        JSON.stringify(k15.anims) === JSON.stringify([['tire', 260, 0]]) &&
+        JSON.stringify(k15.sortie) === JSON.stringify([['part', 140, 480]]),
+      '13 surlignage à 150 % : débord de 3 et 2 pixels réels, une ligne sans pas',
+      JSON.stringify(k15),
     );
     // Échap en mode texte : une annulation, comme une zone.
     await p.evaluate(() => __emettre('selection:cachee', {}));
@@ -1105,14 +1236,242 @@ const L = 1280, H = 400;
         }),
       id,
     );
+    await surligner(p, {
+      id,
+      lignes: [{ x: 110, y: 110, largeur: 60, hauteur: 12 }],
+      reduites: false,
+      ...DEROULE,
+    });
     await p.waitForTimeout(50);
     const refusT = await p.evaluate(() => window.__refus);
     const bt = await etatBalayage(p);
+    const st = await etatSurligne(p);
     verifier(
-      refusT.length === 0 && bt.balaye && bt.anims.length === 3,
-      "13 mode texte, sombre, CSP de l'app : aucun refus",
-      JSON.stringify({ refusT, bt }),
+      refusT.length === 0 && bt.balaye && st.surligne && st.lignes.length === 1 && st.anims.length === 1,
+      "13 mode texte, sombre, CSP de l'app : balayage et surlignage sans refus",
+      JSON.stringify({ refusT, bt, st }),
     );
+    await p.context().close();
+  }
+  {
+    // 14. Mode défilante (0.6, §11, §12, D2, D3, §18) : le tracé du mode zone, plus le contour
+    // du mode fenêtre (--window-highlight, 2 px) sur les pages proposées, qui arrivent après
+    // par une charge `suite` (même id, même numéro), ou jamais. Clic sur une page :
+    // selection_cliquee ; clic sur rien : rien ; glisser : selection_terminee. Après l'envoi,
+    // la zone ou la page reste montrée (le cœur garde la fenêtre).
+    const ND = 'Capture défilante : sélectionnez une zone ou une page';
+    const chargeD = (id, o = {}) => ({ id, numero: o.numero || id, largeur: o.R || L, hauteur: o.RH || H, ecrans: o.ecrans || [{ x: 0, y: 0, largeur: o.R || L, hauteur: o.RH || H }], cote_min: o.coteMin || 3, mode: 'defilante', fenetres: o.fenetres || [], souris: o.souris || null, ...(o.suite === undefined ? {} : { suite: o.suite }) });
+    async function montrerDefilante(p, o = {}) {
+      const id = prochain++;
+      const k = p.echelle;
+      await p.evaluate(m => __emettre('selection:montrer', m), chargeD(id, { R: Math.round(L * k), RH: Math.round(H * k), ...o }));
+      await attendrePrete(p, id);
+      await p.waitForTimeout(100);
+      await vider(p);
+      return id;
+    }
+    const proposer = (p, id, fenetres, o = {}) => p.evaluate(m => __emettre('selection:montrer', m), chargeD(id, { R: Math.round(L * p.echelle), RH: Math.round(H * p.echelle), fenetres, suite: true, ...o }));
+    const nomD = (p) => p.evaluate(() => [document.body.getAttribute('role'), document.body.getAttribute('aria-label')]);
+    const etats = (p) => p.evaluate(() => ({ entoure: document.body.classList.contains('entoure'), glisse: document.body.classList.contains('glisse') }));
+    const PAGE = { x: 200, y: 80, largeur: 500, hauteur: 250, rayon: 0 };
+    let a;
+
+    // 14 a. Nom accessible, curseur en croix ; sans liste : voile partout, rien d'entouré.
+    p = await page();
+    id = await montrerDefilante(p);
+    const nom = await nomD(p);
+    const curseur = await p.evaluate(() => getComputedStyle(document.documentElement).cursor);
+    await p.mouse.move(400, 200); await p.waitForTimeout(60);
+    ef = await etatFenetre(p);
+    px = await ligne(p, 200);
+    verifier(nom[0] === 'application' && nom[1] === ND && curseur === 'crosshair', '14 a nom accessible « ' + ND + ' », curseur en croix', JSON.stringify({ nom, curseur }));
+    verifier(!ef.entoure && px.every(c => proche(c, VOILE)) && (await appels(p)).length === 0, '14 a sans liste : rien d\'entouré, voile partout, rien envoyé', JSON.stringify(ef));
+    const texteD = await p.evaluate(() => document.body.innerText.trim());
+    verifier(texteD === '', '14 a aucun texte montré', texteD);
+
+    // 14 b. Liste arrivée après le premier mouvement : la page sous la pointe s'entoure
+    // aussitôt, sans autre mouvement, sans retour au repos (aucun selection_prete).
+    await proposer(p, id, [PAGE]); await p.waitForTimeout(80);
+    ef = await etatFenetre(p);
+    a = await appels(p);
+    const an = await analyser(p, [[199, 200], [200, 200], [201, 200], [202, 200], [400, 79], [400, 80], [400, 81], [400, 82]], { x: 200, y: 80, l: 500, h: 250 }, 0);
+    const Cb = an.couleurs;
+    verifier(ef.entoure && ef.x === 200 && ef.y === 80 && ef.l === 500 && ef.h === 250 && a.length === 0,
+      '14 b liste arrivée après le premier mouvement : page entourée aussitôt, sans nouvelle mesure', JSON.stringify({ ef, a }));
+    verifier(proche(Cb[0], VOILE) && proche(Cb[1], BLEU) && proche(Cb[2], BLEU) && proche(Cb[3], FOND) && proche(Cb[4], VOILE) && proche(Cb[5], BLEU) && proche(Cb[6], BLEU) && proche(Cb[7], FOND)
+      && an.vu.x === 200 && an.vu.y === 80 && an.vu.l === 500 && an.vu.h === 250 && an.autres === 0 && an.sombresDedans === 0,
+      '14 b contour du mode fenêtre : trait bleu de 2 px à l\'intérieur, page claire, voile autour', JSON.stringify({ Cb, vu: an.vu, autres: an.autres }));
+    await p.screenshot({ path: `${SORTIE}/selection-defilante-page.png` });
+    // Le contour suit la pointe ; hors de la page, rien.
+    await p.mouse.move(900, 360); await p.waitForTimeout(60);
+    ef = await etatFenetre(p);
+    px = await ligne(p, 360);
+    verifier(!ef.entoure && px.every(c => proche(c, VOILE)), '14 b hors de la page : rien d\'entouré, voile partout', JSON.stringify(ef));
+
+    // 14 c. Clic sur rien : rien, on continue. Clic sur la page : selection_cliquee une fois,
+    // bon pixel ; la page reste entourée après le filet ordinaire (le cœur garde la fenêtre).
+    await p.mouse.click(900, 360); await p.waitForTimeout(60);
+    verifier((await appels(p)).length === 0, '14 c clic hors de toute page : rien envoyé');
+    await p.mouse.click(301.4, 170.6); await p.waitForTimeout(60);
+    await p.mouse.click(310, 180); await p.keyboard.press('Escape'); await p.waitForTimeout(40);
+    a = await appels(p);
+    verifier(JSON.stringify(a) === JSON.stringify([['selection_cliquee', { id, numero: id, x: 301, y: 170 }]]), '14 c clic sur la page : selection_cliquee une seule fois, au pixel sous la pointe', JSON.stringify(a));
+    await p.waitForTimeout(1800);
+    ef = await etatFenetre(p);
+    verifier(ef.entoure && ef.x === 200 && ef.l === 500 && (await appels(p)).length === 1, '14 c après le clic : la page reste entourée au-delà de 1,5 s, plus rien ne part', JSON.stringify(ef));
+    await p.evaluate(() => __emettre('selection:cachee', {})); await p.waitForTimeout(40);
+    ef = await etatFenetre(p);
+    verifier(!ef.entoure, '14 c selection:cachee : plus de contour', JSON.stringify(ef));
+
+    // 14 d. Tracé : sur une page comme ailleurs, glisser trace une zone (contour effacé
+    // pendant le tracé, trait blanc), selection_terminee comme le mode zone ; la zone reste.
+    id = await montrerDefilante(p, { fenetres: [PAGE] });
+    await p.mouse.move(250, 120); await p.mouse.down(); await p.mouse.move(450, 260, { steps: 6 }); await p.waitForTimeout(60);
+    const pendant = await etats(p);
+    px = await ligne(p, 200);
+    const traitZone = proche(px[249], VOILE) && proche(px[250], [255, 255, 255], 0) && proche(px[251], FOND) && proche(px[450], [255, 255, 255], 0) && proche(px[451], VOILE) && proche(px[200], VOILE);
+    await p.mouse.up(); await p.waitForTimeout(60);
+    a = await appels(p);
+    verifier(pendant.glisse && !pendant.entoure && traitZone, '14 d pendant le tracé : la zone et son trait, plus de contour de page', JSON.stringify({ pendant, bord: [px[200], px[249], px[250], px[251], px[450], px[451]] }));
+    verifier(JSON.stringify(a) === JSON.stringify([['selection_terminee', { id, numero: id, depart: { x: 250, y: 120 }, arrivee: { x: 450, y: 260 } }]]), '14 d relâché : selection_terminee, coins exacts', JSON.stringify(a));
+    await p.waitForTimeout(1800);
+    z = await etatZone(p);
+    verifier(z.glisse && z.x === '250px' && z.l === '201px' && (await appels(p)).length === 1, '14 d après le tracé : la zone reste au-delà de 1,5 s', JSON.stringify(z));
+    await p.evaluate(() => __emettre('selection:cachee', {}));
+    // Maj : carré, comme le mode zone.
+    id = await montrerDefilante(p, { fenetres: [PAGE] });
+    await p.keyboard.down('Shift'); await glisser(p, [100, 100], [300, 180]); await p.keyboard.up('Shift');
+    a = await appels(p);
+    verifier(a.length === 1 && a[0][0] === 'selection_terminee' && JSON.stringify(a[0][1].arrivee) === JSON.stringify({ x: 180, y: 180 }), '14 d Maj : carré', JSON.stringify(a));
+    await p.evaluate(() => __emettre('selection:cachee', {}));
+    await p.context().close();
+
+    // 14 e. Liste jamais arrivée : le clic ne vise rien, la sélection continue ; puis on trace.
+    p = await page();
+    id = await montrerDefilante(p);
+    await p.mouse.click(400, 200); await p.waitForTimeout(60);
+    const apresClic = await appels(p);
+    ef = await etatFenetre(p);
+    await glisser(p, [100, 100], [300, 250]);
+    a = await appels(p);
+    verifier(apresClic.length === 0 && !ef.entoure && JSON.stringify(a) === JSON.stringify([['selection_terminee', { id, numero: id, depart: { x: 100, y: 100 }, arrivee: { x: 300, y: 250 } }]]),
+      '14 e liste jamais arrivée : clic sans effet, puis le tracé part', JSON.stringify({ apresClic, a }));
+    await p.evaluate(() => __emettre('selection:cachee', {}));
+    // Liste arrivée pendant un tracé : le geste continue, même numéro.
+    id = await montrerDefilante(p);
+    await p.mouse.move(100, 100); await p.mouse.down(); await p.mouse.move(200, 200, { steps: 3 });
+    await proposer(p, id, [PAGE]); await p.waitForTimeout(40);
+    await p.mouse.move(300, 250, { steps: 3 }); await p.waitForTimeout(40);
+    const pendantListe = await etats(p);
+    await p.mouse.up(); await p.waitForTimeout(40);
+    a = await appels(p);
+    verifier(pendantListe.glisse && !pendantListe.entoure && JSON.stringify(a) === JSON.stringify([['selection_terminee', { id, numero: id, depart: { x: 100, y: 100 }, arrivee: { x: 300, y: 250 } }]]),
+      '14 e liste arrivée pendant le tracé : le tracé continue et part, même numéro', JSON.stringify({ pendantListe, a }));
+    await p.evaluate(() => __emettre('selection:cachee', {}));
+    // Liste arrivée pendant l'appui d'un clic : le clic vise la page arrivée.
+    id = await montrerDefilante(p);
+    await p.mouse.move(300, 200); await p.mouse.down();
+    await proposer(p, id, [PAGE]); await p.waitForTimeout(60);
+    const sousAppui = await etatFenetre(p);
+    await p.mouse.up(); await p.waitForTimeout(40);
+    a = await appels(p);
+    verifier(sousAppui.entoure && JSON.stringify(a) === JSON.stringify([['selection_cliquee', { id, numero: id, x: 300, y: 200 }]]), '14 e liste arrivée pendant l\'appui : page entourée, le clic la choisit', JSON.stringify({ sousAppui, a }));
+    await p.evaluate(() => __emettre('selection:cachee', {}));
+    // Position de la souris dans la charge des pages, aucun mouvement depuis la charge.
+    await p.mouse.move(5, 5);
+    id = await montrerDefilante(p);
+    await proposer(p, id, [PAGE], { souris: { x: 300, y: 300 } }); await p.waitForTimeout(60);
+    ef = await etatFenetre(p);
+    verifier(ef.entoure && ef.x === 200, '14 e souris de la charge des pages : page entourée avant tout mouvement', JSON.stringify(ef));
+    await p.evaluate(() => __emettre('selection:cachee', {}));
+    await p.context().close();
+
+    // 14 f. Charges des pages qui ne sont pas une suite de l'affichage montré : une charge
+    // ordinaire (retour au repos, nouvelle mesure) ; `suite` invalide : ignorée.
+    p = await page();
+    id = await montrerDefilante(p);
+    await proposer(p, id, [PAGE], { numero: id + 1000 }); await attendrePrete(p, id); await p.waitForTimeout(60);
+    a = await appels(p);
+    verifier(a.length === 1 && a[0][0] === 'selection_prete' && a[0][1].numero === id + 1000, '14 f numéro différent : charge ordinaire, la page mesure de nouveau', JSON.stringify(a));
+    await vider(p);
+    await p.evaluate(m => __emettre('selection:montrer', m), chargeD(id, { fenetres: [], suite: 'oui' })); await p.waitForTimeout(80);
+    await p.mouse.move(300, 200); await p.waitForTimeout(60);
+    ef = await etatFenetre(p);
+    verifier(ef.entoure && (await appels(p)).length === 0, '14 f suite invalide : demande ignorée, la liste reste', JSON.stringify(ef));
+    // Charge d'un autre mode après une défilante : plus de contour ni de nom.
+    id = await montrer(p);
+    ef = await etatFenetre(p);
+    const nomZ = await nomD(p);
+    verifier(!ef.entoure && nomZ[0] === null && nomZ[1] === null, '14 f charge de mode zone ensuite : plus de contour, plus de nom', JSON.stringify({ ef, nomZ }));
+    await p.context().close();
+
+    // 14 g. Seuil entre clic et tracé : celui du mode fenêtre (max(cote_min, round(4 k))).
+    for (const e of [1, 1.25]) {
+      const S = Math.max(3, Math.round(4 * e));
+      for (const [d, clic] of [[S - 1, true], [S, false]]) {
+        p = await page({ echelle: e });
+        id = await montrerDefilante(p, { fenetres: [{ x: 0, y: 0, largeur: Math.round(L * e), hauteur: Math.round(H * e), rayon: 0 }] });
+        await p.mouse.move(400.5 / e, 200.5 / e); await p.mouse.down();
+        await p.mouse.move((400.5 + d) / e, 200.5 / e, { steps: 3 }); await p.mouse.up(); await p.waitForTimeout(40);
+        a = await appels(p);
+        // Au seuil, c'est un tracé d'un pixel de haut : sous cote_min, rien (on continue).
+        const ok = clic ? JSON.stringify(a) === JSON.stringify([['selection_cliquee', { id, numero: id, x: 400 + d, y: 200 }]]) : a.length === 0;
+        verifier(ok, `14 g k = ${e} : déplacement de ${d} pixels réels (seuil ${S}) : ${clic ? 'clic' : 'tracé trop fin, rien'}`, JSON.stringify(a));
+        if (!clic) {
+          ef = await etatFenetre(p);
+          verifier(ef.entoure, `14 g k = ${e} : tracé refusé : de nouveau le contour sous la pointe`, JSON.stringify(ef));
+        }
+        await p.context().close();
+      }
+    }
+
+    // 14 h. Clic droit et Échap : une annulation ; envoi refusé : la page redevient utilisable.
+    p = await page();
+    id = await montrerDefilante(p, { fenetres: [PAGE] });
+    await p.mouse.click(300, 200, { button: 'right' }); await p.mouse.click(300, 200); await p.waitForTimeout(40);
+    a = await appels(p);
+    verifier(JSON.stringify(a) === JSON.stringify([['selection_annulee', { id, numero: id, cause: 'clic_droit' }]]), '14 h clic droit : annulation, plus rien ensuite', JSON.stringify(a));
+    id = await montrerDefilante(p, { fenetres: [PAGE] });
+    await p.keyboard.press('Escape'); await p.waitForTimeout(40);
+    a = await appels(p);
+    verifier(JSON.stringify(a) === JSON.stringify([['selection_annulee', { id, numero: id, cause: 'echap' }]]), '14 h Échap : annulation', JSON.stringify(a));
+    id = await montrerDefilante(p, { fenetres: [PAGE] });
+    await p.evaluate(() => __rejeter.add('selection_cliquee'));
+    await p.mouse.click(300, 200); await p.waitForTimeout(80);
+    await p.evaluate(() => __rejeter.clear());
+    await vider(p);
+    await p.mouse.move(310, 210); await p.waitForTimeout(40);
+    await p.mouse.click(310, 210); await p.waitForTimeout(40);
+    a = await appels(p);
+    verifier(JSON.stringify(a) === JSON.stringify([['selection_cliquee', { id, numero: id, x: 310, y: 210 }]]), '14 h envoi refusé : la page redevient utilisable, le clic suivant part', JSON.stringify(a));
+    await p.context().close();
+
+    // 14 i. Contour au pixel près à 150 % (trait de max(2, round(2 k)) pixels réels) et clic.
+    p = await page({ echelle: 1.5 });
+    const W15 = { x: 300, y: 120, largeur: 750, hauteur: 375, rayon: 0 };
+    id = await montrerDefilante(p);
+    await p.mouse.move(400.3, 200.6); await p.waitForTimeout(40);
+    await proposer(p, id, [W15]); await p.waitForTimeout(80);
+    const a15 = await analyser(p, [[299, 300], [300, 300], [302, 300], [303, 300]], { x: 300, y: 120, l: 750, h: 375 }, 0);
+    const C15 = a15.couleurs;
+    verifier(proche(C15[0], VOILE) && proche(C15[1], BLEU) && proche(C15[2], BLEU) && proche(C15[3], FOND) && a15.vu.x === 300 && a15.vu.l === 750 && a15.autres === 0 && a15.sombresDedans === 0,
+      '14 i k = 1,5 : contour de 3 pixels réels au pixel près, page claire', JSON.stringify({ C15, vu: a15.vu }));
+    await p.screenshot({ path: `${SORTIE}/selection-defilante-150.png` });
+    await p.mouse.click(400.3, 200.6); await p.waitForTimeout(40);
+    a = await appels(p);
+    verifier(JSON.stringify(a) === JSON.stringify([['selection_cliquee', { id, numero: id, x: 600, y: 300 }]]), '14 i k = 1,5 : clic au pixel réel sous la pointe', JSON.stringify(a));
+    await p.context().close();
+
+    // 14 j. Sous la CSP de l'app, en sombre : aucun refus, contour et tracé.
+    p = await page({ csp: true, theme: 'dark' });
+    id = await montrerDefilante(p);
+    await p.mouse.move(300, 200); await p.waitForTimeout(40);
+    await proposer(p, id, [PAGE]); await p.waitForTimeout(80);
+    ef = await etatFenetre(p);
+    await glisser(p, [100, 100], [300, 250]);
+    a = await appels(p);
+    const refusD = await p.evaluate(() => window.__refus);
+    verifier(refusD.length === 0 && ef.entoure && a.length === 1 && a[0][0] === 'selection_terminee', '14 j CSP de l\'app, sombre : aucun refus, contour puis tracé', JSON.stringify({ refusD, ef, a }));
     await p.context().close();
   }
   console.log('ECHECS :', echecs);

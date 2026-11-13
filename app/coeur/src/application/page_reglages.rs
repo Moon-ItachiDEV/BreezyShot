@@ -220,8 +220,34 @@ pub fn libelle_action(action: &str) -> &'static str {
         "derniere_zone" => "Refaire la dernière zone",
         "historique" => "Historique",
         "texte" => "Copier le texte",
+        "defilante" => "Capture défilante",
         _ => "",
     }
+}
+
+/// L'ordre des lignes de la rubrique Raccourcis : les captures dans l'ordre du menu
+/// (`ORDRE_MENU`), la capture défilante en cinquième, puis « Historique » et « Copier le
+/// texte » comme en 0.5. Une action absente d'ici suit, dans l'ordre reçu.
+pub const ORDRE_RACCOURCIS: [&str; 7] = [
+    "zone",
+    "plein_ecran",
+    "fenetre",
+    "derniere_zone",
+    "defilante",
+    "historique",
+    "texte",
+];
+
+/// Les actions en vigueur rangées dans l'ordre de la page (tri stable).
+pub fn actions_dans_l_ordre<'a>(actions: &[&'a str]) -> Vec<&'a str> {
+    let mut l = actions.to_vec();
+    l.sort_by_key(|a| {
+        ORDRE_RACCOURCIS
+            .iter()
+            .position(|o| o == a)
+            .unwrap_or(ORDRE_RACCOURCIS.len())
+    });
+    l
 }
 
 /// Une saisie ne commence que pour une action en vigueur ; sa fin (`active` faux) passe
@@ -369,6 +395,7 @@ pub fn fixer_candidats(r: &mut Raccourcis, action: &str, candidats: Vec<String>)
         "derniere_zone" => &mut r.derniere_zone,
         "historique" => &mut r.historique,
         "texte" => &mut r.texte,
+        "defilante" => &mut r.defilante,
         _ => return false,
     };
     *cible = candidats;
@@ -422,8 +449,9 @@ pub struct VueReglages {
     pub apercu_nom: String,
     pub theme: &'static str,
     pub demarrage: &'static str,
-    /// Une ligne par action en vigueur (`Contexte.actions`) : « Historique » et « Copier le
-    /// texte » seulement avec une licence (et, pour le texte, une langue de lecture).
+    /// Une ligne par action en vigueur (`Contexte.actions`), dans l'ordre de
+    /// `ORDRE_RACCOURCIS` : « Capture défilante », « Historique » et « Copier le texte »
+    /// seulement avec une licence (et, pour le texte, une langue de lecture).
     pub raccourcis: Vec<VueRaccourci>,
     /// Une licence valide est en place : la ligne « Licence » dit « Pro activé ».
     pub licence_active: bool,
@@ -470,8 +498,7 @@ pub fn vue(r: &Reglages, c: &Contexte<'_>) -> VueReglages {
     if c.demarrage == EtatDemarrage::Indisponible {
         lignes.retain(|l| *l != "demarrage");
     }
-    let raccourcis = c
-        .actions
+    let raccourcis = actions_dans_l_ordre(c.actions)
         .iter()
         .map(|a| {
             let retenu = c.bilan.retenu(a);
@@ -815,6 +842,10 @@ mod tests {
             "Déjà pris par « Fenêtre »"
         );
         assert_eq!(
+            texte_refus(&Raison::DejaPrisParUneAutreAction("defilante".into())),
+            "Déjà pris par « Capture défilante »"
+        );
+        assert_eq!(
             texte_refus(&Raison::ReserveParLeSysteme),
             "Impr. écran est réservée par Windows"
         );
@@ -938,18 +969,32 @@ mod tests {
         assert!(r.texte.is_empty());
         assert_eq!(libelle_action("historique"), "Historique");
         assert_eq!(libelle_action("texte"), "Copier le texte");
+        assert!(fixer_candidats(
+            &mut r,
+            "defilante",
+            vec!["Ctrl+Alt+5".into()]
+        ));
+        assert_eq!(r.defilante, ["Ctrl+Alt+5"]);
+        assert_eq!(libelle_action("defilante"), "Capture défilante");
         assert!(!fixer_candidats(&mut r, "annoter", vec![]));
         // Chaque action des réglages a son libellé et se fixe.
         for a in Raccourcis::ACTIONS {
             assert!(!libelle_action(a).is_empty(), "{a}");
             assert!(fixer_candidats(&mut r, a, vec!["F9".into()]), "{a}");
             assert_eq!(r.candidats(a), Some(&["F9".to_string()][..]), "{a}");
+            assert!(ORDRE_RACCOURCIS.contains(&a), "{a}");
         }
+        // Rangées dans l'ordre de la page, quel que soit l'ordre reçu ; une inconnue suit.
+        assert_eq!(
+            actions_dans_l_ordre(&["inconnue", "texte", "defilante", "historique", "zone"]),
+            ["zone", "defilante", "historique", "texte", "inconnue"]
+        );
     }
 
     /// Réglages › Raccourcis (§7.2) : une ligne par action en vigueur. Avec licence (et une
-    /// langue), « Historique » et « Copier le texte » après la dernière zone ; sans licence,
-    /// les quatre lignes de la 0.4. La ligne « Licence » suit la licence.
+    /// langue), « Capture défilante » en cinquième, puis « Historique » et « Copier le
+    /// texte » ; sans licence, les quatre lignes de la 0.4. La ligne « Licence » suit la
+    /// licence.
     #[test]
     fn raccourcis_selon_la_licence() {
         let r = defaut();
@@ -984,7 +1029,10 @@ mod tests {
                 .map(|x| (x.libelle, x.touches.join("+")))
                 .collect::<Vec<_>>()
         };
-        let avec = vue_pour(&crate::application::actions_selon(true, true, true), true);
+        let avec = vue_pour(
+            &crate::application::actions_selon(true, true, true, true),
+            true,
+        );
         assert_eq!(
             lignes(&avec),
             [
@@ -992,21 +1040,69 @@ mod tests {
                 ("Plein écran", "Ctrl+Maj+2".to_string()),
                 ("Fenêtre", "Ctrl+Maj+3".to_string()),
                 ("Refaire la dernière zone", "Ctrl+Maj+4".to_string()),
+                ("Capture défilante", "Ctrl+Maj+5".to_string()),
                 ("Historique", "Ctrl+Maj+H".to_string()),
                 ("Copier le texte", "Ctrl+Maj+T".to_string()),
             ]
         );
+        assert_eq!(
+            avec.raccourcis.len(),
+            7,
+            "sept lignes avec licence et langue"
+        );
+        assert_eq!(avec.raccourcis[4].action, "defilante");
         assert!(avec.licence_active);
         assert!(avec
             .raccourcis
             .iter()
             .all(|x| !x.modifie && x.refus.is_none()));
         // Sans langue : pas de « Copier le texte ».
-        let sans_langue = vue_pour(&crate::application::actions_selon(true, true, false), true);
-        assert_eq!(sans_langue.raccourcis.len(), 5);
-        assert_eq!(sans_langue.raccourcis[4].action, "historique");
+        let sans_langue = vue_pour(
+            &crate::application::actions_selon(true, true, false, true),
+            true,
+        );
+        assert_eq!(lignes(&sans_langue), lignes(&avec)[..6]);
+        // Sans défilante construite (ou hors Windows) : les six lignes de la 0.5.
+        let sans_defilante = vue_pour(
+            &crate::application::actions_selon(true, true, true, false),
+            true,
+        );
+        assert_eq!(sans_defilante.raccourcis.len(), 6);
+        assert!(sans_defilante
+            .raccourcis
+            .iter()
+            .all(|x| x.action != "defilante"));
+        assert_eq!(sans_defilante.raccourcis[4].action, "historique");
+        // Une défilante sans raccourci (Ctrl + Maj + 5 pris ailleurs) : « Aucun raccourci ».
+        let mut table = BTreeMap::new();
+        for a in ["zone", "defilante"] {
+            table.insert(a.to_string(), r.raccourcis.candidats(a).unwrap().to_vec());
+        }
+        let bilan = choisir(&table, false, |x| x.canonique() != "Ctrl+Maj+5");
+        let c = Contexte {
+            vignette_construite: true,
+            capture_disponible: true,
+            actions: &["zone", "defilante"],
+            bilan: &bilan,
+            defaut: &defaut_r,
+            refus_raccourcis: &refus,
+            dossier_affiche: String::new(),
+            demarrage: EtatDemarrage::Inactif,
+            licence_active: true,
+            version: "1",
+            alerte: None,
+            maintenant: Local.with_ymd_and_hms(2026, 11, 12, 10, 42, 8).unwrap(),
+            saisie_en_cours: false,
+        };
+        let v = vue(&r, &c);
+        assert_eq!(v.raccourcis[1].libelle, "Capture défilante");
+        assert!(v.raccourcis[1].touches.is_empty());
+        assert_eq!(v.raccourcis[1].refus.as_deref(), Some(AUCUN_RACCOURCI));
         // Sans licence : les quatre lignes de la 0.4, même si tout est construit.
-        let sans = vue_pour(&crate::application::actions_selon(false, true, true), false);
+        let sans = vue_pour(
+            &crate::application::actions_selon(false, true, true, true),
+            false,
+        );
         assert_eq!(lignes(&sans), lignes(&avec)[..4]);
         assert!(!sans.licence_active);
         for v in [&avec, &sans] {
@@ -1015,6 +1111,23 @@ mod tests {
         }
         let json = serde_json::to_value(&sans).unwrap();
         assert_eq!(json["licence_active"], serde_json::json!(false));
+    }
+
+    /// Les captures de la rubrique Raccourcis suivent l'ordre du menu de l'icône.
+    #[test]
+    fn ordre_des_raccourcis_comme_le_menu() {
+        let menu: Vec<&str> = crate::application::ORDRE_MENU
+            .iter()
+            .map(|m| m.nom())
+            .filter(|n| ORDRE_RACCOURCIS.contains(n))
+            .collect();
+        let page: Vec<&str> = ORDRE_RACCOURCIS
+            .iter()
+            .copied()
+            .filter(|a| menu.contains(a))
+            .collect();
+        assert_eq!(page, menu);
+        assert_eq!(menu.len(), crate::application::ORDRE_MENU.len());
     }
 
     #[test]
@@ -1078,10 +1191,11 @@ mod essai_de_page {
         seule_copie.vignette.afficher = false;
         seule_copie.enregistrer_apres_capture = false;
         let refus_copier = appliquer(&seule_copie, &Changement::Copier(false)).unwrap_err();
-        // La même vue avec une licence, l'historique et le texte construits, une langue :
-        // ce que la page montre après « Activer » (avenant 0.5 « Licence », §1).
+        // La même vue avec une licence, l'historique, le texte et la défilante construits,
+        // une langue : ce que la page montre après « Activer » (avenant 0.5 « Licence », §1 ;
+        // contrat 0.6, §7.1).
         let vue_sans = vue(&r, &c);
-        let actions_pro = crate::application::actions_selon(true, true, true);
+        let actions_pro = crate::application::actions_selon(true, true, true, true);
         let mut table_pro = BTreeMap::new();
         for a in &actions_pro {
             table_pro.insert(a.to_string(), r.raccourcis.candidats(a).unwrap().to_vec());

@@ -115,8 +115,8 @@ function Horodatage([string]$Ligne) {
 
 # Réglages du cas : Ctrl+Maj+1 (zone), Ctrl+Maj+2 (écran), Ctrl+Maj+4 (dernière zone),
 # copie seule, retardateur et vignette au choix. Version 3 complète : depuis la 0.5, l'app
-# la met à niveau en version 4 au démarrage (historique et texte ajoutés) et réécrit le
-# fichier.
+# la met à niveau en version 5 au démarrage (historique, texte et défilante ajoutés) et
+# réécrit le fichier.
 function Ecrire-Reglages([string]$Dossier, [int]$Retardateur, [bool]$Vignette) {
     $r = [ordered]@{
         version                   = 3
@@ -492,37 +492,7 @@ public static string[] Ecarts(byte[] o, int s, int l, int h, int[] c, int max) {
             Verifier "$Nom : identiques pixel pour pixel" ($e[0] -eq 'total 0') ($e -join ' ; ') | Out-Null
         }
 
-        # Le menu de l'icône, ouvert comme par un clic droit, la souris posée en $Souris
-        # (le menu s'ouvre à la souris). Rend { Fenetre, Menu, Textes, Rect }.
-        function Ouvrir-Menu([int]$IdProc, [int[]]$Souris, [string]$Quoi) {
-            $icones = @($C::Fenetres($IdProc, 'tray_icon_app'))
-            if ($icones.Count -lt 1) { throw "$Quoi : aucune fenêtre tray_icon_app" }
-            $avant = @($C::Visibles('#32768') | ForEach-Object { [long]$_ })
-            [void]$C::SetCursorPos($Souris[0], $Souris[1])
-            Start-Sleep -Milliseconds 100
-            # WM_USER_TRAYICON (6002) avec WM_RBUTTONUP (0x205) : ce que Windows envoie au clic droit.
-            foreach ($h in $icones) { [void]$C::PostMessage($h, 6002, [IntPtr]::Zero, [IntPtr]0x205) }
-            $limite = [DateTime]::UtcNow.AddSeconds(3)
-            $lus = 'aucune fenêtre #32768 nouvelle'
-            do {
-                foreach ($f in @($C::Visibles('#32768') | Where-Object { $avant -notcontains [long]$_ })) {
-                    $hm = $C::MenuDe($f)
-                    if ($hm -eq [IntPtr]::Zero) { $lus = "fenêtre $f sans HMENU"; continue }
-                    $textes = $C::Textes($hm)
-                    if ($null -eq $textes) { $lus = "HMENU $hm illisible"; continue }
-                    Start-Sleep -Milliseconds 300   # fondu d'ouverture fini
-                    return [pscustomobject]@{ Fenetre = $f; Menu = $hm; Textes = @($textes); Rect = (Rect-Fenetre $f) }
-                }
-                Start-Sleep -Milliseconds 30
-            } while ([DateTime]::UtcNow -lt $limite)
-            throw "$Quoi : le menu de l'icône ne s'ouvre pas en 3 s ($lus)"
-        }
-
-        function Fermer-Menu($Menu) {
-            [BreezyShotEssai.Confort]::Touches($ECHAP)
-            $limite = [DateTime]::UtcNow.AddSeconds(2)
-            while (($C::IsWindowVisible($Menu.Fenetre)) -and [DateTime]::UtcNow -lt $limite) { Start-Sleep -Milliseconds 30 }
-        }
+        # Le menu de l'icône : Ouvrir-Menu-Icone et Fermer-Menu-Icone (commun.ps1).
 
         # Une capture de zone au clavier (Ctrl+Maj+1) : sélection prête, glisser. Rend la
         # ligne `zone choisie`.
@@ -552,14 +522,15 @@ public static string[] Ecarts(byte[] o, int s, int l, int h, int[] c, int max) {
                 # (1) Démarrage et menu.
                 Verifier '(1) raccourci derniere_zone: Ctrl+Maj+4' ((Compter-Motif -Motif 'raccourci derniere_zone: Ctrl\+Maj\+4$' -Dossier $da) -eq 1) | Out-Null
                 $SOURIS_MENU = @(($utile.Right - 60), ($utile.Bottom - 10))
-                $m = Ouvrir-Menu $p.Id $SOURIS_MENU '(1)'
-                $attendus = @("Capturer une zone`tCtrl + Maj + 1", "Capturer l'écran`tCtrl + Maj + 2", 'Capturer une fenêtre', "Refaire la dernière zone`tCtrl + Maj + 4")
-                $lus = @($m.Textes | Select-Object -First 4)
+                $m = Ouvrir-Menu-Icone $p.Id $da '(1)' $SOURIS_MENU
+                # Piste A « Liste » : les trois captures, un séparateur, puis la dernière zone.
+                $attendus = @("Capturer une zone`tCtrl + Maj + 1", "Capturer l'écran`tCtrl + Maj + 2", 'Capturer une fenêtre', '', "Refaire la dernière zone`tCtrl + Maj + 4")
+                $lus = @($m.Textes | Select-Object -First 5)
                 $vus = ($m.Textes | ForEach-Object { "« $($_ -replace "`t", ' ⇥ ') »" }) -join ', '
-                Verifier '(1) menu : les quatre captures dans l''ordre, « Refaire la dernière zone » avec Ctrl + Maj + 4' (($lus.Count -eq 4) -and (($lus -join '|') -ceq ($attendus -join '|'))) $vus | Out-Null
+                Verifier '(1) menu : les trois captures, séparateur, « Refaire la dernière zone » avec Ctrl + Maj + 4' (($lus.Count -eq 5) -and (($lus -join '|') -ceq ($attendus -join '|'))) $vus | Out-Null
                 $rectMenu = $m.Rect
                 Write-Host "menu en $($rectMenu.X),$($rectMenu.Y) $($rectMenu.L)x$($rectMenu.H)"
-                Fermer-Menu $m
+                Fermer-Menu-Icone $m '(1)'
 
                 # (12) Mémoire au repos.
                 Start-Sleep -Seconds 2
@@ -618,11 +589,9 @@ public static string[] Ecarts(byte[] o, int s, int l, int h, int[] c, int max) {
                 $C::Touches($CTRL_MAJ_4)
                 $k = Attendre-Png $recents $n '(4) PNG au clavier'
                 Start-Sleep -Milliseconds 300
-                $m = Ouvrir-Menu $p.Id $SOURIS_MENU '(4)'
+                $m = Ouvrir-Menu-Icone $p.Id $da '(4)' $SOURIS_MENU
                 $pos = [array]::IndexOf([string[]]$m.Textes, "Refaire la dernière zone`tCtrl + Maj + 4")
-                if (-not (Verifier '(4) entrée « Refaire la dernière zone » au menu' ($pos -ge 0) (($m.Textes) -join ' | '))) { throw '(4) pas d''entrée' }
-                $ri = [BreezyShotEssai.Confort+RECT]::new()
-                if (-not $C::GetMenuItemRect([IntPtr]::Zero, $m.Menu, [uint32]$pos, [ref]$ri)) { throw '(4) rectangle de l''entrée illisible' }
+                if (-not (Verifier '(4) entrée « Refaire la dernière zone » au menu' ($pos -ge 0) $m.Lus)) { throw '(4) pas d''entrée' }
                 # Le menu est bien au-dessus du témoin, dans la zone : sinon le point ne prouve rien.
                 $vue = Copie-Ecran $x4 $y4 $cote4 $cote4
                 $ecartsMenu = @(Ecarts-Temoin $vue 1)
@@ -631,7 +600,7 @@ public static string[] Ecarts(byte[] o, int s, int l, int h, int[] c, int max) {
                 $n = @(Fichiers-Png $recents).Count
                 $menus = Compter-Motif -Motif 'menu: capturer derniere_zone$' -Dossier $da
                 $refaites = Compter-Motif -Motif 'derniere zone -?\d+,' -Dossier $da
-                $C::Cliquer([int](($ri.Left + $ri.Right) / 2), [int](($ri.Top + $ri.Bottom) / 2))
+                Cliquer-Ligne-Menu $m 'Refaire la dernière zone' '(4)'
                 $lm = Attendre-Suivante 'menu: capturer derniere_zone$' $da $menus '(4) menu: capturer derniere_zone'
                 $lz = Attendre-Suivante 'derniere zone -?\d+,' $da $refaites '(4) derniere zone'
                 $mp = Attendre-Png $recents $n '(4) PNG par le menu'

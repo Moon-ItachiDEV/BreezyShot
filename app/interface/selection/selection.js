@@ -1,6 +1,8 @@
-// Sélection d'une zone (étape 5) ou d'une fenêtre (étape 8). La page montre et rapporte, le
+// Sélection d'une zone (étape 5), d'une fenêtre (étape 8), du texte à lire (0.5) ou de ce
+// qu'une capture défilante fera défiler (0.6). La page montre et rapporte, le
 // cœur décide (ARCHITECTURE.md §2.5). Elle ne dessine que le voile et le rectangle, ou le
-// contour de la fenêtre survolée : ni texte, ni viseur, ni taille, ni poignée, ni animation.
+// contour de la fenêtre survolée : ni texte, ni viseur, ni taille, ni poignée ; seul le mode
+// texte s'anime, une fois la zone choisie (lecture, puis lignes copiées surlignées).
 //
 // Échelle k (pixels réels par pixel CSS) : devicePixelRatio, l'échelle de rendu vraie, quand
 // il explique la taille réelle de la fenêtre (envoyée par le cœur) à 1 px CSS près sur chaque
@@ -9,8 +11,9 @@
 //
 // Contrat avec le cœur (fenetres/selection.rs) :
 // - écoute `selection:montrer` { id, numero, largeur, hauteur, ecrans: [{ x, y, largeur,
-//   hauteur }], cote_min, mode: "zone" | "fenetre" | "texte", fenetres: [{ x, y, largeur, hauteur,
-//   rayon }], souris: { x, y } | null } : tout en pixels réels entiers, relatifs au coin haut
+//   hauteur }], cote_min, mode: "zone" | "fenetre" | "texte" | "defilante", fenetres: [{ x, y,
+//   largeur, hauteur, rayon }], souris: { x, y } | null, suite? } : tout en pixels réels entiers,
+//   relatifs au coin haut
 //   gauche de la fenêtre (une fenêtre proposée peut en déborder ; `mode` absent vaut "zone",
 //   `fenetres` absent vaut []) (`largeur`, `hauteur` : rectangle réel de la fenêtre ; `numero` : celui de la
 //   charge, renvoyé avec chaque message). Retour au repos (voile plein). Dès que
@@ -37,11 +40,28 @@
 // - Mode texte (Copier le texte, 0.5) : une zone, exactement comme le mode zone ; seul le nom
 //   change (« Copier le texte : sélectionnez une zone »). Après `selection_terminee`, le cœur
 //   envoie `selection:balayer` { id, x, y, largeur, hauteur, reduites } (pixels réels entiers
-//   relatifs à la fenêtre, comme `selection_terminee`) : la zone est posée là et joue le
-//   balayage (respiration, bande claire, teinte `accent`, --texte-balayage) ; `reduites` :
-//   --duree-reduite, sans bande ni mouvement. Le filet repart de ce moment. Rien n'est
-//   envoyé : le cœur cache la fenêtre quand la lecture et le balayage sont finis.
-// - `selection_chargee` {} une fois, quand les deux écoutes sont en place.
+//   relatifs à la fenêtre, comme `selection_terminee`) : la zone est posée là, se teinte
+//   (`accent`, --texte-teinte) et respire (--texte-lecture) le temps de la lecture ;
+//   `reduites` : la teinte seule, sans mouvement. La teinte reste jusqu'à la fin. Le filet
+//   repart de ce moment. Si le texte est copié, le cœur envoie ensuite `selection:surligner`
+//   { id, lignes: [{ x, y, largeur, hauteur }], reduites, trace, pas, tenue, sortie } (lignes
+//   en pixels réels entiers relatifs à la fenêtre, durées en ms) : la ligne de rang r se
+//   surligne de gauche à droite de r × pas à r × pas + trace (`reduites` : fondu, pas nul) ;
+//   après tenue, toute la sélection s'efface en sortie. Le filet repart de là, augmenté du
+//   surlignage. Rien n'est envoyé : le cœur cache la fenêtre à la fin de la lecture, ou du
+//   surlignage.
+// - Mode défilante (0.6) : le tracé du mode zone, plus le contour du mode fenêtre sur les
+//   pages proposées (`fenetres`, vide au départ). Sous la pointe, la page entourée reste
+//   claire (même règle que le mode fenêtre, souris de la charge comprise) ; un clic (même
+//   seuil que le mode fenêtre) sur une page entourée : `selection_cliquee` ; un clic sur
+//   rien : rien, on continue ; un glisser (seuil franchi) : le tracé, `selection_terminee`
+//   comme une zone. Maj et Espace : comme le mode zone, pendant le tracé. Les pages
+//   arrivent après (ou jamais) par une charge `suite: true` du même affichage et du même
+//   numéro : la page prend la liste sans revenir au repos (geste en cours gardé) et entoure
+//   aussitôt la page sous la pointe. Après l'envoi, la zone ou la page reste montrée (le
+//   cœur garde la fenêtre jusqu'à la fenêtre de contrôle) : filet FILET_DEFILANTE_MS.
+//   Nom : « Capture défilante : sélectionnez une zone ou une page ».
+// - `selection_chargee` {} une fois, quand les écoutes sont en place.
 // Gestes : glisser du bouton gauche ; Maj tenue : carré ; Espace tenue : la zone se déplace ;
 // Échap ou clic droit : annuler. Une zone reste sur l'écran où le glisser a commencé.
 // Sous `cote_min` de côté, ce n'est pas une zone : le rectangle s'efface et on continue.
@@ -89,6 +109,10 @@ let envoi = 0; // numéro de la dernière demande reçue
 let mesure = 0; // numéro de la dernière mesure lancée
 let filet = 0; // minuterie du filet après un envoi
 const FILET_MS = 1500;
+// Mode défilante : le cœur garde la sélection jusqu'à la fenêtre de contrôle, 2 s au plus
+// après la fin (D4, R1 : `DELAI_PAGE` de application/defilante.rs, qu'un test compare à
+// cette ligne) ; le filet ne doit pas rendre la page avant.
+const FILET_DEFILANTE_MS = FILET_MS + 2000;
 // Mode fenêtre.
 let mode = "zone";
 let fenetres = []; // { x, y, largeur, hauteur, rayon }, du premier plan vers le fond
@@ -154,7 +178,8 @@ function valider(m) {
   }
   if (!entier(m.cote_min) || m.cote_min < 0) return rejeter("cote_min invalide");
   const md = m.mode === undefined ? "zone" : m.mode;
-  if (md !== "zone" && md !== "fenetre" && md !== "texte") return rejeter("mode inconnu");
+  if (md !== "zone" && md !== "fenetre" && md !== "texte" && md !== "defilante") return rejeter("mode inconnu");
+  if (m.suite !== undefined && typeof m.suite !== "boolean") return rejeter("suite invalide");
   const brutes = m.fenetres === undefined ? [] : m.fenetres;
   if (!Array.isArray(brutes)) return rejeter("fenetres invalides");
   const fen = [];
@@ -169,7 +194,7 @@ function valider(m) {
     if (typeof m.souris !== "object" || !entier(m.souris.x) || !entier(m.souris.y)) return rejeter("souris invalide");
     sr = { x: m.souris.x, y: m.souris.y };
   }
-  return { id: m.id, numero: m.numero, largeur: m.largeur, hauteur: m.hauteur, ecrans: liste, coteMin: m.cote_min, mode: md, fenetres: fen, souris: sr };
+  return { id: m.id, numero: m.numero, largeur: m.largeur, hauteur: m.hauteur, ecrans: liste, coteMin: m.cote_min, mode: md, fenetres: fen, souris: sr, suite: m.suite === true };
 }
 
 /** Voile plein, sans rectangle. */
@@ -220,9 +245,21 @@ function mesurer() {
   requestAnimationFrame(verifier);
 }
 
+/** Mode défilante : la charge `suite` de l'affichage montré (même id, même numéro, même
+ *  taille) n'apporte que les pages ; vrai si elle est prise ainsi. */
+function completer(m) {
+  if (!m.suite || mode !== "defilante" || m.mode !== "defilante" || id !== m.id || numero !== m.numero) return false;
+  if (largeur !== m.largeur || hauteur !== m.hauteur) return false;
+  fenetres = m.fenetres;
+  if (!survol) souris = m.souris;
+  planifier();
+  return true;
+}
+
 export function montrer(brut) {
   const m = valider(brut);
   if (!m) return;
+  if (completer(m)) return;
   repos();
   clearTimeout(filet);
   envoi++;
@@ -257,7 +294,7 @@ export function cachee() {
 
 /** Envoie la fin au cœur et attend `selection:cachee`. Sans réponse dans FILET_MS, ou si
  *  l'envoi est refusé, la page redevient utilisable (Échap, clic droit, glisser). */
-function envoyer(commande, args) {
+function envoyer(commande, args, ms = FILET_MS) {
   attente = true;
   if (image) cancelAnimationFrame(image);
   image = 0;
@@ -270,7 +307,7 @@ function envoyer(commande, args) {
     planifier(); // mode fenêtre : de nouveau entourer la fenêtre sous la souris
   };
   clearTimeout(filet);
-  filet = setTimeout(liberer, FILET_MS);
+  filet = setTimeout(liberer, ms);
   appeler(commande, args, liberer);
 }
 
@@ -372,6 +409,8 @@ function entourer(c) {
 /** Mode fenêtre : déplacement (pixels réels, sur un axe) à partir duquel l'appui est un
  *  glisser et non un clic : 4 pixels logiques, au moins `cote_min`. */
 const seuilGlisser = () => Math.max(coteMin, Math.round(4 * Math.max(kx, ky)));
+/** De `a` à `b` (pixels réels), est-ce un glisser (seuil atteint sur un axe) ? */
+const estGlisser = (a, b) => Math.max(Math.abs(b.x - a.x), Math.abs(b.y - a.y)) >= seuilGlisser();
 
 /** Le pixel réel d'une position CSS du pointeur (même règle que `point`). */
 const pixel = (cx, cy) => ({
@@ -379,15 +418,21 @@ const pixel = (cx, cy) => ({
   y: borne(Math.floor(cy * ky + PRES), 0, hauteur - 1),
 });
 
+/** Mode défilante : le glisser en cours est un tracé (seuil franchi), pas un clic. */
+const trace = () => mode === "defilante" && glisser !== null && glisser.trace;
+
 function dessiner() {
   image = 0;
-  if (mode === "fenetre") {
+  if (mode === "fenetre" || (mode === "defilante" && !trace())) {
     if (attente || !prete || id === null) return;
+    // Défilante : tant que l'appui n'est pas un tracé, c'est le contour qui se voit.
+    if (mode === "defilante") corps.classList.remove("glisse");
     const p = survol ? pixel(survol.cx, survol.cy) : souris;
     entourer(p ? cible(p) : null);
     return;
   }
   if (!glisser || attente) return;
+  if (mode === "defilante") entourer(null);
   const [a, b] = coins(glisser);
   // Un seul pixel (pas encore bougé) : rien. Sinon `[min, max + 1[` : les deux pixels des
   // coins sont dans la zone.
@@ -408,30 +453,51 @@ function poserZone(x0, y0, x1, y1) {
   corps.classList.add("glisse");
 }
 
-/** Le nom de la page : celui du mode texte seulement (les autres modes n'en ont pas). */
+/** Le nom de la page : ceux des modes texte et défilante (les autres modes n'en ont pas). */
+const NOMS = {
+  texte: "Copier le texte : sélectionnez une zone",
+  defilante: "Capture défilante : sélectionnez une zone ou une page",
+};
 function nommer() {
-  if (mode === "texte") {
+  if (NOMS[mode]) {
     corps.setAttribute("role", "application");
-    corps.setAttribute("aria-label", "Copier le texte : sélectionnez une zone");
+    corps.setAttribute("aria-label", NOMS[mode]);
   } else {
     corps.removeAttribute("role");
     corps.removeAttribute("aria-label");
   }
 }
 
-// Le balayage du mode texte : la bande (créée une fois) et sa minuterie.
-const bande = document.createElement("i");
-bande.className = "bande";
-morceaux.zone.append(bande);
-let balayage = 0;
+// Le mode texte : la zone lue (coin, pixels réels de la scène) et les lignes copiées,
+// surlignées dans la zone (conteneur créé une fois).
+let lue = null;
+const lus = document.createElement("div");
+lus.className = "lus";
+morceaux.zone.append(lus);
+// Au plus autant de lignes que le cœur en envoie (SURLIGNE_LIGNES_MAX), durées bornées.
+const LIGNES_MAX = 400;
+const DUREE_MAX = 2000;
+
 function finBalayage() {
-  clearTimeout(balayage);
-  balayage = 0;
-  corps.classList.remove("balaye", "reduit");
+  lue = null;
+  lus.replaceChildren();
+  corps.classList.remove("balaye", "reduit", "surligne");
 }
 
-/** `selection:balayer` : la zone lue (pixels réels de la fenêtre) joue le balayage. Seulement
- *  en mode texte, pour l'affichage en cours, une fois la zone envoyée. */
+/** Le filet du mode texte : sans `selection:cachee` dans `ms`, la page redevient utilisable. */
+function armerFilet(ms) {
+  clearTimeout(filet);
+  const tour = envoi;
+  filet = setTimeout(() => {
+    if (tour !== envoi || !attente) return;
+    attente = false;
+    repos();
+  }, ms);
+}
+
+/** `selection:balayer` : la zone lue (pixels réels de la fenêtre) se teinte et respire le
+ *  temps de la lecture. Seulement en mode texte, pour l'affichage en cours, une fois la zone
+ *  envoyée. */
 export function balayer(m) {
   const ok = m && m.id === id && id !== null && mode === "texte" && attente &&
     [m.x, m.y, m.largeur, m.hauteur].every(entier) && m.largeur > 0 && m.hauteur > 0;
@@ -443,24 +509,56 @@ export function balayer(m) {
   const y0 = borne(m.y, 0, hauteur);
   poserZone(x0, y0, borne(m.x + m.largeur, x0, largeur), borne(m.y + m.hauteur, y0, hauteur));
   finBalayage();
+  lue = { x: x0, y: y0 };
   // Le gel peut rester jusqu'à 1,5 s après le relâcher : le filet repart d'ici.
-  clearTimeout(filet);
-  const tour = envoi;
-  filet = setTimeout(() => {
-    if (tour !== envoi || !attente) return;
-    attente = false;
-    repos();
-  }, FILET_MS);
+  armerFilet(FILET_MS);
   corps.classList.toggle("reduit", m.reduites === true);
   void morceaux.zone.offsetWidth; // l'animation repart de zéro
   corps.classList.add("balaye");
-  const duree = parseFloat(getComputedStyle(morceaux.zone).getPropertyValue("--duree-balayage"));
-  balayage = setTimeout(finBalayage, duree || 0);
+}
+
+const dureeValide = (v) => entier(v) && v >= 0 && v <= DUREE_MAX;
+const ligneValide = (l) => l && [l.x, l.y, l.largeur, l.hauteur].every(entier) && l.largeur > 0 && l.hauteur > 0;
+
+/** `selection:surligner` : les lignes du texte copié (pixels réels de la fenêtre) se
+ *  surlignent dans la zone lue, de gauche à droite, l'une après l'autre ; puis toute la
+ *  sélection s'efface. Seulement après le balayage de l'affichage en cours. Chaque ligne
+ *  déborde de 2 pixels logiques sur les côtés et de 1 en haut et en bas, comme une
+ *  sélection de texte ; la zone coupe ce qui dépasse. */
+export function surligner(m) {
+  const lignes = Array.isArray(m?.lignes) ? m.lignes.filter(ligneValide).slice(0, LIGNES_MAX) : [];
+  const ok = m && m.id === id && id !== null && mode === "texte" && attente && lue !== null &&
+    lignes.length > 0 && [m.trace, m.pas, m.tenue, m.sortie].every(dureeValide);
+  if (!ok) {
+    console.warn("selection : surlignage ignoré");
+    return;
+  }
+  const dx = Math.round(2 * kx);
+  const dy = Math.round(ky);
+  const morceau = document.createDocumentFragment();
+  lignes.forEach((l, rang) => {
+    const i = document.createElement("i");
+    poser(i, l.x - dx - lue.x, l.y - dy - lue.y, l.largeur + 2 * dx, l.hauteur + 2 * dy);
+    i.style.setProperty("--rang", String(rang));
+    morceau.append(i);
+  });
+  corps.classList.remove("surligne");
+  lus.replaceChildren(morceau);
+  const sortieA = m.trace + m.pas * (lignes.length - 1) + m.tenue;
+  const s = corps.style;
+  s.setProperty("--surligne-trace", `${m.trace}ms`);
+  s.setProperty("--surligne-pas", `${m.pas}ms`);
+  s.setProperty("--surligne-sortie-a", `${sortieA}ms`);
+  s.setProperty("--surligne-sortie", `${m.sortie}ms`);
+  corps.classList.toggle("reduit", m.reduites === true);
+  armerFilet(sortieA + m.sortie + FILET_MS);
+  void lus.offsetWidth; // les animations partent de zéro
+  corps.classList.add("surligne");
 }
 
 /** Au plus un dessin par image. */
 function planifier() {
-  const voulu = mode === "fenetre" ? prete && id !== null : glisser;
+  const voulu = mode === "fenetre" || mode === "defilante" ? prete && id !== null : glisser;
   if (!image && voulu && !attente) image = requestAnimationFrame(dessiner);
 }
 
@@ -493,7 +591,8 @@ addEventListener(
       // Sans capture, le glisser marche tant que la souris reste dans la fenêtre.
     }
     maj = e.shiftKey;
-    glisser = { pointeur: e.pointerId, ecran, depart, courant: depart, souris: p };
+    // `appui`, `trace` : mode défilante (clic ou tracé, décidé au seuil du mode fenêtre).
+    glisser = { pointeur: e.pointerId, ecran, depart, courant: depart, souris: p, appui: p, trace: false };
   },
   true,
 );
@@ -511,15 +610,27 @@ addEventListener(
       planifier();
       return;
     }
+    if (mode === "defilante" && id !== null && !attente) {
+      survol = { cx: e.clientX, cy: e.clientY };
+      if (e.button === 2) {
+        annuler("clic_droit");
+        return;
+      }
+    }
     const g = glisser;
-    if (!g || attente || e.pointerId !== g.pointeur) return;
+    if (!g || attente || e.pointerId !== g.pointeur) {
+      if (mode === "defilante") planifier(); // le contour suit la pointe
+      return;
+    }
     // Bouton droit appuyé pendant le glisser : un `pointermove` (pas de `pointerdown`).
     if (e.button === 2) {
       annuler("clic_droit");
       return;
     }
     maj = e.shiftKey;
-    avancer(g, point(e));
+    const p = point(e);
+    if (mode === "defilante" && !g.trace && estGlisser(g.appui, p)) g.trace = true;
+    avancer(g, p);
     planifier();
   },
   true,
@@ -556,22 +667,45 @@ addEventListener(
     const g = glisser;
     if (!g || attente || e.pointerId !== g.pointeur || e.button !== 0) return;
     maj = e.shiftKey;
-    avancer(g, point(e));
+    const p = point(e);
+    if (mode === "defilante") {
+      survol = { cx: e.clientX, cy: e.clientY };
+      if (!g.trace && !estGlisser(g.appui, p)) {
+        // Un clic : la page entourée sous la pointe, ou rien (on continue).
+        const c = cible(p);
+        repos();
+        if (!c) {
+          planifier();
+          return;
+        }
+        entourer(c); // le contour du pixel cliqué ; plus rien ne change ensuite
+        envoyer("selection_cliquee", { id, numero, x: p.x, y: p.y }, FILET_DEFILANTE_MS);
+        return;
+      }
+      g.trace = true;
+    }
+    avancer(g, p);
     const [a, b] = coins(g);
     // Même règle que le cœur : un côté (pixels inclus) sous cote_min, ce n'est pas une zone.
     if (Math.abs(b.x - a.x) + 1 < coteMin || Math.abs(b.y - a.y) + 1 < coteMin) {
       repos(); // on continue
+      planifier(); // défilante : de nouveau le contour sous la pointe
       return;
     }
-    // Rien n'est redessiné : le cœur cache la fenêtre.
-    envoyer("selection_terminee", { id, numero, depart: { x: a.x, y: a.y }, arrivee: { x: b.x, y: b.y } });
+    // Rien n'est redessiné : le cœur cache la fenêtre (en mode défilante, il la garde
+    // jusqu'à la fenêtre de contrôle : la zone reste telle quelle).
+    const ms = mode === "defilante" ? FILET_DEFILANTE_MS : FILET_MS;
+    envoyer("selection_terminee", { id, numero, depart: { x: a.x, y: a.y }, arrivee: { x: b.x, y: b.y } }, ms);
   },
   true,
 );
 
 const perdu = (e) => {
   if (appui && e.pointerId === appui.pointeur) appui = null;
-  if (glisser && !attente && e.pointerId === glisser.pointeur) repos();
+  if (glisser && !attente && e.pointerId === glisser.pointeur) {
+    repos();
+    planifier(); // défilante : de nouveau le contour sous la pointe
+  }
 };
 addEventListener("pointercancel", perdu, true);
 addEventListener("lostpointercapture", perdu, true);
@@ -633,6 +767,7 @@ if (tauri?.event?.listen) {
     tauri.event.listen("selection:montrer", (evenement) => montrer(evenement?.payload)),
     tauri.event.listen("selection:cachee", () => cachee()),
     tauri.event.listen("selection:balayer", (evenement) => balayer(evenement?.payload)),
+    tauri.event.listen("selection:surligner", (evenement) => surligner(evenement?.payload)),
   ]).then(
     () => appeler("selection_chargee", {}),
     (e) => console.warn("selection : écoute impossible :", e),
@@ -650,5 +785,5 @@ if (tauri?.event?.listen) {
     });
   }
   // Pour les essais dans un navigateur seulement.
-  window.selectionApercu = { montrer, cachee, balayer };
+  window.selectionApercu = { montrer, cachee, balayer, surligner };
 }

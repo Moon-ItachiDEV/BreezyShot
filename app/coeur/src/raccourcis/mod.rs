@@ -12,6 +12,10 @@
 //!
 //! Échap global : pendant une sélection, l'Application réserve Échap (`reserver_echap`) et
 //! le libère à chaque fin (`liberer_echap`). Un appui arrive en `Signal::Echap`.
+//!
+//! Entrée globale (0.6) : le temps d'un défilement, l'Application réserve Entrée
+//! (`reserver_entree`, = « Terminer ») et la libère à la fin (`liberer_entree`). Un appui
+//! arrive en `Signal::Entree`.
 
 mod annonces;
 mod choix;
@@ -28,7 +32,8 @@ pub use notation::{
     analyser, ErreurNotation, Modificateurs, Raccourci, Touche, RESERVES_AU_SYSTEME,
 };
 pub use reservation::{
-    liberer, liberer_echap, lignes_journal, reserver, reserver_echap, texte_raison, Reservations,
+    liberer, liberer_echap, liberer_entree, lignes_journal, reserver, reserver_echap,
+    reserver_entree, texte_raison, Reservations,
 };
 
 /// Ce que le module signale à l'Application.
@@ -38,4 +43,6 @@ pub enum Signal {
     Presse(String),
     /// Échap a été pressé pendant qu'il était réservé (`reserver_echap`).
     Echap,
+    /// Entrée a été pressée pendant qu'elle était réservée (`reserver_entree`, 0.6).
+    Entree,
 }
