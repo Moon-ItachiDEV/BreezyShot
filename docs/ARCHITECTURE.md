@@ -689,20 +689,89 @@ sans changer de forme : `raccourci derniere_zone: …`, `raccourci presse: derni
 Écart au contrat accepté : `decompte <n> debut` est écrit dès que le numéro est donné, avant
 `bandeau decompte …` et `echap global reserve`.
 
+### 3.10 Capture défilante (0.6)
+
+Décisions pures dans `application/defilante.rs` (placement, course, lancement, lignes du
+journal) ; gestes et fils dans `application/geste_defilante.rs` ; les quatre commandes de
+la page de contrôle dans `application/fenetre_defilante.rs`. Modules utilisés : images
+vivantes `systeme::vivant` (A), défileur `systeme::defiler` (B), mesure et assemblage
+`defilement` (C), fenêtre de contrôle `fenetres::defilante` (E), sélection en mode
+défilante `fenetres::selection` (F).
+
+**Visée.** Même début que la zone (Gel, photo, écran figé, Sélection en mode défilante,
+Échap réservé). Dans un tour de boucle à elle (`plus_tard_nomme`, jamais dans le rappel
+d'une autre page), la fenêtre de contrôle est retrouvée (`Controle::retrouver`, page déjà
+prête) ou créée cachée (`creer`, trois essais à 150 ms). Le fil `defilante-pages` cherche
+les pages qui défilent (`defiler::pages`, 8 fenêtres), coupées à leur écran, côté de
+120 px logiques au moins, 32 au plus, puis `Selection::proposer` (une fois par affichage).
+
+**Lancement** (`defilante::Lancement`, pur). Au relâchement (`zone_choisie`), Entrée est
+réservée et le filet armé : sans fenêtre montrée `DELAI_PAGE` (2 s) après le relâchement,
+l'écran figé et la sélection sont cachés depuis le fil du filet, puis `defilante impossible:
+page`. Le filet de la page de sélection (`FILET_DEFILANTE_MS`, 3,5 s) est lié à cette
+borne par un test. Page prête (`defilante_pret`, thème envoyé) et fenêtre créée :
+`poser` puis `defilante:montrer` ; la première `defilante_zone` (pilule posée) montre la
+fenêtre, cache l'écran figé et la sélection dans le même tour et lance le fil `defilante` ;
+les suivantes ne font que replacer la pilule, convertie avec l'origine et l'échelle réelles
+de la fenêtre.
+
+**Fil `defilante`** (`Fil<Source, Pilote, Atelier>`, essayé sous Linux avec des faux).
+Compositeur attendu, prise ouverte (une zone coupée est refusée), première image,
+`Assemblage::nouveau` (limite `{COTE_MAX, PIXELS_MAX}`), défileur (`preparer`), écoute de
+la molette (son rappel ne fait que poster ; l'`Ecoute` tombe à la fin du fil). Chaque tour :
+les ordres reçus (Terminer, Entrée, molette, arrêt), le verrouillage de session
+(`gel::verrouillages_de_session`, R9 : `annulee session`), la fin, l'aperçu (100 ms), les
+écrans (500 ms), puis une seule action lente : une image mesurée montrée à la course, un pas
+avec sa page posée (deux images identiques, immobiles ou ambiguës ; 400 ms au plus,
+interrompue par Terminer, Entrée, l'arrêt), ou une prise. Chaque image est mesurée contre la
+dernière image gardée ; l'attendu n'est que le décalage lu (positions d'UI Automation),
+jamais le pas commandé. Après chaque pas vers le bas parti et mesuré contre l'image d'avant
+ce pas, l'avance est rendue au défileur (`constater`, 0 compris). Une limite par mémoire
+refusée donne `impossible: memoire`.
+
+**Course** (`defilante::Course`, pure, D6 à D15). Attente de 450 ms, puis `Auto` : pas de
+la moitié de la hauteur utile ; deux pas sans effet d'un moyen non choisi → `Repli`
+(`abandonner`, `None` → `Main`) ; une image perdue ou ambiguë réduit d'abord le pas de
+moitié jusqu'à 40 px (en remontant), puis compte (`PERDUES_AUTO_MAX`, `AMBIGUES_MAX`) ; le
+bas par la position lue ou deux images immobiles d'un moyen choisi, puis 350 ms sans
+mouvement. Un cran de molette dans la zone passe à `Main` (définitif) : une image à chaque
+cran et toutes les 50 ms ; « Trop vite » sur une image perdue, caché quand l'image gardée
+est retrouvée. Une seule fin (bouton, Entrée, en bas, limite), puis `Finit` (la fenêtre
+part tout de suite) et `Assemblee`, vers la sortie commune (`lancer_sortie`, relâchement =
+l'instant du clic ou d'Entrée).
+
+**Pendant la défilante** (`fenetres_bloquees`), le menu de l'icône et les raccourcis
+n'ouvrent rien, sauf Quitter. Échap global annule, `--quitter` aussi (`annulee arret`).
+
+**Journal** (contrat §8, essai 14) : `defilante pages <n> en <ms> ms`, `defilante fenetre
+<hwnd>[ retrouvee]`, `defilante exclue des captures: …`, `defilante page prete en <ms> ms`,
+`defilante zone <x>,<y> <l>x<h> (page|trace) agrandie (oui|non)`, `defilante premiere image
+<l>x<h> en <ms> ms (relache <ms>)`, `defilante moyen <moyen|aucun>`, `defilante repli:
+<nouveau> (<ancien> <raison>)` (raisons : `sans effet`, `impossible`, `cran trop grand`,
+`trop loin`), `defilante repli: molette`, `defilante main (molette)`, `defilante trop vite`,
+`defilante repris`, `defilante fixes haut <h> bas <b>`, `defilante fin
+(bouton|entree|en_bas|limite) images <n> gardees <g> perdues <p>`, `defilante assemblee
+<l>x<h> en <ms> ms`, `chrono defilante relache-premiere <ms> pas-median <ms>
+mesure-mediane <ms> fin-assemblee <ms>`, `defilante annulee (echap|ecrans|session|arret)`,
+`defilante impossible: (prise|page|fil|memoire)`, `menu ignore pendant la defilante`,
+`raccourci ignore pendant la defilante`. Ne doivent jamais paraître : `defilante <n>: fin
+deja rendue`, `defilante: fil arrete (panique)`.
+
 ## 4. Réglages (`reglages/`, étape 2)
 
 Module pur : il reçoit le dossier où écrire, ne connaît ni Tauri ni les autres modules.
 
 ```json
 {
-  "version": 4,
+  "version": 5,
   "raccourcis": {
     "zone": ["ImprEcran", "Ctrl+Maj+1"],
     "plein_ecran": ["Ctrl+Maj+2"],
     "fenetre": ["Ctrl+Maj+3"],
     "derniere_zone": ["Ctrl+Maj+4"],
     "historique": ["Ctrl+Maj+H"],
-    "texte": ["Ctrl+Maj+T"]
+    "texte": ["Ctrl+Maj+T"],
+    "defilante": ["Ctrl+Maj+5"]
   },
   "copier_apres_capture": true,
   "enregistrer_apres_capture": false,
@@ -723,8 +792,9 @@ Module pur : il reçoit le dossier où écrire, ne connaît ni Tauri ni les autr
   Les valeurs par défaut dépendent du système (`ImprEcran` n'existe pas sur Mac ; la
   dernière zone : `Ctrl+Maj+4` sous Windows, `Cmd+Maj+7` sur Mac, provisoire).
   `historique` et `texte` (version 4, 0.5) : `Ctrl+Maj+H` et `Ctrl+Maj+T` sous Windows,
-  `Cmd+Maj+8` et `Cmd+Maj+9` sur Mac (provisoires). Ils sont toujours écrits dans le
-  fichier, licence ou non : seule la réservation dépend des actions construites (§5).
+  `Cmd+Maj+8` et `Cmd+Maj+9` sur Mac (provisoires). `defilante` (version 5, 0.6) :
+  `Ctrl+Maj+5` sous Windows, `Cmd+Maj+0` sur Mac (provisoire). Ils sont toujours écrits
+  dans le fichier, licence ou non : seule la réservation dépend des actions construites (§5).
 - `duree_s` : 1 à 60 s, ou `0` = toujours (`DUREE_TOUJOURS`, version 2 ; la page propose
   3, 6, 10 et Toujours).
 - `capture` (version 3) : `retardateur_s` vaut 0 (aucun) ou 1 à 10 s entières
@@ -744,7 +814,7 @@ Module pur : il reçoit le dossier où écrire, ne connaît ni Tauri ni les autr
   de 1 à 60 s) : la valeur par défaut remplace cette valeur seulement, avec un avertissement.
 - **Champ inconnu** : conservé tel quel à la réécriture.
 - **Version plus ancienne** : mise à niveau pas à pas par une liste de fonctions
-  (`v0 -> v1`, `v1 -> v2`, `v2 -> v3`, `v3 -> v4` : `MISES_A_NIVEAU`, dont la longueur
+  (`v0 -> v1`, `v1 -> v2`, `v2 -> v3`, `v3 -> v4`, `v4 -> v5` : `MISES_A_NIVEAU`, dont la longueur
   donne `VERSION_ACTUELLE`) qui complète sans rien effacer, puis réécriture.
   `v1 -> v2` ne change rien à la forme : il permet seulement `duree_s: 0`, qu'une app de
   version 1 aurait remplacé par 6. `v2 -> v3` (0.4) ajoute `raccourcis.derniere_zone`
@@ -765,6 +835,10 @@ Module pur : il reçoit le dossier où écrire, ne connaît ni Tauri ni les autr
   raccourci ». Un fichier de la 0.4 relu donne `MisANiveau { de: 3, a: 4 }` (`reglages mis
   a niveau de la version 3 a la version 4`) et il est réécrit. Une 0.4 lancée sur un
   fichier v4 le lit au mieux et refuse de l'écrire.
+  `v4 -> v5` (0.6, `v4_vers_v5`) ajoute `raccourcis.defilante` par la même règle que
+  `v3 -> v4` (défaut seulement s'il n'est pas déjà donné, action déjà là gardée, objet
+  `raccourcis` absent non créé), aussi sans licence (invisible alors) : `reglages mis a
+  niveau de la version 4 a la version 5`.
   Un fichier sans champ `version` est une version 0.
 - **Version plus récente que l'app** : on lit ce qu'on comprend et on ne réécrit pas le fichier.
 - **Au moins une sortie active** : si copie, enregistrement et vignette sont tous éteints, la

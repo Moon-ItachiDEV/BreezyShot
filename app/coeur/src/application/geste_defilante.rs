@@ -1667,8 +1667,7 @@ impl<S: Source, P: Pilote, A: Atelier> Fil<S, P, A> {
         let parti = matches!(envoi, Ok(Envoi::Envoye));
         // L'image d'avant ce pas est la dernière gardée : la mesure dira l'avance du pas.
         let depuis_gardee = self.commande_depuis_gardee == 0;
-        let commande = regles::avance_commandee(pas, cran, avant == Some(Moyen::Message));
-        self.commande_depuis_gardee = self.commande_depuis_gardee.saturating_add(commande);
+        self.commande_depuis_gardee = self.commande_depuis_gardee.saturating_add(pas);
         let debut = Instant::now();
         let posee = self.attendre_posee();
         self.durees_pas.push(debut.elapsed());
@@ -1686,13 +1685,9 @@ impl<S: Source, P: Pilote, A: Atelier> Fil<S, P, A> {
         // Une seule lecture de la position par pas (elle peut être lente).
         let position = self.pilote.as_ref().and_then(|p| p.position());
         let utile = regles::hauteur_utile(self.reference.hauteur, self.fixes);
-        self.observe = regles::decalage_attendu(self.position_gardee, position, utile);
-        let attendu = regles::attendu(
-            self.position_gardee,
-            position,
-            utile,
-            self.commande_depuis_gardee,
-        );
+        // Seulement le décalage lu (jamais le pas commandé, C).
+        self.observe = regles::attendu(self.position_gardee, position, utile);
+        let attendu = self.observe;
         let mesure = self.mesurer(attendu, position);
         if parti && pas > 0 && depuis_gardee {
             if let (Some(avance), Some(p)) =
@@ -1735,7 +1730,9 @@ impl<S: Source, P: Pilote, A: Atelier> Fil<S, P, A> {
                 let m = self
                     .atelier
                     .mesurer(&self.precedente, &self.image, self.fixes, None);
-                if m == Mesure::Immobile {
+                // Deux images de suite qui ne disent pas de mouvement : une page unie ou
+                // répétée rend `Ambigue` (C), et n'attend pas les 400 ms.
+                if matches!(m, Mesure::Immobile | Mesure::Ambigue) {
                     return Posee::Prise;
                 }
             }
@@ -1775,9 +1772,7 @@ impl<S: Source, P: Pilote, A: Atelier> Fil<S, P, A> {
         }
         let attendu = match self.course.conduite() {
             Conduite::Main => None,
-            _ => self
-                .observe
-                .or((self.commande_depuis_gardee != 0).then_some(self.commande_depuis_gardee)),
+            _ => self.observe,
         };
         let mesure = self.mesurer(attendu, None);
         let position = match mesure {
@@ -2010,6 +2005,9 @@ mod tests {
         prises: u32,
         /// La page bouge d'elle-même à chaque image (jamais posée).
         animee: bool,
+        /// Chaque image porte un pixel de bruit : deux images d'une page posée diffèrent,
+        /// et l'atelier les dit ambiguës (vue unie, C).
+        bruit: bool,
     }
 
     type Partagee = Arc<Mutex<Page>>;
@@ -2047,6 +2045,10 @@ mod tests {
                 p.position += 1;
             }
             *dest = image(p.position);
+            if p.bruit {
+                dest.largeur = 2;
+                dest.rgba.extend_from_slice(&p.prises.to_le_bytes());
+            }
             Ok(Duration::from_millis(1))
         }
     }
@@ -2134,6 +2136,7 @@ mod tests {
             }
             let d = position_de(apres) - position_de(avant);
             match d {
+                0 if apres.rgba != avant.rgba => Mesure::Ambigue,
                 0 => Mesure::Immobile,
                 d if d < 0 => Mesure::Recul(d.unsigned_abs()),
                 d if d > RECOUVREMENT => Mesure::Perdue,
@@ -2519,7 +2522,7 @@ mod tests {
     }
 
     #[test]
-    fn fil_attendu_commande_sans_position() {
+    fn fil_sans_position_aucun_attendu() {
         let p = page(200);
         let mut pi = pilote(&p, &[Moyen::Message], true);
         pi.vue = None;
@@ -2527,10 +2530,8 @@ mod tests {
         let s = e.jusqu_a_la_fin();
         e.fil.join().unwrap();
         assert_eq!(hauteur_assemblee(&s), 201);
-        let a = e.attendus.lock().unwrap().clone();
-        // Les pixels commandés depuis l'image gardée : 40 à chaque pas, puis cumulés en
-        // bas, où plus rien n'est gardé.
-        assert_eq!(&a[..7], &[40, 40, 40, 40, 40, 40, 80], "{a:?}");
+        // Le pas commandé n'est jamais passé à la mesure (C).
+        assert!(e.attendus.lock().unwrap().is_empty());
     }
 
     #[test]
@@ -2586,6 +2587,23 @@ mod tests {
                 cause: Annulation::Session
             })
         );
+    }
+
+    #[test]
+    fn fil_page_posee_sur_deux_images_ambigues() {
+        let p = page(1_000_000);
+        p.lock().unwrap().bruit = true;
+        let pi = pilote(&p, &[Moyen::Message], true);
+        let e = lancer(p, Some(pi), 1_000_000);
+        e.attendre(|p| p.pas >= 1);
+        let debut = Instant::now();
+        let pas = e.page.lock().unwrap().pas;
+        std::thread::sleep(Duration::from_millis(1_000));
+        let faits = e.page.lock().unwrap().pas - pas;
+        // Sans attendre `ATTENTE_POSEE_MAX` (400 ms) à chaque pas : au moins quatre pas.
+        assert!(faits >= 4, "{faits} pas en {:?}", debut.elapsed());
+        let (s, _) = e.terminer();
+        finit_avant_assemblee(&s);
     }
 
     #[test]

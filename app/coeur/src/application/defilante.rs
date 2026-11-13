@@ -437,8 +437,13 @@ pub struct Course {
     /// La dernière image qui a apporté des lignes (ou le passage en `Main`).
     derniere_nouvelle: Instant,
     pas: i32,
-    /// Le pas a déjà été réduit de moitié (une fois au plus, D10).
-    pas_reduit: bool,
+    /// Le pas d'après la hauteur utile (D6), avant les réductions.
+    pas_plein: i32,
+    /// Réductions de moitié gardées (images perdues, D10).
+    reductions: u32,
+    /// Réductions de moitié pour retrouver du texte dans le recouvrement (images
+    /// ambiguës) ; défaites à la première avance.
+    reductions_ambigues: u32,
     /// Le dernier pas demandé (négatif : une remontée).
     dernier_pas: i32,
     /// Le moyen en cours a fait avancer la page : gardé pour toute la capture (R3).
@@ -468,7 +473,9 @@ impl Course {
             debut,
             derniere_nouvelle: debut,
             pas: PAS_MIN,
-            pas_reduit: false,
+            pas_plein: PAS_MIN,
+            reductions: 0,
+            reductions_ambigues: 0,
             dernier_pas: 0,
             moyen_choisi: false,
             avance_vue: false,
@@ -499,14 +506,20 @@ impl Course {
         self.pas
     }
 
-    /// Règle le pas d'après la hauteur utile de la zone (D6) ; un pas déjà réduit le reste.
+    /// Règle le pas d'après la hauteur utile de la zone (D6) ; un pas réduit le reste.
     pub fn regler_pas(&mut self, hauteur_utile: u32) {
-        let pas = pas_de(hauteur_utile);
-        self.pas = if self.pas_reduit {
-            (pas / 2).max(PAS_MIN)
-        } else {
-            pas
-        };
+        self.pas_plein = pas_de(hauteur_utile);
+        self.recalculer_pas();
+    }
+
+    fn recalculer_pas(&mut self) {
+        let n = (self.reductions + self.reductions_ambigues).min(30);
+        self.pas = (self.pas_plein >> n).max(PAS_MIN);
+    }
+
+    /// Vrai si le pas est déjà au plus petit (`PAS_MIN`).
+    fn au_plus_petit(&self) -> bool {
+        self.pas <= PAS_MIN
     }
 
     /// Plus aucun moyen de défilement (aucun défileur, `abandonner()` qui rend `None`, ou
@@ -528,6 +541,9 @@ impl Course {
         self.immobiles = 0;
         self.ambigues = 0;
         self.perdues_auto = 0;
+        self.reductions = 0;
+        self.reductions_ambigues = 0;
+        self.recalculer_pas();
     }
 
     /// Finit la course par `fin` si elle ne l'est pas déjà (la première fin gagne). Vrai si
@@ -677,6 +693,11 @@ fn suite_auto(
             course.moyen_choisi = true;
             course.avance_vue = true;
             course.derniere_nouvelle = maintenant;
+            if course.reductions_ambigues > 0 {
+                // Du texte est retrouvé : le pas d'avant les images ambiguës.
+                course.reductions_ambigues = 0;
+                course.recalculer_pas();
+            }
             vec![Geste::Apercu, course.descendre(course.pas)]
         }
         // Un pas vers le bas qui fait remonter la page ne choisit pas le moyen : sans
@@ -691,13 +712,15 @@ fn suite_auto(
             course.ambigues = 0;
             vec![course.descendre(course.pas)]
         }
+        // Après une remontée (image perdue ou ambiguë), revenir sur l'image gardée ne dit
+        // rien du moyen ni du bas : on redescend, sans rien compter.
+        Mesure::Immobile if !descente => {
+            course.ambigues = 0;
+            vec![course.descendre(course.pas)]
+        }
         Mesure::Immobile => {
             course.ambigues = 0;
-            // Après une remontée (image perdue), revenir sur l'image gardée ne dit pas que
-            // la page suit : seul un pas vers le bas immobile remet le compte à zéro.
-            if descente {
-                course.perdues_auto = 0;
-            }
+            course.perdues_auto = 0;
             immobile_auto(course, en_bas, maintenant)
         }
         Mesure::Ambigue => {
@@ -712,6 +735,15 @@ fn suite_auto(
                 course.moyen_choisi = true;
                 return vec![course.descendre(course.pas)];
             }
+            if !course.au_plus_petit() {
+                // Le recouvrement n'a plus assez de texte (page clairsemée, C) : remonter de
+                // la moitié du dernier mouvement, pas réduit de moitié, et réessayer.
+                course.reductions_ambigues += 1;
+                course.recalculer_pas();
+                let recul = (course.dernier_pas.abs() / 2).max(1);
+                return vec![course.descendre(-recul)];
+            }
+            // Au plus petit pas, sans position qui avance : compté vers « immobile ».
             course.ambigues += 1;
             if course.ambigues >= AMBIGUES_MAX {
                 course.ambigues = 0;
@@ -723,23 +755,27 @@ fn suite_auto(
             course.immobiles = 0;
             course.ambigues = 0;
             course.moyen_choisi = true;
+            // Remonter d'un demi-pas (D10).
+            let demi = (course.pas / 2).max(1);
+            if !course.au_plus_petit() {
+                // D'abord réduire le pas de moitié, jusqu'au plus petit : une animation ou
+                // un pas trop grand ne passent pas tout de suite à la main.
+                course.reductions += 1;
+                course.recalculer_pas();
+                return vec![course.descendre(-demi)];
+            }
             course.perdues_auto += 1;
             if course.perdues_auto > PERDUES_AUTO_MAX {
-                // La page saute trop loin à chaque pas : la molette de l'utilisateur.
+                // La page saute trop loin même au plus petit pas : la molette de
+                // l'utilisateur.
                 course.passer_main(maintenant);
                 return vec![Geste::Prendre(PRISE_MAIN)];
             }
-            // Remonter d'un demi-pas, et réduire le pas de moitié, une fois au plus (D10).
-            let demi = (course.pas / 2).max(1);
             if !course.avance_vue && course.perdues_auto >= 2 {
                 // Ce moyen n'a jamais fait qu'aller trop loin, même au pas réduit (un cran
                 // plus grand que la zone, B) : le suivant, qui remonte d'abord.
                 course.moyen_change();
                 return vec![Geste::Repli(Raison::TropLoin), course.descendre(-demi)];
-            }
-            if !course.pas_reduit {
-                course.pas_reduit = true;
-                course.pas = (course.pas / 2).max(PAS_MIN);
             }
             vec![course.descendre(-demi)]
         }
@@ -781,12 +817,16 @@ fn suite_main(
     let mut gestes = Vec::new();
     if course.perdue {
         match mesure {
-            Mesure::Avance(_) | Mesure::Immobile | Mesure::Recul(_) => {
+            Mesure::Avance(_) | Mesure::Immobile => {
                 // La dernière image gardée est retrouvée : la capture reprend là.
                 course.perdue = false;
                 gestes.push(Geste::Message(None));
             }
-            Mesure::Perdue | Mesure::Ambigue => return vec![Geste::Prendre(PRISE_MAIN)],
+            // Un recul peut être faux sur une page perdue (liste hors de portée, C) : il ne
+            // cache pas « Trop vite ».
+            Mesure::Recul(_) | Mesure::Perdue | Mesure::Ambigue => {
+                return vec![Geste::Prendre(PRISE_MAIN)]
+            }
         }
     }
     match mesure {
@@ -816,37 +856,14 @@ fn suite_main(
 /// Le décalage attendu d'une image mesurée contre la dernière image gardée (D10, décision
 /// du responsable) : le décalage observé, d'après la position lue à l'image gardée et
 /// maintenant, convertie avec la hauteur de la vue (`hauteur_vue`, pixels) ; une position
-/// inchangée donne 0. Sans positions lisibles, les pixels commandés depuis l'image gardée
-/// (`commande`), seulement comme indice (`None` si rien n'a été commandé).
+/// inchangée donne 0. Sans positions lisibles, rien : les pixels commandés ne sont jamais
+/// passés à la mesure (C, seconde relecture R6).
 pub fn attendu(
     gardee: Option<Position>,
     maintenant: Option<Position>,
     hauteur_vue: u32,
-    commande: i32,
 ) -> Option<i32> {
-    decalage_attendu(gardee, maintenant, hauteur_vue).or((commande != 0).then_some(commande))
-}
-
-/// Ce qu'un pas de `pas` pixels fait au plus, d'après l'avance par cran du moyen
-/// (`Defileur::avance_par_cran`, B) : un cran au moins, puis des crans entiers ; `partiel`
-/// (message posté) : un pas plus petit qu'un cran part en cran partiel. Sans avance connue,
-/// le pas lui-même. Un indice pour l'attendu (D10), jamais une mesure.
-pub fn avance_commandee(pas: i32, cran: Option<u32>, partiel: bool) -> i32 {
-    let Some(cran) = cran
-        .filter(|&c| c > 0)
-        .map(|c| c.min(i32::MAX as u32) as i32)
-    else {
-        return pas;
-    };
-    let crans = pas.unsigned_abs() as i32 / cran;
-    let avance = if crans > 0 {
-        crans.saturating_mul(cran)
-    } else if partiel {
-        pas.unsigned_abs() as i32
-    } else {
-        cran
-    };
-    avance * pas.signum()
+    decalage_attendu(gardee, maintenant, hauteur_vue)
 }
 
 /// Vrai si un cran du moyen en cours fait plus que la zone ne peut recouvrir : chaque pas
@@ -1785,9 +1802,16 @@ mod tests {
                 vec![Geste::Prendre(PRISE_MAIN)]
             );
         }
-        // Retrouvée (en remontant) : message caché, la capture reprend là.
+        // Un recul peut être faux sur une page perdue (C) : le message reste.
         assert_eq!(
             suite(&mut c, Vu::Image(Mesure::Recul(10), None), t),
+            vec![Geste::Prendre(PRISE_MAIN)]
+        );
+        assert!(c.perdue());
+        // Retrouvée (en remontant jusqu'à l'image gardée) : message caché, la capture
+        // reprend là.
+        assert_eq!(
+            suite(&mut c, Vu::Image(Mesure::Immobile, None), t),
             vec![Geste::Message(None), Geste::Prendre(PRISE_MAIN)]
         );
         assert!(!c.perdue());
@@ -1804,7 +1828,7 @@ mod tests {
     }
 
     #[test]
-    fn auto_qui_remonte_et_reduit_son_pas_une_fois() {
+    fn auto_qui_remonte_et_reduit_son_pas_jusqu_au_plus_petit() {
         let t0 = Instant::now();
         let mut c = en_auto(t0);
         let t = t0 + ms(600);
@@ -1817,14 +1841,17 @@ mod tests {
             suite(&mut c, Vu::Image(Mesure::Avance(100), None), t),
             vec![Geste::Apercu, Geste::Descendre(100)]
         );
-        // Une seconde fois : on remonte encore, le pas n'est plus réduit.
+        // Les pertes réduisent encore le pas, jusqu'au plus petit (animation, C).
         assert_eq!(suite(&mut c, perdue, t), vec![Geste::Descendre(-50)]);
-        assert_eq!(c.pas(), 100);
+        assert_eq!(c.pas(), 50);
+        assert_eq!(suite(&mut c, perdue, t), vec![Geste::Descendre(-25)]);
+        assert_eq!(c.pas(), PAS_MIN);
         c.regler_pas(400);
-        assert_eq!(c.pas(), 100);
-        // Toujours perdue : au-delà de `PERDUES_AUTO_MAX`, la molette, sans message.
-        for _ in 1..PERDUES_AUTO_MAX {
-            assert_eq!(suite(&mut c, perdue, t), vec![Geste::Descendre(-50)]);
+        assert_eq!(c.pas(), PAS_MIN);
+        // Au plus petit pas, toujours perdue : au-delà de `PERDUES_AUTO_MAX`, la molette,
+        // sans message.
+        for _ in 0..PERDUES_AUTO_MAX {
+            assert_eq!(suite(&mut c, perdue, t), vec![Geste::Descendre(-20)]);
         }
         assert_eq!(suite(&mut c, perdue, t), vec![Geste::Prendre(PRISE_MAIN)]);
         assert_eq!(c.conduite(), Conduite::Main);
@@ -1847,29 +1874,14 @@ mod tests {
             suite(&mut c, Vu::Image(Mesure::Recul(100), None), t),
             vec![Geste::Descendre(100)]
         );
-        // Encore perdue : un demi-pas du pas réduit, sans le réduire une seconde fois.
+        // Encore perdue : un demi-pas du pas réduit, réduit encore.
         assert_eq!(
             suite(&mut c, Vu::Image(Mesure::Perdue, None), t),
             vec![Geste::Descendre(-50)]
         );
-        assert_eq!(c.pas(), 100);
+        assert_eq!(c.pas(), 50);
         assert_eq!(c.conduite(), Conduite::Auto);
         assert!(!c.perdue());
-    }
-
-    #[test]
-    fn avance_d_un_pas_d_apres_le_cran() {
-        assert_eq!(avance_commandee(200, None, false), 200);
-        assert_eq!(avance_commandee(200, Some(0), false), 200);
-        // Des crans entiers, un au moins.
-        assert_eq!(avance_commandee(200, Some(60), false), 180);
-        assert_eq!(avance_commandee(40, Some(60), false), 60);
-        // Message : un cran partiel pour un pas plus petit qu'un cran.
-        assert_eq!(avance_commandee(40, Some(60), true), 40);
-        assert_eq!(avance_commandee(200, Some(60), true), 180);
-        // Vers le haut.
-        assert_eq!(avance_commandee(-100, Some(60), false), -60);
-        assert_eq!(avance_commandee(-20, Some(60), true), -20);
     }
 
     #[test]
@@ -1903,18 +1915,23 @@ mod tests {
         let perdue = Vu::Image(Mesure::Perdue, None);
         // Le premier pas va trop loin : remonter, pas réduit.
         assert_eq!(suite(&mut c, perdue, t), vec![Geste::Descendre(-100)]);
+        // Revenue sur l'image gardée après une remontée : on redescend, sans compter.
         assert_eq!(
             suite(&mut c, Vu::Image(Mesure::Immobile, None), t),
             vec![Geste::Descendre(100)]
         );
-        // Encore trop loin au pas réduit, sans jamais d'avance : le moyen suivant.
+        assert_eq!(suite(&mut c, perdue, t), vec![Geste::Descendre(-50)]);
+        assert_eq!(suite(&mut c, perdue, t), vec![Geste::Descendre(-25)]);
+        // Au plus petit pas, encore trop loin, sans jamais d'avance : le moyen suivant.
+        assert_eq!(suite(&mut c, perdue, t), vec![Geste::Descendre(-20)]);
         assert_eq!(
             suite(&mut c, perdue, t),
-            vec![Geste::Repli(Raison::TropLoin), Geste::Descendre(-50)]
+            vec![Geste::Repli(Raison::TropLoin), Geste::Descendre(-20)]
         );
         assert_eq!(c.conduite(), Conduite::Auto);
-        // Le suivant repart de zéro.
-        assert_eq!(suite(&mut c, perdue, t), vec![Geste::Descendre(-50)]);
+        // Le suivant repart du pas plein.
+        assert_eq!(c.pas(), 200);
+        assert_eq!(suite(&mut c, perdue, t), vec![Geste::Descendre(-100)]);
     }
 
     #[test]
@@ -1926,8 +1943,9 @@ mod tests {
         let immobile = Vu::Image(Mesure::Immobile, None);
         // Le moyen a fait avancer la page une fois.
         suite(&mut c, Vu::Image(Mesure::Avance(200), None), t);
-        // Puis chaque pas perd l'image ; chaque remontée revient sur l'image gardée.
-        for _ in 0..PERDUES_AUTO_MAX {
+        // Puis chaque pas perd l'image ; chaque remontée revient sur l'image gardée. Trois
+        // pertes réduisent le pas (200, 100, 50, 40), puis `PERDUES_AUTO_MAX` sont comptées.
+        for _ in 0..(3 + PERDUES_AUTO_MAX) {
             let g = suite(&mut c, perdue, t);
             assert!(matches!(g[..], [Geste::Descendre(p)] if p < 0), "{g:?}");
             let g = suite(&mut c, immobile, t);
@@ -1943,17 +1961,25 @@ mod tests {
         let mut c = en_auto(t0);
         let t = t0 + ms(600);
         let ambigue = Vu::Image(Mesure::Ambigue, None);
-        // Rien d'ajouté (pas d'aperçu), le pas suivant part.
-        assert_eq!(suite(&mut c, ambigue, t), vec![Geste::Descendre(200)]);
+        // Pas assez de texte dans le recouvrement : remonter de la moitié du pas, pas
+        // réduit de moitié, réessayer (rien d'ajouté).
+        assert_eq!(suite(&mut c, ambigue, t), vec![Geste::Descendre(-100)]);
+        assert_eq!(c.pas(), 100);
+        // Du texte retrouvé : le pas plein revient.
         assert_eq!(
-            suite(&mut c, Vu::Image(Mesure::Avance(400), None), t),
+            suite(&mut c, Vu::Image(Mesure::Avance(100), None), t),
             vec![Geste::Apercu, Geste::Descendre(200)]
         );
-        // Une page unie sans fin compte comme immobile au bout de `AMBIGUES_MAX`.
+        // Une page unie sans fin : le pas descend jusqu'au plus petit, puis compte.
+        assert_eq!(suite(&mut c, ambigue, t), vec![Geste::Descendre(-100)]);
+        assert_eq!(suite(&mut c, ambigue, t), vec![Geste::Descendre(-50)]);
+        assert_eq!(suite(&mut c, ambigue, t), vec![Geste::Descendre(-25)]);
+        assert_eq!(c.pas(), PAS_MIN);
         for _ in 1..AMBIGUES_MAX {
-            assert_eq!(suite(&mut c, ambigue, t), vec![Geste::Descendre(200)]);
+            assert_eq!(suite(&mut c, ambigue, t), vec![Geste::Descendre(PAS_MIN)]);
         }
-        assert_eq!(suite(&mut c, ambigue, t), vec![Geste::Descendre(200)]);
+        // `AMBIGUES_MAX` au plus petit pas : une image immobile, puis une seconde, le bas.
+        assert_eq!(suite(&mut c, ambigue, t), vec![Geste::Descendre(PAS_MIN)]);
         for _ in 1..AMBIGUES_MAX {
             suite(&mut c, ambigue, t);
         }
@@ -2098,7 +2124,8 @@ mod tests {
         let t0 = Instant::now();
         let mut c = en_auto(t0);
         let t = t0 + ms(600);
-        for i in 0..(3 * AMBIGUES_MAX) {
+        suite(&mut c, Vu::Image(Mesure::Avance(200), pos(0.0)), t);
+        for i in 1..(3 * AMBIGUES_MAX) {
             assert_eq!(
                 suite(&mut c, Vu::Image(Mesure::Ambigue, pos(i as f64)), t),
                 vec![Geste::Descendre(200)],
@@ -2119,7 +2146,7 @@ mod tests {
     }
 
     #[test]
-    fn attendu_observe_sinon_commande() {
+    fn attendu_seulement_observe() {
         let p = |pour_cent| {
             Some(Position {
                 pour_cent,
@@ -2127,12 +2154,12 @@ mod tests {
             })
         };
         // Observé : 10 % d'un parcours de 1 600 px.
-        assert_eq!(attendu(p(10.0), p(20.0), 400, 225), Some(160));
+        assert_eq!(attendu(p(10.0), p(20.0), 400), Some(160));
         // Position inchangée : 0, jamais le pas commandé.
-        assert_eq!(attendu(p(10.0), p(10.0), 400, 225), Some(0));
-        // Sans position : les pixels commandés depuis l'image gardée, comme indice.
-        assert_eq!(attendu(None, p(10.0), 400, 450), Some(450));
-        assert_eq!(attendu(None, None, 400, 0), None);
+        assert_eq!(attendu(p(10.0), p(10.0), 400), Some(0));
+        // Sans position : rien (le pas commandé n'est jamais passé à la mesure).
+        assert_eq!(attendu(None, p(10.0), 400), None);
+        assert_eq!(attendu(None, None, 400), None);
     }
 
     // ----- lancement -----
