@@ -82,10 +82,10 @@ use ::windows::Win32::UI::WindowsAndMessaging::{
 };
 
 use super::{
-    assembler, barre_utile, centre, classe_pour_journal, cran_entendu, garde,
-    meilleur_recouvrement, page_par_classe, parametres_molette, pixels_entre, plus_petit_sous,
-    position_lue, retirer, sans_barre, survol_actif, Choix, Constat, Envoi, Etalon, FenetreInfo,
-    Molette, Moyen, PageTrouvee, Position, RappelMolette, Rect, BUDGET_PAGES, CRAN, MARQUE,
+    assembler, barre_utile, centre, classe_pour_journal, cran_entendu, decalage_px, garde,
+    meilleur_recouvrement, page_par_classe, parametres_molette, plus_petit_sous, position_lue,
+    retirer, sans_barre, survol_actif, Choix, Constat, Envoi, Etalon, FenetreInfo, Molette, Moyen,
+    PageTrouvee, Position, RappelMolette, Rect, BUDGET_PAGES, CRAN, MARQUE,
 };
 
 /// Attente d'une position lue par UI Automation.
@@ -702,8 +702,8 @@ fn chercher(
     None
 }
 
-/// Les trois propriétés de la position et le `ScrollPattern`, ramenés en une seule demande à
-/// l'autre app (Chromium répond lentement à chaque lecture).
+/// Les trois propriétés de la position, le rectangle de l'élément et le `ScrollPattern`,
+/// ramenés en une seule demande à l'autre app (Chromium répond lentement à chaque lecture).
 fn cache_position(auto: &IUIAutomation) -> ::windows::core::Result<IUIAutomationCacheRequest> {
     // SAFETY : appels COM du fil du client.
     unsafe {
@@ -712,11 +712,13 @@ fn cache_position(auto: &IUIAutomation) -> ::windows::core::Result<IUIAutomation
         cache.AddProperty(UIA_ScrollVerticallyScrollablePropertyId)?;
         cache.AddProperty(UIA_ScrollVerticalScrollPercentPropertyId)?;
         cache.AddProperty(UIA_ScrollVerticalViewSizePropertyId)?;
+        cache.AddProperty(UIA_BoundingRectanglePropertyId)?;
         Ok(cache)
     }
 }
 
-/// La position, en une demande (`BuildUpdatedCache`) ; à défaut, en trois lectures.
+/// La position et la hauteur de la vue, en une demande (`BuildUpdatedCache`) ; à défaut,
+/// en lectures une à une (hauteur illisible : celle de la recherche).
 fn lire_position(t: &Trouve, cache: Option<&IUIAutomationCacheRequest>) -> Option<Position> {
     // SAFETY : appels COM du fil du client.
     let en_cache = cache.and_then(|c| unsafe {
@@ -727,9 +729,13 @@ fn lire_position(t: &Trouve, cache: Option<&IUIAutomationCacheRequest>) -> Optio
             motif.CachedVerticallyScrollable().ok()?.as_bool(),
             motif.CachedVerticalScrollPercent().ok()?,
             motif.CachedVerticalViewSize().ok()?,
+            element
+                .CachedBoundingRectangle()
+                .ok()
+                .map(|r| rect_de(r).hauteur),
         ))
     });
-    let (defilable, pour_cent, vue) = match en_cache {
+    let (defilable, pour_cent, vue, hauteur) = match en_cache {
         Some(lu) => lu,
         // SAFETY : idem.
         None => unsafe {
@@ -737,10 +743,15 @@ fn lire_position(t: &Trouve, cache: Option<&IUIAutomationCacheRequest>) -> Optio
                 t.motif.CurrentVerticallyScrollable().ok()?.as_bool(),
                 t.motif.CurrentVerticalScrollPercent().ok()?,
                 t.motif.CurrentVerticalViewSize().ok()?,
+                t.element
+                    .CurrentBoundingRectangle()
+                    .ok()
+                    .map(|r| rect_de(r).hauteur),
             )
         },
     };
-    position_lue(defilable, pour_cent, vue)
+    let hauteur = hauteur.filter(|h| *h > 0).unwrap_or(t.hauteur);
+    position_lue(defilable, pour_cent, vue, hauteur)
 }
 
 /// Jusqu'à `unites` pas `SmallIncrement` (négatif : `SmallDecrement`), aucun commencé après
@@ -1439,12 +1450,10 @@ impl Defileur {
                 // Une seule position lue par pas : elle règle le pas précédent et sert
                 // d'avant à celui-ci (seulement si l'appelant ne dit rien des images).
                 let lue = if self.par_images { None } else { a.position() };
-                if let (Some(d), Some(apres), Some(hauteur)) =
-                    (self.derniere.take(), lue, a.hauteur())
-                {
+                if let (Some(d), Some(apres)) = (self.derniere.take(), lue) {
                     if let (Moyen::Automation, Some(avant)) = (d.moyen, d.position) {
-                        if let Some(px) = pixels_entre(avant, apres, hauteur) {
-                            self.etalons[m.rang()].constater(d.unites, px);
+                        if let Some(px) = decalage_px(&avant, &apres) {
+                            self.etalons[m.rang()].constater(d.unites, f64::from(px));
                         }
                     }
                 }
