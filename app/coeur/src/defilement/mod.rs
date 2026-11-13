@@ -8,9 +8,10 @@
 //! fréquente). Deux lignes sont égales (D12) si 90 % des pixels d'encre de l'une ou de
 //! l'autre (et au moins `DENOMINATEUR_MIN`) le sont à ± `canal` : une ligne presque
 //! blanche n'est donc plus égale à une ligne de texte clairsemé. Une ligne est
-//! **porteuse** si elle a de l'encre et que cette encre change à 3 lignes au-dessus ou
-//! au-dessous (information verticale) : une ligne vide traversée par une barre latérale,
-//! un filet vertical ou le milieu d'un fût ne votent pour aucun décalage. Seules les
+//! **porteuse** si elle a de l'encre et que cette encre change de plus de 3 × `canal` (24)
+//! à 3 lignes au-dessus ou au-dessous (information verticale ; un bruit ou une trame de
+//! ± `canal` n'en est pas) : une ligne vide traversée par une barre latérale, tramée ou
+//! non, un filet vertical ou le milieu d'un fût ne votent pour aucun décalage. Seules les
 //! paires où l'une des deux lignes est porteuse comptent pour l'appui et la note.
 //! Une bande à droite (`bande_droite`, la barre de défilement et son pouce, qui bougent
 //! seuls) n'est jamais comparée.
@@ -25,12 +26,18 @@
 //! demi-ligne) / (appui + 1). Le meilleur qui passe n'est rendu que si chaque autre
 //! décalage jugé, à plus de 2 lignes de lui, en est **séparé** : un quart de ligne d'écart
 //! de plus et une note au moins double, ou bien il ne passe pas et a moins de la moitié de
-//! son appui. Sinon `Ambigue`. `Immobile` n'est donc rendu que si 0 est ce meilleur.
-//! L'attendu ne fait que choisir, parmi des candidats qui passent tous et que rien ne
-//! sépare, celui qui est à `ATTENDU_A_PEU_PRES` lignes de lui (ses voisins sont alors
-//! jugés aussi) ; il ne restreint jamais la recherche et ne choisit jamais une avance
-//! contre 0. Rien ne passe : `Perdue`, ou `Ambigue` si un décalage n'est contredit par
-//! rien (trop peu de lignes porteuses, bande teintée trop grande).
+//! son appui. Sinon `Ambigue`. Dans le groupe des voisins du meilleur (à 2 lignes l'un de
+//! l'autre : page lisse, écarts de rendu type WPF), 0 l'emporte s'il passe : `Immobile`.
+//! Rien ne passe : `Perdue`, ou `Ambigue` si un décalage n'est contredit par rien (trop
+//! peu de lignes porteuses, bande teintée trop grande, recouvrements blancs non jugés).
+//!
+//! **Attendu.** Seule une position **lue** par l'application (`Attendu::Lu`) est passée,
+//! jamais le pas commandé. Deux images égales à la même place donnent `Immobile` quel que
+//! soit le lu. Sinon, si le recouvrement au lu (à `ATTENDU_A_PEU_PRES` lignes près, le lu
+//! d'abord) est cohérent (il passe, ou n'a aucune ligne différente : un blanc), il est
+//! rendu même si d'autres décalages passent, sauf si l'un d'eux le bat nettement
+//! (`Ambigue`, ou `Immobile` si c'est 0) ; sinon la mesure sans attendu, et `Ambigue` si
+//! elle trouve une autre avance que le lu.
 //!
 //! **Ce qui est excusé**, pour un décalage donné, sans compter ni pour ni contre :
 //! - les lignes des suites immobiles du haut et du bas (égales à la même place dans les
@@ -45,7 +52,9 @@
 //!   l'écart.
 //!
 //! Les bandes fixes de l'assemblage (D11) se déterminent après la mesure, sur les lignes
-//! immobiles qui ne suivent pas le décalage trouvé (`fixes`).
+//! immobiles qui ne suivent pas le décalage trouvé (`fixes`). Au placement, une ligne déjà
+//! posée que la nouvelle image ne montre que teintée (survol à place fixe) est gardée, et
+//! une ligne posée teintée est remplacée : la bande ne reste qu'une fois au plus.
 //!
 //! **Budget** (15 ms de médiane jusqu'à 2 560 × 1 300) : au-delà de `COLONNES_VISEES`
 //! colonnes, une colonne sur `pas` seulement est lue (2 à 1 024 de large, 3 à 1 920, 4 à
@@ -172,6 +181,16 @@ pub enum Mesure {
     /// Pas assez de lignes porteuses, ou plusieurs décalages que rien ne sépare (page
     /// unie, motif qui se répète) : rien n'est ajouté, l'image suivante décidera.
     Ambigue,
+}
+
+/// Ce que l'application sait du décalage, avant de mesurer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Attendu {
+    /// Rien de sûr (le pas commandé n'est qu'un indice : il n'est pas passé).
+    Aucun,
+    /// Le décalage lu par l'application (position de défilement lue, en pixels), depuis
+    /// la dernière image gardée : fiable, il peut traverser un blanc (voir `mesurer`).
+    Lu(i32),
 }
 
 /// Les bandes fixes de la zone (D11) : lignes du haut et du bas qui ne défilent pas.
@@ -408,7 +427,9 @@ fn encre_du_paquet(p: &[u8; PAQUET], f: &[u8; PAQUET], seuil: u8) -> u32 {
 }
 
 /// Ce que `decrire` tire d'un paquet, ajouté aux compteurs `acc` (encre, encre qui
-/// change à 3 lignes au-dessus, au-dessous ; un compteur par octet, 255 paquets au plus).
+/// change de plus de `seuil` à 3 lignes au-dessus, au-dessous : un bruit ou une trame de
+/// ± l'écart permis ne fait pas une ligne porteuse ; un compteur par octet, 255 paquets
+/// au plus).
 #[inline(always)]
 fn decrire_le_paquet(
     acc: &mut [[u8; PAQUET]; 3],
@@ -417,13 +438,12 @@ fn decrire_le_paquet(
     dessus: &[u8; PAQUET],
     dessous: &[u8; PAQUET],
     seuil: u8,
-    canal: u8,
 ) {
     for j in 0..PAQUET {
         let encre = plus(dif(p[j], f[j]), seuil) & COULEUR[j];
         acc[0][j] += encre;
-        acc[1][j] += encre & plus(dif(p[j], dessus[j]), canal);
-        acc[2][j] += encre & plus(dif(p[j], dessous[j]), canal);
+        acc[1][j] += encre & plus(dif(p[j], dessus[j]), seuil);
+        acc[2][j] += encre & plus(dif(p[j], dessous[j]), seuil);
     }
 }
 
@@ -587,7 +607,6 @@ fn decrire(im: &Image, t: &Tolerance) -> Lignes {
                     paquet_n(dessus, j, &restes[1]),
                     paquet_n(dessous, j, &restes[2]),
                     seuil,
-                    t.canal,
                 );
             }
             let e = somme(&acc[0]);
@@ -736,6 +755,9 @@ struct Jugement {
     passe: bool,
     /// Rien ne le contredit (passerait avec plus d'appui).
     sans_contradiction: bool,
+    /// Accordé selon D12 sans aucune ligne différente (hors bandes fixes et teintées) :
+    /// un recouvrement blanc égal ligne pour ligne.
+    sans_ligne_fausse: bool,
     note: u64,
     /// Écart pondéré (lignes × `UNITE`).
     ecart: u64,
@@ -824,6 +846,7 @@ impl Contexte<'_> {
                     complet: false,
                     passe: false,
                     sans_contradiction: false,
+                    sans_ligne_fausse: false,
                     note,
                     ecart,
                     appui,
@@ -883,7 +906,7 @@ impl Contexte<'_> {
             }
         }
         // Bandes teintées : au plus deux suites (trous de 2 lignes au plus), chacune de
-        // `BANDE_MAX` lignes au plus, en tout au plus 1/8 des lignes ; pour un décalage
+        // `BANDE_MAX` lignes au plus, la bande au plus 1/8 des lignes ; pour un décalage
         // non nul, deux suites sont la même bande vue dans les deux images (à `d`).
         let mut suites: Vec<(usize, usize)> = Vec::new();
         for (i, e) in etats.iter().enumerate() {
@@ -907,10 +930,17 @@ impl Contexte<'_> {
                 || pres(b1.saturating_sub(a1), dd)
                 || (pres(a1 - a0 + 1, dd) && pres(b1 - b0 + 1, dd) && b0 - a0 <= BANDE_MAX + 2)
         };
+        let deux_vues = d != 0 && suites.len() == 2 && meme_bande(suites[0], suites[1]);
+        // (La même bande vue deux fois n'est comptée qu'une fois.)
+        let bande = if deux_vues {
+            suites.iter().map(|(a, b)| b - a + 1).max().unwrap_or(0)
+        } else {
+            total
+        };
         let valide = suites.len() <= 2
             && suites.iter().all(|(a, b)| b - a < BANDE_MAX)
-            && total * 8 <= long
-            && (d == 0 || suites.len() < 2 || meme_bande(suites[0], suites[1]));
+            && bande * 8 <= long
+            && (d == 0 || suites.len() < 2 || deux_vues);
         let mut refusees = vec![false; long];
         if !valide {
             for (i, e) in etats.iter_mut().enumerate() {
@@ -992,11 +1022,16 @@ impl Contexte<'_> {
         // Refusé seulement pour des bandes teintées trop grandes : l'encre est à sa place,
         // ce n'est pas « trop vite ».
         let sans_contradiction = accorde || (!valide && total > 0 && compter(true).0);
+        // (Une ligne excusée comme fixe est une ligne différente.)
+        let aucune_fausse = !etats
+            .iter()
+            .any(|e| matches!(e, Etat::Fausse(_) | Etat::Fixe));
         Jugement {
             d,
             complet: true,
             passe: accorde && appui >= PORTEUSES_MIN,
             sans_contradiction,
+            sans_ligne_fausse: accorde && aucune_fausse,
             note: (ecart + REGULARISATION) * UNITE / (u64::from(appui) + 1),
             ecart,
             appui,
@@ -1036,20 +1071,27 @@ fn mesure_de(d: i32) -> Mesure {
 }
 
 /// Mesure `apres` contre `avant` (même taille : la dernière image gardée), hors des
-/// bandes `fixes` connues (D11) ; `attendu` : un décalage observé ou supposé (position
-/// lue, pas commandé), qui peut être faux.
+/// bandes `fixes` connues (D11).
 ///
-/// L'attendu ne restreint jamais la recherche et n'invente jamais une avance : il ne fait
-/// que choisir, parmi des décalages qui passent tous et qu'aucun critère ne sépare, celui
-/// qui est à 3 lignes près de lui s'il est seul, et jamais contre 0. Deux images
-/// identiques qui portent assez de lignes donnent `Immobile`, quel que soit l'attendu ;
-/// `Ambigue` si leur contenu se répète (0 n'est pas seul).
+/// Sans attendu, l'image seule décide : un décalage qui passe et que rien ne sépare des
+/// autres, sinon `Ambigue` (ou `Perdue` si tout est contredit).
+///
+/// Avec un attendu **lu** `e` :
+/// - deux images égales à la même place (au bit près, ou à la tolérance de D12) donnent
+///   `Immobile`, quel que soit `e` (l'application ment ou n'a pas encore peint) ;
+/// - si le recouvrement à `e` (ou à 3 lignes près, `e` d'abord) est cohérent (il passe, ou
+///   il n'a aucune ligne différente, même sans ligne porteuse : un blanc), `e` est rendu
+///   même si d'autres décalages passent aussi ; si un autre décalage le contredit
+///   nettement, `Ambigue` (`Immobile` si c'est 0) ;
+/// - sinon, la mesure sans attendu, où `e` départage seulement des candidats qui passent
+///   tous ; une autre avance que `e` donne `Ambigue`.
+///
 /// Des images de tailles différentes ou incohérentes : `Perdue`.
 pub fn mesurer(
     avant: &Pixels,
     apres: &Pixels,
     fixes: Fixes,
-    attendu: Option<i32>,
+    attendu: Attendu,
     t: &Tolerance,
 ) -> Mesure {
     let (Some(va), Some(vb)) = (Vue::de(avant), Vue::de(apres)) else {
@@ -1058,6 +1100,13 @@ pub fn mesurer(
     if va.l != vb.l || va.h != vb.h {
         return Mesure::Perdue;
     }
+    let lu = match attendu {
+        Attendu::Aucun => None,
+        Attendu::Lu(e) => Some(e),
+    };
+    if lu.is_some() && avant.rgba == apres.rgba {
+        return Mesure::Immobile;
+    }
     let (a, b) = (echantillonner(va), echantillonner(vb));
     let (la, lb) = (decrire(&a, t), decrire(&b, t));
     let h = b.h;
@@ -1065,17 +1114,7 @@ pub fn mesurer(
     let bas = (fixes.bas as usize).min(h - haut);
     let utile = h - haut - bas;
     let rec = recouvrement_min(utile);
-    // Assez de lignes porteuses dans les deux images, sinon rien ne peut passer.
-    let porteuses = |l: &Lignes| {
-        l.porteuse[haut..h - bas]
-            .iter()
-            .filter(|p| **p != 0)
-            .count()
-    };
-    if utile <= rec
-        || porteuses(&la) < PORTEUSES_MIN as usize
-        || porteuses(&lb) < PORTEUSES_MIN as usize
-    {
+    if utile <= rec {
         return Mesure::Ambigue;
     }
     // Les différences à la même place : les suites immobiles du haut et du bas.
@@ -1085,6 +1124,11 @@ pub fn mesurer(
         let den = lb.encre[y].max(la.encre[y]).max(DENOMINATEUR_MIN);
         d0[y] = differents(b.ligne(y), lb.fond[y], a.ligne(y), la.fond[y], t, den).min(den);
         statique[y] = d0[y] <= permis_ligne(den, t);
+    }
+    // Deux images égales à la même place, à la tolérance des valeurs près (pas à celle des
+    // lignes, qui accepterait une ligne de liste pour sa voisine) : rien n'a bougé.
+    if lu.is_some() && d0[haut..h - bas].iter().all(|n| *n == 0) {
+        return Mesure::Immobile;
     }
     let fixe_haut = (haut..h - bas).find(|y| !statique[*y]).unwrap_or(h - bas);
     let fixe_bas = (haut..h - bas)
@@ -1103,7 +1147,84 @@ pub fn mesurer(
         fixe_haut,
         fixe_bas,
     };
-    decider(&cx, &d0, attendu)
+    // Assez de lignes porteuses dans les deux images, sinon rien ne peut passer : seul un
+    // attendu lu peut alors décider.
+    let porteuses = |l: &Lignes| {
+        l.porteuse[haut..h - bas]
+            .iter()
+            .filter(|p| **p != 0)
+            .count()
+    };
+    let assez =
+        porteuses(&la) >= PORTEUSES_MIN as usize && porteuses(&lb) >= PORTEUSES_MIN as usize;
+    let (normale, juges) = if assez {
+        decider(&cx, &d0, lu)
+    } else {
+        (Mesure::Ambigue, Vec::new())
+    };
+    match lu {
+        Some(e) => avec_le_lu(&cx, &d0, e, normale, &juges),
+        None => normale,
+    }
+}
+
+/// La décision avec un attendu lu `e` (voir `mesurer`), après la mesure sans lui.
+fn avec_le_lu(cx: &Contexte, d0: &[u32], e: i32, normale: Mesure, juges: &[Jugement]) -> Mesure {
+    let dmax = (cx.b.h - cx.haut - cx.bas - cx.rec) as i32;
+    if e.abs() > dmax {
+        // Au-delà du recouvrement permis : rien à vérifier.
+        return match normale {
+            Mesure::Immobile => Mesure::Immobile,
+            Mesure::Ambigue | Mesure::Perdue => Mesure::Perdue,
+            _ => Mesure::Ambigue,
+        };
+    }
+    let mut pres: Vec<Jugement> = Vec::new();
+    for d in (e - ATTENDU_A_PEU_PRES).max(-dmax)..=(e + ATTENDU_A_PEU_PRES).min(dmax) {
+        let deja = juges.iter().find(|j| j.d == d && j.complet).copied();
+        if let Some(j) = deja.or_else(|| cx.juger(d, None, (d == 0).then_some(d0))) {
+            pres.push(j);
+        }
+    }
+    let coherent = |j: &Jugement| j.complet && (j.passe || j.sans_ligne_fausse);
+    let choisi = pres
+        .iter()
+        .filter(|j| coherent(j))
+        .min_by_key(|j| (j.d != e, j.ecart, (j.d - e).unsigned_abs()));
+    let Some(c) = choisi.copied() else {
+        // Les images contredisent le lu : elles décident seules, sauf une autre avance.
+        return match normale {
+            Mesure::Avance(_) | Mesure::Recul(_) => {
+                let v = match normale {
+                    Mesure::Avance(n) => n as i32,
+                    Mesure::Recul(n) => -(n as i32),
+                    _ => 0,
+                };
+                if (v - e).abs() <= ATTENDU_A_PEU_PRES {
+                    normale
+                } else {
+                    Mesure::Ambigue
+                }
+            }
+            m => m,
+        };
+    };
+    // Un autre décalage qui passe et bat nettement le lu le contredit : plus juste, ou
+    // deux fois plus d'appui pour une note deux fois meilleure.
+    let contredit = juges
+        .iter()
+        .filter(|r| r.complet && r.passe && (r.d - c.d).abs() > ATTENDU_A_PEU_PRES + 2)
+        .filter(|r| {
+            let deux_fois = c.note >= r.note.saturating_mul(2);
+            (c.ecart >= r.ecart + MARGE_ECART && deux_fois)
+                || (2 * c.appui < r.appui && (deux_fois || !c.passe))
+        })
+        .min_by_key(|r| r.note);
+    match contredit {
+        None => mesure_de(c.d),
+        Some(r) if r.d == 0 => Mesure::Immobile,
+        Some(_) => Mesure::Ambigue,
+    }
 }
 
 /// Un décalage classé : (note, décalage).
@@ -1123,14 +1244,16 @@ fn milieu(y0: usize, y1: usize, d: i32) -> (usize, usize) {
 
 /// Les candidats classés en deux passes grossières (profil, résumés), et quelques
 /// décalages dont le recouvrement porte trop peu pour juger (pour ne pas dire « perdue »
-/// quand un recouvrement vide s'accorderait).
-fn classer(cx: &Contexte) -> (Vec<Classe>, Vec<Classe>) {
+/// quand un recouvrement vide s'accorderait) ; vrai s'il y en avait plus, au profil
+/// accordé, que ceux gardés (une barre latérale tramée : le bon n'est peut-être pas jugé).
+fn classer(cx: &Contexte) -> (Vec<Classe>, Vec<Classe>, bool) {
     let h = cx.b.h;
     let utile = h - cx.haut - cx.bas;
     let dmax = (utile - cx.rec) as i32;
     let mut profil: Vec<(u64, i32)> = Vec::with_capacity(CANDIDATS_PROFIL + 1);
     let mut profil_milieu: Vec<(u64, i32)> = Vec::with_capacity(CANDIDATS_PROFIL + 1);
     let mut faibles: Vec<(u64, i32)> = Vec::with_capacity(CANDIDATS_FAIBLES + 1);
+    let mut faibles_nuls = 0usize;
     for d in -dmax..=dmax {
         let (y0, y1) = recouvrement(h, cx.haut, cx.bas, d);
         if y1 - y0 < cx.rec as i64 {
@@ -1143,6 +1266,7 @@ fn classer(cx: &Contexte) -> (Vec<Classe>, Vec<Classe>) {
         let (c1, n1) = cout_du_profil(cx, d, m1, y1);
         let (cout, nb) = (c0 + cm + c1, n0 + nm + n1);
         if nb < u64::from(PORTEUSES_MIN) {
+            faibles_nuls += usize::from(cout == 0);
             garder(&mut faibles, CANDIDATS_FAIBLES, cout * UNITE / nb.max(1), d);
             continue;
         }
@@ -1167,7 +1291,7 @@ fn classer(cx: &Contexte) -> (Vec<Classe>, Vec<Classe>) {
     };
     let mut classes = affiner(&profil, false, CANDIDATS_RESUME);
     classes.extend(affiner(&profil_milieu, true, CANDIDATS_MILIEU));
-    (classes, faibles)
+    (classes, faibles, faibles_nuls > CANDIDATS_FAIBLES)
 }
 
 /// Coût du profil des lignes `y0..y1` de la nouvelle image décalées de `d`, et nombre de
@@ -1230,13 +1354,24 @@ fn note_du_resume(cx: &Contexte, d: i32, y0: usize, y1: usize) -> u64 {
     cout * UNITE / nb.max(1)
 }
 
-/// Juge 0, les meilleurs candidats et l'attendu, puis décide (voir la doc du module).
-fn decider(cx: &Contexte, d0: &[u32], attendu: Option<i32>) -> Mesure {
+/// Juge 0, les meilleurs candidats et l'attendu lu, puis décide (voir la doc du module) ;
+/// rend aussi les jugements.
+fn decider(cx: &Contexte, d0: &[u32], attendu: Option<i32>) -> (Mesure, Vec<Jugement>) {
     let mut juges: Vec<Jugement> = Vec::new();
+    let m = decider_dans(cx, d0, attendu, &mut juges);
+    (m, juges)
+}
+
+fn decider_dans(
+    cx: &Contexte,
+    d0: &[u32],
+    attendu: Option<i32>,
+    juges: &mut Vec<Jugement>,
+) -> Mesure {
     let h = cx.b.h;
     let dmax = (h - cx.haut - cx.bas - cx.rec) as i32;
     let mut ordre: Vec<i32> = vec![0];
-    let (classes, faibles) = classer(cx);
+    let (classes, faibles, non_vus) = classer(cx);
     for (_, d) in classes {
         if !ordre.contains(&d) {
             ordre.push(d);
@@ -1268,7 +1403,8 @@ fn decider(cx: &Contexte, d0: &[u32], attendu: Option<i32>) -> Mesure {
         .min_by_key(|j| (j.note, j.d.unsigned_abs()))
         .copied()
     else {
-        return if juges.iter().any(|j| j.sans_contradiction) {
+        // Des recouvrements sans information n'ont pas tous été jugés : pas « perdue ».
+        return if non_vus || juges.iter().any(|j| j.sans_contradiction) {
             Mesure::Ambigue
         } else {
             Mesure::Perdue
@@ -1310,8 +1446,8 @@ fn decider(cx: &Contexte, d0: &[u32], attendu: Option<i32>) -> Mesure {
                 && r.note >= meilleur.note.saturating_mul(2))
             || (!r.passe && 2 * r.appui < meilleur.appui)
     };
-    let rivaux: Vec<&Jugement> = juges.iter().filter(|j| !voisin(j.d)).collect();
-    if rivaux.iter().all(|r| separe(r)) {
+    let rivaux: Vec<Jugement> = juges.iter().filter(|j| !voisin(j.d)).copied().collect();
+    if rivaux.iter().all(&separe) {
         return mesure_de(choisi);
     }
     // Inséparables : l'attendu choisit, si tous passent, si un seul groupe est près de
@@ -1319,12 +1455,13 @@ fn decider(cx: &Contexte, d0: &[u32], attendu: Option<i32>) -> Mesure {
     let Some(e) = attendu else {
         return Mesure::Ambigue;
     };
-    let mut proches: Vec<Jugement> = rivaux.iter().filter(|r| !separe(r)).map(|r| **r).collect();
+    let mut proches: Vec<Jugement> = rivaux.iter().filter(|r| !separe(r)).copied().collect();
     proches.extend(groupe.iter().copied());
     // Les décalages à 3 lignes de l'attendu qui n'ont pas été jugés le sont maintenant.
     for d in e - ATTENDU_A_PEU_PRES..=e + ATTENDU_A_PEU_PRES {
         if d.abs() <= dmax && !juges.iter().any(|j| j.d == d) {
             if let Some(j) = cx.juger(d, None, (d == 0).then_some(d0)) {
+                juges.push(j);
                 if !separe(&j) {
                     proches.push(j);
                 }
@@ -1351,9 +1488,13 @@ fn decider(cx: &Contexte, d0: &[u32], attendu: Option<i32>) -> Mesure {
     mesure_de(choisir_dans_le_groupe(cx, &pres, attendu))
 }
 
-/// Dans un groupe de voisins : le plus petit écart ; à égalité, l'attendu, puis la plus
-/// petite somme des écarts pixel à pixel, puis le plus petit décalage.
+/// Dans un groupe de voisins : 0 s'il y est (une page immobile aux écarts de rendu, comme
+/// WPF, ne glisse pas de deux lignes) ; sinon le plus petit écart ; à égalité, l'attendu,
+/// puis la plus petite somme des écarts pixel à pixel, puis le plus petit décalage.
 fn choisir_dans_le_groupe(cx: &Contexte, groupe: &[Jugement], attendu: Option<i32>) -> i32 {
+    if groupe.iter().any(|j| j.d == 0) {
+        return 0;
+    }
     let Some(min) = groupe.iter().map(|j| j.ecart).min() else {
         return 0;
     };
@@ -1399,6 +1540,96 @@ impl<'a> Paire<'a> {
         let l = ligne_lue(self.b, yb);
         encre_de(&l, fond(&l), self.t)
     }
+
+    /// Les lignes `y` de l'image d'après qui ne diffèrent de la ligne `y + d` d'avant que
+    /// par une teinte (survol, sélection, ombre : fond changé, encre à sa place), et
+    /// laquelle des deux est teintée. Une suite de telles lignes (trous de 2 lignes au
+    /// plus) est jugée d'un bloc : est teintée la version dont le fond n'est pas celui des
+    /// lignes voisines, égales dans les deux images (vote des lignes au fond net : une
+    /// ligne de texte dense n'a pas de fond qui domine). Un drapeau par ligne de l'image.
+    fn teintes(&self, d: usize) -> Vec<Teinte> {
+        let h = self.b.h;
+        let n = h.saturating_sub(d);
+        let mut sortie = vec![Teinte::Non; h];
+        let lc = (self.b.l - bande_droite(self.b.l)).max(1) * 4;
+        let brute = |v: Vue<'a>, y: usize| -> &'a [u8] { &v.rgba[y * v.l * 4..y * v.l * 4 + lc] };
+        // Les fonds (64 points) des deux versions de la ligne `y`.
+        let fonds = |y: usize| (fond(brute(self.b, y)), fond(brute(self.a, y + d)));
+        let canal = self.t.canal;
+        let mut cand = vec![false; n];
+        for (y, c) in cand.iter_mut().enumerate() {
+            // 32 points égaux : pas une teinte (la plupart des lignes s'arrêtent là).
+            let (rb, ra) = (brute(self.b, y), brute(self.a, y + d));
+            let pas = (lc / 4 / 32).max(1) * 4;
+            let pareilles = rb
+                .chunks(pas)
+                .zip(ra.chunks(pas))
+                .all(|(p, q)| p.len() < 3 || q.len() < 3 || ecart(p, q) <= canal);
+            if pareilles {
+                continue;
+            }
+            let (b, a) = fonds(y);
+            if ecart(&b.c, &a.c) > canal {
+                let (lb, la) = (ligne_lue(self.b, y), ligne_lue(self.a, y + d));
+                let (b, a) = (fond(&lb), fond(&la));
+                *c = encre_en_place(&lb, b, &la, a, self.t) && !lignes_egales(&lb, &la, self.t);
+            }
+        }
+        let mut y = 0;
+        while y < n {
+            if !cand[y] {
+                y += 1;
+                continue;
+            }
+            let (debut, mut fin) = (y, y + 1);
+            let mut k = y + 1;
+            while k < n && k < fin + 2 {
+                if cand[k] {
+                    fin = k + 1;
+                }
+                k += 1;
+            }
+            // Le fond de référence : la ligne voisine la plus proche, hors de la suite,
+            // égale dans les deux images et au fond net.
+            let net = |k: usize| {
+                let (b, a) = fonds(k);
+                (!cand[k] && b.domine && ecart(&a.c, &b.c) <= canal).then_some(b)
+            };
+            let apres = (fin..(fin + 8).min(n)).find_map(net);
+            let avant = (debut.saturating_sub(8)..debut).rev().find_map(net);
+            if let Some(r) = apres.or(avant) {
+                let (mut neuve, mut ancienne) = (0u32, 0u32);
+                for k in debut..fin {
+                    let (b, a) = fonds(k);
+                    let bt = b.domine && ecart(&b.c, &r.c) > canal;
+                    let at = a.domine && ecart(&a.c, &r.c) > canal;
+                    neuve += u32::from(bt && !at);
+                    ancienne += u32::from(at && !bt);
+                }
+                let t = if neuve > ancienne {
+                    Teinte::Neuve
+                } else if ancienne > neuve {
+                    Teinte::Ancienne
+                } else {
+                    Teinte::Non
+                };
+                sortie[debut..fin].fill(t);
+            }
+            y = fin;
+        }
+        sortie
+    }
+}
+
+/// Une ligne de l'image d'après comparée à la ligne déjà posée qu'elle recouvre.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Teinte {
+    /// Égales, ou différentes autrement que par une teinte.
+    Non,
+    /// La nouvelle est teintée : garder la ligne posée.
+    Neuve,
+    /// La ligne posée est teintée : la remplacer.
+    Ancienne,
 }
 
 /// Les colonnes lues de la ligne `y` (les mêmes qu'`echantillonner`).
@@ -1468,12 +1699,15 @@ impl Paire<'_> {
     /// Les lignes du haut de l'image d'après qu'il ne faut pas poser après une avance
     /// `d` : jusqu'à la dernière ligne qui ne montre pas la ligne `y + d` d'avant, avant
     /// quatre lignes d'encre égales de suite (en-tête fixe, en-tête qui apparaît, ombre
-    /// sous l'en-tête).
-    fn haut_a_garder(&self, d: u32) -> u32 {
+    /// sous l'en-tête). Une ligne qui ne diffère que par une teinte ne compte pas.
+    fn haut_a_garder(&self, d: u32, teintes: &[Teinte]) -> u32 {
         let (h, d) = (self.b.h, d as usize);
         let (mut garder, mut suite) = (0usize, 0);
         for y in 0..h.saturating_sub(d).min(h / 2 + BORD_MAX) {
-            if self.egales(y, y + d) {
+            if teintes.get(y).is_some_and(|t| *t != Teinte::Non) {
+                // La même ligne, teintée dans l'une : pas un en-tête (`teintes` décide).
+                suite = 0;
+            } else if self.egales(y, y + d) {
                 if self.encre(y) >= ENCRE_MIN {
                     suite += 1;
                     if suite >= 4 {
