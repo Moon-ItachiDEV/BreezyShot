@@ -767,7 +767,12 @@ la moitié de la hauteur utile ; deux pas sans effet d'un moyen non choisi → `
 (`abandonner`, `None` → `Main`) ; une image perdue ou ambiguë réduit d'abord le pas de
 moitié jusqu'à 40 px (en remontant), puis compte (`PERDUES_AUTO_MAX`, `AMBIGUES_MAX`) ; le
 bas par la position lue ou deux images immobiles d'un moyen choisi, puis 350 ms sans
-mouvement. Un cran de molette dans la zone passe à `Main` (définitif) : une image à chaque
+mouvement. Une image `Immobile` mesurée avec un lu non nul (`Vu::ImmobileLu`, par
+`regles::vu_image` : grille répétitive, lu multiple de la période, N4 de C) ne compte
+jamais pour le bas ni pour un repli : pas réduit de moitié, remontée de la moitié du
+dernier mouvement, puis on réessaie (au plus petit pas, on redescend) ; seule une position
+lue en bas la fait finir. Rien n'est alors constaté au défileur
+(`defilante: immobile avec un lu de <e> px: pas reduit`). Un cran de molette dans la zone passe à `Main` (définitif) : une image à chaque
 cran et toutes les 50 ms ; « Trop vite » sur une image perdue, caché quand l'image gardée
 est retrouvée. Une seule fin (bouton, Entrée, en bas, limite), puis `Finit` (la fenêtre
 part tout de suite) et `Assemblee`, vers la sortie commune (`lancer_sortie`, relâchement =

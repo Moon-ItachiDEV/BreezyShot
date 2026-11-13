@@ -1677,14 +1677,19 @@ impl<S: Source, P: Pilote, A: Atelier> Fil<S, P, A> {
         // jamais le pas commandé (C), et seulement pour l'image de ce pas.
         let attendu = regles::attendu(self.position_gardee, position);
         let mesure = self.mesurer(attendu, position);
-        if parti && pas > 0 && depuis_gardee {
+        let vu = regles::vu_image(mesure, attendu, position);
+        if let (Vu::ImmobileLu(_), Attendu::Lu(e)) = (vu, attendu) {
+            // Grille répétitive, lu multiple de la période (C, N4) : pas le bas, et l'image
+            // ne dit pas l'avance (rien n'est constaté).
+            log::info!("defilante: immobile avec un lu de {e} px: pas reduit");
+        } else if parti && pas > 0 && depuis_gardee {
             if let (Some(avance), Some(p)) =
                 (regles::avance_constatee(mesure), self.pilote.as_mut())
             {
                 p.constater(avance);
             }
         }
-        self.vu_en_attente = Some(Vu::Image(mesure, position));
+        self.vu_en_attente = Some(vu);
     }
 
     /// Images toutes les `PRISE_POSEE` jusqu'à deux égales de suite ou

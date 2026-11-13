@@ -550,6 +550,10 @@ impl Course {
 pub enum Vu {
     /// Une image mesurée, et la position lue s'il y en a une.
     Image(Mesure, Option<Position>),
+    /// Une image mesurée `Immobile` avec un lu non nul (`Attendu::Lu(e)`, e ≠ 0) : sur une
+    /// grille parfaitement répétitive, un lu multiple de la période (C, troisième
+    /// relecture N4). Elle ne compte jamais pour le bas, sauf position lue en bas.
+    ImmobileLu(Option<Position>),
     /// Un cran de l'utilisateur ; `dans_zone` : le pointeur était dans la zone.
     Molette { dans_zone: bool },
     /// « Terminer ».
@@ -633,7 +637,52 @@ pub fn suite(course: &mut Course, vu: Vu, maintenant: Instant) -> Vec<Geste> {
             Conduite::Auto => suite_auto(course, mesure, position, maintenant),
             Conduite::Main => suite_main(course, mesure, position, maintenant),
         },
+        Vu::ImmobileLu(position) => match course.conduite {
+            Conduite::Attente => Vec::new(),
+            Conduite::Auto => suite_auto_immobile_lu(course, position, maintenant),
+            // En `Main`, la fin ne vient que de la position lue : comme une image immobile.
+            Conduite::Main => suite_main(course, Mesure::Immobile, position, maintenant),
+        },
     }
+}
+
+/// L'image d'un pas, pour la course : `Immobile` avec un lu non nul devient
+/// `Vu::ImmobileLu` (N4). Fonction pure.
+pub fn vu_image(mesure: Mesure, attendu: Attendu, position: Option<Position>) -> Vu {
+    match (mesure, attendu) {
+        (Mesure::Immobile, Attendu::Lu(e)) if e != 0 => Vu::ImmobileLu(position),
+        _ => Vu::Image(mesure, position),
+    }
+}
+
+/// Une image immobile après un pas, avec un lu non nul (N4) : la page a bougé de `e`, mais
+/// l'image est la même (grille répétitive, `e` multiple de la période). Ce n'est pas le
+/// bas : le pas est réduit de moitié, on remonte de la moitié du dernier mouvement pour
+/// sortir du multiple, et on réessaie. Au plus petit pas, on redescend. Seule une position
+/// lue en bas (≥ 99,9 %) en fait une image immobile ordinaire.
+fn suite_auto_immobile_lu(
+    course: &mut Course,
+    position: Option<Position>,
+    maintenant: Instant,
+) -> Vec<Geste> {
+    if en_bas_lu(position) {
+        return suite_auto(course, Mesure::Immobile, position, maintenant);
+    }
+    if let Some(lue) = position.map(|p| p.pour_cent).filter(|p| p.is_finite()) {
+        course.derniere_position = Some(lue);
+    }
+    course.en_bas_depuis = None;
+    course.immobiles = 0;
+    course.ambigues = 0;
+    // Le lu dit que la page a bougé : le moyen marche.
+    course.moyen_choisi = true;
+    if !course.au_plus_petit() {
+        course.reductions_ambigues += 1;
+        course.recalculer_pas();
+        let recul = (course.dernier_pas.abs() / 2).max(1);
+        return vec![course.descendre(-recul)];
+    }
+    vec![course.descendre(course.pas)]
 }
 
 /// Une image après un pas automatique.
@@ -1632,6 +1681,79 @@ mod tests {
             suite(&mut c, Vu::Image(Mesure::Recul(20), None), t),
             vec![Geste::Descendre(100)]
         );
+    }
+
+    #[test]
+    fn immobile_avec_un_lu_non_nul_n_est_pas_le_bas() {
+        // N4 : grille parfaitement répétitive, le lu exact (une période) donne `Immobile`.
+        assert_eq!(
+            vu_image(Mesure::Immobile, Attendu::Lu(200), pos(50.0)),
+            Vu::ImmobileLu(pos(50.0))
+        );
+        assert_eq!(
+            vu_image(Mesure::Immobile, Attendu::Lu(0), None),
+            Vu::Image(Mesure::Immobile, None)
+        );
+        assert_eq!(
+            vu_image(Mesure::Immobile, Attendu::Aucun, None),
+            Vu::Image(Mesure::Immobile, None)
+        );
+        assert_eq!(
+            vu_image(Mesure::Avance(200), Attendu::Lu(200), None),
+            Vu::Image(Mesure::Avance(200), None)
+        );
+        let t0 = Instant::now();
+        let mut c = en_auto(t0);
+        let t = t0 + ms(600);
+        suite(&mut c, Vu::Image(Mesure::Avance(200), None), t);
+        // Dès le premier pas, puis à chaque fois : pas réduit de moitié et remontée de la
+        // moitié du dernier mouvement, jamais « en bas » ni un repli.
+        assert_eq!(
+            suite(&mut c, Vu::ImmobileLu(pos(40.0)), t),
+            vec![Geste::Descendre(-100)]
+        );
+        assert_eq!(
+            suite(&mut c, Vu::Image(Mesure::Recul(100), pos(35.0)), t),
+            vec![Geste::Descendre(100)]
+        );
+        assert_eq!(
+            suite(&mut c, Vu::ImmobileLu(pos(40.0)), t),
+            vec![Geste::Descendre(-50)]
+        );
+        // Puis jusqu'au plus petit pas (40) et au-delà : toujours un pas, jamais compté.
+        assert_eq!(
+            suite(&mut c, Vu::Image(Mesure::Recul(50), pos(37.0)), t),
+            vec![Geste::Descendre(50)]
+        );
+        for _ in 0..10 {
+            let g = suite(&mut c, Vu::ImmobileLu(pos(40.0)), t);
+            assert!(matches!(g[..], [Geste::Descendre(_)]), "{g:?}");
+            suite(&mut c, Vu::Image(Mesure::Recul(1), pos(39.0)), t);
+        }
+        assert_eq!(c.fin(), None);
+        // Le texte retrouvé rend le pas plein.
+        assert_eq!(
+            suite(&mut c, Vu::Image(Mesure::Avance(40), pos(41.0)), t),
+            vec![Geste::Apercu, Geste::Descendre(200)]
+        );
+        // Une position lue en bas : la fin, comme une image immobile.
+        assert_eq!(
+            suite(&mut c, Vu::ImmobileLu(pos(99.95)), t),
+            vec![Geste::Prendre(FIN_EN_BAS)]
+        );
+        assert_eq!(
+            suite(&mut c, Vu::ImmobileLu(pos(99.95)), t + FIN_EN_BAS),
+            vec![Geste::Finir(Fin::EnBas)]
+        );
+        // Sans position en bas, deux `ImmobileLu` de suite ne finissent jamais, alors que
+        // deux images immobiles sans lu (ou avec un lu nul) le font.
+        let mut c = en_auto(t0);
+        suite(&mut c, Vu::Image(Mesure::Avance(200), None), t);
+        for _ in 0..2 {
+            let g = suite(&mut c, Vu::ImmobileLu(None), t);
+            assert!(matches!(g[..], [Geste::Descendre(n)] if n < 0), "{g:?}");
+        }
+        assert_eq!(c.fin(), None);
     }
 
     #[test]
