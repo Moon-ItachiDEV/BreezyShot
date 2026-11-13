@@ -62,7 +62,8 @@ function agir(nom, action) {
 
 // ---------- aperçus : octets PNG du cœur → Blob → <img> ----------
 
-const apercus = new Map(); // nom → { url, etat: "attente" | "pret" | "manquant", fin: Promise }
+// nom → { url, etat: "attente" | "pret" | "manquant", fin: Promise, redemander }
+const apercus = new Map();
 const PARALLELES = 4;
 let file = [];
 let enCours = 0;
@@ -92,6 +93,8 @@ function pomper() {
 }
 
 async function lireApercu(nom, a) {
+  // Un `historique:apercu` reçu pendant la demande la fera repartir si elle est refusée.
+  a.redemander = false;
   try {
     const octets = await appeler("historique_apercu", { nom });
     if (apercus.get(nom) !== a) return;
@@ -105,7 +108,10 @@ async function lireApercu(nom, a) {
   } catch {
     // Pas encore fait (capture de la 0.4, échec) : la case attend sur son fond ;
     // `historique:apercu` le redemandera.
-    if (apercus.get(nom) === a) a.etat = "manquant";
+    if (apercus.get(nom) === a) {
+      a.etat = a.redemander ? "attente" : "manquant";
+      if (a.redemander) file.unshift(nom);
+    }
   } finally {
     a.finir();
   }
@@ -114,7 +120,8 @@ async function lireApercu(nom, a) {
 function apercuPret(nom) {
   const a = apercus.get(nom);
   if (!a || a.etat === "pret") return;
-  if (a.etat === "manquant") {
+  if (a.etat === "attente") a.redemander = true;
+  else if (a.etat === "manquant") {
     a.etat = "attente";
     file.unshift(nom);
     pomper();
@@ -125,6 +132,8 @@ function oublierApercus(noms) {
   for (const nom of noms) {
     const a = apercus.get(nom);
     if (a?.url) URL.revokeObjectURL(a.url);
+    // Une case partie n'est plus attendue par `historique_affiche`.
+    a?.finir();
     apercus.delete(nom);
   }
   file = file.filter((n) => apercus.has(n));
@@ -139,7 +148,12 @@ function recevoirListe(entrees) {
   grille.afficher(entrees);
   demanderApercus(entrees.map((e) => e.nom));
   plus.disabled = entrees.length === 0;
-  if (!entrees.length) fermerMenus(false);
+  if (!entrees.length) {
+    fermerMenus(false);
+    // « Effacer » rend le focus à « Plus d'options », grisé à présent : il va au corps.
+    const f = document.activeElement;
+    if (!f || f === document.body || f === plus) corps.focus({ preventScroll: true });
+  }
   if (!affiche) {
     affiche = true;
     annoncerAffiche(entrees);
@@ -179,8 +193,9 @@ function cacherPilule() {
 
 function pilulePourAttente() {
   if (erreurMinuterie) return;
-  if (attente > 0) montrerPilule("info", attente > 1 ? `${attente} supprimées` : "Supprimée", true);
-  else cacherPilule();
+  if (attente > 0) {
+    montrerPilule("info", attente > 1 ? `${attente} supprimées` : "Supprimée", true);
+  } else cacherPilule();
 }
 
 function recevoirAttente(n) {
@@ -333,7 +348,8 @@ for (const n of ["mouseup", "pointerup", "auxclick"]) {
 // Ctrl + Z : annuler les suppressions en attente (pas pendant le menu ni la confirmation).
 document.addEventListener("keydown", (e) => {
   const ctl = e.ctrlKey || e.metaKey;
-  if (ctl && !e.shiftKey && !e.altKey && e.code === "KeyZ") {
+  // `e.key` et non `e.code` : la lettre tapée, quelle que soit la disposition (AZERTY).
+  if (ctl && !e.shiftKey && !e.altKey && e.key.toLowerCase() === "z") {
     e.preventDefault();
     if (menu.hidden && confirmation.hidden) annuler();
   }

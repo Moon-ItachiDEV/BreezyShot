@@ -108,10 +108,10 @@ const NOMS_ATTENDUS = [
 
 // Le cœur simulé : `__appels`, `__emettre(nom, charge)`, `__entrees` (la liste « Récents »),
 // `__manquants` (aperçus pas encore faits).
-function simulerCoeur({ ages, pngs, charge, manquants, n, sansAnnoter }) {
+function simulerCoeur({ ages, pngs, charge, manquants, n, sansAnnoter, retenus }) {
   window.__appels = [];
   window.__ecouteurs = {};
-  window.__marque = 1;
+  window.__lacher = {};
   document.addEventListener(
     'securitypolicyviolation',
     (e) => (window.__csp = (window.__csp || []).concat(e.violatedDirective)),
@@ -138,6 +138,7 @@ function simulerCoeur({ ages, pngs, charge, manquants, n, sansAnnoter }) {
     annotable: !(sansAnnoter && i === 1),
   }));
   window.__manquants = new Set((manquants || []).map((i) => window.__entrees[i].nom));
+  window.__retenus = new Set((retenus || []).map((i) => window.__entrees[i].nom));
   window.__attente = [];
   const octets = pngs.map((b) => Uint8Array.from(atob(b), (c) => c.charCodeAt(0)));
   const emettre = (nom, payload) => window.__ecouteurs[nom] && window.__ecouteurs[nom]({ payload });
@@ -149,12 +150,21 @@ function simulerCoeur({ ages, pngs, charge, manquants, n, sansAnnoter }) {
     core: {
       invoke: (c, a) => {
         window.__appels.push([c, a]);
+        if (c === 'historique_affiche') window.__afficheA = performance.now();
         if (c === 'historique_pret') {
           plusTard(() => window.__envoyerListe());
           return Promise.resolve(charge);
         }
         if (c === 'historique_apercu') {
           const i = window.__entrees.findIndex((e) => e.nom === a.nom);
+          // Demande retenue (une fois) : l'essai la lâche par `__lacher[nom](refus)`.
+          if (window.__retenus.has(a.nom)) {
+            window.__retenus.delete(a.nom);
+            return new Promise((ok, ko) => {
+              window.__lacher[a.nom] = (refus) =>
+                refus ? ko('apercu absent') : ok(octets[i % octets.length].slice().buffer);
+            });
+          }
           if (i < 0 || window.__manquants.has(a.nom)) return Promise.reject('apercu absent');
           return Promise.resolve(octets[i % octets.length].slice().buffer);
         }
@@ -235,9 +245,14 @@ function simulerCoeur({ ages, pngs, charge, manquants, n, sansAnnoter }) {
       manquants: o.manquants || [],
       n: o.n || 0,
       sansAnnoter: !!o.sansAnnoter,
+      retenus: o.retenus || [],
     });
     p.t0 = Date.now();
     await p.goto(URL_PAGE);
+    if (o.retenus) {
+      await p.waitForFunction(() => document.querySelectorAll('.tile').length > 0);
+      return p;
+    }
     await p.waitForFunction(() => __appels.some((a) => a[0] === 'historique_affiche'));
     return p;
   }
@@ -640,6 +655,39 @@ function simulerCoeur({ ages, pngs, charge, manquants, n, sansAnnoter }) {
     await vider(p);
     await p.keyboard.press('Control+z');
     verifier((await appels(p)).length === 0, 'Ctrl + Z sans suppression en attente : rien');
+    // AZERTY : la touche Z envoie `code` KeyW ; c'est la lettre (`key`) qui compte.
+    const ctrl = (key, code) =>
+      p.evaluate(
+        ([key, code]) =>
+          document.activeElement.dispatchEvent(
+            new KeyboardEvent('keydown', { key, code, ctrlKey: true, bubbles: true }),
+          ),
+        [key, code],
+      );
+    await p.keyboard.press('Delete');
+    await p.waitForFunction(() => document.querySelectorAll('.tile').length === 11);
+    await vider(p);
+    await ctrl('w', 'KeyZ');
+    await pause(p, 50);
+    verifier(
+      (await appels(p, 'historique_annuler')).length === 0,
+      'Ctrl + W (code KeyZ, QWERTZ ou AZERTY) : rien',
+    );
+    await ctrl('z', 'KeyW');
+    await p.waitForFunction(() => document.querySelectorAll('.tile').length === 12);
+    verifier(
+      (await appels(p, 'historique_annuler')).length === 1,
+      'AZERTY : Ctrl + Z (key z, code KeyW) → historique_annuler',
+    );
+    await p.locator('.tile').nth(3).click();
+    await vider(p);
+    await ctrl('c', 'KeyC');
+    await ctrl('v', 'KeyC');
+    verifier(
+      JSON.stringify((await appels(p, 'historique_action')).map((a) => a[1].action)) ===
+        '["copier"]',
+      'Ctrl + C selon la lettre (key c → copier ; key v, code KeyC → rien)',
+    );
     // Bouton Supprimer de la pilule.
     const t = p.locator('.tile').nth(4);
     await t.hover();
@@ -664,7 +712,10 @@ function simulerCoeur({ ages, pngs, charge, manquants, n, sansAnnoter }) {
         annotable: true,
       });
       __envoyerListe();
-      return document.getAnimations().length;
+      // Les animations du script seulement (FLIP et entrée), pas les transitions du CSS.
+      return document
+        .getAnimations()
+        .filter((a) => !(a instanceof CSSTransition) && !(a instanceof CSSAnimation)).length;
     });
     verifier((await cases(p).count()) === 13, 'nouvelle liste : 13 cases');
     const premier = await p.locator('.tile .pv').first().getAttribute('aria-label');
@@ -674,7 +725,7 @@ function simulerCoeur({ ages, pngs, charge, manquants, n, sansAnnoter }) {
       premier,
     );
     verifier((await focusNom(p)) === n[5], 'focus resté sur la même case');
-    verifier(anims >= 12, 'FLIP : la nouvelle entre, les autres glissent', String(anims));
+    verifier(anims === 13, 'FLIP : la nouvelle entre, les 12 autres glissent', String(anims));
     await fin(p, 'nouvelle capture');
   }
 
@@ -746,6 +797,11 @@ function simulerCoeur({ ages, pngs, charge, manquants, n, sansAnnoter }) {
     verifier(
       JSON.stringify((await appels(p)).map((a) => a[0])) === '["historique_tout_effacer"]',
       '« Effacer » → un appel historique_tout_effacer',
+    );
+    verifier(
+      await p.evaluate(() => document.activeElement === document.querySelector('#corps')),
+      'après « Effacer » : focus sur le corps de la fenêtre',
+      await p.evaluate(() => document.activeElement?.id || document.activeElement?.tagName),
     );
     const vide = p.getByRole('img', { name: 'Aucune capture' });
     verifier(await vide.isVisible(), 'vide : picto « Aucune capture »');
@@ -829,6 +885,41 @@ function simulerCoeur({ ages, pngs, charge, manquants, n, sansAnnoter }) {
     await fin(p, 'aperçu manquant');
   }
 
+  // Aperçu annoncé pendant une demande en vol, refusée : la page le redemande.
+  {
+    const p = await page({ retenus: [0] });
+    await p.waitForFunction(() => typeof __lacher[__entrees[0].nom] === 'function');
+    await p.evaluate(() => {
+      __emettre('historique:apercu', { nom: __entrees[0].nom });
+      __lacher[__entrees[0].nom](true);
+    });
+    await p.waitForFunction(() => {
+      const i = document.querySelectorAll('.tile img')[0];
+      return i.complete && i.naturalWidth === 400;
+    });
+    const demandes = await p.evaluate(
+      () =>
+        __appels.filter((a) => a[0] === 'historique_apercu' && a[1].nom === __entrees[0].nom)
+          .length,
+    );
+    verifier(demandes === 2, 'aperçu annoncé pendant une demande refusée : redemandé, montré');
+    await fin(p, 'aperçu en vol');
+  }
+
+  // Une case de la première rangée qui part avant son aperçu : historique_affiche part quand même.
+  {
+    const p = await page({ retenus: [1] });
+    await p.waitForFunction(() => typeof __lacher[__entrees[1].nom] === 'function');
+    verifier((await appels(p, 'historique_affiche')).length === 0, 'affiche attend la rangée');
+    await p.evaluate(() => {
+      __entrees.splice(1, 1);
+      __envoyerListe();
+    });
+    await p.waitForFunction(() => __appels.some((a) => a[0] === 'historique_affiche'));
+    verifier(true, 'case partie avant son aperçu : historique_affiche envoyé');
+    await fin(p, 'case partie');
+  }
+
   // (11) glisser : 4 px → un appel, 3 px : rien.
   {
     const p = await page();
@@ -908,13 +999,6 @@ function simulerCoeur({ ages, pngs, charge, manquants, n, sansAnnoter }) {
   {
     const p = await page();
     await p.locator('.tile').first().click();
-    await p.keyboard.press('F5');
-    await p.keyboard.press('Control+r');
-    await pause(p, 300);
-    verifier(
-      (await p.evaluate(() => window.__marque)) === 1,
-      'F5 et Ctrl + R : pas de rechargement',
-    );
     const empeches = await p.evaluate(() => {
       const k = (key, ctrlKey, code) =>
         !window.dispatchEvent(
@@ -1003,7 +1087,6 @@ function simulerCoeur({ ages, pngs, charge, manquants, n, sansAnnoter }) {
   // (16) 50 cases : historique_affiche envoyé une fois, avec la première rangée.
   {
     const p = await page({ n: 50 });
-    await pause(p, 300);
     const aff = await appels(p, 'historique_affiche');
     const cols = await colonnes(p);
     verifier((await cases(p).count()) === 50, '50 cases');
@@ -1012,8 +1095,10 @@ function simulerCoeur({ ages, pngs, charge, manquants, n, sansAnnoter }) {
       `historique_affiche une fois, n = ${cols}`,
       JSON.stringify(aff),
     );
-    const ms = await p.evaluate(() => performance.now());
-    console.log(`MESURE  50 cases : affiche envoyé, page à ${Math.round(ms)} ms de son départ`);
+    const ms = await p.evaluate(() => window.__afficheA);
+    console.log(
+      `MESURE  50 cases : historique_affiche à ${Math.round(ms)} ms du départ de la page`,
+    );
     await p.waitForFunction(() =>
       [...document.querySelectorAll('.tile img')].every(
         (i) => i.complete && i.naturalWidth === 400,

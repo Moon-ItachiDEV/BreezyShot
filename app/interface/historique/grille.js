@@ -210,7 +210,8 @@ export function installerGrille(o) {
     const nom = el.dataset.nom;
     const surCase = e.target.classList.contains("pv");
     const ctl = e.ctrlKey || e.metaKey;
-    if (ctl && !e.shiftKey && !e.altKey && e.code === "KeyC") {
+    // `e.key` et non `e.code` : la lettre tapée, quelle que soit la disposition (AZERTY).
+    if (ctl && !e.shiftKey && !e.altKey && e.key.toLowerCase() === "c") {
       e.preventDefault();
       liserer(nom);
       o.agir(nom, "copier");
