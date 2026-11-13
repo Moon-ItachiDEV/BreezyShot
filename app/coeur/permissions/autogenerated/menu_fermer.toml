@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-menu-fermer"
+description = "Enables the menu_fermer command without any pre-configured scope."
+commands.allow = ["menu_fermer"]
+
+[[permission]]
+identifier = "deny-menu-fermer"
+description = "Denies the menu_fermer command without any pre-configured scope."
+commands.deny = ["menu_fermer"]

@@ -1,6 +1,6 @@
 [package]
 name = "breezyshot"
-version = "0.5.1"
+version = "0.5.2"
 description = "Outil de capture d'écran pour Windows 11, puis macOS"
 edition = "2021"
 license = "FSL-1.1-MIT"

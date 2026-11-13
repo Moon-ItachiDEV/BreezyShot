@@ -29,6 +29,7 @@ pub mod etat;
 pub mod etats;
 pub mod fenetre_editeur;
 pub mod fenetre_historique;
+pub mod fenetre_menu;
 pub mod fenetre_reglages;
 pub mod geste_historique;
 pub mod geste_texte;
@@ -148,6 +149,9 @@ pub enum Evenement {
     ThemeBarre(Theme),
     /// Une entrée du menu de l'icône a été choisie (son identifiant).
     Menu(String),
+    /// Clic gauche ou droit sur l'icône (son rectangle, pixels réels) : le menu web
+    /// s'ouvre, ou se ferme s'il est ouvert.
+    ClicIcone(fenetres::Rect),
     /// Signal du module des raccourcis (appui).
     Raccourci(raccourcis::Signal),
     /// Signal du module des fenêtres (clic dans le bandeau).
@@ -502,7 +506,10 @@ fn lancer_app(contexte: tauri::Context, commande: Commande, inconnus: Vec<String
             fenetre_historique::historique_fermer,
             licence::licence_etat,
             licence::licence_activer,
-            licence::licence_retirer
+            licence::licence_retirer,
+            fenetre_menu::menu_pret,
+            fenetre_menu::menu_choisi,
+            fenetre_menu::menu_fermer
         ])
         .setup(move |app| {
             demarrer(app.handle(), commande, &inconnus);
@@ -692,6 +699,7 @@ fn demarrer(app: &AppHandle, commande: Commande, inconnus: &[String]) {
         taille,
         &entrees_menu(&actions_construites(pro, false), |a| bilan.libelle_menu(a)),
         |app, id| traiter(app, Evenement::Menu(id)),
+        |app, rect| traiter(app, Evenement::ClicIcone(rect)),
     ) {
         Ok(()) => log::info!(
             "icone installee ({taille} px, echelle {echelle_principale}, barre {})",
@@ -1242,28 +1250,38 @@ fn avec_raccourci(libelle: &str, raccourci: Option<&str>) -> String {
     }
 }
 
-/// Les entrées du menu de l'icône, dans l'ordre : les modes construits parmi `actions`
-/// (`raccourci` donne le raccourci actif d'une action), un séparateur, « Historique » et un
-/// séparateur si l'historique est construit, « Réglages », un séparateur, « Quitter
-/// BreezyShot ». Seulement ce qui marche.
+/// Vrai pour les modes du premier groupe du menu (les captures) ; les autres (refaire la
+/// dernière zone, Copier le texte) forment le second groupe.
+fn mode_du_premier_groupe(mode: Mode) -> bool {
+    matches!(mode, Mode::Zone | Mode::PleinEcran | Mode::Fenetre)
+}
+
+/// Les entrées du menu de l'icône (piste A « Liste »), par groupes séparés : les captures
+/// construites parmi `actions` (`raccourci` donne le raccourci actif d'une action) ;
+/// « Refaire la dernière zone » et « Copier le texte » ; « Historique » s'il est construit
+/// et « Réglages » ; « Quitter BreezyShot ». Seulement ce qui marche.
 pub fn entrees_menu(
     actions: &[&str],
     raccourci: impl Fn(&str) -> Option<String>,
 ) -> Vec<EntreeMenu> {
-    let mut entrees: Vec<EntreeMenu> = modes_au_menu(actions)
+    let entree = |mode: Mode| EntreeMenu::Action {
+        id: id_menu(mode),
+        texte: texte_capturer(mode, raccourci(mode.nom()).as_deref()),
+    };
+    let (premier, second): (Vec<Mode>, Vec<Mode>) = modes_au_menu(actions)
         .into_iter()
-        .map(|mode| EntreeMenu::Action {
-            id: id_menu(mode),
-            texte: texte_capturer(mode, raccourci(mode.nom()).as_deref()),
-        })
-        .collect();
+        .partition(|m| mode_du_premier_groupe(*m));
+    let mut entrees: Vec<EntreeMenu> = premier.into_iter().map(entree).collect();
+    if !second.is_empty() {
+        entrees.push(EntreeMenu::Separateur);
+        entrees.extend(second.into_iter().map(entree));
+    }
     entrees.push(EntreeMenu::Separateur);
     if actions.contains(&ACTION_HISTORIQUE) {
         entrees.push(EntreeMenu::Action {
             id: MENU_HISTORIQUE.into(),
             texte: avec_raccourci("Historique", raccourci(ACTION_HISTORIQUE).as_deref()),
         });
-        entrees.push(EntreeMenu::Separateur);
     }
     entrees.push(EntreeMenu::Action {
         id: MENU_REGLAGES.into(),
@@ -1351,6 +1369,7 @@ pub fn traiter(app: &AppHandle, evenement: Evenement) {
                 Err(e) => log::warn!("icone non mise a jour: {e}"),
             }
         }
+        Evenement::ClicIcone(rect) => fenetre_menu::clic_icone(app, rect),
         Evenement::Menu(id) => match (id.as_str(), mode_du_menu(&id)) {
             (MENU_QUITTER, _) => {
                 log::info!("menu: quitter");
@@ -1568,9 +1587,12 @@ fn demarrer_capture(app: &AppHandle, mode: Mode) {
         return;
     }
     noter_demande(app);
+    // Un raccourci pressé menu ouvert : le menu part avant la photo, et le compositeur est
+    // attendu comme pour le bandeau caché.
+    let menu_cache = fenetres::menu::cacher(app);
     match declencheur {
         Declencheur::DemandeDecompte(_) => commencer_decompte(app, mode, retardateur_s),
-        _ => apres_gel(app, mode, recu_a, false),
+        _ => apres_gel(app, mode, recu_a, menu_cache),
     }
 }
 
@@ -3935,6 +3957,7 @@ mod tests {
                 action("capturer_zone", "Capturer une zone\tCtrl + Maj + 1"),
                 action("capturer_plein_ecran", "Capturer l'écran\tCtrl + Maj + 2"),
                 action("capturer_fenetre", "Capturer une fenêtre\tCtrl + Maj + 3"),
+                EntreeMenu::Separateur,
                 action(
                     "capturer_derniere_zone",
                     "Refaire la dernière zone\tCtrl + Maj + 4"
@@ -3956,6 +3979,7 @@ mod tests {
                 action("capturer_zone", "Capturer une zone"),
                 action("capturer_plein_ecran", "Capturer l'écran"),
                 action("capturer_fenetre", "Capturer une fenêtre"),
+                EntreeMenu::Separateur,
                 action("capturer_derniere_zone", "Refaire la dernière zone"),
                 EntreeMenu::Separateur,
                 action(MENU_REGLAGES, "Réglages"),
@@ -3974,7 +3998,7 @@ mod tests {
         assert_eq!(m[1], action("capturer_plein_ecran", "Capturer l'écran"));
         assert_eq!(m[2], action("capturer_fenetre", "Capturer une fenêtre"));
         assert_eq!(
-            m[3],
+            m[4],
             action("capturer_derniere_zone", "Refaire la dernière zone")
         );
     }
@@ -4082,7 +4106,7 @@ mod tests {
         assert_eq!(b.libelle_menu("derniere_zone"), None);
         let m = entrees_menu(&ACTIONS_DE_CAPTURE, |a| b.libelle_menu(a));
         assert_eq!(
-            m[3],
+            m[4],
             action("capturer_derniere_zone", "Refaire la dernière zone")
         );
         assert_eq!(
@@ -4139,8 +4163,8 @@ mod tests {
         );
     }
 
-    /// Menu de la 0.5 (§2.1, §7.3) : Copier le texte en cinquième, puis l'historique entre
-    /// deux séparateurs ; sans langue, pas de Copier le texte.
+    /// Menu de la piste A « Liste » : les captures ; la dernière zone et Copier le texte ;
+    /// l'historique et les Réglages ; Quitter. Sans langue, pas de Copier le texte.
     #[test]
     fn menu_avec_historique_et_texte() {
         let raccourci = |a: &str| match a {
@@ -4155,11 +4179,11 @@ mod tests {
                 action("capturer_zone", "Capturer une zone"),
                 action("capturer_plein_ecran", "Capturer l'écran"),
                 action("capturer_fenetre", "Capturer une fenêtre"),
+                EntreeMenu::Separateur,
                 action("capturer_derniere_zone", "Refaire la dernière zone"),
                 action("capturer_texte", "Copier le texte\tCtrl + Maj + T"),
                 EntreeMenu::Separateur,
                 action(MENU_HISTORIQUE, "Historique\tCtrl + Maj + H"),
-                EntreeMenu::Separateur,
                 action(MENU_REGLAGES, "Réglages"),
                 EntreeMenu::Separateur,
                 action(MENU_QUITTER, "Quitter BreezyShot"),
@@ -4169,7 +4193,7 @@ mod tests {
         assert_eq!(sans_texte.len(), m.len() - 1);
         assert!(!sans_texte.contains(&action("capturer_texte", "Copier le texte\tCtrl + Maj + T")));
         assert_eq!(
-            sans_texte[5],
+            sans_texte[6],
             action(MENU_HISTORIQUE, "Historique\tCtrl + Maj + H")
         );
         // Sans historique ni texte : le menu de la 0.4.
