@@ -45,4 +45,17 @@ l'éditeur, glisser, Tout effacer, trois fermetures, mémoire sur 20 ouvertures 
 de la 0.4 ; machine sans langue (`BREEZYSHOT_ESSAI_SANS_TEXTE`). La langue en-US doit être
 présente sur la machine : sans elle, l'essai échoue.
 
+Essai 14 (Windows, 900 s au plus) : capture défilante sur un témoin WPF dont chaque rangée
+de pixels porte son numéro (`temoin-defilant.ps1`) ; l'image finale est relue rangée par
+rangée (chaque rangée une fois, dans l'ordre). Sans licence : rien de la défilante, Ctrl +
+Maj + 5 libre. Avec : lancée par Ctrl + Maj + 5 et par le menu, clic sur la page après la
+liste des pages, fin seule en bas, presse-papiers exact, budgets (départ, mesure, fin,
+annonce, vitesse, mémoire) ; molette qui reprend la main, « Trop vite », Entrée ; Échap,
+appuis ignorés, « Terminer », en-tête collant, petite zone agrandie, limite de 16 384 px,
+`--quitter` ; fenêtre de contrôle absente des copies d'écran (sentinelle), voile vu en cas
+capturable. Le focus de la sélection pendant la création de la fenêtre de contrôle est dit
+par les lignes `[focus]`. Edge et l'Explorateur sont joués et notés seulement ; les suites
+d'images pour l'assemblage (résumés de lignes `resume …`, paires `suite … paire`) et les
+lignes `vivant:` des tests sont dans la sortie.
+
 Le journal : `%LOCALAPPDATA%\BreezyShot\Journal\breezyshot.log`.
