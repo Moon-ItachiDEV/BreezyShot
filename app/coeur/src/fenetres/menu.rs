@@ -66,7 +66,8 @@ pub struct Ouverture {
 /// Dernière fermeture (pour `ANTI_REBOND`) et lignes en attente de la page.
 static FERME_A: Mutex<Option<Instant>> = Mutex::new(None);
 static EN_ATTENTE: Mutex<Option<Ouverture>> = Mutex::new(None);
-/// Vrai tant que la fenêtre du menu est exclue des captures (posé par `ouvrir`).
+/// Vrai tant que la fenêtre du menu est exclue des captures (posé par `ouvrir`, remis à
+/// faux à chaque création de la fenêtre).
 static EXCLU: AtomicBool = AtomicBool::new(false);
 
 fn fenetre(app: &AppHandle) -> Option<WebviewWindow> {
@@ -139,6 +140,8 @@ pub fn ouvert(app: &AppHandle) -> bool {
 }
 
 fn creer(app: &AppHandle) -> Result<WebviewWindow, String> {
+    // Une fenêtre neuve n'est exclue de rien : l'exclusion sera reposée si elle est voulue.
+    EXCLU.store(false, Ordering::SeqCst);
     let f = WebviewWindowBuilder::new(app, ETIQUETTE_MENU, WebviewUrl::App(PAGE.into()))
         .title("BreezyShot")
         .inner_size(LARGEUR + 2.0 * MARGE, 200.0)

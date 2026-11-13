@@ -663,7 +663,8 @@ fn zones_unies_rien_d_invente() {
     assert_eq!(asm.ajouter(&b, &Mesure::Ambigue), Ajout::Rien);
     assert_eq!(asm.hauteur(), 300);
     // Une ligne de texte qui monte dans une zone unie (moins de 16 lignes porteuses) :
-    // sans lu, ambiguë ; le lu exact traverse le blanc ; un lu faux ne passe pas.
+    // sans lu, ambiguë ; le lu exact traverse le blanc ; un lu faux, même d'une ligne, ne
+    // passe pas (sans lignes porteuses, seul le lu exact est jugé).
     let ligne = page_texte(400, 22, 10, 390, 2);
     let (mut avant, mut apres) = (vide.clone(), vide.clone());
     couvrir(&mut avant, 100, &ligne);
@@ -671,7 +672,7 @@ fn zones_unies_rien_d_invente() {
     for (e, m) in [
         (Attendu::Aucun, Mesure::Ambigue),
         (Attendu::Lu(60), Mesure::Avance(60)),
-        (Attendu::Lu(61), Mesure::Avance(60)),
+        (Attendu::Lu(61), Mesure::Ambigue),
         (Attendu::Lu(90), Mesure::Ambigue),
         (Attendu::Lu(0), Mesure::Ambigue),
     ] {
@@ -1894,6 +1895,226 @@ fn r5_la_ligne_survolee_au_plus_une_fois() {
             assert!(
                 n <= if inverser { 17 } else { 22 },
                 "{y0} {pas} {inverser} : {n}"
+            );
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------------------
+// Troisième relecture (N1 à N3)
+
+/// Le survol de l'Explorateur sur une liste : la ligne de la liste (22 lignes, alignée sur
+/// la page) sous le pointeur à y 300 de la zone, teintée par multiplication des couleurs.
+fn survol_aligne(page: &Pixels, position: u32, h: u32) -> Pixels {
+    let mut im = z(page, position, h);
+    let y0 = (position + 300) / 22 * 22 - position;
+    for y in y0..(y0 + 22).min(h) {
+        for x in 0..im.largeur - 17 {
+            let c = pixel(&im, x, y);
+            let t = [229u32, 243, 255];
+            poser(
+                &mut im,
+                x,
+                y,
+                [0, 1, 2].map(|k| (u32::from(c[k]) * t[k] / 255) as u8),
+            );
+        }
+    }
+    im
+}
+
+#[test]
+fn n1_survol_qui_suit_les_lignes_d_une_liste() {
+    // La bande survolée change de place à l'écran (de 1 à 21 lignes) quand le décalage
+    // n'est pas un multiple de 22 : la même bande, vue deux fois, est excusée. Sans
+    // attendu comme avec le lu exact, la mesure est juste ; survolée dans une seule des
+    // deux images, jamais une fausse mesure.
+    let t = &TOLERANCE;
+    let h = 552;
+    let liste = page_liste(524, 160, 7);
+    let texte = page_texte(524, 3520, 20, 500, 4);
+    for page in [&liste, &texte] {
+        for p in (0..page.hauteur - h - 340).step_by(583) {
+            for d in [22u32, 44, 100, 150, 200, 276, 330] {
+                let a = survol_aligne(page, p, h);
+                let b = survol_aligne(page, p + d, h);
+                for e in [Attendu::Aucun, Attendu::Lu(d as i32)] {
+                    assert_eq!(
+                        mesurer(&a, &b, Fixes::default(), e, t),
+                        Mesure::Avance(d),
+                        "{p} {d} {e:?}"
+                    );
+                }
+                let (a0, b0) = (z(page, p, h), z(page, p + d, h));
+                for (a, b) in [(&a0, &b), (&a, &b0)] {
+                    for e in [Attendu::Aucun, Attendu::Lu(d as i32)] {
+                        let m = mesurer(a, b, Fixes::default(), e, t);
+                        jamais_fausse(m, i64::from(d), "survol d'un côté");
+                    }
+                }
+            }
+        }
+    }
+    // Déroulé comme D : la page entière, et une ligne teintée seulement si aucune image ne
+    // la montre sans teinte (au pas de 150 : aucune). Aussi sur une liste zébrée (une
+    // ligne sur deux d'un fond gris : la référence du vote est une voisine de même fond).
+    let mut zebree = liste.clone();
+    for i in (1..160).step_by(2) {
+        for y in i * 22..i * 22 + 22 {
+            for x in 0..524 {
+                let c = pixel(&zebree, x, y);
+                let t = [242u32, 242, 246];
+                poser(
+                    &mut zebree,
+                    x,
+                    y,
+                    [0, 1, 2].map(|k| (u32::from(c[k]) * t[k] / 255) as u8),
+                );
+            }
+        }
+    }
+    for (liste, pas) in [
+        (&liste, 150u32),
+        (&liste, 300),
+        (&liste, 400),
+        (&zebree, 150),
+        (&zebree, 300),
+    ] {
+        let pos = positions(liste.hauteur, h, pas);
+        let images: Vec<Pixels> = pos.iter().map(|p| survol_aligne(liste, *p, h)).collect();
+        for avec_lu in [false, true] {
+            let (finale, vues) = comme_d(&images, &pos, avec_lu);
+            for (vrai, m) in &vues {
+                assert_eq!(*m, mesure_de(*vrai as i32), "{pas} {avec_lu}");
+            }
+            assert_eq!(finale.hauteur, liste.hauteur);
+            let r = 524 * 4;
+            let nette = |y: usize| {
+                pos.iter().zip(&images).any(|(p, im)| {
+                    let p = *p as usize;
+                    (p..p + h as usize).contains(&y)
+                        && im.rgba[(y - p) * r..(y - p + 1) * r] == liste.rgba[y * r..(y + 1) * r]
+                })
+            };
+            let teintees: Vec<usize> = (0..liste.hauteur as usize)
+                .filter(|y| finale.rgba[y * r..(y + 1) * r] != liste.rgba[y * r..(y + 1) * r])
+                .collect();
+            assert!(
+                teintees.iter().all(|y| !nette(*y)),
+                "{pas} {avec_lu} : {teintees:?}"
+            );
+            assert!(pas != 150 || teintees.is_empty(), "{teintees:?}");
+        }
+    }
+}
+
+#[test]
+fn n2_vue_unie_vraiment_unie() {
+    // Deux images égales avec un lu : seule une vue vraiment unie (chaque ligne d'une
+    // couleur, à `canal` près) suit le lu. Un dégradé ou une photo floue sans ligne
+    // porteuse, égaux (écran pas encore repeint) : `Immobile`.
+    let t = &TOLERANCE;
+    let mut degrade = unie(600, 1000, BLANC);
+    let mut flou = unie(600, 1000, BLANC);
+    for y in 0..1000 {
+        for x in 0..600 {
+            let v = (60 + y * 120 / 3000 + x / 40) as u8;
+            poser(&mut degrade, x, y, [v, v / 2 + 40, 200 - v / 2]);
+            let f = 128.0 + 60.0 * (f64::from(y) / 90.0).sin() * (f64::from(x) / 130.0).cos();
+            poser(&mut flou, x, y, [f as u8, (f * 0.8) as u8, 150]);
+        }
+    }
+    for page in [&degrade, &flou, &page_lisse(400, 1000)] {
+        let a = z(page, 300, 500);
+        assert_eq!(
+            mesurer(&a, &a, Fixes::default(), Attendu::Lu(200), t),
+            Mesure::Immobile
+        );
+    }
+    // Un dégradé purement vertical, des bandes horizontales sans texte : chaque ligne est
+    // d'une couleur, mais pas la vue entière.
+    let mut vertical = unie(600, 1000, BLANC);
+    let mut bandes = unie(600, 1000, BLANC);
+    for y in 0..1000 {
+        for x in 0..600 {
+            let v = (40 + y * 180 / 3000) as u8;
+            poser(&mut vertical, x, y, [v, v, 255 - v / 2]);
+            if (y / 22) % 2 == 1 {
+                poser(&mut bandes, x, y, [235, 236, 240]);
+            }
+        }
+    }
+    for page in [&vertical, &bandes] {
+        let a = z(page, 300, 500);
+        for e in [200, 11] {
+            assert_eq!(
+                mesurer(&a, &a, Fixes::default(), Attendu::Lu(e), t),
+                Mesure::Immobile
+            );
+        }
+    }
+    // Un blanc avec un bruit de prise de ± 8, différent dans les deux images : le lu.
+    let blanc = unie(800, 1000, [250, 250, 250]);
+    let mut hz = Hasard(19);
+    let mut bruiter = |mut im: Pixels| {
+        for c in im.rgba.chunks_exact_mut(4) {
+            for v in &mut c[..3] {
+                *v = (i32::from(*v) + hz.entre(-8, 8)).clamp(0, 255) as u8;
+            }
+        }
+        im
+    };
+    let (a, b) = (bruiter(z(&blanc, 0, 500)), bruiter(z(&blanc, 120, 500)));
+    assert_eq!(
+        mesurer(&a, &b, Fixes::default(), Attendu::Lu(120), t),
+        Mesure::Avance(120)
+    );
+    assert_eq!(
+        mesurer(&a, &b, Fixes::default(), Attendu::Lu(0), t),
+        Mesure::Immobile
+    );
+    // Unie, avec un bruit de ± 4 : le lu.
+    let mut h = Hasard(3);
+    let mut vide = unie(600, 500, [243, 243, 243]);
+    for c in vide.rgba.chunks_exact_mut(4) {
+        for v in &mut c[..3] {
+            *v = (i32::from(*v) + h.entre(-4, 4)) as u8;
+        }
+    }
+    assert_eq!(
+        mesurer(&vide, &vide, Fixes::default(), Attendu::Lu(200), t),
+        Mesure::Avance(200)
+    );
+}
+
+#[test]
+fn n3_sans_ligne_porteuse_le_lu_exact_seul() {
+    // Page lisse (aucune ligne porteuse) abîmée de zones type WPF, lu exact : la pente ne
+    // fait jamais prendre un voisin du lu ; le lu exact, ou `Ambigue`.
+    let t = &TOLERANCE;
+    let page = page_lisse(400, 3000);
+    for (k, p) in (0..2400u32).step_by(197).enumerate() {
+        for d in [0i64, 1, 2, 3, -2, 22, 60, 150, 260] {
+            let q = i64::from(p) + d;
+            if q < 0 || q + 500 > 3000 {
+                continue;
+            }
+            let a = z(&page, p, 500);
+            let mut b = z(&page, q as u32, 500);
+            let mut hz = Hasard((k as i64 * 31 + d + 7) as u64);
+            for _ in 0..4 {
+                let (x0, y0) = (hz.entre(0, 360) as u32, hz.entre(0, 490) as u32);
+                for y in y0..y0 + 8 {
+                    for x in x0..x0 + 32 {
+                        let c = pixel(&b, x, y).map(|v| v.saturating_sub(14));
+                        poser(&mut b, x, y, c);
+                    }
+                }
+            }
+            let m = mesurer(&a, &b, Fixes::default(), Attendu::Lu(d as i32), t);
+            assert!(
+                m == mesure_de(d as i32) || m == Mesure::Ambigue,
+                "{p} {d} : {m:?}"
             );
         }
     }

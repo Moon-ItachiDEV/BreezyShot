@@ -227,6 +227,11 @@ pub fn capturer(app: &AppHandle, recu_a: Instant, bandeau_cache: bool) {
 /// fil `defilante-pages` (D2).
 pub fn selection_montree(app: &AppHandle, id: u64) {
     let numero = NUMERO.fetch_add(1, Ordering::SeqCst) + 1;
+    // Un menu de l'icône ouvert juste avant le départ montrerait encore ses actions, que
+    // `traiter` ignorerait : il se ferme.
+    if crate::fenetres::menu::cacher(app) {
+        log::info!("menu ferme: defilante");
+    }
     let ecrans = super::capture_en_cours(app)
         .as_ref()
         .map(|c| c.gel.ecrans.clone())
@@ -1301,6 +1306,11 @@ struct Fil<S: Source, P: Pilote, A: Atelier> {
     relache_premiere: Duration,
     /// La position lue à la dernière image gardée.
     position_gardee: Option<Position>,
+    /// Le facteur d'étalonnage du lu de cette capture (`regles::etalon`), dès qu'une avance
+    /// a été mesurée sur du contenu.
+    etalon: Option<f64>,
+    /// `Ambigue` de suite avec un lu non étalonné.
+    ambigues_lues: u32,
     /// Les pixels commandés depuis la dernière image gardée.
     commande_depuis_gardee: i32,
     /// L'instant de l'ordre de fin (clic, Entrée).
@@ -1376,6 +1386,8 @@ impl<S: Source, P: Pilote, A: Atelier> Fil<S, P, A> {
             surveillance: maintenant,
             relache_premiere,
             position_gardee,
+            etalon: None,
+            ambigues_lues: 0,
             commande_depuis_gardee: 0,
             fin_recue: None,
         }
@@ -1675,16 +1687,22 @@ impl<S: Source, P: Pilote, A: Atelier> Fil<S, P, A> {
         let position = self.pilote.as_ref().and_then(|p| p.position());
         // Seulement le décalage lu, en pixels réels de la vue (B, defiler::decalage_px),
         // jamais le pas commandé (C), et seulement pour l'image de ce pas.
-        let attendu = regles::attendu(self.position_gardee, position);
-        let mesure = self.mesurer(attendu, position);
-        if parti && pas > 0 && depuis_gardee {
+        let attendu =
+            regles::lu_etalonne(regles::attendu(self.position_gardee, position), self.etalon);
+        let (mesure, attendu) = self.mesurer(attendu, position);
+        let vu = regles::vu_image(mesure, attendu, position);
+        if let (Vu::ImmobileLu(_), Attendu::Lu(e)) = (vu, attendu) {
+            // Grille répétitive, lu multiple de la période (C, N4) : pas le bas, et l'image
+            // ne dit pas l'avance (rien n'est constaté).
+            log::info!("defilante: immobile avec un lu de {e} px: pas reduit");
+        } else if parti && pas > 0 && depuis_gardee {
             if let (Some(avance), Some(p)) =
                 (regles::avance_constatee(mesure), self.pilote.as_mut())
             {
                 p.constater(avance);
             }
         }
-        self.vu_en_attente = Some(Vu::Image(mesure, position));
+        self.vu_en_attente = Some(vu);
     }
 
     /// Images toutes les `PRISE_POSEE` jusqu'à deux égales de suite ou
@@ -1761,7 +1779,7 @@ impl<S: Source, P: Pilote, A: Atelier> Fil<S, P, A> {
             self.demander_image(Instant::now() + regles::PRISE_POSEE);
             return;
         }
-        let mesure = self.mesurer(Attendu::Aucun, None);
+        let (mesure, _) = self.mesurer(Attendu::Aucun, None);
         let position = match mesure {
             Mesure::Immobile | Mesure::Ambigue => self.pilote.as_ref().and_then(|p| p.position()),
             _ => None,
@@ -1770,15 +1788,22 @@ impl<S: Source, P: Pilote, A: Atelier> Fil<S, P, A> {
     }
 
     /// Mesure `image` contre la dernière image gardée et l'ajoute (D10 à D13).
-    fn mesurer(&mut self, attendu: Attendu, position: Option<Position>) -> Mesure {
+    /// Rend aussi l'attendu retenu : `Aucun` si la mesure a été refaite sans le lu.
+    fn mesurer(&mut self, attendu: Attendu, position: Option<Position>) -> (Mesure, Attendu) {
         if self.fini {
-            return Mesure::Immobile;
+            return (Mesure::Immobile, attendu);
         }
         let debut = Instant::now();
         let fixes = self.atelier.fixes();
-        let mesure = self
+        let mut attendu = attendu;
+        let mut mesure = self
             .atelier
             .mesurer(&self.reference, &self.image, fixes, attendu);
+        if let (Attendu::Lu(e), None) = (attendu, self.etalon) {
+            if e != 0 {
+                (mesure, attendu) = self.etalonner(e, mesure, fixes);
+            }
+        }
         self.durees_mesure.push(debut.elapsed());
         self.images += 1;
         // La dernière image gardée est celle dont des lignes sont entrées (D10).
@@ -1794,7 +1819,7 @@ impl<S: Source, P: Pilote, A: Atelier> Fil<S, P, A> {
                     numero: self.numero,
                     cause: Impossible::Memoire,
                 });
-                return mesure;
+                return (mesure, attendu);
             }
             Ajout::Limite(_) => {
                 self.course.finir(Fin::Limite);
@@ -1818,7 +1843,52 @@ impl<S: Source, P: Pilote, A: Atelier> Fil<S, P, A> {
             self.course
                 .regler_pas(regles::hauteur_utile(self.reference.hauteur, fixes));
         }
-        mesure
+        (mesure, attendu)
+    }
+
+    /// Étalonnage du lu (relecture d'ensemble, point 3), tant qu'il n'y en a pas : une
+    /// `Avance(d)` que la mesure sans lu redit (sur du contenu, le lu n'a pas décidé) donne
+    /// le facteur `d / e` ; deux `Ambigue` de suite avec le lu font remesurer sans lui, et
+    /// une avance ainsi trouvée étalonne aussi.
+    fn etalonner(&mut self, e: i32, mesure: Mesure, fixes: Fixes) -> (Mesure, Attendu) {
+        match mesure {
+            Mesure::Avance(d) => {
+                self.ambigues_lues = 0;
+                let sans =
+                    self.atelier
+                        .mesurer(&self.reference, &self.image, fixes, Attendu::Aucun);
+                if sans == mesure {
+                    self.noter_etalon(d, e);
+                }
+                (mesure, Attendu::Lu(e))
+            }
+            Mesure::Ambigue => {
+                self.ambigues_lues += 1;
+                if self.ambigues_lues < regles::AMBIGUES_LUES_MAX {
+                    return (mesure, Attendu::Lu(e));
+                }
+                self.ambigues_lues = 0;
+                let sans =
+                    self.atelier
+                        .mesurer(&self.reference, &self.image, fixes, Attendu::Aucun);
+                log::info!("defilante: lu de {e} px ambigu deux fois: mesure sans lu");
+                if let Mesure::Avance(d) = sans {
+                    self.noter_etalon(d, e);
+                }
+                (sans, Attendu::Aucun)
+            }
+            _ => {
+                self.ambigues_lues = 0;
+                (mesure, Attendu::Lu(e))
+            }
+        }
+    }
+
+    fn noter_etalon(&mut self, avance: u32, lu: i32) {
+        self.etalon = regles::etalon(avance, lu);
+        if let Some(k) = self.etalon {
+            log::info!("defilante: lu etalonne {k:.3} (avance {avance} px, lu {lu} px)");
+        }
     }
 
     /// L'aperçu en direct : le bas de l'image assemblée, rangé pour `defilante_apercu`.
@@ -2109,6 +2179,8 @@ mod tests {
         refuse: bool,
         /// Vue unie, comme `defilement::mesurer` (C, complément) : seul le lu décide.
         unie: bool,
+        /// Un lu à plus de 3 lignes de la vraie avance donne `Ambigue` (C, `avec_le_lu`).
+        exigeant: bool,
     }
 
     impl Atelier for FauxAtelier {
@@ -2130,6 +2202,11 @@ mod tests {
                 };
             }
             let d = position_de(apres) - position_de(avant);
+            if let Attendu::Lu(e) = attendu {
+                if self.exigeant && (e - d).abs() > 3 {
+                    return Mesure::Ambigue;
+                }
+            }
             match d {
                 0 if apres.rgba != avant.rgba => Mesure::Ambigue,
                 0 => Mesure::Immobile,
@@ -2186,6 +2263,17 @@ mod tests {
         refuse: bool,
         lire_verrouillages: fn() -> u64,
     ) -> Essai {
+        lancer_complet(page, pilote, limite, refuse, lire_verrouillages, false)
+    }
+
+    fn lancer_complet(
+        page: Partagee,
+        pilote: Option<FauxPilote>,
+        limite: u32,
+        refuse: bool,
+        lire_verrouillages: fn() -> u64,
+        exigeant: bool,
+    ) -> Essai {
         let (envoi, reception) = mpsc::channel();
         let (vers_essai, signaux) = mpsc::channel();
         let arret = Arc::new(AtomicBool::new(false));
@@ -2224,6 +2312,7 @@ mod tests {
                     attendus: Arc::clone(&attendus),
                     refuse,
                     unie: false,
+                    exigeant,
                 },
                 premiere,
                 Duration::ZERO,
@@ -2587,6 +2676,7 @@ mod tests {
                 attendus: Arc::clone(&attendus),
                 refuse: false,
                 unie: true,
+                exigeant: false,
             },
             image(0),
             Duration::ZERO,
@@ -2617,6 +2707,33 @@ mod tests {
         );
         // Aucun lu passé pour l'image reprise : ni celui du pas, ni un autre.
         assert_eq!(*attendus.lock().unwrap(), vec![-40]);
+    }
+
+    #[test]
+    fn fil_lu_biaise_etalonne() {
+        // Le rectangle de la vue compte un en-tête : le lu est 17 % trop petit (vue 0,12 %
+        // au lieu de 0,1 %), et l'atelier rend `Ambigue` pour un lu à plus de 3 lignes de la
+        // vraie avance. Deux `Ambigue` de suite : remesuré sans lu, l'avance trouvée étalonne
+        // le lu ; ensuite, chaque lu corrigé tombe juste.
+        let p = page(999);
+        let mut pi = pilote(&p, &[Moyen::Message], true);
+        pi.vue = Some(0.12);
+        let e = lancer_complet(p, Some(pi), 100_000, false, || 0, true);
+        let s = e.jusqu_a_la_fin();
+        e.fil.join().unwrap();
+        // Toute la page, sans passer à la main.
+        assert_eq!(hauteur_assemblee(&s), 1_000);
+        let a = e.attendus.lock().unwrap().clone();
+        // Les deux lus biaisés (33 puis 67 pour 40 et 80), puis les lus étalonnés.
+        assert_eq!(&a[..2], &[33, 67], "{a:?}");
+        let suite: Vec<i32> = a[2..].iter().copied().filter(|&x| x != 0).collect();
+        assert!(suite.len() >= 10, "{a:?}");
+        assert!(
+            suite[..suite.len() - 1]
+                .iter()
+                .all(|&x| (x - 40).abs() <= 1),
+            "{a:?}"
+        );
     }
 
     #[test]

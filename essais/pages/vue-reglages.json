@@ -10,6 +10,7 @@
       "dossier",
       "enregistrer",
       "modele_nom",
+      "impr_ecran",
       "theme",
       "demarrage",
       "version",
@@ -43,6 +44,7 @@
     "apercu_nom": "BreezyShot 2026-11-12 à 10.42.08.png",
     "theme": "systeme",
     "demarrage": "non",
+    "impr_ecran": false,
     "raccourcis": [
       {
         "action": "zone",
@@ -105,6 +107,7 @@
       "dossier",
       "enregistrer",
       "modele_nom",
+      "impr_ecran",
       "theme",
       "demarrage",
       "version",
@@ -138,6 +141,7 @@
     "apercu_nom": "BreezyShot 2026-11-12 à 10.42.08.png",
     "theme": "systeme",
     "demarrage": "non",
+    "impr_ecran": false,
     "raccourcis": [
       {
         "action": "zone",
@@ -195,23 +199,23 @@
         "refus": null
       },
       {
-        "action": "historique",
-        "libelle": "Historique",
-        "touches": [
-          "Ctrl",
-          "Maj",
-          "H"
-        ],
-        "modifie": false,
-        "refus": null
-      },
-      {
         "action": "texte",
         "libelle": "Copier le texte",
         "touches": [
           "Ctrl",
           "Maj",
           "T"
+        ],
+        "modifie": false,
+        "refus": null
+      },
+      {
+        "action": "historique",
+        "libelle": "Historique",
+        "touches": [
+          "Ctrl",
+          "Maj",
+          "H"
         ],
         "modifie": false,
         "refus": null

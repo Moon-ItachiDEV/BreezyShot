@@ -47,7 +47,14 @@ pub fn lignes_montrees(vignette_construite: bool, capture_disponible: bool) -> V
     }
     // La licence (avenant 0.5 « Licence », §1) : toujours là, en dernier dans Général
     // (logo et version, Thème, Lancer au démarrage, Licence : décision du responsable).
-    l.extend(["modele_nom", "theme", "demarrage", "version", "licence"]);
+    l.extend([
+        "modele_nom",
+        "impr_ecran",
+        "theme",
+        "demarrage",
+        "version",
+        "licence",
+    ]);
     l
 }
 
@@ -66,6 +73,8 @@ pub enum Changement {
     Demarrage(bool),
     Retardateur(u32),
     Pointeur(bool),
+    /// « Impr. écran ouvre BreezyShot » : prendre la touche à l'Outil Capture de Windows.
+    ImprEcran(bool),
 }
 
 impl Changement {
@@ -82,6 +91,7 @@ impl Changement {
             Changement::Demarrage(_) => "demarrage",
             Changement::Retardateur(_) => "retardateur",
             Changement::Pointeur(_) => "pointeur",
+            Changement::ImprEcran(_) => "impr_ecran",
         }
     }
 }
@@ -123,7 +133,8 @@ pub fn ligne_changement(c: &Changement) -> String {
         | Changement::Enregistrer(b)
         | Changement::VignetteAfficher(b)
         | Changement::Demarrage(b)
-        | Changement::Pointeur(b) => oui_non(*b).to_string(),
+        | Changement::Pointeur(b)
+        | Changement::ImprEcran(b) => oui_non(*b).to_string(),
         Changement::VignetteDuree(n) | Changement::Retardateur(n) => n.to_string(),
         Changement::VignetteCoin(t) | Changement::Theme(t) => t.clone(),
         Changement::ModeleNom(_) => return "reglage change: modele_nom".into(),
@@ -178,6 +189,19 @@ pub fn code_pour_journal(texte: &str) -> String {
         .collect()
 }
 
+/// La touche Impr. écran seule, dans la notation des réglages.
+pub const IMPR_ECRAN: &str = "ImprEcran";
+
+/// Vrai si `candidat` est la touche Impr. écran seule (notation lue par `raccourcis`).
+pub fn est_impr_ecran(candidat: &str) -> bool {
+    raccourcis::analyser(candidat).is_ok_and(|r| r.est_impr_ecran_seule())
+}
+
+/// Refus de « Impr. écran ouvre BreezyShot » quand Windows garde la touche : la phrase dit
+/// où la lui reprendre.
+pub const REFUS_IMPR_ECRAN: &str =
+    "Windows garde la touche : Paramètres › Accessibilité › Clavier, désactivez « Utiliser le bouton Impr. écran pour ouvrir la capture d'écran »";
+
 /// Applique un changement à une copie des réglages et la valide par le module `reglages`.
 /// Fonction pure.
 pub fn appliquer(r: &Reglages, c: &Changement) -> Result<Reglages, Refus> {
@@ -197,6 +221,16 @@ pub fn appliquer(r: &Reglages, c: &Changement) -> Result<Reglages, Refus> {
         Changement::Retardateur(s) if *s > reglages::RETARDATEUR_MAX_S => return Err(invalide()),
         Changement::Retardateur(s) => n.capture.retardateur_s = *s,
         Changement::Pointeur(b) => n.capture.pointeur = *b,
+        // Allumée : Impr. écran devient le premier raccourci de la zone (déplacée en tête si
+        // elle y était plus bas). Éteinte : les raccourcis restent ; Windows reprenant la
+        // touche, la zone passe au candidat suivant.
+        Changement::ImprEcran(true) => {
+            let zone = n.raccourcis.candidats("zone").unwrap_or_default().to_vec();
+            let mut nouveaux = vec![IMPR_ECRAN.to_string()];
+            nouveaux.extend(zone.into_iter().filter(|c| !est_impr_ecran(c)));
+            fixer_candidats(&mut n.raccourcis, "zone", nouveaux);
+        }
+        Changement::ImprEcran(false) => {}
     }
     reglages::valider(&n).map_err(|e| refus_validation(c.ligne(), &e, &n))?;
     Ok(n)
@@ -225,17 +259,18 @@ pub fn libelle_action(action: &str) -> &'static str {
     }
 }
 
-/// L'ordre des lignes de la rubrique Raccourcis : les captures dans l'ordre du menu
-/// (`ORDRE_MENU`), la capture défilante en cinquième, puis « Historique » et « Copier le
-/// texte » comme en 0.5. Une action absente d'ici suit, dans l'ordre reçu.
+/// L'ordre des lignes de Réglages › Raccourcis : celui du menu de l'icône (`ORDRE_MENU`),
+/// la capture défilante en cinquième, puis « Copier le texte » avant l'historique (0.5.3).
+/// Affichage seulement : l'ordre de réservation des raccourcis ne change pas
+/// (`ACTIONS_PRIORITAIRES`, `actions_selon`). Une action absente suit, dans l'ordre reçu.
 pub const ORDRE_RACCOURCIS: [&str; 7] = [
     "zone",
     "plein_ecran",
     "fenetre",
     "derniere_zone",
     "defilante",
-    "historique",
     "texte",
+    "historique",
 ];
 
 /// Les actions en vigueur rangées dans l'ordre de la page (tri stable).
@@ -449,8 +484,9 @@ pub struct VueReglages {
     pub apercu_nom: String,
     pub theme: &'static str,
     pub demarrage: &'static str,
+    pub impr_ecran: bool,
     /// Une ligne par action en vigueur (`Contexte.actions`), dans l'ordre de
-    /// `ORDRE_RACCOURCIS` : « Capture défilante », « Historique » et « Copier le texte »
+    /// `ORDRE_RACCOURCIS` : « Capture défilante », « Copier le texte » et « Historique »
     /// seulement avec une licence (et, pour le texte, une langue de lecture).
     pub raccourcis: Vec<VueRaccourci>,
     /// Une licence valide est en place : la ligne « Licence » dit « Pro activé ».
@@ -474,6 +510,9 @@ pub struct Contexte<'a> {
     pub refus_raccourcis: &'a std::collections::BTreeMap<String, String>,
     pub dossier_affiche: String,
     pub demarrage: EtatDemarrage,
+    /// Impr. écran ouvre BreezyShot (Windows ne la garde pas pour l'Outil Capture) ;
+    /// `None` hors Windows : la ligne n'est pas montrée.
+    pub impr_ecran: Option<bool>,
     pub licence_active: bool,
     pub version: &'static str,
     pub alerte: Option<String>,
@@ -497,6 +536,9 @@ pub fn vue(r: &Reglages, c: &Contexte<'_>) -> VueReglages {
     let mut lignes = lignes_montrees(c.vignette_construite, c.capture_disponible);
     if c.demarrage == EtatDemarrage::Indisponible {
         lignes.retain(|l| *l != "demarrage");
+    }
+    if c.impr_ecran.is_none() {
+        lignes.retain(|l| *l != "impr_ecran");
     }
     let raccourcis = actions_dans_l_ordre(c.actions)
         .iter()
@@ -539,6 +581,7 @@ pub fn vue(r: &Reglages, c: &Contexte<'_>) -> VueReglages {
         apercu_nom: apercu_nom(&r.modele_nom, c.maintenant),
         theme: r.theme.texte(),
         demarrage: nom_demarrage(c.demarrage),
+        impr_ecran: c.impr_ecran.unwrap_or(false),
         raccourcis,
         licence_active: c.licence_active,
         version: c.version,
@@ -579,6 +622,7 @@ mod tests {
                 "copier",
                 "dossier",
                 "modele_nom",
+                "impr_ecran",
                 "theme",
                 "demarrage",
                 "version",
@@ -596,6 +640,7 @@ mod tests {
                 "dossier",
                 "enregistrer",
                 "modele_nom",
+                "impr_ecran",
                 "theme",
                 "demarrage",
                 "version",
@@ -609,11 +654,46 @@ mod tests {
     }
 
     #[test]
+    fn impr_ecran_seulement_sous_windows_et_premier_raccourci_de_la_zone() {
+        let r = Reglages::par_defaut(Plateforme::Windows);
+        // Allumée sans Impr. écran dans la zone : elle passe en tête, le reste suit.
+        let mut sans = r.clone();
+        fixer_candidats(&mut sans.raccourcis, "zone", vec!["Ctrl+Maj+1".into()]);
+        let n = appliquer(&sans, &Changement::ImprEcran(true)).unwrap();
+        assert_eq!(
+            n.raccourcis.candidats("zone").unwrap(),
+            ["ImprEcran".to_string(), "Ctrl+Maj+1".to_string()]
+        );
+        // Plus bas, sous une autre écriture : remise en tête, sans doublon.
+        let mut bas = r.clone();
+        fixer_candidats(
+            &mut bas.raccourcis,
+            "zone",
+            vec!["F9".into(), "Impr. écran".into()],
+        );
+        let n = appliquer(&bas, &Changement::ImprEcran(true)).unwrap();
+        assert_eq!(
+            n.raccourcis.candidats("zone").unwrap(),
+            ["ImprEcran".to_string(), "F9".to_string()]
+        );
+        // Éteinte : rien ne bouge.
+        assert_eq!(appliquer(&bas, &Changement::ImprEcran(false)).unwrap(), bas);
+        // La page envoie { cle, valeur } : lu tel quel.
+        let c: Changement = serde_json::from_str(r#"{"cle":"impr_ecran","valeur":true}"#).unwrap();
+        assert_eq!(c, Changement::ImprEcran(true));
+        assert_eq!(
+            ligne_changement(&Changement::ImprEcran(true)),
+            "reglage change: impr_ecran oui"
+        );
+        assert!(est_impr_ecran("ImprEcran") && !est_impr_ecran("Ctrl+ImprEcran"));
+    }
+
+    #[test]
     fn lignes_de_la_capture() {
         // En tête, dans l'ordre de la page.
         let tout = lignes_montrees(true, true);
         assert_eq!(tout[..3], ["retardateur", "pointeur", "copier"]);
-        assert_eq!(tout.len(), 13);
+        assert_eq!(tout.len(), 14);
         // Rien de ce qui n'a pas d'effet en 0.4.
         for absent in ["barre", "format", "mise_a_jour"] {
             assert!(!tout.contains(&absent));
@@ -902,6 +982,7 @@ mod tests {
             refus_raccourcis: &refus,
             dossier_affiche: "Images › BreezyShot".into(),
             demarrage: EtatDemarrage::DesactiveParWindows,
+            impr_ecran: None,
             licence_active: false,
             version: "9.9.9",
             alerte: None,
@@ -987,7 +1068,7 @@ mod tests {
         // Rangées dans l'ordre de la page, quel que soit l'ordre reçu ; une inconnue suit.
         assert_eq!(
             actions_dans_l_ordre(&["inconnue", "texte", "defilante", "historique", "zone"]),
-            ["zone", "defilante", "historique", "texte", "inconnue"]
+            ["zone", "defilante", "texte", "historique", "inconnue"]
         );
     }
 
@@ -1015,6 +1096,7 @@ mod tests {
                 refus_raccourcis: &refus,
                 dossier_affiche: String::new(),
                 demarrage: EtatDemarrage::Inactif,
+                impr_ecran: None,
                 licence_active,
                 version: "1",
                 alerte: None,
@@ -1041,8 +1123,8 @@ mod tests {
                 ("Fenêtre", "Ctrl+Maj+3".to_string()),
                 ("Refaire la dernière zone", "Ctrl+Maj+4".to_string()),
                 ("Capture défilante", "Ctrl+Maj+5".to_string()),
-                ("Historique", "Ctrl+Maj+H".to_string()),
                 ("Copier le texte", "Ctrl+Maj+T".to_string()),
+                ("Historique", "Ctrl+Maj+H".to_string()),
             ]
         );
         assert_eq!(
@@ -1061,7 +1143,9 @@ mod tests {
             &crate::application::actions_selon(true, true, false, true),
             true,
         );
-        assert_eq!(lignes(&sans_langue), lignes(&avec)[..6]);
+        let mut sans_texte = lignes(&avec);
+        sans_texte.retain(|(l, _)| *l != "Copier le texte");
+        assert_eq!(lignes(&sans_langue), sans_texte);
         // Sans défilante construite (ou hors Windows) : les six lignes de la 0.5.
         let sans_defilante = vue_pour(
             &crate::application::actions_selon(true, true, true, false),
@@ -1072,7 +1156,7 @@ mod tests {
             .raccourcis
             .iter()
             .all(|x| x.action != "defilante"));
-        assert_eq!(sans_defilante.raccourcis[4].action, "historique");
+        assert_eq!(sans_defilante.raccourcis[4].action, "texte");
         // Une défilante sans raccourci (Ctrl + Maj + 5 pris ailleurs) : « Aucun raccourci ».
         let mut table = BTreeMap::new();
         for a in ["zone", "defilante"] {
@@ -1088,6 +1172,7 @@ mod tests {
             refus_raccourcis: &refus,
             dossier_affiche: String::new(),
             demarrage: EtatDemarrage::Inactif,
+            impr_ecran: None,
             licence_active: true,
             version: "1",
             alerte: None,
@@ -1179,6 +1264,7 @@ mod essai_de_page {
             refus_raccourcis: &refus,
             dossier_affiche: "Images › BreezyShot".into(),
             demarrage: EtatDemarrage::Inactif,
+            impr_ecran: Some(false),
             licence_active: false,
             // Jamais la vraie version : l'essai ne la suppose pas.
             version: "7.8.9-essai",

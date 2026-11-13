@@ -79,6 +79,10 @@ pub const PERDUES_AUTO_MAX: u32 = 4;
 /// En `Auto`, tant d'images `Ambigue` de suite comptent pour une image immobile (une page
 /// unie plus haute que la zone ne fait pas défiler sans fin).
 pub const AMBIGUES_MAX: u32 = 6;
+/// Images `Vu::ImmobileLu` de suite au plus petit pas après lesquelles elles comptent comme
+/// des images immobiles ordinaires : une vue au contenu fixe dont l'application dit qu'elle
+/// défile ne tourne pas jusqu'à `DUREE_MAX` (N4).
+pub const IMMOBILES_LUS_MAX: u32 = 3;
 
 /// Texte de la pilule de la page de contrôle.
 pub const LIBELLE_TERMINER: &str = "Terminer";
@@ -409,6 +413,11 @@ impl Fin {
 pub struct Course {
     conduite: Conduite,
     perdue: bool,
+    /// Un cran de l'utilisateur dans la zone a été vu : « Trop vite » ne parle que de sa
+    /// molette, jamais d'un passage en `Main` décidé par l'app (contrat §3, D10, U5).
+    molette_vue: bool,
+    /// « Trop vite » est montré.
+    trop_vite_montre: bool,
     fin: Option<Fin>,
     debut: Instant,
     /// La dernière image qui a apporté des lignes (ou le passage en `Main`).
@@ -421,6 +430,10 @@ pub struct Course {
     /// Réductions de moitié pour retrouver du texte dans le recouvrement (images
     /// ambiguës) ; défaites à la première avance.
     reductions_ambigues: u32,
+    /// `Vu::ImmobileLu` de suite au plus petit pas (N4).
+    immobiles_lus: u32,
+    /// Le bas est à vérifier au plus petit pas (deux images immobiles sans position lue).
+    bas_a_verifier: bool,
     /// Le dernier pas demandé (négatif : une remontée).
     dernier_pas: i32,
     /// Le moyen en cours a fait avancer la page : gardé pour toute la capture (R3).
@@ -446,6 +459,8 @@ impl Course {
         Course {
             conduite: Conduite::Attente,
             perdue: false,
+            molette_vue: false,
+            trop_vite_montre: false,
             fin: None,
             debut,
             derniere_nouvelle: debut,
@@ -453,6 +468,8 @@ impl Course {
             pas_plein: PAS_MIN,
             reductions: 0,
             reductions_ambigues: 0,
+            immobiles_lus: 0,
+            bas_a_verifier: false,
             dernier_pas: 0,
             moyen_choisi: false,
             avance_vue: false,
@@ -491,7 +508,11 @@ impl Course {
 
     fn recalculer_pas(&mut self) {
         let n = (self.reductions + self.reductions_ambigues).min(30);
-        self.pas = (self.pas_plein >> n).max(PAS_MIN);
+        self.pas = if self.bas_a_verifier {
+            PAS_MIN
+        } else {
+            (self.pas_plein >> n).max(PAS_MIN)
+        };
     }
 
     /// Vrai si le pas est déjà au plus petit (`PAS_MIN`).
@@ -550,6 +571,10 @@ impl Course {
 pub enum Vu {
     /// Une image mesurée, et la position lue s'il y en a une.
     Image(Mesure, Option<Position>),
+    /// Une image mesurée `Immobile` avec un lu non nul (`Attendu::Lu(e)`, e ≠ 0) : sur une
+    /// grille parfaitement répétitive, un lu multiple de la période (C, troisième
+    /// relecture N4). Elle ne compte jamais pour le bas, sauf position lue en bas.
+    ImmobileLu(Option<Position>),
     /// Un cran de l'utilisateur ; `dans_zone` : le pointeur était dans la zone.
     Molette { dans_zone: bool },
     /// « Terminer ».
@@ -611,6 +636,7 @@ pub fn suite(course: &mut Course, vu: Vu, maintenant: Instant) -> Vec<Geste> {
         Vu::Entree => finir(course, Fin::Entree),
         Vu::Molette { dans_zone: false } => Vec::new(),
         Vu::Molette { dans_zone: true } => {
+            course.molette_vue = true;
             if course.conduite != Conduite::Main {
                 // Définitif : aucun pas n'est plus demandé ; un pas en route finit (D9).
                 course.passer_main(maintenant);
@@ -630,10 +656,62 @@ pub fn suite(course: &mut Course, vu: Vu, maintenant: Instant) -> Vec<Geste> {
         Vu::Image(mesure, position) => match course.conduite {
             // Aucune image n'est demandée pendant l'attente : rien à en faire.
             Conduite::Attente => Vec::new(),
-            Conduite::Auto => suite_auto(course, mesure, position, maintenant),
+            Conduite::Auto => {
+                course.immobiles_lus = 0;
+                suite_auto(course, mesure, position, maintenant)
+            }
             Conduite::Main => suite_main(course, mesure, position, maintenant),
         },
+        Vu::ImmobileLu(position) => match course.conduite {
+            Conduite::Attente => Vec::new(),
+            Conduite::Auto => suite_auto_immobile_lu(course, position, maintenant),
+            // En `Main`, la fin ne vient que de la position lue : comme une image immobile.
+            Conduite::Main => suite_main(course, Mesure::Immobile, position, maintenant),
+        },
     }
+}
+
+/// L'image d'un pas, pour la course : `Immobile` avec un lu non nul devient
+/// `Vu::ImmobileLu` (N4). Fonction pure.
+pub fn vu_image(mesure: Mesure, attendu: Attendu, position: Option<Position>) -> Vu {
+    match (mesure, attendu) {
+        (Mesure::Immobile, Attendu::Lu(e)) if e != 0 => Vu::ImmobileLu(position),
+        _ => Vu::Image(mesure, position),
+    }
+}
+
+/// Une image immobile après un pas, avec un lu non nul (N4) : la page a bougé de `e`, mais
+/// l'image est la même (grille répétitive, `e` multiple de la période). Ce n'est pas le
+/// bas : le pas est réduit de moitié, on remonte de la moitié du dernier mouvement pour
+/// sortir du multiple, et on réessaie. Au plus petit pas, on redescend. Seule une position
+/// lue en bas (≥ 99,9 %) en fait une image immobile ordinaire, ou `IMMOBILES_LUS_MAX`
+/// de suite au plus petit pas (contenu fixe, la vue dit qu'elle défile).
+fn suite_auto_immobile_lu(
+    course: &mut Course,
+    position: Option<Position>,
+    maintenant: Instant,
+) -> Vec<Geste> {
+    if course.au_plus_petit() {
+        course.immobiles_lus = course.immobiles_lus.saturating_add(1);
+    }
+    if en_bas_lu(position) || course.immobiles_lus >= IMMOBILES_LUS_MAX {
+        return suite_auto(course, Mesure::Immobile, position, maintenant);
+    }
+    if let Some(lue) = position.map(|p| p.pour_cent).filter(|p| p.is_finite()) {
+        course.derniere_position = Some(lue);
+    }
+    course.en_bas_depuis = None;
+    course.immobiles = 0;
+    course.ambigues = 0;
+    // Le lu dit que la page a bougé : le moyen marche.
+    course.moyen_choisi = true;
+    if !course.au_plus_petit() {
+        course.reductions_ambigues += 1;
+        course.recalculer_pas();
+        let recul = (course.dernier_pas.abs() / 2).max(1);
+        return vec![course.descendre(-recul)];
+    }
+    vec![course.descendre(course.pas)]
 }
 
 /// Une image après un pas automatique.
@@ -670,9 +748,11 @@ fn suite_auto(
             course.moyen_choisi = true;
             course.avance_vue = true;
             course.derniere_nouvelle = maintenant;
-            if course.reductions_ambigues > 0 {
-                // Du texte est retrouvé : le pas d'avant les images ambiguës.
+            if course.reductions_ambigues > 0 || course.bas_a_verifier {
+                // Du texte est retrouvé : le pas d'avant les images ambiguës, ou d'avant la
+                // vérification du bas.
                 course.reductions_ambigues = 0;
+                course.bas_a_verifier = false;
                 course.recalculer_pas();
             }
             vec![Geste::Apercu, course.descendre(course.pas)]
@@ -698,6 +778,19 @@ fn suite_auto(
         Mesure::Immobile => {
             course.ambigues = 0;
             course.perdues_auto = 0;
+            if !en_bas
+                && position.is_none()
+                && course.moyen_choisi
+                && course.immobiles >= 1
+                && !course.au_plus_petit()
+            {
+                // Sans position lue, deux images immobiles ne suffisent pas : sur une liste,
+                // un vrai décalage hors de portée donne aussi `Immobile` (C, sans lu). Un
+                // pas au plus petit doit le redire avant de conclure au bas.
+                course.bas_a_verifier = true;
+                course.recalculer_pas();
+                return vec![course.descendre(course.pas)];
+            }
             immobile_auto(course, en_bas, maintenant)
         }
         Mesure::Ambigue => {
@@ -797,7 +890,10 @@ fn suite_main(
             Mesure::Avance(_) | Mesure::Immobile => {
                 // La dernière image gardée est retrouvée : la capture reprend là.
                 course.perdue = false;
-                gestes.push(Geste::Message(None));
+                if course.trop_vite_montre {
+                    course.trop_vite_montre = false;
+                    gestes.push(Geste::Message(None));
+                }
             }
             // Un recul peut être faux sur une page perdue (liste hors de portée, C) : il ne
             // cache pas « Trop vite ».
@@ -815,7 +911,12 @@ fn suite_main(
         Mesure::Perdue => {
             course.perdue = true;
             course.en_bas_depuis = None;
-            gestes.push(Geste::Message(Some(TEXTE_TROP_VITE)));
+            // Seulement si la molette de l'utilisateur a conduit : un passage en `Main` décidé
+            // par l'app reste silencieux (l'aperçu qui ne grandit pas suffit).
+            if course.molette_vue {
+                course.trop_vite_montre = true;
+                gestes.push(Geste::Message(Some(TEXTE_TROP_VITE)));
+            }
         }
         // Sans position lue, aucune fin seule en `Main` (D15).
         Mesure::Immobile if en_bas_lu(position) => {
@@ -841,6 +942,37 @@ pub fn attendu(gardee: Option<Position>, maintenant: Option<Position>) -> Attend
     match (gardee, maintenant) {
         (Some(g), Some(m)) => defiler::decalage_px(&g, &m).map_or(Attendu::Aucun, Attendu::Lu),
         _ => Attendu::Aucun,
+    }
+}
+
+/// Bornes du facteur d'étalonnage du lu (décision du responsable, relecture d'ensemble
+/// point 3) : un rectangle de vue qui compte un en-tête ou une barre fausse le lu d'un
+/// facteur constant, de quelques pour cent ; au-delà de ces bornes, ce n'est plus un biais.
+pub const ETALON_MIN: f64 = 0.5;
+pub const ETALON_MAX: f64 = 2.0;
+/// `Ambigue` de suite avec un lu non étalonné avant de remesurer sans lu.
+pub const AMBIGUES_LUES_MAX: u32 = 2;
+
+/// Le facteur d'étalonnage du lu d'après une avance mesurée sur du contenu (la mesure sans
+/// lu la redit) : `avance / lu`, borné à [`ETALON_MIN`, `ETALON_MAX`]. Rien pour un lu nul
+/// ou négatif, ou une avance nulle. Fonction pure.
+pub fn etalon(avance: u32, lu: i32) -> Option<f64> {
+    (lu > 0 && avance > 0)
+        .then(|| (f64::from(avance) / f64::from(lu)).clamp(ETALON_MIN, ETALON_MAX))
+}
+
+/// Le lu corrigé par l'étalonnage de la capture, s'il y en a un. Fonction pure.
+pub fn lu_etalonne(attendu: Attendu, etalon: Option<f64>) -> Attendu {
+    match (attendu, etalon) {
+        (Attendu::Lu(e), Some(k)) => {
+            let v = (f64::from(e) * k).round();
+            if v.abs() < f64::from(i32::MAX) {
+                Attendu::Lu(v as i32)
+            } else {
+                Attendu::Aucun
+            }
+        }
+        _ => attendu,
     }
 }
 
@@ -1635,6 +1767,142 @@ mod tests {
     }
 
     #[test]
+    fn immobile_avec_un_lu_non_nul_n_est_pas_le_bas() {
+        // N4 : grille parfaitement répétitive, le lu exact (une période) donne `Immobile`.
+        assert_eq!(
+            vu_image(Mesure::Immobile, Attendu::Lu(200), pos(50.0)),
+            Vu::ImmobileLu(pos(50.0))
+        );
+        assert_eq!(
+            vu_image(Mesure::Immobile, Attendu::Lu(0), None),
+            Vu::Image(Mesure::Immobile, None)
+        );
+        assert_eq!(
+            vu_image(Mesure::Immobile, Attendu::Aucun, None),
+            Vu::Image(Mesure::Immobile, None)
+        );
+        assert_eq!(
+            vu_image(Mesure::Avance(200), Attendu::Lu(200), None),
+            Vu::Image(Mesure::Avance(200), None)
+        );
+        let t0 = Instant::now();
+        let mut c = en_auto(t0);
+        let t = t0 + ms(600);
+        suite(&mut c, Vu::Image(Mesure::Avance(200), None), t);
+        // Dès le premier pas, puis à chaque fois : pas réduit de moitié et remontée de la
+        // moitié du dernier mouvement, jamais « en bas » ni un repli.
+        assert_eq!(
+            suite(&mut c, Vu::ImmobileLu(pos(40.0)), t),
+            vec![Geste::Descendre(-100)]
+        );
+        assert_eq!(
+            suite(&mut c, Vu::Image(Mesure::Recul(100), pos(35.0)), t),
+            vec![Geste::Descendre(100)]
+        );
+        assert_eq!(
+            suite(&mut c, Vu::ImmobileLu(pos(40.0)), t),
+            vec![Geste::Descendre(-50)]
+        );
+        // Puis jusqu'au plus petit pas (40) et au-delà : toujours un pas, jamais compté.
+        assert_eq!(
+            suite(&mut c, Vu::Image(Mesure::Recul(50), pos(37.0)), t),
+            vec![Geste::Descendre(50)]
+        );
+        for _ in 0..10 {
+            let g = suite(&mut c, Vu::ImmobileLu(pos(40.0)), t);
+            assert!(matches!(g[..], [Geste::Descendre(_)]), "{g:?}");
+            suite(&mut c, Vu::Image(Mesure::Recul(1), pos(39.0)), t);
+        }
+        assert_eq!(c.fin(), None);
+        // Le texte retrouvé rend le pas plein.
+        assert_eq!(
+            suite(&mut c, Vu::Image(Mesure::Avance(40), pos(41.0)), t),
+            vec![Geste::Apercu, Geste::Descendre(200)]
+        );
+        // Une position lue en bas : la fin, comme une image immobile.
+        assert_eq!(
+            suite(&mut c, Vu::ImmobileLu(pos(99.95)), t),
+            vec![Geste::Prendre(FIN_EN_BAS)]
+        );
+        assert_eq!(
+            suite(&mut c, Vu::ImmobileLu(pos(99.95)), t + FIN_EN_BAS),
+            vec![Geste::Finir(Fin::EnBas)]
+        );
+        // Sans position en bas, deux `ImmobileLu` de suite ne finissent jamais, alors que
+        // deux images immobiles sans lu (ou avec un lu nul) le font.
+        let mut c = en_auto(t0);
+        suite(&mut c, Vu::Image(Mesure::Avance(200), None), t);
+        for _ in 0..2 {
+            let g = suite(&mut c, Vu::ImmobileLu(None), t);
+            assert!(matches!(g[..], [Geste::Descendre(n)] if n < 0), "{g:?}");
+        }
+        assert_eq!(c.fin(), None);
+    }
+
+    #[test]
+    fn immobiles_lus_bornes_au_plus_petit_pas() {
+        // Contenu fixe dans une vue dont l'application dit qu'elle défile : chaque pas lu
+        // donne `Immobile`. Le pas est réduit jusqu'au plus petit (40), puis, après
+        // `IMMOBILES_LUS_MAX` de suite à ce pas, ce sont des images immobiles ordinaires.
+        let t0 = Instant::now();
+        let mut c = en_auto(t0);
+        let t = t0 + ms(600);
+        suite(&mut c, Vu::Image(Mesure::Avance(200), None), t);
+        let lu = Vu::ImmobileLu(None);
+        assert_eq!(suite(&mut c, lu, t), vec![Geste::Descendre(-100)]);
+        assert_eq!(suite(&mut c, lu, t), vec![Geste::Descendre(-50)]);
+        assert_eq!(suite(&mut c, lu, t), vec![Geste::Descendre(-25)]);
+        // Au plus petit pas : deux fois on redescend.
+        assert_eq!(suite(&mut c, lu, t), vec![Geste::Descendre(40)]);
+        assert_eq!(suite(&mut c, lu, t), vec![Geste::Descendre(40)]);
+        // Une autre image entre deux remet le compte à zéro.
+        assert_eq!(
+            suite(&mut c, Vu::Image(Mesure::Recul(5), None), t),
+            vec![Geste::Descendre(40)]
+        );
+        assert_eq!(suite(&mut c, lu, t), vec![Geste::Descendre(40)]);
+        assert_eq!(suite(&mut c, lu, t), vec![Geste::Descendre(40)]);
+        // La troisième de suite : une image immobile (la première des deux du bas).
+        assert_eq!(suite(&mut c, lu, t), vec![Geste::Descendre(40)]);
+        assert_eq!(suite(&mut c, lu, t), vec![Geste::Prendre(FIN_EN_BAS)]);
+        assert_eq!(
+            suite(&mut c, Vu::Image(Mesure::Immobile, None), t + FIN_EN_BAS),
+            vec![Geste::Finir(Fin::EnBas)]
+        );
+        assert_eq!(c.fin(), Some(Fin::EnBas));
+    }
+
+    #[test]
+    fn sans_position_le_bas_est_verifie_au_plus_petit_pas() {
+        // C, point ouvert : sur une liste, sans lu, un vrai décalage hors de portée donne
+        // `Immobile`. Deux images immobiles sans position ne concluent pas au bas tout de
+        // suite : un pas au plus petit doit le redire.
+        let t0 = Instant::now();
+        let mut c = en_auto(t0);
+        let t = t0 + ms(600);
+        let immobile = Vu::Image(Mesure::Immobile, None);
+        suite(&mut c, Vu::Image(Mesure::Avance(200), None), t);
+        assert_eq!(suite(&mut c, immobile, t), vec![Geste::Descendre(200)]);
+        assert_eq!(suite(&mut c, immobile, t), vec![Geste::Descendre(PAS_MIN)]);
+        // Le petit pas avance : ce n'était pas le bas, le pas plein revient.
+        assert_eq!(
+            suite(&mut c, Vu::Image(Mesure::Avance(40), None), t),
+            vec![Geste::Apercu, Geste::Descendre(200)]
+        );
+        assert_eq!(c.fin(), None);
+        // Le petit pas redit `Immobile` : le bas.
+        assert_eq!(suite(&mut c, immobile, t), vec![Geste::Descendre(200)]);
+        assert_eq!(suite(&mut c, immobile, t), vec![Geste::Descendre(PAS_MIN)]);
+        assert_eq!(suite(&mut c, immobile, t), vec![Geste::Prendre(FIN_EN_BAS)]);
+        // Avec une position lue (qui ne dit pas le bas), deux images immobiles suffisent.
+        let mut c = en_auto(t0);
+        suite(&mut c, Vu::Image(Mesure::Avance(200), pos(40.0)), t);
+        let lue = Vu::Image(Mesure::Immobile, pos(40.0));
+        assert_eq!(suite(&mut c, lue, t), vec![Geste::Descendre(200)]);
+        assert_eq!(suite(&mut c, lue, t), vec![Geste::Prendre(FIN_EN_BAS)]);
+    }
+
+    #[test]
     fn moyen_garde_des_qu_il_fait_avancer() {
         let t0 = Instant::now();
         let mut c = en_auto(t0);
@@ -1643,8 +1911,10 @@ mod tests {
         // Première commande sans effet, seconde qui avance : moyen choisi.
         assert_eq!(suite(&mut c, immobile, t), vec![Geste::Descendre(200)]);
         suite(&mut c, Vu::Image(Mesure::Avance(200), None), t);
-        // Ensuite deux images immobiles disent « en bas », jamais un repli.
+        // Ensuite deux images immobiles disent « en bas », jamais un repli ; sans position
+        // lue, un pas au plus petit le redit d'abord.
         assert_eq!(suite(&mut c, immobile, t), vec![Geste::Descendre(200)]);
+        assert_eq!(suite(&mut c, immobile, t), vec![Geste::Descendre(PAS_MIN)]);
         assert_eq!(suite(&mut c, immobile, t), vec![Geste::Prendre(FIN_EN_BAS)]);
         // 350 ms sans autre avance : la fin seule.
         assert_eq!(
@@ -1737,6 +2007,40 @@ mod tests {
         // Plus de départ automatique.
         assert!(suite(&mut c, Vu::Temps(t0 + ms(900)), t0 + ms(900)).is_empty());
         assert_eq!(c.conduite(), Conduite::Main);
+    }
+
+    #[test]
+    fn trop_vite_seulement_apres_la_molette() {
+        // Auto, une avance, puis des pertes au plus petit pas jusqu'au passage en `Main`
+        // décidé par l'app : aucune perte ne montre « Trop vite » sans cran de l'utilisateur.
+        let t0 = Instant::now();
+        let mut c = en_auto(t0);
+        let t = t0 + ms(600);
+        suite(&mut c, Vu::Image(Mesure::Avance(200), None), t);
+        let mut n = 0;
+        while c.conduite() == Conduite::Auto {
+            let g = suite(&mut c, Vu::Image(Mesure::Perdue, None), t);
+            assert!(!g.iter().any(|g| matches!(g, Geste::Message(_))), "{g:?}");
+            n += 1;
+            assert!(n < 20);
+        }
+        let g = suite(&mut c, Vu::Image(Mesure::Perdue, None), t);
+        assert_eq!(g, vec![Geste::Prendre(PRISE_MAIN)]);
+        assert!(c.perdue());
+        // Retrouvée : rien à cacher, rien n'a été montré.
+        assert_eq!(
+            suite(&mut c, Vu::Image(Mesure::Avance(40), None), t),
+            vec![Geste::Apercu, Geste::Prendre(PRISE_MAIN)]
+        );
+        // Puis l'utilisateur fait défiler, trop loin : le message.
+        suite(&mut c, Vu::Molette { dans_zone: true }, t);
+        assert_eq!(
+            suite(&mut c, Vu::Image(Mesure::Perdue, None), t),
+            vec![
+                Geste::Message(Some(TEXTE_TROP_VITE)),
+                Geste::Prendre(PRISE_MAIN)
+            ]
+        );
     }
 
     #[test]
@@ -2101,6 +2405,25 @@ mod tests {
             suite(&mut c, Vu::Temps(t0 + DUREE_MAX), t0 + DUREE_MAX),
             vec![Geste::Finir(Fin::Limite)]
         );
+    }
+
+    #[test]
+    fn etalonnage_du_lu() {
+        // Un lu 5 % trop grand : 158 pour une vraie avance de 150.
+        let k = etalon(150, 158).unwrap();
+        assert!((k - 150.0 / 158.0).abs() < 1e-9);
+        assert_eq!(lu_etalonne(Attendu::Lu(158), Some(k)), Attendu::Lu(150));
+        assert_eq!(lu_etalonne(Attendu::Lu(-316), Some(k)), Attendu::Lu(-300));
+        // Borné.
+        assert_eq!(etalon(400, 100), Some(ETALON_MAX));
+        assert_eq!(etalon(10, 100), Some(ETALON_MIN));
+        // Rien sans lu positif ni avance.
+        assert_eq!(etalon(150, 0), None);
+        assert_eq!(etalon(150, -150), None);
+        assert_eq!(etalon(0, 150), None);
+        // Sans étalonnage, ou sans lu : inchangé.
+        assert_eq!(lu_etalonne(Attendu::Lu(158), None), Attendu::Lu(158));
+        assert_eq!(lu_etalonne(Attendu::Aucun, Some(k)), Attendu::Aucun);
     }
 
     #[test]

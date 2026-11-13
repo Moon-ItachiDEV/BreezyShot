@@ -14,6 +14,8 @@
 // 15° pour flèche, ligne et bout tiré ; carré à la création, proportions gardées par un coin ;
 // trait droit pour le stylo et le surligneur. Stylo et surligneur : le pointeur tenu immobile
 // en fin de trait redresse un trait presque droit.
+// Flèche : tracée, elle reste choisie ; sa poignée du milieu (pleine, à la couleur d'accent)
+// la courbe, et la redresse ramenée sur la corde.
 
 import { jeton, jetonNombre } from "./editeur.js";
 import { sorteObjet, TYPE_DE_SORTE, TAILLES_TEXTE } from "./barre.js";
@@ -104,7 +106,6 @@ export function installerOutils(ed) {
           type: "fleche",
           ...base,
           double: false,
-          courbe: s === "courbe",
           couleur,
           epaisseur,
           opacite,
@@ -143,13 +144,14 @@ export function installerOutils(ed) {
     }
   }
   // Pose `o` dans le document (un pas ; `ajouter` donne l'`id`, et l'`ordre` d'un numéro).
-  // Il n'est pas choisi (maquette) : la sélection ne vient que d'un appui sur un objet.
-  function poser(o) {
+  // Il n'est pas choisi (maquette), sauf une flèche (`garder`) : ses poignées se voient, celle
+  // du milieu la courbe.
+  function poser(o, garder = false) {
     let id = 0;
     ed.modifier((doc) => {
       id = ed.modele.ajouter(doc, o);
     });
-    ed.selection = [];
+    ed.selection = garder ? [id] : [];
     ed.barre.synchroniser();
     ed.dessiner();
     return id;
@@ -166,12 +168,10 @@ export function installerOutils(ed) {
     if (enEdition) validerSaisie();
     scene.focus({ preventScroll: true });
     if (enEdition || !ed.h || !ed.fond) return;
-    // Un menu ouvert : l'appui le referme seulement (maquette). Une bulle de réglage (taille,
-    // couleur) se referme et le geste commence : le réglage choisi, on dessine.
+    // Un menu ouvert : l'appui le referme seulement (maquette).
     if (ed.barre.menuOuvert() && !espace) {
-      const bulle = ed.barre.bulleOuverte();
       ed.barre.fermerMenus();
-      if (!bulle) return;
+      return;
     }
     toile.setPointerCapture?.(e.pointerId);
     const p = versImage(e);
@@ -204,11 +204,18 @@ export function installerOutils(ed) {
       };
       ed.gommes = geste.passages;
       passer(p, p);
-      // La gomme posée sur un objet entier (texte, numéro, masque, projecteur), sans encre
-      // dessous : il part en entier, et disparaît dès l'appui.
-      if (!geste.passages.size) {
-        const o = ed.modele.objetSous(ed.h.doc, p, tolerance(), ENTIERS);
-        if (o) ed.gommeEntier = geste.entier = o.id;
+      // Ce qui est dessus décide. La gomme posée sur un objet entier (texte, numéro, masque,
+      // projecteur) qu'aucune encre atteinte ne recouvre : il part en entier, disparaît dès
+      // l'appui, et ce qu'il couvrait n'est pas gommé. Une encre par-dessus lui : elle seule
+      // est gommée à l'appui, pas celles qu'il cache.
+      const o = ed.modele.objetSous(ed.h.doc, p, tolerance(), ENTIERS);
+      if (o) {
+        const doc = ed.h.doc;
+        const caches = [...geste.passages.keys()].filter((id) => !dessus(doc, ed.objet(id), o));
+        if (caches.length === geste.passages.size) {
+          geste.passages.clear();
+          ed.gommeEntier = geste.entier = o.id;
+        } else for (const id of caches) geste.passages.delete(id);
       }
       placerRond(e);
       ed.dessiner();
@@ -302,6 +309,11 @@ export function installerOutils(ed) {
 
   // ---------- gomme ----------
   const rayonGomme = () => jetonNombre(`editeur-gomme-rayon-${ed.barre.rang("gomme")}`) / echelleCss();
+  // Vrai si `a` est peint au-dessus de `b` : comme `objetSous`, les masques sous tout, puis
+  // les projecteurs, puis les annotations, chacun dans l'ordre du document.
+  const etage = (o) => (o.type === "masque" ? 0 : o.type === "projecteur" ? 1 : 2);
+  const dessus = (doc, a, b) =>
+    !!a && (etage(a) - etage(b) || doc.objets.indexOf(a) - doc.objets.indexOf(b)) > 0;
   // La gomme passée de `a` à `b` : le passage est noté pour chaque encre atteinte. Un
   // passage se prolonge tant que la gomme reste sur l'encre ; revenue dessus, elle en ouvre
   // un autre (le chemin fait hors de l'encre n'est pas gardé).
@@ -427,6 +439,9 @@ export function installerOutils(ed) {
       placerRond(e);
       const seuil = jetonNombre("editeur-deplacement-seuil");
       if (Math.hypot(e.clientX - g.ecran[0], e.clientY - g.ecran[1]) >= seuil) g.bouge = true;
+      // Posée sur un objet entier, elle ne gomme les encres qu'une fois vraiment partie : un
+      // clic qui tremble enlève l'objet sans trouer ce qu'il couvrait.
+      if (g.entier != null && !g.bouge) return;
       if (Math.hypot(p.x - g.p.x, p.y - g.p.y) < PAS_GOMME / echelleCss()) return;
       passer(g.p, p);
       g.p = p;
@@ -470,15 +485,7 @@ export function installerOutils(ed) {
       } else c.points = g.libre;
       g.maj = !!e.shiftKey;
       if (avance) attendreRedressement(g);
-    } else {
-      contraindre(c, p, e.shiftKey);
-      if (c.courbe) {
-        const dx = c.x2 - c.x1;
-        const dy = c.y2 - c.y1;
-        c.cx = (c.x1 + c.x2) / 2 - dy * 0.22;
-        c.cy = (c.y1 + c.y2) / 2 + dx * 0.22;
-      }
-    }
+    } else contraindre(c, p, e.shiftKey);
     ed.dessiner();
   }
 
@@ -550,6 +557,12 @@ export function installerOutils(ed) {
         ed.modifier((doc) => {
           for (const o of doc.objets) if (ids.includes(o.id)) ed.modele.normaliser(o);
         }, g.marque);
+        // Revenu tel qu'au départ (la poignée du milieu d'une flèche droite tirée sans la
+        // courber, un objet ramené à sa place) : aucun pas d'annulation.
+        const origines = g.origines ?? [g.origine];
+        if (origines.every((q) => JSON.stringify(ed.objet(q.id)) === JSON.stringify(q))) {
+          ed.abandonner();
+        }
       }
       ed.dessiner();
       return;
@@ -586,8 +599,7 @@ export function installerOutils(ed) {
       return;
     }
     ed.modele.normaliser(c);
-    delete c.courbe;
-    poser(c);
+    poser(c, c.type === "fleche");
   }
 
   // Échap pendant un geste : il est abandonné. Rien n'est créé ni gommé, le recadrage est
@@ -736,6 +748,17 @@ export function installerOutils(ed) {
     if (!edition || !saisie.value) return null;
     return { ...edition.objet, texte: saisie.value };
   }
+  // La barre règle le texte en saisie (couleur, taille, opacité) sans la fermer : le focus
+  // passé dans la barre ne la valide pas, et lui revient après le réglage.
+  function reglerSaisie(champ, valeur) {
+    if (!edition) return false;
+    edition.objet[champ] = valeur;
+    placerSaisie();
+    return true;
+  }
+  function reprendreSaisie() {
+    if (edition && document.activeElement !== saisie) saisie.focus({ preventScroll: true });
+  }
   function ouvrirSaisie(o, existant) {
     ed.selection = [];
     edition = { objet: copie(o), existant };
@@ -755,11 +778,15 @@ export function installerOutils(ed) {
     saisie.hidden = true;
     const v = saisie.value.trim();
     if (e.existant) {
+      // Le texte et ce que la barre a réglé pendant la saisie : un seul pas.
       const o = ed.objet(e.objet.id);
-      if (o && v !== o.texte) {
+      const neuf = { ...e.objet, texte: v };
+      const champs = ["texte", "couleur", "taille", "opacite"].filter((k) => neuf[k] !== o?.[k]);
+      if (o && champs.length) {
         ed.modifier((doc) => {
-          if (v) doc.objets.find((x) => x.id === o.id).texte = v;
-          else doc.objets = doc.objets.filter((x) => x.id !== o.id);
+          const d = doc.objets.find((x) => x.id === o.id);
+          if (!v) doc.objets = doc.objets.filter((x) => x.id !== o.id);
+          else for (const k of champs) d[k] = neuf[k];
         });
       }
     } else if (v) {
@@ -789,8 +816,8 @@ export function installerOutils(ed) {
       annulerSaisie();
     }
   });
-  saisie.addEventListener("blur", () => {
-    if (edition) validerSaisie();
+  saisie.addEventListener("blur", (e) => {
+    if (edition && !e.relatedTarget?.closest?.("#palette")) validerSaisie();
   });
 
   // ---------- opérations sur la sélection ----------
@@ -922,17 +949,21 @@ export function installerOutils(ed) {
     if (poignees()) {
       const o = ed.objet(ed.selection[0]);
       const rayon = n("editeur-poignee-rayon");
-      for (const [x, y] of o ? ed.modele.poignees(o) : []) {
+      const blanc = jeton("editeur-poignee");
+      // La poignée du milieu d'une flèche (celle qui la courbe) : pleine, à la couleur
+      // d'accent, cerclée de blanc ; les autres : blanches, cerclées d'accent.
+      for (const [x, y, nom] of o ? ed.modele.poignees(o) : []) {
         const [px, py] = versToile(x, y);
+        const courbe = nom === "pc";
         ctx.beginPath();
         ctx.arc(px, py, rayon, 0, 2 * Math.PI);
         ctx.shadowColor = jeton("editeur-poignee-ombre-couleur");
         ctx.shadowBlur = n("editeur-poignee-ombre");
-        ctx.fillStyle = jeton("editeur-poignee");
+        ctx.fillStyle = courbe ? acc : blanc;
         ctx.fill();
         ctx.shadowColor = "transparent";
         ctx.lineWidth = n("editeur-poignee-trait");
-        ctx.strokeStyle = acc;
+        ctx.strokeStyle = courbe ? blanc : acc;
         ctx.stroke();
       }
     }
@@ -951,6 +982,9 @@ export function installerOutils(ed) {
     toutChoisir,
     outilChange,
     idEnEdition: () => (edition?.existant ? edition.objet.id : null),
+    objetEnSaisie: () => edition?.objet ?? null,
+    reglerSaisie,
+    reprendreSaisie,
     texteEnSaisie,
     placerSaisie,
     dupliquer,

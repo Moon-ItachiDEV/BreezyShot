@@ -5,8 +5,8 @@
 // poignées et le recadrage en cours sont dessinés par la page, par-dessus la vue.
 
 import {
-  boite, boiteForme, cadre, longueurPointe, mesureTexte, numeroAffiche, policeTexte, POLICE,
-  TRAITS, TRAITS_SURLIGNEUR,
+  boite, boiteForme, cadre, entreePointe, longueurPointe, mesureTexte, numeroAffiche,
+  policeTexte, POLICE, TRAITS, TRAITS_SURLIGNEUR,
 } from "./document.js";
 
 // Épaisseurs : valeurs tenues par `document.js` (qui ne dépend pas de ce module).
@@ -107,10 +107,14 @@ function dessinerFleche(c, o) {
     const ex = o.x2 - o.cx, ey = o.y2 - o.cy, el = Math.hypot(ex, ey) || 1;
     const ux = ex / el, uy = ey / el;
     const sx = o.x1 - o.cx, sy = o.y1 - o.cy, sl = Math.hypot(sx, sy) || 1;
+    // Le corps est la courbe du modèle même, arrêtée où elle entre dans la pointe (de
+    // Casteljau) : il passe par la poignée du milieu, là où la prise et la gomme le voient.
+    const t = entreePointe(o, hl * 0.7), u = 1 - t;
     c.lineWidth = Ws * 1.05;
     c.beginPath();
     c.moveTo(o.x1, o.y1);
-    c.quadraticCurveTo(o.cx, o.cy, o.x2 - ux * hl * 0.7, o.y2 - uy * hl * 0.7);
+    c.quadraticCurveTo(o.x1 + t * (o.cx - o.x1), o.y1 + t * (o.cy - o.y1),
+      u * u * o.x1 + 2 * u * t * o.cx + t * t * o.x2, u * u * o.y1 + 2 * u * t * o.cy + t * t * o.y2);
     c.stroke();
     c.lineWidth = Math.max(1, W * 0.25);
     pointe(c, o.x2, o.y2, ux, uy, hl);

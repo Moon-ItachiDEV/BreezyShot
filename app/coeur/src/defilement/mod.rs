@@ -33,9 +33,10 @@
 //!
 //! **Attendu.** Seule une position **lue** par l'application (`Attendu::Lu`) est passée,
 //! jamais le pas commandé. Deux images égales à la même place donnent `Immobile` quel que
-//! soit le lu si elles ont des lignes porteuses ; entièrement unies, le lu est rendu (dans
-//! la portée, sinon `Perdue`). Sinon, si le recouvrement au lu (à `ATTENDU_A_PEU_PRES` lignes près, le lu
-//! d'abord) est cohérent (il passe, ou n'a aucune ligne différente : un blanc), il est
+//! soit le lu, sauf entièrement unies (chaque ligne d'une couleur à `canal` près) : le lu
+//! est alors rendu (dans la portée, sinon `Perdue`). Sinon, si le recouvrement au lu (à
+//! `ATTENDU_A_PEU_PRES` lignes près s'il y a assez de lignes porteuses, sinon le lu seul ;
+//! le lu d'abord) est cohérent (il passe, ou n'a aucune ligne différente : un blanc), il est
 //! rendu même si d'autres décalages passent, sauf si l'un d'eux le bat nettement
 //! (`Ambigue`, ou `Immobile` si c'est 0) ; sinon la mesure sans attendu, et `Ambigue` si
 //! elle trouve une autre avance que le lu.
@@ -43,11 +44,12 @@
 //! **Ce qui est excusé**, pour un décalage donné, sans compter ni pour ni contre :
 //! - les lignes des suites immobiles du haut et du bas (égales à la même place dans les
 //!   deux images) qui ne suivent pas ce décalage : en-tête et pied, connus ou non ;
-//! - une bande **teintée** à place fixe dans la zone (ligne survolée ou sélectionnée,
-//!   ombre sous un en-tête) : le fond de la ligne change mais l'encre reste à sa place ;
-//!   au plus deux suites de `BANDE_MAX` lignes qui sont la même bande vue dans les deux
-//!   images (à `d` l'une de l'autre, ou ses deux bouts si elle se recouvre elle-même), au
-//!   plus 1/8 du recouvrement ;
+//! - une bande **teintée** (ligne survolée ou sélectionnée, ombre sous un en-tête) : le
+//!   fond de la ligne change mais l'encre reste à sa place ; au plus deux suites de
+//!   `BANDE_MAX` lignes qui sont la même bande vue dans les deux images (à place fixe : à
+//!   `d` l'une de l'autre, ou ses deux bouts si elle se recouvre elle-même ; alignée sur
+//!   les lignes d'une liste : à `d` près de moins que sa hauteur), la bande au plus 1/8
+//!   du recouvrement ;
 //! - au bord du recouvrement, une suite de lignes différentes (en-tête collant qui
 //!   apparaît, bannière qui part) d'au plus `BORD_MAX` lignes, comptée à demi dans
 //!   l'écart.
@@ -672,12 +674,13 @@ fn encre_de(ligne: &[u8], f: Fond, t: &Tolerance) -> u32 {
 fn encre_en_place(a: &[u8], fa: Fond, b: &[u8], fb: Fond, t: &Tolerance) -> bool {
     let seuil = seuil_encre(t);
     let (mut ou, mut seule) = (0u32, 0u32);
+    // Par pixel (un canal suffit) : une teinte qui multiplie les couleurs fait passer un
+    // canal sous le seuil sans déplacer l'encre.
     for (p, q) in a.chunks_exact(4).zip(b.chunks_exact(4)) {
-        for c in 0..3 {
-            let (ea, eb) = (dif(p[c], fa.c[c]) > seuil, dif(q[c], fb.c[c]) > seuil);
-            ou += u32::from(ea | eb);
-            seule += u32::from(ea ^ eb);
-        }
+        let ea = (0..3).any(|c| dif(p[c], fa.c[c]) > seuil);
+        let eb = (0..3).any(|c| dif(q[c], fb.c[c]) > seuil);
+        ou += u32::from(ea | eb);
+        seule += u32::from(ea ^ eb);
     }
     let part = if fonds_differents(fa, fb, t.canal) {
         5
@@ -918,6 +921,22 @@ impl Contexte<'_> {
                 }
             }
         }
+        // Deux suites séparées par des lignes égales seulement (le texte d'une ligne de
+        // liste teintée, égal à son propre fond près), jamais fausses, n'en font qu'une si
+        // elle reste de moins de `BANDE_MAX` lignes.
+        let mut jointes: Vec<(usize, usize)> = Vec::with_capacity(suites.len());
+        for (a, b) in suites {
+            match jointes.last_mut() {
+                Some((debut, fin))
+                    if b - *debut < BANDE_MAX
+                        && !etats[*fin..a].iter().any(|e| matches!(e, Etat::Fausse(_))) =>
+                {
+                    *fin = b
+                }
+                _ => jointes.push((a, b)),
+            }
+        }
+        let suites = jointes;
         let total: usize = suites.iter().map(|(a, b)| b - a + 1).sum();
         // Deux suites : la bande de hauteur H vue à la même place dans les deux images, donc à
         // `d` lignes l'une de l'autre (H lignes chacune) ; si elle se recouvre elle-même
@@ -926,10 +945,15 @@ impl Contexte<'_> {
         let pres = |x: usize, y: usize| (x as i64 - y as i64).abs() <= 2;
         let dd = d.unsigned_abs() as usize;
         // (Une suite coupée par le bord des lignes jugées garde sa fin ou son début.)
+        // Une bande qui suit les lignes d'une liste (la ligne sous le pointeur) change de
+        // place à l'écran de moins que sa hauteur : ses deux vues sont à `d` lignes près de
+        // moins que cette hauteur.
         let meme_bande = |(a0, a1): (usize, usize), (b0, b1): (usize, usize)| {
+            let haut = (a1 - a0 + 1).max(b1 - b0 + 1);
             pres(b0 - a0, dd)
                 || pres(b1.saturating_sub(a1), dd)
                 || (pres(a1 - a0 + 1, dd) && pres(b1 - b0 + 1, dd) && b0 - a0 <= BANDE_MAX + 2)
+                || (b0 - a0).abs_diff(dd) < haut
         };
         let deux_vues = d != 0 && suites.len() == 2 && meme_bande(suites[0], suites[1]);
         // (La même bande vue deux fois n'est comptée qu'une fois.)
@@ -1132,12 +1156,13 @@ pub fn mesurer(
             .count()
     };
     // Deux images égales à la même place, à la tolérance des valeurs près (pas à celle des
-    // lignes, qui accepterait une ligne de liste pour sa voisine). Avec du contenu (des
-    // lignes porteuses) : rien n'a bougé, ou la page n'est pas encore peinte. Une vue
-    // entièrement unie est cohérente avec tout mouvement : le lu décide, dans la portée.
+    // lignes, qui accepterait une ligne de liste pour sa voisine). Avec du contenu : rien
+    // n'a bougé, ou la page n'est pas encore peinte. Une vue entièrement unie (chaque
+    // ligne à `canal` près, voir `toute_unie`) est cohérente avec tout mouvement : le lu
+    // décide, dans la portée.
     if let Some(e) = lu {
         if d0[haut..h - bas].iter().all(|n| *n == 0) {
-            let unie = porteuses(&la) == 0 && porteuses(&lb) == 0;
+            let unie = toute_unie([&a, &b], haut, h - bas, t.canal);
             return if !unie || e == 0 {
                 Mesure::Immobile
             } else if e.unsigned_abs() as usize > utile - rec {
@@ -1174,13 +1199,20 @@ pub fn mesurer(
         (Mesure::Ambigue, Vec::new())
     };
     match lu {
-        Some(e) => avec_le_lu(&cx, &d0, e, normale, &juges),
+        Some(e) => avec_le_lu(&cx, &d0, e, assez, normale, &juges),
         None => normale,
     }
 }
 
 /// La décision avec un attendu lu `e` (voir `mesurer`), après la mesure sans lui.
-fn avec_le_lu(cx: &Contexte, d0: &[u32], e: i32, normale: Mesure, juges: &[Jugement]) -> Mesure {
+fn avec_le_lu(
+    cx: &Contexte,
+    d0: &[u32],
+    e: i32,
+    assez: bool,
+    normale: Mesure,
+    juges: &[Jugement],
+) -> Mesure {
     let dmax = (cx.b.h - cx.haut - cx.bas - cx.rec) as i32;
     if e.abs() > dmax {
         // Au-delà du recouvrement permis : rien à vérifier.
@@ -1191,7 +1223,10 @@ fn avec_le_lu(cx: &Contexte, d0: &[u32], e: i32, normale: Mesure, juges: &[Jugem
         };
     }
     let mut pres: Vec<Jugement> = Vec::new();
-    for d in (e - ATTENDU_A_PEU_PRES).max(-dmax)..=(e + ATTENDU_A_PEU_PRES).min(dmax) {
+    // Les voisins à 3 lignes près seulement si des lignes porteuses peuvent les départager :
+    // sinon (une zone lisse) une pente compense un écart de rendu, `e` seul est jugé.
+    let pres_de = if assez { ATTENDU_A_PEU_PRES } else { 0 };
+    for d in (e - pres_de).max(-dmax)..=(e + pres_de).min(dmax) {
         let deja = juges.iter().find(|j| j.d == d && j.complet).copied();
         if let Some(j) = deja.or_else(|| cx.juger(d, None, (d == 0).then_some(d0))) {
             pres.push(j);
@@ -1202,6 +1237,7 @@ fn avec_le_lu(cx: &Contexte, d0: &[u32], e: i32, normale: Mesure, juges: &[Jugem
         .iter()
         .filter(|j| coherent(j))
         .min_by_key(|j| (j.d != e, j.ecart, (j.d - e).unsigned_abs()));
+
     let Some(c) = choisi.copied() else {
         // Les images contredisent le lu : elles décident seules, sauf une autre avance.
         return match normale {
@@ -1251,6 +1287,42 @@ fn milieu(y0: usize, y1: usize, d: i32) -> (usize, usize) {
         BORD_MAX.min((y1 - y0) / 4)
     };
     (y0 + bord, y1 - bord)
+}
+
+/// La vue entière (lignes `y0..y1` des deux images) est unie : sur chaque canal, tous ses
+/// points lus sont à `canal` près de leur médiane commune. Un blanc avec un bruit de prise
+/// de ± `canal` l'est ; un dégradé, même purement vertical, des bandes horizontales, une
+/// photo floue ou une zone assombrie de 14 ne le sont pas.
+fn toute_unie(images: [&Image; 2], y0: usize, y1: usize, canal: u8) -> bool {
+    let mut compte = [[0u32; 256]; 3];
+    let mut n = 0u32;
+    for im in images {
+        for y in y0..y1 {
+            for p in im.ligne(y).chunks_exact(4) {
+                for c in 0..3 {
+                    compte[c][usize::from(p[c])] += 1;
+                }
+                n += 1;
+            }
+        }
+    }
+    compte.iter().all(|h| {
+        let mut cumul = 0u32;
+        let mediane = h
+            .iter()
+            .position(|k| {
+                cumul += k;
+                2 * cumul >= n
+            })
+            .unwrap_or(0);
+        let (bas, haut) = (
+            mediane.saturating_sub(usize::from(canal)),
+            (mediane + usize::from(canal)).min(255),
+        );
+        h.iter()
+            .enumerate()
+            .all(|(v, k)| *k == 0 || (bas..=haut).contains(&v))
+    })
 }
 
 /// Les candidats classés en deux passes grossières (profil, résumés), et quelques
@@ -1583,7 +1655,7 @@ impl<'a> Paire<'a> {
             if ecart(&b.c, &a.c) > canal {
                 let (lb, la) = (ligne_lue(self.b, y), ligne_lue(self.a, y + d));
                 let (b, a) = (fond(&lb), fond(&la));
-                *c = encre_en_place(&lb, b, &la, a, self.t) && !lignes_egales(&lb, &la, self.t);
+                *c = encre_en_place(&lb, b, &la, a, self.t);
             }
         }
         let mut y = 0;
@@ -1601,14 +1673,27 @@ impl<'a> Paire<'a> {
                 k += 1;
             }
             // Le fond de référence : la ligne voisine la plus proche, hors de la suite,
-            // égale dans les deux images et au fond net.
+            // égale dans les deux images et au fond net ; de préférence (liste zébrée) une
+            // dont le fond est celui de l'une des deux versions de la suite.
             let net = |k: usize| {
                 let (b, a) = fonds(k);
                 (!cand[k] && b.domine && ecart(&a.c, &b.c) <= canal).then_some(b)
             };
-            let apres = (fin..(fin + 8).min(n)).find_map(net);
-            let avant = (debut.saturating_sub(8)..debut).rev().find_map(net);
-            if let Some(r) = apres.or(avant) {
+            let versions = (debut..fin).map(fonds).find(|(b, a)| b.domine && a.domine);
+            let semblable = |k: usize| {
+                net(k).filter(|r| {
+                    versions.is_some_and(|(b, a)| {
+                        ecart(&r.c, &b.c) <= canal || ecart(&r.c, &a.c) <= canal
+                    })
+                })
+            };
+            let loin = 2 * BANDE_MAX;
+            let pres_de = |f: &dyn Fn(usize) -> Option<Fond>, portee: usize| {
+                (fin..(fin + portee).min(n))
+                    .find_map(f)
+                    .or_else(|| (debut.saturating_sub(portee)..debut).rev().find_map(f))
+            };
+            if let Some(r) = pres_de(&semblable, loin).or_else(|| pres_de(&net, 8)) {
                 let (mut neuve, mut ancienne) = (0u32, 0u32);
                 for k in debut..fin {
                     let (b, a) = fonds(k);

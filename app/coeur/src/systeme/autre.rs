@@ -18,6 +18,9 @@ pub fn version_windows() -> Option<u32> {
     None
 }
 
+/// Rien à prévenir ici.
+pub fn annoncer_clavier() {}
+
 /// `None` : pas de touche réservée ici.
 pub fn lecture_impr_ecran() -> Option<(Option<u32>, Option<u32>)> {
     None

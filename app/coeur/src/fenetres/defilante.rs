@@ -209,6 +209,18 @@ pub struct Controle {
     /// Numéro de détenteur (`DETENTEUR` à `creer` ou `retrouver`) : seul le dernier
     /// détenteur de la fenêtre peut la faire détruire par `Drop`.
     detenteur: u64,
+    /// La dernière erreur de `poser` ou `montrer` (WebView2, système) : `Drop` l'écrit,
+    /// pour que le journal dise la vraie cause d'une fenêtre lâchée.
+    erreur: Mutex<Option<String>>,
+}
+
+/// La ligne de `Drop` d'une fenêtre lâchée sans `detruire`, avec la dernière erreur
+/// connue. Fonction pure.
+pub fn ligne_lachee(cause: Option<&str>) -> String {
+    match cause {
+        Some(c) => format!("defilante: fenetre lachee sans detruire (cause: {c})"),
+        None => "defilante: fenetre lachee sans detruire (cause inconnue)".to_string(),
+    }
 }
 
 /// Dernier détenteur de la fenêtre de contrôle (`creer` et `retrouver` l'avancent).
@@ -249,6 +261,7 @@ pub fn creer(app: &AppHandle) -> Result<Controle, String> {
         ecran: Mutex::new(None),
         detruite: AtomicBool::new(false),
         detenteur: nouveau_detenteur(),
+        erreur: Mutex::new(None),
     })
 }
 
@@ -299,6 +312,7 @@ pub fn retrouver(app: &AppHandle) -> Option<Controle> {
         ecran: Mutex::new(None),
         detruite: AtomicBool::new(false),
         detenteur: nouveau_detenteur(),
+        erreur: Mutex::new(None),
     })
 }
 
@@ -320,6 +334,19 @@ impl Controle {
     /// prend la taille de l'écran avant `defilante:montrer`. `montrer` la repose au-dessus
     /// de tout au même endroit.
     pub fn poser(&self, ecran: Rect) -> Result<(), String> {
+        let r = self.poser_sans_noter(ecran);
+        self.noter(r)
+    }
+
+    /// Garde la dernière erreur pour `Drop` (`ligne_lachee`).
+    fn noter<T>(&self, r: Result<T, String>) -> Result<T, String> {
+        if let Err(e) = &r {
+            *self.erreur.lock().unwrap_or_else(|p| p.into_inner()) = Some(e.clone());
+        }
+        r
+    }
+
+    fn poser_sans_noter(&self, ecran: Rect) -> Result<(), String> {
         if ecran.est_vide() {
             return Err("ecran vide".into());
         }
@@ -340,6 +367,11 @@ impl Controle {
     /// Montre la fenêtre sans l'activer (jamais le focus ni le clavier), au-dessus de tout,
     /// clics traversants ; la surveillance de la souris part.
     pub fn montrer(&self) -> Result<(), String> {
+        let r = self.montrer_sans_noter();
+        self.noter(r)
+    }
+
+    fn montrer_sans_noter(&self) -> Result<(), String> {
         if !self.vivante.load(Ordering::SeqCst) {
             return Err("fenetre de controle detruite".into());
         }
@@ -478,7 +510,12 @@ impl Drop for Controle {
         if !encore(&self.vivante) {
             return;
         }
-        log::warn!("defilante: fenetre lachee sans detruire");
+        let cause = self
+            .erreur
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .clone();
+        log::warn!("{}", ligne_lachee(cause.as_deref()));
         let app = self.app.clone();
         let vivante = Arc::clone(&self.vivante);
         let poste = self.app.run_on_main_thread(move || {
@@ -522,6 +559,18 @@ fn geste_clics(app: &AppHandle, partage: &Partage, affichage: u64, voulu: bool) 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn fenetre_lachee_dit_la_cause() {
+        assert_eq!(
+            ligne_lachee(Some("show: WebView2 indisponible")),
+            "defilante: fenetre lachee sans detruire (cause: show: WebView2 indisponible)"
+        );
+        assert_eq!(
+            ligne_lachee(None),
+            "defilante: fenetre lachee sans detruire (cause inconnue)"
+        );
+    }
 
     fn r(x: i32, y: i32, largeur: i32, hauteur: i32) -> Rect {
         Rect {

@@ -1373,6 +1373,11 @@ impl Interne {
     }
 
     fn surligner(&self, lignes: &[Rect], reduites: bool, deroule: Surlignage) -> bool {
+        if lignes.is_empty() {
+            // Un texte dont aucun mot n'a de surface : rien à surligner.
+            log::info!("selection surlignage sans ligne");
+            return false;
+        }
         let Some(charge) = self.etat().charge_surligner(lignes, reduites, deroule) else {
             log::info!("selection surlignage sans affichage");
             return false;
