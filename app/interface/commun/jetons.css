@@ -101,6 +101,7 @@
   --duree-editeur-message-echec: 4000ms;
   --duree-editeur-zoom: 1200ms;
   --duree-editeur-recadrage: 260ms;
+  --duree-editeur-redresser: 600ms;
   --duree-editeur-reduite: 1ms;
   --duree-historique-ouverture: 250ms;
   --duree-historique-age: 150ms;
@@ -115,6 +116,7 @@
   --duree-historique-erreur: 4000ms;
   --duree-historique-reduite: 1ms;
   --texte-balayage: 400ms;
+  --texte-lecture: 200ms;
   --courbe-ressort: cubic-bezier(0.34, 1.4, 0.64, 1);
   --courbe-douce: cubic-bezier(0.2, 0.8, 0.2, 1);
   --courbe-vent: cubic-bezier(0.5, 0, 0.75, 0);
@@ -351,6 +353,13 @@
   --editeur-taille-numero-0: 10px;
   --editeur-taille-numero-1: 13px;
   --editeur-taille-numero-2: 16px;
+  --editeur-taille-gomme-0: 8px;
+  --editeur-taille-gomme-1: 13px;
+  --editeur-taille-gomme-2: 18px;
+  --editeur-gomme-rayon-0: 5px;
+  --editeur-gomme-rayon-1: 10px;
+  --editeur-gomme-rayon-2: 20px;
+  --editeur-gomme-trait: 1.5px;
   --editeur-taille-texte-0: 12px;
   --editeur-taille-texte-1: 16px;
   --editeur-taille-texte-2: 21px;
@@ -391,6 +400,8 @@
   --editeur-recadrage-min: 40px;
   --editeur-tolerance: 8px;
   --editeur-deplacement-seuil: 3px;
+  --editeur-deplacement-reste: 12px;
+  --editeur-redresser-min: 24px;
   --editeur-glisser-seuil: 4px;
   --editeur-poignee-rayon: 5px;
   --editeur-poignee-trait: 1.5px;
@@ -440,6 +451,7 @@
   --texte-survol: 14%;
   --texte-choix: 30%;
   --texte-teinte: 10%;
+  --texte-surligne: 30%;
   --texte-teinte-editeur: 6%;
   --historique-focus: 2px;
   --historique-focus-ecart: 1px;
@@ -562,6 +574,10 @@
   --editeur-instrument-neutre: #9EA3AA;
   --editeur-instrument-ombre-bout: rgba(0,0,0,0.12);
   --editeur-gomme-bout: #D98E84;
+  --editeur-gomme-cercle: rgba(20,20,22,0.72);
+  --editeur-gomme-halo: rgba(255,255,255,0.85);
+  --editeur-gomme-fond: rgba(255,255,255,0.22);
+  --editeur-gomme-fond-appui: rgba(255,255,255,0.42);
   --editeur-projecteur-lumiere: #FFE7A3;
   --editeur-projecteur-coeur: #FFFFFF;
   --editeur-copier-fait-texte: #FFFFFF;

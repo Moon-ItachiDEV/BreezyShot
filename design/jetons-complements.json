@@ -411,6 +411,30 @@
     "origine": "design/editeur-epure/index.html, piste B (instSVG, .tl[data-t=erase])."
    },
    {
+    "name": "editeur-gomme-cercle",
+    "value": "rgba(20,20,22,0.72)",
+    "usage": "Rond de la gomme sous le pointeur : trait (sur l'image, sans thème).",
+    "origine": "Fil « Rendre l'annotation plus naturelle » (13/11/2026) : gomme au pixel."
+   },
+   {
+    "name": "editeur-gomme-halo",
+    "value": "rgba(255,255,255,0.85)",
+    "usage": "Rond de la gomme : liseré clair, lisible sur une image sombre.",
+    "origine": "Fil « Rendre l'annotation plus naturelle » (13/11/2026) : gomme au pixel."
+   },
+   {
+    "name": "editeur-gomme-fond",
+    "value": "rgba(255,255,255,0.22)",
+    "usage": "Rond de la gomme : fond.",
+    "origine": "Fil « Rendre l'annotation plus naturelle » (13/11/2026) : gomme au pixel."
+   },
+   {
+    "name": "editeur-gomme-fond-appui",
+    "value": "rgba(255,255,255,0.42)",
+    "usage": "Rond de la gomme : fond pendant qu'elle efface.",
+    "origine": "Fil « Rendre l'annotation plus naturelle » (13/11/2026) : gomme au pixel."
+   },
+   {
     "name": "editeur-projecteur-lumiere",
     "value": "#FFE7A3",
     "usage": "Lentille du projecteur.",
@@ -850,6 +874,12 @@
     "origine": "design/editeur-epure/index.html, piste B (contrat 0.4 (gardé))."
    },
    {
+    "name": "duree-editeur-redresser",
+    "value": "600ms",
+    "usage": "Stylo, surligneur : pointeur immobile avant qu'un trait presque droit se redresse.",
+    "origine": "Fil « Rendre l'annotation plus naturelle » (13/11/2026)."
+   },
+   {
     "name": "duree-editeur-reduite",
     "value": "1ms",
     "usage": "Animations réduites.",
@@ -930,8 +960,14 @@
    {
     "name": "texte-balayage",
     "value": "400ms",
-    "usage": "Balayage de Copier le texte.",
+    "usage": "Balayage de l'image dans l'éditeur (bouton « Texte »).",
     "origine": "design/historique/index.html, onglet « Copier le texte » ; contrat 0.5 §10."
+   },
+   {
+    "name": "texte-lecture",
+    "value": "200ms",
+    "usage": "Copier le texte : la zone lue se teinte et respire le temps de la lecture (BALAYAGE du cœur).",
+    "origine": "design/copier-texte-animation/index.html, choix A « Surligné » du 13/11 (LECTURE)."
    }
   ]
  },
@@ -2325,6 +2361,48 @@
     "origine": "design/editeur-epure/index.html, piste B (openToolPop)."
    },
    {
+    "name": "editeur-taille-gomme-0",
+    "value": "8px",
+    "usage": "Gomme, Petite (bulle de l'outil).",
+    "origine": "Fil « Rendre l'annotation plus naturelle » (13/11/2026) : gomme au pixel."
+   },
+   {
+    "name": "editeur-taille-gomme-1",
+    "value": "13px",
+    "usage": "Gomme, Moyenne (bulle de l'outil).",
+    "origine": "Fil « Rendre l'annotation plus naturelle » (13/11/2026) : gomme au pixel."
+   },
+   {
+    "name": "editeur-taille-gomme-2",
+    "value": "18px",
+    "usage": "Gomme, Grande (bulle de l'outil).",
+    "origine": "Fil « Rendre l'annotation plus naturelle » (13/11/2026) : gomme au pixel."
+   },
+   {
+    "name": "editeur-gomme-rayon-0",
+    "value": "5px",
+    "usage": "Gomme, Petite : rayon (écran).",
+    "origine": "Fil « Rendre l'annotation plus naturelle » (13/11/2026) : gomme au pixel."
+   },
+   {
+    "name": "editeur-gomme-rayon-1",
+    "value": "10px",
+    "usage": "Gomme, Moyenne : rayon (écran).",
+    "origine": "Fil « Rendre l'annotation plus naturelle » (13/11/2026) : gomme au pixel."
+   },
+   {
+    "name": "editeur-gomme-rayon-2",
+    "value": "20px",
+    "usage": "Gomme, Grande : rayon (écran).",
+    "origine": "Fil « Rendre l'annotation plus naturelle » (13/11/2026) : gomme au pixel."
+   },
+   {
+    "name": "editeur-gomme-trait",
+    "value": "1.5px",
+    "usage": "Rond de la gomme : trait.",
+    "origine": "Fil « Rendre l'annotation plus naturelle » (13/11/2026) : gomme au pixel."
+   },
+   {
     "name": "editeur-taille-texte-0",
     "value": "12px",
     "usage": "Texte, premier A.",
@@ -2563,6 +2641,18 @@
     "value": "3px",
     "usage": "Déplacement d'un objet : seuil.",
     "origine": "design/editeur-epure/index.html, piste B (pointermove, 3 px)."
+   },
+   {
+    "name": "editeur-deplacement-reste",
+    "value": "12px",
+    "usage": "Déplacement d'un objet : ce qui reste de sa boîte dans l'image (écran).",
+    "origine": "Fil « Rendre l'annotation plus naturelle » (13/11/2026)."
+   },
+   {
+    "name": "editeur-redresser-min",
+    "value": "24px",
+    "usage": "Stylo, surligneur : longueur à partir de laquelle un trait tenu se redresse (écran).",
+    "origine": "Fil « Rendre l'annotation plus naturelle » (13/11/2026)."
    },
    {
     "name": "editeur-glisser-seuil",
@@ -2855,8 +2945,14 @@
    {
     "name": "texte-teinte",
     "value": "10%",
-    "usage": "Balayage : teinte d'accent qui s'efface.",
+    "usage": "Copier le texte : teinte d'accent de la zone lue, jusqu'à la fin du surlignage.",
     "origine": "design/historique/index.html, onglet « Copier le texte » ; contrat 0.5 §10."
+   },
+   {
+    "name": "texte-surligne",
+    "value": "30%",
+    "usage": "Copier le texte : part d'accent des lignes copiées surlignées.",
+    "origine": "design/copier-texte-animation/index.html, choix A « Surligné » du 13/11 (.lus i)."
    },
    {
     "name": "texte-teinte-editeur",

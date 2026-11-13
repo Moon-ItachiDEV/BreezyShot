@@ -1466,18 +1466,31 @@ Gel, photo, écran figé, Sélection en mode `texte` (une zone, avec le nom « C
 sélectionnez une zone »), Échap réservé, comme une zone. La zone choisie
 (`geste_texte::zone_choisie`, fil principal) : `TexteChoisi` → Lecture, `zone texte
 <x>,<y> <l>x<h>`, Échap libéré, découpe pendant que l'écran figé est encore montré, puis la
-sélection, gardée à l'écran en mode texte, joue le balayage (`Selection::balayer`,
-événement `selection:balayer { id, x, y, largeur, hauteur, reduites }` en pixels réels
-relatifs à la fenêtre ; `selection balayage <id>`). La garde de l'écran figé est rangée à
-part (`ECRAN`) : elle est gardée au moins le balayage (400 ms, 120 ms avec les animations
-réduites) et au plus `ECRAN_FIGE_MAX_LECTURE` (1,5 s) ; le fil `texte-ecran` la libère
-lui-même à la borne, même si la lecture ne rend rien. La lecture puis, s'il y a un texte, la
+sélection, gardée à l'écran en mode texte, joue le balayage : la zone se teinte et respire
+le temps de la lecture (`Selection::balayer`, événement `selection:balayer { id, x, y,
+largeur, hauteur, reduites }` en pixels réels relatifs à la fenêtre ; `selection balayage
+<id>`). La garde de l'écran figé est rangée à part (`ECRAN`, avec la zone lue) : elle est
+gardée au moins le balayage (200 ms, 120 ms avec les animations réduites) et la lecture
+n'est pas attendue au-delà de `ECRAN_FIGE_MAX_LECTURE` (1,5 s) ; le fil `texte-ecran` la
+libère lui-même à la borne, même si la lecture ne rend rien, sauf pendant un surlignage. La
+lecture puis, s'il y a un texte, la
 copie (`sortie::copier_texte`) se font dans le fil `texte` ; le fil `texte-echeance` tient
 `DELAI_LECTURE` (10 s). `ATTENDUE` (`texte::Attendue`) fait qu'un seul des deux rend le
 résultat : le fil `texte` ne copie que s'il prend la lecture attendue ; une lecture échue ou
 abandonnée ne copie jamais (`texte lu <n>: resultat perime ignore`). Un résultat arrivé
-avant la fin du balayage attend (`texte::arrivee`, `balayage_fini`). À la fin
-(`finir`) : l'écran figé libéré s'il ne l'est pas, `TexteLu` ou `LectureImpossible` →
+avant la fin du balayage attend (`texte::arrivee`, `balayage_fini`). À la fin (`finir`),
+un texte copié dont l'écran figé est encore montré est d'abord surligné (choix « Surligné »
+du 13/11) : `texte::lignes_lues` réunit les mots de chaque ligne (au plus 400 lignes, en
+pixels réels du bureau), `Selection::surligner` envoie `selection:surligner { id, lignes:
+[{ x, y, largeur, hauteur }], reduites, trace, pas, tenue, sortie }` (durées en ms,
+`texte::deroule` : chaque ligne tirée en 260 ms, la suivante 40 ms plus tard, 160 ms de
+décalage en tout au plus ; tenue 220 ms ; la page efface la sélection en 140 ms ; réduit :
+fondus de 120 ms, sans pas ; `selection surlignage <id> <n> lignes`). Pendant ce temps la
+fin est gardée dans la lecture et la borne ne libère plus l'écran ; le fil `texte-surligne`
+le libère au bout de `texte::duree_surlignage` (au plus 810 ms, 30 ms de marge comprise),
+puis `surlignage_fini` montre la fin. Sinon (pas copié, écran déjà libéré, aucune ligne,
+sélection absente), la fin est montrée tout de suite. `conclure` : l'écran figé libéré s'il
+ne l'est pas, `TexteLu` ou `LectureImpossible` →
 Repos, le bandeau : « Texte copié » ; « Impossible de copier » (avec la cause) ; « Aucun
 texte trouvé » (erreur brève de 4 s avec « Réessayer », §6, qui relance Copier le texte) ;
 « Impossible de lire le texte » (sans langue, moteur en échec, échéance, fil arrêté).
@@ -1512,7 +1525,8 @@ vers le presse-papiers (`sortie::copier_texte`).
 
 **Journal** : `texte langues …|aucune|aucune (essai)`, `texte non pris en charge`, `menu:
 capturer texte`, `raccourci presse: texte`, `DemandeCapture texte`, `zone texte <x>,<y>
-<l>x<h>`, `selection balayage <id>` (ou `selection balayage sans affichage`), `texte moteur
+<l>x<h>`, `selection balayage <id>` (ou `selection balayage sans affichage`), `selection
+surlignage <id> <n> lignes` (ou `selection surlignage sans affichage`), `texte moteur
 cree en <ms> ms`, `texte lu <n> lignes <m> mots en <ms> ms langue <l> facteur <f>`, `texte
 vide en <ms> ms`, `texte impossible: aucune_langue|echeance|moteur (<code>)` (`<code>` :
 `fil`, `deja_en_cours`, `taille`, `decoupe`, ou une étape et son HRESULT), `texte copie`,
@@ -1523,7 +1537,8 @@ texte <id> <n> lu <l> lignes <m> mots en <ms> ms|vide|echec (<code>)`, `editeur 
 `editeur copier_texte <id> ignoree`. En WARN : `langues de lecture non cherchees: <e>`,
 `decoupe impossible: <e>`, `garde de l'ecran fige impossible (<e>): ecran libere`, `fil de
 lecture impossible: <e>`, `echeance de lecture non armee: <e>`, `fil de copie du texte
-impossible: <e>`, `selection balayage <id> non envoye: <e>`.
+impossible: <e>`, `selection balayage <id> non envoye: <e>`, `selection surlignage <id>
+non envoye: <e>`, `surlignage sans fil (<e>): fin montree tout de suite`.
 
 ## 7. Vérification
 
@@ -1757,7 +1772,8 @@ impossible: <e>`, `selection balayage <id> non envoye: <e>`.
   « Activer » inactif champ vide, clair et sombre) ; point 12, les lignes de raccourcis
   selon la licence (six avec licence, cinq sans langue, ligne partie pendant sa saisie et
   saisie rendue au cœur). `vue-reglages.json` porte `vue` (sans licence) et `vue_pro`.
-- Pages de Copier le texte (chantier G) : `selection.cjs` (mode texte, `selection:balayer`),
+- Pages de Copier le texte (chantier G) : `selection.cjs` (mode texte, `selection:balayer`,
+  `selection:surligner`),
   `editeur.cjs` (bouton « Texte », export de but `texte`, calque « Choisir le texte » et
   son clavier) et `bandeau.cjs` (erreur brève à `duree_ms`) grandissent avec elles.
 - Essai Windows 13 (`13-historique-texte.ps1`, 0.5), avec la variable capturable, le
@@ -2002,8 +2018,11 @@ texte : sélectionnez une zone »). Seule différence côté cœur : une fin par
 fenêtre montrée (`garder_si_texte`, le premier plan n'est pas encore rendu), pour que
 l'Application envoie `Selection::balayer(zone, reduites)` → `selection:balayer { id, x, y,
 largeur, hauteur, reduites }` (pixels réels relatifs à la fenêtre ; sans affichage gardé :
-`selection balayage sans affichage`) ; la garde de la capture la cache ensuite (§6.4). Un
-nouvel affichage oublie l'affichage gardé.
+`selection balayage sans affichage`), puis, pour un texte copié,
+`Selection::surligner(lignes, reduites, deroule)` → `selection:surligner { id, lignes,
+reduites, trace, pas, tenue, sortie }` (lignes en pixels réels relatifs à la fenêtre ; la
+page tire chaque ligne de gauche à droite puis efface toute la sélection) ; la garde de la
+capture la cache ensuite (§6.4). Un nouvel affichage oublie l'affichage gardé.
 
 ## 10. Sortie (`sortie/`, étape 6)
 

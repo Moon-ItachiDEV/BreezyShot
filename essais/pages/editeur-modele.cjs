@@ -421,6 +421,200 @@ async function partieDocument() {
     D.annuler(h);
     verifier(a && b && c && D.vide(doc), '10 vide : ni objet ni recadrage');
   }
+  // (G) Gomme au pixel (fil « Rendre l'annotation plus naturelle ») : modèle.
+  // (G1) Encres et objets entiers ; ce que la gomme atteint.
+  {
+    const t = Object.fromEntries(exemples().filter((o) => o.cx == null).map((o) => [o.type, o]));
+    const encres = ['fleche', 'rectangle', 'ellipse', 'ligne', 'crayon', 'surligneur'];
+    const types = exemples().map((o) => o.type).concat('projecteur');
+    const a = types.every((n) => D.estEncre({ type: n }) === encres.includes(n));
+    const P = (x, y) => ({ x, y });
+    const trait = { type: 'crayon', points: [[100, 100], [300, 100]], couleur: '#E5484D',
+      epaisseur: 1, opacite: 1 };
+    // Rayon 10, trait de 5 px : atteint jusqu'à 10 + 2,5 (+ 1) px de la ligne.
+    const b = D.gommeTouche(trait, P(200, 80), P(200, 120), 10)
+      && D.gommeTouche(trait, P(200, 112), P(200, 112), 10)
+      && !D.gommeTouche(trait, P(200, 115), P(200, 115), 10)
+      && !D.gommeTouche(trait, P(320, 100), P(400, 100), 10)
+      && D.gommeTouche(trait, P(50, 100), P(350, 100), 10);
+    const rect = t.rectangle; // (50, 50)-(150, 120), bord seul
+    const c = D.gommeTouche(rect, P(50, 80), P(50, 80), 5)
+      && !D.gommeTouche(rect, P(100, 85), P(100, 85), 5)
+      && D.gommeTouche({ ...rect, plein: true }, P(100, 85), P(100, 85), 5)
+      && D.gommeTouche(rect, P(100, 85), P(200, 85), 5);
+    const ell = t.ellipse; // (200, 50)-(300, 150)
+    const d = D.gommeTouche(ell, P(250, 50), P(250, 50), 5)
+      && !D.gommeTouche(ell, P(250, 100), P(250, 100), 5)
+      && D.gommeTouche({ ...ell, plein: true }, P(250, 100), P(250, 100), 5);
+    // Flèche (10, 10) → (110, 60) : le corps, la pointe (plus large que le corps), pas à côté.
+    const f = t.fleche;
+    const e = D.gommeTouche(f, P(60, 35), P(60, 35), 3)
+      && D.gommeTouche(f, P(96, 60), P(96, 60), 3) && !D.gommeTouche(f, P(60, 60), P(60, 60), 3);
+    const entiers = ['texte', 'numero', 'masque'].every((n) => {
+      const o = t[n], bo = D.boite(o);
+      return !D.gommeTouche(o, P(bo.x, bo.y), P(bo.x + bo.largeur, bo.y + bo.hauteur), 50);
+    }) && !D.gommeTouche({ type: 'projecteur', x1: 0, y1: 0, x2: 50, y2: 50, forme: 'ovale' },
+      P(0, 0), P(50, 50), 50);
+    verifier(a && b && c && d && e && entiers,
+      'G1 encres et objets entiers ; la gomme atteint le trait, le bord, le plein, la pointe, '
+      + 'jamais un texte, un numéro, un flou ni un projecteur', [a, b, c, d, e, entiers].join());
+  }
+  // (G2) gommer : passages gardés au 1/100 px, sur une encre seulement ; annuler, rétablir.
+  {
+    const doc = D.nouveauDocument(640, 480), h = D.creerHistorique(doc);
+    for (const o of exemples()) D.modifier(h, (d) => D.ajouter(d, o));
+    const avant = json(doc);
+    const crayon = doc.objets.find((o) => o.type === 'crayon');
+    const texte = doc.objets.find((o) => o.type === 'texte');
+    D.modifier(h, (d) => {
+      D.gommer(d, crayon.id, [{ largeur: 20.004, points: [[20.001, 310.006], [40, 305]] },
+        { largeur: 20, points: [] }, { largeur: 0, points: [[1, 1]] }]);
+      D.gommer(d, texte.id, [{ largeur: 20, points: [[310, 310]] }]);
+      D.gommer(d, 999, [{ largeur: 20, points: [[310, 310]] }]);
+    });
+    const o1 = doc.objets.find((o) => o.type === 'crayon');
+    const a = json(o1.gommes) === '[{"largeur":20,"points":[[20,310.01],[40,305]]}]'
+      && !('gommes' in doc.objets.find((o) => o.type === 'texte'));
+    D.modifier(h, (d) => D.gommer(d, o1.id, [{ largeur: 8, points: [[60, 330]] }]));
+    const b = doc.objets.find((o) => o.type === 'crayon').gommes.length === 2;
+    D.annuler(h); D.annuler(h);
+    const c = json(doc) === avant;
+    D.retablir(h); D.retablir(h);
+    const d1 = doc.objets.find((o) => o.type === 'crayon').gommes.length === 2;
+    verifier(a && b && c && d1, 'G2 gommer : passages au 1/100 px, encres seules, passages '
+      + 'vides écartés, annulé et rétabli', [a, b, c, d1].join());
+  }
+  // (G3) Une encre gommée ne se prend que là où il en reste ; ce qui est dessous se prend
+  // dans le trou.
+  {
+    const doc = D.nouveauDocument(640, 480);
+    const dessous = D.ajouter(doc, { type: 'rectangle', x1: 180, y1: 80, x2: 220, y2: 120,
+      couleur: '#30A46C', epaisseur: 1, plein: true, arrondi: 0, opacite: 1 });
+    const id = D.ajouter(doc, { type: 'surligneur', points: [[100, 100], [300, 100]],
+      couleur: '#FFD43B', epaisseur: 1 });
+    const o = doc.objets[1];
+    const a = D.objetSous(doc, { x: 200, y: 100 }, 4, null).id === id;
+    D.gommer(doc, id, [{ largeur: 30, points: [[200, 70], [200, 130]] }]);
+    const b = !D.touche(o, { x: 200, y: 100 }, 4) && !D.touche(o, { x: 190, y: 95 }, 4)
+      && D.touche(o, { x: 150, y: 100 }, 4) && D.touche(o, { x: 250, y: 105 }, 4)
+      && !D.touche(o, { x: 150, y: 130 }, 4);
+    const c = D.objetSous(doc, { x: 200, y: 100 }, 4, null).id === dessous;
+    // Forme pleine : le trou ne se prend pas, le reste oui.
+    const plein = doc.objets[0];
+    D.gommer(doc, dessous, [{ largeur: 10, points: [[190, 90]] }]);
+    const d = !D.touche(plein, { x: 190, y: 90 }, 0) && D.touche(plein, { x: 210, y: 110 }, 0);
+    // Flèche coupée en son milieu : chaque bout se prend, pas la coupe.
+    const f = { type: 'fleche', x1: 100, y1: 300, x2: 400, y2: 300, double: false,
+      couleur: '#E5484D', epaisseur: 1, opacite: 1, id: 9 };
+    f.gommes = [{ largeur: 40, points: [[250, 280], [250, 320]] }];
+    const e = !D.touche(f, { x: 250, y: 300 }, 4) && D.touche(f, { x: 150, y: 300 }, 4)
+      && D.touche(f, { x: 390, y: 300 }, 4);
+    verifier(a && b && c && d && e, 'G3 encre gommée : prise là où il en reste, pas dans le '
+      + 'trou (trait, forme pleine, flèche) ; l\'objet du dessous s\'y prend',
+    [a, b, c, d, e].join());
+  }
+  // (G4) Les passages de gomme suivent l'objet : déplacer, dupliquer, redimensionner.
+  {
+    const g = () => [{ largeur: 10, points: [[100, 100], [120, 110]] }];
+    const trait = { type: 'crayon', points: [[50, 100], [150, 100], [150, 140]],
+      couleur: '#E5484D', epaisseur: 1, opacite: 1, gommes: g() };
+    const m = JSON.parse(json(trait));
+    D.deplacer(m, trait, 7, -3);
+    const a = json(m.gommes) === '[{"largeur":10,"points":[[107,97],[127,107]]}]'
+      && json(trait.gommes) === json(g());
+    const doc = D.nouveauDocument(640, 480);
+    const id = D.ajouter(doc, JSON.parse(json(trait)));
+    const [copie] = D.dupliquer(doc, [id]);
+    const b = json(doc.objets.find((o) => o.id === copie).gommes)
+      === '[{"largeur":10,"points":[[116,116],[136,126]]}]';
+    // Tracé agrandi × 2 par le coin bas droit : points et passages au même endroit du tracé,
+    // largeur × 2.
+    const bq = D.boiteForme(trait), r = JSON.parse(json(trait));
+    D.redimensionner(r, trait, 'se', { x: bq.x + 2 * bq.largeur, y: bq.y + 2 * bq.hauteur }, 1);
+    const c = json(r.points[1]) === json([bq.x + 2 * (150 - bq.x), bq.y + 2 * (100 - bq.y)])
+      && json(r.gommes[0].points[0]) === json([bq.x + 2 * (100 - bq.x), bq.y + 2 * (100 - bq.y)])
+      && r.gommes[0].largeur === 20;
+    // Rectangle élargi × 2 : le passage garde sa place sur le bord.
+    const rect = { type: 'rectangle', x1: 100, y1: 100, x2: 200, y2: 150, couleur: '#E5484D',
+      epaisseur: 1, plein: false, arrondi: 0, opacite: 1,
+      gommes: [{ largeur: 10, points: [[150, 100], [200, 125]] }] };
+    const r2 = JSON.parse(json(rect));
+    D.redimensionner(r2, rect, 'se', { x: 300, y: 150 }, 1);
+    const d = json(r2.gommes[0].points) === '[[200,100],[300,125]]';
+    // Flèche : le bout tiré d'un quart de tour, le passage tourne avec elle.
+    const f = { type: 'fleche', x1: 100, y1: 100, x2: 200, y2: 100, double: false,
+      couleur: '#E5484D', epaisseur: 1, opacite: 1,
+      gommes: [{ largeur: 10, points: [[150, 100], [150, 90]] }] };
+    const f2 = JSON.parse(json(f));
+    D.redimensionner(f2, f, 'p2', { x: 100, y: 300 }, 1);
+    const e = json(f2.gommes) === '[{"largeur":20,"points":[[100,200],[120,200]]}]';
+    // La courbure tirée ne déplace pas les passages.
+    const f3 = JSON.parse(json(f));
+    D.redimensionner(f3, f, 'pc', { x: 150, y: 150 }, 1);
+    const k = json(f3.gommes) === json(f.gommes) && f3.cy === 200;
+    verifier(a && b && c && d && e && k, 'G4 les passages de gomme suivent l\'objet déplacé, '
+      + 'dupliqué, redimensionné (tracé, rectangle, bout de flèche tourné)',
+    [a, b, c, d, e, k].join());
+  }
+  // (G5) Maj sur une poignée : 15° pour un bout, proportions gardées pour un coin.
+  {
+    const f = { type: 'fleche', x1: 100, y1: 100, x2: 200, y2: 100, double: false,
+      couleur: '#E5484D', epaisseur: 1, opacite: 1 };
+    const f1 = { ...f }, f2 = { ...f };
+    D.redimensionner(f1, f, 'p2', { x: 200, y: 110 }, 1, true);
+    D.redimensionner(f2, f, 'p2', { x: 200, y: 110 }, 1);
+    const L = Math.hypot(100, 10);
+    const a = Math.abs(f1.y2 - 100) < 1e-9 && Math.abs(f1.x2 - (100 + L)) < 1e-9
+      && f2.y2 === 110;
+    const f4 = { ...f };
+    D.redimensionner(f4, f, 'p1', { x: 100, y: 0 }, 1, true); // 45° autour de p2
+    const b = Math.abs((f4.x1 - 200) + (f4.y1 - 100)) < 1e-6 || Math.abs((f4.x1 - 200) - (f4.y1 - 100)) < 1e-6;
+    const rect = { type: 'rectangle', x1: 100, y1: 100, x2: 300, y2: 200, couleur: '#E5484D',
+      epaisseur: 1, plein: false, arrondi: 0, opacite: 1 };
+    const r1 = { ...rect }, r2 = { ...rect };
+    D.redimensionner(r1, rect, 'se', { x: 500, y: 210 }, 1, true);
+    D.redimensionner(r2, rect, 'se', { x: 500, y: 210 }, 1);
+    const c = r1.x2 === 500 && r1.y2 === 300 && r1.x1 === 100 && r1.y1 === 100
+      && r2.x2 === 500 && r2.y2 === 210;
+    const r3 = { ...rect };
+    D.redimensionner(r3, rect, 'nw', { x: 200, y: 190 }, 1, true); // coin haut gauche, × 1/2
+    const d = r3.x1 === 200 && r3.y1 === 150 && r3.x2 === 300 && r3.y2 === 200;
+    const trait = { type: 'crayon', points: [[100, 100], [200, 150]], couleur: '#E5484D',
+      epaisseur: 1, opacite: 1 };
+    const bq = D.boiteForme(trait), t1 = JSON.parse(json(trait));
+    D.redimensionner(t1, trait, 'se', { x: bq.x + 2 * bq.largeur, y: bq.y + bq.hauteur }, 1, true);
+    // Les points du tracé : × 2 sur les deux axes, calés sur le coin haut gauche de la boîte.
+    const e = json(t1.points) === json([[bq.x + 2 * (100 - bq.x), bq.y + 2 * (100 - bq.y)],
+      [bq.x + 2 * (200 - bq.x), bq.y + 2 * (150 - bq.y)]]);
+    verifier(a && b && c && d && e, 'G5 Maj sur une poignée : bout par 15°, rectangle et tracé '
+      + 'aux proportions gardées ; sans Maj, libre', [a, b, c, d, e].join());
+  }
+  // (G6) abandonner : le pas du geste est défait, rien à rétablir de lui ; ce qui était à
+  // rétablir avant lui le redevient.
+  {
+    const doc = D.nouveauDocument(100, 100), h = D.creerHistorique(doc);
+    const vide0 = !D.abandonner(h) && h.version === 0;
+    D.modifier(h, (d) => D.ajouter(d, exemples()[2]));
+    D.modifier(h, (d) => D.ajouter(d, exemples()[3]));
+    D.annuler(h);
+    const avant = json(doc), v = h.version;
+    for (let i = 1; i <= 5; i++) D.modifier(h, (d) => { d.objets[0].x1 = 50 + i; }, 'geste');
+    const a = h.passe.length === 2 && !D.peutRetablir(h);
+    const b = D.abandonner(h) && json(doc) === avant && h.passe.length === 1
+      && h.futur.length === 1 && h.version === v + 6;
+    D.retablir(h);
+    const c = doc.objets.length === 2 && !D.abandonner(h) === false;
+    // Après annuler ou rétablir, plus rien n'est écarté.
+    const doc2 = D.nouveauDocument(100, 100), h2 = D.creerHistorique(doc2);
+    D.modifier(h2, (d) => D.ajouter(d, exemples()[2]));
+    D.annuler(h2);
+    D.modifier(h2, (d) => D.ajouter(d, exemples()[3]));
+    D.annuler(h2);
+    D.retablir(h2);
+    const d1 = D.abandonner(h2) && h2.futur.length === 0 && doc2.objets.length === 0;
+    verifier(vide0 && a && b && c && d1, 'G6 abandonner : le pas du geste défait sans rester à '
+      + 'rétablir, l\'ancien « à rétablir » rendu', [vide0, a, b, c, d1].join());
+  }
   // Rectangles normalisés ; crayon lissé (Chaikin deux fois).
   {
     const o = { type: 'masque', x1: 10, y1: 30, x2: 5, y2: 2 };
@@ -1202,6 +1396,271 @@ async function partieDessin(nav) {
   verifier(r.pareil && r.coins > 0 && r.horsCoins === 0 && r.coinVide && r.export0,
     'P8 option rayon : coins de l\'image transparents à l\'écran, rien d\'autre ne change, '
     + 'absente = 0, export sans arrondi', JSON.stringify(r));
+
+  // (G) Gomme au pixel : dessin (fil « Rendre l'annotation plus naturelle »).
+  // (G7) Un rectangle plein coupé par une bande de 40 px : au milieu de la bande, l'image au
+  // bit près (ni encre ni ombre) ; l'encre reste de part et d'autre ; rien ne change hors de
+  // la boîte. Tout gommé (l'objet encore dans le document, comme pendant le geste) : aucun
+  // pixel ne change, pas même l'ombre.
+  r = await p.evaluate(async () => {
+    const L = 300, H = 200, im = await preparer(L, H);
+    const egal = (s, x, y) => {
+      const i = (y * L + x) * 4;
+      return [0, 1, 2, 3].every((q) => s.rgba[i + q] === im.src[i + q]);
+    };
+    const rect = { type: 'rectangle', x1: 40, y1: 40, x2: 260, y2: 160, couleur: '#E5484D',
+      epaisseur: 1, plein: true, arrondi: 0, opacite: 1 };
+    const s = exporter(im, docAvec(L, H, [{ ...rect,
+      gommes: [{ largeur: 40, points: [[150, 10], [150, 190]] }] }]));
+    let trou = 0, trouN = 0, encre = 0, encreN = 0;
+    for (let y = 30; y < 170; y++) {
+      for (let x = 144; x <= 156; x++) {
+        trouN++;
+        if (egal(s, x, y)) trou++;
+      }
+      if (y < 45 || y >= 155) continue;
+      for (const x of [60, 100, 200, 240]) {
+        encreN++;
+        if (!egal(s, x, y)) encre++;
+      }
+    }
+    const e = ecarts(im, s, [D.boite(rect)]);
+    const tout = exporter(im, docAvec(L, H, [{ ...rect,
+      gommes: [{ largeur: 400, points: [[150, 100]] }] }]));
+    return { trou, trouN, encre, encreN, dehors: e.dehors, tout: ecarts(im, tout, []).dehors };
+  });
+  verifier(r.trou === r.trouN && r.encre === r.encreN && r.dehors === 0 && r.tout === 0,
+    'G7 gommé : l\'image revient au bit près au milieu de la bande, l\'encre reste de part et '
+    + 'd\'autre, rien hors de la boîte ; tout gommé : aucun pixel, pas même l\'ombre',
+    JSON.stringify(r));
+
+  // (G8) Vue à la taille réelle = export au bit près, encres gommées comprises : image
+  // entière et recadrée, encres à cheval sur le bord, opacité, surligneur, passages d'un
+  // point ; et les passages changent bien l'export.
+  r = await p.evaluate(async () => {
+    const im = await preparer(300, 200);
+    const g = (l, ...traces) => traces.map((points) => ({ largeur: l, points }));
+    const objets = [
+      { type: 'fleche', x1: -40, y1: 30, x2: 160, y2: 120, double: true, couleur: '#E5484D',
+        epaisseur: 2, opacite: 1, gommes: g(18, [[60, 60], [70, 110]]) },
+      { type: 'ellipse', x1: 150, y1: 20, x2: 280, y2: 120, couleur: '#30A46C', epaisseur: 2,
+        plein: false, opacite: 0.6, gommes: g(24, [[150, 70], [215, 20]]) },
+      { type: 'ligne', x1: 20, y1: 190, x2: 290, y2: 140, couleur: '#8E4EC6', epaisseur: 2,
+        opacite: 1, gommes: g(18, [[150, 140], [160, 200]]) },
+      { type: 'crayon', points: [[30, 140], [70, 170], [110, 130], [150, 180]],
+        couleur: '#F5A524', epaisseur: 2, opacite: 1, gommes: g(30, [[90, 150]]) },
+      { type: 'surligneur', points: [[20, 100], [280, 104]], couleur: '#FFD43B', epaisseur: 2,
+        gommes: g(40, [[100, 80], [100, 130]]).concat(g(10, [[200, 102]])) },
+      { type: 'rectangle', x1: 200, y1: 150, x2: 330, y2: 230, couleur: '#0090FF',
+        epaisseur: 1, plein: true, arrondi: 8, opacite: 1, gommes: g(20, [[260, 190], [320, 190]]) },
+    ];
+    const sansGomme = objets.map((o) => ({ ...o, gommes: undefined }));
+    const vue = document.createElement('canvas');
+    vue.width = 400; vue.height = 300;
+    const c = vue.getContext('2d', { willReadFrequently: true });
+    const res = {};
+    for (const [nom, cadre] of [['entiere', null],
+      ['recadree', { x: 10, y: 20, largeur: 270, hauteur: 170 }]]) {
+      const doc = docAvec(300, 200, objets, cadre);
+      const s = exporter(im, doc);
+      M.peindreVue(c, doc, im.fond, { x: 50, y: 40, echelle: 1, dpr: 1 }, []);
+      const kx = cadre ? cadre.x : 0, ky = cadre ? cadre.y : 0;
+      const v = c.getImageData(50 + kx, 40 + ky, s.largeur, s.hauteur).data;
+      let diff = 0;
+      for (let i = 0; i < v.length; i++) if (v[i] !== s.rgba[i]) diff++;
+      const s0 = exporter(im, docAvec(300, 200, sansGomme, cadre));
+      let change = 0;
+      for (let i = 0; i < s0.rgba.length; i += 4) {
+        if ([0, 1, 2, 3].some((q) => s0.rgba[i + q] !== s.rgba[i + q])) change++;
+      }
+      res[nom] = { diff, change };
+    }
+    return res;
+  });
+  verifier(r.entiere.diff === 0 && r.recadree.diff === 0 && r.entiere.change > 1000
+    && r.recadree.change > 1000, 'G8 encres gommées : vue à la taille réelle = export au bit '
+    + 'près (image entière et recadrée, bord, opacité, surligneur), les passages changent '
+    + 'l\'export', JSON.stringify(r));
+
+  // (G9) Pendant le geste, l'aperçu (passages en option de la vue) est ce que le geste
+  // laissera une fois fini (passages gardés dans l'objet), au bit près, aux échelles 1, 1,5
+  // et 2 ; une encre déjà gommée cumule ses anciens passages et ceux du geste.
+  r = await p.evaluate(async () => {
+    const im = await preparer(300, 200);
+    const base = [
+      { type: 'crayon', points: [[20, 20], [120, 160], [220, 40], [280, 180]],
+        couleur: '#E5484D', epaisseur: 2, opacite: 1 },
+      { type: 'surligneur', points: [[20, 100], [280, 100]], couleur: '#FFD43B', epaisseur: 1,
+        gommes: [{ largeur: 12, points: [[40, 100], [60, 100]] }] },
+      { type: 'fleche', x1: 30, y1: 180, x2: 270, y2: 150, double: false, couleur: '#0090FF',
+        epaisseur: 1, opacite: 0.8 }];
+    const passages = [{ largeur: 20, points: [[60, 60], [90, 110], [140, 100]] },
+      { largeur: 10, points: [[240, 100]] }, { largeur: 16, points: [[150, 165], [160, 160]] }];
+    const apercu = docAvec(300, 200, base), garde = docAvec(300, 200, base);
+    for (const o of garde.objets) D.gommer(garde, o.id, passages);
+    const enCours = new Map(apercu.objets.map((o) => [o.id, passages]));
+    M.peindreMasques(im.ctx, im.base, apercu);
+    const vue = document.createElement('canvas');
+    vue.width = 600; vue.height = 400;
+    const c = vue.getContext('2d', { willReadFrequently: true });
+    const lire = (doc, e, options) => {
+      M.peindreVue(c, doc, im.fond, { x: 0, y: 0, echelle: e, dpr: e }, [], options);
+      return c.getImageData(0, 0, 600, 400).data;
+    };
+    const compter = (a, b) => {
+      let n = 0;
+      for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) n++;
+      return n;
+    };
+    const res = {};
+    for (const e of [1, 1.5, 2]) {
+      res['x' + e] = compter(lire(apercu, e, { gommes: enCours }), lire(garde, e));
+    }
+    res.change = compter(lire(apercu, 1), lire(apercu, 1, { gommes: enCours }));
+    res.cumul = garde.objets[1].gommes.length === 4;
+    return res;
+  });
+  verifier(r.x1 === 0 && r['x1.5'] === 0 && r.x2 === 0 && r.change > 1000 && r.cumul,
+    'G9 aperçu pendant le geste = résultat gardé au bit près (échelles 1, 1,5, 2), anciens '
+    + 'passages et passages du geste cumulés', JSON.stringify(r));
+
+  // (G10) effetGomme : « rien » à côté de l'encre ou dans un trou déjà fait (même largeur ou
+  // plus petite), « efface » en travers, « vide » quand il ne reste rien de visible, même
+  // pour une encre de 4 000 px (jugée réduite) ; un passage d'un point compte.
+  r = await p.evaluate(() => {
+    const doc = D.nouveauDocument(4000, 300);
+    const trait = { type: 'ligne', x1: 100, y1: 100, x2: 300, y2: 100, couleur: '#E5484D',
+      epaisseur: 1, opacite: 1 };
+    const troue = { ...trait, gommes: [{ largeur: 30, points: [[200, 80], [200, 120]] }] };
+    const long = { type: 'crayon', points: [[50, 150], [3950, 150]], couleur: '#1A1A1A',
+      epaisseur: 0, opacite: 1 };
+    const E = (o, ...passages) => M.effetGomme(doc, o, passages);
+    return {
+      cote: E(trait, { largeur: 10, points: [[200, 140], [260, 140]] }),
+      travers: E(trait, { largeur: 10, points: [[200, 80], [200, 120]] }),
+      point: E(trait, { largeur: 10, points: [[150, 100]] }),
+      dansTrou: E(troue, { largeur: 30, points: [[200, 80], [200, 120]] }),
+      dansTrouPetite: E(troue, { largeur: 10, points: [[200, 90], [200, 110]] }),
+      bordTrou: E(troue, { largeur: 10, points: [[215, 80], [215, 120]] }),
+      tout: E(trait, { largeur: 60, points: [[80, 100], [320, 100]] }),
+      enDeux: E(trait, { largeur: 40, points: [[90, 100], [200, 100]] },
+        { largeur: 40, points: [[200, 100], [310, 100]] }),
+      long: E(long, { largeur: 40, points: [[30, 150], [3970, 150]] }),
+      longMoitie: E(long, { largeur: 40, points: [[30, 150], [2000, 150]] }),
+    };
+  });
+  verifier(r.cote === 'rien' && r.travers === 'efface' && r.point === 'efface'
+    && r.dansTrou === 'rien' && r.dansTrouPetite === 'rien' && r.bordTrou === 'efface'
+    && r.tout === 'vide' && r.enDeux === 'vide' && r.long === 'vide'
+    && r.longMoitie === 'efface', 'G10 effet d\'un geste : rien à côté ni dans un trou déjà '
+    + 'fait, efface en travers (un point compte), vide quand il ne reste rien (encre de '
+    + '4 000 px comprise)', JSON.stringify(r));
+
+  // (G11) La vue garde le rendu des encres gommées qui n'ont pas changé : ce qu'elle repose
+  // est, au bit près, ce qu'elle aurait redessiné ; un objet déplacé, gommé de nouveau,
+  // recoloré, une vue décalée ou zoomée ne reposent jamais un rendu périmé.
+  r = await p.evaluate(async () => {
+    const im = await preparer(300, 200);
+    const doc = docAvec(300, 200, [
+      { type: 'crayon', points: [[20, 30], [120, 160], [220, 40], [280, 170]],
+        couleur: '#E5484D', epaisseur: 2, opacite: 1,
+        gommes: [{ largeur: 20, points: [[70, 95], [80, 100]] }] },
+      { type: 'fleche', x1: 30, y1: 180, x2: 270, y2: 140, double: false, couleur: '#0090FF',
+        epaisseur: 1, opacite: 0.8, gommes: [{ largeur: 16, points: [[150, 160]] }] }]);
+    M.peindreMasques(im.ctx, im.base, doc);
+    const vue = document.createElement('canvas');
+    vue.width = 700; vue.height = 500;
+    const c = vue.getContext('2d', { willReadFrequently: true });
+    let v = { x: 20, y: 30, echelle: 1, dpr: 1 };
+    const lire = () => {
+      M.peindreVue(c, doc, im.fond, v, []);
+      return c.getImageData(0, 0, 700, 500).data;
+    };
+    const frais = () => {
+      M.relacherCalque();
+      return lire();
+    };
+    const pareil = (a, b) => a.every((x, i) => x === b[i]);
+    const res = {};
+    const etape = (nom) => {
+      const garde = lire(); // la première peinture garde, la seconde repose
+      res[nom] = pareil(lire(), frais()) && pareil(garde, frais());
+    };
+    etape('repos');
+    const [trait, fleche] = doc.objets;
+    D.deplacer(trait, JSON.parse(JSON.stringify(trait)), 12, -7);
+    etape('deplace');
+    D.gommer(doc, fleche.id, [{ largeur: 30, points: [[100, 160], [110, 150]] }]);
+    etape('regomme');
+    fleche.couleur = '#30A46C';
+    etape('recolore');
+    v = { x: 27, y: 18, echelle: 1, dpr: 1 };
+    etape('decale');
+    v = { x: 0, y: 0, echelle: 2, dpr: 2 };
+    etape('zoom');
+    // ce que la gomme a changé se voit bien : la vue gardée n'est pas celle d'avant le geste
+    v = { x: 20, y: 30, echelle: 1, dpr: 1 };
+    const avant = lire();
+    D.gommer(doc, trait.id, [{ largeur: 40, points: [[200, 50], [240, 80]] }]);
+    res.change = !pareil(avant, lire());
+    M.relacherCalque();
+    return res;
+  });
+  verifier(Object.values(r).every(Boolean), 'G11 rendu gardé par la vue = rendu redessiné au '
+    + 'bit près ; jamais périmé (objet déplacé, gommé de nouveau, recoloré, vue décalée, '
+    + 'zoomée)', JSON.stringify(r));
+
+  // (G12) Coût : vue 3840 × 2160, 50 traits de crayon dont 20 gommés (20 passages chacun),
+  // 10 peintures attendues, comparées aux mêmes traits sans gomme. Rendus gardés : pas plus
+  // lent que sans gomme (borne 40 ms de plus) ; tout redessiné à chaque peinture (vue qui
+  // bouge, zoom) : borne large de 600 ms de plus, un garde-fou contre une gomme devenue lente
+  // (sans carte graphique, flouter l'ombre de chaque calque coûte environ 5 ms). Les 50 traits
+  // gommés dépassent ce que la vue garde : elle en garde une part, toujours la même.
+  r = await p.evaluate(async () => {
+    const L = 3840, H = 2160, im = await preparer(L, H);
+    const hasard = graine(42);
+    const traits = [], gommes = [];
+    for (let i = 0; i < 50; i++) {
+      const x = hasard() * (L - 900), y = hasard() * (H - 500), pts = [];
+      for (let j = 0; j < 200; j++) pts.push([x + j * 4, y + 200 + 180 * Math.sin(j / 15)]);
+      traits.push({ type: 'crayon', points: pts, couleur: '#E5484D', epaisseur: 2, opacite: 1 });
+      const g = [];
+      for (let k = 0; k < 20; k++) {
+        const a = pts[k * 10], q = [];
+        for (let m = 0; m < 10; m++) q.push([a[0] + m * 3, a[1] + (m % 2 ? 6 : -6)]);
+        g.push({ largeur: 20, points: q });
+      }
+      gommes.push(g);
+    }
+    const vue = document.createElement('canvas');
+    vue.width = L; vue.height = H;
+    const c = vue.getContext('2d');
+    const mesurer = (doc, froid) => {
+      M.peindreMasques(im.ctx, im.base, doc);
+      M.peindreVue(c, doc, im.fond, { x: 0, y: 0, echelle: 1, dpr: 1 }, []);
+      c.getImageData(0, 0, 1, 1);
+      const t0 = performance.now();
+      for (let i = 0; i < 10; i++) {
+        if (froid) M.relacherCalque();
+        M.peindreVue(c, doc, im.fond, { x: 0, y: 0, echelle: 1, dpr: 1 }, []);
+        c.getImageData(0, 0, 1, 1); // attend la fin du dessin
+      }
+      return Math.round((performance.now() - t0) / 10 * 10) / 10;
+    };
+    const vingt = docAvec(L, H, traits.map((o, i) => (i < 20 ? { ...o, gommes: gommes[i] } : o)));
+    const res = {
+      sans: mesurer(docAvec(L, H, traits)),
+      gardes: mesurer(vingt),
+      redessines: mesurer(vingt, true),
+      cinquante: mesurer(docAvec(L, H, traits.map((o, i) => ({ ...o, gommes: gommes[i] })))),
+    };
+    M.relacherCalque();
+    return res;
+  });
+  verifier(r.gardes - r.sans <= 40 && r.redessines - r.sans <= 600,
+    `G12 vue 3840 × 2160, 20 traits gommés sur 50 : ${r.gardes} ms par peinture (rendus `
+    + `gardés), ${r.redessines} ms (tout redessiné), sans gomme ${r.sans} ms ; 50 traits `
+    + `gommés : ${r.cinquante} ms`, JSON.stringify(r));
 
   // (g) Temps : Pixeliser sur une grande image (toute l'image masquée) ; composer 5760 × 1080
   // avec 50 objets (borne du contrat : 1 000 ms).

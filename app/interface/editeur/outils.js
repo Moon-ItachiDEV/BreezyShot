@@ -3,6 +3,17 @@
 // en place, numéros, masques, recadrage par les équerres des coins, vue à la main. Tout
 // changement du document passe par `ed.modifier` (document.js) ; la page dessine par-dessus
 // la vue les équerres, le recadrage en cours et les poignées.
+//
+// Gomme : elle efface l'encre (stylo, surligneur, flèche, ligne, rectangle, ellipse) là où
+// elle passe, et là seulement ; un geste = un pas d'annulation, et un geste qui n'efface
+// aucun pixel n'en fait pas. Une encre dont il ne reste rien est retirée. Texte, numéro, flou
+// et projecteur sont entiers : la gomme passe dessus sans les entamer, un clic de gomme sur
+// l'un d'eux (sans encre effacée) l'enlève. Le rond qui suit le pointeur a la taille de la
+// gomme, en pixels de l'écran : zoomer pour gommer fin.
+// Échap pendant un geste l'abandonne (rien n'est créé, déplacé, recadré ni gommé). Maj :
+// 15° pour flèche, ligne et bout tiré ; carré à la création, proportions gardées par un coin ;
+// trait droit pour le stylo et le surligneur. Stylo et surligneur : le pointeur tenu immobile
+// en fin de trait redresse un trait presque droit.
 
 import { jeton, jetonNombre } from "./editeur.js";
 import { sorteObjet, TYPE_DE_SORTE, TAILLES_TEXTE } from "./barre.js";
@@ -14,6 +25,10 @@ const MIN_TRAIT = 8; // flèche ou ligne : ≤ 8 px, rien n'est créé
 const MIN_BOITE = 6; // autre : ≤ 6 px
 const ANGLE = Math.PI / 12; // Maj : 15°
 const SANS_PRISE = new Set(["crayon", "surligneur", "gomme"]); // un appui ne prend pas d'objet
+const ENTIERS = ["texte", "numero", "masque", "projecteur"]; // un clic de gomme les enlève
+const PAS_GOMME = 1; // px d'écran entre deux points d'un passage de gomme
+const DROIT_ECART = 0.08; // redresser : écart au plus, en part de la longueur du trait
+const DROIT_AXE = (4 * Math.PI) / 180; // redresser : à moins de 4° d'un axe, le trait s'y cale
 
 const copie = (o) => JSON.parse(JSON.stringify(o));
 
@@ -21,7 +36,10 @@ export function installerOutils(ed) {
   const toile = ed.toile;
   const scene = ed.scene;
   const saisie = $("#saisie");
+  const rond = $("#curseur-gomme");
   let geste = null; // { mode: pan|equerre|gomme|deplacer|poignee|trace, … }
+  let dernier = null; // dernier mouvement du pointeur (Maj enfoncée ou relâchée le rejoue)
+  let survol = null; // { clientX, clientY } du pointeur sur la toile, ou null
   let espace = false;
   let edition = null; // { objet, existant }
   let numeroGeste = 0;
@@ -148,10 +166,12 @@ export function installerOutils(ed) {
     if (enEdition) validerSaisie();
     scene.focus({ preventScroll: true });
     if (enEdition || !ed.h || !ed.fond) return;
-    // Un menu ouvert : l'appui le referme seulement (maquette).
+    // Un menu ouvert : l'appui le referme seulement (maquette). Une bulle de réglage (taille,
+    // couleur) se referme et le geste commence : le réglage choisi, on dessine.
     if (ed.barre.menuOuvert() && !espace) {
+      const bulle = ed.barre.bulleOuverte();
       ed.barre.fermerMenus();
-      return;
+      if (!bulle) return;
     }
     toile.setPointerCapture?.(e.pointerId);
     const p = versImage(e);
@@ -173,8 +193,25 @@ export function installerOutils(ed) {
       return;
     }
     if (s === "gomme") {
-      geste = { mode: "gomme", marque: `gomme-${++numeroGeste}` };
-      effacer(p);
+      geste = {
+        mode: "gomme",
+        passages: new Map(), // id → [{ largeur, points }] : aperçu, posé au relâchement
+        rayon: rayonGomme(),
+        depart: p,
+        p,
+        ecran: [e.clientX, e.clientY],
+        bouge: false,
+      };
+      ed.gommes = geste.passages;
+      passer(p, p);
+      // La gomme posée sur un objet entier (texte, numéro, masque, projecteur), sans encre
+      // dessous : il part en entier, et disparaît dès l'appui.
+      if (!geste.passages.size) {
+        const o = ed.modele.objetSous(ed.h.doc, p, tolerance(), ENTIERS);
+        if (o) ed.gommeEntier = geste.entier = o.id;
+      }
+      placerRond(e);
+      ed.dessiner();
       return;
     }
     if (!SANS_PRISE.has(s)) {
@@ -185,6 +222,7 @@ export function installerOutils(ed) {
           poignee: h,
           origine: copie(o),
           marque: `geste-${++numeroGeste}`,
+          bouge: false,
         };
         return;
       }
@@ -199,11 +237,13 @@ export function installerOutils(ed) {
           if (i >= 0) ed.selection.splice(i, 1);
           else ed.selection.push(o.id);
         } else if (!ed.selection.includes(o.id)) ed.selection = [o.id];
+        const origines = ed.objetsChoisis().map(copie);
         geste = {
           mode: "deplacer",
           p,
           ecran: [e.clientX, e.clientY],
-          origines: ed.objetsChoisis().map(copie),
+          origines,
+          limites: limites(origines),
           marque: `geste-${++numeroGeste}`,
           bouge: false,
         };
@@ -249,7 +289,9 @@ export function installerOutils(ed) {
       return;
     }
     ed.enCours = nouvelObjet(s, p);
-    geste = { mode: "trace" };
+    // `libre` : le trait à main levée du stylo ou du surligneur, gardé quand il est montré
+    // droit (Maj, ou redressé).
+    geste = { mode: "trace", libre: ed.enCours?.points ? [[p.x, p.y]] : null, droit: false };
     ed.dessiner();
   }
 
@@ -258,17 +300,97 @@ export function installerOutils(ed) {
     return p.x >= k.x && p.y >= k.y && p.x <= k.x + k.largeur && p.y <= k.y + k.hauteur;
   }
 
-  // Gomme : chaque objet touché est supprimé ; un geste = un seul pas (même marque).
-  function effacer(p) {
-    const o = ed.modele.objetSous(ed.h.doc, p, tolerance(), null);
-    if (!o) return;
-    ed.modifier((doc) => ed.modele.supprimer(doc, [o.id]), geste.marque);
+  // ---------- gomme ----------
+  const rayonGomme = () => jetonNombre(`editeur-gomme-rayon-${ed.barre.rang("gomme")}`) / echelleCss();
+  // La gomme passée de `a` à `b` : le passage est noté pour chaque encre atteinte. Un
+  // passage se prolonge tant que la gomme reste sur l'encre ; revenue dessus, elle en ouvre
+  // un autre (le chemin fait hors de l'encre n'est pas gardé).
+  function passer(a, b) {
+    const g = geste;
+    for (const o of ed.h.doc.objets) {
+      if (!ed.modele.gommeTouche(o, a, b, g.rayon)) continue;
+      let l = g.passages.get(o.id);
+      if (!l) g.passages.set(o.id, (l = []));
+      const d = l[l.length - 1];
+      const fin = d?.points[d.points.length - 1];
+      if (fin && fin[0] === a.x && fin[1] === a.y) d.points.push([b.x, b.y]);
+      else {
+        const points = a.x === b.x && a.y === b.y ? [[a.x, a.y]] : [[a.x, a.y], [b.x, b.y]];
+        l.push({ largeur: 2 * g.rayon, points });
+      }
+    }
   }
+  // Fin du geste : un seul pas, pour ce qui a vraiment changé (les encres gommées, l'objet
+  // entier pris à l'appui). Rien de changé et pas de mouvement : le clic enlève l'objet entier
+  // sous la gomme, s'il y en a un (une encre déjà gommée à cet endroit le couvrait).
+  function finirGomme(g) {
+    ed.gommes = null;
+    ed.gommeEntier = null;
+    const doc = ed.h.doc;
+    const effets = [];
+    for (const [id, passages] of g.passages) {
+      const o = ed.objet(id);
+      const effet = o ? ed.dessin.effetGomme(doc, o, passages) : "rien";
+      if (effet !== "rien") effets.push([id, passages, effet]);
+    }
+    const otes = effets.filter((x) => x[2] === "vide").map((x) => x[0]);
+    if (g.entier != null && ed.objet(g.entier)) otes.push(g.entier);
+    else if (!effets.length && !g.bouge) {
+      const o = ed.modele.objetSous(doc, g.depart, tolerance(), ENTIERS);
+      if (o) otes.push(o.id);
+    }
+    if (effets.length || otes.length) {
+      ed.modifier((d) => {
+        for (const [id, passages, effet] of effets) {
+          if (effet === "efface") ed.modele.gommer(d, id, passages);
+        }
+        if (otes.length) ed.modele.supprimer(d, otes);
+      });
+    }
+    ed.dessiner();
+  }
+  // Le rond de la gomme, sous le pointeur, à la taille de la gomme (pixels de l'écran).
+  function placerRond(e) {
+    const r = scene.getBoundingClientRect();
+    const d = 2 * jetonNombre(`editeur-gomme-rayon-${ed.barre.rang("gomme")}`);
+    rond.style.width = rond.style.height = `${d}px`;
+    rond.style.translate = `${e.clientX - r.left - d / 2}px ${e.clientY - r.top - d / 2}px`;
+    rond.classList.toggle("appui", geste?.mode === "gomme");
+    rond.hidden = false;
+  }
+  function cacherRond() {
+    rond.hidden = true;
+    rond.classList.remove("appui");
+  }
+
+  // ---------- déplacement borné ----------
+  // Un objet déplacé reste à portée : au moins 12 px d'écran de sa boîte (ou toute sa boîte)
+  // dans l'image. Rend les bornes de (dx, dy), ou null si les objets sont déjà dehors.
+  function limites(origines) {
+    if (!origines.length) return null;
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    for (const o of origines) {
+      const b = ed.modele.boiteForme(o);
+      x0 = Math.min(x0, b.x); y0 = Math.min(y0, b.y);
+      x1 = Math.max(x1, b.x + b.largeur); y1 = Math.max(y1, b.y + b.hauteur);
+    }
+    const k = ed.modele.cadre(ed.h.doc);
+    const m = jetonNombre("editeur-deplacement-reste") / echelleCss();
+    const mx = Math.min(m, x1 - x0, k.largeur), my = Math.min(m, y1 - y0, k.hauteur);
+    const l = {
+      dx: [k.x + mx - x1, k.x + k.largeur - mx - x0],
+      dy: [k.y + my - y1, k.y + k.hauteur - my - y0],
+    };
+    return l.dx[0] > 0 || l.dx[1] < 0 || l.dy[0] > 0 || l.dy[1] < 0 ? null : l;
+  }
+  const borner = (l, dx, dy) =>
+    l ? [clamp(dx, l.dx[0], l.dx[1]), clamp(dy, l.dy[0], l.dy[1])] : [dx, dy];
 
   function mouvement(e) {
     if (!ed.h) return;
     const p = versImage(e);
     const g = geste;
+    dernier = g ? { clientX: e.clientX, clientY: e.clientY, target: e.target } : null;
     if (!g) {
       if (e.target === toile) curseur(e, p);
       return;
@@ -302,14 +424,19 @@ export function installerOutils(ed) {
       return;
     }
     if (g.mode === "gomme") {
-      effacer(p);
+      placerRond(e);
+      const seuil = jetonNombre("editeur-deplacement-seuil");
+      if (Math.hypot(e.clientX - g.ecran[0], e.clientY - g.ecran[1]) >= seuil) g.bouge = true;
+      if (Math.hypot(p.x - g.p.x, p.y - g.p.y) < PAS_GOMME / echelleCss()) return;
+      passer(g.p, p);
+      g.p = p;
+      ed.dessiner();
       return;
     }
     if (g.mode === "deplacer") {
-      const dx = p.x - g.p.x;
-      const dy = p.y - g.p.y;
       const seuil = jetonNombre("editeur-deplacement-seuil");
       if (!g.bouge && Math.hypot(e.clientX - g.ecran[0], e.clientY - g.ecran[1]) < seuil) return;
+      const [dx, dy] = borner(g.limites, p.x - g.p.x, p.y - g.p.y);
       g.bouge = true;
       ed.modifier((doc) => {
         for (const q of g.origines) {
@@ -323,15 +450,26 @@ export function installerOutils(ed) {
       g.bouge = true;
       ed.modifier((doc) => {
         const o = doc.objets.find((x) => x.id === g.origine.id);
-        if (o) ed.modele.redimensionner(o, g.origine, g.poignee, p, echelleCss());
+        if (o) ed.modele.redimensionner(o, g.origine, g.poignee, p, echelleCss(), !!e.shiftKey);
       }, g.marque);
       return;
     }
     const c = ed.enCours;
     if (!c) return;
     if (c.points) {
-      const l = c.points[c.points.length - 1];
-      if (Math.hypot(p.x - l[0], p.y - l[1]) > 2 / echelleCss()) c.points.push([p.x, p.y]);
+      const l = g.libre[g.libre.length - 1];
+      const avance = Math.hypot(p.x - l[0], p.y - l[1]) > 2 / echelleCss();
+      if (avance) g.libre.push([p.x, p.y]);
+      // Maj tenue, ou trait redressé : un segment du départ à la pointe (Maj : par 15°).
+      if (e.shiftKey || g.droit) {
+        const d = g.libre[0];
+        const bout = { x1: d[0], y1: d[1] };
+        if (e.shiftKey) contraindre(Object.assign(bout, { type: "ligne" }), p, true);
+        else Object.assign(bout, { x2: p.x, y2: p.y });
+        c.points = [d, [bout.x2, bout.y2]];
+      } else c.points = g.libre;
+      g.maj = !!e.shiftKey;
+      if (avance) attendreRedressement(g);
     } else {
       contraindre(c, p, e.shiftKey);
       if (c.courbe) {
@@ -342,6 +480,34 @@ export function installerOutils(ed) {
       }
     }
     ed.dessiner();
+  }
+
+  // Stylo et surligneur : le pointeur resté immobile en fin de trait redresse un trait
+  // presque droit (comme sur une tablette) ; ensuite la pointe mène le bout du segment.
+  function attendreRedressement(g) {
+    clearTimeout(g.minuterie);
+    if (g.droit) return;
+    g.minuterie = setTimeout(() => {
+      const c = ed.enCours;
+      if (geste !== g || !c?.points || g.droit || g.maj) return;
+      const l = g.libre, a = l[0], b = l[l.length - 1];
+      const L = Math.hypot(b[0] - a[0], b[1] - a[1]);
+      if (L < jetonNombre("editeur-redresser-min") / echelleCss()) return;
+      let ecart = 0;
+      for (const q of l) {
+        ecart = Math.max(ecart,
+          Math.abs((b[0] - a[0]) * (a[1] - q[1]) - (a[0] - q[0]) * (b[1] - a[1])) / L);
+      }
+      if (ecart > L * DROIT_ECART) return;
+      g.droit = true;
+      // Presque horizontal ou vertical : calé sur l'axe.
+      const an = Math.atan2(b[1] - a[1], b[0] - a[0]);
+      const axe = Math.round(an / (Math.PI / 2)) * (Math.PI / 2);
+      const bout = Math.abs(an - axe) < DROIT_AXE
+        ? [a[0] + Math.cos(axe) * L, a[1] + Math.sin(axe) * L] : b;
+      c.points = [a, bout];
+      ed.dessiner();
+    }, jetonNombre("duree-editeur-redresser"));
   }
 
   // Maj : 15° pour flèche et ligne, carré pour les boîtes.
@@ -365,13 +531,19 @@ export function installerOutils(ed) {
   function relache() {
     const g = geste;
     geste = null;
+    dernier = null;
     if (!g || !ed.h) return;
+    clearTimeout(g.minuterie);
     if (g.mode === "pan") {
       scene.dataset.curseur = espace ? "grab" : "";
       ed.envoyerVue();
       return;
     }
-    if (g.mode === "gomme") return;
+    if (g.mode === "gomme") {
+      rond.classList.remove("appui");
+      finirGomme(g);
+      return;
+    }
     if (g.mode === "deplacer" || g.mode === "poignee") {
       if (g.bouge) {
         const ids = ed.selection.slice();
@@ -418,20 +590,46 @@ export function installerOutils(ed) {
     poser(c);
   }
 
+  // Échap pendant un geste : il est abandonné. Rien n'est créé ni gommé, le recadrage est
+  // laissé, un déplacement ou une poignée tirée reviennent au départ (sans rien à rétablir).
+  function abandonnerGeste() {
+    const g = geste;
+    if (!g) return false;
+    geste = null;
+    dernier = null;
+    clearTimeout(g.minuterie);
+    ed.enCours = null;
+    ed.gommes = null;
+    ed.gommeEntier = null;
+    rond.classList.remove("appui");
+    if (g.mode === "pan") {
+      scene.dataset.curseur = espace ? "grab" : "";
+      ed.envoyerVue();
+    } else if ((g.mode === "deplacer" || g.mode === "poignee") && g.bouge) ed.abandonner();
+    ed.dessiner();
+    return true;
+  }
+
   function curseur(e, p) {
+    survol = { clientX: e.clientX, clientY: e.clientY };
     if (espace) {
       scene.dataset.curseur = "grab";
+      cacherRond();
       return;
     }
     const coin = poigneeSous(p) ? null : equerreSous(e);
     if (coin) {
       scene.dataset.curseur = coin === "nw" || coin === "se" ? "nwse" : "nesw";
+      cacherRond();
       return;
     }
     const s = sorte();
     let c = "";
-    if (s === "gomme") c = "cell";
-    else if (!SANS_PRISE.has(s)) {
+    if (s === "gomme") {
+      c = "gomme";
+      placerRond(e);
+    } else cacherRond();
+    if (!SANS_PRISE.has(s)) {
       const h = poigneeSous(p);
       if (h) c = h === "nw" || h === "se" ? "nwse" : h === "ne" || h === "sw" ? "nesw" : "pt";
       else {
@@ -458,6 +656,18 @@ export function installerOutils(ed) {
   });
   window.addEventListener("pointerup", relache);
   window.addEventListener("pointercancel", relache);
+  toile.addEventListener("pointerleave", () => {
+    survol = null;
+    if (geste?.mode !== "gomme") cacherRond();
+  });
+  // Maj enfoncée ou relâchée pendant un geste : il suit tout de suite, sans attendre le
+  // prochain mouvement.
+  for (const n of ["keydown", "keyup"]) {
+    window.addEventListener(n, (e) => {
+      if (e.key !== "Shift" || e.repeat || !geste || !dernier) return;
+      mouvement({ ...dernier, shiftKey: n === "keydown" });
+    });
+  }
   // Capture perdue ou fenêtre quittée : le geste finit (gardé s'il a une taille).
   toile.addEventListener("lostpointercapture", () => {
     if (geste) relache();
@@ -466,7 +676,8 @@ export function installerOutils(ed) {
     if (geste) relache();
   });
   toile.addEventListener("dblclick", (e) => {
-    if (!ed.h) return;
+    // Stylo, surligneur, gomme : deux appuis sont deux gestes, pas une saisie.
+    if (!ed.h || SANS_PRISE.has(sorte())) return;
     const o = ed.modele.objetSous(ed.h.doc, versImage(e), tolerance(), "texte");
     if (o) ouvrirSaisie(o, true);
   });
@@ -616,9 +827,24 @@ export function installerOutils(ed) {
       marquePousser = `pousser-${++numeroGeste}`;
     }
     dernierePoussee = maintenant;
+    const [bx, by] = borner(limites(ed.objetsChoisis()), dx, dy);
+    if (!bx && !by) return;
     ed.modifier((doc) => {
-      for (const o of doc.objets) if (ids.includes(o.id)) ed.modele.deplacer(o, copie(o), dx, dy);
+      for (const o of doc.objets) if (ids.includes(o.id)) ed.modele.deplacer(o, copie(o), bx, by);
     }, marquePousser);
+  }
+  function toutChoisir() {
+    if (!ed.h || geste || edition) return;
+    ed.selection = ed.h.doc.objets.map((o) => o.id);
+    ed.barre.synchroniser();
+    ed.dessiner();
+  }
+  // L'outil a changé (clavier compris) : le curseur et le rond de la gomme suivent, sans
+  // attendre un mouvement.
+  function outilChange() {
+    if (geste || !ed.h) return;
+    if (!survol) cacherRond();
+    else curseur(survol, versImage(survol));
   }
 
   // ---------- surcouche de la vue ----------
@@ -652,6 +878,8 @@ export function installerOutils(ed) {
     ctx.stroke();
     ctx.restore();
   }
+  // Les poignées ne sont montrées que pour un seul objet choisi, avec un outil qui prend.
+  const poignees = () => !edition && ed.selection.length === 1 && !SANS_PRISE.has(sorte());
   ed.surcouche = (ctx) => {
     const dpr = ed.vue.dpr;
     const n = (nom) => jetonNombre(nom) * dpr;
@@ -691,7 +919,7 @@ export function installerOutils(ed) {
     const [ax, ay] = versToile(k.x, k.y);
     const [bx, by] = versToile(k.x + k.largeur, k.y + k.hauteur);
     equerres(ctx, Math.round(ax), Math.round(ay), Math.round(bx - ax), Math.round(by - ay));
-    if (!edition && ed.selection.length === 1 && !SANS_PRISE.has(sorte())) {
+    if (poignees()) {
       const o = ed.objet(ed.selection[0]);
       const rayon = n("editeur-poignee-rayon");
       for (const [x, y] of o ? ed.modele.poignees(o) : []) {
@@ -718,6 +946,10 @@ export function installerOutils(ed) {
     // Un geste en cours (bouton enfoncé) : ni annuler ni rétablir.
     gesteEnCours: () => !!geste,
     recadrageEnCours: () => geste?.mode === "equerre",
+    abandonnerGeste,
+    poignees,
+    toutChoisir,
+    outilChange,
     idEnEdition: () => (edition?.existant ? edition.objet.id : null),
     texteEnSaisie,
     placerSaisie,
@@ -730,7 +962,13 @@ export function installerOutils(ed) {
       if (!geste) scene.dataset.curseur = oui ? "grab" : "";
     },
     remiseAZero: () => {
+      clearTimeout(geste?.minuterie);
       geste = null;
+      dernier = null;
+      survol = null;
+      ed.gommes = null;
+      ed.gommeEntier = null;
+      cacherRond();
       edition = null;
       saisie.hidden = true;
       ed.enCours = null;

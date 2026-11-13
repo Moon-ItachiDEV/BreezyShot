@@ -22,7 +22,7 @@ export const OUTILS = {
   },
   stylo: { nom: "Stylo", touche: "P" },
   surligneur: { nom: "Surligneur", touche: "H" },
-  gomme: { nom: "Gomme" },
+  gomme: { nom: "Gomme", touche: "G" },
   texte: { nom: "Texte", touche: "T" },
   forme: {
     nom: "Forme",
@@ -86,6 +86,18 @@ const TRAITS = ["droite", "courbe", "rectangle", "ellipse", "ligne", "crayon", "
 const AVEC_COULEUR = new Set([...TRAITS, "texte", "numero"]);
 const AVEC_OPACITE = new Set([...AVEC_COULEUR].filter((s) => s !== "surligneur"));
 export const TAILLES_TEXTE = [20, 28, 40];
+// Type d'objet → l'outil dont il porte les réglages.
+const OUTIL_DE_TYPE = {
+  fleche: "fleche",
+  crayon: "stylo",
+  surligneur: "surligneur",
+  texte: "texte",
+  rectangle: "forme",
+  ellipse: "forme",
+  ligne: "forme",
+  numero: "numero",
+  masque: "flou",
+};
 
 // Réglage → champ de l'objet, et à quelles sortes d'objet il s'applique.
 const CHAMPS = {
@@ -95,6 +107,7 @@ const CHAMPS = {
   numero: ["rayon", (s) => s === "numero"],
   intensite: ["intensite", (s) => s === "pixeliser" || s === "flouter"],
   opacite: ["opacite", (s) => AVEC_OPACITE.has(s)],
+  gomme: [null, () => false], // la taille de la gomme : une préférence, aucun objet
 };
 
 // Instruments dessinés de la maquette (instSVG), en 28 × 90 ; les couleurs par classes.
@@ -225,7 +238,7 @@ export function installerBarre(ed) {
       fermerMenus();
       choisirOutil(id);
       rendreFocus(e);
-      if (encore && id !== "gomme") ouvrirReglages(b);
+      if (encore) ouvrirReglages(b);
     });
   }
   const emplacement = $('[data-place="emplacement"]', outilsEl);
@@ -266,6 +279,7 @@ export function installerBarre(ed) {
     if (AJOUTS.includes(id)) p.emplacement = id;
     if (id === "stylo" || id === "surligneur" || id === "gomme") ed.selection = [];
     synchroniser();
+    ed.outils?.outilChange();
     ed.dessiner();
   }
 
@@ -338,21 +352,24 @@ export function installerBarre(ed) {
     if (!c && ouvert(menuCouleur)) fermerMenus();
   }
 
-  // Un réglage change : la préférence, et les objets choisis à qui il s'applique (un pas
-  // d'annulation ; `marque` : une glissière tirée = un pas).
+  // Un réglage change : les objets choisis à qui il s'applique (un pas d'annulation ;
+  // `marque` : une glissière tirée = un pas), et la préférence de LEUR outil : recolorer un
+  // texte choisi ne change pas la couleur de la flèche en main. Sans objet à qui l'appliquer :
+  // la préférence de l'outil en main.
   function regler(cle, valeur, marque = null) {
     const p = prefs();
-    const t = p.outil;
-    if (cle === "couleur") {
-      if (t in p.couleurs) p.couleurs[t] = valeur;
-    } else if (cle === "opacite") {
-      if (t in p.opacites) p.opacites[t] = valeur;
-    } else p.tailles[t] = cle === "tailleTexte" ? TAILLES_TEXTE.indexOf(valeur) : valeur;
     const [champ, sApplique] = CHAMPS[cle];
-    const cibles = ed
-      .objetsChoisis()
-      .filter((o) => sApplique(sorteObjet(o)))
-      .map((o) => o.id);
+    const choisis = ed.objetsChoisis().filter((o) => sApplique(sorteObjet(o)));
+    const cibles = choisis.map((o) => o.id);
+    const outils = new Set(choisis.map((o) => OUTIL_DE_TYPE[o.type]).filter(Boolean));
+    if (!outils.size) outils.add(p.outil);
+    for (const t of outils) {
+      if (cle === "couleur") {
+        if (t in p.couleurs) p.couleurs[t] = valeur;
+      } else if (cle === "opacite") {
+        if (t in p.opacites) p.opacites[t] = valeur;
+      } else p.tailles[t] = cle === "tailleTexte" ? TAILLES_TEXTE.indexOf(valeur) : valeur;
+    }
     if (cibles.length) {
       const v =
         cle === "numero"
@@ -489,14 +506,21 @@ export function installerBarre(ed) {
     else if (s === "texte") cle = "tailleTexte";
     else if (s === "numero") cle = "numero";
     else if (s === "pixeliser" || s === "flouter") cle = "intensite";
+    else if (s === "gomme") cle = "gomme";
     if (cle) {
       const r = el("div", "row");
-      const noms = cle === "intensite" ? ["Léger", "Moyen", "Fort"] : ["Fin", "Moyen", "Épais"];
+      const noms =
+        cle === "intensite"
+          ? ["Léger", "Moyen", "Fort"]
+          : cle === "gomme"
+            ? ["Petite", "Moyenne", "Grande"]
+            : ["Fin", "Moyen", "Épais"];
       const v = valeur(cle);
       for (let i = 0; i < 3; i++) {
         let contenu;
         if (cle === "tailleTexte") contenu = el("span", `a a${i}`, "A");
         else if (cle === "intensite") contenu = picto("pixel", `ico f${i}`);
+        else if (cle === "gomme") contenu = el("b", `g${i}`);
         else contenu = el("b", `${s === "surligneur" ? "s" : cle === "numero" ? "n" : "t"}${i}`);
         const val = cle === "tailleTexte" ? TAILLES_TEXTE[i] : i;
         r.appendChild(option(noms[i], contenu, v === val, () => regler(cle, val)));
@@ -837,6 +861,7 @@ export function installerBarre(ed) {
       else if (k === "c" && !e.shiftKey) ed.actions.copier();
       else if (k === "s") (e.shiftKey ? ed.actions.enregistrerSous : ed.actions.enregistrer)();
       else if (k === "d") ed.outils.dupliquer();
+      else if (k === "a" && !e.shiftKey) ed.outils.toutChoisir();
       else if (k === "0" || e.code === "Digit0" || e.code === "Numpad0") ed.ajuster();
       else if (k === "1" || e.code === "Digit1" || e.code === "Numpad1") ed.tailleReelle();
       else if (k === "=" || k === "+" || e.code === "NumpadAdd") ed.zoomerCentre(1.25);
@@ -848,6 +873,8 @@ export function installerBarre(ed) {
     if (e.altKey) return;
     if (e.key === "Escape") {
       e.preventDefault();
+      // Un geste en cours (bouton enfoncé) : Échap l'abandonne, rien d'autre.
+      if (ed.outils.abandonnerGeste()) return;
       if (menuOuvert()) {
         const o = ouvreur;
         fermerMenus();
@@ -928,6 +955,7 @@ export function installerBarre(ed) {
     fermerMenuFermer,
     glisserEnCours,
     menuOuvert,
+    bulleOuverte: () => ouvert(reglages) || ouvert(menuCouleur),
     fermerMenus,
     ouvrirMenuObjet,
     choisirOutil,
