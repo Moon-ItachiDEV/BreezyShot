@@ -69,8 +69,8 @@ jobs:
         run: npx tauri build --no-bundle -- --locked
 
       - name: Essais
-        # 01 à 12 ; une étape bloquée ne doit pas manger tout le job.
-        timeout-minutes: 30
+        # 01 à 13 ; une étape bloquée ne doit pas manger tout le job.
+        timeout-minutes: 45
         run: ./essais/lancer.ps1 -Exe app/coeur/target/release/breezyshot.exe -Sortie essais-resultats
 
       - name: Envoyer le .exe
