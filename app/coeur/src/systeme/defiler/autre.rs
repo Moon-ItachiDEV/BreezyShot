@@ -1,10 +1,17 @@
 //! Hors Windows : rien ne défile (Linux pour le développement ; macOS : la capture
 //! défilante y est absente).
 
-use super::{Envoi, FenetreInfo, Moyen, PageTrouvee, Position, RappelMolette, Rect};
+use super::{Depart, Envoi, FenetreInfo, Moyen, PageTrouvee, Position, RappelMolette, Rect};
 
-pub fn pages(_fenetres: &[FenetreInfo], _max: usize) -> Vec<PageTrouvee> {
-    Vec::new()
+pub fn preparer_pages() {}
+
+pub fn chercher_pages(
+    _fenetres: &[FenetreInfo],
+    _max: usize,
+    _depart: Depart,
+    rappel: &mut dyn FnMut(&[PageTrouvee]),
+) {
+    rappel(&[]);
 }
 
 /// Aucun défileur ne peut exister ici : le type n'a aucune valeur.

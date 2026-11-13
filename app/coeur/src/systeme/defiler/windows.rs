@@ -5,9 +5,17 @@
 //!   `SHELLDLL_DefView`, fenêtre à barre verticale qui a de quoi défiler, sa zone cliente
 //!   sans la barre) : lectures du système, sans message, quelques millisecondes. UI
 //!   Automation (`ScrollPattern`, `VerticallyScrollable`) seulement pour les fenêtres où rien
-//!   n'est trouvé (WPF, WinUI), dans un fil MTA à lui, attendu au plus `BUDGET_PAGES`.
-//!   Une page fille est coupée à la zone cliente de ses ancêtres et privée de ses sœurs plus
-//!   haut dans l'ordre d'empilement.
+//!   n'est trouvé (WPF, WinUI) et qui ne sont pas écartées (barre des tâches), une fenêtre
+//!   par fil d'un bassin de `FILS_PAGES` fils MTA durables (fil
+//!   `defilante-pages-automation`, client créé une fois par fil, à la première visée
+//!   défilante, `preparer_pages` ; un fil s'en va après `INACTIF_MAX` sans demande) : une
+//!   fenêtre lente ne retient pas les autres. Parcours en largeur de la vue des contrôles,
+//!   borné (`pages_d_une_fenetre`). Première liste au plus tard à `BUDGET_PAGES`, pages
+//!   tardives ajoutées jusqu'à `PAGES_TARDIVES_MAX` (`pages.rs`). Journal : `defiler
+//!   pages:` (forme de l'essai 14), `defiler pages detail:` (lancement, COM et client,
+//!   classe, durée et éléments de chaque fenêtre), `defiler pages tardives:`, `defiler
+//!   pages fin:`. Une page fille est coupée à la zone cliente de ses ancêtres et privée de
+//!   ses sœurs plus haut dans l'ordre d'empilement.
 //! - Moyens (R3) : `WM_MOUSEWHEEL` posté à la fenêtre fille sous le centre de la zone, avec
 //!   les coordonnées écran du centre (en pixels logiques pour une app non adaptée au DPI) ;
 //!   UI Automation `Scroll(SmallIncrement)` ; molette `SendInput` marquée (`MARQUE`). Chaque
@@ -36,6 +44,7 @@
 //! un titre).
 
 use std::cell::{Cell, RefCell};
+use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender, SyncSender, TryRecvError};
 use std::sync::{Arc, Mutex, TryLockError};
@@ -56,11 +65,12 @@ use ::windows::Win32::System::Variant::VARIANT;
 use ::windows::Win32::UI::Accessibility::{
     CUIAutomation, CUIAutomation8, IUIAutomation, IUIAutomation2, IUIAutomationCacheRequest,
     IUIAutomationCondition, IUIAutomationElement, IUIAutomationScrollPattern,
-    ScrollAmount_NoAmount, ScrollAmount_SmallDecrement, ScrollAmount_SmallIncrement,
-    TreeScope_Children, TreeScope_Descendants, TreeScope_Subtree, UIA_BoundingRectanglePropertyId,
-    UIA_ControlTypePropertyId, UIA_IsScrollPatternAvailablePropertyId, UIA_ScrollBarControlTypeId,
-    UIA_ScrollPatternId, UIA_ScrollVerticalScrollPercentPropertyId,
-    UIA_ScrollVerticalViewSizePropertyId, UIA_ScrollVerticallyScrollablePropertyId,
+    IUIAutomationTreeWalker, ScrollAmount_NoAmount, ScrollAmount_SmallDecrement,
+    ScrollAmount_SmallIncrement, TreeScope_Children, TreeScope_Descendants,
+    UIA_BoundingRectanglePropertyId, UIA_ControlTypePropertyId,
+    UIA_IsScrollPatternAvailablePropertyId, UIA_ScrollBarControlTypeId, UIA_ScrollPatternId,
+    UIA_ScrollVerticalScrollPercentPropertyId, UIA_ScrollVerticalViewSizePropertyId,
+    UIA_ScrollVerticallyScrollablePropertyId, UIA_PROPERTY_ID,
 };
 use ::windows::Win32::UI::HiDpi::PhysicalToLogicalPointForPerMonitorDPI;
 use ::windows::Win32::UI::Input::KeyboardAndMouse::{
@@ -81,11 +91,15 @@ use ::windows::Win32::UI::WindowsAndMessaging::{
     WM_QUIT, WM_USER, WS_EX_TRANSPARENT, WS_VSCROLL,
 };
 
+use super::pages::{
+    a_fouiller, ecartee, ligne_detail, ligne_fin, ligne_pages, ligne_tardives, EtatAutomation,
+    Lancement, Regard, Suivi, Vue,
+};
 use super::{
-    assembler, barre_utile, centre, classe_pour_journal, cran_entendu, decalage_px, garde,
+    barre_utile, centre, classe_pour_journal, cran_entendu, decalage_px, garde,
     meilleur_recouvrement, page_par_classe, parametres_molette, plus_petit_sous, position_lue,
-    retirer, sans_barre, survol_actif, Choix, Constat, Envoi, Etalon, FenetreInfo, Molette, Moyen,
-    PageTrouvee, Position, RappelMolette, Rect, BUDGET_PAGES, CRAN, MARQUE,
+    retirer, sans_barre, survol_actif, Choix, Constat, Depart, Envoi, Etalon, FenetreInfo, Molette,
+    Moyen, PageTrouvee, Position, RappelMolette, Rect, CRAN, MARQUE, PAGES_TARDIVES_MAX,
 };
 
 /// Attente d'une position lue par UI Automation.
@@ -346,65 +360,129 @@ fn pages_filles(racine: HWND) -> Vec<PageTrouvee> {
     filles.liste
 }
 
-pub fn pages(fenetres: &[FenetreInfo], max: usize) -> Vec<PageTrouvee> {
+pub fn preparer_pages() {
+    let mut b = bassin();
+    garnir(b.get_or_insert_with(Bassin::nouveau));
+}
+
+pub fn chercher_pages(
+    fenetres: &[FenetreInfo],
+    max: usize,
+    depart: Depart,
+    rappel: &mut dyn FnMut(&[PageTrouvee]),
+) {
     let debut = Instant::now();
     let n = fenetres.len().min(max);
     let fenetres = &fenetres[..n];
     let bords: Vec<Rect> = fenetres.iter().map(|f| f.rect).collect();
-    let mut trouvees: Vec<Vec<PageTrouvee>> = fenetres
-        .iter()
-        .map(|f| {
-            if f.fenetre == 0 {
-                Vec::new()
-            } else {
-                pages_filles(hwnd(f.fenetre))
+    let mut vues: Vec<Vue> = Vec::with_capacity(n);
+    let mut recues: Vec<Option<Vec<PageTrouvee>>> = Vec::with_capacity(n);
+    let mut manquent: Vec<(usize, isize)> = Vec::new();
+    for (i, f) in fenetres.iter().enumerate() {
+        if f.fenetre == 0 {
+            vues.push(Vue {
+                classe: "aucune".into(),
+                regard: Regard::SansFenetre,
+            });
+            recues.push(Some(Vec::new()));
+            continue;
+        }
+        let h = hwnd(f.fenetre);
+        let c = classe(h);
+        let filles = pages_filles(h);
+        let regard = if !filles.is_empty() {
+            Regard::Filles {
+                pages: filles.len(),
             }
-        })
-        .collect();
-    let par_filles = trouvees.iter().filter(|t| !t.is_empty()).count();
-    let manquent: Vec<(usize, isize)> = trouvees
-        .iter()
-        .enumerate()
-        .filter(|(i, t)| t.is_empty() && fenetres[*i].fenetre != 0)
-        .map(|(i, _)| (i, fenetres[i].fenetre))
-        .collect();
-    let (mut par_automation, mut en_retard) = (0usize, 0usize);
+        } else if ecartee(&c) {
+            Regard::Ecartee
+        } else {
+            manquent.push((i, f.fenetre));
+            Regard::EnFile
+        };
+        recues.push((!matches!(regard, Regard::EnFile)).then_some(filles));
+        vues.push(Vue {
+            classe: classe_pour_journal(&c).to_owned(),
+            regard,
+        });
+    }
+    let duree_filles = debut.elapsed();
+    let mut automation = EtatAutomation::Inutile;
+    let mut reception = None;
     if !manquent.is_empty() {
-        let echeance = debut + BUDGET_PAGES;
-        let attendues = manquent.len();
         let (tx, rx) = mpsc::channel();
-        let lance = thread::Builder::new()
-            .name("defilante-pages-automation".into())
-            .spawn(move || pages_automation(manquent, echeance, tx));
-        match lance {
-            Ok(_) => {
-                let mut recues = 0;
-                while recues < attendues {
-                    let reste = echeance.saturating_duration_since(Instant::now());
-                    match rx.recv_timeout(reste) {
-                        Ok((i, p)) => {
-                            recues += 1;
-                            if !p.is_empty() {
-                                par_automation += 1;
-                            }
-                            trouvees[i] = p;
-                        }
-                        Err(_) => break,
-                    }
-                }
-                en_retard = attendues - recues;
+        let echeance = debut + PAGES_TARDIVES_MAX;
+        automation = demander(
+            manquent.iter().map(|&(i, h)| DemandePage {
+                i,
+                h,
+                echeance,
+                reponse: tx.clone(),
+            }),
+            Instant::now(),
+        );
+        // Seules les demandes tiennent l'envoi : toutes servies ou laissées, la réception
+        // le voit.
+        drop(tx);
+        reception = Some(rx);
+    }
+    let lancement = Lancement {
+        fil: depart.fil.saturating_duration_since(depart.demandee),
+        liste: debut.saturating_duration_since(depart.fil),
+        filles: duree_filles,
+        automation,
+    };
+    let mut suivi = Suivi::nouveau(bords, recues);
+    let mut premiere = true;
+    let mut retard_au_budget = false;
+    let mut taille = 0;
+    loop {
+        if let Some(liste) = suivi.proposer(debut.elapsed()) {
+            taille = liste.len();
+            if premiere {
+                log::info!("{}", ligne_pages(taille, &vues, debut.elapsed()));
+                log::info!("{}", ligne_detail(&lancement, &vues));
+                retard_au_budget = vues.iter().any(|v| v.regard.en_retard());
+                premiere = false;
+            } else {
+                log::info!("{}", ligne_tardives(taille, &vues, debut.elapsed()));
             }
-            Err(e) => log::warn!("defiler pages: fil d'automation impossible ({e})"),
+            rappel(&liste);
+        }
+        if suivi.fini(debut.elapsed()) {
+            break;
+        }
+        let Some(rx) = reception.as_ref() else {
+            // Rien à attendre (aucune fenêtre pour UI Automation) : `proposer` a tout rendu.
+            break;
+        };
+        let reste = suivi.echeance().saturating_sub(debut.elapsed());
+        match rx.recv_timeout(reste) {
+            Ok(Nouvelle::Debut { i, a }) => {
+                if let Some(v) = vues.get_mut(i).filter(|v| v.regard == Regard::EnFile) {
+                    v.regard = Regard::EnCours {
+                        depuis: a.saturating_duration_since(debut),
+                    };
+                }
+            }
+            Ok(Nouvelle::Fin { i, pages, fouille }) => {
+                if let Some(v) = vues.get_mut(i) {
+                    v.regard = fouille.regard(pages.len(), debut);
+                }
+                suivi.recevoir(i, pages, debut.elapsed());
+            }
+            Err(RecvTimeoutError::Timeout) => {}
+            Err(RecvTimeoutError::Disconnected) => {
+                // Plus personne ne répondra (demandes laissées à leur échéance, fils
+                // arrêtés) : ce qui manque reste en retard au journal.
+                suivi.abandonner();
+                reception = None;
+            }
         }
     }
-    let liste = assembler(&bords, &trouvees);
-    log::info!(
-        "defiler pages: {} (filles {par_filles}, automation {par_automation}, en retard \
-         {en_retard}) sur {n} fenetres en {} ms",
-        liste.len(),
-        debut.elapsed().as_millis()
-    );
-    liste
+    if retard_au_budget {
+        log::info!("{}", ligne_fin(taille, &vues, debut.elapsed()));
+    }
 }
 
 // ---------------------------------------------------------------------------------------
@@ -469,150 +547,418 @@ fn condition_defilable(auto: &IUIAutomation) -> ::windows::core::Result<IUIAutom
     }
 }
 
-/// Les barres de défilement.
-fn condition_barre(auto: &IUIAutomation) -> ::windows::core::Result<IUIAutomationCondition> {
-    // SAFETY : appel COM du fil du client.
-    unsafe {
-        auto.CreatePropertyCondition(
-            UIA_ControlTypePropertyId,
-            &VARIANT::from(UIA_ScrollBarControlTypeId.0),
-        )
+// ---------------------------------------------------------------------------------------
+// UI Automation des pages : un bassin de fils MTA durables, chacun avec son client.
+
+/// Fils du bassin : une fenêtre qui bloque (jusqu'à `DELAI_UIA_MS` par appel) n'en retient
+/// qu'un, les autres fenêtres passent par les autres.
+const FILS_PAGES: usize = 4;
+
+/// Un fil du bassin sans demande pendant ce délai s'en va avec son client (la licence a pu
+/// être retirée) ; la visée suivante le recrée.
+const INACTIF_MAX: Duration = Duration::from_secs(60);
+
+/// Au plus tant d'éléments ouverts (une demande de leurs enfants chacun) par fenêtre.
+const NOEUDS_MAX: u32 = 48;
+
+/// Au plus tant d'enfants regardés par élément ouvert.
+const ENFANTS_MAX: i32 = 256;
+
+/// Au plus tant de niveaux sous la fenêtre.
+const PROFONDEUR_MAX: u32 = 12;
+
+/// Au plus tant de pages par fenêtre.
+const PAGES_PAR_FENETRE: usize = 16;
+
+/// Les derniers enfants d'une page regardés pour y trouver ses barres de défilement (WPF :
+/// la barre verticale puis l'horizontale, après le contenu).
+const DERNIERS_ENFANTS: usize = 3;
+
+/// Une fenêtre à fouiller, et où répondre.
+struct DemandePage {
+    /// Son rang dans la liste de la recherche.
+    i: usize,
+    h: isize,
+    /// Au-delà, plus personne n'attend : une demande pas commencée est laissée, une fouille
+    /// en cours s'arrête entre deux appels.
+    echeance: Instant,
+    reponse: Sender<Nouvelle>,
+}
+
+/// Ce que le bassin dit d'une demande.
+enum Nouvelle {
+    Debut {
+        i: usize,
+        a: Instant,
+    },
+    Fin {
+        i: usize,
+        pages: Vec<PageTrouvee>,
+        fouille: Fouille,
+    },
+}
+
+/// Ce qu'a coûté la fouille d'une fenêtre.
+#[derive(Debug, Default)]
+struct Fouille {
+    duree: Duration,
+    fin: Option<Instant>,
+    elements: u32,
+    noeuds: u32,
+    coupee: bool,
+    erreur: Option<String>,
+}
+
+impl Fouille {
+    fn regard(self, pages: usize, debut: Instant) -> Regard {
+        match self.erreur {
+            Some(code) => Regard::Erreur {
+                duree: self.duree,
+                code,
+            },
+            None => Regard::Automation {
+                duree: self.duree,
+                fin: self
+                    .fin
+                    .map(|f| f.saturating_duration_since(debut))
+                    .unwrap_or_default(),
+                elements: self.elements,
+                noeuds: self.noeuds,
+                pages,
+                coupee: self.coupee,
+            },
+        }
     }
 }
 
-/// Le rectangle de chaque élément trouvé, ramené avec lui.
-fn cache_rectangle(auto: &IUIAutomation) -> ::windows::core::Result<IUIAutomationCacheRequest> {
-    // SAFETY : appels COM du fil du client.
-    unsafe {
-        let cache = auto.CreateCacheRequest()?;
-        cache.AddProperty(UIA_BoundingRectanglePropertyId)?;
-        Ok(cache)
+/// L'état du premier client du bassin.
+#[derive(Debug, Clone)]
+enum Preparation {
+    EnCours(Instant),
+    Prete {
+        com: Duration,
+        client: Duration,
+        a: Instant,
+    },
+    Impossible(String),
+}
+
+/// Le bassin : la file des demandes, les fils vivants, l'état de leur préparation.
+struct Bassin {
+    envoi: Sender<DemandePage>,
+    file: Arc<Mutex<Receiver<DemandePage>>>,
+    vivants: usize,
+    preparation: Preparation,
+}
+
+impl Bassin {
+    fn nouveau() -> Bassin {
+        let (envoi, file) = mpsc::channel();
+        Bassin {
+            envoi,
+            file: Arc::new(Mutex::new(file)),
+            vivants: 0,
+            preparation: Preparation::EnCours(Instant::now()),
+        }
     }
 }
 
-/// Les rectangles des barres de défilement filles de `element` (à défaut, descendantes).
-fn barres_de(element: &IUIAutomationElement, condition: &IUIAutomationCondition) -> Vec<Rect> {
-    let mut barres = Vec::new();
-    for portee in [TreeScope_Children, TreeScope_Descendants] {
-        // SAFETY : appels COM du fil du client.
-        let Ok(liste) = (unsafe { element.FindAll(portee, condition) }) else {
-            continue;
-        };
-        // SAFETY : idem.
-        let n = unsafe { liste.Length() }
-            .unwrap_or(0)
-            .clamp(0, ELEMENTS_MAX);
-        for k in 0..n {
-            // SAFETY : indice dans la liste.
-            if let Ok(rect) = unsafe {
-                liste
-                    .GetElement(k)
-                    .and_then(|b| b.CurrentBoundingRectangle())
-            } {
-                barres.push(rect_de(rect));
+/// Créé à la première visée défilante (`preparer_pages`), jamais sans licence. Ordre des
+/// verrous : la file, puis le bassin (un fil qui s'en va) ; jamais l'inverse.
+static BASSIN: Mutex<Option<Bassin>> = Mutex::new(None);
+
+fn bassin() -> std::sync::MutexGuard<'static, Option<Bassin>> {
+    BASSIN.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+/// Lance les fils qui manquent. Sous le verrou du bassin.
+fn garnir(b: &mut Bassin) {
+    if b.vivants == 0 && !matches!(b.preparation, Preparation::EnCours(_)) {
+        b.preparation = Preparation::EnCours(Instant::now());
+    }
+    while b.vivants < FILS_PAGES {
+        let file = Arc::clone(&b.file);
+        let lance = thread::Builder::new()
+            .name("defilante-pages-automation".into())
+            .spawn(move || fil_du_bassin(file));
+        match lance {
+            Ok(_) => b.vivants += 1,
+            Err(e) => {
+                log::warn!("defiler pages: fil d'automation impossible ({e})");
+                break;
             }
         }
-        if !barres.is_empty() {
-            break;
+    }
+}
+
+/// Envoie les demandes au bassin (créé ou complété au besoin) ; rend l'état de sa
+/// préparation à `maintenant`.
+fn demander(demandes: impl Iterator<Item = DemandePage>, maintenant: Instant) -> EtatAutomation {
+    let mut g = bassin();
+    let b = g.get_or_insert_with(Bassin::nouveau);
+    for d in demandes {
+        let _ = b.envoi.send(d);
+    }
+    garnir(b);
+    match &b.preparation {
+        Preparation::EnCours(depuis) => EtatAutomation::EnPreparation {
+            depuis: maintenant.saturating_duration_since(*depuis),
+        },
+        Preparation::Prete { com, client, a } => EtatAutomation::Prete {
+            com: *com,
+            client: *client,
+            depuis: maintenant.saturating_duration_since(*a),
+        },
+        Preparation::Impossible(e) => EtatAutomation::Impossible(e.clone()),
+    }
+}
+
+/// Note la préparation d'un fil : la première réussie compte ; un échec n'efface pas une
+/// réussite.
+fn noter_preparation(p: Preparation) {
+    let mut g = bassin();
+    let Some(b) = g.as_mut() else {
+        return;
+    };
+    let garder = match (&b.preparation, &p) {
+        (Preparation::Prete { .. }, _) => false,
+        (_, Preparation::Prete { .. }) => true,
+        (Preparation::EnCours(_), Preparation::Impossible(_)) => true,
+        _ => false,
+    };
+    if garder {
+        b.preparation = p;
+    }
+}
+
+/// Ce dont une fouille a besoin, créé une fois par fil du bassin.
+struct Client {
+    auto: IUIAutomation,
+    vrai: IUIAutomationCondition,
+    /// Rectangle, type de contrôle, `ScrollPattern` présent, défile verticalement :
+    /// ramenés avec chaque élément (aucun aller-retour de plus pour les lire).
+    cache: IUIAutomationCacheRequest,
+    marcheur: IUIAutomationTreeWalker,
+}
+
+impl Client {
+    fn creer() -> ::windows::core::Result<Client> {
+        let auto = automation()?;
+        // SAFETY : appels COM du fil du client.
+        unsafe {
+            let vrai = auto.CreateTrueCondition()?;
+            let cache = auto.CreateCacheRequest()?;
+            for p in [
+                UIA_BoundingRectanglePropertyId,
+                UIA_ControlTypePropertyId,
+                UIA_IsScrollPatternAvailablePropertyId,
+                UIA_ScrollVerticallyScrollablePropertyId,
+            ] {
+                cache.AddProperty(p)?;
+            }
+            let marcheur = auto.ControlViewWalker()?;
+            Ok(Client {
+                auto,
+                vrai,
+                cache,
+                marcheur,
+            })
         }
+    }
+}
+
+/// Un fil du bassin : COM (MTA) et son client une fois, puis les demandes, jusqu'à
+/// `INACTIF_MAX` sans demande.
+fn fil_du_bassin(file: Arc<Mutex<Receiver<DemandePage>>>) {
+    let debut = Instant::now();
+    let com = Com::ouvrir();
+    let duree_com = debut.elapsed();
+    let client = match &com {
+        Ok(_) => Client::creer().map_err(|e| format!("client {}", code(&e))),
+        Err(e) => Err(e.clone()),
+    };
+    match &client {
+        Ok(_) => noter_preparation(Preparation::Prete {
+            com: duree_com,
+            client: debut.elapsed().saturating_sub(duree_com),
+            a: Instant::now(),
+        }),
+        Err(e) => noter_preparation(Preparation::Impossible(e.clone())),
+    }
+    loop {
+        let demande = {
+            let rx = file.lock().unwrap_or_else(|e| e.into_inner());
+            match rx.recv_timeout(INACTIF_MAX) {
+                Ok(d) => d,
+                Err(_) => {
+                    // Sous le verrou du bassin : une demande envoyée avant est vue ici, une
+                    // envoyée après trouve un fil de moins et en relance un.
+                    let mut g = bassin();
+                    match rx.try_recv() {
+                        Ok(d) => d,
+                        Err(_) => {
+                            if let Some(b) = g.as_mut() {
+                                b.vivants = b.vivants.saturating_sub(1);
+                            }
+                            break;
+                        }
+                    }
+                }
+            }
+        };
+        servir(client.as_ref(), demande);
+    }
+    // Le client part avant COM (ordre inverse de la création).
+    drop(client);
+    drop(com);
+}
+
+/// Une demande : laissée si son échéance est passée, sinon fouillée et rendue.
+fn servir(client: Result<&Client, &String>, d: DemandePage) {
+    let debut = Instant::now();
+    if debut >= d.echeance {
+        return;
+    }
+    if d.reponse
+        .send(Nouvelle::Debut { i: d.i, a: debut })
+        .is_err()
+    {
+        // Plus personne n'attend cette recherche.
+        return;
+    }
+    let (pages, mut fouille) = match client {
+        Ok(c) => pages_d_une_fenetre(c, hwnd(d.h), d.echeance),
+        Err(e) => (
+            Vec::new(),
+            Fouille {
+                erreur: Some(e.clone()),
+                ..Fouille::default()
+            },
+        ),
+    };
+    fouille.duree = debut.elapsed();
+    fouille.fin = Some(Instant::now());
+    let _ = d.reponse.send(Nouvelle::Fin {
+        i: d.i,
+        pages,
+        fouille,
+    });
+}
+
+/// Un booléen ramené dans le cache de `e` (faux s'il manque ou n'est pas un booléen).
+fn booleen_cache(e: &IUIAutomationElement, propriete: UIA_PROPERTY_ID) -> bool {
+    // SAFETY : lecture du cache de l'élément, sans appel à la page.
+    unsafe { e.GetCachedPropertyValue(propriete) }
+        .ok()
+        .and_then(|v| bool::try_from(&v).ok())
+        .unwrap_or(false)
+}
+
+/// `e` a un `ScrollPattern` et défile verticalement (d'après son cache).
+fn defile_cache(e: &IUIAutomationElement) -> bool {
+    booleen_cache(e, UIA_IsScrollPatternAvailablePropertyId)
+        && booleen_cache(e, UIA_ScrollVerticallyScrollablePropertyId)
+}
+
+/// Les rectangles des barres de défilement parmi les `DERNIERS_ENFANTS` derniers enfants de
+/// `element` (vue des contrôles) : quelques appels, au lieu de parcourir son contenu.
+fn barres_de(c: &Client, element: &IUIAutomationElement) -> Vec<Rect> {
+    let mut barres = Vec::new();
+    // SAFETY : appels COM du fil du client.
+    let mut courant = unsafe { c.marcheur.GetLastChildElementBuildCache(element, &c.cache) }.ok();
+    for _ in 0..DERNIERS_ENFANTS {
+        let Some(e) = courant else {
+            break;
+        };
+        // SAFETY : lectures du cache de l'élément.
+        let (genre, rect) = unsafe { (e.CachedControlType(), e.CachedBoundingRectangle()) };
+        if let (true, Ok(r)) = (genre.is_ok_and(|g| g == UIA_ScrollBarControlTypeId), rect) {
+            barres.push(rect_de(r));
+        }
+        // SAFETY : appel COM du fil du client.
+        courant = unsafe { c.marcheur.GetPreviousSiblingElementBuildCache(&e, &c.cache) }.ok();
     }
     barres
 }
 
-/// Ce qu'UI Automation trouve de défilable dans la fenêtre `h` (S4, complément).
-fn pages_d_une_fenetre(
-    auto: &IUIAutomation,
-    defilable: &IUIAutomationCondition,
-    barre: Option<&IUIAutomationCondition>,
-    cache: Option<&IUIAutomationCacheRequest>,
-    h: HWND,
-    echeance: Instant,
-) -> Vec<PageTrouvee> {
+/// Ce qu'UI Automation trouve de défilable dans la fenêtre `h` (S4, complément) : un
+/// parcours en largeur de la vue des contrôles, une demande d'enfants par élément ouvert
+/// (propriétés ramenées dans le cache), sans ouvrir ce qui défile (c'est la page) ni les
+/// feuilles (`a_fouiller`). Borné par `echeance`, `NOEUDS_MAX`, `ENFANTS_MAX`,
+/// `PROFONDEUR_MAX` et `PAGES_PAR_FENETRE`. Un `FindAll(TreeScope_Subtree)` lisait chaque
+/// élément de la page (un témoin WPF de 120 à 400 images : autant d'allers-retours par le
+/// fil de l'app) avant de rendre quoi que ce soit.
+fn pages_d_une_fenetre(c: &Client, h: HWND, echeance: Instant) -> (Vec<PageTrouvee>, Fouille) {
+    let mut fouille = Fouille::default();
     let mut pages = Vec::new();
-    // SAFETY : appels COM du fil du client.
-    let Ok(racine) = (unsafe { auto.ElementFromHandle(h) }) else {
-        return pages;
-    };
-    // SAFETY : idem.
-    let liste = unsafe {
-        match cache {
-            Some(c) => racine.FindAllBuildCache(TreeScope_Subtree, defilable, c),
-            None => racine.FindAll(TreeScope_Subtree, defilable),
+    // SAFETY : appel COM du fil du client.
+    let racine = match unsafe { c.auto.ElementFromHandleBuildCache(h, &c.cache) } {
+        Ok(r) => r,
+        Err(e) => {
+            fouille.erreur = Some(code(&e));
+            return (pages, fouille);
         }
     };
-    let Ok(liste) = liste else {
-        return pages;
-    };
-    // SAFETY : idem.
-    let n = unsafe { liste.Length() }
-        .unwrap_or(0)
-        .clamp(0, ELEMENTS_MAX);
-    for k in 0..n {
-        if Instant::now() >= echeance {
+    fouille.elements = 1;
+    let mut file: VecDeque<(IUIAutomationElement, u32)> = VecDeque::new();
+    if defile_cache(&racine) {
+        garder_page(c, &racine, h, &mut pages);
+    } else {
+        file.push_back((racine, 0));
+    }
+    'fouille: while let Some((element, profondeur)) = file.pop_front() {
+        if Instant::now() >= echeance || fouille.noeuds >= NOEUDS_MAX {
+            fouille.coupee = true;
             break;
         }
-        // SAFETY : indice dans la liste.
-        let Ok(element) = (unsafe { liste.GetElement(k) }) else {
+        fouille.noeuds += 1;
+        // SAFETY : appel COM du fil du client.
+        let Ok(enfants) =
+            (unsafe { element.FindAllBuildCache(TreeScope_Children, &c.vrai, &c.cache) })
+        else {
             continue;
         };
-        // SAFETY : appels COM du fil du client.
-        let rect = unsafe {
-            if cache.is_some() {
-                element.CachedBoundingRectangle()
-            } else {
-                element.CurrentBoundingRectangle()
+        // SAFETY : idem.
+        let n = unsafe { enfants.Length() }
+            .unwrap_or(0)
+            .clamp(0, ENFANTS_MAX);
+        for k in 0..n {
+            // SAFETY : indice dans la liste.
+            let Ok(enfant) = (unsafe { enfants.GetElement(k) }) else {
+                continue;
+            };
+            fouille.elements += 1;
+            if defile_cache(&enfant) {
+                garder_page(c, &enfant, h, &mut pages);
+                if pages.len() >= PAGES_PAR_FENETRE {
+                    break 'fouille;
+                }
+                continue;
             }
-        };
-        let Ok(rect) = rect.map(rect_de) else {
-            continue;
-        };
-        if rect.est_vide() {
-            continue;
+            // SAFETY : lecture du cache de l'élément.
+            let genre = unsafe { enfant.CachedControlType() }.map_or(0, |t| t.0);
+            if profondeur + 1 < PROFONDEUR_MAX && a_fouiller(genre) {
+                file.push_back((enfant, profondeur + 1));
+            }
         }
-        let barres = barre.map(|c| barres_de(&element, c)).unwrap_or_default();
-        pages.push(PageTrouvee {
-            rect: sans_barre(rect, &barres),
-            fenetre: brut(h),
-        });
     }
-    pages
+    (pages, fouille)
 }
 
-/// Le fil `defilante-pages-automation` : une réponse par fenêtre, tant que l'échéance
-/// n'est pas passée. Au-delà, plus personne ne l'attend : il finit ce qu'il fait et s'en
-/// va.
-fn pages_automation(
-    manquent: Vec<(usize, isize)>,
-    echeance: Instant,
-    tx: Sender<(usize, Vec<PageTrouvee>)>,
-) {
-    let Ok(_com) = Com::ouvrir() else {
+/// Garde `element` (qui défile) comme page de la fenêtre `h`, sans sa barre verticale.
+fn garder_page(c: &Client, element: &IUIAutomationElement, h: HWND, pages: &mut Vec<PageTrouvee>) {
+    // SAFETY : lecture du cache de l'élément.
+    let Ok(rect) = (unsafe { element.CachedBoundingRectangle() }).map(rect_de) else {
         return;
     };
-    let Ok(auto) = automation() else {
+    if rect.est_vide() {
         return;
-    };
-    let Ok(defilable) = condition_defilable(&auto) else {
-        return;
-    };
-    let barre = condition_barre(&auto).ok();
-    let cache = cache_rectangle(&auto).ok();
-    for (i, h) in manquent {
-        if Instant::now() >= echeance {
-            break;
-        }
-        let pages = pages_d_une_fenetre(
-            &auto,
-            &defilable,
-            barre.as_ref(),
-            cache.as_ref(),
-            hwnd(h),
-            echeance,
-        );
-        if tx.send((i, pages)).is_err() {
-            break;
-        }
     }
+    let barres = barres_de(c, element);
+    pages.push(PageTrouvee {
+        rect: sans_barre(rect, &barres),
+        fenetre: brut(h),
+    });
 }
 
 /// Le `ScrollPattern` de la zone, et la hauteur de son élément.
@@ -1809,6 +2155,7 @@ mod tests {
     };
 
     use crate::systeme::defiler as facade;
+    use crate::systeme::defiler::BUDGET_PAGES;
     use crate::systeme::gel::{self, Coins};
 
     /// Verrou des séances. ASSEMBLAGE : le remplacer par `crate::systeme::gel::VERROU_ECRAN`
@@ -2227,6 +2574,36 @@ mod tests {
             .find(|p| p.fenetre == f.sentinelle)
             .expect("sentinelle en partie visible");
         assert!(sentinelle.rect.droite() <= (infos[1].rect.x + 100) as i64);
+    }
+
+    #[test]
+    fn types_de_controle_comme_ceux_du_systeme() {
+        use ::windows::Win32::UI::Accessibility::{
+            UIA_ButtonControlTypeId, UIA_DataItemControlTypeId, UIA_DocumentControlTypeId,
+            UIA_GroupControlTypeId, UIA_HeaderItemControlTypeId, UIA_ImageControlTypeId,
+            UIA_ListItemControlTypeId, UIA_PaneControlTypeId, UIA_SeparatorControlTypeId,
+            UIA_TextControlTypeId, UIA_WindowControlTypeId,
+        };
+        for t in [
+            UIA_ButtonControlTypeId,
+            UIA_DataItemControlTypeId,
+            UIA_HeaderItemControlTypeId,
+            UIA_ImageControlTypeId,
+            UIA_ListItemControlTypeId,
+            UIA_ScrollBarControlTypeId,
+            UIA_SeparatorControlTypeId,
+            UIA_TextControlTypeId,
+        ] {
+            assert!(!a_fouiller(t.0), "{t:?}");
+        }
+        for t in [
+            UIA_DocumentControlTypeId,
+            UIA_GroupControlTypeId,
+            UIA_PaneControlTypeId,
+            UIA_WindowControlTypeId,
+        ] {
+            assert!(a_fouiller(t.0), "{t:?}");
+        }
     }
 
     #[test]

@@ -895,6 +895,17 @@ fn suite_main(
                     gestes.push(Geste::Message(None));
                 }
             }
+            // Encore perdue : « Trop vite » si la molette de l'utilisateur a roulé depuis un
+            // passage en `Main` décidé par l'app (la page était déjà hors de portée, sans
+            // rien dire) ; il roule et la page reste trop loin : c'est le seul indice qu'il
+            // faut remonter. Sans molette, rien.
+            Mesure::Perdue if course.molette_vue && !course.trop_vite_montre => {
+                course.trop_vite_montre = true;
+                return vec![
+                    Geste::Message(Some(TEXTE_TROP_VITE)),
+                    Geste::Prendre(PRISE_MAIN),
+                ];
+            }
             // Un recul peut être faux sur une page perdue (liste hors de portée, C) : il ne
             // cache pas « Trop vite ».
             Mesure::Recul(_) | Mesure::Perdue | Mesure::Ambigue => {
@@ -935,7 +946,10 @@ fn suite_main(
 /// du responsable) : le décalage observé, d'après la position lue à l'image gardée et
 /// maintenant, en pixels réels de la vue qui défile (`defiler::decalage_px`, B) ; une
 /// position inchangée donne `Lu(0)`. `Lu` seulement si les deux positions ont été lues ;
-/// sinon, ou si la vue a changé de hauteur, `Aucun` : les pixels commandés ne sont jamais
+/// sinon, ou si la vue ou la page ont changé de hauteur entre les deux (vue redimensionnée,
+/// image paresseuse, chargement à l'infini : les pour cent ne se comparent plus), `Aucun` :
+/// l'image est mesurée sans lu, et la position gardée repart juste à la prochaine image
+/// gardée. Les pixels commandés ne sont jamais
 /// passés à la mesure (C, seconde reprise R1 et R3). Dans une vue unie, un `Lu(e)` non nul
 /// fait rendre `Avance(e)` (C, complément) : il ne vient donc que d'une vraie lecture.
 pub fn attendu(gardee: Option<Position>, maintenant: Option<Position>) -> Attendu {
@@ -2041,6 +2055,55 @@ mod tests {
                 Geste::Prendre(PRISE_MAIN)
             ]
         );
+    }
+
+    #[test]
+    fn trop_vite_apres_un_passage_en_main_silencieux_si_la_molette_roule() {
+        // Relecture finale, P3 : l'app passe en `Main` d'elle-même (plus de moyen) alors
+        // que la page est déjà hors de portée de la dernière image gardée.
+        let t0 = Instant::now();
+        let mut c = Course::nouvelle(t0);
+        c.regler_pas(600);
+        assert_eq!(c.sans_moyen(t0), vec![Geste::Prendre(PRISE_MAIN)]);
+        let message = |g: &[Geste]| g.iter().any(|g| matches!(g, Geste::Message(Some(_))));
+        // Sans molette de l'utilisateur, rien n'est montré, aussi longtemps qu'elle reste
+        // perdue (un cran hors de la zone ne compte pas).
+        for i in 1..=5 {
+            let g = suite(&mut c, Vu::Image(Mesure::Perdue, None), t0 + ms(50 * i));
+            assert_eq!(g, vec![Geste::Prendre(PRISE_MAIN)], "image {i}");
+        }
+        assert!(c.perdue());
+        assert!(suite(&mut c, Vu::Molette { dans_zone: false }, t0 + ms(300)).is_empty());
+        let g = suite(&mut c, Vu::Image(Mesure::Perdue, None), t0 + ms(350));
+        assert!(!message(&g), "{g:?}");
+        // L'utilisateur roule dans la zone, la page reste trop loin : « Trop vite », une
+        // fois.
+        suite(&mut c, Vu::Molette { dans_zone: true }, t0 + ms(400));
+        assert_eq!(
+            suite(&mut c, Vu::Image(Mesure::Perdue, None), t0 + ms(450)),
+            vec![
+                Geste::Message(Some(TEXTE_TROP_VITE)),
+                Geste::Prendre(PRISE_MAIN)
+            ]
+        );
+        suite(&mut c, Vu::Molette { dans_zone: true }, t0 + ms(500));
+        for g in [
+            suite(&mut c, Vu::Image(Mesure::Perdue, None), t0 + ms(550)),
+            suite(&mut c, Vu::Image(Mesure::Ambigue, None), t0 + ms(600)),
+            suite(&mut c, Vu::Image(Mesure::Recul(30), None), t0 + ms(650)),
+        ] {
+            assert_eq!(g, vec![Geste::Prendre(PRISE_MAIN)]);
+        }
+        // Il remonte assez : la dernière image gardée est retrouvée, le message part.
+        assert_eq!(
+            suite(&mut c, Vu::Image(Mesure::Avance(40), None), t0 + ms(700)),
+            vec![
+                Geste::Message(None),
+                Geste::Apercu,
+                Geste::Prendre(PRISE_MAIN)
+            ]
+        );
+        assert!(!c.perdue());
     }
 
     #[test]

@@ -2835,6 +2835,37 @@ mod tests {
     }
 
     #[test]
+    fn proposer_des_pages_tardives_garde_les_indices_et_le_numero() {
+        // Les pages venues après le budget prolongent la liste (`defiler::chercher_pages`) :
+        // même charge, et un point vise la même page, par le même indice, avant et après.
+        let mut d = demande();
+        d.mode = Mode::Defilante;
+        let mut e = Etat::default();
+        let (id, _) = e.commencer(&d, None, None, Instant::now());
+        let c1 = e.nouvelle_charge(id, d.bureau).expect("charge");
+        let premiere = vec![fp(100, 100, 600, 400, 0)];
+        let c2 = e.proposer(id, premiere.clone()).expect("pages");
+        let a = e.courant(id).expect("affichage").clone();
+        let avant = decider_fenetre((300.0, 300.0), a.fenetre, &a.fenetres, &a.ecrans, 3);
+        let mut grandie = premiere;
+        grandie.push(fp(900, 100, 400, 400, 0));
+        let c3 = e.proposer(id, grandie).expect("pages tardives");
+        assert_eq!((c2.numero, c3.numero), (c1.numero, c1.numero));
+        assert!(c2.suite && c3.suite);
+        assert!(e.charge_courante(id, c1.numero));
+        let a = e.courant(id).expect("affichage").clone();
+        assert_eq!(
+            decider_fenetre((300.0, 300.0), a.fenetre, &a.fenetres, &a.ecrans, 3),
+            avant
+        );
+        assert!(matches!(avant, DecisionFenetre::Fenetre { indice: 0, .. }));
+        assert!(matches!(
+            decider_fenetre((1000.0, 300.0), a.fenetre, &a.fenetres, &a.ecrans, 3),
+            DecisionFenetre::Fenetre { indice: 1, .. }
+        ));
+    }
+
+    #[test]
     fn proposer_hors_mode_defilante_ne_change_rien() {
         for mode in [Mode::Zone, Mode::Fenetre, Mode::Texte] {
             let mut d = demande();
