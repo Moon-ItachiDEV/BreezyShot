@@ -732,8 +732,7 @@ input[type="range"] {
 
 /* Copier le texte (contrat 0.5, §2.4 ; design/historique, « .ov.ed », « .w », « .ocrbar ») :
    bouton « Texte » de la barre du haut, calque de balayage et de choix des mots. Les jetons
-   `texte-*` (balayage, teinte, survol, choix) viennent de design/historique ; leur valeur
-   du design sert tant qu'ils ne sont pas générés. */
+   `texte-*` (balayage, teinte de l'éditeur, survol, choix) viennent de design/historique. */
 .rb.lib {
   width: auto;
   display: flex;
@@ -745,6 +744,11 @@ input[type="range"] {
   opacity: 0.3;
   cursor: default;
   background: none;
+  transform: none;
+}
+.ok:disabled {
+  opacity: 0.3;
+  cursor: default;
   transform: none;
 }
 .calque-texte {
@@ -761,7 +765,7 @@ input[type="range"] {
   cursor: text;
 }
 .balayage {
-  --duree-balayage: var(--texte-balayage, 400ms);
+  --duree-balayage: var(--texte-balayage);
   position: absolute;
   overflow: hidden;
   pointer-events: none;
@@ -797,7 +801,7 @@ input[type="range"] {
   content: "";
   position: absolute;
   inset: 0;
-  background: color-mix(in srgb, var(--accent) var(--texte-teinte, 10%), transparent);
+  background: color-mix(in srgb, var(--accent) var(--texte-teinte-editeur), transparent);
   animation: efface var(--duree-balayage) var(--courbe-douce) forwards;
 }
 .calque-texte.reduit .balayage.joue,
@@ -833,10 +837,10 @@ input[type="range"] {
   transition: background-color var(--duree-editeur-appui) linear;
 }
 .mot.survol {
-  background: color-mix(in srgb, var(--accent) var(--texte-survol, 14%), transparent);
+  background: color-mix(in srgb, var(--accent) var(--texte-survol), transparent);
 }
 .mot.choisi {
-  background: color-mix(in srgb, var(--accent) var(--texte-choix, 30%), transparent);
+  background: color-mix(in srgb, var(--accent) var(--texte-choix), transparent);
 }
 .mot.curseur {
   box-shadow: inset 1.5px 0 0 var(--accent);
@@ -891,6 +895,12 @@ input[type="range"] {
 .rb.petit {
   width: var(--editeur-copier-hauteur);
   height: var(--editeur-copier-hauteur);
+}
+/* Anneau de focus : `all: unset` des boutons l'efface ; celui de toute la page, remis. */
+.bt:focus-visible,
+.rb:focus-visible {
+  outline: var(--editeur-focus) solid var(--accent);
+  outline-offset: var(--editeur-focus);
 }
 
 /* Animations réduites : réglage du système ou `reduites` de la charge (data-reduites). */

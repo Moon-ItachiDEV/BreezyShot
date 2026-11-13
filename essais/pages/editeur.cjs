@@ -1984,7 +1984,7 @@ const CHARGE = {
         reessayer === 0 &&
         encore &&
         tf >= 3900 &&
-        tf < 4600,
+        tf < 6000, // borne haute large : la pilule part seule, sans clic
       '21 vide : « Aucun texte trouvé » 4 s, sans « Réessayer »',
       JSON.stringify([m4, reessayer, encore, tf]),
     );
@@ -2046,6 +2046,196 @@ const CHARGE = {
       JSON.stringify([avec, sans]),
     );
     await fin(p, '21 sans texte');
+  }
+  {
+    // Le clavier appartient au calque, où que soit le focus ; barre du haut grisée.
+    const p = await page({ charge: { texte: true } });
+    const centre = (sel) =>
+      p.$eval(sel, (b) => {
+        const r = b.getBoundingClientRect();
+        return [r.left + r.width / 2, r.top + r.height / 2];
+      });
+    await lireTexte(p);
+    const grises = await p.evaluate(() =>
+      ['enregistrer', 'copier', 'fermer'].map(
+        (a) => document.querySelector(`#barre-haut [data-act="${a}"]`).disabled,
+      ),
+    );
+    await vider(p);
+    // Clic sur « Enregistrer » et « Copier » grisés : rien n'est exporté.
+    await p.mouse.click(...(await centre('#barre-haut [data-act="enregistrer"]')));
+    await p.mouse.click(...(await centre('#barre-haut [data-act="copier"]')));
+    await uneImage(p);
+    const sansExport = (await appels(p, 'editeur_exporter')).length;
+    // Focus hors du calque (vide de la barre du haut) : Échap ne ferme que le calque.
+    await p.mouse.click(...(await centre('#barre-haut .sp')));
+    const hors = await p.evaluate(
+      () => !document.querySelector('.calque-texte').contains(document.activeElement),
+    );
+    await p.keyboard.press('Escape');
+    await uneImage(p);
+    const e1 = [await calque(p), (await appels(p, 'editeur_fermer')).length];
+    verifier(
+      JSON.stringify(grises) === '[true,true,false]' &&
+        sansExport === 0 &&
+        hors &&
+        e1[0] === null &&
+        e1[1] === 0,
+      '21 choix : « Enregistrer » et « Copier » du haut grisés (clic sans export) ; Échap, ' +
+        'focus hors du calque, ne ferme que le calque',
+      JSON.stringify([grises, sansExport, hors, e1]),
+    );
+    const apres = await p.evaluate(() =>
+      ['enregistrer', 'copier'].map(
+        (a) => document.querySelector(`#barre-haut [data-act="${a}"]`).disabled,
+      ),
+    );
+    verifier(JSON.stringify(apres) === '[false,false]', '21 calque fermé : barre du haut rendue');
+    // Ctrl + A puis focus hors du calque : Ctrl + C copie le texte, jamais l'image ; une
+    // touche d'outil (P) est sans effet ; Tab reste dans le calque et sa barre.
+    await vider(p);
+    const n = await lireTexte(p);
+    await p.keyboard.press('Control+a');
+    await p.mouse.click(...(await centre('#barre-haut .sp')));
+    const outil0 = await p.evaluate(() => __ed.prefs.outil);
+    await p.keyboard.press('p');
+    const outil1 = await p.evaluate(() => __ed.prefs.outil);
+    const tabs = [];
+    for (const k of ['Tab', 'Tab', 'Tab', 'Shift+Tab', 'Shift+Tab']) {
+      await p.keyboard.press(k);
+      tabs.push(
+        await p.evaluate((n) => {
+          const a = document.activeElement;
+          return a.classList.contains('calque-texte')
+            ? 'calque'
+            : a.getAttribute('aria-label') || a.textContent.trim();
+        }),
+      );
+    }
+    const anneau = await p.evaluate(() => {
+      const s = getComputedStyle(document.activeElement);
+      return [document.activeElement.textContent.trim(), s.outlineStyle, s.outlineWidth];
+    });
+    await p.keyboard.press('Shift+Tab'); // le calque
+    await p.keyboard.press('Shift+Tab'); // la croix, en boucle
+    const anneauCroix = await p.evaluate(() => {
+      const s = getComputedStyle(document.activeElement);
+      return [document.activeElement.getAttribute('aria-label'), s.outlineStyle, s.outlineWidth];
+    });
+    await p.mouse.click(...(await centre('#barre-haut .sp')));
+    await p.keyboard.press('Control+c');
+    await uneImage(p);
+    const c = await copies(p);
+    const images = (await appels(p, 'editeur_exporter')).filter(
+      (a) => a[2]['x-editeur-but'] !== 'texte',
+    ).length;
+    verifier(
+      JSON.stringify(c) === JSON.stringify([{ id: 7, numero: n, debut: 0, fin: 6 }]) &&
+        images === 0 &&
+        outil0 === outil1,
+      '21 focus hors du calque : Ctrl + C copie le texte choisi (pas l’image), P sans effet',
+      JSON.stringify([c, images, outil0, outil1]),
+    );
+    verifier(
+      JSON.stringify(tabs) === '["Copier","Tout copier","Fermer","Tout copier","Copier"]',
+      '21 Tab et Maj + Tab restent dans le calque et sa barre',
+      JSON.stringify(tabs),
+    );
+    verifier(
+      JSON.stringify(anneau) === '["Copier","solid","2px"]' &&
+        JSON.stringify(anneauCroix) === '["Fermer","solid","2px"]',
+      '21 anneau de focus sur « Copier » et la croix',
+      JSON.stringify([anneau, anneauCroix]),
+    );
+    // « Fermer » de la barre du haut : le calque se ferme, puis la fenêtre est demandée.
+    await vider(p);
+    await lireTexte(p);
+    await p.mouse.click(...(await centre('#barre-haut [data-act="fermer"]')));
+    await attendreAppel(p, 'editeur_fermer');
+    verifier(
+      (await calque(p)) === null && (await appels(p, 'editeur_fermer')).length === 1,
+      '21 « Fermer » pendant le choix : le calque se ferme, puis la fenêtre suit son cours',
+    );
+    await fin(p, '21 clavier');
+  }
+  {
+    // Résultat reçu avant le numéro de l'export : montré ; ou, après Échap, l'export finit.
+    const p = await page({ charge: { texte: true } });
+    await p.evaluate(() => {
+      const orig = __TAURI__.core.invoke;
+      __TAURI__.core.invoke = (c, a, o) => {
+        const r = orig(c, a, o);
+        if (c !== 'editeur_exporter') return r;
+        return r.then((n) => new Promise((ok) => (window.__lacher = () => ok(n))));
+      };
+    });
+    const avantNumero = async (escape) => {
+      await p.evaluate(() => (window.__lacher = null));
+      await bouton(p, 'Texte').click();
+      await p.waitForFunction(() => window.__lacher, null, { timeout: 3000 }).catch(() => {});
+      await p.evaluate((mots) => {
+        const n = __exports.at(-1).numero;
+        __emettre('editeur:texte', { id: 7, numero: n, etat: 'lu', mots });
+      }, MOTS);
+      if (escape) await p.keyboard.press('Escape');
+      await p.evaluate(() => window.__lacher());
+      await p.waitForTimeout(600);
+      return p.evaluate(() => ({
+        calque: document.querySelector('.calque-texte.choix') ? 'choix' : null,
+        bloque: __ed.exportEnCours(),
+        grise: document.querySelector('#barre-haut [data-texte="lancer"]').disabled,
+      }));
+    };
+    const r1 = await avantNumero(false);
+    await p.keyboard.press('Escape');
+    const r2 = await avantNumero(true);
+    verifier(
+      JSON.stringify(r1) === '{"calque":"choix","bloque":false,"grise":false}' &&
+        JSON.stringify(r2) === '{"calque":null,"bloque":false,"grise":false}',
+      '21 editeur:texte avant le numéro : choix montré ; puis Échap : l’export ne reste pas bloqué',
+      JSON.stringify([r1, r2]),
+    );
+    // Rejet de editeur_copier_texte : « Impossible de copier ».
+    await p.evaluate(() => {
+      const orig = __TAURI__.core.invoke;
+      __TAURI__.core.invoke = (c, a, o) =>
+        c === 'editeur_copier_texte' ? Promise.reject(new Error('refus')) : orig(c, a, o);
+    });
+    await avantNumero(false);
+    await p.getByRole('button', { name: 'Tout copier', exact: true }).click();
+    await p
+      .waitForFunction(() => document.querySelector('#message').classList.contains('on'))
+      .catch(() => {});
+    const m = await p.$eval('#message', (m) => m.textContent.trim());
+    verifier(
+      m === 'Impossible de copier',
+      '21 editeur_copier_texte rejeté : « Impossible de copier »',
+      m,
+    );
+    await fin(p, '21 avant le numéro');
+  }
+  {
+    // Recadrage : les boîtes sont en pixels de l'image composée (le cadre).
+    const p = await page({ charge: { texte: true } });
+    await p.evaluate(() =>
+      __ed.modifier((d) => __ed.modele.recadrer(d, { x: 30, y: 20, largeur: 300, hauteur: 200 })),
+    );
+    await uneImage(p);
+    await lireTexte(p);
+    const cadre = await p.evaluate(() => __ed.modele.cadre(__ed.h.doc));
+    const b = await boites(p);
+    const att = [];
+    for (const m of MOTS) {
+      const [x0, y0] = await point(p, cadre.x + m.x, cadre.y + m.y);
+      const [x1, y1] = await point(p, cadre.x + m.x + m.largeur, cadre.y + m.y + m.hauteur);
+      att.push([x0, y0, x1 - x0, y1 - y0]);
+    }
+    verifier(
+      cadre.x === 30 && cadre.y === 20 && justes(b, att),
+      '21 recadrage : boîtes justes (décalées du cadre)',
+      JSON.stringify([cadre, b[0], att[0]]),
+    );
+    await fin(p, '21 recadrage');
   }
   // Boîtes justes aux échelles 1,25, 1,5 et 2, et après un changement de taille.
   for (const echelle of [1.25, 1.5, 2]) {

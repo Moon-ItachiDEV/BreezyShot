@@ -9,8 +9,11 @@
 // `editeur:texte_copie` { id, numero, etat: "fait" | "echec" }.
 //
 // Le bouton n'existe que si la charge le dit (`texte: true`, R10) : sinon rien n'est créé.
-// Pendant le choix, la vue ne bouge pas (molette et touches du zoom gardées par le calque) ;
-// la fenêtre redimensionnée replace les boîtes (`placer`, appelé par editeur.js).
+// Tant que le calque est ouvert, tout le clavier est à lui, où que soit le focus (écoute en
+// capture sur `window`) : Échap ne ferme que lui, Ctrl + C copie le texte choisi (jamais
+// l'image), les touches des outils et du zoom sont sans effet, Tab reste dans le calque et sa
+// barre. « Enregistrer » et « Copier » de la barre du haut sont grisés ; « Fermer » ferme
+// d'abord le calque. La fenêtre redimensionnée replace les boîtes (`placer`).
 
 const SVG = "http://www.w3.org/2000/svg";
 const MARGE_TOUCHE = 2; // pixels CSS autour d'une boîte, comme le design
@@ -49,6 +52,8 @@ function mots(liste) {
 export function installerTexte(ed, { appeler, message, reduites }) {
   const fenetre = document.getElementById("fenetre");
   const enregistrer = document.querySelector('#barre-haut [data-act="enregistrer"]');
+  const bCopier = document.querySelector('#barre-haut [data-act="copier"]');
+  const bFermer = document.querySelector('#barre-haut [data-act="fermer"]');
   let bTexte = null;
   // La lecture en cours ou le choix : { numero, recu, balaye, phase, calque, ... }, ou null.
   let l = null;
@@ -73,7 +78,12 @@ export function installerTexte(ed, { appeler, message, reduites }) {
   }
   function synchroniser() {
     if (bTexte) bTexte.disabled = ed.exportEnCours();
+    enregistrer.disabled = !!l;
+    bCopier.disabled = !!l;
   }
+  // « Fermer » de la barre du haut pendant le calque : le calque se ferme d'abord, puis le
+  // geste suit son cours (editeur.js).
+  bFermer.addEventListener("click", () => fermer(false), true);
 
   // ---------- géométrie : pixels de l'image composée → pixels CSS du calque ----------
   function geometrie() {
@@ -137,7 +147,9 @@ export function installerTexte(ed, { appeler, message, reduites }) {
     const o = l;
     l = null;
     clearTimeout(o.minuterie);
+    window.removeEventListener("keydown", o.ecoute, true);
     o.calque.remove();
+    synchroniser();
     if (rendre) {
       const r = retour?.isConnected ? retour : ed.scene;
       r.focus({ preventScroll: true });
@@ -153,7 +165,8 @@ export function installerTexte(ed, { appeler, message, reduites }) {
     const { calque, zone } = creerCalque();
     const lu = { calque, zone, phase: "balayage", numero: null, recu: null, balaye: false };
     l = lu;
-    garder(calque);
+    lu.ecoute = garder(calque);
+    synchroniser();
     placer();
     calque.focus({ preventScroll: true });
     // Balayage : 400 ms (respiration, bande, teinte) ; animations réduites : 120 ms, sans
@@ -170,7 +183,12 @@ export function installerTexte(ed, { appeler, message, reduites }) {
     }, duree);
     const numero = await ed.exporter("texte");
     synchroniser();
-    if (l !== lu) return;
+    if (l !== lu) {
+      // Calque fermé avant le numéro : un résultat déjà reçu finit l'export.
+      if (numero != null && premiers.has(numero)) terminerExport(numero);
+      premiers.clear();
+      return;
+    }
     if (numero == null) {
       fermer();
       message("Impossible de lire le texte");
@@ -191,7 +209,8 @@ export function installerTexte(ed, { appeler, message, reduites }) {
     if (!r || !ed.charge || r.id !== ed.charge.id || !Number.isSafeInteger(r.numero)) return;
     // Arrivé avant le numéro de l'export : gardé pour `lancer`.
     if (!terminerExport(r.numero)) {
-      if (l && l.numero === null) premiers.set(r.numero, r);
+      if (premiers.size > 8) premiers.clear();
+      premiers.set(r.numero, r);
       return;
     }
     if (l && r.numero === l.numero) l.recu = r;
@@ -290,7 +309,10 @@ export function installerTexte(ed, { appeler, message, reduites }) {
       numero: l.numero,
       debut: c[0],
       fin: c[1],
-    }).catch((e) => console.info("editeur_copier_texte :", e));
+    }).catch((e) => {
+      console.info("editeur_copier_texte :", e);
+      message("Impossible de copier");
+    });
     fermer();
   }
   function copie(r) {
@@ -394,20 +416,32 @@ export function installerTexte(ed, { appeler, message, reduites }) {
     calque.addEventListener("lostpointercapture", lacher);
     calque.addEventListener("focus", peindre);
     calque.addEventListener("blur", peindre);
-    calque.addEventListener("keydown", (e) => {
-      // Rien ne passe aux raccourcis de l'éditeur (Échap qui ferme, zoom, outils…).
-      e.stopPropagation();
+    // Tout le clavier, où que soit le focus : rien ne passe aux raccourcis de l'éditeur.
+    const ecoute = (e) => {
+      e.stopImmediatePropagation();
       if (!l || l.calque !== calque) return;
       const k = e.key;
       const ctl = e.ctrlKey || e.metaKey;
-      const surBouton = e.target !== calque;
+      const t = document.activeElement;
+      const surBouton = !!l.barre && t !== calque && l.barre.contains(t);
       if (k === "Escape") {
         e.preventDefault();
         fermer();
         return;
       }
+      if (k === "Tab") {
+        // Le calque, puis les boutons de sa barre, en boucle.
+        e.preventDefault();
+        const ordre = [calque, ...(l.barre ? [...l.barre.querySelectorAll("button")] : [])];
+        const places = ordre.filter((b) => !b.disabled);
+        const i = places.indexOf(t);
+        const pas = e.shiftKey ? places.length - 1 : 1;
+        places[i < 0 ? 0 : (i + pas) % places.length].focus({ preventScroll: true });
+        peindre();
+        return;
+      }
       if (l.phase !== "choix") {
-        if (k !== "Tab") e.preventDefault();
+        e.preventDefault();
         return;
       }
       if (ctl && k.toLowerCase() === "c") {
@@ -415,11 +449,9 @@ export function installerTexte(ed, { appeler, message, reduites }) {
         copier(false);
         return;
       }
-      if (surBouton) {
-        // Entrée et Espace activent le bouton, Tab passe au suivant.
-        if (ctl) e.preventDefault();
-        return;
-      }
+      // Entrée et Espace activent le bouton de la barre qui a le focus.
+      if (surBouton && !ctl && (k === "Enter" || k === " ")) return;
+      if (!surBouton && t !== calque) calque.focus({ preventScroll: true });
       const n = l.mots.length;
       l.clavier = true;
       if (ctl && k.toLowerCase() === "a") {
@@ -453,12 +485,12 @@ export function installerTexte(ed, { appeler, message, reduites }) {
           if (l.ancre === null) l.ancre = cur;
           l.fin = l.curseur;
         }
-      } else if (k === "Tab") {
-        return;
       }
       e.preventDefault();
       peindre();
-    });
+    };
+    window.addEventListener("keydown", ecoute, true);
+    return ecoute;
   }
 
   return {

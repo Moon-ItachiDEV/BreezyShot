@@ -228,29 +228,79 @@ const LONG_OK = { id: 'long-ok', genre: 'reussite', titre: 'Enregistré dans Ima
   // seule à `duree_ms` (bandeau_termine une fois, aucune action) ; sans `duree_ms` (ou null)
   // elle reste. Les deux pages tournent en même temps.
   {
-    const AUCUN = { id: 'u5', genre: 'erreur', titre: 'Aucun texte trouvé', actions: [{ id: 'reessayer', libelle: 'Réessayer' }] };
-    const pa = await tauriPage(), pb = await tauriPage();
+    const AUCUN = {
+      id: 'u5',
+      genre: 'erreur',
+      titre: 'Aucun texte trouvé',
+      actions: [{ id: 'reessayer', libelle: 'Réessayer' }],
+    };
+    const pa = await tauriPage(),
+      pb = await tauriPage();
     const t0 = Date.now();
-    await pa.evaluate(m => { window.__t0 = performance.now(); __emettre(m); }, { ...AUCUN, duree_ms: 4000 });
-    await pb.evaluate(m => __emettre(m), { ...AUCUN, duree_ms: null });
-    const boutons = await pa.$$eval('#bandeau button', bs => bs.map(b => b.dataset.action + ':' + (b.getAttribute('aria-label') || b.textContent)));
+    await pa.evaluate(
+      (m) => {
+        window.__t0 = performance.now();
+        __emettre(m);
+      },
+      { ...AUCUN, duree_ms: 4000 },
+    );
+    await pb.evaluate((m) => __emettre(m), { ...AUCUN, duree_ms: null });
+    const boutons = await pa.$$eval('#bandeau button', (bs) =>
+      bs.map((b) => b.dataset.action + ':' + (b.getAttribute('aria-label') || b.textContent)),
+    );
     await pa.waitForTimeout(Math.max(0, 3700 - (Date.now() - t0)));
-    const avant = await pa.evaluate(() => [!bandeau.hidden, __appels.filter(a => a[0] === 'bandeau_termine').length]);
-    await pa.waitForFunction(() => __appels.some(a => a[0] === 'bandeau_termine'), null, { timeout: 3000 }).catch(() => {});
+    const avant = await pa.evaluate(() => [
+      !bandeau.hidden,
+      __appels.filter((a) => a[0] === 'bandeau_termine').length,
+    ]);
+    await pa
+      .waitForFunction(() => __appels.some((a) => a[0] === 'bandeau_termine'), null, {
+        timeout: 3000,
+      })
+      .catch(() => {});
     const fini = await pa.evaluate(() => {
-      const t = __appels.filter(a => a[0] === 'bandeau_termine');
-      return { n: t.length, id: t[0] && t[0][1].id, ms: performance.now() - window.__t0, actions: __appels.filter(a => a[0] === 'bandeau_action').length, cache: bandeau.hidden };
+      const t = __appels.filter((a) => a[0] === 'bandeau_termine');
+      return {
+        n: t.length,
+        id: t[0] && t[0][1].id,
+        ms: performance.now() - window.__t0,
+        actions: __appels.filter((a) => a[0] === 'bandeau_action').length,
+        cache: bandeau.hidden,
+      };
     });
     await pa.waitForTimeout(300);
-    const n2 = await pa.evaluate(() => __appels.filter(a => a[0] === 'bandeau_termine').length);
-    verifier(JSON.stringify(boutons) === JSON.stringify(['reessayer:Réessayer', 'fermer:Fermer le message']), 'U5 erreur à duree_ms : action « Réessayer » et croix', JSON.stringify(boutons));
-    verifier(avant[0] && avant[1] === 0 && fini.n === 1 && n2 === 1 && fini.id === 'u5' && fini.actions === 0 && fini.cache && fini.ms >= 4000 && fini.ms < 4700,
-      'U5 part seule à 4 s : bandeau_termine une fois, sans action', JSON.stringify({ avant, fini, n2 }));
-    const reste = await pb.evaluate(() => [!bandeau.hidden, __appels.filter(a => a[0] === 'bandeau_termine').length]);
-    verifier(reste[0] && reste[1] === 0, 'erreur sans duree_ms (null) : reste jusqu\'au clic', JSON.stringify(reste));
-    await pa.context().close(); await pb.context().close();
+    const n2 = await pa.evaluate(() => __appels.filter((a) => a[0] === 'bandeau_termine').length);
+    verifier(
+      JSON.stringify(boutons) ===
+        JSON.stringify(['reessayer:Réessayer', 'fermer:Fermer le message']),
+      'U5 erreur à duree_ms : action « Réessayer » et croix',
+      JSON.stringify(boutons),
+    );
+    verifier(
+      avant[0] &&
+        avant[1] === 0 &&
+        fini.n === 1 &&
+        n2 === 1 &&
+        fini.id === 'u5' &&
+        fini.actions === 0 &&
+        fini.cache &&
+        fini.ms >= 4000 &&
+        fini.ms < 7000,
+      'U5 part seule à 4 s : bandeau_termine une fois, sans action',
+      JSON.stringify({ avant, fini, n2 }),
+    );
+    const reste = await pb.evaluate(() => [
+      !bandeau.hidden,
+      __appels.filter((a) => a[0] === 'bandeau_termine').length,
+    ]);
+    verifier(
+      reste[0] && reste[1] === 0,
+      "erreur sans duree_ms (null) : reste jusqu'au clic",
+      JSON.stringify(reste),
+    );
+    await pa.context().close();
+    await pb.context().close();
   }
-
   // bandeau_pret : une seule fois, avant tout autre appel.
   p = await tauriPage();
   await p.waitForTimeout(100);

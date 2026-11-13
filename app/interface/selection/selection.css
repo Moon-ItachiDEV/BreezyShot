@@ -117,7 +117,7 @@ body.entoure #plein {
    « .zone.scan ») : respiration, bande claire de gauche à droite, teinte `accent` qui
    s'efface. Animations réduites : la teinte seule, immobile, --duree-reduite. */
 #zone {
-  --duree-balayage: var(--texte-balayage, 400ms);
+  --duree-balayage: var(--texte-balayage);
 }
 #zone .bande {
   position: absolute;
@@ -132,7 +132,7 @@ body.entoure #plein {
   mix-blend-mode: screen;
 }
 body.balaye #zone {
-  background: color-mix(in srgb, var(--accent) var(--texte-teinte, 10%), transparent);
+  background: color-mix(in srgb, var(--accent) var(--texte-teinte), transparent);
   animation:
     respire var(--duree-balayage) var(--courbe-ressort),
     efface var(--duree-balayage) var(--courbe-douce) forwards;
