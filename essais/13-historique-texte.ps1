@@ -1567,7 +1567,7 @@ public static uint Crc32(byte[] o) {
                 $pp = Lire-Texte
                 Verifier '(14) Espace, Maj+Droite × 2, Entrée : presse-papiers = « BreezyShot reads this »' (($l -match ' 3 mots$') -and ($pp -ceq 'BreezyShot reads this')) "$l ; lu « $(Montrer $pp) »" | Out-Null
                 # Bloc noir sur la deuxième ligne (outil Flou, variante Bloc noir), puis tout.
-                # Le calque s'est fermé à la copie. Barre C (0.5.3) : l'outil Flou se prend au
+                # Le calque s'est fermé à la copie. Barre C (0.5.4) : l'outil Flou se prend au
                 # clavier (B : Flou, Pixeliser), car dans une fenêtre étroite son bouton peut
                 # être hors de la partie visible des outils ; Flou déplié, la barre tient et
                 # « Bloc noir » se voit. Pas d'Échap : sans sélection ni menu, il fermerait
