@@ -353,8 +353,8 @@ dans le dossier temporaire du système (`systeme::dossier_secours()`), sous le n
 ### 3.4 Ligne de commande et instance unique
 
 - Une seule instance. Lancer `breezyshot.exe` une seconde fois (icône épinglée à la barre des
-  tâches, menu Démarrer) ouvre les Réglages dans la première, ou les ramène devant (depuis la
-  0.5.1) : la première écrit `seconde instance: reglages ouverts`, la seconde sort avec le
+  tâches, menu Démarrer) ouvre la barre de capture dans la première, comme Impr. écran
+  (depuis la 0.5.3 ; les Réglages en 0.5.1 et 0.5.2) : la première écrit `seconde instance: barre de capture`, la seconde sort avec le
   code 0. `--desinstaller` reçu par une seconde instance reste refusé (`seconde instance refusee`).
 - `breezyshot.exe --quitter` : demande à l'instance en cours de se fermer proprement (libère
   les raccourcis, retire l'icône, écrit `arret propre`), puis sort. Sans instance en cours,
@@ -376,7 +376,7 @@ dans le dossier temporaire du système (`systeme::dossier_secours()`), sous le n
   `icone invisible` (toujours `invisible` sous Linux, où Tauri ne donne pas ce rectangle).
 - Lignes du journal sur lesquelles les essais s'appuient : `demarrage BreezyShot <version>`,
   `systeme windows build <n>`, `echelle par ecran v2: oui|non|sans objet`, `icone installee`
-  (ou `icone non installee: …`), `icone visible|invisible`, `pret` (tout est en place), `seconde instance: reglages ouverts`,
+  (ou `icone non installee: …`), `icone visible|invisible`, `pret` (tout est en place), `seconde instance: barre de capture`,
   `--quitter recu: fermeture demandee`, `arret propre`, `--quitter: aucune instance en cours`.
 - `app/interface/index.html` est une page vide : elle n'existe que parce que Tauri veut un
   dossier d'interface non vide.
@@ -1037,8 +1037,9 @@ Module pur : il reçoit le dossier où écrire, ne connaît ni Tauri ni les autr
   contenu à droite (titre de la rubrique, réglages en cartes) sur un gris uni plus clair,
   coin haut gauche arrondi ; ni Mica ni transparence. Les lignes de Raccourcis portent le
   pictogramme de l'entrée du menu de l'icône (`commun/pictos.js`, partagé avec le menu), et
-  suivent son ordre : Copier le texte avant Historique (`actions_selon`). L'ordre de
-  priorité des raccourcis au démarrage (`ACTIONS_PRIORITAIRES`) ne change pas.
+  suivent son ordre : Copier le texte avant Historique (`page_reglages::ORDRE_RACCOURCIS`,
+  affichage seulement ; l'ordre de réservation des raccourcis ne change pas). La fenêtre
+  prend au plus 90 % de la zone utile (`reglages::taille_sur`), cadre compris.
 - **La page ne décide rien.** Elle appelle `reglages_lire` (à l'ouverture et à chaque retour
   du focus), `reglages_changer { changement: { cle, valeur } }`, `reglages_apercu_nom`,
   `reglages_parcourir`, `reglages_saisie`, `reglages_raccourci`, `reglages_retablir`. Chaque

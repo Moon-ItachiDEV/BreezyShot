@@ -723,10 +723,17 @@ const SANS_VIGNETTE = { ...VUE, lignes: ['copier', 'dossier', 'modele_nom', 'the
       const sw = document.querySelector('[role="switch"][aria-checked="false"]');
       const carte = fond(document.querySelector('.carte'));
       const pastille = getComputedStyle(document.querySelector('.choix[data-choisi]'), '::before').backgroundColor;
-      return [fond(sw.querySelector('.sw-bouton')), carte, pastille];
+      const ombres = [getComputedStyle(sw.querySelector('.sw-bouton')).boxShadow,
+        getComputedStyle(document.querySelector('.choix[data-choisi]'), '::before').boxShadow];
+      const fondChoix = fond(document.querySelector('.choix[data-choisi]'));
+      return [fond(sw.querySelector('.sw-bouton')), carte, pastille, ombres, fondChoix];
     });
-    // En clair, blanc sur blanc : l'ombre et le bord les détachent ; en sombre, la couleur.
-    verifier(theme === 'light' || (ecart(lisible[0], lisible[1]) >= 0x60 && ecart(lisible[2], lisible[1]) >= 0x18),
+    // En clair, blanc sur blanc : l'ombre les détache, et le fond du sélecteur est teinté ;
+    // en sombre, la couleur.
+    const ombrees = lisible[3].every(o => o && o !== 'none');
+    verifier(ombrees && (theme === 'light'
+      ? !/rgba\(.*, 0\)$/.test(lisible[4]) && lisible[4] !== lisible[2]
+      : ecart(lisible[0], lisible[1]) >= 0x60 && ecart(lisible[2], lisible[1]) >= 0x18),
       `13 ${theme} rond éteint et pastille du sélecteur se détachent de la carte`, json(lisible));
     await poser('Raccourcis');
     const pictos = await p.$$eval('[data-reglage="raccourci"]', ls => ls.map(l => l.querySelectorAll('[data-picto] svg > *').length));

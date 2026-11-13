@@ -464,14 +464,33 @@ pub fn nom_demarrage(e: EtatDemarrage) -> &'static str {
     }
 }
 
+/// L'ordre des lignes de Réglages › Raccourcis : celui du menu de l'icône (Copier le texte
+/// avant l'historique). Affichage seulement : l'ordre de réservation des raccourcis ne
+/// change pas (`ACTIONS_PRIORITAIRES`, `actions_selon`). Une action absente suit, dans
+/// l'ordre des actions.
+pub const ORDRE_RACCOURCIS: [&str; 6] = [
+    "zone",
+    "plein_ecran",
+    "fenetre",
+    "derniere_zone",
+    "texte",
+    "historique",
+];
+
 /// La vue complète. Fonction pure.
 pub fn vue(r: &Reglages, c: &Contexte<'_>) -> VueReglages {
     let mut lignes = lignes_montrees(c.vignette_construite, c.capture_disponible);
     if c.demarrage == EtatDemarrage::Indisponible {
         lignes.retain(|l| *l != "demarrage");
     }
-    let raccourcis = c
-        .actions
+    let mut actions: Vec<&str> = c.actions.to_vec();
+    actions.sort_by_key(|a| {
+        ORDRE_RACCOURCIS
+            .iter()
+            .position(|o| o == a)
+            .unwrap_or(ORDRE_RACCOURCIS.len())
+    });
+    let raccourcis = actions
         .iter()
         .map(|a| {
             let retenu = c.bilan.retenu(a);

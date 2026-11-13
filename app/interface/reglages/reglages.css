@@ -140,6 +140,7 @@ svg { display: block; }
 .contenu {
   min-height: 0;
   overflow: auto;
+  scrollbar-gutter: stable;
   padding: var(--reglages-contenu-haut) var(--reglages-contenu-marge-h) var(--reglages-contenu-marge-h);
   background: var(--reglages-contenu);
   border-top: var(--reglages-filet) solid var(--stroke);
@@ -609,6 +610,9 @@ kbd {
   .ligne.sous::before { left: var(--reglages-ligne-marge-h) !important; }
   .ligne.large > .ctl { flex-basis: 100%; align-items: stretch; }
   .ligne.large .champ, .ligne.large .apercu { width: 100%; max-width: 100%; }
+  .ligne:has(> .choix) .lb { flex-basis: 100%; }
+  .ligne > .choix { width: 100%; }
+  .choix [role="radio"] { flex: 1 1 0; min-width: 0; padding: 0; overflow: hidden; text-overflow: ellipsis; }
 }
 
 @media (forced-colors: active) {

@@ -120,13 +120,12 @@ pub fn actions_construites(pro: bool, texte_disponible: bool) -> Vec<&'static st
 /// construit (et la langue), `pro` qu'une licence valide est en place ; les droits sont lus
 /// ici et nulle part ailleurs.
 pub fn actions_selon(pro: bool, avec_historique: bool, avec_texte: bool) -> Vec<&'static str> {
-    // L'ordre du menu de l'icône : Copier le texte, puis l'historique.
     let mut actions = ACTIONS_DE_CAPTURE.to_vec();
-    if avec_texte && droits::ouverte(Fonction::Texte, pro) {
-        actions.push(Mode::Texte.nom());
-    }
     if avec_historique && droits::ouverte(Fonction::Historique, pro) {
         actions.push(ACTION_HISTORIQUE);
+    }
+    if avec_texte && droits::ouverte(Fonction::Texte, pro) {
+        actions.push(Mode::Texte.nom());
     }
     actions
 }
@@ -1349,12 +1348,12 @@ pub fn traiter(app: &AppHandle, evenement: Evenement) {
                     }
                 }
                 // Relancer l'app déjà ouverte (icône épinglée, menu Démarrer, double-clic) :
-                // les Réglages s'ouvrent, ou reviennent devant, comme un clic sur l'app dans
-                // le Dock. Ouverts à un tour suivant de la boucle (jamais une fenêtre Web
-                // créée au milieu d'un autre message).
+                // la barre de capture s'ouvre, comme Impr. écran (demande de l'utilisateur
+                // du 13/11/2026 ; en 0.5.1 et 0.5.2, c'étaient les Réglages, qui restent au
+                // menu de l'icône). Au tour suivant de la boucle, comme une entrée du menu.
                 Commande::Demarrer => {
-                    log::info!("seconde instance: reglages ouverts");
-                    poster_plus_tard(app, Evenement::Menu(MENU_REGLAGES.into()));
+                    log::info!("seconde instance: barre de capture");
+                    poster_plus_tard(app, Evenement::Menu(id_menu(Mode::Zone)));
                 }
                 // Désinstaller via une seconde instance n'aurait pas de sens : ignoré.
                 Commande::Desinstaller => log::info!("seconde instance refusee"),
@@ -4052,8 +4051,8 @@ mod tests {
                 "plein_ecran",
                 "fenetre",
                 "derniere_zone",
-                "texte",
-                "historique"
+                "historique",
+                "texte"
             ]
         );
         // Sans langue de lecture, jamais `texte` ; `historique` suit sa construction.
