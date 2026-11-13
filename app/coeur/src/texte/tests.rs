@@ -349,7 +349,7 @@ fn delai_de_lecture_egal_a_l_attente_du_moteur() {
 #[test]
 fn lire_prepare_appelle_le_moteur_et_ramene_les_boites() {
     let p = image(100, 20, [255, 255, 255, 128]);
-    let issue = lire_avec(&p, 10000, |bgra, l, h| {
+    let issue = lire_avec(&p, Ok(10000), |bgra, l, h| {
         // Le moteur reçoit l'image agrandie ×2, opaque.
         assert_eq!((l, h), (200, 40));
         assert_eq!(bgra.len(), 200 * 40 * 4);
@@ -375,8 +375,70 @@ fn lire_sans_moteur_ou_image_vide() {
     let jamais =
         |_: &[u8], _: u32, _: u32| -> Result<Reconnu, ErreurMoteur> { panic!("moteur appelé") };
     let p = image(10, 10, [0, 0, 0, 255]);
-    assert_eq!(lire_avec(&p, 0, jamais), Issue::AucuneLangue);
-    assert_eq!(lire_avec(&image(0, 10, [0; 4]), 10000, jamais), Issue::Vide);
-    let refus = lire_avec(&p, 10000, |_, _, _| Err(ErreurMoteur::AucuneLangue));
+    let sans_moteur = Err(ErreurMoteur::AucuneLangue);
+    assert_eq!(lire_avec(&p, sans_moteur, jamais), Issue::AucuneLangue);
+    assert_eq!(
+        lire_avec(&image(0, 10, [0; 4]), Ok(10000), jamais),
+        Issue::Vide
+    );
+    let refus = lire_avec(&p, Ok(10000), |_, _, _| Err(ErreurMoteur::AucuneLangue));
     assert_eq!(refus, Issue::AucuneLangue);
+}
+
+#[test]
+fn dimension_illisible_est_un_echec_du_moteur() {
+    let jamais =
+        |_: &[u8], _: u32, _: u32| -> Result<Reconnu, ErreurMoteur> { panic!("moteur appelé") };
+    let p = image(10, 10, [0, 0, 0, 255]);
+    let panne = Err(ErreurMoteur::Moteur("dimension 0x80004005".into()));
+    assert_eq!(
+        lire_avec(&p, panne, jamais),
+        Issue::Echec("dimension 0x80004005".into())
+    );
+    assert_eq!(
+        lire_avec(&p, Ok(0), jamais),
+        Issue::Echec("dimension 0x00000000".into())
+    );
+}
+
+#[test]
+fn debug_sans_le_texte_lu() {
+    let lu = depuis_reconnu(
+        Reconnu {
+            langue: "fr-FR".into(),
+            lignes: vec![
+                LigneBrute {
+                    texte: "SECRET un".into(),
+                    mots: vec![
+                        mot("SECRET", 0.0, 0.0, 10.0, 5.0),
+                        mot("un", 12.0, 0.0, 4.0, 5.0),
+                    ],
+                },
+                LigneBrute {
+                    texte: "SECRET".into(),
+                    mots: vec![mot("SECRET", 0.0, 8.0, 10.0, 5.0)],
+                },
+            ],
+        },
+        1.0,
+        100,
+        100,
+    );
+    let issue = Issue::Texte(lu.clone());
+    for ecrit in [
+        format!("{lu:?}"),
+        format!("{issue:?}"),
+        format!("{issue:#?}"),
+    ] {
+        assert!(!ecrit.contains("SECRET"), "{ecrit}");
+        assert!(
+            ecrit.contains("mots: 3") && ecrit.contains("lignes: 2"),
+            "{ecrit}"
+        );
+    }
+    assert_eq!(
+        format!("{:?}", Issue::Echec("echeance".into())),
+        "Echec(\"echeance\")"
+    );
+    assert_eq!(format!("{:?}", Issue::Vide), "Vide");
 }

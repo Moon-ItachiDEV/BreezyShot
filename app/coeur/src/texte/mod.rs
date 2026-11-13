@@ -4,6 +4,7 @@
 //! Le texte lu ne va jamais au journal ni à une page : seules les boîtes des mots sortent
 //! de `Lu` ; le texte n'en sort que par `assembler` et `extrait`, vers le presse-papiers.
 
+use std::fmt;
 use std::time::Duration;
 
 use crate::systeme::gel::Pixels;
@@ -151,8 +152,8 @@ pub struct Mot {
     pub ligne: u32,
 }
 
-/// Le résultat d'une lecture. Les textes restent privés.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// Le résultat d'une lecture. Les textes restent privés (et hors de son `Debug`).
+#[derive(Clone, PartialEq, Eq)]
 pub struct Lu {
     pub langue: String,
     pub mots: Vec<Mot>,
@@ -160,6 +161,18 @@ pub struct Lu {
     textes: Vec<String>,
     /// Le séparateur de la ligne de chaque mot (même rang que `mots`).
     separateurs: Vec<&'static str>,
+}
+
+/// La langue et les nombres de mots et de lignes : jamais le texte.
+impl fmt::Debug for Lu {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let lignes = self.mots.last().map_or(0, |m| m.ligne as usize + 1);
+        f.debug_struct("Lu")
+            .field("langue", &self.langue)
+            .field("mots", &self.mots.len())
+            .field("lignes", &lignes)
+            .finish_non_exhaustive()
+    }
 }
 
 /// Ramène les boîtes du moteur à l'image d'origine (`facteur`, bornées à `l × h`), dans
@@ -266,7 +279,7 @@ fn texte_de(lu: &Lu, debut: usize, fin: usize, fin_de_ligne: &str) -> String {
 }
 
 /// Ce qu'une lecture rend.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub enum Issue {
     Texte(Lu),
     Vide,
@@ -275,24 +288,39 @@ pub enum Issue {
     Echec(String),
 }
 
+/// Comme un `Debug` dérivé, mais `Texte` passe par celui de `Lu` (jamais le texte).
+impl fmt::Debug for Issue {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Issue::Texte(lu) => f.debug_tuple("Texte").field(lu).finish(),
+            Issue::Vide => f.write_str("Vide"),
+            Issue::AucuneLangue => f.write_str("AucuneLangue"),
+            Issue::Echec(code) => f.debug_tuple("Echec").field(code).finish(),
+        }
+    }
+}
+
 /// `preparer`, puis `systeme::texte::reconnaitre`, puis `depuis_reconnu`. Bloquant : dans
 /// le fil `texte`, jamais sur le fil principal.
 ///
-/// Sans moteur (`dimension_max` à 0) : `AucuneLangue`. Image vide, ou aucun mot lu :
-/// `Vide`.
+/// Pas de moteur sur ce système : `AucuneLangue`. Le moteur n'a pas pu donner sa dimension
+/// maximale : `Echec`. Image vide, ou aucun mot lu : `Vide`.
 pub fn lire(pixels: &Pixels) -> Issue {
-    lire_avec(pixels, moteur::dimension_max(), moteur::reconnaitre)
+    lire_avec(pixels, moteur::dimension(), moteur::reconnaitre)
 }
 
-/// `lire`, avec le moteur donné (pour les tests).
+/// `lire`, avec la dimension maximale et le moteur donnés (pour les tests).
 fn lire_avec(
     pixels: &Pixels,
-    dimension: u32,
+    dimension: Result<u32, ErreurMoteur>,
     reconnaitre: impl FnOnce(&[u8], u32, u32) -> Result<Reconnu, ErreurMoteur>,
 ) -> Issue {
-    if dimension == 0 {
-        return Issue::AucuneLangue;
-    }
+    let dimension = match dimension {
+        Ok(0) => return Issue::Echec("dimension 0x00000000".into()),
+        Ok(d) => d,
+        Err(ErreurMoteur::AucuneLangue) => return Issue::AucuneLangue,
+        Err(ErreurMoteur::Moteur(code)) => return Issue::Echec(code),
+    };
     let Some(preparee) = preparer(pixels, dimension) else {
         return Issue::Vide;
     };

@@ -1,69 +1,52 @@
 //! `Windows.Media.Ocr`, toujours hors du fil principal (fil `texte`, fil `texte-langues`).
 //!
-//! Chaque appel entre dans l'appartement à plusieurs fils de WinRT (`RoInitialize`) et en
-//! sort à la fin. Le moteur est créé à chaque lecture puis relâché (R15). La lecture
-//! (`RecognizeAsync`) est attendue dans le fil appelant, au plus `ATTENTE_MAX` : rien
-//! n'attend sur le fil principal, et un moteur qui ne rend pas ne garde pas le fil.
+//! L'appartement à plusieurs fils (MTA) est tenu pour tout le processus par un seul
+//! `CoIncrementMTAUsage`, jamais rendu : la crate `windows` garde ses fabriques WinRT
+//! (`OcrEngine`…) dans des statiques, et un MTA défait entre deux lectures les laisserait
+//! pointer dans un appartement mort. Les fils qui lisent n'initialisent rien eux-mêmes : un
+//! fil sans appartement est dans le MTA implicite ; un fil déjà à un fil (STA) le reste, les
+//! objets de la lecture sont agiles.
+//!
+//! Le moteur est créé à chaque lecture puis relâché (R15). La lecture (`RecognizeAsync`)
+//! est attendue dans le fil appelant, au plus `ATTENTE_MAX` : rien n'attend sur le fil
+//! principal, et un moteur qui ne rend pas ne garde pas le fil.
 //!
 //! `TryCreateFrom…` rend `null` (sans erreur) quand aucune langue ne convient : la crate
 //! `windows` le change en une erreur de code 0, que `est_nul` reconnaît.
 
-use std::cell::Cell;
 use std::sync::mpsc;
 use std::sync::OnceLock;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use ::windows::core::{Error, HRESULT};
 use ::windows::Graphics::Imaging::{BitmapPixelFormat, SoftwareBitmap};
 use ::windows::Media::Ocr::{OcrEngine, OcrResult};
 use ::windows::Security::Cryptography::CryptographicBuffer;
-use ::windows::Win32::Foundation::RPC_E_CHANGED_MODE;
-use ::windows::Win32::System::WinRT::{RoInitialize, RoUninitialize, RO_INIT_MULTITHREADED};
+use ::windows::Win32::System::Com::CoIncrementMTAUsage;
 
-use super::{Disponibilite, ErreurMoteur, LigneBrute, MotBrut, Reconnu, ATTENTE_MAX};
+use super::{
+    Disponibilite, ErreurMoteur, LigneBrute, MotBrut, Place, Reconnu, ATTENTE_MAX,
+    DERNIERE_CREATION,
+};
 
 pub const FIN_DE_LIGNE: &str = "\r\n";
 
 /// `OcrEngine::MaxImageDimension`, lu une fois (10000 sur la machine d'essai).
 static DIMENSION_MAX: OnceLock<u32> = OnceLock::new();
 
-thread_local! {
-    /// Durée de création du dernier moteur de ce fil.
-    static DERNIERE_CREATION: Cell<Option<Duration>> = const { Cell::new(None) };
-}
+/// Le MTA tenu pour tout le processus : le code de `CoIncrementMTAUsage`, demandé une fois.
+static MTA: OnceLock<Result<(), HRESULT>> = OnceLock::new();
 
-/// L'entrée de ce fil dans WinRT, défaite à la destruction.
-struct Appartement {
-    /// Faux si le fil était déjà dans un appartement à un fil (`RPC_E_CHANGED_MODE`) : on
-    /// s'en sert tel quel (les objets de la lecture sont agiles) et on ne défait rien.
-    a_defaire: bool,
-}
-
-impl Appartement {
-    fn entrer() -> Result<Appartement, Error> {
-        // SAFETY : initialisation WinRT de ce fil ; `Drop` l'équilibre si elle a réussi.
-        match unsafe { RoInitialize(RO_INIT_MULTITHREADED) } {
-            Ok(()) => Ok(Appartement { a_defaire: true }),
-            Err(e) if e.code() == RPC_E_CHANGED_MODE => Ok(Appartement { a_defaire: false }),
-            Err(e) => Err(e),
-        }
-    }
-
-    /// Une lecture abandonnée tourne encore dans le moteur : on ne sort pas de
-    /// l'appartement, pour ne pas le défaire sous elle (le fil finit ensuite).
-    fn laisser(mut self) {
-        self.a_defaire = false;
-    }
-}
-
-impl Drop for Appartement {
-    fn drop(&mut self) {
-        if self.a_defaire {
-            // SAFETY : équilibre le `RoInitialize` réussi de ce fil ; tous les objets WinRT
-            // de l'appel sont détruits avant (la garde est créée en premier).
-            unsafe { RoUninitialize() };
-        }
-    }
+/// Tient le MTA (une fois par processus, jamais rendu).
+fn tenir_mta() -> Result<(), Error> {
+    let tenu = MTA.get_or_init(|| {
+        // SAFETY : sans argument ; le témoin rendu n'est jamais passé à
+        // `CoDecrementMTAUsage`, le MTA vit jusqu'à la fin du processus.
+        unsafe { CoIncrementMTAUsage() }
+            .map(|_temoin| ())
+            .map_err(|e| e.code())
+    });
+    (*tenu).map_err(Error::from_hresult)
 }
 
 /// Vrai si l'erreur est un `null` rendu par WinRT (code 0), pas une vraie erreur.
@@ -77,9 +60,9 @@ fn moteur(etape: &str, e: &Error) -> ErreurMoteur {
 }
 
 pub fn disponibilite() -> Disponibilite {
-    let Ok(_appartement) = Appartement::entrer() else {
+    if tenir_mta().is_err() {
         return Disponibilite::NonPrisEnCharge;
-    };
+    }
     match langues() {
         Ok(l) if l.is_empty() => Disponibilite::Aucune,
         Ok(l) => Disponibilite::Langues(l),
@@ -98,27 +81,26 @@ fn langues() -> Result<Vec<String>, Error> {
     Ok(etiquettes)
 }
 
-pub fn dimension_max() -> u32 {
+pub fn dimension() -> Result<u32, ErreurMoteur> {
     if let Some(d) = DIMENSION_MAX.get() {
-        return *d;
+        return Ok(*d);
     }
-    let Ok(_appartement) = Appartement::entrer() else {
-        return 0;
-    };
+    tenir_mta().map_err(|e| moteur("init", &e))?;
+    // Gardée seulement si elle a pu être lue : un échec sera relu la fois suivante.
     match OcrEngine::MaxImageDimension() {
-        // Gardée seulement si elle a pu être lue : un échec sera relu la fois suivante.
-        Ok(d) => *DIMENSION_MAX.get_or_init(|| d),
-        Err(_) => 0,
+        Ok(d) => Ok(*DIMENSION_MAX.get_or_init(|| d)),
+        Err(e) => Err(moteur("dimension", &e)),
     }
 }
 
-pub fn derniere_creation() -> Option<Duration> {
-    DERNIERE_CREATION.with(Cell::get)
-}
-
-pub fn reconnaitre(bgra: &[u8], largeur: u32, hauteur: u32) -> Result<Reconnu, ErreurMoteur> {
-    // Créée en premier, détruite en dernier : après tous les objets WinRT ci-dessous.
-    let appartement = Appartement::entrer().map_err(|e| moteur("init", &e))?;
+/// `place` suit la lecture jusqu'au rappel du moteur (rendue alors, même après l'échéance).
+pub fn reconnaitre(
+    bgra: &[u8],
+    largeur: u32,
+    hauteur: u32,
+    place: Place<'static>,
+) -> Result<Reconnu, ErreurMoteur> {
+    tenir_mta().map_err(|e| moteur("init", &e))?;
     let (Ok(l), Ok(h)) = (i32::try_from(largeur), i32::try_from(hauteur)) else {
         return Err(ErreurMoteur::Moteur("taille".into()));
     };
@@ -146,6 +128,8 @@ pub fn reconnaitre(bgra: &[u8], largeur: u32, hauteur: u32) -> Result<Reconnu, E
     let (envoi, reception) = mpsc::sync_channel::<Result<OcrResult, Error>>(1);
     operation
         .when(move |r| {
+            // Le moteur a fini : sa place est rendue avant que le fil qui attend reparte.
+            drop(place);
             // Reçu par personne si la lecture a été abandonnée : sans importance.
             let _ = envoi.send(r);
         })
@@ -154,7 +138,6 @@ pub fn reconnaitre(bgra: &[u8], largeur: u32, hauteur: u32) -> Result<Reconnu, E
         Ok(r) => r.map_err(|e| moteur("lecture", &e))?,
         Err(_) => {
             let _ = operation.Cancel();
-            appartement.laisser();
             return Err(ErreurMoteur::Moteur("echeance".into()));
         }
     };
