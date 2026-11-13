@@ -1303,9 +1303,6 @@ struct Fil<S: Source, P: Pilote, A: Atelier> {
     position_gardee: Option<Position>,
     /// Les pixels commandés depuis la dernière image gardée.
     commande_depuis_gardee: i32,
-    /// Le décalage observé (positions lues) au dernier pas, depuis la dernière image
-    /// gardée : il vaut encore pour une image reprise sans pas entre-temps.
-    observe: Attendu,
     /// L'instant de l'ordre de fin (clic, Entrée).
     fin_recue: Option<Instant>,
 }
@@ -1380,7 +1377,6 @@ impl<S: Source, P: Pilote, A: Atelier> Fil<S, P, A> {
             relache_premiere,
             position_gardee,
             commande_depuis_gardee: 0,
-            observe: Attendu::Aucun,
             fin_recue: None,
         }
     }
@@ -1678,9 +1674,8 @@ impl<S: Source, P: Pilote, A: Atelier> Fil<S, P, A> {
         // Une seule lecture de la position par pas (elle peut être lente).
         let position = self.pilote.as_ref().and_then(|p| p.position());
         // Seulement le décalage lu, en pixels réels de la vue (B, defiler::decalage_px),
-        // jamais le pas commandé (C).
-        self.observe = regles::attendu(self.position_gardee, position);
-        let attendu = self.observe;
+        // jamais le pas commandé (C), et seulement pour l'image de ce pas.
+        let attendu = regles::attendu(self.position_gardee, position);
         let mesure = self.mesurer(attendu, position);
         if parti && pas > 0 && depuis_gardee {
             if let (Some(avance), Some(p)) =
@@ -1758,16 +1753,15 @@ impl<S: Source, P: Pilote, A: Atelier> Fil<S, P, A> {
 
     /// Une image demandée (`Geste::Prendre`), mesurée et rangée pour le tour suivant. La
     /// position n'est lue que si elle sert (image immobile ou ambiguë : « en bas »).
+    /// L'attendu est `Aucun` : la position n'est pas relue pour cette image, et le lu d'un
+    /// pas précédent ne vaut plus (la vue a pu bouger depuis ; dans une vue unie, un lu
+    /// périmé ferait rendre une fausse avance à la mesure, C).
     fn prendre_une(&mut self) {
         if !self.prendre() {
             self.demander_image(Instant::now() + regles::PRISE_POSEE);
             return;
         }
-        let attendu = match self.course.conduite() {
-            Conduite::Main => Attendu::Aucun,
-            _ => self.observe,
-        };
-        let mesure = self.mesurer(attendu, None);
+        let mesure = self.mesurer(Attendu::Aucun, None);
         let position = match mesure {
             Mesure::Immobile | Mesure::Ambigue => self.pilote.as_ref().and_then(|p| p.position()),
             _ => None,
@@ -1813,7 +1807,6 @@ impl<S: Source, P: Pilote, A: Atelier> Fil<S, P, A> {
             std::mem::swap(&mut self.reference, &mut self.image);
             self.position_gardee = position;
             self.commande_depuis_gardee = 0;
-            self.observe = Attendu::Aucun;
         }
         if mesure == Mesure::Perdue {
             self.perdues += 1;
@@ -2114,6 +2107,8 @@ mod tests {
         attendus: Arc<Mutex<Vec<i32>>>,
         /// La limite vient d'une mémoire refusée.
         refuse: bool,
+        /// Vue unie, comme `defilement::mesurer` (C, complément) : seul le lu décide.
+        unie: bool,
     }
 
     impl Atelier for FauxAtelier {
@@ -2124,6 +2119,15 @@ mod tests {
             // L'attente de page posée mesure sans attendu : seuls les lus transmis comptent.
             if let Attendu::Lu(a) = attendu {
                 self.attendus.lock().unwrap().push(a);
+            }
+            if self.unie {
+                return match attendu {
+                    Attendu::Aucun => Mesure::Ambigue,
+                    Attendu::Lu(0) => Mesure::Immobile,
+                    Attendu::Lu(e) if e.abs() > RECOUVREMENT => Mesure::Perdue,
+                    Attendu::Lu(e) if e < 0 => Mesure::Recul(e.unsigned_abs()),
+                    Attendu::Lu(e) => Mesure::Avance(e as u32),
+                };
             }
             let d = position_de(apres) - position_de(avant);
             match d {
@@ -2219,6 +2223,7 @@ mod tests {
                     limite,
                     attendus: Arc::clone(&attendus),
                     refuse,
+                    unie: false,
                 },
                 premiere,
                 Duration::ZERO,
@@ -2541,6 +2546,77 @@ mod tests {
         assert_eq!(&a[..3], &[40, 40, 40], "{a:?}");
         // En bas, la position ne bouge plus : 0, et non le pas commandé.
         assert_eq!(a.last(), Some(&0), "{a:?}");
+    }
+
+    #[test]
+    fn fil_image_reprise_sans_pas_aucun_lu() {
+        // Vue unie : seul le lu ferait avancer la mesure. La page bouge sans pas (inertie,
+        // autre app) ; l'image reprise n'a pas de position relue : aucune avance.
+        let p = page(1_000);
+        p.lock().unwrap().position = 200;
+        let mut pi = pilote(&p, &[Moyen::Message], true);
+        pi.vue = Some(0.1);
+        let (envoi, reception) = mpsc::channel::<Commande>();
+        let arret = Arc::new(AtomicBool::new(false));
+        let attendus = Arc::new(Mutex::new(Vec::new()));
+        let d = Depart {
+            numero: 1,
+            zone: ZONE,
+            fenetre: None,
+            relache: Instant::now(),
+            ecrans: Vec::new(),
+            apercu: Arc::new(Mutex::new(None)),
+            apercu_taille: (84, 200),
+            reception,
+            envoi,
+            arret: Arc::clone(&arret),
+            verrouillages: 0,
+        };
+        let sortie = Sortie {
+            arret,
+            poster: Box::new(|_| {}),
+        };
+        let mut f = Fil::nouveau(
+            d,
+            sortie,
+            FausseSource(Arc::clone(&p)),
+            Some(pi),
+            FauxAtelier {
+                lignes: 0,
+                limite: 100_000,
+                attendus: Arc::clone(&attendus),
+                refuse: false,
+                unie: true,
+            },
+            image(0),
+            Duration::ZERO,
+            Vec::new,
+            || 0,
+        );
+        // Un pas lu vers le haut : un recul de 40, mesuré avec le lu de ce pas ; l'image
+        // n'est pas gardée, la dernière gardée reste celle d'avant le pas.
+        f.descendre(-40);
+        let vu = f.vu_en_attente.take();
+        assert!(
+            matches!(vu, Some(Vu::Image(Mesure::Recul(40), _))),
+            "{vu:?}"
+        );
+        assert_eq!(*attendus.lock().unwrap(), vec![-40]);
+        // Puis la page bouge seule de 80 (40 sous l'image gardée), et une image est reprise
+        // sans pas : le lu du pas (-40) est périmé, et la position n'est pas relue.
+        p.lock().unwrap().position += 80;
+        f.prendre_une();
+        let vu = f.vu_en_attente.take();
+        assert!(
+            !matches!(vu, Some(Vu::Image(Mesure::Avance(_), _))),
+            "{vu:?}"
+        );
+        assert!(
+            !matches!(vu, Some(Vu::Image(Mesure::Recul(_), _))),
+            "{vu:?}"
+        );
+        // Aucun lu passé pour l'image reprise : ni celui du pas, ni un autre.
+        assert_eq!(*attendus.lock().unwrap(), vec![-40]);
     }
 
     #[test]
