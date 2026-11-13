@@ -2237,6 +2237,122 @@ const CHARGE = {
     );
     await fin(p, '21 recadrage');
   }
+  {
+    // Menu « Fermer » ouvert par le cœur (`editeur:fermer_demande`, réponse « demander »)
+    // pendant le calque : le calque se ferme d'abord, le clavier revient au menu.
+    const p = await page({ charge: { texte: true } });
+    const menu = () =>
+      p.evaluate(() => ({
+        ouvert: document.querySelector('#menu-fermer').classList.contains('ouvert'),
+        focus: document.activeElement.closest('#menu-fermer')
+          ? document.activeElement.textContent.trim()
+          : document.activeElement.className,
+      }));
+    await lireTexte(p);
+    await p.evaluate(() => __emettre('editeur:fermer_demande', { id: 7, raison: 'cadre' }));
+    await p
+      .waitForFunction(() => document.querySelector('#menu-fermer.ouvert'), null, { timeout: 3000 })
+      .catch(() => {});
+    const m0 = [await calque(p), await menu()];
+    await p.keyboard.press('Tab');
+    const m1 = await menu();
+    await p.keyboard.press('Escape');
+    await uneImage(p);
+    const m2 = await menu();
+    verifier(
+      m0[0] === null &&
+        JSON.stringify(m0[1]) === '{"ouvert":true,"focus":"Copier et fermer"}' &&
+        JSON.stringify(m1) === '{"ouvert":true,"focus":"Fermer sans copier"}' &&
+        m2.ouvert === false,
+      '21 fermer_demande (cadre) pendant le calque : calque fermé, Tab reste dans le menu, ' +
+        'Échap ferme le menu',
+      JSON.stringify([m0, m1, m2]),
+    );
+    await vider(p);
+    await lireTexte(p);
+    await p.evaluate(() => __emettre('editeur:fermer_demande', { id: 7, raison: 'remplacer' }));
+    await p
+      .waitForFunction(() => document.querySelector('#menu-fermer.ouvert'), null, { timeout: 3000 })
+      .catch(() => {});
+    const r0 = await calque(p);
+    await p.keyboard.press('Enter');
+    await attendreAppel(p, 'editeur_exporter');
+    const buts = (await appels(p, 'editeur_exporter')).map((a) => a[2]['x-editeur-but']);
+    verifier(
+      r0 === null &&
+        JSON.stringify(buts) === '["texte","copier_fermer"]' &&
+        (await copies(p)).length === 0,
+      '21 fermer_demande (remplacer) pendant le calque : Entrée fait « Copier et fermer » ' +
+        'de l’image, pas du texte',
+      JSON.stringify([r0, buts]),
+    );
+    await fin(p, '21 menu Fermer');
+  }
+  {
+    // Alt + F4 jamais annulé ; Espace active le bouton qui a le focus ; anneaux de focus.
+    const p = await page({ charge: { texte: true } });
+    await p.evaluate(() =>
+      addEventListener('keydown', (e) => {
+        if (e.key === 'F4') window.__f4 = e.defaultPrevented;
+      }),
+    );
+    await lireTexte(p);
+    await p.keyboard.press('Alt+F4');
+    const f4 = await p.evaluate(() => window.__f4);
+    verifier(
+      f4 === false && (await calque(p)) !== null,
+      '21 Alt + F4 pendant le calque : non annulé',
+      JSON.stringify(f4),
+    );
+    await vider(p);
+    await p.keyboard.press('Tab'); // Copier (grisé, sauté) → Tout copier
+    const cible = await p.evaluate(() => document.activeElement.textContent.trim());
+    await p.keyboard.press('Space');
+    await uneImage(p);
+    const c = await copies(p);
+    await vider(p);
+    await p.evaluate(() => document.querySelector('#barre-haut [data-act="enregistrer"]').focus());
+    await p.keyboard.press('Space');
+    await attendreAppel(p, 'editeur_exporter');
+    const buts = (await appels(p, 'editeur_exporter')).map((a) => a[2]['x-editeur-but']);
+    verifier(
+      cible === 'Tout copier' &&
+        c.length === 1 &&
+        c[0].debut === 0 &&
+        c[0].fin === 6 &&
+        JSON.stringify(buts) === '["enregistrer"]',
+      '21 Espace sur un bouton : « Tout copier » du calque, « Enregistrer » sans calque',
+      JSON.stringify([cible, c, buts]),
+    );
+    await p.evaluate(
+      (n) =>
+        __emettre('editeur:resultat', {
+          id: 7,
+          numero: n,
+          but: 'enregistrer',
+          etat: 'fait',
+          message: null,
+        }),
+      await p.evaluate(() => __exports.at(-1).numero),
+    );
+    const anneaux = [];
+    for (const sel of ['#barre-haut [data-act="copier"]', '#outils .tl']) {
+      await p.keyboard.press('Shift');
+      await p.$eval(sel, (b) => b.focus());
+      anneaux.push(
+        await p.$eval(sel, (b) => {
+          const s = getComputedStyle(b);
+          return [b.matches(':focus-visible'), s.outlineStyle, s.outlineWidth];
+        }),
+      );
+    }
+    verifier(
+      JSON.stringify(anneaux) === '[[true,"solid","2px"],[true,"solid","2px"]]',
+      '21 anneau de focus sur « Copier » du haut et sur un outil',
+      JSON.stringify(anneaux),
+    );
+    await fin(p, '21 Alt, Espace, anneaux');
+  }
   // Boîtes justes aux échelles 1,25, 1,5 et 2, et après un changement de taille.
   for (const echelle of [1.25, 1.5, 2]) {
     const p = await page({ charge: { texte: true }, echelle });
