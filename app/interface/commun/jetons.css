@@ -485,6 +485,18 @@
   --historique-pilule-action-v: 3px;
   --historique-pilule-action-h: 8px;
   --historique-pilule-texte-marge: 4px;
+  --defilante-apercu-largeur: 84px;
+  --defilante-ecart: 12px;
+  --defilante-trait: 1px;
+  --defilante-pilule-marge: 4px;
+  --defilante-bouton-hauteur: 32px;
+  --defilante-bouton-marge: 16px;
+  --defilante-bouton-largeur: 90px;
+  --defilante-appui-echelle: 0.97;
+  --defilante-pilule-entree-decalage: 8px;
+  --defilante-message-haut: 14px;
+  --defilante-message-marge-haut: 7px;
+  --defilante-message-marge-cote: 14px;
   --accent: #0067C0;
   --accent-hover: #1975C5;
   --accent-press: #3183CA;
@@ -597,6 +609,7 @@
   --historique-mica-teinte-2: rgba(232,224,248,0.45);
   --historique-fermer-survol: #C42B1C;
   --historique-fermer-survol-texte: #FFFFFF;
+  --defilante-apercu-ombre: 0 0 0 1px rgba(255,255,255,0.55), 0 8px 16px rgba(0,0,0,0.35);
   --shadow-2: 0 0 2px rgba(0,0,0,0.12), 0 1px 2px rgba(0,0,0,0.14);
   --shadow-8: 0 0 2px rgba(0,0,0,0.12), 0 4px 8px rgba(0,0,0,0.14);
   --shadow-16: 0 0 2px rgba(0,0,0,0.12), 0 8px 16px rgba(0,0,0,0.14);

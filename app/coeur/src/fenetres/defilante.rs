@@ -19,12 +19,19 @@
 //! - `defilante:cacher` : `ChargeCacher` ;
 //! - `interface:theme` (`theme::envoyer_a`).
 //!
-//! Socle : signatures, corps inertes (chantier E).
+//! Clics : la fenêtre part toujours traversée (clics et molette vont à la page dessous,
+//! mesure S9) ; un fil `defilante-souris` suit la souris pendant qu'elle est montrée et ne
+//! la rend cliquable que lorsque la souris est sur la pilule (`pilule`), comme le bandeau.
+
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Arc, Mutex, MutexGuard};
+use std::time::Duration;
 
 use serde::Serialize;
-use tauri::AppHandle;
+use tauri::{AppHandle, Emitter, Manager, WebviewWindow};
 
-use crate::systeme::Rect;
+use super::place::{INTERVALLE_LOIN, INTERVALLE_PROCHE};
+use crate::systeme::{self, Rect};
 
 /// Étiquette de la fenêtre (aussi dans `capabilities/defilante.json`).
 pub const ETIQUETTE_DEFILANTE: &str = "defilante";
@@ -99,58 +106,403 @@ pub struct ChargeCacher {
     pub id: u64,
 }
 
+/// Taille logique de la fenêtre à sa création, avant d'être posée sur l'écran de la zone.
+const TAILLE_INITIALE: (f64, f64) = (200.0, 200.0);
+
+/// Taille de la pilule « Terminer » dessinée par la page, en pixels logiques, ombre non
+/// comprise (bord 1 + marge 4 + bouton 90 au moins × 32 + marge 4 + bord 1, jetons
+/// `defilante-*`). Pour le placement du cœur : la page rapporte la place réelle par
+/// `defilante_zone`.
+pub const TAILLE_PILULE_LOGIQUE: (f64, f64) = (100.0, 42.0);
+
+/// Vrai si le point (pixels réels du bureau) est dans `r` (bord droit et bas exclus).
+fn dans(r: Rect, (x, y): (f64, f64)) -> bool {
+    let (x0, y0) = (f64::from(r.x), f64::from(r.y));
+    x >= x0 && y >= y0 && x < x0 + f64::from(r.largeur) && y < y0 + f64::from(r.hauteur)
+}
+
+/// La fenêtre doit-elle recevoir les clics ? Seulement montrée, avec une pilule, et quand
+/// la souris est dessus.
+fn cliquable(montree: bool, pilule: Option<Rect>, souris: Option<(f64, f64)>) -> bool {
+    match (montree, pilule, souris) {
+        (true, Some(r), Some(p)) => !r.est_vide() && dans(r, p),
+        _ => false,
+    }
+}
+
+/// La pilule retenue pour la surveillance : un rectangle vide n'en est pas une.
+fn pilule_retenue(rect: Option<Rect>) -> Option<Rect> {
+    rect.filter(|r| !r.est_vide())
+}
+
+/// Rythme de la surveillance : proche de la pilule, plus serré.
+fn intervalle(pilule: Option<Rect>, souris: Option<(f64, f64)>) -> Duration {
+    let (Some(r), Some(p)) = (pilule, souris) else {
+        return INTERVALLE_LOIN;
+    };
+    let pilule = super::Rect {
+        x: r.x,
+        y: r.y,
+        largeur: r.largeur.max(0) as u32,
+        hauteur: r.hauteur.max(0) as u32,
+    };
+    super::intervalle(Some(p), Some(&pilule))
+}
+
+/// Ce que partagent la fenêtre de contrôle et son fil de surveillance.
+#[derive(Debug, Default)]
+struct Souris {
+    /// Vrai entre `montrer` et `cacher`.
+    montree: bool,
+    /// Rectangle de la pilule, pixels réels du bureau.
+    pilule: Option<Rect>,
+    /// Ce que la fenêtre fait des clics : vrai = elle les reçoit.
+    recoit: bool,
+}
+
+#[derive(Debug, Default)]
+struct Partage {
+    souris: Mutex<Souris>,
+    /// Numéro de l'affichage en cours : un fil d'un affichage passé s'arrête.
+    affichage: AtomicU64,
+}
+
+impl Partage {
+    fn souris(&self) -> MutexGuard<'_, Souris> {
+        // Un fil qui a paniqué en tenant le verrou ne laisse que des valeurs simples.
+        self.souris.lock().unwrap_or_else(|e| e.into_inner())
+    }
+}
+
 /// La fenêtre de contrôle créée (cachée). À garder par l'Application le temps d'une
-/// capture, puis `detruire`.
+/// capture, puis `detruire`. Ses gestes se font sur le fil principal.
 #[derive(Debug)]
 pub struct Controle {
     app: AppHandle,
     /// Identifiant système (Windows : le HWND), gardé pour la surveillance de la souris.
     identifiant: Option<isize>,
+    /// Faux une fois la fenêtre détruite.
+    vivante: Arc<AtomicBool>,
+    partage: Arc<Partage>,
+    /// L'écran où la fenêtre est posée (pixels réels du bureau).
+    ecran: Mutex<Option<Rect>>,
 }
 
 /// Crée la fenêtre de contrôle, cachée (fil principal, jamais dans un rappel de page :
 /// toujours postée à un tour suivant de la boucle). Journal : `defilante fenetre <hwnd>`,
 /// `defilante exclue des captures: …`. Une fenêtre qui existe encore : une erreur.
 pub fn creer(app: &AppHandle) -> Result<Controle, String> {
-    let _ = app;
-    Err("fenetre de controle non construite".into())
+    if app.get_webview_window(ETIQUETTE_DEFILANTE).is_some() {
+        return Err("fenetre de controle deja creee".into());
+    }
+    let outil =
+        super::creer_fenetre_outil(app, ETIQUETTE_DEFILANTE, PAGE, TAILLE_INITIALE, EXCLUSION)?;
+    Ok(Controle {
+        app: app.clone(),
+        identifiant: outil.identifiant,
+        vivante: outil.vivante,
+        partage: Arc::new(Partage::default()),
+        ecran: Mutex::new(None),
+    })
 }
 
 impl Controle {
+    fn fenetre(&self) -> Option<WebviewWindow> {
+        self.app.get_webview_window(ETIQUETTE_DEFILANTE)
+    }
+
+    fn ecran(&self) -> Option<Rect> {
+        *self.ecran.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
     /// Identifiant système de la fenêtre (Windows : le HWND).
     pub fn identifiant(&self) -> Option<isize> {
         self.identifiant
     }
 
-    /// Pose la fenêtre sur tout `ecran` (pixels réels du bureau), au-dessus de tout.
+    /// Pose la fenêtre sur tout `ecran` (pixels réels du bureau), sans la montrer : la page
+    /// prend la taille de l'écran avant `defilante:montrer`. `montrer` la repose au-dessus
+    /// de tout au même endroit.
     pub fn poser(&self, ecran: Rect) -> Result<(), String> {
-        let _ = (&self.app, ecran);
-        Err("fenetre de controle non construite".into())
+        if ecran.est_vide() {
+            return Err("ecran vide".into());
+        }
+        let fenetre = self.fenetre().ok_or("fenetre de controle absente")?;
+        *self.ecran.lock().unwrap_or_else(|e| e.into_inner()) = Some(ecran);
+        super::poser(
+            &fenetre,
+            super::Rect {
+                x: ecran.x,
+                y: ecran.y,
+                largeur: ecran.largeur as u32,
+                hauteur: ecran.hauteur as u32,
+            },
+        );
+        Ok(())
     }
 
-    /// Montre la fenêtre sans l'activer (jamais le focus ni le clavier).
+    /// Montre la fenêtre sans l'activer (jamais le focus ni le clavier), au-dessus de tout,
+    /// clics traversants ; la surveillance de la souris part.
     pub fn montrer(&self) -> Result<(), String> {
-        Err("fenetre de controle non construite".into())
+        if !self.vivante.load(Ordering::SeqCst) {
+            return Err("fenetre de controle detruite".into());
+        }
+        let fenetre = self.fenetre().ok_or("fenetre de controle absente")?;
+        let par_systeme = match self.ecran() {
+            Some(e) => systeme::poser_au_dessus(&fenetre, e)?,
+            None => false,
+        };
+        if !par_systeme && !systeme::montrer_sans_activer(&fenetre)? {
+            fenetre.show().map_err(|e| format!("show: {e}"))?;
+        }
+        super::traverser(&fenetre, true);
+        let affichage = {
+            let mut s = self.partage.souris();
+            s.montree = true;
+            s.recoit = false;
+            self.partage.affichage.fetch_add(1, Ordering::SeqCst) + 1
+        };
+        self.surveiller(affichage);
+        Ok(())
     }
 
-    /// Cache la fenêtre (clics traversants).
-    pub fn cacher(&self) {}
+    /// Cache la fenêtre (clics traversants) ; la surveillance s'arrête.
+    pub fn cacher(&self) {
+        {
+            let mut s = self.partage.souris();
+            s.montree = false;
+            s.recoit = false;
+            s.pilule = None;
+        }
+        self.partage.affichage.fetch_add(1, Ordering::SeqCst);
+        if let Some(f) = self.fenetre() {
+            super::cacher(&f);
+        }
+    }
 
     /// La pilule « Terminer » : son rectangle en pixels réels du bureau (`None` : aucune) ;
     /// la fenêtre n'est cliquable que là, quand la souris y est.
     pub fn pilule(&self, rect: Option<Rect>) {
-        let _ = rect;
+        self.partage.souris().pilule = pilule_retenue(rect);
     }
 
     /// Envoie `charge` à la page sous le nom `evenement`.
     pub fn emettre<S: Serialize + Clone>(&self, evenement: &str, charge: S) -> Result<(), String> {
-        let _ = (evenement, charge);
-        Err("fenetre de controle non construite".into())
+        self.app
+            .emit_to(ETIQUETTE_DEFILANTE, evenement, charge)
+            .map_err(|e| e.to_string())
     }
 
     /// Cache puis détruit la fenêtre. Journal en WARN si elle ne l'est pas :
     /// `defilante: fenetre non detruite: <e>`.
     pub fn detruire(self) -> Result<(), String> {
-        Ok(())
+        self.cacher();
+        let Some(f) = self.fenetre() else {
+            return Ok(());
+        };
+        match f.destroy() {
+            Ok(()) => Ok(()),
+            Err(e) => {
+                log::warn!("defilante: fenetre non detruite: {e}");
+                Err(e.to_string())
+            }
+        }
+    }
+
+    /// Fil de surveillance de l'affichage `affichage` : rend la fenêtre cliquable quand la
+    /// souris est sur la pilule, traversée sinon. S'arrête à `cacher`, à un nouvel
+    /// affichage, ou à la destruction de la fenêtre. Aucune méthode de la fenêtre Tauri ici
+    /// (chacune attend le fil principal) : les gestes y sont postés.
+    fn surveiller(&self, affichage: u64) {
+        let app = self.app.clone();
+        let vivante = Arc::clone(&self.vivante);
+        let partage = Arc::clone(&self.partage);
+        let lancement = std::thread::Builder::new()
+            .name("defilante-souris".into())
+            .spawn(move || {
+                let mut attente = INTERVALLE_PROCHE;
+                loop {
+                    std::thread::sleep(attente);
+                    if !vivante.load(Ordering::SeqCst)
+                        || partage.affichage.load(Ordering::SeqCst) != affichage
+                    {
+                        break;
+                    }
+                    let pos = super::souris(&app);
+                    let mut s = partage.souris();
+                    if !s.montree {
+                        break;
+                    }
+                    let voulu = cliquable(s.montree, s.pilule, pos);
+                    attente = intervalle(s.pilule, pos);
+                    if voulu == s.recoit {
+                        continue;
+                    }
+                    s.recoit = voulu;
+                    drop(s);
+                    let pour = app.clone();
+                    let partage = Arc::clone(&partage);
+                    let _ = app.run_on_main_thread(move || {
+                        geste_clics(&pour, &partage, affichage, voulu);
+                    });
+                }
+            });
+        if let Err(e) = lancement {
+            log::warn!("defilante: surveillance impossible: {e}");
+        }
+    }
+}
+
+/// Geste posté par la surveillance (fil principal) : l'état est relu sous le verrou ; la
+/// fenêtre ne reçoit les clics que si l'affichage est toujours le même et montré.
+fn geste_clics(app: &AppHandle, partage: &Partage, affichage: u64, voulu: bool) {
+    let recoit = {
+        let mut s = partage.souris();
+        let ok = voulu
+            && s.montree
+            && s.pilule.is_some()
+            && partage.affichage.load(Ordering::SeqCst) == affichage;
+        s.recoit = ok;
+        ok
+    };
+    if let Some(f) = app.get_webview_window(ETIQUETTE_DEFILANTE) {
+        super::traverser(&f, !recoit);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn r(x: i32, y: i32, largeur: i32, hauteur: i32) -> Rect {
+        Rect {
+            x,
+            y,
+            largeur,
+            hauteur,
+        }
+    }
+
+    #[test]
+    fn cliquable_seulement_sur_la_pilule_montree() {
+        let p = r(100, 200, 150, 63);
+        assert!(cliquable(true, Some(p), Some((100.0, 200.0))));
+        assert!(cliquable(true, Some(p), Some((249.9, 262.9))));
+        // Bord droit et bas exclus.
+        assert!(!cliquable(true, Some(p), Some((250.0, 230.0))));
+        assert!(!cliquable(true, Some(p), Some((120.0, 263.0))));
+        assert!(!cliquable(true, Some(p), Some((99.9, 230.0))));
+        // Cachée, sans pilule, souris inconnue, pilule vide : traversée.
+        assert!(!cliquable(false, Some(p), Some((120.0, 230.0))));
+        assert!(!cliquable(true, None, Some((120.0, 230.0))));
+        assert!(!cliquable(true, Some(p), None));
+        assert!(!cliquable(
+            true,
+            Some(r(100, 200, 0, 63)),
+            Some((100.0, 230.0))
+        ));
+    }
+
+    #[test]
+    fn cliquable_sur_un_ecran_a_gauche() {
+        let p = r(-1700, -300, 150, 63);
+        assert!(cliquable(true, Some(p), Some((-1650.0, -280.0))));
+        assert!(!cliquable(true, Some(p), Some((1650.0, 280.0))));
+    }
+
+    #[test]
+    fn rythme_selon_la_distance() {
+        let p = r(1000, 800, 150, 63);
+        assert_eq!(
+            intervalle(Some(p), Some((1050.0, 820.0))),
+            INTERVALLE_PROCHE
+        );
+        assert_eq!(intervalle(Some(p), Some((10.0, 10.0))), INTERVALLE_LOIN);
+        assert_eq!(intervalle(None, Some((1050.0, 820.0))), INTERVALLE_LOIN);
+        assert_eq!(intervalle(Some(p), None), INTERVALLE_LOIN);
+    }
+
+    #[test]
+    fn la_pilule_vide_est_oubliee() {
+        assert_eq!(pilule_retenue(Some(r(5, 5, 0, 4))), None);
+        assert_eq!(pilule_retenue(Some(r(5, 5, 4, -1))), None);
+        assert_eq!(pilule_retenue(None), None);
+        assert_eq!(pilule_retenue(Some(r(5, 5, 4, 4))), Some(r(5, 5, 4, 4)));
+    }
+
+    #[test]
+    fn charges_au_format_de_la_page() {
+        let montrer = ChargeMontrer {
+            id: 4,
+            echelle: 1.25,
+            zone: RectPage {
+                x: 100,
+                y: 80,
+                largeur: 600,
+                hauteur: 450,
+            },
+            apercu: ApercuPage {
+                x: 715,
+                y: 80,
+                largeur: 105,
+                hauteur_max: 800,
+            },
+            pilule: PointPage { x: 338, y: 543 },
+            libelle: "Terminer".into(),
+            reduites: false,
+        };
+        assert_eq!(
+            serde_json::to_value(&montrer).unwrap(),
+            serde_json::json!({
+                "id": 4, "echelle": 1.25,
+                "zone": { "x": 100, "y": 80, "largeur": 600, "hauteur": 450 },
+                "apercu": { "x": 715, "y": 80, "largeur": 105, "hauteur_max": 800 },
+                "pilule": { "x": 338, "y": 543 },
+                "libelle": "Terminer", "reduites": false
+            })
+        );
+        assert_eq!(
+            serde_json::to_value(ChargeApercu {
+                id: 4,
+                numero: 7,
+                hauteur: 312
+            })
+            .unwrap(),
+            serde_json::json!({ "id": 4, "numero": 7, "hauteur": 312 })
+        );
+        assert_eq!(
+            serde_json::to_value(ChargeMessage { id: 4, texte: None }).unwrap(),
+            serde_json::json!({ "id": 4, "texte": null })
+        );
+        assert_eq!(
+            serde_json::to_value(ChargeMessage {
+                id: 4,
+                texte: Some("Trop vite. Remontez un peu.".into())
+            })
+            .unwrap(),
+            serde_json::json!({ "id": 4, "texte": "Trop vite. Remontez un peu." })
+        );
+        assert_eq!(
+            serde_json::to_value(ChargeCacher { id: 4 }).unwrap(),
+            serde_json::json!({ "id": 4 })
+        );
+    }
+
+    #[test]
+    fn noms_du_contrat() {
+        assert_eq!(ETIQUETTE_DEFILANTE, "defilante");
+        assert_eq!(PAGE, "defilante/defilante.html");
+        assert_eq!(EVENEMENT_MONTRER, "defilante:montrer");
+        assert_eq!(EVENEMENT_APERCU, "defilante:apercu");
+        assert_eq!(EVENEMENT_MESSAGE, "defilante:message");
+        assert_eq!(EVENEMENT_CACHER, "defilante:cacher");
+        let capacites: serde_json::Value =
+            serde_json::from_str(include_str!("../../capabilities/defilante.json")).unwrap();
+        assert_eq!(
+            capacites["windows"],
+            serde_json::json!([ETIQUETTE_DEFILANTE])
+        );
+        let page = concat!(env!("CARGO_MANIFEST_DIR"), "/../interface/");
+        assert!(std::path::Path::new(page).join(PAGE).is_file());
     }
 }
