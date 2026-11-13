@@ -1715,7 +1715,7 @@ impossible: <e>`, `selection balayage <id> non envoye: <e>`.
   couleurs, menu « Fermer » et ses issues, « Copier » qui ferme, vignette de prise, règle
   de `fermer_demande`, un seul export à la fois, clair, sombre, fenêtre étroite, aucune
   erreur ni violation de CSP. Étape du job `pages`.
-- **Tests de la 0.5** (`cargo test --locked` sous Linux : 639 tests de la bibliothèque
+- **Tests de la 0.5** (`cargo test --locked` sous Linux : 641 tests de la bibliothèque
   réussis, 2 ignorés, et les 2 de `tests/architecture.rs`, qui refusent aussi un appel à
   `droits::ouverte` ou à `licence::verifier` hors d'`application`). Tests ajoutés, par
   fichier : `licence/tests.rs` 17 (licence d'essai acceptée, octet changé dans la charge ou
@@ -1734,7 +1734,8 @@ impossible: <e>`, `selection balayage <id> non envoye: <e>`.
   touche déjà donnée, synonymes) ; `application/etats.rs` 5 de plus (§3.1) ;
   `application/mod.rs` 7 de plus (actions construites, menu, annonce commune,
   `bilan_avec`, licence retirée pendant l'attente, borne gagnée) ;
-  `application/page_reglages.rs` 2 ; `fenetres/selection.rs` 3 (affichage gardé pour le
+  `application/page_reglages.rs` 2 ; `application/geste_texte.rs` 2 (garde de l'écran figé
+  prise une seule fois, écrans changés) ; `fenetres/selection.rs` 3 (affichage gardé pour le
   balayage) ; `fenetres/mod.rs`, `application/zone.rs` et `application/editeur.rs` 1
   chacun.
 - Test Windows (machine GitHub) `windows_lit_deux_fois_une_image_blanche`

@@ -566,10 +566,9 @@ Noté, non corrigé :
 
 ## MVP, version 0.5 « Historique et Copier le texte »
 
-La 0.5 est sur la branche `version-0.5` (dernier commit de l'app : `7eaec83` ; ensuite,
-`1f051d9` ne change qu'un test, `3d2dc0a` et `3b03c43` que les essais). La version passe à
-0.5.0. Contrat : `contrat-0.5-historique-texte.md`, avec ses avenants « Droits » et
-« Licence ».
+La 0.5 est sur la branche `version-0.5` (derniers commits de l'app : `d83e28b` pour le cœur,
+`6582dac` pour les pages). La version passe à 0.5.0. Contrat :
+`contrat-0.5-historique-texte.md`, avec ses avenants « Droits » et « Licence ».
 
 Ce qu'elle apporte, dans une seule app :
 
@@ -583,18 +582,22 @@ Ce qu'elle apporte, dans une seule app :
   Sans licence, l'app se comporte comme la 0.4, plus la ligne « Licence » (ni aperçu, ni
   recherche des langues). Licence d'essai publique : `essais/licence-essai.txt`.
 
-Vérifications GitHub, pas encore toutes vertes :
+Vérifications GitHub :
 
-- Tests : 639 tests du cœur et 2 tests d'architecture (2 ignorés) ; dix essais de pages,
+- Tests : 641 tests du cœur et 2 tests d'architecture (2 ignorés) ; dix essais de pages,
   `ECHECS : 0` ; essais Windows 01 à 13 sur le vrai `.exe`.
 - Passage 65 : 10 essais Windows sur 13 réussis (voir « Trouvé sur Windows, corrigé »).
-- Second passage : …
+- Passage 66 (`688d7b1`) : tests verts sur Windows, macOS et Linux, 13 essais Windows sur 13.
+- Les corrections de la seconde relecture (`d83e28b`, `6582dac`) sont venues après le
+  passage 66 : c'est le passage de la demande de fusion qui fait foi pour elles.
 
 Chaque chantier a été écrit par un agent sur un contrat écrit d'abord, puis relu par un
 agent distinct de l'auteur (effort élevé) : L (licence) et B (données de l'historique)
 ensemble, puis A (moteur de texte), C (réglages), D (cœur de l'historique), E (cœur du
 texte), F (page de l'historique), G (pages du texte) et H (essai 13). Un autre agent
-distinct (effort élevé) a relu l'assemblage.
+distinct (effort élevé) a relu l'assemblage. Un dernier agent distinct (effort élevé) a relu
+les corrections des pages du texte (`63bfea5`) et celles de l'assemblage (`7eaec83`), que
+personne n'avait relues.
 
 ### Trouvé par les relectures, corrigé
 
@@ -632,13 +635,23 @@ distinct (effort élevé) a relu l'assemblage.
   licence, l'app faisait des aperçus et cherchait les langues : plus maintenant. Le journal
   de la licence écrivait un chemin : il n'écrit plus que le genre d'erreur.
 
+- Seconde relecture (`63bfea5` et `7eaec83`), rien de bloquant. Une régression de `63bfea5` :
+  le calque « Choisir le texte » gardait le clavier quand le menu « Fermer » était ouvert
+  par la croix de la barre des tâches, Alt + F4 ou une capture en attente (Entrée copiait
+  le texte au lieu de l'image). Toute bulle ou tout menu qui s'ouvre ferme d'abord le
+  calque. Aussi : Alt + F4 n'est plus annulé pendant le calque ; Espace active de nouveau
+  les boutons de l'éditeur (défaut de la 0.4) ; anneau de focus sur « Copier » et les
+  outils ; la ligne `texte ecran libere: bureau change` n'est écrite que si l'écran a été
+  libéré ; une capture faite avec l'historique encore ouvert après le retrait de la licence
+  a son aperçu (`6582dac`, `d83e28b`).
+
 ### Non vérifié
 
 - Les corrections faites après les relectures de chantier n'ont été relues que par le
-  relecteur de l'assemblage. Celles de G (`63bfea5`), fusionnées après sa relecture, ne
-  l'ont pas été (le relecteur de l'essai 13 n'en a regardé que ce que son point (14)
-  utilise). Celles de la relecture de l'assemblage (`7eaec83`) et celles de l'essai 13
-  (`3d2dc0a`, `3b03c43`) n'ont pas été relues par un second agent.
+  relecteur de l'assemblage. Celles de la seconde relecture (`6582dac`, `d83e28b`) et
+  celles des essais (`3d2dc0a`, `3b03c43`) n'ont pas été relues par un second agent.
+- Les tests de `7eaec83` et de `d83e28b` prouvent les règles pures, pas tout leur câblage
+  (`bureau_change` demande une vraie app).
 - Le français et les accents ne sont pas prouvés sur la machine GitHub : le témoin est en
   anglais ASCII.
 - Un texte de 12 px est mal lu, même agrandi deux fois (« Hello areezyShct 2026, … »).
