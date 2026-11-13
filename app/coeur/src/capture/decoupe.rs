@@ -138,24 +138,16 @@ pub fn arrondir(pixels: &mut Pixels, rayon: i32, coins: [bool; 4]) {
 /// Taille que l'aperçu de l'historique doit couvrir (une case 16:10).
 const APERCU_HISTORIQUE: (u32, u32) = (400, 250);
 
-/// La partie 16:10 du haut à gauche d'une image (contrat 0.6, D16) : la découpe
-/// qu'`apercu_historique` réduit ensuite, pour l'aperçu de la vignette d'une capture
-/// défilante. Pur. Socle : l'image telle quelle (chantier C : la découpe, sortie
-/// d'`apercu_historique` sans changer son résultat).
+/// La partie 16:10 du haut à gauche d'une image (contrat 0.6, D16) : la plus grande partie
+/// 16:10 calée en haut à gauche (arrondie au pixel), celle qu'`apercu_historique` réduit
+/// ensuite. Sert à l'aperçu de la vignette d'une capture défilante. Pur. Une image vide ou
+/// incohérente est rendue telle quelle.
 pub fn partie_16_10_du_haut(pixels: &Pixels) -> Pixels {
-    pixels.clone()
-}
-
-/// L'aperçu d'une case de l'historique (contrat 0.5, §3.1) : la partie 16:10 du haut à
-/// gauche (ce que montre la case), réduite pour couvrir 400 × 250, jamais agrandie. Pur.
-/// Une image vide ou incohérente est rendue telle quelle.
-pub fn apercu_historique(pixels: &Pixels) -> Pixels {
     let (l, h) = (pixels.largeur, pixels.hauteur);
     let coherent = pixels.rgba.len() as u64 == u64::from(l) * u64::from(h) * 4;
     if !coherent || l == 0 || h == 0 {
         return pixels.clone();
     }
-    // La plus grande partie 16:10 calée en haut à gauche (arrondie au pixel).
     let (pl, ph) = if u64::from(l) * 10 >= u64::from(h) * 16 {
         let pl = (u64::from(h) * 16 + 5) / 10;
         (pl.clamp(1, u64::from(l)) as u32, h)
@@ -163,20 +155,32 @@ pub fn apercu_historique(pixels: &Pixels) -> Pixels {
         let ph = (u64::from(l) * 10 + 8) / 16;
         (l, ph.clamp(1, u64::from(h)) as u32)
     };
-    let partie = if (pl, ph) == (l, h) {
-        pixels.clone()
-    } else {
-        let rangee = pl as usize * 4;
-        let mut rgba = Vec::with_capacity(rangee * ph as usize);
-        for ligne in pixels.rgba.chunks_exact(l as usize * 4).take(ph as usize) {
-            rgba.extend_from_slice(&ligne[..rangee]);
-        }
-        Pixels {
-            largeur: pl,
-            hauteur: ph,
-            rgba,
-        }
-    };
+    if (pl, ph) == (l, h) {
+        return pixels.clone();
+    }
+    let rangee = pl as usize * 4;
+    let mut rgba = Vec::with_capacity(rangee * ph as usize);
+    for ligne in pixels.rgba.chunks_exact(l as usize * 4).take(ph as usize) {
+        rgba.extend_from_slice(&ligne[..rangee]);
+    }
+    Pixels {
+        largeur: pl,
+        hauteur: ph,
+        rgba,
+    }
+}
+
+/// L'aperçu d'une case de l'historique (contrat 0.5, §3.1) : la partie 16:10 du haut à
+/// gauche (ce que montre la case, `partie_16_10_du_haut`), réduite pour couvrir 400 × 250,
+/// jamais agrandie. Pur. Une image vide ou incohérente est rendue telle quelle.
+pub fn apercu_historique(pixels: &Pixels) -> Pixels {
+    let (l, h) = (pixels.largeur, pixels.hauteur);
+    let coherent = pixels.rgba.len() as u64 == u64::from(l) * u64::from(h) * 4;
+    if !coherent || l == 0 || h == 0 {
+        return pixels.clone();
+    }
+    let partie = partie_16_10_du_haut(pixels);
+    let (pl, ph) = (partie.largeur, partie.hauteur);
     // Couvrir 400 × 250 : le plus petit facteur qui garde les deux côtés au moins à la
     // cible. Déjà plus petite d'un côté : jamais agrandie, rendue telle quelle.
     let (cl, ch) = APERCU_HISTORIQUE;
@@ -603,6 +607,106 @@ mod tests {
         let mut abimee = grille(800, 500);
         abimee.rgba.pop();
         assert_eq!(apercu_historique(&abimee), abimee);
+    }
+
+    /// L'aperçu de l'historique tel qu'il était avant la sortie de `partie_16_10_du_haut`
+    /// (0.5, recopié mot pour mot) : le témoin du test d'égalité.
+    fn apercu_historique_de_la_0_5(pixels: &Pixels) -> Pixels {
+        let (l, h) = (pixels.largeur, pixels.hauteur);
+        let coherent = pixels.rgba.len() as u64 == u64::from(l) * u64::from(h) * 4;
+        if !coherent || l == 0 || h == 0 {
+            return pixels.clone();
+        }
+        let (pl, ph) = if u64::from(l) * 10 >= u64::from(h) * 16 {
+            let pl = (u64::from(h) * 16 + 5) / 10;
+            (pl.clamp(1, u64::from(l)) as u32, h)
+        } else {
+            let ph = (u64::from(l) * 10 + 8) / 16;
+            (l, ph.clamp(1, u64::from(h)) as u32)
+        };
+        let partie = if (pl, ph) == (l, h) {
+            pixels.clone()
+        } else {
+            let rangee = pl as usize * 4;
+            let mut rgba = Vec::with_capacity(rangee * ph as usize);
+            for ligne in pixels.rgba.chunks_exact(l as usize * 4).take(ph as usize) {
+                rgba.extend_from_slice(&ligne[..rangee]);
+            }
+            Pixels {
+                largeur: pl,
+                hauteur: ph,
+                rgba,
+            }
+        };
+        let (cl, ch) = APERCU_HISTORIQUE;
+        if pl <= cl || ph <= ch {
+            return partie;
+        }
+        let k = (f64::from(cl) / f64::from(pl)).max(f64::from(ch) / f64::from(ph));
+        let nl = ((f64::from(pl) * k).round() as u32).clamp(cl, pl);
+        let nh = ((f64::from(ph) * k).round() as u32).clamp(ch, ph);
+        reduire_a(&partie, nl, nh)
+    }
+
+    #[test]
+    fn partie_16_10_du_haut_egale_a_la_decoupe_de_l_historique() {
+        let mut abimee = grille(800, 500);
+        abimee.rgba.pop();
+        let vide = Pixels {
+            largeur: 0,
+            hauteur: 0,
+            rgba: Vec::new(),
+        };
+        let mut cas = vec![abimee, vide];
+        for (l, h) in [
+            (1920u32, 1080u32),
+            (5760, 1080),
+            (400, 4000),
+            (1000, 9000),
+            (300, 200),
+            (320, 200),
+            (1000, 240),
+            (1, 1),
+            (1, 5000),
+            (5000, 1),
+            (2, 1),
+            (1001, 1000),
+            (641, 401),
+            (799, 3000),
+            (1024, 16384),
+        ] {
+            cas.push(grille(l, h));
+        }
+        for p in &cas {
+            let (l, h) = (p.largeur, p.hauteur);
+            // Résultat de l'aperçu inchangé.
+            assert_eq!(
+                apercu_historique(p),
+                apercu_historique_de_la_0_5(p),
+                "{l}x{h}"
+            );
+            let partie = partie_16_10_du_haut(p);
+            // La partie est 16:10 à l'arrondi près (ou l'image entière si un côté manque),
+            // calée en haut à gauche : ses pixels sont ceux de l'image.
+            if p.rgba.len() as u64 == u64::from(l) * u64::from(h) * 4 && l > 0 && h > 0 {
+                let (pl, ph) = (partie.largeur, partie.hauteur);
+                assert!(pl <= l && ph <= h && (pl == l || ph == h), "{l}x{h}");
+                assert!(
+                    (i64::from(pl) * 10 - i64::from(ph) * 16).abs() <= 16 || pl == 1 || ph == 1,
+                    "{l}x{h} → {pl}x{ph}"
+                );
+                for y in 0..ph as usize {
+                    let source = &p.rgba[y * l as usize * 4..][..pl as usize * 4];
+                    let ligne = &partie.rgba[y * pl as usize * 4..][..pl as usize * 4];
+                    assert_eq!(source, ligne, "{l}x{h} ligne {y}");
+                }
+            } else {
+                assert_eq!(&partie, p);
+            }
+        }
+        // Une défilante de 1 000 × 9 000 : la partie est le haut, 1 000 × 625.
+        let p = partie_16_10_du_haut(&grille(1000, 9000));
+        assert_eq!((p.largeur, p.hauteur), (1000, 625));
     }
 
     #[test]
