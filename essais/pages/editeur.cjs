@@ -993,6 +993,27 @@ const CHARGE = {
       '5 bis gomme posée sur le flou loin des encres : il part en entier (un pas)',
       JSON.stringify([pas, r]),
     );
+    // Une flèche, un numéro emmené dessus, un trait de stylo par-dessus le numéro : l'appui
+    // de la gomme sur la pile gomme le trait seul ; le numéro reste et la flèche qu'il cache
+    // n'est pas trouée (relecture des corrections).
+    await outil(p, 'Flèche');
+    await glisser(p, [40, 100], [180, 100]);
+    await outil(p, 'Numéro');
+    await cliquer(p, 110, 128);
+    await glisser(p, [110, 128], [110, 100]);
+    await outil(p, 'Stylo');
+    await glisser(p, [86, 100], [134, 100]);
+    await outil(p, 'Gomme');
+    pas = (await etat(p)).pas;
+    await cliquer(p, 110, 100);
+    r = await etat(p);
+    verifier(
+      egal(r.types.slice(-3), ['fleche', 'numero', 'crayon']) &&
+        egal(r.g.slice(-3), [0, 0, 1]) &&
+        r.pas === pas + 1,
+      '5 bis gomme posée sur un trait qui couvre un numéro posé sur une flèche : le trait est gommé, le numéro reste, la flèche cachée n’est pas trouée (un pas)',
+      JSON.stringify([pas, r]),
+    );
     await fin(p, '5 bis');
   }
 

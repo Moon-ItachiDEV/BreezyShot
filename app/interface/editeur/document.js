@@ -662,8 +662,9 @@ function gomme(o, x, y) {
 // Reste-t-il de l'encre à portée de `p` ? Un point de l'encre que la gomme n'a pas atteint,
 // sur sa ligne ou en travers (un trait gommé dans sa longueur garde ses bords), à la
 // distance de prise de l'objet (celle de `toucheForme`) ; si `p` est lui-même dans un trou
-// de gomme, à la tolérance seulement (le bord de ce qui reste).
-const TRAVERS = [0, -0.4, 0.4, -0.8, 0.8]; // en demi-largeurs de l'encre
+// de gomme, à la tolérance seulement (le bord de ce qui reste). En travers, jusqu'au bord :
+// un surligneur de 24 px gommé au milieu par la gomme de 20 px garde 2 px de chaque côté.
+const TRAVERS = [0, -0.2, 0.2, -0.4, 0.4, -0.6, 0.6, -0.8, 0.8, -0.95, 0.95]; // en demi-largeurs
 function encreRestePres(o, p, tol) {
   const trou = gomme(o, p.x, p.y);
   if (dansPlein(o, p)) return !trou;

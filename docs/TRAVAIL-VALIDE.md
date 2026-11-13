@@ -724,8 +724,9 @@ Ce qu'elle apporte :
   couleurs et « Autre couleur », opacité) ; plus de menu « Ajouter » ni de bulle par-dessus
   l'image. Flèche, stylo, surligneur et gomme sont dessinés, le corps à la couleur de
   l'encre. Un objet choisi déplie l'outil qui l'a fait ; ce qu'on y règle va à lui ; une
-  variante le change sur place, au bouton comme à la touche. Un texte en saisie déplie
-  l'outil Texte.
+  variante prise dans son pli le change sur place, alors que la touche d'une variante
+  (« L » : Ligne) la prend pour le tracé suivant et défait la sélection. Un texte en saisie
+  déplie l'outil Texte.
 - L'éditeur s'ouvre assez large pour que la barre dépliée tienne sans défiler (1088 px
   logiques quand l'écran le permet). Plus étroit, seuls les outils défilent ; Annuler,
   Rétablir et Plus restent en entier.
@@ -741,16 +742,19 @@ Ce qu'elle apporte :
 
 Vérifications, ici sous Linux :
 
-- `cargo test --locked --lib` : 654 tests du cœur réussis, 2 ignorés. `cargo fmt --check`
-  et `cargo clippy --locked --all-targets -- -D warnings` propres, sous Linux et pour la
+- Sur l'arbre fusionné avec main (menu de l'icône) : `cargo test --locked` : 665 tests du
+  cœur réussis, 2 ignorés, et les 2 tests d'architecture. `cargo fmt --check` et
+  `cargo clippy --locked --all-targets -- -D warnings` propres, sous Linux et pour la
   cible Windows (`x86_64-pc-windows-msvc`, vérifiée sans édition de liens : le code de
   `TextAngle` compile, il n'a pas tourné).
-- Les dix essais de pages, `ECHECS : 0` : `editeur.cjs` 243 points, `editeur-modele.cjs`
+- Les onze essais de pages, `ECHECS : 0` : `editeur.cjs` 243 points, `editeur-modele.cjs`
   69, `selection.cjs` 232, `historique.cjs` 122, `reglages.cjs` 107, `vignette.cjs` 43,
-  `bandeau.cjs` 25, `decompte.cjs` 24, `installateur.cjs` 23, `souffle.cjs` 12 ;
-  `jetons.css` à jour.
-- Essais par mutation de la page de sélection : sans le filet de 2 s, sans le plafond de
-  400 lignes ou sans la borne de 2 s du surlignage, un essai échoue.
+  `bandeau.cjs` 25, `decompte.cjs` 24, `installateur.cjs` 23, `menu.cjs` 20,
+  `souffle.cjs` 12 ; `jetons.css` à jour.
+- Essais par mutation : sans le filet de 2 s, sans le plafond de 400 lignes ou sans la
+  borne de 2 s du surlignage, un essai de la page de sélection échoue ; avec l'ancien appui
+  de la gomme (5 bis), l'ancien sondage en travers (G3) ou sans `h.avant = null` dans
+  `annuler` (G6), un essai de l'éditeur échoue.
 - Le passage GitHub de la demande de fusion (tests sur Windows, macOS et Linux, essais
   Windows sur le vrai `.exe`) fait foi.
 
@@ -761,6 +765,15 @@ Playwright jetables en clair et en sombre, aux échelles 1 et 2, animations réd
 comprises. L'autre a relu Copier le texte : les fils et les verrous déroulés à la main
 (borne pendant le surlignage, réveil tardif, échec d'émission, écrans changés, arrêt), les
 durées du cœur et de la page, la géométrie, la confidentialité, et des essais par mutation.
+
+Les corrections ont ensuite été relues par un troisième agent distinct (Fable 5.2, effort
+élevé) : le diff entier et le code autour (`document.js`, `outils.js`, `barre.js`,
+`dessin.js`, `editeur.css`, `selection.js`, `geste_texte.rs`, `application/texte.rs`,
+`fenetres/editeur.rs`, `fenetres/selection.rs`, `systeme/texte/`), tous les essais lancés
+(cœur, clippy sous Linux et pour Windows, fmt, jetons, dix essais de pages), 23 mutations
+posées, dont 22 prises, des scripts jetables (pile de trois objets sous la gomme, flèches
+extrêmes, largeur de la barre par outil et par échelle, numéros de version tirés au
+hasard, surligneur gommé) et le journal du passage GitHub Windows.
 
 ### Trouvé par les relectures, corrigé
 
@@ -779,7 +792,8 @@ durées du cœur et de la page, la géométrie, la confidentialité, et des essa
   est sondé en travers) ; le trait courbé passait à 6 à 8 px de la poignée (le corps suit
   la courbe jusqu'à la tête, posée sur elle) ; le focus tombait sur la page quand un pli
   se refermait (il revient au bouton de l'outil) ; une touche de variante avec un objet
-  choisi faisait diverger la barre et l'outil (elle change l'objet, comme le bouton) ; un
+  choisi faisait diverger la barre et l'outil (elle défait la sélection et prend la
+  variante pour le tracé suivant ; le bouton du pli, lui, change l'objet) ; un
   geste sans pas marquait le document modifié, et la fermeture redemandait « Copier et
   fermer » après un Copier (la version d'avant le geste revient, un numéro de version
   n'est jamais repris pour un autre contenu) ; courbes dégénérées (poignée bornée à la
@@ -802,8 +816,32 @@ durées du cœur et de la page, la géométrie, la confidentialité, et des essa
   dans le sens des aiguilles d'une montre autour du centre de l'image : `redresser` le
   fait, testé sur des boîtes calculées à la main.
 
+### Trouvé par la relecture des corrections, corrigé
+
+- Bloquant : le passage GitHub Windows était rouge depuis la barre C. L'étape (14) de
+  l'essai 13 cliquait encore « Ajouter » puis « Flou », que la barre C a retirés. L'outil
+  Flou se prend maintenant à la touche B, car dans une fenêtre étroite son bouton peut être
+  hors de la partie visible des outils, puis « Bloc noir » ; l'Échap qui suivait est
+  retiré (sans sélection ni menu, il fermerait l'éditeur). Mesuré dans Chromium à 921 px,
+  la largeur de la fenêtre sur la machine GitHub : Flou déplié, la barre tient sans
+  défiler et le centre de « Bloc noir » est bien ce bouton, quel que soit l'outil en main
+  avant.
+- Important : la documentation disait le contraire du code sur la touche de variante.
+  Elle suit le code : le bouton du pli change l'objet choisi ; la touche prend la variante
+  pour le tracé suivant et défait la sélection.
+- Mineurs : la gomme posée sur une pile (un trait de stylo sur un numéro posé sur une
+  flèche) trouait encore la flèche cachée ; à l'appui, seules les encres par-dessus
+  l'objet entier sont gommées (essai 5 bis). Un surligneur Moyen (24 px) gommé au milieu
+  par la gomme Moyenne (20 px) ne se prenait plus par ses 2 px de bord ; l'encre est
+  sondée en travers jusqu'à 0,95 demi-largeur (G3). Aucun essai ne tenait les numéros de
+  version après annuler puis abandonner (G6 ajouté). Le compte de `editeur.cjs` incluait
+  la ligne finale.
+
 ### Limites acceptées
 
+- La gomme traînée sur un texte ou un numéro posé sur une encre troue l'encre cachée
+  dessous : invisible tant que l'objet la couvre, le trou se voit si on le déplace. Seul
+  l'appui la protège.
 - Les passages de gomme ne sont pas simplifiés, et le rendu gardé d'une encre gommée a pour
   clé un `JSON.stringify` de l'objet à chaque peinture : 17 ms par geste sur une charge
   synthétique (30 traits de 6 000 points), loin d'un usage réel.
@@ -820,5 +858,7 @@ durées du cœur et de la page, la géométrie, la confidentialité, et des essa
   unique des tests à faire.
 - Aucun essai Windows ne lit un texte penché : le sens de `TextAngle` suit la
   documentation.
+- La fin de l'étape (14) de l'essai 13 (Flou à la touche B, Bloc noir, relecture) n'a
+  tourné que dans le passage GitHub de la demande de fusion.
 - Les pages de l'éditeur et de la sélection sont essayées dans Chromium sous Linux, pas
   dans WebView2.

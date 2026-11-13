@@ -516,9 +516,18 @@ async function partieDocument() {
       epaisseur: 2, gommes: [{ largeur: 10, points: [[190, 300], [710, 300]] }] };
     const h = D.touche(s2, { x: 450, y: 289 }, 4) && D.touche(s2, { x: 450, y: 311 }, 4)
       && !D.touche(s2, { x: 450, y: 300 }, 4);
-    verifier(a && b && c && d && e && h, 'G3 encre gommée : prise là où il en reste, pas dans le '
-      + 'trou (trait, forme pleine, flèche, surligneur gommé dans sa longueur) ; l\'objet du '
-      + 'dessous s\'y prend', [a, b, c, d, e, h].join());
+    // Les cas courants, jusqu'au bord (troisième relecture) : le surligneur Moyen (24 px)
+    // gommé au milieu par la gomme Moyenne (20 px) garde 2 px de chaque côté ; le Fin (16 px),
+    // la même gomme décalée de 3 px, 1 px d'un côté.
+    const s3 = { ...s2, epaisseur: 1, gommes: [{ largeur: 20, points: [[190, 300], [710, 300]] }] };
+    const s4 = { ...s2, epaisseur: 0, gommes: [{ largeur: 20, points: [[190, 303], [710, 303]] }] };
+    const k = D.touche(s3, { x: 450, y: 289 }, 4) && D.touche(s3, { x: 450, y: 311 }, 4)
+      && !D.touche(s3, { x: 450, y: 300 }, 4)
+      && D.touche(s4, { x: 450, y: 292.5 }, 4) && !D.touche(s4, { x: 450, y: 300 }, 4)
+      && !D.touche(s4, { x: 450, y: 303 }, 4) && !D.touche(s4, { x: 450, y: 307 }, 4);
+    verifier(a && b && c && d && e && h && k, 'G3 encre gommée : prise là où il en reste, pas '
+      + 'dans le trou (trait, forme pleine, flèche, surligneur gommé dans sa longueur, jusqu\'à '
+      + 'son bord) ; l\'objet du dessous s\'y prend', [a, b, c, d, e, h, k].join());
   }
   // (G4) Les passages de gomme suivent l'objet : déplacer, dupliquer, redimensionner.
   {
@@ -624,8 +633,34 @@ async function partieDocument() {
     D.annuler(h2);
     D.retablir(h2);
     const d1 = D.abandonner(h2) && h2.futur.length === 0 && doc2.objets.length === 0;
-    verifier(vide0 && a && b && c && d1, 'G6 abandonner : le pas du geste défait sans rester à '
-      + 'rétablir, l\'ancien « à rétablir » rendu', [vide0, a, b, c, d1].join());
+    // Un numéro n'est jamais repris pour un autre contenu (le cœur s'en sert pour « déjà
+    // enregistré ») : deux pas, annuler (puis rétablir), puis abandonner (troisième relecture).
+    let e = true;
+    for (const retablirAussi of [false, true]) {
+      const doc3 = D.nouveauDocument(100, 100), h3 = D.creerHistorique(doc3);
+      const vus = new Map();
+      const noter = () => {
+        const t = json(doc3);
+        if (vus.has(h3.version) && vus.get(h3.version) !== t) e = false;
+        vus.set(h3.version, t);
+      };
+      noter();
+      D.modifier(h3, (d) => D.ajouter(d, exemples()[2]));
+      noter();
+      D.modifier(h3, (d) => D.ajouter(d, exemples()[3]));
+      noter();
+      D.annuler(h3);
+      noter();
+      if (retablirAussi) {
+        D.retablir(h3);
+        noter();
+      }
+      e = e && D.abandonner(h3) && doc3.objets.length === (retablirAussi ? 1 : 0);
+      noter();
+    }
+    verifier(vide0 && a && b && c && d1 && e, 'G6 abandonner : le pas du geste défait sans rester '
+      + 'à rétablir, l\'ancien « à rétablir » rendu ; aucun numéro de version repris pour un '
+      + 'autre contenu', [vide0, a, b, c, d1, e].join());
   }
   // (F) La flèche se courbe à sa poignée du milieu : la courbe passe par la pointe ; près du
   // milieu de la corde (6 px d'écran), elle redevient droite ; Maj : courbe symétrique. Les

@@ -1271,8 +1271,9 @@ noir ; projecteur rectangle ou ovale). Gomme : les encres (flèche, rectangle, e
 ligne, stylo, surligneur) gardent leurs passages (`gommes`, traits ronds) et ne sont
 effacées que dessous ; les passages suivent l'objet (déplacer, redimensionner, courber,
 dupliquer) ; texte, numéro, masque et projecteur sont entiers. Une encre reste prise
-(`touche`) là où il en reste : son axe est sondé en travers (`encreRestePres`), ce qui
-garde un surligneur gommé dans sa longueur. `dessin.js` peint la vue (`peindreVue`, options `cacher`, `ajout`,
+(`touche`) là où il en reste : son axe est sondé en travers jusqu'à 0,95 demi-largeur
+(`encreRestePres`), ce qui garde un surligneur gommé dans sa longueur, même par 2 px de
+bord. `dessin.js` peint la vue (`peindreVue`, options `cacher`, `ajout`,
 `rayon` pour les coins arrondis à l'écran seulement) et compose l'export (`composer`,
 toile de l'image entière puis le cadre). Masques : Pixeliser (avec un écart de luminosité
 tiré d'une `graine` par masque), Flouter (source entière), Bloc noir (rectangle plein).
@@ -1301,10 +1302,11 @@ remplace la v2 depuis le 12/11/2026)
   instrument a le corps à la couleur de son encre (liseré marqué pour une encre très
   foncée ou très pâle) et saute quand elle ou sa taille change. Un objet choisi déplie
   l'outil qui l'a fait, à ses valeurs : ce qu'on y règle va à lui et à la préférence de
-  son outil, pas à l'outil en main (un pas, aucun si rien ne change) ; une variante le
-  change (`changerVariante`, aussi à la touche de la variante). Prendre un autre outil,
-  une variante, ou Stylo, Surligneur, Gomme, défait la sélection ; reprendre l'outil de
-  l'objet choisi la garde. Un texte en saisie déplie l'outil Texte, quel que soit l'outil
+  son outil, pas à l'outil en main (un pas, aucun si rien ne change) ; une variante prise
+  dans son pli le change (`changerVariante`). Prendre un autre outil, la touche d'une
+  variante (« L » : Ligne, prise pour le tracé suivant, l'objet n'est pas changé), ou
+  Stylo, Surligneur, Gomme, défait la sélection ; reprendre l'outil de l'objet choisi la
+  garde. Un texte en saisie déplie l'outil Texte, quel que soit l'outil
   en main. Le focus ne se perd jamais dans un pli qui se replie : il revient au bouton de
   l'outil. Fenêtre étroite (sous 1088 px) : seuls les outils défilent (molette comprise,
   même sur Annuler ou Plus), estompés du côté caché ; Annuler, Rétablir et Plus restent en
@@ -1320,7 +1322,10 @@ remplace la v2 depuis le 12/11/2026)
   posée sur un objet entier (texte, numéro, masque, projecteur par son bord) qu'aucune
   encre atteinte ne recouvre, elle l'enlève en entier, caché dès l'appui, et ne gomme ce
   qu'il couvrait qu'une fois vraiment partie (au-delà du seuil de déplacement) ; ce qui
-  est dessus décide, dans l'ordre de `objetSous` (masques, projecteurs, puis annotations).
+  est dessus décide, dans l'ordre de `objetSous` (masques, projecteurs, puis annotations) :
+  une encre par-dessus l'objet est seule gommée à l'appui, pas celles qu'il cache. Limite
+  connue : la gomme traînée sur un texte ou un numéro troue l'encre cachée dessous
+  (invisible tant que l'objet la couvre).
   Un geste de glissière aller-retour (opacité revenue à sa valeur) ne fait aucun pas. Le recadrage se fait aux quatre équerres des
   coins de l'image (`recadrer`, `null` à l'image entière) ; le Projecteur se prend par son
   bord.
@@ -1798,15 +1803,17 @@ non envoye: <e>`, `surlignage sans fil (<e>): fin montree tout de suite`.
   (Pixeliser aligné sur la grille, petits masques, attaque par candidats sur un texte),
   vue à la taille réelle égale à l'export, temps sur 25 Mpx, Projecteur (P1 à P10 : prise
   par le bord, réunion, alpha, coût du voile), gomme (G1 à G11 : passages, encres
-  effacées dessous seulement, passages qui suivent l'objet, encre prise là où il en reste),
+  effacées dessous seulement, passages qui suivent l'objet, encre prise là où il en reste,
+  jusqu'à son bord),
   flèche courbée à sa poignée (F : courbe par la poignée, poignée bornée, aimant à la
   corde, tête sur la courbe, trait qui passe par la poignée, Maj, bouts et passages qui
-  suivent), version gardée par un geste abandonné,
+  suivent), version gardée par un geste abandonné, aucun numéro de version repris pour un
+  autre contenu (G6),
   `changerVariante` (V) ; `ECHECS : 0` attendu. Étape du job `pages`.
 - `essais/pages/editeur.cjs` (0.4) : la page de l'éditeur dans Chromium, cœur simulé et
   vrai modèle, 243 points : noms et rôles accessibles (contrat de l'essai 12), chaque
   outil, flèche choisie après le tracé et courbée à sa poignée, Gomme au pixel (ce qui
-  est dessus décide, clic qui tremble),
+  est dessus décide, pile d'une encre sur un numéro sur une flèche, clic qui tremble),
   Projecteur, recadrage par chaque coin, sélection, la barre C (l'outil déplié, ce que
   chaque outil déplie, l'objet choisi qui déplie son outil, variante changée sur l'objet,
   instruments à la couleur de l'encre), couleurs, menu « Fermer » et ses issues,

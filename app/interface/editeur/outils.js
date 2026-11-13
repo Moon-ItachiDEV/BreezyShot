@@ -206,12 +206,16 @@ export function installerOutils(ed) {
       passer(p, p);
       // Ce qui est dessus décide. La gomme posée sur un objet entier (texte, numéro, masque,
       // projecteur) qu'aucune encre atteinte ne recouvre : il part en entier, disparaît dès
-      // l'appui, et ce qu'il couvrait n'est pas gommé.
+      // l'appui, et ce qu'il couvrait n'est pas gommé. Une encre par-dessus lui : elle seule
+      // est gommée à l'appui, pas celles qu'il cache.
       const o = ed.modele.objetSous(ed.h.doc, p, tolerance(), ENTIERS);
-      const doc = ed.h.doc;
-      if (o && [...geste.passages.keys()].every((id) => !dessus(doc, ed.objet(id), o))) {
-        geste.passages.clear();
-        ed.gommeEntier = geste.entier = o.id;
+      if (o) {
+        const doc = ed.h.doc;
+        const caches = [...geste.passages.keys()].filter((id) => !dessus(doc, ed.objet(id), o));
+        if (caches.length === geste.passages.size) {
+          geste.passages.clear();
+          ed.gommeEntier = geste.entier = o.id;
+        } else for (const id of caches) geste.passages.delete(id);
       }
       placerRond(e);
       ed.dessiner();
