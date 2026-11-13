@@ -1684,9 +1684,9 @@ impl<S: Source, P: Pilote, A: Atelier> Fil<S, P, A> {
         }
         // Une seule lecture de la position par pas (elle peut être lente).
         let position = self.pilote.as_ref().and_then(|p| p.position());
-        let utile = regles::hauteur_utile(self.reference.hauteur, self.fixes);
-        // Seulement le décalage lu (jamais le pas commandé, C).
-        self.observe = regles::attendu(self.position_gardee, position, utile);
+        // Seulement le décalage lu, en pixels réels de la vue (B, defiler::decalage_px),
+        // jamais le pas commandé (C).
+        self.observe = regles::attendu(self.position_gardee, position);
         let attendu = self.observe;
         let mesure = self.mesurer(attendu, position);
         if parti && pas > 0 && depuis_gardee {
@@ -2066,6 +2066,9 @@ mod tests {
         constats: Arc<Mutex<Vec<u32>>>,
         /// La part visible de la page (`Position::vue`) ; `None` : position illisible.
         vue: Option<f64>,
+        /// La hauteur de la vue qui défile (`Position::hauteur_vue`), en pixels : celle de
+        /// la fausse zone, une ligne.
+        hauteur_vue: i32,
     }
 
     impl Pilote for FauxPilote {
@@ -2107,6 +2110,7 @@ mod tests {
             Some(Position {
                 pour_cent: f64::from(p.position) * 100.0 / f64::from(p.bas.max(1)),
                 vue,
+                hauteur_vue: self.hauteur_vue,
             })
         }
     }
@@ -2256,6 +2260,7 @@ mod tests {
             cran: None,
             constats: Arc::new(Mutex::new(Vec::new())),
             vue: Some(50.0),
+            hauteur_vue: 1,
         }
     }
 
@@ -2536,7 +2541,8 @@ mod tests {
 
     #[test]
     fn fil_attendu_observe_d_apres_la_position() {
-        // Une ligne de zone, une vue de 0,1 % : 999 pixels de parcours, lus exactement.
+        // Une vue d'une ligne (hauteur_vue 1 px) qui montre 0,1 % de la page : 999 pixels de
+        // parcours, lus exactement par defiler::decalage_px.
         let p = page(999);
         let mut pi = pilote(&p, &[Moyen::Message], true);
         pi.vue = Some(0.1);

@@ -17,7 +17,7 @@ use std::time::{Duration, Instant};
 use super::editeur;
 pub use crate::defilement::RECOUVREMENT_MIN;
 use crate::defilement::{Fixes, Limite, Mesure};
-use crate::systeme::defiler::{Moyen, PageTrouvee, Position};
+use crate::systeme::defiler::{self, Moyen, PageTrouvee, Position};
 use crate::systeme::gel::EcranInfo;
 use crate::systeme::Rect;
 
@@ -351,29 +351,6 @@ pub fn pas_de(hauteur_utile: u32) -> i32 {
 /// La hauteur utile d'une zone de `hauteur` pixels avec ses bandes fixes.
 pub fn hauteur_utile(hauteur: u32, fixes: Fixes) -> u32 {
     hauteur.saturating_sub(fixes.haut.saturating_add(fixes.bas))
-}
-
-/// Le décalage attendu d'un pas, en pixels, d'après deux positions lues (UI Automation)
-/// et la hauteur utile de la zone (D10 : départage une mesure ambiguë). `None` sans les
-/// deux positions, ou si la part visible n'est pas lisible.
-pub fn decalage_attendu(
-    avant: Option<Position>,
-    apres: Option<Position>,
-    hauteur_utile: u32,
-) -> Option<i32> {
-    let (a, b) = (avant?, apres?);
-    let vue = b.vue;
-    if !(vue.is_finite() && vue > 0.0 && vue < 100.0)
-        || !a.pour_cent.is_finite()
-        || !b.pour_cent.is_finite()
-        || a.pour_cent < 0.0
-        || b.pour_cent < 0.0
-    {
-        return None;
-    }
-    let h = hauteur_utile as f64;
-    let parcours = h * 100.0 / vue - h;
-    Some(((b.pour_cent - a.pour_cent) / 100.0 * parcours).round() as i32)
 }
 
 /// Vrai si les écrans ont changé (branchés, débranchés, déplacés, autre résolution ou
@@ -855,15 +832,11 @@ fn suite_main(
 
 /// Le décalage attendu d'une image mesurée contre la dernière image gardée (D10, décision
 /// du responsable) : le décalage observé, d'après la position lue à l'image gardée et
-/// maintenant, convertie avec la hauteur de la vue (`hauteur_vue`, pixels) ; une position
-/// inchangée donne 0. Sans positions lisibles, rien : les pixels commandés ne sont jamais
-/// passés à la mesure (C, seconde relecture R6).
-pub fn attendu(
-    gardee: Option<Position>,
-    maintenant: Option<Position>,
-    hauteur_vue: u32,
-) -> Option<i32> {
-    decalage_attendu(gardee, maintenant, hauteur_vue)
+/// maintenant, en pixels réels de la vue qui défile (`defiler::decalage_px`, B) ; une
+/// position inchangée donne 0. Sans positions lisibles, ou si la vue a changé de hauteur,
+/// rien : les pixels commandés ne sont jamais passés à la mesure (C, seconde relecture R6).
+pub fn attendu(gardee: Option<Position>, maintenant: Option<Position>) -> Option<i32> {
+    defiler::decalage_px(&gardee?, &maintenant?)
 }
 
 /// Vrai si un cran du moyen en cours fait plus que la zone ne peut recouvrir : chaque pas
@@ -1268,6 +1241,7 @@ mod tests {
         Some(Position {
             pour_cent,
             vue: 20.0,
+            hauteur_vue: 400,
         })
     }
 
@@ -1523,27 +1497,6 @@ mod tests {
         assert_eq!(pas_de(60), PAS_MIN);
         assert_eq!(hauteur_utile(450, Fixes { haut: 40, bas: 10 }), 400);
         assert_eq!(hauteur_utile(30, Fixes { haut: 40, bas: 10 }), 0);
-    }
-
-    #[test]
-    fn decalage_attendu_d_apres_les_positions() {
-        // Page cinq fois plus haute que la vue : 400 px utiles, parcours 1 600 px.
-        let a = Some(Position {
-            pour_cent: 10.0,
-            vue: 20.0,
-        });
-        let b = Some(Position {
-            pour_cent: 20.0,
-            vue: 20.0,
-        });
-        assert_eq!(decalage_attendu(a, b, 400), Some(160));
-        assert_eq!(decalage_attendu(b, a, 400), Some(-160));
-        assert_eq!(decalage_attendu(None, b, 400), None);
-        let illisible = Some(Position {
-            pour_cent: -1.0,
-            vue: 100.0,
-        });
-        assert_eq!(decalage_attendu(illisible, illisible, 400), None);
     }
 
     #[test]
@@ -2151,15 +2104,32 @@ mod tests {
             Some(Position {
                 pour_cent,
                 vue: 20.0,
+                hauteur_vue: 400,
             })
         };
-        // Observé : 10 % d'un parcours de 1 600 px.
-        assert_eq!(attendu(p(10.0), p(20.0), 400), Some(160));
+        // Observé : vue de 400 px qui montre 20 % de la page, parcours de 1 600 px ; 10 %
+        // de plus = 160 px (B, defiler::decalage_px), dans les deux sens.
+        assert_eq!(attendu(p(10.0), p(20.0)), Some(160));
+        assert_eq!(attendu(p(20.0), p(10.0)), Some(-160));
         // Position inchangée : 0, jamais le pas commandé.
-        assert_eq!(attendu(p(10.0), p(10.0), 400), Some(0));
+        assert_eq!(attendu(p(10.0), p(10.0)), Some(0));
         // Sans position : rien (le pas commandé n'est jamais passé à la mesure).
-        assert_eq!(attendu(None, p(10.0), 400), None);
-        assert_eq!(attendu(None, None, 400), None);
+        assert_eq!(attendu(None, p(10.0)), None);
+        assert_eq!(attendu(p(10.0), None), None);
+        assert_eq!(attendu(None, None), None);
+        // Vue illisible (toute la page visible), ou redimensionnée entre les deux : rien.
+        let toute = Some(Position {
+            pour_cent: 0.0,
+            vue: 100.0,
+            hauteur_vue: 400,
+        });
+        assert_eq!(attendu(p(10.0), toute), None);
+        let plus_haute = Some(Position {
+            pour_cent: 20.0,
+            vue: 20.0,
+            hauteur_vue: 500,
+        });
+        assert_eq!(attendu(p(10.0), plus_haute), None);
     }
 
     // ----- lancement -----

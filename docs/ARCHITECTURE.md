@@ -746,8 +746,9 @@ les ordres reçus (Terminer, Entrée, molette, arrêt), le verrouillage de sessi
 écrans (500 ms), puis une seule action lente : une image mesurée montrée à la course, un pas
 avec sa page posée (deux images identiques, immobiles ou ambiguës ; 400 ms au plus,
 interrompue par Terminer, Entrée, l'arrêt), ou une prise. Chaque image est mesurée contre la
-dernière image gardée ; l'attendu n'est que le décalage lu (positions d'UI Automation),
-jamais le pas commandé. Après chaque pas vers le bas parti et mesuré contre l'image d'avant
+dernière image gardée ; l'attendu n'est que le décalage lu (positions d'UI Automation,
+en pixels réels de la vue par `defiler::decalage_px` : rien si une vue est illisible ou a
+changé de plus de 2 px de haut), jamais le pas commandé. Après chaque pas vers le bas parti et mesuré contre l'image d'avant
 ce pas, l'avance est rendue au défileur (`constater`, 0 compris). Une limite par mémoire
 refusée donne `impossible: memoire`.
 
