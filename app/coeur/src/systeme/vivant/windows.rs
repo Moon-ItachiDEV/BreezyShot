@@ -259,8 +259,8 @@ mod tests {
 
     use ::windows::core::{w, PCWSTR};
     use ::windows::Win32::Foundation::{
-        GetLastError, COLORREF, ERROR_CLASS_ALREADY_EXISTS, HINSTANCE, HWND, LPARAM, LRESULT, RECT,
-        WPARAM,
+        GetLastError, SetLastError, COLORREF, ERROR_CLASS_ALREADY_EXISTS, ERROR_SUCCESS, HINSTANCE,
+        HWND, LPARAM, LRESULT, RECT, WPARAM,
     };
     use ::windows::Win32::Graphics::Dwm::{
         DwmFlush, DwmSetWindowAttribute, DWMWA_BORDER_COLOR, DWMWA_COLOR_NONE,
@@ -386,9 +386,22 @@ mod tests {
         pomper();
     }
 
+    /// Objets GDI du processus. Zéro est un vrai compte (processus de tests sans fenêtre,
+    /// prises rendues) : seul un zéro avec une erreur Windows fait échouer.
     fn objets_gdi() -> u32 {
-        // SAFETY : pseudo-poignée du processus courant.
-        unsafe { GetGuiResources(GetCurrentProcess(), GR_GDIOBJECTS) }
+        // SAFETY : pseudo-poignée du processus courant ; l'erreur est remise à zéro avant.
+        unsafe {
+            SetLastError(ERROR_SUCCESS);
+            let n = GetGuiResources(GetCurrentProcess(), GR_GDIOBJECTS);
+            if n == 0 {
+                let erreur = GetLastError();
+                assert_eq!(
+                    erreur, ERROR_SUCCESS,
+                    "GetGuiResources a echoue : {erreur:?}"
+                );
+            }
+            n
+        }
     }
 
     fn vide() -> Pixels {
@@ -985,7 +998,6 @@ mod tests {
             prise.prendre(&mut px).unwrap();
         }
         let avant = objets_gdi();
-        assert!(avant > 0, "GetGuiResources a echoue");
 
         let mut prise = facade::ouvrir(zone).unwrap();
         let ouverte = objets_gdi();
@@ -996,6 +1008,9 @@ mod tests {
         }
         assert_eq!(px.rgba.as_ptr(), adresse, "destination reallouee");
         let pendant = objets_gdi();
+        // La prise ouverte tient un DC et une section DIB : un compteur qui ne les voit pas
+        // rendrait les contrôles de fuite ci-dessous muets.
+        assert!(pendant > avant, "compteur GDI muet : {avant} -> {pendant}");
         drop(prise);
         let rendue = objets_gdi();
         for _ in 0..50 {
