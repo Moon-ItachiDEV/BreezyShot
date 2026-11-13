@@ -418,6 +418,8 @@ export function installerTexte(ed, { appeler, message, reduites }) {
     calque.addEventListener("blur", peindre);
     // Tout le clavier, où que soit le focus : rien ne passe aux raccourcis de l'éditeur.
     const ecoute = (e) => {
+      // Alt (Alt + F4, menus du système) : rien n'est annulé, comme dans l'éditeur.
+      if (e.altKey) return;
       e.stopImmediatePropagation();
       if (!l || l.calque !== calque) return;
       const k = e.key;
@@ -501,6 +503,9 @@ export function installerTexte(ed, { appeler, message, reduites }) {
     recu,
     copie,
     ouvert: () => !!l,
+    // Toute ouverture d'un menu ou d'une bulle (menu « Fermer » demandé par le cœur compris)
+    // ferme d'abord le calque, sans lui rendre le focus.
+    fermer: () => fermer(false),
     remiseAZero: () => {
       premiers.clear();
       fermer(false);
