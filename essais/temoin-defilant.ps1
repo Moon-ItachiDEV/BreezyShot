@@ -32,8 +32,8 @@
 #   hwnd <h> / pid <p> / fenetre x,y lxh / page x,y lxh / entete x,y lxh (avec -EnTete) /
 #   contenu <px> / visible <px> / fait <n> / crans <n> / position <p> <ms> (une ligne par
 #   changement de la position, en pixels, avec l'heure en millisecondes Unix UTC).
-# Commande : l'essai ecrit « haut <n> » dans « $Fichier.cmd » ; le temoin remonte en haut,
-# efface la commande et ecrit « fait <n> ».
+# Commande : l'essai ecrit "haut <n>" dans "$Fichier.cmd" ; le temoin remonte en haut,
+# efface la commande et ecrit "fait <n>".
 #   pwsh -NoProfile -File essais/temoin-defilant.ps1 -X 40 -Y 80 -Fichier t.txt [-EnTete]
 
 param(
@@ -114,7 +114,7 @@ public static class PageDefilante {
             }
         return o;
     }
-    // BGRA (4 octets par pixel) vers BGR (3 octets, lignes de « pas » octets) pour un BMP 24 bits.
+    // BGRA (4 octets par pixel) vers BGR (3 octets, lignes de "pas" octets) pour un BMP 24 bits.
     public static void VersBgr(byte[] bgra, int largeur, int hauteur, System.IntPtr dest, int pas) {
         var ligne = new byte[pas];
         for (int y = 0; y < hauteur; y++) {
@@ -139,12 +139,12 @@ $CONTENU = $Lignes * $LIGNE
 if ($Png -ne '') {
     Add-Type -AssemblyName System.Drawing
     New-Item -ItemType Directory -Force -Path $Png | Out-Null
-    function Ecrire-Bmp([byte[]]$Bgra, [int]$L, [int]$H, [string]$Chemin) {
-        $b = [System.Drawing.Bitmap]::new($L, $H, [System.Drawing.Imaging.PixelFormat]::Format24bppRgb)
+    function Ecrire-Bmp([byte[]]$Bgra, [int]$Larg, [int]$Haute, [string]$Chemin) {
+        $b = [System.Drawing.Bitmap]::new($Larg, $Haute, [System.Drawing.Imaging.PixelFormat]::Format24bppRgb)
         try {
-            $r = [System.Drawing.Rectangle]::new(0, 0, $L, $H)
+            $r = [System.Drawing.Rectangle]::new(0, 0, $Larg, $Haute)
             $d = $b.LockBits($r, [System.Drawing.Imaging.ImageLockMode]::WriteOnly, [System.Drawing.Imaging.PixelFormat]::Format24bppRgb)
-            try { $P::VersBgr($Bgra, $L, $H, $d.Scan0, $d.Stride) } finally { $b.UnlockBits($d) }
+            try { $P::VersBgr($Bgra, $Larg, $Haute, $d.Scan0, $d.Stride) } finally { $b.UnlockBits($d) }
             $t = "$Chemin.tmp"
             $b.Save($t, [System.Drawing.Imaging.ImageFormat]::Bmp)
             Move-Item -LiteralPath $t -Destination $Chemin -Force
@@ -173,21 +173,21 @@ $script:enAttente = 0
 $script:base = [System.Collections.Generic.List[string]]::new()
 
 function Ecrire-Etat {
-    $l = [System.Collections.Generic.List[string]]::new()
-    foreach ($b in $script:base) { $l.Add($b) }
-    $l.Add("fait $($script:fait)")
-    $l.Add("crans $($script:crans)")
-    foreach ($p in $script:positions) { $l.Add($p) }
+    $lignesEtat = [System.Collections.Generic.List[string]]::new()
+    foreach ($b in $script:base) { $lignesEtat.Add($b) }
+    $lignesEtat.Add("fait $($script:fait)")
+    $lignesEtat.Add("crans $($script:crans)")
+    foreach ($pos in $script:positions) { $lignesEtat.Add($pos) }
     $t = "$Fichier.tmp"
-    [System.IO.File]::WriteAllLines($t, $l, [System.Text.Encoding]::ASCII)
+    [System.IO.File]::WriteAllLines($t, $lignesEtat, [System.Text.Encoding]::ASCII)
     for ($i = 0; $i -lt 20; $i++) {
         try { [System.IO.File]::Move($t, $Fichier, $true); $script:sale = $false; return }
         catch { Start-Sleep -Milliseconds 5 }
     }
 }
 function Heure-Ms { return [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() }
-function Rect-Texte([double]$x, [double]$y, [double]$l, [double]$h) {
-    return "$([int][math]::Round($x)),$([int][math]::Round($y)) $([int][math]::Round($l))x$([int][math]::Round($h))"
+function Rect-Texte([double]$rx, [double]$ry, [double]$rl, [double]$rh) {
+    return "$([int][math]::Round($rx)),$([int][math]::Round($ry)) $([int][math]::Round($rl))x$([int][math]::Round($rh))"
 }
 
 $f = [System.Windows.Window]::new()
@@ -208,13 +208,13 @@ $haut = if ($EnTete) { $P::HauteurEnTete } else { 0 }
 $f.Left = $X / $k; $f.Top = $Y / $k
 $f.Width = $Largeur / $k; $f.Height = ($Hauteur + $haut) / $k
 
-function Image-De([byte[]]$Bgra, [int]$L, [int]$H) {
-    $wb = [System.Windows.Media.Imaging.WriteableBitmap]::new($L, $H, 96, 96, [System.Windows.Media.PixelFormats]::Bgra32, $null)
-    $wb.WritePixels([System.Windows.Int32Rect]::new(0, 0, $L, $H), $Bgra, $L * 4, 0)
+function Image-De([byte[]]$Bgra, [int]$Larg, [int]$Haute) {
+    $wb = [System.Windows.Media.Imaging.WriteableBitmap]::new($Larg, $Haute, 96, 96, [System.Windows.Media.PixelFormats]::Bgra32, $null)
+    $wb.WritePixels([System.Windows.Int32Rect]::new(0, 0, $Larg, $Haute), $Bgra, $Larg * 4, 0)
     $wb.Freeze()
     $img = [System.Windows.Controls.Image]::new()
     $img.Source = $wb
-    $img.Width = $L; $img.Height = $H
+    $img.Width = $Larg; $img.Height = $Haute
     $img.Stretch = [System.Windows.Media.Stretch]::None
     $img.HorizontalAlignment = [System.Windows.HorizontalAlignment]::Left
     $img.VerticalAlignment = [System.Windows.VerticalAlignment]::Top
