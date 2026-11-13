@@ -329,6 +329,16 @@ pub fn identifiant_fenetre(fenetre: &tauri::WebviewWindow) -> Option<isize> {
 }
 
 /// Position de la souris en pixels réels (`GetCursorPos`), sans passer par le fil principal.
+/// Vrai si le bouton gauche ou droit de la souris est enfoncé en ce moment.
+pub fn bouton_souris_enfonce() -> bool {
+    use windows::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, VK_LBUTTON, VK_RBUTTON};
+    // SAFETY : simple lecture de l'état des boutons.
+    unsafe {
+        (GetAsyncKeyState(i32::from(VK_LBUTTON.0)) as u16 & 0x8000) != 0
+            || (GetAsyncKeyState(i32::from(VK_RBUTTON.0)) as u16 & 0x8000) != 0
+    }
+}
+
 pub fn position_souris() -> Option<(f64, f64)> {
     let mut p = POINT::default();
     // SAFETY : `p` reçoit la position.

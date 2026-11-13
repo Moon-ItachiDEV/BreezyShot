@@ -30,16 +30,14 @@
 # Cas A, texte (copie, vignette éteinte, animations réduites) :
 # (1) `texte langues` (une ligne, venue avec l'activation) contient en-US ; mémoire au
 #     repos sans licence notée ;
-# (2) menu (lu par position) : « Capture défilante<tab>Ctrl + Maj + 5 » en cinquième (0.6,
-#     avec la licence), « Copier le texte<tab>Ctrl + Maj + T » en sixième, séparateur,
+# (2) menu (lu par position) : « Capture défilante<tab>Ctrl + Maj + 5 » après la dernière
+#     zone (0.6, avec la licence), puis « Copier le texte<tab>Ctrl + Maj + T », séparateur,
 #     « Historique<tab>Ctrl + Maj + H » ; Échap le ferme ;
 # (3) presse-papiers témoin ; Ctrl+Maj+T : `DemandeCapture texte`, `selection montree …
 #     mode texte` ; glisser réel autour des trois lignes : `zone texte` exacte, `Selection
 #     -> Lecture`, écran figé encore visible 100 ms après le relâcher (guetté toutes les
-#     2 ms), caché ensuite (≤ 1,5 s + surlignage réduit 0,49 s + marge) ; `texte lu 3
-#     lignes 11 mots` ; `selection surlignage … 3 lignes` (les lignes copiées surlignées) ;
-#     presse-papiers = les trois lignes séparées par CR LF, exactement ; `bandeau affiche …
-#     reussite` ;
+#     2 ms), caché ensuite (≤ 1,5 s + marge) ; `texte lu 3 lignes 11 mots` ; presse-papiers
+#     = les trois lignes séparées par CR LF, exactement ; `bandeau affiche … reussite` ;
 #     temps notés ; (3b) la ligne de 12 px : lue, notée ;
 # (4) zone blanche : `texte vide`, presse-papiers inchangé, `bandeau affiche … erreur`,
 #     `bandeau termine` entre 3,8 et 5 s (heures du journal) sans clic ;
@@ -229,6 +227,7 @@ function Demarrer-Cas([string]$Dossier, [string]$Quoi, [switch]$Vignette, [switc
     $bandeaux = Compter-Motif -Motif 'bandeau pret$' -Dossier $Dossier
     $vignettes = Compter-Motif -Motif 'vignette prete$' -Dossier $Dossier
     $langues = Compter-Motif -Motif 'texte (langues|non pris en charge)' -Dossier $Dossier
+    $script:dossierCas = $Dossier
     try { $proc = Demarrer-App -Dossier $Dossier }
     finally {
         Remove-Item Env:BREEZYSHOT_ESSAI_CAPTURABLE -ErrorAction SilentlyContinue
@@ -844,57 +843,14 @@ public static uint Crc32(byte[] o) {
             if ($E::GetForegroundWindow() -ne $H) { throw "$Quoi : la fenêtre n'est pas revenue au premier plan ($($E::Decrire($E::GetForegroundWindow())))" }
         }
 
-        # --- Menu de l'icône (essai 08) -----------------------------------------------------
-        # Ouvre le vrai menu (message de Windows au clic droit à la fenêtre de l'icône) et le
-        # lit par l'API des menus : { Fenetre, Menu, Textes, Lus }.
-        function Ouvrir-Menu([string]$Quoi) {
-            $icones = $E::Fenetres($script:proc.Id, 'tray_icon_app')
-            if ($icones.Length -lt 1) { throw "$Quoi : aucune fenêtre tray_icon_app (menu de l'icône impossible à ouvrir)" }
-            $avant = @($E::Visibles('#32768') | ForEach-Object { [long]$_ })
-            foreach ($h in $icones) { [void]$E::PostMessage($h, 6002, [IntPtr]::Zero, [IntPtr]0x205) }
-            $limite = [DateTime]::UtcNow.AddSeconds(3)
-            do {
-                foreach ($f in @($E::Visibles('#32768') | Where-Object { $avant -notcontains [long]$_ })) {
-                    $hm = $E::MenuDe($f)
-                    if ($hm -eq [IntPtr]::Zero) { continue }
-                    $t = $E::Textes($hm)
-                    if ($null -ne $t -and $t.Length -gt 0) {
-                        $lus = (@($t) | ForEach-Object { "« $($_ -replace "`t", '<tab>') »" }) -join ', '
-                        return [pscustomobject]@{ Fenetre = $f; Menu = $hm; Textes = @($t); Lus = $lus }
-                    }
-                }
-                Start-Sleep -Milliseconds 50
-            } while ([DateTime]::UtcNow -lt $limite)
-            throw "$Quoi : le menu de l'icône ne s'ouvre pas en 3 s"
+        # --- Menu de l'icône ------------------------------------------------------------------
+        # Le vrai menu (clic droit sur l'icône, menu web lu par UI Automation) : commun.ps1.
+        function Ouvrir-Menu([string]$Quoi, [string]$Dossier = $script:dossierCas) {
+            return (Ouvrir-Menu-Icone $script:proc.Id $Dossier $Quoi)
         }
-        # Échap ferme le menu sans rien choisir (vérifié : la fenêtre du menu part). Comme
-        # les essais 08 et 10, Échap part sans la garde de premier plan : un menu de l'icône
-        # ouvert par message ne donne pas toujours le premier plan à l'app, et le menu ouvert
-        # capte le clavier (rien d'autre ne le reçoit). S'il reste ouvert : WM_CANCELMODE à
-        # la fenêtre de l'icône.
-        function Fermer-Menu($M, [string]$Quoi) {
-            $ouvert = { @($E::Visibles('#32768') | Where-Object { [long]$_ -eq [long]$M.Fenetre }).Count -gt 0 }
-            $E::AppuyerGlobal($AUCUN, $ECHAP)
-            $limite = [DateTime]::UtcNow.AddSeconds(2)
-            while ((& $ouvert) -and [DateTime]::UtcNow -lt $limite) { Start-Sleep -Milliseconds 50 }
-            if (& $ouvert) {
-                Write-Host "$Quoi : Échap n'a pas fermé le menu, WM_CANCELMODE"
-                foreach ($h in $E::Fenetres($script:proc.Id, 'tray_icon_app')) { [void]$E::PostMessage($h, [uint32]0x1F, [IntPtr]::Zero, [IntPtr]::Zero) }
-                $limite = [DateTime]::UtcNow.AddSeconds(2)
-                while ((& $ouvert) -and [DateTime]::UtcNow -lt $limite) { Start-Sleep -Milliseconds 50 }
-            }
-            if (& $ouvert) { throw "$Quoi : ni Échap ni WM_CANCELMODE n'ont fermé le menu" }
-            Start-Sleep -Milliseconds 200
-        }
-        # Clic réel au centre de l'entrée dont le texte vaut exactement $Texte, ou commence
-        # par « $Texte<tab> ».
+        function Fermer-Menu($M, [string]$Quoi) { Fermer-Menu-Icone $M $Quoi }
         function Cliquer-Entree($M, [string]$Texte, [string]$Quoi) {
-            $i = -1
-            for ($k = 0; $k -lt $M.Textes.Count; $k++) { if ($M.Textes[$k] -ceq $Texte -or $M.Textes[$k].StartsWith("$Texte`t", [StringComparison]::Ordinal)) { $i = $k; break } }
-            if ($i -lt 0) { throw "$Quoi : pas d'entrée « $Texte » ($($M.Lus))" }
-            $r = [BreezyShotEssai.Historique+RECT]::new()
-            if (-not $E::GetMenuItemRect([IntPtr]::Zero, $M.Menu, [uint32]$i, [ref]$r)) { throw "$Quoi : rectangle de « $Texte » illisible" }
-            $E::Cliquer([int](($r.Left + $r.Right) / 2), [int](($r.Top + $r.Bottom) / 2))
+            Cliquer-Ligne-Menu $M $Texte $Quoi
             $E::Poser($REPOS_X, $REPOS_Y)
         }
 
@@ -904,7 +860,7 @@ public static uint Crc32(byte[] o) {
             $vus = Compter-Motif -Motif 'menu: reglages$' -Dossier $Dossier
             $fen = Compter-Motif -Motif 'reglages fenetre \d+$' -Dossier $Dossier
             $pretes = Compter-Motif -Motif 'reglages page prete$' -Dossier $Dossier
-            $m = Ouvrir-Menu $Quoi
+            $m = Ouvrir-Menu $Quoi $Dossier
             Cliquer-Entree $m 'Réglages' $Quoi
             $null = Attendre-Suivante 'menu: reglages$' $Dossier $vus "$Quoi : menu: reglages" 5
             $l = Attendre-Suivante 'reglages fenetre (\d+)$' $Dossier $fen "$Quoi : fenêtre des Réglages" 10
@@ -1169,7 +1125,7 @@ public static uint Crc32(byte[] o) {
                 Verifier '(L1) sans licence, la sonde des langues ne tourne pas (aucune ligne texte langues)' ((Compter-Motif -Motif 'texte (langues|non pris en charge)' -Dossier $da) -eq 0) (Derniere-Ligne -Motif 'texte (langues|non pris)' -Dossier $da) | Out-Null
                 $m = Ouvrir-Menu '(L1)'
                 $pro = @($m.Textes | Where-Object { $_.StartsWith('Historique', [StringComparison]::Ordinal) -or $_.StartsWith('Copier le texte', [StringComparison]::Ordinal) })
-                Verifier '(L1) menu sans « Historique » ni « Copier le texte » (8 positions)' (($pro.Count -eq 0) -and ($m.Textes.Count -eq 8)) $m.Lus | Out-Null
+                Verifier '(L1) menu sans « Historique » ni « Copier le texte » (9 positions)' (($pro.Count -eq 0) -and ($m.Textes.Count -eq 9)) $m.Lus | Out-Null
                 Fermer-Menu $m '(L1)'
                 $h = Tenir-Ailleurs $VK_H 'h-sans'
                 $t = Tenir-Ailleurs $VK_T 't-sans'
@@ -1224,14 +1180,14 @@ public static uint Crc32(byte[] o) {
             Point '(2) menu avec la licence' {
                 $m = Ouvrir-Menu '(2)'
                 $t = $m.Textes
-                # 0.6 : avec la licence, « Capture défilante » est la cinquième entrée, avant
-                # « Copier le texte » (contrat 0.6, §7.3) ; les réglages v3 du cas reçoivent son
-                # défaut Ctrl+Maj+5 à la mise à niveau.
-                $ok = ($t.Count -ge 8) -and ($t[4] -ceq "Capture défilante`tCtrl + Maj + 5") -and ($t[5] -ceq "Copier le texte`tCtrl + Maj + T") -and ($t[6] -eq '') -and ($t[7] -ceq "Historique`tCtrl + Maj + H")
-                Verifier '(2) « Capture défilante<tab>Ctrl + Maj + 5 » en cinquième, « Copier le texte<tab>Ctrl + Maj + T » en sixième, séparateur, « Historique<tab>Ctrl + Maj + H »' $ok $m.Lus | Out-Null
+                # Piste A « Liste » : … séparateur, dernière zone, Capture défilante (0.6, avec
+                # la licence ; les réglages v3 du cas reçoivent son défaut Ctrl+Maj+5 à la mise
+                # à niveau), Copier le texte, séparateur, Historique, Réglages.
+                $ok = ($t.Count -ge 10) -and ($t[5] -ceq "Capture défilante`tCtrl + Maj + 5") -and ($t[6] -ceq "Copier le texte`tCtrl + Maj + T") -and ($t[7] -eq '') -and ($t[8] -ceq "Historique`tCtrl + Maj + H") -and ($t[9] -ceq 'Réglages')
+                Verifier '(2) « Capture défilante<tab>Ctrl + Maj + 5 » puis « Copier le texte<tab>Ctrl + Maj + T » après la dernière zone, séparateur, « Historique<tab>Ctrl + Maj + H » puis « Réglages »' $ok $m.Lus | Out-Null
                 $menus = Compter-Motif -Motif 'menu: ' -Dossier $da
                 Fermer-Menu $m '(2)'
-                Verifier '(2) Échap ferme le menu, aucune entrée choisie' ((Compter-Motif -Motif 'menu: ' -Dossier $da) -eq $menus) | Out-Null
+                Verifier '(2) Échap ferme le menu, aucune entrée choisie' ($script:FermeParEchap -and ((Compter-Motif -Motif 'menu: ' -Dossier $da) -eq $menus)) | Out-Null
             }
 
             # Le témoin de texte, à gauche, sous la place du bandeau.
@@ -1252,9 +1208,7 @@ public static uint Crc32(byte[] o) {
                 $cache = $E::TracerPuisGuetter($zone3.X0, $zone3.Y0, $zone3.X1, $zone3.Y1, $fige, 3000)
                 $E::Poser($REPOS_X, $REPOS_Y)
                 Noter-Mesure -Nom 'relache -> ecran fige cache (guette toutes les 2 ms)' -Valeur $cache -Unite 'ms'
-                # La lecture attendue au plus 1 500 ms, puis le surlignage des lignes copiées
-                # (animations réduites : 120 + 220 + 120 ms, et 30 ms de marge).
-                Verifier '(3) écran figé encore visible 100 ms après le relâcher, caché ensuite (≤ 1 500 ms + surlignage 490 + 200)' (($cache -ge 100) -and ($cache -le 2190)) "caché à $cache ms (-1 : déjà caché au relâcher)" | Out-Null
+                Verifier '(3) écran figé encore visible 100 ms après le relâcher, caché ensuite (≤ 1 500 ms + 200)' (($cache -ge 100) -and ($cache -le 1700)) "caché à $cache ms (-1 : déjà caché au relâcher)" | Out-Null
                 $z = Attendre-Motif -Motif 'zone texte ' -Dossier $da -DelaiS 5 -Quoi '(3) zone texte'
                 Verifier '(3) zone texte = la zone tracée' ($z -match "zone texte $(Texte-Zone $zone3)$") "$z ; tracée $(Texte-Zone $zone3)" | Out-Null
                 $null = Attendre-Suivante 'etat Selection -> Lecture \(TexteChoisi\)$' $da $lectures '(3) Selection -> Lecture' 5
@@ -1263,8 +1217,6 @@ public static uint Crc32(byte[] o) {
                 if ($lu -match 'en (\d+) ms') { Noter-Mesure -Nom 'lecture des trois lignes (budget 400)' -Valeur ([int]$Matches[1]) -Unite 'ms' }
                 $copie = Attendre-Motif -Motif 'texte copie' -Dossier $da -DelaiS 5 -Quoi '(3) texte copie'
                 Verifier '(3) texte copie' ($copie -match 'texte copie$') $copie | Out-Null
-                $surligne = Attendre-Motif -Motif 'selection surlignage \d+ \d+ lignes$' -Dossier $da -DelaiS 5 -Quoi '(3) surlignage'
-                Verifier '(3) les trois lignes copiées surlignées sur la zone' ($surligne -match 'selection surlignage \d+ 3 lignes$') $surligne | Out-Null
                 $attendu = $LIGNES_TEMOIN -join "`r`n"
                 $pp = Lire-Texte
                 Verifier '(3) presse-papiers = les trois lignes, séparées par CR LF, exactement' ($pp -ceq $attendu) "lu « $(Montrer $pp) »" | Out-Null
@@ -1273,7 +1225,7 @@ public static uint Crc32(byte[] o) {
                 $chrono = Attendre-Motif -Motif 'chrono texte relache-gel-cache (\d+) relache-message (\d+)$' -Dossier $da -DelaiS 5 -Quoi '(3) chrono'
                 $null = $chrono -match 'relache-gel-cache (\d+) relache-message (\d+)$'
                 Noter-Mesure -Nom 'relache -> gel cache (journal)' -Valeur ([int]$Matches[1]) -Unite 'ms'
-                Noter-Mesure -Nom 'relache -> Texte copie (budget max(120, lecture) + surlignage 490 + 150)' -Valeur ([int]$Matches[2]) -Unite 'ms'
+                Noter-Mesure -Nom 'relache -> Texte copie (budget max(400, lecture) + 150)' -Valeur ([int]$Matches[2]) -Unite 'ms'
                 $moteur = Derniere-Ligne -Motif 'texte moteur cree en \d+ ms$' -Dossier $da
                 if ($null -ne $moteur -and $moteur -match 'en (\d+) ms$') { Noter-Mesure -Nom 'texte moteur cree (R15 : 150)' -Valeur ([int]$Matches[1]) -Unite 'ms' }
             }
@@ -1788,7 +1740,7 @@ public static uint Crc32(byte[] o) {
                 Fermer-Reglages $fen $db '(L4)'
                 $m = Ouvrir-Menu '(L4)'
                 $pro = @($m.Textes | Where-Object { $_.StartsWith('Historique', [StringComparison]::Ordinal) -or $_.StartsWith('Copier le texte', [StringComparison]::Ordinal) })
-                Verifier '(L4) entrées « Historique » et « Copier le texte » parties du menu' (($pro.Count -eq 0) -and ($m.Textes.Count -eq 8)) $m.Lus | Out-Null
+                Verifier '(L4) entrées « Historique » et « Copier le texte » parties du menu' (($pro.Count -eq 0) -and ($m.Textes.Count -eq 9)) $m.Lus | Out-Null
                 Fermer-Menu $m '(L4)'
                 Verifier '(L4) Ctrl+Maj+H rendu à Windows' ((Tenir-Ailleurs $VK_H 'h-retiree') -eq 'tenu') | Out-Null
                 Fermer-Cas $script:proc $db '(L4)'

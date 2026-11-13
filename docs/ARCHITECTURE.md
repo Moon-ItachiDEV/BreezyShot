@@ -397,8 +397,10 @@ dans le dossier temporaire du système (`systeme::dossier_secours()`), sous le n
 
 ### 3.4 Ligne de commande et instance unique
 
-- Une seule instance. Lancer `breezyshot.exe` une seconde fois ne fait rien de visible : la
-  première écrit `seconde instance refusee` dans le journal, la seconde sort avec le code 0.
+- Une seule instance. Lancer `breezyshot.exe` une seconde fois (icône épinglée à la barre des
+  tâches, menu Démarrer) ouvre les Réglages dans la première, ou les ramène devant (depuis la
+  0.5.1) : la première écrit `seconde instance: reglages ouverts`, la seconde sort avec le
+  code 0. `--desinstaller` reçu par une seconde instance reste refusé (`seconde instance refusee`).
 - `breezyshot.exe --quitter` : demande à l'instance en cours de se fermer proprement (libère
   les raccourcis, retire l'icône, écrit `arret propre`), puis sort. Sans instance en cours,
   sort tout de suite avec le code 0. C'est le moyen qu'utilisent les essais pour fermer l'app.
@@ -419,7 +421,7 @@ dans le dossier temporaire du système (`systeme::dossier_secours()`), sous le n
   `icone invisible` (toujours `invisible` sous Linux, où Tauri ne donne pas ce rectangle).
 - Lignes du journal sur lesquelles les essais s'appuient : `demarrage BreezyShot <version>`,
   `systeme windows build <n>`, `echelle par ecran v2: oui|non|sans objet`, `icone installee`
-  (ou `icone non installee: …`), `icone visible|invisible`, `pret` (tout est en place), `seconde instance refusee`,
+  (ou `icone non installee: …`), `icone visible|invisible`, `pret` (tout est en place), `seconde instance: reglages ouverts`,
   `--quitter recu: fermeture demandee`, `arret propre`, `--quitter: aucune instance en cours`.
 - `app/interface/index.html` est une page vide : elle n'existe que parce que Tauri veut un
   dossier d'interface non vide.
@@ -468,6 +470,24 @@ dans le dossier temporaire du système (`systeme::dossier_secours()`), sous le n
   `ATTENTE_MENU`) en cinquième, avant « Copier le texte », seulement avec une licence (et
   sous Windows) ; le menu a donc au plus six captures. Sans licence, le menu est celui de
   la 0.5 sans licence.
+  **Depuis la 0.5.2 (piste A « Liste », choisie le 13/11/2026)** : sous Windows et macOS, le
+  menu est une fenêtre web (`fenetres::menu`, page `menu/menu.html`), parce que le menu
+  natif ne se style pas. Un clic gauche OU droit sur l'icône (`Evenement::ClicIcone`, avec
+  le rectangle de l'icône) l'ouvre au-dessus d'elle, au-dessus de la barre des tâches, bord
+  droit à 44 px à droite du centre de l'icône, borné à la zone utile (`menu::placer`, pur,
+  testé) ; un second clic le ferme. Il se ferme aussi au choix, sur Échap ou Tab, au clic
+  ailleurs (perte du focus), et quand une capture démarre. La fenêtre est créée cachée à la
+  première ouverture, puis gardée cachée et réutilisée. Groupes : les captures (zone, écran,
+  fenêtre) ; « Refaire la dernière zone », « Capture défilante » (0.6, avec une licence,
+  dans l'ordre `ORDRE_MENU`, §3.10) et « Copier le texte » ; « Historique » et « Réglages » ;
+  « Quitter BreezyShot ». Pendant une capture défilante, le menu ne s'ouvre pas, sauf pour
+  Quitter (§3.10). Icônes 16 px
+  (« Curseurs » pour Réglages), raccourcis à droite en `text-2`, faux verre peint
+  (`acrylic-solid`, `shadow-8`). À l'ouverture, le moulinet de l'icône fait un quart de
+  tour (`icone::tourner` : images tournées posées 420 ms, courbe ressort). Journal : `icone:
+  clic`, `menu fenetre <hwnd>`, `menu page prete`, `menu ouvert`, `menu ferme`, puis
+  `menu: <entrée>` comme avant (l'entrée est traitée au tour suivant de la boucle). Sous
+  Linux (Tauri n'y rapporte pas les clics sur l'icône), le menu natif reste.
 - Info-bulle : « BreezyShot ».
 
 ### 3.6 Capture d'une zone (assemblage des étapes 4 à 6)

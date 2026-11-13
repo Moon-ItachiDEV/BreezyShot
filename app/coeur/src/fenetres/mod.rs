@@ -12,6 +12,7 @@ pub mod defilante;
 pub mod editeur;
 pub mod historique;
 pub mod installateur;
+pub mod menu;
 mod place;
 pub mod reglages;
 pub mod selection;
