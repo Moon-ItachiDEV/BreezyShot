@@ -38,7 +38,7 @@
 use std::cell::{Cell, RefCell};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender, SyncSender, TryRecvError};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, TryLockError};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
@@ -59,7 +59,8 @@ use ::windows::Win32::UI::Accessibility::{
     ScrollAmount_NoAmount, ScrollAmount_SmallDecrement, ScrollAmount_SmallIncrement,
     TreeScope_Children, TreeScope_Descendants, TreeScope_Subtree, UIA_BoundingRectanglePropertyId,
     UIA_ControlTypePropertyId, UIA_IsScrollPatternAvailablePropertyId, UIA_ScrollBarControlTypeId,
-    UIA_ScrollPatternId, UIA_ScrollVerticallyScrollablePropertyId,
+    UIA_ScrollPatternId, UIA_ScrollVerticalScrollPercentPropertyId,
+    UIA_ScrollVerticalViewSizePropertyId, UIA_ScrollVerticallyScrollablePropertyId,
 };
 use ::windows::Win32::UI::HiDpi::PhysicalToLogicalPointForPerMonitorDPI;
 use ::windows::Win32::UI::Input::KeyboardAndMouse::{
@@ -119,7 +120,8 @@ const ELEMENTS_MAX: i32 = 64;
 /// Au plus tant de fenêtres filles regardées par fenêtre.
 const FILLES_MAX: usize = 4000;
 
-/// Attente de l'arrêt du fil du crochet (`Drop` d'`Ecoute`).
+/// Attente, en tout, de la fin d'un rappel en cours et de l'arrêt du fil du crochet (`Drop`
+/// d'`Ecoute`).
 const ARRET_MAX: Duration = Duration::from_secs(1);
 
 /// Attente de la pose du crochet.
@@ -615,6 +617,7 @@ fn pages_automation(
 
 /// Le `ScrollPattern` de la zone, et la hauteur de son élément.
 struct Trouve {
+    element: IUIAutomationElement,
     motif: IUIAutomationScrollPattern,
     hauteur: i32,
 }
@@ -633,6 +636,7 @@ fn defilable_sous(element: &IUIAutomationElement, point: (i32, i32)) -> Option<T
             return None;
         }
         Some(Trouve {
+            element: element.clone(),
             motif,
             hauteur: rect.hauteur,
         })
@@ -698,14 +702,45 @@ fn chercher(
     None
 }
 
-fn lire_position(motif: &IUIAutomationScrollPattern) -> Option<Position> {
+/// Les trois propriétés de la position et le `ScrollPattern`, ramenés en une seule demande à
+/// l'autre app (Chromium répond lentement à chaque lecture).
+fn cache_position(auto: &IUIAutomation) -> ::windows::core::Result<IUIAutomationCacheRequest> {
     // SAFETY : appels COM du fil du client.
     unsafe {
-        let defilable = motif.CurrentVerticallyScrollable().ok()?.as_bool();
-        let pour_cent = motif.CurrentVerticalScrollPercent().ok()?;
-        let vue = motif.CurrentVerticalViewSize().ok()?;
-        position_lue(defilable, pour_cent, vue)
+        let cache = auto.CreateCacheRequest()?;
+        cache.AddPattern(UIA_ScrollPatternId)?;
+        cache.AddProperty(UIA_ScrollVerticallyScrollablePropertyId)?;
+        cache.AddProperty(UIA_ScrollVerticalScrollPercentPropertyId)?;
+        cache.AddProperty(UIA_ScrollVerticalViewSizePropertyId)?;
+        Ok(cache)
     }
+}
+
+/// La position, en une demande (`BuildUpdatedCache`) ; à défaut, en trois lectures.
+fn lire_position(t: &Trouve, cache: Option<&IUIAutomationCacheRequest>) -> Option<Position> {
+    // SAFETY : appels COM du fil du client.
+    let en_cache = cache.and_then(|c| unsafe {
+        let element = t.element.BuildUpdatedCache(c).ok()?;
+        let motif: IUIAutomationScrollPattern =
+            element.GetCachedPatternAs(UIA_ScrollPatternId).ok()?;
+        Some((
+            motif.CachedVerticallyScrollable().ok()?.as_bool(),
+            motif.CachedVerticalScrollPercent().ok()?,
+            motif.CachedVerticalViewSize().ok()?,
+        ))
+    });
+    let (defilable, pour_cent, vue) = match en_cache {
+        Some(lu) => lu,
+        // SAFETY : idem.
+        None => unsafe {
+            (
+                t.motif.CurrentVerticallyScrollable().ok()?.as_bool(),
+                t.motif.CurrentVerticalScrollPercent().ok()?,
+                t.motif.CurrentVerticalViewSize().ok()?,
+            )
+        },
+    };
+    position_lue(defilable, pour_cent, vue)
 }
 
 /// Jusqu'à `unites` pas `SmallIncrement` (négatif : `SmallDecrement`), aucun commencé après
@@ -833,13 +868,14 @@ fn travailler(
     let _ = recherche.send(trouve.as_ref().map(|t| t.hauteur));
     match trouve {
         Some(t) => {
+            let cache = cache_position(&auto).ok();
             while let Ok(d) = demandes.recv() {
                 if d.en_retard() {
                     continue;
                 }
                 match d {
                     Demande::Position(_, r) => {
-                        let _ = r.send(lire_position(&t.motif));
+                        let _ = r.send(lire_position(&t, cache.as_ref()));
                     }
                     Demande::Defiler(n, echeance, r) => {
                         let _ = r.send(faire_defiler(&t.motif, n, echeance));
@@ -1000,6 +1036,8 @@ pub struct Defileur {
     /// L'appelant a déjà dit ce que les images ont vu (`constater`) : la position n'est plus
     /// lue pour régler les pas d'`Automation`.
     par_images: bool,
+    /// Un pas sauté pour une touche tenue a été dit au journal (une fois par capture).
+    touches_dites: bool,
 }
 
 /// Un moyen peut-il servir maintenant ?
@@ -1244,6 +1282,7 @@ pub fn preparer(zone: Rect, fenetre: Option<isize>) -> Result<Defileur, String> 
         automation,
         derniere: None,
         par_images: false,
+        touches_dites: false,
     })
 }
 
@@ -1376,7 +1415,7 @@ impl Defileur {
         };
         match m {
             Moyen::Message => {
-                let (delta, n, partiel) = match etalon.delta_partiel(pixels) {
+                let (delta, n, partiel) = match etalon.delta_partiel(pixels, self.zone.hauteur) {
                     Some(p) => (p, 1, true),
                     None => (
                         CRAN,
@@ -1483,7 +1522,12 @@ pub fn descendre(d: &mut Defileur, pixels: i32) -> Result<Envoi, String> {
             return Ok(Envoi::Saute);
         }
         let essai = d.verifier(m).and_then(|()| {
-            if garde(m, d.zone, d.racine, &d.constat(m)) == Envoi::Saute {
+            let constat = d.constat(m);
+            if garde(m, d.zone, d.racine, &constat) == Envoi::Saute {
+                if constat.touches_tenues && !d.touches_dites {
+                    d.touches_dites = true;
+                    log::info!("defiler pas saute: touche ou bouton vu enfonce (dit une fois)");
+                }
                 return Ok(None);
             }
             d.envoyer(m, pixels)
@@ -1628,8 +1672,10 @@ fn boucle_crochet(
 pub struct Ecoute {
     fil: u32,
     actif: Arc<AtomicBool>,
-    /// Vrai jusqu'au `Drop` ; tenu par le fil du rappel pendant chaque appel.
-    ouvert: Arc<Mutex<bool>>,
+    /// Vrai jusqu'au `Drop`, lu avant chaque appel du rappel.
+    ouvert: Arc<AtomicBool>,
+    /// Tenu par le fil du rappel pendant chaque appel.
+    en_appel: Arc<Mutex<()>>,
     fini: Receiver<()>,
     poignee: Option<JoinHandle<()>>,
 }
@@ -1642,15 +1688,21 @@ pub fn ecouter_molette(rappel: RappelMolette) -> Result<Ecoute, String> {
     let actif_fil = Arc::clone(&actif);
     let abandonne = Arc::new(AtomicBool::new(false));
     let abandonne_fil = Arc::clone(&abandonne);
-    let ouvert = Arc::new(Mutex::new(true));
+    let ouvert = Arc::new(AtomicBool::new(true));
     let ouvert_fil = Arc::clone(&ouvert);
+    let en_appel = Arc::new(Mutex::new(()));
+    let en_appel_fil = Arc::clone(&en_appel);
     thread::Builder::new()
         .name("defilante-molette-rappel".into())
         .spawn(move || {
             for m in rx {
-                // Tenu pendant l'appel : `Drop` attend la fin d'un appel commencé.
-                let ouvert = ouvert_fil.lock().unwrap_or_else(|e| e.into_inner());
-                if !*ouvert {
+                if !ouvert_fil.load(Ordering::SeqCst) {
+                    break;
+                }
+                // Tenu pendant l'appel : `Drop` attend (au plus `ARRET_MAX`) la fin d'un
+                // appel commencé ; relu une fois tenu, `Drop` a pu passer entre-temps.
+                let _appel = en_appel_fil.lock().unwrap_or_else(|e| e.into_inner());
+                if !ouvert_fil.load(Ordering::SeqCst) {
                     break;
                 }
                 rappel(m);
@@ -1666,6 +1718,7 @@ pub fn ecouter_molette(rappel: RappelMolette) -> Result<Ecoute, String> {
             fil,
             actif,
             ouvert,
+            en_appel,
             fini: fini_rx,
             poignee: Some(poignee),
         }),
@@ -1677,7 +1730,7 @@ pub fn ecouter_molette(rappel: RappelMolette) -> Result<Ecoute, String> {
             // Le fil voit l'abandon après sa réponse ; une réponse arrivée entre-temps est
             // reprise ici pour l'arrêter.
             abandonne.store(true, Ordering::SeqCst);
-            *ouvert.lock().unwrap_or_else(|e| e.into_inner()) = false;
+            ouvert.store(false, Ordering::SeqCst);
             if let Ok(Ok(fil)) = pret_rx.try_recv() {
                 // SAFETY : message sans données, à la file du fil du crochet.
                 let _ = unsafe { PostThreadMessageW(fil, WM_QUIT, WPARAM(0), LPARAM(0)) };
@@ -1693,12 +1746,25 @@ pub fn active(e: &Ecoute) -> bool {
 
 impl Drop for Ecoute {
     fn drop(&mut self) {
-        // Plus aucun rappel à partir d'ici (un appel commencé est attendu : il ne fait que
-        // poster).
-        *self.ouvert.lock().unwrap_or_else(|e| e.into_inner()) = false;
+        let fin = Instant::now() + ARRET_MAX;
+        // Plus aucun rappel ne commence à partir d'ici.
+        self.ouvert.store(false, Ordering::SeqCst);
         // SAFETY : message sans données, à la file du fil du crochet.
         let _ = unsafe { PostThreadMessageW(self.fil, WM_QUIT, WPARAM(0), LPARAM(0)) };
-        if self.fini.recv_timeout(ARRET_MAX).is_ok() {
+        // Un appel commencé est attendu, borné : un rappel qui bloque (ou ce `Drop` appelé
+        // du rappel lui-même) ne retient pas la fin de la capture.
+        loop {
+            match self.en_appel.try_lock() {
+                Ok(_) | Err(TryLockError::Poisoned(_)) => break,
+                Err(TryLockError::WouldBlock) if Instant::now() >= fin => {
+                    log::warn!("defiler molette: rappel encore en cours a l'arret");
+                    break;
+                }
+                Err(TryLockError::WouldBlock) => thread::sleep(Duration::from_millis(5)),
+            }
+        }
+        let reste = fin.saturating_duration_since(Instant::now());
+        if self.fini.recv_timeout(reste).is_ok() {
             if let Some(p) = self.poignee.take() {
                 let _ = p.join();
             }
@@ -2203,7 +2269,8 @@ mod tests {
             attendre(Duration::from_secs(2), || position_page() > 0),
             "la page fille n'a pas bougé"
         );
-        assert_eq!(position_page(), PAR_CRAN);
+        // Zone de moins de 400 px : le premier pas est un demi-cran.
+        assert_eq!(position_page(), PAR_CRAN / 2);
         sentinelles_immobiles();
     }
 
@@ -2220,22 +2287,24 @@ mod tests {
             attendre(Duration::from_secs(2), || position_page() > 0),
             "la page n'a pas bougé"
         );
-        // Premier pas : un cran.
-        assert_eq!(position_page(), PAR_CRAN);
+        // Premier pas, zone de moins de 400 px : un demi-cran (delta 60, 20 px).
+        assert_eq!(position_page(), PAR_CRAN / 2);
         assert_eq!(d.envoyes(), 1);
-        // Les images ont vu 40 px : le pas suivant de 100 px fait deux crans.
-        d.constater(PAR_CRAN as u32);
+        // Les images ont vu 20 px pour un demi-cran : 40 px par cran, et le pas suivant de
+        // 100 px fait deux crans.
+        d.constater((PAR_CRAN / 2) as u32);
         assert_eq!(d.avance_par_cran(), Some(PAR_CRAN as u32));
         assert_eq!(pas(&mut d, 100), Envoi::Envoye);
-        assert!(attendre(Duration::from_secs(2), || position_page() == 3 * PAR_CRAN));
+        assert!(attendre(Duration::from_secs(2), || position_page()
+            == 2 * PAR_CRAN + PAR_CRAN / 2));
         // Remonter.
         assert_eq!(pas(&mut d, -40), Envoi::Envoye);
-        assert!(attendre(Duration::from_secs(2), || position_page() == 2 * PAR_CRAN));
+        assert!(attendre(Duration::from_secs(2), || position_page()
+            == PAR_CRAN + PAR_CRAN / 2));
         // Un pas plus petit qu'un cran : un cran partiel (delta 60, 20 px).
         assert_eq!(pas(&mut d, PAR_CRAN / 2), Envoi::Envoye);
         assert!(
-            attendre(Duration::from_secs(2), || position_page()
-                == 2 * PAR_CRAN + PAR_CRAN / 2),
+            attendre(Duration::from_secs(2), || position_page() == 2 * PAR_CRAN),
             "cran partiel : {}",
             position_page()
         );

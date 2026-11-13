@@ -198,8 +198,9 @@ impl Defileur {
     }
 
     /// Demande un pas de `pixels` pixels réels vers le bas (négatif : vers le haut). Le
-    /// premier pas d'un moyen est d'une unité (un cran, un `SmallIncrement`), les suivants
-    /// sont réglés sur ce qu'une unité a fait. Si le moyen en cours ne peut plus rien
+    /// premier pas d'un moyen est d'une unité (un cran, un `SmallIncrement` ; pour `Message`,
+    /// un demi-cran si la zone fait moins de 400 px de haut), les suivants sont réglés sur ce
+    /// qu'une unité a fait. Si le moyen en cours ne peut plus rien
     /// envoyer (fenêtre fermée ou remplacée, message refusé, aucun `ScrollPattern`, UI
     /// Automation trois fois sans réponse), il est laissé ici même pour le suivant
     /// (`moyen()` le dit, l'appelant le compare à ce qu'il avait) ; sans plus aucun moyen,
@@ -313,8 +314,9 @@ pub struct Ecoute {
 /// l'app. Le crochet ne fait que poster le cran (il ne bloque jamais : Windows retire sans
 /// prévenir un crochet trop lent, `LowLevelHooksTimeout`), dans un fil à la priorité
 /// « temps critique » ; `rappel` est appelé d'un fil à part (`defilante-molette-rappel`),
-/// il ne doit que poster (et ne jamais détruire l'`Ecoute`). Une fois l'`Ecoute` détruite,
-/// `rappel` n'est plus jamais appelé. Erreur ailleurs que sous Windows.
+/// il ne doit que poster, sans attendre. Une fois l'`Ecoute` détruite, `rappel` n'est plus
+/// jamais appelé ; sa destruction attend au plus 1 s, en tout, un appel en cours et l'arrêt
+/// du crochet. Erreur ailleurs que sous Windows.
 pub fn ecouter_molette(rappel: impl Fn(Molette) + Send + 'static) -> Result<Ecoute, String> {
     plateforme::ecouter_molette(Box::new(rappel)).map(|interne| Ecoute { interne })
 }
@@ -428,12 +430,19 @@ impl Etalon {
     }
 
     /// Le delta d'un cran partiel (1 à 119, sans signe) pour un pas de `pixels` plus petit
-    /// qu'une unité vue : `120 × |pixels| / unité`. `None` si l'unité est inconnue, si le pas
-    /// en vaut au moins une, ou si un cran partiel est déjà resté sans effet.
-    fn delta_partiel(&self, pixels: i32) -> Option<i32> {
-        let p = self.par_unite?;
+    /// qu'une unité vue : `120 × |pixels| / unité`. Unité encore inconnue : un demi-cran au
+    /// tout premier pas si la zone fait moins de `ZONE_DEMI_CRAN` px de haut (un cran entier
+    /// d'Edge, 200 px, la dépasserait). `None` si le pas vaut au moins une unité, si un cran
+    /// partiel est déjà resté sans effet, ou pour un pas nul.
+    fn delta_partiel(&self, pixels: i32, hauteur_zone: i32) -> Option<i32> {
+        if self.partiel_refuse || pixels == 0 {
+            return None;
+        }
+        let Some(p) = self.par_unite else {
+            return (self.derniere == 0 && hauteur_zone < ZONE_DEMI_CRAN).then_some(CRAN / 2);
+        };
         let voulu = pixels.unsigned_abs() as f64;
-        if self.partiel_refuse || pixels == 0 || voulu >= p {
+        if voulu >= p {
             return None;
         }
         Some(((voulu * CRAN as f64 / p).round() as i32).clamp(1, CRAN - 1))
@@ -492,6 +501,11 @@ fn position_lue(defilable: bool, pour_cent: f64, vue: f64) -> Option<Position> {
     (defilable && pour_cent.is_finite() && (0.0..=100.0).contains(&pour_cent) && vue.is_finite())
         .then_some(Position { pour_cent, vue })
 }
+
+/// Au-dessous de cette hauteur de zone (pixels réels), le premier pas d'un message posté est
+/// un demi-cran.
+#[cfg_attr(not(windows), allow(dead_code))]
+const ZONE_DEMI_CRAN: i32 = 400;
 
 /// Valeur d'un cran (`WHEEL_DELTA`).
 #[cfg_attr(not(windows), allow(dead_code))]
@@ -972,20 +986,42 @@ mod tests {
     #[test]
     fn cran_partiel_pour_un_pas_plus_petit_qu_un_cran() {
         let mut e = Etalon::default();
-        assert_eq!(e.delta_partiel(100), None, "cran inconnu");
+        assert_eq!(e.delta_partiel(100, 600), None, "cran inconnu, grande zone");
         e.constater(1.0, 600.0);
-        assert_eq!(e.delta_partiel(300), Some(60));
-        assert_eq!(e.delta_partiel(-300), Some(60), "sans signe");
-        assert_eq!(e.delta_partiel(1), Some(1), "au moins 1");
-        assert_eq!(e.delta_partiel(599), Some(119), "au plus 119");
-        assert_eq!(e.delta_partiel(600), None, "un cran entier");
-        assert_eq!(e.delta_partiel(0), None);
+        assert_eq!(e.delta_partiel(300, 600), Some(60));
+        assert_eq!(e.delta_partiel(-300, 600), Some(60), "sans signe");
+        assert_eq!(e.delta_partiel(1, 600), Some(1), "au moins 1");
+        assert_eq!(e.delta_partiel(599, 600), Some(119), "au plus 119");
+        assert_eq!(e.delta_partiel(600, 600), None, "un cran entier");
+        assert_eq!(e.delta_partiel(0, 600), None);
         e.refuser_partiel();
         assert_eq!(
-            e.delta_partiel(300),
+            e.delta_partiel(300, 600),
             None,
             "l'app ignore les crans partiels"
         );
+    }
+
+    #[test]
+    fn demi_cran_au_premier_pas_d_une_petite_zone() {
+        let mut e = Etalon::default();
+        assert_eq!(e.delta_partiel(100, 399), Some(CRAN / 2));
+        assert_eq!(e.delta_partiel(-100, 240), Some(CRAN / 2));
+        assert_eq!(e.delta_partiel(100, 400), None, "zone assez haute");
+        assert_eq!(e.delta_partiel(0, 240), None);
+        // Seulement le tout premier pas.
+        e.envoye(1);
+        assert_eq!(e.delta_partiel(100, 240), None);
+        // Un demi-cran resté sans effet : plus de demi-cran.
+        let mut e = Etalon::default();
+        e.refuser_partiel();
+        assert_eq!(e.delta_partiel(100, 240), None);
+        // Un demi-cran qui a fait 100 px : 200 px par cran, le pas suivant en partiel.
+        let mut e = Etalon::default();
+        e.envoye(1);
+        e.constater(0.5, 100.0);
+        assert_eq!(e.par_unite(), Some(200));
+        assert_eq!(e.delta_partiel(150, 240), Some(90));
     }
 
     #[test]
