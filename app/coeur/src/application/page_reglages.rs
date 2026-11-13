@@ -936,7 +936,8 @@ mod essai_de_page {
     fn fixture() -> String {
         let r = Reglages::par_defaut(Plateforme::Windows);
         let mut table = BTreeMap::new();
-        for a in crate::application::ACTIONS_CONSTRUITES {
+        let actions = crate::application::actions_construites(false);
+        for a in &actions {
             table.insert(a.to_string(), r.raccourcis.candidats(a).unwrap().to_vec());
         }
         let bilan = choisir(&table, true, |_| true);
@@ -947,7 +948,7 @@ mod essai_de_page {
             // La vue de Windows. Jamais `gel::disponible()` ici, qui changerait le fichier
             // selon le système de l'essai.
             capture_disponible: true,
-            actions: &crate::application::ACTIONS_CONSTRUITES,
+            actions: &actions,
             bilan: &bilan,
             defaut: &defaut,
             refus_raccourcis: &refus,

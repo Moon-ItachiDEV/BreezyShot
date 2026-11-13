@@ -1,4 +1,4 @@
-//! L'éditeur d'annotation, côté Application (contrat 0.4 « Éditeur », §6) : les huit
+//! L'éditeur d'annotation, côté Application (contrat 0.4 « Éditeur », §6) : les neuf
 //! commandes de la page (fil principal, sans `async`), permises à la seule fenêtre
 //! `editeur` (`capabilities/editeur.json`). Les décisions sont dans `editeur.rs`, les
 //! gestes communs dans `mod.rs` ; ici, seulement des gestes.
@@ -15,6 +15,7 @@ use super::editeur::{self, ChargeEditeur, RaisonFermeture, ReponseFermer};
 use super::{
     afficher, avec_editeur, desarmer_filet_page, exporter_editeur, fermer_editeur,
     fermer_ou_suivant, garder_preferences_editeur, preferences_editeur, reduites_editeur,
+    texte_construit,
 };
 use crate::fenetres::editeur as fenetre;
 use crate::fenetres::theme;
@@ -32,9 +33,13 @@ fn ignoree(commande: &str, id: u64) {
 pub fn editeur_pret(app: AppHandle) -> Result<ChargeEditeur, String> {
     let reduites = reduites_editeur(&app);
     let preferences = preferences_editeur(&app);
+    let texte = texte_construit(&app);
     let Some((charge, demande_a)) = avec_editeur(&app, None, |e| {
         e.page_prete = true;
-        (editeur::charge(e, reduites, preferences), e.demande_a)
+        (
+            editeur::charge(e, reduites, preferences, texte),
+            e.demande_a,
+        )
     }) else {
         ignoree("pret", 0);
         return Err(AUTRE_DOCUMENT.into());
@@ -181,4 +186,12 @@ pub fn editeur_garder(app: AppHandle, id: u64) {
     if let Some(a) = abandonnee {
         log::info!("editeur: capture {a} abandonnee");
     }
+}
+
+/// Copier les mots `debut` à `fin` (inclus) de la lecture `numero` du document `id`
+/// (contrat 0.5, §5.6). Socle : refusée (chantier E).
+#[tauri::command]
+pub fn editeur_copier_texte(app: AppHandle, id: u64, numero: u64, debut: u32, fin: u32) {
+    let _ = (&app, numero, debut, fin);
+    ignoree("copier_texte", id);
 }

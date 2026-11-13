@@ -269,6 +269,7 @@ pub fn message_capture_impossible() -> Message {
         titre: TITRE_CAPTURE_IMPOSSIBLE.into(),
         detail: String::new(),
         actions: Vec::new(),
+        duree_ms: None,
     }
 }
 
@@ -280,12 +281,14 @@ pub fn message_annonce(annonce: &Annonce) -> Message {
             titre: titre.clone(),
             detail: String::new(),
             actions: Vec::new(),
+            duree_ms: None,
         },
         Annonce::Erreur { titre, cause } => Message {
             genre: Genre::Erreur,
             titre: titre.clone(),
             detail: cause.clone(),
             actions: Vec::new(),
+            duree_ms: None,
         },
     }
 }

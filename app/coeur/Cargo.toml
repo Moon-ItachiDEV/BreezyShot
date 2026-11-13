@@ -31,7 +31,17 @@ arboard = { version = "3.7", default-features = false, features = ["image-data"]
 png = { version = "0.18", default-features = false }
 
 [target.'cfg(windows)'.dependencies]
+# Copier le texte (0.5) : la lecture de Windows (Media.Ocr) et ce qu'elle demande pour
+# passer une image (Graphics.Imaging, Storage.Streams, Security.Cryptography) et ses langues
+# (Globalization), WinRT initialisé dans un fil (Win32_System_WinRT).
 windows = { version = "0.62", features = [
+  "Foundation",
+  "Foundation_Collections",
+  "Globalization",
+  "Graphics_Imaging",
+  "Media_Ocr",
+  "Security_Cryptography",
+  "Storage_Streams",
   "Win32_Foundation",
   "Win32_Graphics_Dwm",
   "Win32_Graphics_Gdi",
@@ -45,6 +55,7 @@ windows = { version = "0.62", features = [
   "Win32_System_Registry",
   "Win32_System_RemoteDesktop",
   "Win32_System_Threading",
+  "Win32_System_WinRT",
   "Win32_UI_HiDpi",
   "Win32_UI_Input_KeyboardAndMouse",
   "Win32_UI_Shell",

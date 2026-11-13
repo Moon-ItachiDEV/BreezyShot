@@ -241,6 +241,7 @@ pub fn apres_action(action: &str, bilan: &Bilan) -> (bool, Option<Message>, Opti
         titre: titre.into(),
         detail: cause.into(),
         actions: Vec::new(),
+        duree_ms: None,
     };
     match action {
         COPIER => match &bilan.copie {
@@ -444,6 +445,7 @@ pub fn bilan_suppression(
             titre: "Impossible de supprimer".into(),
             detail: c.clone(),
             actions: Vec::new(),
+            duree_ms: None,
         });
     (ligne, message)
 }

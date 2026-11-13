@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-historique-action"
+description = "Enables the historique_action command without any pre-configured scope."
+commands.allow = ["historique_action"]
+
+[[permission]]
+identifier = "deny-historique-action"
+description = "Denies the historique_action command without any pre-configured scope."
+commands.deny = ["historique_action"]

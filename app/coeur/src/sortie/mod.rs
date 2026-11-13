@@ -13,10 +13,12 @@
 mod annonce;
 mod fichier;
 mod glisser;
+mod historique;
 mod nom;
 mod png;
 mod presse_papiers;
 mod recents;
+mod texte;
 
 #[cfg(test)]
 mod tests;
@@ -33,9 +35,14 @@ pub use fichier::enregistrer_a;
 pub use glisser::{
     a_effacer, fichier_a_glisser, liens_a_supprimer, supprimer, Suppression, GLISSER_GARDES,
 };
+pub use historique::{
+    chemin_apercu, chemin_recent, lire_recent, lister_recents, ranger_apercu, supprimer_recent,
+    vider, BilanVidage, EntreeRecente,
+};
 pub use nom::{chemin_libre, nom_affiche, nom_fichier};
 pub use png::{encoder_png, sur_blanc};
 pub use recents::{recents_a_supprimer, RECENTS_GARDES};
+pub use texte::copier_texte;
 
 /// Ce que l'Application demande de faire d'une capture.
 #[derive(Debug, Clone, PartialEq, Eq)]

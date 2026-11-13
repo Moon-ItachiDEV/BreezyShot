@@ -4,11 +4,13 @@
 
 pub mod application;
 pub mod capture;
+pub mod droits;
 pub mod fenetres;
 pub mod installation;
 pub mod raccourcis;
 pub mod reglages;
 pub mod sortie;
 pub mod systeme;
+pub mod texte;
 
 pub use application::lancer;

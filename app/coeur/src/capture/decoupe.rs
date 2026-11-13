@@ -135,6 +135,13 @@ pub fn arrondir(pixels: &mut Pixels, rayon: i32, coins: [bool; 4]) {
     }
 }
 
+/// L'aperçu d'une case de l'historique (contrat 0.5, §3.1) : la partie 16:10 du haut à
+/// gauche, réduite pour couvrir 400 × 250, jamais agrandie. Pur. Socle : signature
+/// (chantier B pour le corps).
+pub fn apercu_historique(pixels: &Pixels) -> Pixels {
+    pixels.clone()
+}
+
 /// Réduit l'image pour qu'aucun côté ne dépasse `cote_max` (aperçu de la vignette) :
 /// chaque pixel d'arrivée est la moyenne des pixels de départ qu'il couvre (boîtes),
 /// couleurs pondérées par l'alpha, alpha gardé. Une image déjà assez petite, vide ou

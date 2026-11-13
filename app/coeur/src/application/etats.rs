@@ -1,4 +1,4 @@
-//! Les sept états d'une capture et la table unique de leurs passages.
+//! Les huit états d'une capture et la table unique de leurs passages.
 //!
 //! La table suit le tableau « États » du document de workflow. Ajouter un état ou un
 //! passage, c'est ajouter des lignes à `PASSAGES` ; `suivant` ne change pas.
@@ -14,6 +14,8 @@ pub enum Etat {
     Vignette,
     /// Retardateur en cours : rien n'est photographié avant la fin du délai (0.4).
     Decompte,
+    /// Copier le texte (0.5) : la zone est lue ; toute demande de capture est ignorée.
+    Lecture,
 }
 
 /// Modes de capture. Ce sont aussi les noms d'action des raccourcis.
@@ -24,23 +26,27 @@ pub enum Mode {
     Fenetre,
     /// Refaire la dernière zone (0.4) : la même zone du même écran, sans sélection.
     DerniereZone,
+    /// Copier le texte (0.5) : une zone lue, jamais rangée comme une capture.
+    Texte,
 }
 
 impl Mode {
-    pub const TOUS: [Mode; 4] = [
+    pub const TOUS: [Mode; 5] = [
         Mode::Zone,
         Mode::PleinEcran,
         Mode::Fenetre,
         Mode::DerniereZone,
+        Mode::Texte,
     ];
 
-    /// Nom d'action (`zone`, `plein_ecran`, `fenetre`, `derniere_zone`).
+    /// Nom d'action (`zone`, `plein_ecran`, `fenetre`, `derniere_zone`, `texte`).
     pub fn nom(self) -> &'static str {
         match self {
             Mode::Zone => "zone",
             Mode::PleinEcran => "plein_ecran",
             Mode::Fenetre => "fenetre",
             Mode::DerniereZone => "derniere_zone",
+            Mode::Texte => "texte",
         }
     }
 
@@ -98,6 +104,12 @@ pub enum Declencheur {
     DecompteFini(Mode),
     /// Échap, croix du décompte ou session verrouillée pendant le décompte.
     DecompteAnnule,
+    /// Copier le texte : la zone est choisie, la lecture part (0.5).
+    TexteChoisi,
+    /// La lecture a rendu un texte, ou rien (« Aucun texte trouvé »).
+    TexteLu,
+    /// Plus de langue, moteur en échec ou échéance de la lecture.
+    LectureImpossible,
 }
 
 impl Declencheur {
@@ -186,6 +198,14 @@ pub const PASSAGES: &[(Etat, Declencheur, Etat)] = &[
     (E::Decompte, D::DecompteFini(Mode::Fenetre), E::Gel),
     (E::Decompte, D::DecompteFini(Mode::DerniereZone), E::Gel),
     (E::Decompte, D::DecompteAnnule, E::Repos),
+    // 0.5 : Copier le texte, sans retardateur (aucune ligne `DemandeDecompte(Texte)`). Les
+    // sorties de la Sélection (annulée, écrans changés, muette…) servent telles quelles.
+    (E::Repos, D::DemandeCapture(Mode::Texte), E::Gel),
+    (E::Vignette, D::DemandeCapture(Mode::Texte), E::Gel),
+    (E::Gel, D::PhotoPrise(Mode::Texte), E::Selection),
+    (E::Selection, D::TexteChoisi, E::Lecture),
+    (E::Lecture, D::TexteLu, E::Repos),
+    (E::Lecture, D::LectureImpossible, E::Repos),
 ];
 
 /// Fonction pure : l'état suivant, ou `None` si le déclencheur est ignoré dans cet état.
@@ -238,7 +258,7 @@ impl Automate {
 mod tests {
     use super::*;
 
-    const TOUS_LES_ETATS: [Etat; 7] = [
+    const TOUS_LES_ETATS: [Etat; 8] = [
         E::Repos,
         E::Gel,
         E::Selection,
@@ -246,6 +266,96 @@ mod tests {
         E::Souffle,
         E::Vignette,
         E::Decompte,
+        E::Lecture,
+    ];
+
+    /// Les sept états de la 0.4.
+    const ETATS_0_4: [Etat; 7] = [
+        E::Repos,
+        E::Gel,
+        E::Selection,
+        E::Decoupe,
+        E::Souffle,
+        E::Vignette,
+        E::Decompte,
+    ];
+
+    /// Les quatre modes de la 0.4.
+    const MODES_0_4: [Mode; 4] = [
+        Mode::Zone,
+        Mode::PleinEcran,
+        Mode::Fenetre,
+        Mode::DerniereZone,
+    ];
+
+    /// Copie littérale de la table de la 0.4 (44 lignes) : elle ne doit jamais changer.
+    const PASSAGES_0_4: &[(Etat, Declencheur, Etat)] = &[
+        (E::Repos, D::DemandeCapture(Mode::Zone), E::Gel),
+        (E::Repos, D::DemandeCapture(Mode::PleinEcran), E::Gel),
+        (E::Repos, D::DemandeCapture(Mode::Fenetre), E::Gel),
+        (E::Gel, D::PhotoPrise(Mode::Zone), E::Selection),
+        (E::Gel, D::PhotoPrise(Mode::Fenetre), E::Selection),
+        (E::Gel, D::PhotoPrise(Mode::PleinEcran), E::Decoupe),
+        (E::Gel, D::GelImpossible, E::Repos),
+        (E::Selection, D::ZoneChoisie, E::Decoupe),
+        (E::Selection, D::SelectionAnnulee, E::Repos),
+        (E::Selection, D::EcransChanges, E::Repos),
+        (E::Selection, D::SessionVerrouillee, E::Repos),
+        (E::Selection, D::BureauSecurise, E::Repos),
+        (E::Selection, D::SelectionMuette, E::Repos),
+        (E::Selection, D::SelectionImpossible, E::Repos),
+        (E::Decoupe, D::DecoupeImpossible, E::Repos),
+        (E::Decoupe, D::SortieSansBilan, E::Repos),
+        (E::Decoupe, D::ImagePrete, E::Souffle),
+        (E::Decoupe, D::ImagePreteSansVignette, E::Repos),
+        (E::Souffle, D::SouffleTermine, E::Vignette),
+        (E::Souffle, D::VignetteImpossible, E::Repos),
+        (E::Vignette, D::VignetteFermee, E::Repos),
+        (E::Vignette, D::DelaiEcoule, E::Repos),
+        (E::Vignette, D::GlisserReussi, E::Repos),
+        (E::Vignette, D::VignetteImpossible, E::Repos),
+        (E::Vignette, D::CaptureSupprimee, E::Repos),
+        (E::Vignette, D::DemandeCapture(Mode::Zone), E::Gel),
+        (E::Vignette, D::DemandeCapture(Mode::PleinEcran), E::Gel),
+        (E::Vignette, D::DemandeCapture(Mode::Fenetre), E::Gel),
+        (E::Repos, D::DemandeCapture(Mode::DerniereZone), E::Gel),
+        (E::Vignette, D::DemandeCapture(Mode::DerniereZone), E::Gel),
+        (E::Gel, D::PhotoPrise(Mode::DerniereZone), E::Decoupe),
+        (E::Repos, D::DemandeDecompte(Mode::Zone), E::Decompte),
+        (E::Repos, D::DemandeDecompte(Mode::PleinEcran), E::Decompte),
+        (E::Repos, D::DemandeDecompte(Mode::Fenetre), E::Decompte),
+        (
+            E::Repos,
+            D::DemandeDecompte(Mode::DerniereZone),
+            E::Decompte,
+        ),
+        (E::Vignette, D::DemandeDecompte(Mode::Zone), E::Decompte),
+        (
+            E::Vignette,
+            D::DemandeDecompte(Mode::PleinEcran),
+            E::Decompte,
+        ),
+        (E::Vignette, D::DemandeDecompte(Mode::Fenetre), E::Decompte),
+        (
+            E::Vignette,
+            D::DemandeDecompte(Mode::DerniereZone),
+            E::Decompte,
+        ),
+        (E::Decompte, D::DecompteFini(Mode::Zone), E::Gel),
+        (E::Decompte, D::DecompteFini(Mode::PleinEcran), E::Gel),
+        (E::Decompte, D::DecompteFini(Mode::Fenetre), E::Gel),
+        (E::Decompte, D::DecompteFini(Mode::DerniereZone), E::Gel),
+        (E::Decompte, D::DecompteAnnule, E::Repos),
+    ];
+
+    /// Les six lignes de la 0.5.
+    const LIGNES_0_5: &[(Etat, Declencheur, Etat)] = &[
+        (E::Repos, D::DemandeCapture(Mode::Texte), E::Gel),
+        (E::Vignette, D::DemandeCapture(Mode::Texte), E::Gel),
+        (E::Gel, D::PhotoPrise(Mode::Texte), E::Selection),
+        (E::Selection, D::TexteChoisi, E::Lecture),
+        (E::Lecture, D::TexteLu, E::Repos),
+        (E::Lecture, D::LectureImpossible, E::Repos),
     ];
 
     /// Les six états de la 0.3.
@@ -325,11 +435,11 @@ mod tests {
         v
     }
 
-    /// Tous les déclencheurs de la 0.4, chaque mode compris.
+    /// Tous les déclencheurs de la 0.4, chaque mode de la 0.4 compris.
     fn tous_les_declencheurs() -> Vec<Declencheur> {
         let mut v: Vec<Declencheur> = SANS_MODE_0_3.to_vec();
         v.push(D::DecompteAnnule);
-        for m in Mode::TOUS {
+        for m in MODES_0_4 {
             v.extend([
                 D::DemandeCapture(m),
                 D::PhotoPrise(m),
@@ -369,8 +479,8 @@ mod tests {
     }
 
     #[test]
-    fn seulement_des_lignes_nouvelles() {
-        for ligne @ (depart, d, arrivee) in PASSAGES {
+    fn lignes_de_la_0_4_sur_la_0_3() {
+        for ligne @ (depart, d, arrivee) in PASSAGES_0_4 {
             if PASSAGES_0_3.contains(ligne) {
                 continue;
             }
@@ -391,6 +501,119 @@ mod tests {
     }
 
     #[test]
+    fn table_0_4_incluse() {
+        assert_eq!(PASSAGES_0_4.len(), 44);
+        for ligne in PASSAGES_0_4 {
+            assert!(
+                PASSAGES.contains(ligne),
+                "ligne de la 0.4 perdue : {ligne:?}"
+            );
+        }
+    }
+
+    /// La 0.5 n'ajoute que ses six lignes : aucune retirée, aucune changée.
+    #[test]
+    fn seulement_des_lignes_nouvelles() {
+        assert_eq!(PASSAGES.len(), PASSAGES_0_4.len() + LIGNES_0_5.len());
+        for ligne in PASSAGES {
+            assert!(
+                PASSAGES_0_4.contains(ligne) || LIGNES_0_5.contains(ligne),
+                "ligne inattendue : {ligne:?}"
+            );
+        }
+        for ligne in LIGNES_0_5 {
+            assert!(
+                PASSAGES.contains(ligne),
+                "ligne de la 0.5 absente : {ligne:?}"
+            );
+        }
+        // Les sept états de la 0.4 font ce qu'ils faisaient pour chaque déclencheur de la 0.4.
+        for etat in ETATS_0_4 {
+            for d in tous_les_declencheurs() {
+                let avant = PASSAGES_0_4
+                    .iter()
+                    .find(|(e, x, _)| *e == etat && *x == d)
+                    .map(|(_, _, a)| *a);
+                assert_eq!(suivant(etat, d), avant, "{etat:?} {d:?}");
+            }
+        }
+    }
+
+    /// Pendant la lecture, toute demande de capture (et de décompte) est ignorée ; seules
+    /// ses deux fins passent.
+    #[test]
+    fn lecture_ignore_les_captures() {
+        for m in Mode::TOUS {
+            for d in [
+                D::DemandeCapture(m),
+                D::DemandeDecompte(m),
+                D::PhotoPrise(m),
+                D::DecompteFini(m),
+            ] {
+                assert_eq!(suivant(E::Lecture, d), None, "{d:?}");
+            }
+        }
+        for d in tous_les_declencheurs() {
+            assert_eq!(suivant(E::Lecture, d), None, "{d:?}");
+        }
+        assert_eq!(suivant(E::Lecture, D::TexteLu), Some(E::Repos));
+        assert_eq!(suivant(E::Lecture, D::LectureImpossible), Some(E::Repos));
+        let mut a = Automate::default();
+        for d in [
+            D::DemandeCapture(Mode::Texte),
+            D::PhotoPrise(Mode::Texte),
+            D::TexteChoisi,
+        ] {
+            assert!(a.traiter(d).is_some(), "{d:?}");
+        }
+        assert_eq!(a.etat(), E::Lecture);
+        assert_eq!(a.traiter(D::DemandeCapture(Mode::Zone)), None);
+        assert_eq!(a.traiter(D::TexteLu), Some(E::Repos));
+        // Les sorties de la Sélection valent aussi en mode texte.
+        a.traiter(D::DemandeCapture(Mode::Texte));
+        a.traiter(D::PhotoPrise(Mode::Texte));
+        assert_eq!(a.traiter(D::SelectionAnnulee), Some(E::Repos));
+        // Hors de la Sélection et de la Lecture, les déclencheurs du texte sont ignorés.
+        for etat in ETATS_0_4 {
+            for d in [D::TexteChoisi, D::TexteLu, D::LectureImpossible] {
+                let attendu = (etat == E::Selection && d == D::TexteChoisi).then_some(E::Lecture);
+                assert_eq!(suivant(etat, d), attendu, "{etat:?} {d:?}");
+            }
+        }
+    }
+
+    /// Copier le texte n'a jamais de retardateur.
+    #[test]
+    fn texte_sans_decompte() {
+        for etat in TOUS_LES_ETATS {
+            assert_eq!(suivant(etat, D::DemandeDecompte(Mode::Texte)), None);
+            assert_eq!(suivant(etat, D::DecompteFini(Mode::Texte)), None);
+        }
+        assert_eq!(
+            D::DemandeCapture(Mode::Texte).libelle(),
+            "DemandeCapture texte"
+        );
+        assert_eq!(Mode::depuis_nom("texte"), Some(Mode::Texte));
+        assert_eq!(D::TexteChoisi.libelle(), "TexteChoisi");
+    }
+
+    /// L'historique n'est pas un état (comme Réglages et l'éditeur) : aucun état, aucun
+    /// déclencheur, aucun mode ne le porte.
+    #[test]
+    fn historique_hors_automate() {
+        for etat in TOUS_LES_ETATS {
+            assert!(!format!("{etat:?}").contains("Historique"));
+        }
+        for m in Mode::TOUS {
+            assert_ne!(m.nom(), "historique");
+        }
+        assert_eq!(Mode::depuis_nom("historique"), None);
+        for (_, d, _) in PASSAGES {
+            assert!(!d.libelle().contains("istorique"), "{d:?}");
+        }
+    }
+
+    #[test]
     fn decompte_n_accepte_que_ses_sorties() {
         for d in tous_les_declencheurs() {
             let attendu = match d {
@@ -405,7 +628,7 @@ mod tests {
     #[test]
     fn parcours_avec_retardateur() {
         for depart in [E::Repos, E::Vignette] {
-            for m in Mode::TOUS {
+            for m in MODES_0_4 {
                 let mut a = Automate { etat: depart };
                 assert_eq!(a.traiter(D::DemandeDecompte(m)), Some(E::Decompte));
                 // Un second appui pendant le décompte est ignoré.
@@ -420,6 +643,7 @@ mod tests {
                     Mode::PleinEcran | Mode::DerniereZone => {
                         assert_eq!(a.traiter(D::PhotoPrise(m)), Some(E::Decoupe));
                     }
+                    Mode::Texte => unreachable!("pas de retardateur pour le texte"),
                 }
                 assert_eq!(a.traiter(D::ImagePreteSansVignette), Some(E::Repos));
             }

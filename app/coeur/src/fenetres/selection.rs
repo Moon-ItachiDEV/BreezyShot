@@ -86,6 +86,8 @@ pub enum Mode {
     #[default]
     Zone,
     Fenetre,
+    /// Copier le texte (0.5) : une zone, comme `Zone`, avec le nom et le voile du texte.
+    Texte,
 }
 
 impl Mode {
@@ -94,6 +96,7 @@ impl Mode {
         match self {
             Mode::Zone => "zone",
             Mode::Fenetre => "fenetre",
+            Mode::Texte => "texte",
         }
     }
 }
@@ -130,7 +133,7 @@ pub struct Demande {
 /// celui de `Demande::fenetres`.
 fn fenetres_de(demande: &Demande) -> Vec<FenetreProposee> {
     match demande.mode {
-        Mode::Zone => Vec::new(),
+        Mode::Zone | Mode::Texte => Vec::new(),
         Mode::Fenetre => demande
             .fenetres
             .iter()
@@ -434,6 +437,7 @@ fn garde_mode(mode: Mode, attendu: Mode) -> Result<(), String> {
     match (mode, attendu) {
         (Mode::Zone, Mode::Fenetre) => Err("clic en mode zone".into()),
         (Mode::Fenetre, Mode::Zone) => Err("zone en mode fenetre".into()),
+        (Mode::Texte, Mode::Fenetre) => Err("clic en mode texte".into()),
         _ => Ok(()),
     }
 }
@@ -873,6 +877,10 @@ impl Selection {
     pub fn cacher(&self) {
         self.interne.cacher();
     }
+
+    /// Copier le texte (0.5) : joue le balayage sur `zone` (pixels réels du bureau) une fois
+    /// la zone choisie (`selection:balayer`). Socle : sans effet (chantier E).
+    pub fn balayer(&self, _zone: Rect, _reduites: bool) {}
 
     /// Vrai entre `montrer` et la fin de l'affichage.
     pub fn visible(&self) -> bool {
