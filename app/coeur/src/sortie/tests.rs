@@ -1669,3 +1669,465 @@ fn enregistrer_a_tolere_un_disque_sans_vidage() {
         assert_eq!(rendu.kind(), genre);
     }
 }
+
+// ---------- Historique (contrat 0.5, §3.1) ----------
+
+use super::historique::{dossier_apercus_de, horodatage_du_nom, taille_ihdr};
+use super::{
+    chemin_apercu, chemin_recent, lire_recent, lister_recents, ranger_apercu, supprimer_recent,
+    vider, BilanVidage,
+};
+
+/// `<racine>/local/{Recents,Apercus,Glisser}` et `<racine>/Images`, crees.
+struct Dossiers {
+    _racine: tempfile::TempDir,
+    local: PathBuf,
+    recents: PathBuf,
+    apercus: PathBuf,
+    glisser: PathBuf,
+    images: PathBuf,
+}
+
+fn dossiers() -> Dossiers {
+    let racine = tempfile::tempdir().expect("dossier temporaire");
+    let local = racine.path().join("local");
+    let d = Dossiers {
+        recents: local.join("Recents"),
+        apercus: local.join("Apercus"),
+        glisser: local.join("Glisser"),
+        images: racine.path().join("Images"),
+        local,
+        _racine: racine,
+    };
+    for dossier in [&d.recents, &d.apercus, &d.glisser, &d.images] {
+        fs::create_dir_all(dossier).expect("dossier");
+    }
+    d
+}
+
+fn png_de(pixels: &Pixels) -> Vec<u8> {
+    png::encoder_rgba(pixels.largeur, pixels.hauteur, &pixels.rgba).expect("encodage")
+}
+
+/// Des fichiers qui ne sont pas a nous, a cote des notres.
+const ETRANGERS: [&str; 6] = [
+    "notes.txt",
+    "photo.png",
+    "20261111-194012-123.PNG",
+    "20261111-194012-123.png.bak",
+    "x20261111-194012-123.png",
+    "20261111-194012-123_1.png",
+];
+
+fn poser_etrangers(dossier: &Path) {
+    for nom in ETRANGERS {
+        fs::write(dossier.join(nom), b"pas a nous").expect("ecriture");
+    }
+    // Un sous-dossier qui porte un nom au format, et un fichier dedans.
+    let sous = dossier.join("20261111-194012-999.png");
+    fs::create_dir_all(&sous).expect("sous-dossier");
+    fs::write(sous.join("20261111-194012-998.png"), b"dedans").expect("ecriture");
+}
+
+fn etrangers_intacts(dossier: &Path) {
+    for nom in ETRANGERS {
+        assert_eq!(
+            fs::read(dossier.join(nom)).expect(nom),
+            b"pas a nous",
+            "{nom} touche"
+        );
+    }
+    let sous = dossier.join("20261111-194012-999.png");
+    assert!(sous.is_dir(), "sous-dossier efface");
+    assert!(
+        sous.join("20261111-194012-998.png").is_file(),
+        "fichier du sous-dossier efface"
+    );
+}
+
+#[test]
+fn horodatage_lu_dans_le_nom() {
+    let t = horodatage_du_nom("20261111-194012-123_2.png").expect("date");
+    assert_eq!(
+        t,
+        Utc.with_ymd_and_hms(2026, 11, 11, 19, 40, 12).unwrap() + TimeDelta::milliseconds(123)
+    );
+    // Le nom que `sortir` ecrit redonne l'heure de la capture.
+    let base = base_recent(instant());
+    let relu = horodatage_du_nom(&format!("{base}.png")).expect("date");
+    assert_eq!(relu, instant().with_timezone(&Utc));
+    // Au format mais impossible : ecarte.
+    for nom in [
+        "20261311-194012-123.png",
+        "20261131-250000-000.png",
+        "notes.png",
+    ] {
+        assert_eq!(horodatage_du_nom(nom), None, "{nom}");
+    }
+}
+
+#[test]
+fn ihdr_lu_et_verifie() {
+    let octets = png_de(&image(37, 11));
+    assert_eq!(taille_ihdr(&octets[..33]), Some((37, 11)));
+    // Trop court, signature fausse, CRC faux.
+    assert_eq!(taille_ihdr(&octets[..32]), None);
+    let mut faux = octets.clone();
+    faux[0] = 0;
+    assert_eq!(taille_ihdr(&faux), None);
+    let mut faux = octets.clone();
+    faux[17] ^= 1; // largeur changee sans son CRC
+    assert_eq!(taille_ihdr(&faux), None);
+    // Un PNG RGB (pas ce que `sortir` ecrit) : ecarte.
+    let mut rgb = Vec::new();
+    let mut e = ::png::Encoder::new(&mut rgb, 2, 2);
+    e.set_color(::png::ColorType::Rgb);
+    e.set_depth(::png::BitDepth::Eight);
+    e.write_header()
+        .unwrap()
+        .write_image_data(&[0; 12])
+        .unwrap();
+    assert_eq!(taille_ihdr(&rgb), None);
+}
+
+#[test]
+fn lister_recents_ordre_tailles_et_ecartes() {
+    let d = dossiers();
+    poser_etrangers(&d.recents);
+    let tailles = [
+        ("20261111-194012-123.png", (30, 20)),
+        ("20261111-194012-123_2.png", (31, 21)),
+        ("20261111-194012-123_10.png", (32, 22)),
+        ("20250101-000000-000.png", (5, 5)),
+        ("20261112-080000-001.png", (64, 40)),
+    ];
+    for (nom, (l, h)) in tailles {
+        fs::write(d.recents.join(nom), png_de(&image(l, h))).expect("ecriture");
+    }
+    let complet = png_de(&image(50, 50));
+    // Tronques : avant la fin de l'en-tete, et au milieu des donnees.
+    fs::write(d.recents.join("20261113-000000-000.png"), &complet[..20]).expect("ecriture");
+    fs::write(
+        d.recents.join("20261113-000000-001.png"),
+        &complet[..complet.len() - 5],
+    )
+    .expect("ecriture");
+    // Au format, mais pas un PNG ; vide ; date impossible.
+    fs::write(d.recents.join("20261113-000000-002.png"), b"pas une image").expect("ecriture");
+    fs::write(d.recents.join("20261113-000000-003.png"), b"").expect("ecriture");
+    fs::write(d.recents.join("20261399-000000-000.png"), &complet).expect("ecriture");
+
+    let liste = lister_recents(&d.recents);
+    let vus: Vec<(&str, u32, u32)> = liste
+        .iter()
+        .map(|e| (e.nom.as_str(), e.largeur, e.hauteur))
+        .collect();
+    assert_eq!(
+        vus,
+        [
+            ("20261112-080000-001.png", 64, 40),
+            ("20261111-194012-123_10.png", 32, 22),
+            ("20261111-194012-123_2.png", 31, 21),
+            ("20261111-194012-123.png", 30, 20),
+            ("20250101-000000-000.png", 5, 5),
+        ]
+    );
+    assert_eq!(
+        liste[0].horodatage,
+        Utc.with_ymd_and_hms(2026, 11, 12, 8, 0, 0).unwrap() + TimeDelta::milliseconds(1)
+    );
+    // Lister ne touche a rien.
+    etrangers_intacts(&d.recents);
+    // Dossier absent ou chemin vide : liste vide, sans panique.
+    assert!(lister_recents(&d.local.join("absent")).is_empty());
+    assert!(lister_recents(Path::new("")).is_empty());
+}
+
+#[test]
+fn chemin_recent_format_exact_seulement() {
+    let dossier = Path::new("/l/Recents");
+    assert_eq!(
+        chemin_recent(dossier, "20261111-194012-123.png"),
+        Some(dossier.join("20261111-194012-123.png"))
+    );
+    assert_eq!(
+        chemin_recent(dossier, "20261111-194012-123_2.png"),
+        Some(dossier.join("20261111-194012-123_2.png"))
+    );
+    for nom in [
+        "",
+        "../20261111-194012-123.png",
+        "..\\20261111-194012-123.png",
+        "/20261111-194012-123.png",
+        "20261111-194012-123.PNG",
+        "20261111-194012-123",
+        "20261111-194012-123_1.png",
+        "20261111-194012-123_02.png",
+        "photo.png",
+        "20261111-194012-123.png/..",
+    ] {
+        assert_eq!(chemin_recent(dossier, nom), None, "{nom:?}");
+        assert_eq!(chemin_apercu(dossier, nom), None, "{nom:?}");
+    }
+    assert_eq!(
+        chemin_recent(Path::new(""), "20261111-194012-123.png"),
+        None
+    );
+    assert_eq!(
+        dossier_apercus_de(dossier),
+        Some(Path::new("/l").join("Apercus"))
+    );
+    assert_eq!(dossier_apercus_de(Path::new("Recents")), None);
+}
+
+#[test]
+fn lire_recent_aller_retour_exact_et_alpha() {
+    let d = dossiers();
+    // Ecrit par `sortir` lui-meme, avec et sans transparence.
+    let mut dem = demande(d.local.parent().unwrap());
+    dem.enregistrer = false;
+    dem.dossier_recents = d.recents.clone();
+    dem.transparence = true;
+    let transparente = image_transparente();
+    let chemin = sortir(&transparente, &dem).recent.unwrap().expect("recent");
+    let (relu, alpha) = lire_recent(&chemin).expect("relu");
+    assert_eq!(relu, transparente);
+    assert!(alpha);
+
+    dem.transparence = false;
+    let opaque = image(33, 17);
+    let chemin = sortir(&opaque, &dem).recent.unwrap().expect("recent");
+    let (relu, alpha) = lire_recent(&chemin).expect("relu");
+    assert_eq!(relu, opaque);
+    assert!(!alpha);
+
+    // Tronque, abime, absent, autre format : une erreur sans chemin.
+    let octets = fs::read(&chemin).unwrap();
+    let abime = d.recents.join("20261113-000000-000.png");
+    for contenu in [
+        &octets[..octets.len() / 2],
+        &octets[..10],
+        b"rien".as_slice(),
+    ] {
+        fs::write(&abime, contenu).unwrap();
+        let cause = lire_recent(&abime).expect_err("illisible");
+        assert!(!cause.contains("Recents"), "{cause}");
+    }
+    assert!(lire_recent(&d.recents.join("absent.png")).is_err());
+    let mut rgb = Vec::new();
+    let mut e = ::png::Encoder::new(&mut rgb, 2, 2);
+    e.set_color(::png::ColorType::Rgb);
+    e.set_depth(::png::BitDepth::Eight);
+    e.write_header()
+        .unwrap()
+        .write_image_data(&[0; 12])
+        .unwrap();
+    fs::write(&abime, rgb).unwrap();
+    assert!(lire_recent(&abime).is_err());
+}
+
+#[test]
+fn apercu_range_relu_et_remplace() {
+    let d = dossiers();
+    let apercus = d.local.join("Apercus-neuf");
+    let nom = "20261111-194012-123.png";
+    let premier = image_transparente();
+    ranger_apercu(&apercus, nom, &premier).expect("apercu");
+    let chemin = chemin_apercu(&apercus, nom).expect("chemin");
+    // Alpha garde (fenetre aux coins arrondis).
+    assert_eq!(lire_recent(&chemin).expect("relu").0, premier);
+    // Refait : remplace.
+    let second = image(8, 5);
+    ranger_apercu(&apercus, nom, &second).expect("apercu");
+    assert_eq!(lire_recent(&chemin).expect("relu").0, second);
+    assert_eq!(noms_du_dossier(&apercus), [nom]);
+    // Nom refuse ou pixels abimes : rien d'ecrit.
+    assert!(ranger_apercu(&apercus, "../photo.png", &second).is_err());
+    assert!(ranger_apercu(&apercus, "photo.png", &second).is_err());
+    let mut abimees = image(4, 4);
+    abimees.rgba.pop();
+    assert!(ranger_apercu(&apercus, "20261111-194012-124.png", &abimees).is_err());
+    assert_eq!(noms_du_dossier(&apercus), [nom]);
+    assert!(!d.local.join("photo.png").exists());
+}
+
+#[test]
+fn supprimer_recent_le_png_et_son_apercu_seulement() {
+    let d = dossiers();
+    poser_etrangers(&d.recents);
+    poser_etrangers(&d.apercus);
+    let nom = "20261111-194012-123.png";
+    let voisin = "20261111-194012-123_2.png";
+    for n in [nom, voisin] {
+        fs::write(d.recents.join(n), png_de(&image(4, 4))).unwrap();
+        ranger_apercu(&d.apercus, n, &image(2, 2)).unwrap();
+    }
+    // Le fichier enregistre par l'utilisateur et un lien de glisser restent (R14).
+    let enregistre = d.images.join("BreezyShot 2026-11-11 à 20.40.12.png");
+    fs::write(&enregistre, b"a l'utilisateur").unwrap();
+    let lien = d.glisser.join("BreezyShot 2026-11-11 à 20.40.12.png");
+    fs::write(&lien, b"lien").unwrap();
+
+    supprimer_recent(&d.recents, &d.apercus, nom).expect("supprime");
+    assert!(!d.recents.join(nom).exists());
+    assert!(!d.apercus.join(nom).exists());
+    assert!(d.recents.join(voisin).is_file());
+    assert!(d.apercus.join(voisin).is_file());
+    assert!(enregistre.is_file() && lien.is_file());
+    etrangers_intacts(&d.recents);
+    etrangers_intacts(&d.apercus);
+
+    // Deja parti : fait. Nom hors format : refuse, rien de touche.
+    supprimer_recent(&d.recents, &d.apercus, nom).expect("deja parti");
+    for faux in ETRANGERS.iter().copied().chain(["../Images/x.png", ""]) {
+        assert!(
+            supprimer_recent(&d.recents, &d.apercus, faux).is_err(),
+            "{faux}"
+        );
+    }
+    // Un sous-dossier au nom du format : refuse, gardé.
+    assert!(supprimer_recent(&d.recents, &d.apercus, "20261111-194012-999.png").is_err());
+    etrangers_intacts(&d.recents);
+    etrangers_intacts(&d.apercus);
+    // Apercu absent : la capture part quand meme.
+    fs::remove_file(d.apercus.join(voisin)).unwrap();
+    supprimer_recent(&d.recents, &d.apercus, voisin).expect("supprime");
+    assert!(!d.recents.join(voisin).exists());
+}
+
+#[test]
+fn vider_ne_touche_que_nos_formats() {
+    let d = dossiers();
+    for dossier in [&d.recents, &d.apercus, &d.glisser] {
+        poser_etrangers(dossier);
+    }
+    let captures = [
+        "20261111-194012-123.png",
+        "20261111-194012-123_2.png",
+        "20250101-000000-000.png",
+    ];
+    for n in captures {
+        fs::write(d.recents.join(n), png_de(&image(4, 4))).unwrap();
+        ranger_apercu(&d.apercus, n, &image(2, 2)).unwrap();
+    }
+    // Un apercu sans capture part aussi.
+    ranger_apercu(&d.apercus, "20240101-000000-000.png", &image(2, 2)).unwrap();
+    for n in ["BreezyShot 2026-11-11 à 20.40.12.png", "BreezyShot (2).PNG"] {
+        fs::write(d.glisser.join(n), b"lien").unwrap();
+    }
+    // Ce qui n'est pas dans ces trois dossiers reste : reglages, journal, Images.
+    let reglages = d.local.join("reglages.json");
+    let journal = d.local.join("20261111-194012-123.png");
+    let enregistre = d.images.join("20261111-194012-123.png");
+    for f in [&reglages, &journal, &enregistre] {
+        fs::write(f, b"garde").unwrap();
+    }
+
+    let bilan = vider(&d.recents, &d.apercus, &d.glisser);
+    assert_eq!(
+        bilan,
+        BilanVidage {
+            effaces: 3,
+            echecs: 0
+        }
+    );
+    for dossier in [&d.recents, &d.apercus] {
+        etrangers_intacts(dossier);
+        let restes: Vec<String> = noms_du_dossier(dossier)
+            .into_iter()
+            .filter(|n| cle_recent(n).is_some())
+            .collect();
+        // Seul le sous-dossier au nom du format reste.
+        assert_eq!(restes, ["20261111-194012-999.png"]);
+    }
+    // `Glisser` : tous les `.png` (toute casse), rien d'autre ; le sous-dossier reste.
+    let mut restes = noms_du_dossier(&d.glisser);
+    restes.sort();
+    let mut attendus = vec![
+        "20261111-194012-123.png.bak",
+        "20261111-194012-999.png",
+        "notes.txt",
+    ];
+    attendus.sort();
+    assert_eq!(restes, attendus);
+    assert!(d
+        .glisser
+        .join("20261111-194012-999.png")
+        .join("20261111-194012-998.png")
+        .is_file());
+    for f in [&reglages, &journal, &enregistre] {
+        assert_eq!(fs::read(f).unwrap(), b"garde");
+    }
+    // Encore : rien a faire. Dossiers absents ou vides : sans panique.
+    assert_eq!(
+        vider(&d.recents, &d.apercus, &d.glisser),
+        BilanVidage::default()
+    );
+    let absent = d.local.join("absent");
+    assert_eq!(vider(&absent, &absent, &absent), BilanVidage::default());
+    let vide = Path::new("");
+    assert_eq!(vider(vide, vide, vide), BilanVidage::default());
+}
+
+#[test]
+fn nettoyage_a_50_efface_aussi_les_apercus() {
+    let d = dossiers();
+    let mut dem = demande(d.local.parent().unwrap());
+    dem.enregistrer = false;
+    dem.dossier_recents = d.recents.clone();
+    poser_etrangers(&d.apercus);
+    for i in 0..55 {
+        let nom = format!("20250101-0000{i:02}-000.png");
+        fs::write(d.recents.join(&nom), png_de(&image(2, 2))).unwrap();
+        ranger_apercu(&d.apercus, &nom, &image(1, 1)).unwrap();
+    }
+    // Un apercu sans capture (capture supprimee par la vignette).
+    ranger_apercu(&d.apercus, "20240101-000000-000.png", &image(1, 1)).unwrap();
+
+    let neuf = sortir(&image(2, 2), &dem).recent.unwrap().expect("recent");
+    let nom_neuf = neuf.file_name().unwrap().to_str().unwrap().to_string();
+    ranger_apercu(&d.apercus, &nom_neuf, &image(1, 1)).unwrap();
+
+    let liste = lister_recents(&d.recents);
+    assert_eq!(liste.len(), RECENTS_GARDES);
+    assert_eq!(liste[0].nom, nom_neuf);
+    let mut apercus: Vec<String> = noms_du_dossier(&d.apercus)
+        .into_iter()
+        .filter(|n| cle_recent(n).is_some() && d.apercus.join(n).is_file())
+        .collect();
+    apercus.sort();
+    let mut attendus: Vec<String> = liste.iter().map(|e| e.nom.clone()).collect();
+    attendus.sort();
+    assert_eq!(apercus, attendus);
+    etrangers_intacts(&d.apercus);
+}
+
+#[test]
+fn horloge_reculee_la_capture_neuve_reste_avec_son_apercu() {
+    let d = dossiers();
+    let mut dem = demande(d.local.parent().unwrap());
+    dem.enregistrer = false;
+    dem.dossier_recents = d.recents.clone();
+    // 50 captures datees de 2030 : l'horloge a recule depuis.
+    for i in 0..RECENTS_GARDES {
+        let nom = format!("20300101-0000{i:02}-000.png");
+        fs::write(d.recents.join(&nom), png_de(&image(2, 2))).unwrap();
+        ranger_apercu(&d.apercus, &nom, &image(1, 1)).unwrap();
+    }
+    let neuf = sortir(&image(3, 3), &dem).recent.unwrap().expect("recent");
+    let nom_neuf = neuf.file_name().unwrap().to_str().unwrap().to_string();
+    ranger_apercu(&d.apercus, &nom_neuf, &image(1, 1)).unwrap();
+    let liste = lister_recents(&d.recents);
+    assert_eq!(liste.len(), RECENTS_GARDES);
+    // La neuve est gardee (rangee par son nom, en dernier), la plus ancienne de 2030 partie.
+    assert_eq!(liste.last().unwrap().nom, nom_neuf);
+    assert!(!d.recents.join("20300101-000000-000.png").exists());
+    assert!(!d.apercus.join("20300101-000000-000.png").exists());
+    assert!(d.apercus.join(&nom_neuf).is_file());
+    // Encore une : la precedente neuve, maintenant la plus ancienne, part avec son apercu.
+    dem.maintenant = instant() + TimeDelta::seconds(1);
+    let second = sortir(&image(3, 3), &dem).recent.unwrap().expect("recent");
+    assert!(second.is_file());
+    assert!(!neuf.exists());
+    assert!(!d.apercus.join(&nom_neuf).exists());
+}
