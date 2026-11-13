@@ -52,10 +52,9 @@
 # (12) Ctrl + Maj + 2 éditeur ouvert : capture faite, éditeur ouvert, même fenêtre, aucun
 #     `editeur ferme` ;
 # (13) Ctrl+Maj+S : dialogue #32770 possédé par l'éditeur (guetté, 30 s au plus), annulé
-#     (IDCANCEL) : `dialogue annule`, rien d'écrit ; « Plus », `menuitem` « Glisser vers
-#     une appli », puis glisser réel depuis la vignette de prise (`button` « Glisser vers
-#     une appli » : appui, 4 px et plus) vers la fenêtre de cible-glisser.ps1 : `glisser
-#     <id> debut`, `depose`, un fichier reçu au modèle, mêmes octets que le « Récents » de
+#     (IDCANCEL) : `dialogue annule`, rien d'écrit ; glisser réel depuis le bouton de la
+#     barre du haut (`button` « Glisser vers une appli » : appui, 4 px et plus) vers la
+#     fenêtre de cible-glisser.ps1 : `glisser <id> debut`, `depose`, un fichier reçu au modèle, mêmes octets que le « Récents » de
 #     cet export ;
 # (14) éditeur ramené au premier plan (SetForegroundWindow, sinon clic réel au milieu de la
 #     barre du haut de la page, zone de glisser, à 26 px CSS du haut ; vérifié), un
@@ -895,14 +894,8 @@ public static int Pixel(byte[] a, int l, int x, int y) {
                 $fd = Join-Path $script:Essai.Dossier 'depots-12.txt'
                 $null = Lancer-Aide 'cible-glisser.ps1' @('-X', '780', '-Y', '20', '-Cote', '220', '-FichierHwnd', $fh, '-FichierDepots', $fd) $fh
                 $E::Poser($REPOS_X, $REPOS_Y)
-                $plus = Element $h 'Plus' ([System.Windows.Automation.ControlType]::Button)
-                $p = Centre-Stable $plus
-                $E::Cliquer($p[0], $p[1])
-                $g = Element $h 'Glisser vers une appli' ([System.Windows.Automation.ControlType]::MenuItem)
-                $q = Centre-Stable $g
-                $E::Cliquer($q[0], $q[1])
-                $E::Poser($REPOS_X, $REPOS_Y)
-                # La vignette de prise (avenant §3) : le glisser réel part d'elle.
+                # Le bouton de la barre du haut (design/glisser-appli, piste A) : le glisser
+                # réel part de lui.
                 $prise = Element $h 'Glisser vers une appli' ([System.Windows.Automation.ControlType]::Button)
                 $q = Centre-Stable $prise
                 $debuts = Compter-Motif -Motif "editeur glisser $($c.Id) debut$" -Dossier $da

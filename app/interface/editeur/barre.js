@@ -5,7 +5,7 @@
 // choisi déplie l'outil qui l'a fait, à ses valeurs : ce qu'on y règle s'applique à lui (et
 // à la préférence de son outil). Les quatre instruments (flèche, stylo, surligneur, gomme)
 // sont dessinés, le corps à la couleur de l'encre, et sautent quand leur couleur ou leur
-// taille change. Menus « Plus », « Fermer » et de l'objet, vignette de prise, message,
+// taille change. Menus « Plus », « Fermer » et de l'objet, bouton Glisser, message,
 // clavier. Textes posés en texte, jamais en HTML ; les instruments sont des constantes de la
 // maquette, sans texte de l'utilisateur.
 
@@ -265,7 +265,7 @@ export function installerBarre(ed) {
   const bFermer = $('[data-act="fermer"]');
   const bCopier = $('[data-act="copier"]');
   const autre = $("#autre-couleur");
-  const vignette = $("#vignette-prise");
+  const bGlisser = $("#bouton-glisser");
   const pops = [plus, menuFermer, menuObjet];
   let ouvreur = null;
 
@@ -716,7 +716,6 @@ export function installerBarre(ed) {
   function ouvrirMenuFermer() {
     if (ouvert(menuFermer)) return;
     ed.outils?.validerSaisie();
-    retirerVignette();
     ouvrir(menuFermer, bFermer);
     $('[data-act="copier_fermer"]', menuFermer).focus({ preventScroll: true });
   }
@@ -776,63 +775,47 @@ export function installerBarre(ed) {
     },
   };
 
-  // ---------- vignette de prise (« Glisser vers une appli ») ----------
-  let urlVignette = null;
-  function montrerVignette() {
-    if (!ed.fond || !ed.h) return;
-    const cadre = ed.modele.cadre(ed.h.doc);
-    const l = Math.round(
-      (jetonNombre("editeur-vignette-largeur") - 2 * jetonNombre("editeur-pop-marge")) * 2,
-    );
-    const h = Math.max(1, Math.round((l * cadre.hauteur) / cadre.largeur));
-    const c = document.createElement("canvas");
-    c.width = l;
-    c.height = h;
-    const e = l / cadre.largeur;
-    const vue = { x: Math.round(-cadre.x * e), y: Math.round(-cadre.y * e), echelle: e, dpr: 1 };
-    ed.dessin.peindreVue(c.getContext("2d"), ed.h.doc, ed.fond, vue, []);
-    c.toBlob((blob) => {
-      c.width = 0;
-      if (!blob) return;
-      if (urlVignette) URL.revokeObjectURL(urlVignette);
-      urlVignette = URL.createObjectURL(blob);
-      $("#vignette-image").src = urlVignette;
-    });
-    vignette.hidden = false;
-    vignette.tabIndex = 0;
-    vignette.focus({ preventScroll: true });
-  }
-  function retirerVignette() {
-    if (vignette.hidden) return;
-    const focus = vignette.contains(document.activeElement);
-    vignette.hidden = true;
-    vignette.tabIndex = -1;
-    appui = null;
-    if (focus) scene.focus({ preventScroll: true });
-  }
-  // Appui puis 4 px de déplacement sur la vignette → export « glisser » ; le cœur fait le
-  // glisser du système.
+  // ---------- bouton « Glisser vers une appli » (design/glisser-appli, piste A) ----------
+  // Appui puis 4 px de déplacement → export « glisser » ; le cœur fait le glisser du système.
+  // Un simple clic (ou Entrée) secoue le bouton et dit quoi faire.
   let appui = null;
-  vignette.addEventListener("pointerdown", (e) => {
-    if (e.button !== 0) return;
+  let parti = false;
+  bGlisser.addEventListener("pointerdown", (e) => {
+    if (e.button !== 0 || bGlisser.disabled) return;
     e.preventDefault();
+    fermerMenus();
+    ed.outils?.validerSaisie();
     appui = { x: e.clientX, y: e.clientY, id: e.pointerId };
-    vignette.setPointerCapture?.(e.pointerId);
+    parti = false;
+    bGlisser.setPointerCapture?.(e.pointerId);
   });
-  vignette.addEventListener("pointermove", (e) => {
+  bGlisser.addEventListener("pointermove", (e) => {
     if (!appui || e.pointerId !== appui.id) return;
     const seuil = jetonNombre("editeur-glisser-seuil");
     if (Math.hypot(e.clientX - appui.x, e.clientY - appui.y) < seuil) return;
-    retirerVignette();
-    ed.exporter("glisser");
+    appui = null;
+    parti = true;
+    if (!ed.fond || !ed.h) return;
+    exporter("glisser");
   });
   for (const n of ["pointerup", "pointercancel"]) {
-    vignette.addEventListener(n, () => {
+    bGlisser.addEventListener(n, () => {
       appui = null;
     });
   }
+  bGlisser.addEventListener("click", () => {
+    if (parti) {
+      parti = false;
+      return;
+    }
+    bGlisser.classList.remove("secoue");
+    void bGlisser.offsetWidth;
+    bGlisser.classList.add("secoue");
+    message("Fais-le glisser vers une appli", true);
+  });
+  bGlisser.addEventListener("animationend", () => bGlisser.classList.remove("secoue"));
   function glisserEnCours(oui) {
-    if (oui) retirerVignette();
+    bGlisser.classList.toggle("glisse", oui);
   }
 
   // Menu contextuel d'un objet (« Forme »).
@@ -879,10 +862,7 @@ export function installerBarre(ed) {
       fermerMenus();
       ed.actions.enregistrer();
     } else if (a === "enregistrer_sous") ed.actions.enregistrerSous();
-    else if (a === "glisser") {
-      fermerMenus();
-      montrerVignette();
-    } else if (a === "fermer") {
+    else if (a === "fermer") {
       if (ouvert(menuFermer)) fermerMenus();
       else ed.fermer(false);
     } else if (a === "copier_fermer") {
@@ -908,7 +888,6 @@ export function installerBarre(ed) {
   document.addEventListener(
     "pointerdown",
     (e) => {
-      if (!vignette.hidden && !vignette.contains(e.target)) retirerVignette();
       if (!menuOuvert() || e.target === ed.toile) return;
       if (e.target.closest(".pop") || e.target.closest('[aria-expanded="true"]')) return;
       fermerMenus();
@@ -1041,8 +1020,7 @@ export function installerBarre(ed) {
         const o = ouvreur;
         fermerMenus();
         o?.focus({ preventScroll: true });
-      } else if (!vignette.hidden) retirerVignette();
-      else if (ed.selection.length) {
+      } else if (ed.selection.length) {
         ed.selection = [];
         synchroniser();
         ed.dessiner();
@@ -1095,7 +1073,7 @@ export function installerBarre(ed) {
   }
   function remiseAZero() {
     fermerMenus(false);
-    retirerVignette();
+    appui = null;
     bCopier.classList.remove("done");
     synchroniser();
   }
