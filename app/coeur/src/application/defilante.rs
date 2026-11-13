@@ -427,6 +427,8 @@ pub struct Course {
     reductions_ambigues: u32,
     /// `Vu::ImmobileLu` de suite au plus petit pas (N4).
     immobiles_lus: u32,
+    /// Le bas est à vérifier au plus petit pas (deux images immobiles sans position lue).
+    bas_a_verifier: bool,
     /// Le dernier pas demandé (négatif : une remontée).
     dernier_pas: i32,
     /// Le moyen en cours a fait avancer la page : gardé pour toute la capture (R3).
@@ -460,6 +462,7 @@ impl Course {
             reductions: 0,
             reductions_ambigues: 0,
             immobiles_lus: 0,
+            bas_a_verifier: false,
             dernier_pas: 0,
             moyen_choisi: false,
             avance_vue: false,
@@ -498,7 +501,11 @@ impl Course {
 
     fn recalculer_pas(&mut self) {
         let n = (self.reductions + self.reductions_ambigues).min(30);
-        self.pas = (self.pas_plein >> n).max(PAS_MIN);
+        self.pas = if self.bas_a_verifier {
+            PAS_MIN
+        } else {
+            (self.pas_plein >> n).max(PAS_MIN)
+        };
     }
 
     /// Vrai si le pas est déjà au plus petit (`PAS_MIN`).
@@ -733,9 +740,11 @@ fn suite_auto(
             course.moyen_choisi = true;
             course.avance_vue = true;
             course.derniere_nouvelle = maintenant;
-            if course.reductions_ambigues > 0 {
-                // Du texte est retrouvé : le pas d'avant les images ambiguës.
+            if course.reductions_ambigues > 0 || course.bas_a_verifier {
+                // Du texte est retrouvé : le pas d'avant les images ambiguës, ou d'avant la
+                // vérification du bas.
                 course.reductions_ambigues = 0;
+                course.bas_a_verifier = false;
                 course.recalculer_pas();
             }
             vec![Geste::Apercu, course.descendre(course.pas)]
@@ -761,6 +770,19 @@ fn suite_auto(
         Mesure::Immobile => {
             course.ambigues = 0;
             course.perdues_auto = 0;
+            if !en_bas
+                && position.is_none()
+                && course.moyen_choisi
+                && course.immobiles >= 1
+                && !course.au_plus_petit()
+            {
+                // Sans position lue, deux images immobiles ne suffisent pas : sur une liste,
+                // un vrai décalage hors de portée donne aussi `Immobile` (C, sans lu). Un
+                // pas au plus petit doit le redire avant de conclure au bas.
+                course.bas_a_verifier = true;
+                course.recalculer_pas();
+                return vec![course.descendre(course.pas)];
+            }
             immobile_auto(course, en_bas, maintenant)
         }
         Mesure::Ambigue => {
@@ -1804,6 +1826,36 @@ mod tests {
     }
 
     #[test]
+    fn sans_position_le_bas_est_verifie_au_plus_petit_pas() {
+        // C, point ouvert : sur une liste, sans lu, un vrai décalage hors de portée donne
+        // `Immobile`. Deux images immobiles sans position ne concluent pas au bas tout de
+        // suite : un pas au plus petit doit le redire.
+        let t0 = Instant::now();
+        let mut c = en_auto(t0);
+        let t = t0 + ms(600);
+        let immobile = Vu::Image(Mesure::Immobile, None);
+        suite(&mut c, Vu::Image(Mesure::Avance(200), None), t);
+        assert_eq!(suite(&mut c, immobile, t), vec![Geste::Descendre(200)]);
+        assert_eq!(suite(&mut c, immobile, t), vec![Geste::Descendre(PAS_MIN)]);
+        // Le petit pas avance : ce n'était pas le bas, le pas plein revient.
+        assert_eq!(
+            suite(&mut c, Vu::Image(Mesure::Avance(40), None), t),
+            vec![Geste::Apercu, Geste::Descendre(200)]
+        );
+        assert_eq!(c.fin(), None);
+        // Le petit pas redit `Immobile` : le bas.
+        assert_eq!(suite(&mut c, immobile, t), vec![Geste::Descendre(200)]);
+        assert_eq!(suite(&mut c, immobile, t), vec![Geste::Descendre(PAS_MIN)]);
+        assert_eq!(suite(&mut c, immobile, t), vec![Geste::Prendre(FIN_EN_BAS)]);
+        // Avec une position lue (qui ne dit pas le bas), deux images immobiles suffisent.
+        let mut c = en_auto(t0);
+        suite(&mut c, Vu::Image(Mesure::Avance(200), pos(40.0)), t);
+        let lue = Vu::Image(Mesure::Immobile, pos(40.0));
+        assert_eq!(suite(&mut c, lue, t), vec![Geste::Descendre(200)]);
+        assert_eq!(suite(&mut c, lue, t), vec![Geste::Prendre(FIN_EN_BAS)]);
+    }
+
+    #[test]
     fn moyen_garde_des_qu_il_fait_avancer() {
         let t0 = Instant::now();
         let mut c = en_auto(t0);
@@ -1812,8 +1864,10 @@ mod tests {
         // Première commande sans effet, seconde qui avance : moyen choisi.
         assert_eq!(suite(&mut c, immobile, t), vec![Geste::Descendre(200)]);
         suite(&mut c, Vu::Image(Mesure::Avance(200), None), t);
-        // Ensuite deux images immobiles disent « en bas », jamais un repli.
+        // Ensuite deux images immobiles disent « en bas », jamais un repli ; sans position
+        // lue, un pas au plus petit le redit d'abord.
         assert_eq!(suite(&mut c, immobile, t), vec![Geste::Descendre(200)]);
+        assert_eq!(suite(&mut c, immobile, t), vec![Geste::Descendre(PAS_MIN)]);
         assert_eq!(suite(&mut c, immobile, t), vec![Geste::Prendre(FIN_EN_BAS)]);
         // 350 ms sans autre avance : la fin seule.
         assert_eq!(

@@ -767,7 +767,9 @@ la moitié de la hauteur utile ; deux pas sans effet d'un moyen non choisi → `
 (`abandonner`, `None` → `Main`) ; une image perdue ou ambiguë réduit d'abord le pas de
 moitié jusqu'à 40 px (en remontant), puis compte (`PERDUES_AUTO_MAX`, `AMBIGUES_MAX`) ; le
 bas par la position lue ou deux images immobiles d'un moyen choisi, puis 350 ms sans
-mouvement. Une image `Immobile` mesurée avec un lu non nul (`Vu::ImmobileLu`, par
+mouvement ; sans position lue, la seconde ne conclut qu'au plus petit pas : sinon le pas
+passe au plus petit (`bas_a_verifier`, jusqu'à la prochaine avance) et une troisième doit
+le redire (sur une liste, sans lu, un vrai décalage hors de portée donne aussi `Immobile`). Une image `Immobile` mesurée avec un lu non nul (`Vu::ImmobileLu`, par
 `regles::vu_image` : grille répétitive, lu multiple de la période, N4 de C) ne compte
 jamais pour le bas ni pour un repli : pas réduit de moitié, remontée de la moitié du
 dernier mouvement, puis on réessaie (au plus petit pas, on redescend) ; seule une position
