@@ -34,20 +34,7 @@ jobs:
           "moteur du profil : $(if ($m) { $m.RecognizerLanguage.LanguageTag } else { 'null' })"
           Get-WindowsCapability -Online | Where-Object Name -like 'Language.OCR*' |
             Format-Table Name, State
-      - name: Installer en-US et fr-FR
-        shell: powershell
-        continue-on-error: true
-        run: |
-          foreach ($n in 'Language.OCR~~~en-US~0.0.1.0', 'Language.OCR~~~fr-FR~0.0.1.0') {
-            $t = [Diagnostics.Stopwatch]::StartNew()
-            try {
-              $r = Add-WindowsCapability -Online -Name $n -ErrorAction Stop
-              "$n : installé en $([int]$t.Elapsed.TotalSeconds) s, redémarrage $($r.RestartNeeded)"
-            } catch {
-              "$n : ECHEC en $([int]$t.Elapsed.TotalSeconds) s : $_"
-            }
-          }
-      - name: Langues de lecture après, et lecture d'un texte
+      - name: Lecture d'un texte
         shell: powershell
         run: |
           $null = [Windows.Media.Ocr.OcrEngine, Windows.Foundation, ContentType = WindowsRuntime]
@@ -58,7 +45,7 @@ jobs:
           Add-Type -AssemblyName System.Drawing
           $l = [Windows.Media.Ocr.OcrEngine]::AvailableRecognizerLanguages
           "langues : $($l.Count) : $(($l | ForEach-Object LanguageTag) -join ', ')"
-          if ($l.Count -eq 0) { "AUCUNE LANGUE : pas de lecture possible ici"; exit 0 }
+          if ($l.Count -eq 0) { "AUCUNE LANGUE"; exit 0 }
           $asTask = ([System.WindowsRuntimeSystemExtensions].GetMethods() | Where-Object {
               $_.Name -eq 'AsTask' -and $_.GetParameters().Count -eq 1 -and
               $_.GetParameters()[0].ParameterType.Name -eq 'IAsyncOperation`1' })[0]
@@ -92,9 +79,9 @@ jobs:
           foreach ($lang in $l) {
             $t = [Diagnostics.Stopwatch]::StartNew()
             $m = [Windows.Media.Ocr.OcrEngine]::TryCreateFromLanguage($lang)
-            "moteur $($lang.LanguageTag) créé en $([int]$t.Elapsed.TotalMilliseconds) ms"
-            foreach ($taille in 12, 16, 24) {
-              Lire 'Bonjour BreezyShot 2026, été à Noël : 42 €' $taille $m
+            "moteur $($lang.LanguageTag) pret en $([int]$t.Elapsed.TotalMilliseconds) ms"
+            foreach ($taille in 9, 11, 12, 14, 16, 24) {
+              Lire 'Hello BreezyShot 2026, the quick brown fox: 42' $taille $m
             }
           }
           $m = [Windows.Media.Ocr.OcrEngine]::TryCreateFromUserProfileLanguages()
