@@ -168,6 +168,12 @@ jobs:
           SORTIE: ${{ github.workspace }}/essais-resultats/pages
         run: node essais/pages/historique.cjs
 
+      - name: Essai de la page de la capture défilante
+        env:
+          NODE_PATH: ${{ github.workspace }}/app/node_modules
+          SORTIE: ${{ github.workspace }}/essais-resultats/pages
+        run: node essais/pages/defilante.cjs
+
       - name: Envoyer les captures de la page
         if: always()
         uses: actions/upload-artifact@v4
