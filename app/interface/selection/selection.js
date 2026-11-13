@@ -110,7 +110,8 @@ let mesure = 0; // numéro de la dernière mesure lancée
 let filet = 0; // minuterie du filet après un envoi
 const FILET_MS = 1500;
 // Mode défilante : le cœur garde la sélection jusqu'à la fenêtre de contrôle, 2 s au plus
-// après la fin (D4, R1) ; le filet ne doit pas rendre la page avant.
+// après la fin (D4, R1 : `DELAI_PAGE` de application/defilante.rs, qu'un test compare à
+// cette ligne) ; le filet ne doit pas rendre la page avant.
 const FILET_DEFILANTE_MS = FILET_MS + 2000;
 // Mode fenêtre.
 let mode = "zone";

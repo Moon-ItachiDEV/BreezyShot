@@ -1805,7 +1805,6 @@ mod tests {
     /// Verrou des séances. ASSEMBLAGE : le remplacer par `crate::systeme::gel::VERROU_ECRAN`
     /// (le verrou commun aux tests qui touchent l'écran ou le pointeur, Gel et A), ici
     /// seulement : `seance()` est le seul endroit qui le prend.
-    static VERROU: std::sync::Mutex<()> = std::sync::Mutex::new(());
     static ECHELLE: Once = Once::new();
 
     /// La garde de chaque test Windows de ce module.
@@ -1817,7 +1816,10 @@ mod tests {
                 SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2)
             };
         });
-        VERROU.lock().unwrap_or_else(|e| e.into_inner())
+        // Partagé avec les tests de `gel` et de `vivant` : un seul test d'écran à la fois.
+        crate::systeme::gel::VERROU_ECRAN
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
     }
 
     /// Sur GitHub (`BREEZYSHOT_AUTOMATION_OBLIGATOIRE=1`), UI Automation doit marcher et la

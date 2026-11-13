@@ -860,6 +860,13 @@ impl Etat {
     /// charge à envoyer (`suite` vrai), ou `None` : `id` n'est plus en cours, n'est pas en
     /// mode défilante, ou n'a pas encore de charge (la première, faite ensuite, portera les
     /// pages).
+    /// Vrai si `id` est en cours, en mode défilante, sans charge encore faite : `proposer`
+    /// retient alors la liste pour la première charge.
+    fn sans_charge(&mut self, id: u64) -> bool {
+        self.courant_mut(id)
+            .is_some_and(|a| a.mode == Mode::Defilante && a.charge.is_none())
+    }
+
     fn proposer(&mut self, id: u64, pages: Vec<FenetreProposee>) -> Option<ChargeMontrer> {
         let a = self.courant_mut(id).filter(|a| a.mode == Mode::Defilante)?;
         a.fenetres = pages.into_iter().take(FENETRES_MAX).collect();
@@ -1091,7 +1098,9 @@ impl Selection {
     /// charge, même affichage, même numéro de charge (le repère ne change pas) ; la page
     /// garde son geste en cours. `Signal::Fenetre::indice` est alors un indice de `pages`
     /// (les `FENETRES_MAX` premières). Fil principal (posté sinon). Un `id` qui n'est pas
-    /// celui en cours, ou pas en mode défilante : rien.
+    /// celui en cours, ou pas en mode défilante : rien. Une fois par affichage : un clic
+    /// sur une page d'une première liste, arrivé avec une seconde, serait décidé sur la
+    /// seconde.
     pub fn proposer(&self, id: u64, pages: Vec<FenetreProposee>) {
         self.interne.proposer(id, pages);
     }
@@ -1395,8 +1404,13 @@ impl Interne {
             return;
         }
         let n = pages.len().min(FENETRES_MAX);
+        let retenue = self.etat().sans_charge(id);
         let Some(charge) = self.etat().proposer(id, pages) else {
-            log::info!("selection {id}: pages sans affichage en cours");
+            if retenue {
+                log::info!("selection {id}: pages retenues pour la premiere charge");
+            } else {
+                log::info!("selection {id}: pages sans affichage en cours");
+            }
             return;
         };
         match self.emettre_charge(charge) {

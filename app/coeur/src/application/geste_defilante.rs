@@ -210,8 +210,8 @@ fn message_lancement_impossible() -> crate::fenetres::Message {
 
 /// Vrai de la visée à la fin d'une capture défilante : le menu de l'icône et les raccourcis
 /// qui ouvriraient une fenêtre de l'app (Réglages, Historique) doivent être ignorés, sauf
-/// Quitter (une fenêtre ouverte sur la zone entrerait dans l'image, R2). À brancher dans
-/// `mod.rs` (accroche du socle).
+/// Quitter (une fenêtre ouverte sur la zone entrerait dans l'image, R2). Lu par
+/// `super::traiter` pour le menu de l'icône et les raccourcis.
 pub fn fenetres_bloquees(app: &AppHandle) -> bool {
     super::defilante_en_cours(app).is_some()
 }
@@ -277,7 +277,11 @@ fn creer_controle(app: &AppHandle, numero: u64, essai: u32) {
     if !voulue {
         return;
     }
-    let cree = controle::creer(app);
+    // Une fenêtre restée d'une capture précédente est reprise (R1 « ou retrouvée »).
+    let (cree, retrouvee) = match controle::retrouver(app) {
+        Some(c) => (Ok(c), true),
+        None => (controle::creer(app), false),
+    };
     let err = match cree {
         Ok(c) => {
             let c = Arc::new(c);
@@ -289,11 +293,19 @@ fn creer_controle(app: &AppHandle, numero: u64, essai: u32) {
                 {
                     Some(e) => {
                         e.controle = Some(Arc::clone(&c));
-                        Some(e.etat.controle_cree())
+                        Some(if retrouvee {
+                            log::info!("{}", regles::ligne_page_prete(e.creation.elapsed()));
+                            e.etat.controle_retrouve()
+                        } else {
+                            e.etat.controle_cree()
+                        })
                     }
                     None => None,
                 }
             };
+            if retrouvee && etape.is_some() {
+                theme::envoyer_a(app, controle::ETIQUETTE_DEFILANTE);
+            }
             match etape {
                 Some(Etape::Montrer) => envoyer_montrer(app, numero),
                 Some(_) => {}
@@ -309,13 +321,8 @@ fn creer_controle(app: &AppHandle, numero: u64, essai: u32) {
         creation_ratee(app, numero);
         return;
     }
-    // Une fenêtre `defilante` restée d'une capture précédente (destruction en retard) :
-    // détruite, puis un nouvel essai.
-    if let Some(vieille) = app.get_webview_window(controle::ETIQUETTE_DEFILANTE) {
-        if let Err(e) = vieille.destroy() {
-            log::warn!("defilante: ancienne fenetre non detruite: {e}");
-        }
-    }
+    // Tauri peut refuser l'étiquette d'une fenêtre dont la destruction n'est pas finie :
+    // un nouvel essai (qui la retrouvera si elle vit encore).
     let postee = super::plus_tard_nomme(app, "defilante-poste", ENTRE_CREATIONS, move |app| {
         creer_controle(app, numero, essai + 1)
     });
@@ -646,6 +653,7 @@ pub(super) fn pilule_posee(app: &AppHandle, id: u64, x: f64, y: f64, largeur: f6
                         reception,
                         envoi: l.envoi.clone(),
                         arret: Arc::clone(&l.arret),
+                        verrouillages: gel::verrouillages_de_session(),
                     },
                 )
             }),
@@ -976,6 +984,8 @@ struct Depart {
     reception: Receiver<Commande>,
     envoi: Sender<Commande>,
     arret: Arc<AtomicBool>,
+    /// `gel::verrouillages_de_session()` au relâchement (R9).
+    verrouillages: u64,
 }
 
 /// Lance le fil `defilante`. Une panique dans le fil finit la capture (`fil`) : jamais un
@@ -1043,11 +1053,11 @@ impl Pilote for defiler::Defileur {
     fn position(&self) -> Option<Position> {
         defiler::Defileur::position(self)
     }
-    // À l'assemblage avec `0318bde` (B) : `defiler::Defileur::constater(self, avance)`.
-    fn constater(&mut self, _avance: u32) {}
-    // À l'assemblage avec `0318bde` (B) : `defiler::Defileur::avance_par_cran(self)`.
+    fn constater(&mut self, avance: u32) {
+        defiler::Defileur::constater(self, avance)
+    }
     fn avance_par_cran(&self) -> Option<u32> {
-        None
+        defiler::Defileur::avance_par_cran(self)
     }
 }
 
@@ -1058,6 +1068,8 @@ trait Atelier {
         -> Mesure;
     fn ajouter(&mut self, image: &Pixels, mesure: &Mesure) -> Ajout;
     fn apercu(&self, largeur: u32, hauteur_max: u32) -> Pixels;
+    /// Vrai si la dernière `Ajout::Limite` vient d'une mémoire refusée (D19).
+    fn memoire_refusee(&self) -> bool;
     /// Une seule fois.
     fn finir(&mut self, derniere: &Pixels) -> Result<Pixels, String>;
 }
@@ -1089,6 +1101,9 @@ impl Atelier for VraiAtelier {
             Some(a) => a.apercu(largeur, hauteur_max),
             None => vide(),
         }
+    }
+    fn memoire_refusee(&self) -> bool {
+        self.0.as_ref().is_some_and(|a| a.memoire_refusee())
     }
     fn finir(&mut self, derniere: &Pixels) -> Result<Pixels, String> {
         match self.0.take() {
@@ -1209,6 +1224,7 @@ fn defiler_et_assembler(d: Depart, sortie: impl FnMut(Signal) + Send + 'static) 
         image,
         relache_premiere,
         gel::ecrans,
+        gel::verrouillages_de_session,
     );
     fil.courir();
 }
@@ -1244,6 +1260,11 @@ struct Fil<S: Source, P: Pilote, A: Atelier> {
     zone: Rect,
     ecrans: Vec<EcranInfo>,
     lire_ecrans: fn() -> Vec<EcranInfo>,
+    /// Verrouillages de session vus au départ, et comment les relire (R9).
+    verrouillages: u64,
+    lire_verrouillages: fn() -> u64,
+    /// La mémoire de l'assemblage a été refusée : `Impossible::Memoire` est parti.
+    abandonne: bool,
     apercu: PlaceApercu,
     apercu_taille: (u32, u32),
     reception: Receiver<Commande>,
@@ -1307,6 +1328,7 @@ impl<S: Source, P: Pilote, A: Atelier> Fil<S, P, A> {
         premiere: Pixels,
         relache_premiere: Duration,
         lire_ecrans: fn() -> Vec<EcranInfo>,
+        lire_verrouillages: fn() -> u64,
     ) -> Fil<S, P, A> {
         let maintenant = Instant::now();
         let mut course = Course::nouvelle(maintenant);
@@ -1329,6 +1351,9 @@ impl<S: Source, P: Pilote, A: Atelier> Fil<S, P, A> {
             zone: d.zone,
             ecrans: d.ecrans,
             lire_ecrans,
+            verrouillages: d.verrouillages,
+            lire_verrouillages,
+            abandonne: false,
             apercu: d.apercu,
             apercu_taille: d.apercu_taille,
             reception: d.reception,
@@ -1376,7 +1401,16 @@ impl<S: Source, P: Pilote, A: Atelier> Fil<S, P, A> {
     /// prochain ordre ou de la prochaine échéance.
     fn courir(&mut self) {
         loop {
-            if self.arrete() || self.servir_ordres() {
+            if self.arrete() || self.servir_ordres() || self.abandonne {
+                return;
+            }
+            if (self.lire_verrouillages)() != self.verrouillages {
+                // La session est verrouillée : les images ne seraient plus celles de la page,
+                // et la page défilerait derrière l'écran de verrouillage (R9).
+                self.sortie.envoyer(Signal::Annulee {
+                    numero: self.numero,
+                    cause: Annulation::Session,
+                });
                 return;
             }
             if self.echecs >= regles::PRISES_EN_ECHEC_MAX && self.course.fin().is_none() {
@@ -1693,6 +1727,11 @@ impl<S: Source, P: Pilote, A: Atelier> Fil<S, P, A> {
                 continue;
             }
             if prise {
+                // Deux images identiques : posée, même sur un motif répété que la mesure
+                // dirait ambigu (C).
+                if self.precedente.rgba == self.image.rgba {
+                    return Posee::Prise;
+                }
                 let m = self
                     .atelier
                     .mesurer(&self.precedente, &self.image, self.fixes, None);
@@ -1763,6 +1802,18 @@ impl<S: Source, P: Pilote, A: Atelier> Fil<S, P, A> {
         // La dernière image gardée est celle dont des lignes sont entrées (D10).
         let gardee = match self.atelier.ajouter(&self.image, &mesure) {
             Ajout::Ajoutees(_) => true,
+            Ajout::Limite(_) if self.atelier.memoire_refusee() => {
+                // La mémoire n'a pas pu être réservée : rien n'est rendu (D19).
+                log::warn!("defilante: memoire refusee");
+                self.abandonne = true;
+                self.fini = true;
+                self.course.finir(Fin::Limite);
+                self.sortie.envoyer(Signal::Impossible {
+                    numero: self.numero,
+                    cause: Impossible::Memoire,
+                });
+                return mesure;
+            }
             Ajout::Limite(_) => {
                 self.course.finir(Fin::Limite);
                 true
@@ -1928,7 +1979,7 @@ mod tests {
         );
         assert_eq!(c.apercu.x, 1012);
         assert_eq!(c.apercu.largeur, 84);
-        assert_eq!(c.pilule, PointPage { x: 645, y: 660 });
+        assert_eq!(c.pilule, PointPage { x: 650, y: 660 });
         assert_eq!(c.libelle, "Terminer");
         assert!(c.reduites);
     }
@@ -2062,6 +2113,8 @@ mod tests {
         lignes: u32,
         limite: u32,
         attendus: Arc<Mutex<Vec<i32>>>,
+        /// La limite vient d'une mémoire refusée.
+        refuse: bool,
     }
 
     impl Atelier for FauxAtelier {
@@ -2102,6 +2155,9 @@ mod tests {
         fn apercu(&self, _: u32, _: u32) -> Pixels {
             image(0)
         }
+        fn memoire_refusee(&self) -> bool {
+            self.refuse && self.lignes >= self.limite
+        }
         fn finir(&mut self, _: &Pixels) -> Result<Pixels, String> {
             Ok(Pixels {
                 largeur: 1,
@@ -2122,6 +2178,16 @@ mod tests {
     }
 
     fn lancer(page: Partagee, pilote: Option<FauxPilote>, limite: u32) -> Essai {
+        lancer_avec(page, pilote, limite, false, || 0)
+    }
+
+    fn lancer_avec(
+        page: Partagee,
+        pilote: Option<FauxPilote>,
+        limite: u32,
+        refuse: bool,
+        lire_verrouillages: fn() -> u64,
+    ) -> Essai {
         let (envoi, reception) = mpsc::channel();
         let (vers_essai, signaux) = mpsc::channel();
         let arret = Arc::new(AtomicBool::new(false));
@@ -2137,6 +2203,7 @@ mod tests {
             reception,
             envoi: envoi.clone(),
             arret: Arc::clone(&arret),
+            verrouillages: 0,
         };
         let sortie = Sortie {
             arret: Arc::clone(&arret),
@@ -2157,10 +2224,12 @@ mod tests {
                     lignes: 0,
                     limite,
                     attendus: Arc::clone(&attendus),
+                    refuse,
                 },
                 premiere,
                 Duration::ZERO,
                 Vec::new,
+                lire_verrouillages,
             );
             f.courir();
         });
@@ -2478,6 +2547,45 @@ mod tests {
         assert_eq!(&a[..3], &[40, 40, 40], "{a:?}");
         // En bas, la position ne bouge plus : 0, et non le pas commandé.
         assert_eq!(a.last(), Some(&0), "{a:?}");
+    }
+
+    #[test]
+    fn fil_memoire_refusee_impossible() {
+        let p = page(1_000_000);
+        let pi = pilote(&p, &[Moyen::Message], true);
+        let e = lancer_avec(p, Some(pi), 100, true, || 0);
+        let s = e.jusqu_a_la_fin();
+        e.fil.join().unwrap();
+        assert_eq!(
+            s.last(),
+            Some(&Signal::Impossible {
+                numero: 1,
+                cause: Impossible::Memoire
+            })
+        );
+        assert!(!s.iter().any(|s| matches!(s, Signal::Finit { .. })));
+    }
+
+    static VERROUILLAGES_ESSAI: AtomicU64 = AtomicU64::new(0);
+
+    #[test]
+    fn fil_session_verrouillee_annule() {
+        let p = page(1_000_000);
+        let pi = pilote(&p, &[Moyen::Message], true);
+        let e = lancer_avec(p, Some(pi), 1_000_000, false, || {
+            VERROUILLAGES_ESSAI.load(Ordering::SeqCst)
+        });
+        e.attendre(|p| p.pas >= 2);
+        VERROUILLAGES_ESSAI.fetch_add(1, Ordering::SeqCst);
+        let s = e.jusqu_a_la_fin();
+        e.fil.join().unwrap();
+        assert_eq!(
+            s.last(),
+            Some(&Signal::Annulee {
+                numero: 1,
+                cause: Annulation::Session
+            })
+        );
     }
 
     #[test]

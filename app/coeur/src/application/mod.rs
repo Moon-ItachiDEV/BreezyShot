@@ -1394,6 +1394,10 @@ pub fn traiter(app: &AppHandle, evenement: Evenement) {
                 log::info!("menu: quitter");
                 app.exit(0);
             }
+            // Pendant une défilante, aucune fenêtre ne s'ouvre sur la zone (R2).
+            (_, _) if geste_defilante::fenetres_bloquees(app) => {
+                log::info!("menu ignore pendant la defilante");
+            }
             (MENU_REGLAGES, _) => {
                 log::info!("menu: reglages");
                 fenetre_reglages::ouvrir(app);
@@ -1457,6 +1461,10 @@ pub fn traiter(app: &AppHandle, evenement: Evenement) {
         }
         Evenement::Raccourci(raccourcis::Signal::Presse(action)) => {
             log::info!("raccourci presse: {action}");
+            if geste_defilante::fenetres_bloquees(app) {
+                log::info!("raccourci ignore pendant la defilante");
+                return;
+            }
             let construite = actions_en_vigueur(app).contains(&action.as_str());
             match Mode::depuis_nom(&action) {
                 Some(mode) if construite => lancer_capture(app, mode),
@@ -2192,8 +2200,9 @@ pub(super) fn abandonner(app: &AppHandle, declencheur: Declencheur, probleme: Op
 
 /// Un signal pendant une capture de zone (fil principal) : décision pure, puis gestes.
 fn traiter_zone(app: &AppHandle, arrivee: Arrivee<'_>) {
-    let (geste, texte, defilante) = {
+    let (geste, texte, defilante, sans_capture) = {
         let c = capture_en_cours(app);
+        let sans_capture = c.is_none();
         let texte = c.as_ref().is_some_and(|c| c.mode == selection::Mode::Texte);
         let defilante = c
             .as_ref()
@@ -2207,7 +2216,7 @@ fn traiter_zone(app: &AppHandle, arrivee: Arrivee<'_>) {
             }),
             arrivee,
         );
-        (geste, texte, defilante)
+        (geste, texte, defilante, sans_capture)
     };
     // Capture défilante : la page cliquée, par son indice dans la liste proposée.
     let page = match arrivee {
@@ -2215,6 +2224,24 @@ fn traiter_zone(app: &AppHandle, arrivee: Arrivee<'_>) {
         _ => None,
     };
     match geste {
+        // Une zone choisie en mode texte ou défilante est gardée à l'écran par la Sélection
+        // jusqu'à ce que le cœur la cache : sans capture (ni défilante) pour la recevoir,
+        // personne ne le ferait.
+        Geste::Rien
+            if sans_capture
+                && matches!(
+                    arrivee,
+                    Arrivee::Selection(
+                        selection::Signal::Zone { .. } | selection::Signal::Fenetre { .. }
+                    )
+                )
+                && !geste_defilante::fenetres_bloquees(app) =>
+        {
+            log::warn!("selection gardee sans capture: cachee");
+            if let Some(s) = app.try_state::<Selection>() {
+                s.cacher();
+            }
+        }
         Geste::Rien => {}
         Geste::Abandonner {
             declencheur,

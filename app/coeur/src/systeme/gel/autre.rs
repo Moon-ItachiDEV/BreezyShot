@@ -57,6 +57,10 @@ pub fn surveillance_session() -> bool {
     false
 }
 
+pub fn verrouillages_de_session() -> u64 {
+    0
+}
+
 pub fn poignee_ecran_fige() -> Option<isize> {
     None
 }

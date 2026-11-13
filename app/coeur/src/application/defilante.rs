@@ -102,8 +102,8 @@ pub const HAUT_MESSAGE_LOGIQUE: f64 = 14.0;
 /// Taille de la pilule « Terminer » prévue pour la placer, en pixels logiques (bouton de
 /// 32 px, 4 px de marge, 1 px de bord ; « Terminer » à 14 px) : la page rapporte ensuite
 /// la vraie (`defilante_zone`).
-pub const PILULE_LARGEUR_LOGIQUE: f64 = 110.0;
-pub const PILULE_HAUTEUR_LOGIQUE: f64 = 42.0;
+pub const PILULE_LARGEUR_LOGIQUE: f64 = crate::fenetres::defilante::TAILLE_PILULE_LOGIQUE.0;
+pub const PILULE_HAUTEUR_LOGIQUE: f64 = crate::fenetres::defilante::TAILLE_PILULE_LOGIQUE.1;
 /// Hauteur gardée à l'aperçu quand la zone touche le bas de l'écran, en pixels logiques.
 pub const APERCU_HAUTEUR_MIN_LOGIQUE: f64 = 40.0;
 
@@ -948,6 +948,14 @@ impl Lancement {
         self.envoyer()
     }
 
+    /// Une fenêtre de contrôle restée d'une capture précédente est reprise
+    /// (`Controle::retrouver`, R1) : sa page est déjà chargée et écoute, elle n'enverra
+    /// plus `defilante_pret`.
+    pub fn controle_retrouve(&mut self) -> Etape {
+        self.prete = true;
+        self.controle_cree()
+    }
+
     /// La création a échoué pour de bon : abandon si la zone est déjà choisie, sinon au
     /// relâchement.
     pub fn creation_ratee(&mut self) -> Etape {
@@ -1381,7 +1389,7 @@ mod tests {
         // Aperçu à 12 px à droite, haut de la zone, jusqu'à 8 px du bas de la zone utile.
         assert_eq!(p.apercu, r(1012, 200, 84, 1032 - 8 - 200));
         // Pilule centrée, 10 px sous la zone.
-        assert_eq!(p.pilule, (400 + 300 - 55, 660));
+        assert_eq!(p.pilule, (400 + 300 - 50, 660));
         // Message centré, 14 px sous le haut.
         assert_eq!(p.message, (960, 14));
     }
@@ -2171,6 +2179,30 @@ mod tests {
         assert!(!l.echouer());
         assert!(!l.finir());
         assert!(!l.ouverte());
+    }
+
+    #[test]
+    fn filet_de_la_selection_apres_la_borne_de_la_page() {
+        // Le filet de la page de sélection ne rend pas la main avant l'abandon du cœur.
+        let page = include_str!("../../../interface/selection/selection.js");
+        let ligne = format!(
+            "const FILET_DEFILANTE_MS = FILET_MS + {};",
+            DELAI_PAGE.as_millis()
+        );
+        assert!(page.contains(&ligne), "{ligne}");
+    }
+
+    #[test]
+    fn lancement_controle_retrouve() {
+        // Retrouvée pendant la visée : la page écoute déjà, montrée au relâchement.
+        let mut l = Lancement::default();
+        assert_eq!(l.controle_retrouve(), Etape::Rien);
+        assert!(l.prete);
+        assert_eq!(l.relache(), Etape::Montrer);
+        // Retrouvée après le relâchement : montrée tout de suite.
+        let mut l = Lancement::default();
+        assert_eq!(l.relache(), Etape::Rien);
+        assert_eq!(l.controle_retrouve(), Etape::Montrer);
     }
 
     #[test]

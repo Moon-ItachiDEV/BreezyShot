@@ -6,7 +6,7 @@
 //! procédure de la fenêtre prend `IMAGE` pour peindre : un verrou gardé à ce moment-là
 //! bloquerait le fil. Un verrou empoisonné (fil qui a paniqué) est repris, jamais déballé.
 
-use std::sync::atomic::{AtomicIsize, Ordering};
+use std::sync::atomic::{AtomicIsize, AtomicU64, Ordering};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
@@ -796,6 +796,8 @@ unsafe extern "system" fn procedure_ecran_fige(
         }
         WM_WTSSESSION_CHANGE => {
             if wparam.0 == WTS_SESSION_LOCK as usize {
+                // Compté même écran figé caché (défilante, R9).
+                VERROUILLAGES.fetch_add(1, Ordering::SeqCst);
                 cacher_et_prevenir(hwnd, Changement::SessionVerrouillee);
             }
             LRESULT(0)
@@ -845,6 +847,13 @@ static RAPPEL_CHANGEMENT: Mutex<Option<RappelChangement>> = Mutex::new(None);
 
 /// Poignée de la fenêtre inscrite au verrouillage de session (0 : aucune).
 static SESSION_SURVEILLEE: AtomicIsize = AtomicIsize::new(0);
+
+/// Verrouillages de session vus par la fenêtre de l'écran figé, montrée ou cachée.
+static VERROUILLAGES: AtomicU64 = AtomicU64::new(0);
+
+pub fn verrouillages_de_session() -> u64 {
+    VERROUILLAGES.load(Ordering::SeqCst)
+}
 
 pub fn quand_bureau_change(rappel: RappelChangement) {
     let ancien = verrouiller(&RAPPEL_CHANGEMENT).replace(rappel);

@@ -265,6 +265,14 @@ pub fn surveillance_session() -> bool {
     plateforme::surveillance_session()
 }
 
+/// Le nombre de verrouillages de session vus depuis le lancement, que l'écran figé soit
+/// montré ou caché (la fenêtre figée reste créée et inscrite) : la capture défilante le
+/// relit pendant le défilement (R9). Ne compte que si `surveillance_session()`. Hors
+/// Windows : 0.
+pub fn verrouillages_de_session() -> u64 {
+    plateforme::verrouillages_de_session()
+}
+
 /// Vrai tant que l'écran figé est montré : marqué « montré » (dès `montrer_ecran_fige`,
 /// jusqu'à la demande de le cacher) ou encore visible (masquage posté, pas encore traité).
 /// La garde de `figer_bureau`, pour les autres prises de l'écran (`vivant`). Porte sur la
