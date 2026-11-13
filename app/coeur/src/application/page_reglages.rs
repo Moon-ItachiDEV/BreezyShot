@@ -45,8 +45,9 @@ pub fn lignes_montrees(vignette_construite: bool, capture_disponible: bool) -> V
     if vignette_construite {
         l.push("enregistrer");
     }
-    // La licence (avenant 0.5 « Licence », §1) : toujours là, au-dessus de « À propos ».
-    l.extend(["modele_nom", "theme", "demarrage", "licence", "version"]);
+    // La licence (avenant 0.5 « Licence », §1) : toujours là, en dernier dans Général
+    // (logo et version, Thème, Lancer au démarrage, Licence : décision du responsable).
+    l.extend(["modele_nom", "theme", "demarrage", "version", "licence"]);
     l
 }
 
@@ -221,6 +222,13 @@ pub fn libelle_action(action: &str) -> &'static str {
         "texte" => "Copier le texte",
         _ => "",
     }
+}
+
+/// Une saisie ne commence que pour une action en vigueur ; sa fin (`active` faux) passe
+/// toujours : la licence retirée pendant la saisie de « Historique », la page retire la
+/// ligne et rend la saisie, et les raccourcis doivent être repris tout de suite.
+pub fn saisie_permise(active: bool, action_en_vigueur: bool) -> bool {
+    !active || action_en_vigueur
 }
 
 /// Une touche tapée dans la page, telle que le navigateur la donne.
@@ -546,8 +554,8 @@ mod tests {
                 "modele_nom",
                 "theme",
                 "demarrage",
-                "licence",
-                "version"
+                "version",
+                "licence"
             ]
         );
         let avec = lignes_montrees(true, false);
@@ -563,8 +571,8 @@ mod tests {
                 "modele_nom",
                 "theme",
                 "demarrage",
-                "licence",
-                "version"
+                "version",
+                "licence"
             ]
         );
         // Sans Gel, la rubrique Capture n'a aucun effet : aucune de ses lignes.
@@ -1003,10 +1011,18 @@ mod tests {
         assert!(!sans.licence_active);
         for v in [&avec, &sans] {
             let n = v.lignes.len();
-            assert_eq!(v.lignes[n - 2..], ["licence", "version"]);
+            assert_eq!(v.lignes[n - 2..], ["version", "licence"]);
         }
         let json = serde_json::to_value(&sans).unwrap();
         assert_eq!(json["licence_active"], serde_json::json!(false));
+    }
+
+    #[test]
+    fn fin_de_saisie_toujours_permise() {
+        assert!(saisie_permise(true, true));
+        assert!(!saisie_permise(true, false));
+        assert!(saisie_permise(false, true));
+        assert!(saisie_permise(false, false));
     }
 
     #[test]

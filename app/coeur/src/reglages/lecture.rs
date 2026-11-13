@@ -94,17 +94,44 @@ fn deja_donne(raccourcis: &Map<String, Value>, notation: &str) -> bool {
 }
 
 /// Une notation ramenée à une forme comparable sans le module `raccourcis` (qui n'est pas
-/// connu d'ici) : sans espaces, en minuscules, morceaux triés (`Maj + ctrl+T` vaut
-/// `Ctrl+Maj+T`). Une notation que `raccourcis` lirait autrement (`Option` pour `Alt`)
-/// n'est pas reconnue : le défaut est alors donné, et le choix des raccourcis dira le
-/// conflit au démarrage, comme pour tout raccourci en double.
-fn forme_simple(notation: &str) -> Vec<String> {
-    let mut morceaux: Vec<String> = notation
-        .split('+')
-        .map(|m| m.split_whitespace().collect::<String>().to_lowercase())
-        .collect();
+/// connu d'ici), avec la même règle que son `simplifier` : sans espaces ni points, en
+/// minuscules, sans accents (`Impr. écran` vaut `ImprEcran`), `Option` vaut `Alt` et `Cmd`
+/// vaut `Win` ; morceaux triés (`Maj + ctrl+T` vaut `Ctrl+Maj+T`).
+pub(super) fn forme_simple(notation: &str) -> Vec<String> {
+    let mut morceaux: Vec<String> = notation.split('+').map(morceau_simple).collect();
     morceaux.sort();
     morceaux
+}
+
+/// Un morceau d'une notation, comme `raccourcis::notation::simplifier` puis les synonymes
+/// des modificateurs.
+fn morceau_simple(morceau: &str) -> String {
+    let minuscules: String = morceau
+        .chars()
+        .filter(|c| !c.is_whitespace() && *c != '.')
+        .flat_map(char::to_lowercase)
+        .collect();
+    let simple: String = if minuscules.chars().count() <= 1 {
+        minuscules
+    } else {
+        minuscules
+            .chars()
+            .map(|c| match c {
+                'é' | 'è' | 'ê' | 'ë' => 'e',
+                'à' | 'â' => 'a',
+                'î' | 'ï' => 'i',
+                'ô' => 'o',
+                'û' | 'ù' => 'u',
+                'ç' => 'c',
+                autre => autre,
+            })
+            .collect()
+    };
+    match simple.as_str() {
+        "option" => "alt".into(),
+        "cmd" => "win".into(),
+        _ => simple,
+    }
 }
 
 /// Ajoute à `cible` les clés de `modele` qui lui manquent, en descendant dans les sous-objets

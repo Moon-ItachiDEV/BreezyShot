@@ -10,6 +10,7 @@ use tempfile::TempDir;
 use super::fichier::{
     charger_a, cle_sauvegarde, nom_sauvegarde, sauvegardes_a_supprimer, texte_du_fichier,
 };
+use super::lecture::forme_simple;
 use super::*;
 
 const W: Plateforme = Plateforme::Windows;
@@ -1652,14 +1653,27 @@ fn ecrire_refuse_un_retardateur_hors_limites() {
 
 // ---------- Version 4 (0.5) ----------
 
-/// Le fichier par défaut de la 0.4 (version 3), tel qu'elle l'écrivait.
+/// Le fichier par défaut de la 0.4 (version 3), tel qu'elle l'écrivait (commit `9651235`).
 fn fichier_v3_de_la_0_4() -> Value {
-    let mut v = defaut_json(|_| {});
-    v["version"] = json!(3);
-    let r = v["raccourcis"].as_object_mut().unwrap();
-    r.shift_remove("historique");
-    r.shift_remove("texte");
-    v
+    json!({
+        "version": 3,
+        "raccourcis": {
+            "zone": ["ImprEcran", "Ctrl+Maj+1"],
+            "plein_ecran": ["Ctrl+Maj+2"],
+            "fenetre": ["Ctrl+Maj+3"],
+            "derniere_zone": ["Ctrl+Maj+4"]
+        },
+        "copier_apres_capture": true,
+        "enregistrer_apres_capture": false,
+        "vignette": { "afficher": true, "duree_s": 6, "coin": "bas_gauche" },
+        "selection": { "loupe": false },
+        "capture": { "retardateur_s": 0, "pointeur": false },
+        "demarrer_avec_systeme": false,
+        "dossier_enregistrement": null,
+        "modele_nom": "BreezyShot {date} à {heure}",
+        "animations": "systeme",
+        "theme": "systeme"
+    })
 }
 
 #[test]
@@ -1790,4 +1804,43 @@ fn version_4_relue_telle_quelle() {
     assert_eq!(r.raccourcis.historique, ["F8"]);
     assert!(r.raccourcis.texte.is_empty());
     assert_stable(&d);
+}
+
+/// Même règle que `raccourcis` pour reconnaître une touche déjà donnée : `Cmd` vaut `Win`,
+/// `Option` vaut `Alt`, points, espaces, casse et accents ne comptent pas.
+#[test]
+fn raccourci_deja_donne_synonymes() {
+    for (plateforme, ecrite, prise) in [
+        (Plateforme::Mac, "Win+Maj+8", "historique"),
+        (Plateforme::Mac, "maj+CMD+9", "texte"),
+        (W, "Ctrl+Option+H", "rien"),
+        (W, "Ctrl. + Maj + t", "texte"),
+    ] {
+        let mut v = fichier_v3_de_la_0_4();
+        v["raccourcis"]["fenetre"] = json!([ecrite]);
+        let d = dossier();
+        poser_json(&d, v);
+        let (r, _) = charger(d.path(), plateforme);
+        let defaut = Raccourcis::par_defaut(plateforme);
+        for action in ["historique", "texte"] {
+            let attendu: &[String] = if action == prise {
+                &[]
+            } else {
+                defaut.candidats(action).unwrap()
+            };
+            assert_eq!(
+                r.raccourcis.candidats(action),
+                Some(attendu),
+                "{ecrite} {action}"
+            );
+        }
+    }
+    // Option vaut Alt : `Ctrl+Option+H` déjà donné prend `Ctrl+Alt+H` s'il était le défaut.
+    assert_eq!(
+        forme_simple("Ctrl+Option+H"),
+        forme_simple("alt + ctrl + h")
+    );
+    assert_eq!(forme_simple("Cmd+Maj+8"), forme_simple("Win+Maj+8"));
+    assert_eq!(forme_simple("Impr. écran"), forme_simple("ImprEcran"));
+    assert_ne!(forme_simple("Ctrl+Alt+H"), forme_simple("Ctrl+Maj+H"));
 }

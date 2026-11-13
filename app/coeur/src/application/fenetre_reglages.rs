@@ -484,7 +484,7 @@ pub async fn reglages_parcourir(app: AppHandle) -> Reponse {
 /// fin d'une saisie de raccourci.
 #[tauri::command]
 pub fn reglages_saisie(app: AppHandle, action: String, active: bool) -> Reponse {
-    if !action_connue(&app, &action) {
+    if !page::saisie_permise(active, action_connue(&app, &action)) {
         return refuser(&app, Refus::nouveau("raccourci", "", "action_inconnue"));
     }
     if !active {
