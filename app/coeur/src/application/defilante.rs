@@ -425,7 +425,9 @@ impl Fin {
     }
 }
 
-/// La course d'une capture : conduite, « trop vite », pas, moyens essayés, fin rendue.
+/// La course d'une capture : conduite, « trop vite », pas, moyen choisi, fin rendue. Le
+/// nombre de moyens n'est pas compté ici : le défileur le sait (`abandonner()` rend
+/// `None` quand il n'y en a plus) et le fil appelle alors `sans_moyen`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Course {
     conduite: Conduite,
@@ -437,16 +439,19 @@ pub struct Course {
     pas: i32,
     /// Le pas a déjà été réduit de moitié (une fois au plus, D10).
     pas_reduit: bool,
-    /// Moyens qui restent à essayer, celui en cours compris (R3).
-    moyens_restants: u32,
+    /// Le dernier pas demandé (négatif : une remontée).
+    dernier_pas: i32,
     /// Le moyen en cours a fait avancer la page : gardé pour toute la capture (R3).
     moyen_choisi: bool,
     /// Images immobiles de suite après un pas (D8, D15).
     immobiles: u32,
-    /// Images ambiguës de suite en `Auto`.
+    /// Images ambiguës de suite en `Auto`, sans que la position lue bouge.
     ambigues: u32,
-    /// Images perdues de suite en `Auto` (chaque fois, l'app remonte d'un demi-pas).
+    /// Images perdues en `Auto` depuis la dernière avance ou image immobile (chaque fois,
+    /// l'app remonte d'un demi-pas).
     perdues_auto: u32,
+    /// La dernière position lue, en pour cent.
+    derniere_position: Option<f64>,
     /// Le bas semble atteint depuis ce moment (D15).
     en_bas_depuis: Option<Instant>,
 }
@@ -462,11 +467,12 @@ impl Course {
             derniere_nouvelle: debut,
             pas: PAS_MIN,
             pas_reduit: false,
-            moyens_restants: Moyen::ORDRE.len() as u32,
+            dernier_pas: 0,
             moyen_choisi: false,
             immobiles: 0,
             ambigues: 0,
             perdues_auto: 0,
+            derniere_position: None,
             en_bas_depuis: None,
         }
     }
@@ -500,13 +506,23 @@ impl Course {
         };
     }
 
-    /// Aucun moyen de défilement n'existe (pas de `Defileur`) : la main est à la molette
-    /// dès le départ, sans rien montrer (D8).
-    pub fn sans_moyen(&mut self, maintenant: Instant) {
-        self.moyens_restants = 0;
-        if self.conduite != Conduite::Main && self.fin.is_none() {
-            self.passer_main(maintenant);
+    /// Plus aucun moyen de défilement (aucun défileur, `abandonner()` qui rend `None`, ou
+    /// un pas retenu sans moyen) : la main passe à la molette de l'utilisateur, sans rien
+    /// montrer (D8), et les images continuent d'être prises.
+    pub fn sans_moyen(&mut self, maintenant: Instant) -> Vec<Geste> {
+        if self.fin.is_some() || self.conduite == Conduite::Main {
+            return Vec::new();
         }
+        self.passer_main(maintenant);
+        vec![Geste::Prendre(PRISE_MAIN)]
+    }
+
+    /// Le défileur est passé à un autre moyen de lui-même : ses deux premières commandes
+    /// décideront de nouveau (R3).
+    pub fn moyen_change(&mut self) {
+        self.moyen_choisi = false;
+        self.immobiles = 0;
+        self.ambigues = 0;
     }
 
     /// Finit la course par `fin` si elle ne l'est pas déjà (la première fin gagne). Vrai si
@@ -523,6 +539,11 @@ impl Course {
         self.conduite = Conduite::Main;
         self.derniere_nouvelle = maintenant;
         self.en_bas_depuis = None;
+    }
+
+    fn descendre(&mut self, pas: i32) -> Geste {
+        self.dernier_pas = pas;
+        Geste::Descendre(pas)
     }
 }
 
@@ -547,13 +568,14 @@ pub enum Geste {
     /// Un pas de défilement, en pixels réels (négatif : remonter). Le fil prend ensuite des
     /// images jusqu'à la page posée (D6) et rend la dernière, mesurée (`Vu::Image`).
     Descendre(i32),
-    /// Prendre une image dans ce délai, puis la rendre mesurée (`Vu::Image`).
+    /// Prendre une image au plus tard dans ce délai, puis la rendre mesurée (`Vu::Image`).
     Prendre(Duration),
     /// Montrer ce message en haut de l'écran, ou le cacher (`None`).
     Message(Option<&'static str>),
     /// Envoyer l'aperçu en direct.
     Apercu,
-    /// Abandonner le moyen de défilement pour le suivant (D8).
+    /// Abandonner le moyen de défilement pour le suivant (D8) ; sans suivant, le fil
+    /// appelle `Course::sans_moyen`.
     Repli,
     /// Finir la capture.
     Finir(Fin),
@@ -591,11 +613,11 @@ pub fn suite(course: &mut Course, vu: Vu, maintenant: Instant) -> Vec<Geste> {
         Vu::Entree => finir(course, Fin::Entree),
         Vu::Molette { dans_zone: false } => Vec::new(),
         Vu::Molette { dans_zone: true } => {
-            if course.conduite == Conduite::Main {
-                return Vec::new();
+            if course.conduite != Conduite::Main {
+                // Définitif : aucun pas n'est plus demandé ; un pas en route finit (D9).
+                course.passer_main(maintenant);
             }
-            // Définitif : aucun pas n'est plus demandé ; un pas en route finit (D9).
-            course.passer_main(maintenant);
+            // Chaque cran : une image au plus tard dans `PRISE_MAIN`.
             vec![Geste::Prendre(PRISE_MAIN)]
         }
         Vu::Temps(_) => match course.conduite {
@@ -603,7 +625,7 @@ pub fn suite(course: &mut Course, vu: Vu, maintenant: Instant) -> Vec<Geste> {
                 if maintenant.saturating_duration_since(course.debut) >= DEPART_AUTO =>
             {
                 course.conduite = Conduite::Auto;
-                vec![Geste::Descendre(course.pas)]
+                vec![course.descendre(course.pas)]
             }
             _ => Vec::new(),
         },
@@ -624,17 +646,24 @@ fn suite_auto(
     maintenant: Instant,
 ) -> Vec<Geste> {
     let en_bas = en_bas_lu(position);
+    let lue = position.map(|p| p.pour_cent).filter(|p| p.is_finite());
+    let bouge =
+        matches!((lue, course.derniere_position), (Some(a), Some(b)) if (a - b).abs() > 1e-6);
+    if lue.is_some() {
+        course.derniere_position = lue;
+    }
     if let Some(depuis) = course.en_bas_depuis {
-        if !matches!(mesure, Mesure::Avance(_)) {
+        if matches!(mesure, Mesure::Immobile | Mesure::Ambigue) && !bouge {
             let ecoule = maintenant.saturating_duration_since(depuis);
             if ecoule >= FIN_EN_BAS {
                 return finir(course, Fin::EnBas);
             }
             return vec![Geste::Prendre(FIN_EN_BAS - ecoule)];
         }
-        // Une avance pendant l'arrêt : la page n'était pas en bas (image paresseuse).
+        // La page a bougé pendant l'arrêt (image paresseuse, rechargement) : pas en bas.
         course.en_bas_depuis = None;
     }
+    let descente = course.dernier_pas > 0;
     match mesure {
         Mesure::Avance(_) => {
             course.immobiles = 0;
@@ -642,30 +671,43 @@ fn suite_auto(
             course.perdues_auto = 0;
             course.moyen_choisi = true;
             course.derniere_nouvelle = maintenant;
-            vec![Geste::Apercu, Geste::Descendre(course.pas)]
+            vec![Geste::Apercu, course.descendre(course.pas)]
+        }
+        // Un pas vers le bas qui fait remonter la page ne choisit pas le moyen : sans
+        // effet utile tant que le moyen n'est pas choisi.
+        Mesure::Recul(_) if descente && !course.moyen_choisi => {
+            course.ambigues = 0;
+            immobile_auto(course, false, maintenant)
         }
         Mesure::Recul(_) => {
-            // La page a bougé (après une remontée, ou une page qui recharge).
+            // Après une remontée, ou une page qui recharge.
             course.immobiles = 0;
             course.ambigues = 0;
-            course.moyen_choisi = true;
-            vec![Geste::Descendre(course.pas)]
+            vec![course.descendre(course.pas)]
         }
         Mesure::Immobile => {
             course.ambigues = 0;
+            course.perdues_auto = 0;
             immobile_auto(course, en_bas, maintenant)
         }
         Mesure::Ambigue => {
-            course.ambigues += 1;
             if en_bas {
                 course.ambigues = 0;
                 return immobile_auto(course, true, maintenant);
             }
+            if bouge {
+                // La position avance : la page défile, la vue est seulement unie.
+                course.ambigues = 0;
+                course.immobiles = 0;
+                course.moyen_choisi = true;
+                return vec![course.descendre(course.pas)];
+            }
+            course.ambigues += 1;
             if course.ambigues >= AMBIGUES_MAX {
                 course.ambigues = 0;
                 return immobile_auto(course, false, maintenant);
             }
-            vec![Geste::Descendre(course.pas)]
+            vec![course.descendre(course.pas)]
         }
         Mesure::Perdue => {
             course.immobiles = 0;
@@ -683,7 +725,7 @@ fn suite_auto(
                 course.pas_reduit = true;
                 course.pas = (course.pas / 2).max(PAS_MIN);
             }
-            vec![Geste::Descendre(-demi)]
+            vec![course.descendre(-demi)]
         }
     }
 }
@@ -697,7 +739,7 @@ fn immobile_auto(course: &mut Course, en_bas: bool, maintenant: Instant) -> Vec<
     }
     course.immobiles += 1;
     if course.immobiles < 2 {
-        return vec![Geste::Descendre(course.pas)];
+        return vec![course.descendre(course.pas)];
     }
     course.immobiles = 0;
     if course.moyen_choisi {
@@ -705,13 +747,9 @@ fn immobile_auto(course: &mut Course, en_bas: bool, maintenant: Instant) -> Vec<
         course.en_bas_depuis = Some(maintenant);
         return vec![Geste::Prendre(FIN_EN_BAS)];
     }
-    // Les deux premières commandes de ce moyen sans effet : le suivant (R3, D8).
-    course.moyens_restants = course.moyens_restants.saturating_sub(1);
-    if course.moyens_restants == 0 {
-        course.passer_main(maintenant);
-        return vec![Geste::Repli, Geste::Prendre(PRISE_MAIN)];
-    }
-    vec![Geste::Repli, Geste::Descendre(course.pas)]
+    // Les deux premières commandes de ce moyen sans effet : le suivant (R3, D8). Le fil
+    // passe en `Main` s'il n'y en a plus (`sans_moyen`).
+    vec![Geste::Repli, course.descendre(course.pas)]
 }
 
 /// Une image prise pendant que la molette de l'utilisateur conduit.
@@ -754,6 +792,163 @@ fn suite_main(
     }
     gestes.push(Geste::Prendre(PRISE_MAIN));
     gestes
+}
+
+/// Le décalage attendu d'une image mesurée contre la dernière image gardée (D10, décision
+/// du responsable) : le décalage observé, d'après la position lue à l'image gardée et
+/// maintenant, convertie avec la hauteur de la vue (`hauteur_vue`, pixels) ; une position
+/// inchangée donne 0. Sans positions lisibles, les pixels commandés depuis l'image gardée
+/// (`commande`), seulement comme indice (`None` si rien n'a été commandé).
+pub fn attendu(
+    gardee: Option<Position>,
+    maintenant: Option<Position>,
+    hauteur_vue: u32,
+    commande: i32,
+) -> Option<i32> {
+    decalage_attendu(gardee, maintenant, hauteur_vue).or((commande != 0).then_some(commande))
+}
+
+/// Ce que le fil principal doit faire à une étape du lancement (R1, D4).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Etape {
+    Rien,
+    /// Poser la fenêtre et envoyer `defilante:montrer`.
+    Montrer,
+    /// Abandonner sans image (« Impossible de lancer la capture défilante »).
+    Echouer,
+    /// Première pilule : montrer la fenêtre, cacher l'écran figé et la sélection dans le
+    /// même tour, lancer le fil.
+    Partir,
+    /// Une pilule de plus : seulement la poser.
+    Placer,
+}
+
+/// Le lancement d'une défilante, de la visée à la fin (pur, R1, D4) : chaque arrivée
+/// (page prête, fenêtre créée, relâchement, pilule, filet, fin) rend ce qu'il faut faire.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct Lancement {
+    /// `defilante_pret` reçu.
+    pub prete: bool,
+    /// La fenêtre de contrôle existe.
+    pub controle: bool,
+    /// La création a échoué pour de bon.
+    pub ratee: bool,
+    /// La zone est choisie (Défilement).
+    pub lancee: bool,
+    /// `defilante:montrer` envoyé.
+    pub montrer_envoye: bool,
+    /// La fenêtre est montrée (l'écran figé caché).
+    pub montree: bool,
+    /// Le filet ou un échec a pris la main.
+    pub abandonnee: bool,
+    /// La fin est décidée.
+    pub finie: bool,
+}
+
+impl Lancement {
+    fn envoyer(&mut self) -> Etape {
+        if self.prete
+            && self.controle
+            && self.lancee
+            && !self.montrer_envoye
+            && !self.montree
+            && !self.abandonnee
+        {
+            self.montrer_envoye = true;
+            Etape::Montrer
+        } else {
+            Etape::Rien
+        }
+    }
+
+    fn en_attente(&self) -> bool {
+        self.lancee && !self.montree && !self.abandonnee
+    }
+
+    /// `defilante_pret` (une page rechargée avant d'être montrée reçoit de nouveau sa
+    /// charge).
+    pub fn page_prete(&mut self) -> Etape {
+        self.prete = true;
+        if self.en_attente() {
+            self.montrer_envoye = false;
+        }
+        self.envoyer()
+    }
+
+    /// La fenêtre de contrôle est créée.
+    pub fn controle_cree(&mut self) -> Etape {
+        self.controle = true;
+        self.envoyer()
+    }
+
+    /// La création a échoué pour de bon : abandon si la zone est déjà choisie, sinon au
+    /// relâchement.
+    pub fn creation_ratee(&mut self) -> Etape {
+        self.ratee = true;
+        if self.en_attente() {
+            self.abandonnee = true;
+            Etape::Echouer
+        } else {
+            Etape::Rien
+        }
+    }
+
+    /// La zone est choisie.
+    pub fn relache(&mut self) -> Etape {
+        self.lancee = true;
+        if self.ratee {
+            self.abandonnee = true;
+            return Etape::Echouer;
+        }
+        self.envoyer()
+    }
+
+    /// `defilante_zone`.
+    pub fn pilule(&mut self) -> Etape {
+        if !self.lancee || !self.controle || self.abandonnee || self.finie {
+            Etape::Rien
+        } else if self.montree {
+            Etape::Placer
+        } else {
+            self.montree = true;
+            Etape::Partir
+        }
+    }
+
+    /// Le filet de `DELAI_PAGE` : vrai s'il abandonne (fenêtre pas encore montrée).
+    pub fn filet(&mut self) -> bool {
+        if self.en_attente() && !self.finie {
+            self.abandonnee = true;
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Un échec après la pilule (fenêtre non montrée) : vrai s'il compte.
+    pub fn echouer(&mut self) -> bool {
+        if self.lancee && !self.abandonnee && !self.finie {
+            self.abandonnee = true;
+            true
+        } else {
+            false
+        }
+    }
+
+    /// La fin est décidée : vrai la première fois.
+    pub fn finir(&mut self) -> bool {
+        if self.lancee && !self.finie && !self.abandonnee {
+            self.finie = true;
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Terminer, Entrée et les charges vers la page passent.
+    pub fn ouverte(&self) -> bool {
+        self.lancee && !self.finie && !self.abandonnee
+    }
 }
 
 /// Pourquoi une défilante est annulée (D18) : rien n'est gardé, aucun message.
@@ -1291,33 +1486,70 @@ mod tests {
     }
 
     #[test]
-    fn repli_sur_les_trois_moyens_puis_la_molette() {
+    fn repli_jusqu_a_ce_que_le_defileur_n_ait_plus_de_moyen() {
         let t0 = Instant::now();
         let mut c = en_auto(t0);
         let t = t0 + ms(600);
         let immobile = Vu::Image(Mesure::Immobile, None);
-        for _ in 0..2 {
+        for _ in 0..4 {
             // Première commande sans effet : la seconde.
             assert_eq!(suite(&mut c, immobile, t), vec![Geste::Descendre(200)]);
-            // Seconde sans effet : le moyen suivant.
+            // Seconde sans effet : le moyen suivant ; la course ne compte pas les moyens.
             assert_eq!(
                 suite(&mut c, immobile, t),
                 vec![Geste::Repli, Geste::Descendre(200)]
             );
+            assert_eq!(c.conduite(), Conduite::Auto);
         }
-        assert_eq!(suite(&mut c, immobile, t), vec![Geste::Descendre(200)]);
-        // Le troisième abandonné : la molette de l'utilisateur, sans message.
-        assert_eq!(
-            suite(&mut c, immobile, t),
-            vec![Geste::Repli, Geste::Prendre(PRISE_MAIN)]
-        );
+        // Le défileur n'en a plus : la molette de l'utilisateur, sans message.
+        assert_eq!(c.sans_moyen(t), vec![Geste::Prendre(PRISE_MAIN)]);
         assert_eq!(c.conduite(), Conduite::Main);
         assert!(!c.perdue());
+        assert!(c.sans_moyen(t).is_empty());
         // Puis les images suivent la molette ; pas de fin seule sans position.
         for _ in 0..20 {
             assert_eq!(suite(&mut c, immobile, t), vec![Geste::Prendre(PRISE_MAIN)]);
         }
         assert_eq!(c.fin(), None);
+    }
+
+    #[test]
+    fn moyen_change_par_le_defileur() {
+        let t0 = Instant::now();
+        let mut c = en_auto(t0);
+        let t = t0 + ms(600);
+        let immobile = Vu::Image(Mesure::Immobile, None);
+        suite(&mut c, Vu::Image(Mesure::Avance(200), None), t);
+        c.moyen_change();
+        // Le nouveau moyen n'est pas choisi : deux images immobiles font un repli.
+        assert_eq!(suite(&mut c, immobile, t), vec![Geste::Descendre(200)]);
+        assert_eq!(
+            suite(&mut c, immobile, t),
+            vec![Geste::Repli, Geste::Descendre(200)]
+        );
+    }
+
+    #[test]
+    fn recul_sur_un_pas_vers_le_bas_ne_choisit_pas_le_moyen() {
+        let t0 = Instant::now();
+        let mut c = en_auto(t0);
+        let t = t0 + ms(600);
+        let recul = Vu::Image(Mesure::Recul(200), None);
+        assert_eq!(suite(&mut c, recul, t), vec![Geste::Descendre(200)]);
+        assert_eq!(
+            suite(&mut c, recul, t),
+            vec![Geste::Repli, Geste::Descendre(200)]
+        );
+        // Après une remontée voulue, un recul est attendu : on redescend.
+        let mut c = en_auto(t0);
+        assert_eq!(
+            suite(&mut c, Vu::Image(Mesure::Perdue, None), t),
+            vec![Geste::Descendre(-100)]
+        );
+        assert_eq!(
+            suite(&mut c, Vu::Image(Mesure::Recul(20), None), t),
+            vec![Geste::Descendre(100)]
+        );
     }
 
     #[test]
@@ -1404,7 +1636,11 @@ mod tests {
                 "{vu:?}"
             );
         }
-        assert!(suite(&mut c, Vu::Molette { dans_zone: true }, t).is_empty());
+        // Chaque cran demande une image.
+        assert_eq!(
+            suite(&mut c, Vu::Molette { dans_zone: true }, t),
+            vec![Geste::Prendre(PRISE_MAIN)]
+        );
         assert_eq!(c.conduite(), Conduite::Main);
     }
 
@@ -1485,6 +1721,32 @@ mod tests {
         }
         assert_eq!(suite(&mut c, perdue, t), vec![Geste::Prendre(PRISE_MAIN)]);
         assert_eq!(c.conduite(), Conduite::Main);
+        assert!(!c.perdue());
+    }
+
+    #[test]
+    fn recul_puis_perdue_en_auto() {
+        let t0 = Instant::now();
+        let mut c = en_auto(t0);
+        let t = t0 + ms(600);
+        // Le moyen est choisi ; une perdue fait remonter d'un demi-pas.
+        suite(&mut c, Vu::Image(Mesure::Avance(200), None), t);
+        assert_eq!(
+            suite(&mut c, Vu::Image(Mesure::Perdue, None), t),
+            vec![Geste::Descendre(-100)]
+        );
+        // Le recul après la remontée : on redescend du pas réduit.
+        assert_eq!(
+            suite(&mut c, Vu::Image(Mesure::Recul(100), None), t),
+            vec![Geste::Descendre(100)]
+        );
+        // Encore perdue : un demi-pas du pas réduit, sans le réduire une seconde fois.
+        assert_eq!(
+            suite(&mut c, Vu::Image(Mesure::Perdue, None), t),
+            vec![Geste::Descendre(-50)]
+        );
+        assert_eq!(c.pas(), 100);
+        assert_eq!(c.conduite(), Conduite::Auto);
         assert!(!c.perdue());
     }
 
@@ -1604,12 +1866,155 @@ mod tests {
     }
 
     #[test]
-    fn sans_moyen_la_main_tout_de_suite() {
+    fn sans_moyen_la_main_tout_de_suite_et_les_images_continuent() {
         let t0 = Instant::now();
         let mut c = Course::nouvelle(t0);
-        c.sans_moyen(t0);
+        assert_eq!(c.sans_moyen(t0), vec![Geste::Prendre(PRISE_MAIN)]);
         assert_eq!(c.conduite(), Conduite::Main);
         assert!(suite(&mut c, Vu::Temps(t0 + ms(500)), t0 + ms(500)).is_empty());
+        assert_eq!(
+            suite(&mut c, Vu::Image(Mesure::Immobile, None), t0 + ms(550)),
+            vec![Geste::Prendre(PRISE_MAIN)]
+        );
+        assert_eq!(
+            suite(&mut c, Vu::Molette { dans_zone: true }, t0 + ms(560)),
+            vec![Geste::Prendre(PRISE_MAIN)]
+        );
+    }
+
+    #[test]
+    fn perdue_ou_recul_pendant_l_arret_en_bas() {
+        let t0 = Instant::now();
+        let t = t0 + ms(600);
+        for (m, attendu) in [
+            (Mesure::Perdue, Geste::Descendre(-100)),
+            (Mesure::Recul(30), Geste::Descendre(200)),
+        ] {
+            let mut c = en_auto(t0);
+            suite(&mut c, Vu::Image(Mesure::Avance(200), None), t);
+            assert_eq!(
+                suite(&mut c, Vu::Image(Mesure::Immobile, pos(100.0)), t),
+                vec![Geste::Prendre(FIN_EN_BAS)]
+            );
+            // La page a bougé : pas en bas, même après 350 ms.
+            assert_eq!(
+                suite(&mut c, Vu::Image(m, None), t + FIN_EN_BAS),
+                vec![attendu],
+                "{m:?}"
+            );
+            assert_eq!(c.fin(), None);
+        }
+    }
+
+    #[test]
+    fn ambigue_avec_une_position_qui_avance() {
+        let t0 = Instant::now();
+        let mut c = en_auto(t0);
+        let t = t0 + ms(600);
+        for i in 0..(3 * AMBIGUES_MAX) {
+            assert_eq!(
+                suite(&mut c, Vu::Image(Mesure::Ambigue, pos(i as f64)), t),
+                vec![Geste::Descendre(200)],
+                "{i}"
+            );
+        }
+        assert_eq!(c.fin(), None);
+    }
+
+    #[test]
+    fn dix_minutes_pendant_l_attente() {
+        let t0 = Instant::now();
+        let mut c = Course::nouvelle(t0);
+        assert_eq!(
+            suite(&mut c, Vu::Temps(t0 + DUREE_MAX), t0 + DUREE_MAX),
+            vec![Geste::Finir(Fin::Limite)]
+        );
+    }
+
+    #[test]
+    fn attendu_observe_sinon_commande() {
+        let p = |pour_cent| {
+            Some(Position {
+                pour_cent,
+                vue: 20.0,
+            })
+        };
+        // Observé : 10 % d'un parcours de 1 600 px.
+        assert_eq!(attendu(p(10.0), p(20.0), 400, 225), Some(160));
+        // Position inchangée : 0, jamais le pas commandé.
+        assert_eq!(attendu(p(10.0), p(10.0), 400, 225), Some(0));
+        // Sans position : les pixels commandés depuis l'image gardée, comme indice.
+        assert_eq!(attendu(None, p(10.0), 400, 450), Some(450));
+        assert_eq!(attendu(None, None, 400, 0), None);
+    }
+
+    // ----- lancement -----
+
+    #[test]
+    fn lancement_page_prete_avant_le_relachement() {
+        let mut l = Lancement::default();
+        assert_eq!(l.controle_cree(), Etape::Rien);
+        assert_eq!(l.page_prete(), Etape::Rien);
+        assert_eq!(l.relache(), Etape::Montrer);
+        assert_eq!(l.pilule(), Etape::Partir);
+        assert_eq!(l.pilule(), Etape::Placer);
+        // Le filet arrive trop tard : rien.
+        assert!(!l.filet());
+        assert!(l.ouverte());
+        assert!(l.finir());
+        assert!(!l.finir());
+        assert_eq!(l.pilule(), Etape::Rien);
+        assert!(!l.ouverte());
+    }
+
+    #[test]
+    fn lancement_page_prete_apres_le_relachement() {
+        let mut l = Lancement::default();
+        assert_eq!(l.relache(), Etape::Rien);
+        // Page prête avant la fenêtre rangée (création qui pompe la boucle).
+        assert_eq!(l.page_prete(), Etape::Rien);
+        assert_eq!(l.controle_cree(), Etape::Montrer);
+        // Page rechargée avant d'être montrée : la charge repart.
+        assert_eq!(l.page_prete(), Etape::Montrer);
+        assert_eq!(l.pilule(), Etape::Partir);
+        assert_eq!(l.page_prete(), Etape::Rien);
+    }
+
+    #[test]
+    fn lancement_filet_contre_la_pilule() {
+        let mut l = Lancement::default();
+        l.controle_cree();
+        l.relache();
+        assert!(l.filet());
+        // Une pilule tardive ne montre plus rien, une seconde voie n'échoue pas deux fois.
+        assert_eq!(l.pilule(), Etape::Rien);
+        assert!(!l.filet());
+        assert!(!l.echouer());
+        assert!(!l.finir());
+        assert!(!l.ouverte());
+    }
+
+    #[test]
+    fn lancement_creation_ratee() {
+        // Pendant la visée : l'échec attend le relâchement.
+        let mut l = Lancement::default();
+        assert_eq!(l.creation_ratee(), Etape::Rien);
+        assert_eq!(l.relache(), Etape::Echouer);
+        assert!(!l.filet());
+        // Après le relâchement : tout de suite.
+        let mut l = Lancement::default();
+        l.relache();
+        assert_eq!(l.creation_ratee(), Etape::Echouer);
+        assert_eq!(l.pilule(), Etape::Rien);
+        // Fenêtre non montrée après la pilule : un seul échec.
+        let mut l = Lancement::default();
+        l.controle_cree();
+        l.page_prete();
+        l.relache();
+        assert_eq!(l.pilule(), Etape::Partir);
+        assert!(l.echouer());
+        assert!(!l.echouer());
+        assert!(!l.filet());
     }
 
     // ----- journal -----
