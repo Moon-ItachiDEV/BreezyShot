@@ -1956,10 +1956,32 @@ fn n1_survol_qui_suit_les_lignes_d_une_liste() {
         }
     }
     // Déroulé comme D : la page entière, et une ligne teintée seulement si aucune image ne
-    // la montre sans teinte (au pas de 150 : aucune).
-    for pas in [150u32, 300, 400] {
+    // la montre sans teinte (au pas de 150 : aucune). Aussi sur une liste zébrée (une
+    // ligne sur deux d'un fond gris : la référence du vote est une voisine de même fond).
+    let mut zebree = liste.clone();
+    for i in (1..160).step_by(2) {
+        for y in i * 22..i * 22 + 22 {
+            for x in 0..524 {
+                let c = pixel(&zebree, x, y);
+                let t = [242u32, 242, 246];
+                poser(
+                    &mut zebree,
+                    x,
+                    y,
+                    [0, 1, 2].map(|k| (u32::from(c[k]) * t[k] / 255) as u8),
+                );
+            }
+        }
+    }
+    for (liste, pas) in [
+        (&liste, 150u32),
+        (&liste, 300),
+        (&liste, 400),
+        (&zebree, 150),
+        (&zebree, 300),
+    ] {
         let pos = positions(liste.hauteur, h, pas);
-        let images: Vec<Pixels> = pos.iter().map(|p| survol_aligne(&liste, *p, h)).collect();
+        let images: Vec<Pixels> = pos.iter().map(|p| survol_aligne(liste, *p, h)).collect();
         for avec_lu in [false, true] {
             let (finale, vues) = comme_d(&images, &pos, avec_lu);
             for (vrai, m) in &vues {
@@ -2009,6 +2031,48 @@ fn n2_vue_unie_vraiment_unie() {
             Mesure::Immobile
         );
     }
+    // Un dégradé purement vertical, des bandes horizontales sans texte : chaque ligne est
+    // d'une couleur, mais pas la vue entière.
+    let mut vertical = unie(600, 1000, BLANC);
+    let mut bandes = unie(600, 1000, BLANC);
+    for y in 0..1000 {
+        for x in 0..600 {
+            let v = (40 + y * 180 / 3000) as u8;
+            poser(&mut vertical, x, y, [v, v, 255 - v / 2]);
+            if (y / 22) % 2 == 1 {
+                poser(&mut bandes, x, y, [235, 236, 240]);
+            }
+        }
+    }
+    for page in [&vertical, &bandes] {
+        let a = z(page, 300, 500);
+        for e in [200, 11] {
+            assert_eq!(
+                mesurer(&a, &a, Fixes::default(), Attendu::Lu(e), t),
+                Mesure::Immobile
+            );
+        }
+    }
+    // Un blanc avec un bruit de prise de ± 8, différent dans les deux images : le lu.
+    let blanc = unie(800, 1000, [250, 250, 250]);
+    let mut hz = Hasard(19);
+    let mut bruiter = |mut im: Pixels| {
+        for c in im.rgba.chunks_exact_mut(4) {
+            for v in &mut c[..3] {
+                *v = (i32::from(*v) + hz.entre(-8, 8)).clamp(0, 255) as u8;
+            }
+        }
+        im
+    };
+    let (a, b) = (bruiter(z(&blanc, 0, 500)), bruiter(z(&blanc, 120, 500)));
+    assert_eq!(
+        mesurer(&a, &b, Fixes::default(), Attendu::Lu(120), t),
+        Mesure::Avance(120)
+    );
+    assert_eq!(
+        mesurer(&a, &b, Fixes::default(), Attendu::Lu(0), t),
+        Mesure::Immobile
+    );
     // Unie, avec un bruit de ± 4 : le lu.
     let mut h = Hasard(3);
     let mut vide = unie(600, 500, [243, 243, 243]);

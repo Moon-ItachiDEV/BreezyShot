@@ -1162,8 +1162,7 @@ pub fn mesurer(
     // décide, dans la portée.
     if let Some(e) = lu {
         if d0[haut..h - bas].iter().all(|n| *n == 0) {
-            // (Égales : il suffit de regarder l'une.)
-            let unie = toute_unie(&b, haut, h - bas, t.canal);
+            let unie = toute_unie([&a, &b], haut, h - bas, t.canal);
             return if !unie || e == 0 {
                 Mesure::Immobile
             } else if e.unsigned_abs() as usize > utile - rec {
@@ -1290,18 +1289,39 @@ fn milieu(y0: usize, y1: usize, d: i32) -> (usize, usize) {
     (y0 + bord, y1 - bord)
 }
 
-/// Chaque ligne `y0..y1` est unie : sur chaque canal, ses points lus ne s'écartent pas de
-/// plus de `canal` les uns des autres (un dégradé ou une photo floue ne l'est pas).
-fn toute_unie(im: &Image, y0: usize, y1: usize, canal: u8) -> bool {
-    (y0..y1).all(|y| {
-        let (mut bas, mut haut) = ([255u8; 3], [0u8; 3]);
-        for p in im.ligne(y).chunks_exact(4) {
-            for c in 0..3 {
-                bas[c] = bas[c].min(p[c]);
-                haut[c] = haut[c].max(p[c]);
+/// La vue entière (lignes `y0..y1` des deux images) est unie : sur chaque canal, tous ses
+/// points lus sont à `canal` près de leur médiane commune. Un blanc avec un bruit de prise
+/// de ± `canal` l'est ; un dégradé, même purement vertical, des bandes horizontales, une
+/// photo floue ou une zone assombrie de 14 ne le sont pas.
+fn toute_unie(images: [&Image; 2], y0: usize, y1: usize, canal: u8) -> bool {
+    let mut compte = [[0u32; 256]; 3];
+    let mut n = 0u32;
+    for im in images {
+        for y in y0..y1 {
+            for p in im.ligne(y).chunks_exact(4) {
+                for c in 0..3 {
+                    compte[c][usize::from(p[c])] += 1;
+                }
+                n += 1;
             }
         }
-        (0..3).all(|c| haut[c].saturating_sub(bas[c]) <= canal)
+    }
+    compte.iter().all(|h| {
+        let mut cumul = 0u32;
+        let mediane = h
+            .iter()
+            .position(|k| {
+                cumul += k;
+                2 * cumul >= n
+            })
+            .unwrap_or(0);
+        let (bas, haut) = (
+            mediane.saturating_sub(usize::from(canal)),
+            (mediane + usize::from(canal)).min(255),
+        );
+        h.iter()
+            .enumerate()
+            .all(|(v, k)| *k == 0 || (bas..=haut).contains(&v))
     })
 }
 
@@ -1653,14 +1673,27 @@ impl<'a> Paire<'a> {
                 k += 1;
             }
             // Le fond de référence : la ligne voisine la plus proche, hors de la suite,
-            // égale dans les deux images et au fond net.
+            // égale dans les deux images et au fond net ; de préférence (liste zébrée) une
+            // dont le fond est celui de l'une des deux versions de la suite.
             let net = |k: usize| {
                 let (b, a) = fonds(k);
                 (!cand[k] && b.domine && ecart(&a.c, &b.c) <= canal).then_some(b)
             };
-            let apres = (fin..(fin + 8).min(n)).find_map(net);
-            let avant = (debut.saturating_sub(8)..debut).rev().find_map(net);
-            if let Some(r) = apres.or(avant) {
+            let versions = (debut..fin).map(fonds).find(|(b, a)| b.domine && a.domine);
+            let semblable = |k: usize| {
+                net(k).filter(|r| {
+                    versions.is_some_and(|(b, a)| {
+                        ecart(&r.c, &b.c) <= canal || ecart(&r.c, &a.c) <= canal
+                    })
+                })
+            };
+            let loin = 2 * BANDE_MAX;
+            let pres_de = |f: &dyn Fn(usize) -> Option<Fond>, portee: usize| {
+                (fin..(fin + portee).min(n))
+                    .find_map(f)
+                    .or_else(|| (debut.saturating_sub(portee)..debut).rev().find_map(f))
+            };
+            if let Some(r) = pres_de(&semblable, loin).or_else(|| pres_de(&net, 8)) {
                 let (mut neuve, mut ancienne) = (0u32, 0u32);
                 for k in debut..fin {
                     let (b, a) = fonds(k);
