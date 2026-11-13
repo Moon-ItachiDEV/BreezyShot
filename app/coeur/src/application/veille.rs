@@ -4,9 +4,13 @@
 //! quel état était la capture) ; une seconde ligne dit quand elle reprend. Rien d'autre :
 //! la veille ne change aucun état, elle sert à lire un blocage après coup.
 //!
-//! Un raccourci passe par le fil principal (message `WM_HOTKEY`) : une boucle bloquée, c'est
-//! un appui qui ne répond pas. Un appui qui arrive mais que l'automate refuse est dit à part
-//! (`ligne_appui_ignore`).
+//! Ce que le journal prouve : un appui reçu écrit `raccourci presse: …` (message `WM_HOTKEY`,
+//! qui passe par la fenêtre cachée du plugin, pas par la file de tao) ; s'il manque, l'appui
+//! n'est jamais arrivé. Un appui reçu que l'automate refuse est dit à part
+//! (`ligne_appui_ignore`). La veille, elle, ne parle que de la boucle de tao : elle peut se
+//! dire bloquée pendant une boucle imbriquée où les raccourcis arrivent encore, ou après une
+//! mise en veille du PC, et l'arrêt de l'app (jusqu'à 2 s d'attente des suppressions) peut
+//! aussi écrire une ligne `bloquee`.
 
 use std::sync::mpsc::{self, RecvTimeoutError};
 use std::time::{Duration, Instant};
@@ -63,7 +67,8 @@ fn texte_etat(etat: Option<(Etat, Duration)>) -> String {
     }
 }
 
-/// Lance la veille (une fois, après `pret`). Le fil s'arrête avec la boucle.
+/// Lance la veille (une fois, après `pret`). Le fil s'arrête quand la boucle refuse une
+/// tâche, au plus tard avec le processus.
 pub fn lancer(app: &AppHandle) {
     let app = app.clone();
     let lance = std::thread::Builder::new()
