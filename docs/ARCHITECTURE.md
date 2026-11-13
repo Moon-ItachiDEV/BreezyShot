@@ -353,8 +353,10 @@ dans le dossier temporaire du système (`systeme::dossier_secours()`), sous le n
 
 ### 3.4 Ligne de commande et instance unique
 
-- Une seule instance. Lancer `breezyshot.exe` une seconde fois ne fait rien de visible : la
-  première écrit `seconde instance refusee` dans le journal, la seconde sort avec le code 0.
+- Une seule instance. Lancer `breezyshot.exe` une seconde fois (icône épinglée à la barre des
+  tâches, menu Démarrer) ouvre les Réglages dans la première, ou les ramène devant (depuis la
+  0.5.1) : la première écrit `seconde instance: reglages ouverts`, la seconde sort avec le
+  code 0. `--desinstaller` reçu par une seconde instance reste refusé (`seconde instance refusee`).
 - `breezyshot.exe --quitter` : demande à l'instance en cours de se fermer proprement (libère
   les raccourcis, retire l'icône, écrit `arret propre`), puis sort. Sans instance en cours,
   sort tout de suite avec le code 0. C'est le moyen qu'utilisent les essais pour fermer l'app.
@@ -375,7 +377,7 @@ dans le dossier temporaire du système (`systeme::dossier_secours()`), sous le n
   `icone invisible` (toujours `invisible` sous Linux, où Tauri ne donne pas ce rectangle).
 - Lignes du journal sur lesquelles les essais s'appuient : `demarrage BreezyShot <version>`,
   `systeme windows build <n>`, `echelle par ecran v2: oui|non|sans objet`, `icone installee`
-  (ou `icone non installee: …`), `icone visible|invisible`, `pret` (tout est en place), `seconde instance refusee`,
+  (ou `icone non installee: …`), `icone visible|invisible`, `pret` (tout est en place), `seconde instance: reglages ouverts`,
   `--quitter recu: fermeture demandee`, `arret propre`, `--quitter: aucune instance en cours`.
 - `app/interface/index.html` est une page vide : elle n'existe que parce que Tauri veut un
   dossier d'interface non vide.

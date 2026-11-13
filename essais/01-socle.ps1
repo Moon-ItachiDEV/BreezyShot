@@ -43,14 +43,15 @@ try {
     Start-Sleep -Seconds 5
     Noter-Mesure -Nom 'mémoire privée au repos' -Valeur (Memoire-Privee-Mo -Processus $premiere) -Unite 'Mo'
 
-    # 5. Une seconde instance sort avec 0 en moins de 10 s ; la première le note ; un seul processus.
+    # 5. Une seconde instance sort avec 0 en moins de 10 s ; la première ouvre les Réglages ; un seul processus.
     $seconde = Lancer-Et-Attendre -DelaiS 10 -LaisserVivant
     # Compter tout de suite, avant de tuer quoi que ce soit : une seconde instance restée
     # en vie au-delà du délai compte comme un second processus.
     $restants = @(Processus-App)
     Verifier 'seconde instance sortie en moins de 10 s' $seconde.Fini "$($seconde.DureeS) s" | Out-Null
     Verifier 'seconde instance : code de sortie 0' ($seconde.Code -eq 0) "code $($seconde.Code)" | Out-Null
-    Verifier 'la première écrit « seconde instance refusee »' (Attendre-Ligne -Texte 'seconde instance refusee' -DelaiS 5) | Out-Null
+    Verifier 'la première écrit « seconde instance: reglages ouverts »' (Attendre-Ligne -Texte 'seconde instance: reglages ouverts' -DelaiS 5) | Out-Null
+    Verifier 'la seconde instance ouvre les Réglages' (Attendre-Ligne -Texte 'reglages fenetre' -DelaiS 10) | Out-Null
     Verifier 'un seul processus BreezyShot' ($restants.Count -eq 1) "$($restants.Count) processus" | Out-Null
     if (-not $seconde.Fini) { try { $seconde.Processus.Kill() } catch { } }
     Verifier 'la première instance tourne toujours' (-not $premiere.HasExited) | Out-Null
