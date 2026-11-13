@@ -29,6 +29,10 @@ serde_json = { version = "1", features = ["preserve_order"] }
 serde = { version = "1", features = ["derive"] }
 arboard = { version = "3.7", default-features = false, features = ["image-data"] }
 png = { version = "0.18", default-features = false }
+# Licence Pro (0.5) : signature Ed25519 vérifiée hors ligne, sans source de hasard ; base64
+# déjà tirée par les dépendances de Tauri.
+ed25519-compact = { version = "2", default-features = false, features = ["std"] }
+base64 = "0.23"
 
 [target.'cfg(windows)'.dependencies]
 # Copier le texte (0.5) : la lecture de Windows (Media.Ocr) et ce qu'elle demande pour

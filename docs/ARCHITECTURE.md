@@ -18,8 +18,9 @@ app/
     src/
       main.rs               point d'entrée, ne fait qu'appeler breezyshot::lancer()
       lib.rs                déclare les modules
-      droits.rs             les fonctions que la licence Pro débloquera, et le seul point
+      droits.rs             les fonctions que la licence Pro débloque, et le seul point
                             qui dit si l'une est ouverte (`droits::ouverte`, 0.5, §2)
+      licence/              lecture et vérification d'une licence collée (pur, 0.5, §2)
       application/          chef d'orchestre : démarrage, table des états, icône et menu,
                             journal, chrono, arguments de la ligne de commande ;
                             zone.rs : décisions de la capture d'une zone, d'une fenêtre et
@@ -34,7 +35,8 @@ app/
                             historique.rs : décisions de l'historique (pures, 0.5),
                             geste_historique.rs : ses gestes, fenetre_historique.rs : ses
                             huit commandes ; texte.rs : décisions de Copier le texte
-                            (pures, 0.5), geste_texte.rs : ses gestes
+                            (pures, 0.5), geste_texte.rs : ses gestes ; licence.rs :
+                            licence en vigueur et ses trois commandes (0.5)
       raccourcis/           raccourcis globaux (étape 3), Échap global de la sélection
       capture/              figer (appelle systeme::gel), géométrie de la sélection, découpe
                             (étape 4) ; fenetre.rs : liste des fenêtres, partie à découper,
@@ -117,7 +119,7 @@ outils/                     petits scripts Node sans dépendance (generer-jetons
 1. **Seule l'Application connaît les autres modules.** `raccourcis`, `capture`, `sortie`,
    `reglages`, `fenetres`, `installation` et `texte` ne s'importent jamais entre eux et
    n'importent jamais `application`. Ils peuvent tous utiliser `systeme` (boîte à outils) ;
-   `systeme` ne connaît aucun module ; `droits` n'utilise rien.
+   `systeme` ne connaît aucun module ; `droits` et `licence` n'utilisent rien.
    Un test (`cargo test`) lit les sources et échoue si un `use crate::…` interdit apparaît.
 2. **L'Application appelle, les modules signalent.** Un module expose des fonctions et renvoie
    ses événements par un canal ou une fonction de rappel reçue à sa création, avec son propre
@@ -157,20 +159,24 @@ méthode a pris l'image (GDI aujourd'hui).
 Ce dépôt est public, sous licence FSL-1.1-MIT (`LICENSE.md`). Il contient toute l'app,
 fonctions Pro comprises (historique et texte reconnu, fonds et masquage automatique, capture
 déroulante, vidéo et GIF : lots 3 à 6 de la feuille de route), dans la même app. Une licence
-débloquera plus tard le Pro pour l'utilisateur qui l'ajoute ; la licence, sa saisie et
-l'achat ne sont pas construits (lot « Pro »). En 0.5, l'historique et « Copier le texte »
-sont ouverts à tous.
+collée dans Réglages › Général débloque le Pro (0.5) ; l'achat et le lien avec un vendeur
+ne sont pas construits. Sans licence, l'app est celle de la 0.4 plus la ligne « Licence ».
 
+- Licence : `BS1.<charge>.<signature>`, signature Ed25519 vérifiée hors ligne par
+  `licence::verifier` (module pur, sans système ni Tauri ; liste constante de clés
+  publiques, la clé d'essai seule en 0.5). Le texte collé est rangé par `sortie`
+  (`<dossier des réglages>/licence.txt`) et jamais écrit au journal. Licence d'essai :
+  `essais/licence-essai.txt`.
 - Chaque fonction Pro passe par un seul point de contrôle : le module `droits`
-  (`droits.rs`, pur, sans système ni Tauri), `enum Fonction` (une variante par fonction que
-  la licence débloquera) et `droits::ouverte(Fonction) -> bool`, qui rend toujours vrai
-  aujourd'hui. Le lot « Pro » n'aura que cette fonction à changer.
-- `droits::ouverte` n'est appelé que par l'Application, et seulement là où elle assemble ses
-  listes : `actions_construites` (d'où viennent le menu, les raccourcis, les lignes de
-  Réglages › Raccourcis et le bouton « Texte » de l'éditeur). Ce que les pages reçoivent
-  découle de cette liste, jamais d'un second appel ; aucun `if pro` dispersé. Une fonction
-  fermée est absente partout, comme Copier le texte sans langue de lecture. Un test
-  (`tests/architecture.rs`) refuse un appel depuis un autre module.
+  (`droits.rs`, pur), `enum Fonction` et `droits::ouverte(Fonction, pro) -> bool`.
+- `droits::ouverte` et `licence::verifier` ne sont appelés que par l'Application ;
+  `droits::ouverte` seulement là où elle assemble ses listes : `actions_construites(pro,
+  texte_disponible)` (d'où viennent le menu, les raccourcis, les lignes de Réglages ›
+  Raccourcis et le bouton « Texte » de l'éditeur). Ce que les pages reçoivent découle de
+  cette liste, jamais d'un second appel ; aucun `if pro` dispersé. Une fonction fermée est
+  absente partout, comme Copier le texte sans langue de lecture. Activer ou retirer la
+  licence poste `Evenement::LicenceChangee` : raccourcis pris ou rendus, menu refait, sans
+  redémarrer. Un test (`tests/architecture.rs`) refuse un appel depuis un autre module.
 - Tout ce qu'un lot futur devra étendre (table des états, liste des actions de la vignette,
   entrées du menu, raccourcis par nom d'action) est une liste que l'Application assemble,
   pas un cas écrit en dur dans un module.
@@ -252,7 +258,7 @@ demande de capture est ignorée. L'historique n'est pas un état (comme Réglage
 
 Modes : `zone`, `plein_ecran`, `fenetre`, `derniere_zone` (0.4) et `texte` (0.5). Ce sont
 aussi les **noms d'action** des raccourcis ; `historique` (0.5) est un nom d'action sans
-mode. Les actions construites (`actions_construites(texte_disponible)`) : les quatre
+mode. Les actions construites (`actions_construites(pro, texte_disponible)`) : les quatre
 captures, `historique` si l'historique est construit et ouvert (`droits`), `texte` s'il est
 construit, ouvert et si une langue de lecture existe.
 

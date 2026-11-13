@@ -14,6 +14,7 @@ mod annonce;
 mod fichier;
 mod glisser;
 mod historique;
+mod licence;
 mod nom;
 mod png;
 mod presse_papiers;
@@ -39,6 +40,7 @@ pub use historique::{
     chemin_apercu, chemin_recent, lire_recent, lister_recents, ranger_apercu, supprimer_recent,
     vider, BilanVidage, EntreeRecente,
 };
+pub use licence::{ecrire_licence, effacer_licence, lire_licence};
 pub use nom::{chemin_libre, nom_affiche, nom_fichier};
 pub use png::{encoder_png, sur_blanc};
 pub use recents::{recents_a_supprimer, RECENTS_GARDES};

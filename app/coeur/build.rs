@@ -48,6 +48,9 @@ fn main() {
         "historique_glisser",
         "historique_affiche",
         "historique_fermer",
+        "licence_etat",
+        "licence_activer",
+        "licence_retirer",
         "installateur_pret",
         "installateur_action",
     ]);

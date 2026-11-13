@@ -936,7 +936,7 @@ mod essai_de_page {
     fn fixture() -> String {
         let r = Reglages::par_defaut(Plateforme::Windows);
         let mut table = BTreeMap::new();
-        let actions = crate::application::actions_construites(false);
+        let actions = crate::application::actions_construites(false, false);
         for a in &actions {
             table.insert(a.to_string(), r.raccourcis.candidats(a).unwrap().to_vec());
         }

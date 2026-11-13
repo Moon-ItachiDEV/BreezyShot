@@ -7,6 +7,7 @@ pub mod capture;
 pub mod droits;
 pub mod fenetres;
 pub mod installation;
+pub mod licence;
 pub mod raccourcis;
 pub mod reglages;
 pub mod sortie;

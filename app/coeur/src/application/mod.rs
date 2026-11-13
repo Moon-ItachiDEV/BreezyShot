@@ -10,7 +10,8 @@
 //! 0.5 : l'historique (`geste_historique`, `fenetre_historique`, décisions dans
 //! `historique.rs`) et Copier le texte (`geste_texte`, décisions dans `texte.rs`) ne
 //! touchent ce fichier que par leurs points d'accroche. Une fonction Pro n'est construite
-//! que si `droits::ouverte` le dit, ici seulement (`actions_construites`).
+//! que si `droits::ouverte` le dit, ici seulement (`actions_construites`), d'après la
+//! licence en vigueur (`licence.rs`, `Evenement::LicenceChangee`).
 //!
 //! Retardateur (0.4) : `demarrer_capture` entre en Décompte (`commencer_decompte`), le fil
 //! `decompte` poste `DecompteFini`, puis la séquence du mode part (`apres_gel`) ;
@@ -35,6 +36,7 @@ pub mod historique;
 pub mod icone;
 pub mod installateur;
 pub mod journal;
+pub mod licence;
 pub mod page_reglages;
 pub mod texte;
 pub mod vignette;
@@ -105,18 +107,23 @@ pub const MENU_HISTORIQUE: &str = "historique";
 /// menu, une ligne dans Réglages › Raccourcis (et, pour `texte`, le bouton de l'éditeur).
 /// `historique` si l'historique est construit et ouvert (`droits`) ; `texte` si Copier le
 /// texte est construit, ouvert, et si une langue de lecture existe (R10).
-pub fn actions_construites(texte_disponible: bool) -> Vec<&'static str> {
-    actions_selon(historique::CONSTRUIT, texte::CONSTRUIT && texte_disponible)
+pub fn actions_construites(pro: bool, texte_disponible: bool) -> Vec<&'static str> {
+    actions_selon(
+        pro,
+        historique::CONSTRUIT,
+        texte::CONSTRUIT && texte_disponible,
+    )
 }
 
 /// Règle pure de `actions_construites` : `avec_historique`, `avec_texte` disent ce qui est
-/// construit (et la langue) ; les droits sont lus ici et nulle part ailleurs.
-pub fn actions_selon(avec_historique: bool, avec_texte: bool) -> Vec<&'static str> {
+/// construit (et la langue), `pro` qu'une licence valide est en place ; les droits sont lus
+/// ici et nulle part ailleurs.
+pub fn actions_selon(pro: bool, avec_historique: bool, avec_texte: bool) -> Vec<&'static str> {
     let mut actions = ACTIONS_DE_CAPTURE.to_vec();
-    if avec_historique && droits::ouverte(Fonction::Historique) {
+    if avec_historique && droits::ouverte(Fonction::Historique, pro) {
         actions.push(ACTION_HISTORIQUE);
     }
-    if avec_texte && droits::ouverte(Fonction::Texte) {
+    if avec_texte && droits::ouverte(Fonction::Texte, pro) {
         actions.push(Mode::Texte.nom());
     }
     actions
@@ -186,6 +193,8 @@ pub enum Evenement {
     TexteEchu(u64),
     /// Résultat de la recherche des langues de lecture, au démarrage.
     TexteDisponible(bool),
+    /// La licence a été activée ou retirée (`licence.rs`) : listes refaites.
+    LicenceChangee,
 }
 
 /// Ce que le fil d'une action de la vignette rend au fil principal.
@@ -370,6 +379,10 @@ pub struct Application {
     lecture: Mutex<Option<texte::LectureEnCours>>,
     /// Une langue de lecture existe (`Evenement::TexteDisponible`) ; faux jusque-là.
     texte_disponible: AtomicBool,
+    /// La licence en vigueur (`licence.rs`) ; `None` : pas de Pro.
+    licence: Mutex<Option<crate::licence::Licence>>,
+    /// Les actions construites que tiennent le menu et les raccourcis (`suivre_les_actions`).
+    actions_suivies: Mutex<Vec<&'static str>>,
 }
 
 /// Une annonce envoyée au bandeau, dont la situation attend d'être retenue.
@@ -479,7 +492,10 @@ fn lancer_app(contexte: tauri::Context, commande: Commande, inconnus: Vec<String
             fenetre_historique::historique_tout_effacer,
             fenetre_historique::historique_glisser,
             fenetre_historique::historique_affiche,
-            fenetre_historique::historique_fermer
+            fenetre_historique::historique_fermer,
+            licence::licence_etat,
+            licence::licence_activer,
+            licence::licence_retirer
         ])
         .setup(move |app| {
             demarrer(app.handle(), commande, &inconnus);
@@ -597,9 +613,14 @@ fn demarrer(app: &AppHandle, commande: Commande, inconnus: &[String]) {
         }
         None => Reglages::par_defaut(plateforme),
     };
-    // Les langues de lecture ne sont pas encore connues : `texte` attend
-    // `Evenement::TexteDisponible`.
-    let candidats = table_candidats(&reglages, &actions_construites(false));
+    // La licence d'abord : les actions Pro en dépendent. Les langues de lecture ne sont pas
+    // encore connues : `texte` attend `Evenement::TexteDisponible`.
+    licence::charger(app);
+    let pro = pro(app);
+    if let Ok(mut suivies) = app.state::<Application>().actions_suivies.lock() {
+        *suivies = actions_construites(pro, false);
+    }
+    let candidats = table_candidats(&reglages, &actions_construites(pro, false));
     fenetre_reglages::retenir_theme(&reglages);
     log::info!("theme interface: {}", reglages.theme.texte());
     if systeme::demarrage::cle_d_essai() {
@@ -662,7 +683,7 @@ fn demarrer(app: &AppHandle, commande: Commande, inconnus: &[String]) {
         app,
         theme,
         taille,
-        &entrees_menu(&actions_construites(false), |a| bilan.libelle_menu(a)),
+        &entrees_menu(&actions_construites(pro, false), |a| bilan.libelle_menu(a)),
         |app, id| traiter(app, Evenement::Menu(id)),
     ) {
         Ok(()) => log::info!(
@@ -765,9 +786,25 @@ fn texte_disponible(app: &AppHandle) -> bool {
         .load(Ordering::SeqCst)
 }
 
-/// Les actions construites en ce moment (langues de lecture comprises).
+/// Vrai si une licence valide est en place.
+pub(super) fn pro(app: &AppHandle) -> bool {
+    licence_en_vigueur(app).is_some()
+}
+
+/// La licence en vigueur, sous son verrou (repris s'il est empoisonné).
+pub(super) fn licence_en_vigueur(
+    app: &AppHandle,
+) -> std::sync::MutexGuard<'_, Option<crate::licence::Licence>> {
+    app.state::<Application>()
+        .inner()
+        .licence
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+}
+
+/// Les actions construites en ce moment (licence et langues de lecture comprises).
 pub(super) fn actions_en_vigueur(app: &AppHandle) -> Vec<&'static str> {
-    actions_construites(texte_disponible(app))
+    actions_construites(pro(app), texte_disponible(app))
 }
 
 /// Vrai si le mode `mode` est une action construite en ce moment.
@@ -802,25 +839,57 @@ pub(super) fn refaire_menu(app: &AppHandle) {
 /// une action construite, son raccourci est réservé (`raccourci texte: …`) et le menu
 /// refait. Pas de surveillance ensuite : une langue installée compte au prochain démarrage.
 fn texte_devenu_disponible(app: &AppHandle, disponible: bool) {
-    let etat = app.state::<Application>();
-    let avant = texte_construit(app);
-    etat.texte_disponible.store(disponible, Ordering::SeqCst);
-    if texte_construit(app) == avant || !disponible {
+    app.state::<Application>()
+        .texte_disponible
+        .store(disponible, Ordering::SeqCst);
+    suivre_les_actions(app);
+}
+
+/// Range la licence en vigueur (`licence.rs`, après vérification et rangement), puis poste
+/// `Evenement::LicenceChangee`, qui refait les listes au tour suivant.
+pub(super) fn poser_licence(app: &AppHandle, licence: Option<crate::licence::Licence>) {
+    *licence_en_vigueur(app) = licence;
+    poster_plus_tard(app, Evenement::LicenceChangee);
+}
+
+/// Les actions construites ont pu changer (langues, licence) depuis la liste que tiennent
+/// le menu et les raccourcis : une action apparue reçoit son raccourci (`raccourci
+/// <action>: …`), une action partie rend le sien, puis le menu est refait. Rien si la
+/// liste est la même.
+fn suivre_les_actions(app: &AppHandle) {
+    let apres = actions_en_vigueur(app);
+    let avant = std::mem::replace(
+        &mut *app
+            .state::<Application>()
+            .actions_suivies
+            .lock()
+            .unwrap_or_else(|e| e.into_inner()),
+        apres.clone(),
+    );
+    if apres == avant {
         return;
     }
-    let action = Mode::Texte.nom();
-    if let Some(r) = etat.reservations.get() {
-        let candidats = reglages_lus(app)
-            .raccourcis
-            .candidats(action)
-            .unwrap_or_default()
-            .to_vec();
-        let choix = r.changer(app, action, &candidats, systeme::impr_ecran_reserve());
-        match &choix.retenu {
-            Some(x) => log::info!("raccourci {action}: {}", x.canonique()),
-            None => log::info!("raccourci {action}: aucun"),
+    if let Some(r) = app.state::<Application>().reservations.get() {
+        for action in apres.iter().filter(|a| !avant.contains(a)) {
+            let candidats = reglages_lus(app)
+                .raccourcis
+                .candidats(action)
+                .unwrap_or_default()
+                .to_vec();
+            let choix = r.changer(app, action, &candidats, systeme::impr_ecran_reserve());
+            match &choix.retenu {
+                Some(x) => log::info!("raccourci {action}: {}", x.canonique()),
+                None => log::info!("raccourci {action}: aucun"),
+            }
+            if *action == Mode::Texte.nom() {
+                geste_texte::raccourci_reserve(app, &choix);
+            }
         }
-        geste_texte::raccourci_reserve(app, &choix);
+        for action in avant.iter().filter(|a| !apres.contains(a)) {
+            // Liste vide : le raccourci est rendu au système.
+            r.changer(app, action, &[], systeme::impr_ecran_reserve());
+            log::info!("raccourci {action} rendu");
+        }
     }
     refaire_menu(app);
 }
@@ -1105,6 +1174,7 @@ pub fn traiter(app: &AppHandle, evenement: Evenement) {
             | Evenement::TexteLu(_)
             | Evenement::TexteEchu(_)
             | Evenement::TexteDisponible(_)
+            | Evenement::LicenceChangee
             | Evenement::Fenetres(fenetres::Signal::ActionBandeau { .. })
     );
     if de_capture && hors_fil_principal(app) {
@@ -1248,6 +1318,7 @@ pub fn traiter(app: &AppHandle, evenement: Evenement) {
         Evenement::TexteLu(fin) => geste_texte::texte_lu(app, *fin),
         Evenement::TexteEchu(numero) => geste_texte::echu(app, numero),
         Evenement::TexteDisponible(oui) => texte_devenu_disponible(app, oui),
+        Evenement::LicenceChangee => suivre_les_actions(app),
     }
 }
 
@@ -3779,7 +3850,7 @@ mod tests {
                 Mode::DerniereZone
             ]
         );
-        assert_eq!(modes_au_menu(&actions_selon(true, true)), ORDRE_MENU);
+        assert_eq!(modes_au_menu(&actions_selon(true, true, true)), ORDRE_MENU);
         assert_eq!(id_menu(Mode::Texte), "capturer_texte");
         assert_eq!(id_menu(Mode::DerniereZone), "capturer_derniere_zone");
         assert_eq!(texte_capturer(Mode::Fenetre, None), "Capturer une fenêtre");
@@ -3789,9 +3860,9 @@ mod tests {
     fn liste_des_actions_construites() {
         let base = ["zone", "plein_ecran", "fenetre", "derniere_zone"];
         assert_eq!(ACTIONS_DE_CAPTURE, base);
-        assert_eq!(actions_selon(false, false), base);
+        assert_eq!(actions_selon(true, false, false), base);
         assert_eq!(
-            actions_selon(true, false),
+            actions_selon(true, true, false),
             [
                 "zone",
                 "plein_ecran",
@@ -3801,11 +3872,11 @@ mod tests {
             ]
         );
         assert_eq!(
-            actions_selon(false, true),
+            actions_selon(true, false, true),
             ["zone", "plein_ecran", "fenetre", "derniere_zone", "texte"]
         );
         assert_eq!(
-            actions_selon(true, true),
+            actions_selon(true, true, true),
             [
                 "zone",
                 "plein_ecran",
@@ -3816,16 +3887,23 @@ mod tests {
             ]
         );
         // Sans langue de lecture, jamais `texte` ; `historique` suit sa construction.
-        assert!(!actions_construites(false).contains(&"texte"));
+        assert!(!actions_construites(true, false).contains(&"texte"));
         assert_eq!(
-            actions_construites(false).contains(&"historique"),
+            actions_construites(true, false).contains(&"historique"),
             historique::CONSTRUIT
         );
         assert_eq!(
-            actions_construites(true).contains(&"texte"),
+            actions_construites(true, true).contains(&"texte"),
             texte::CONSTRUIT
         );
-        for a in actions_selon(true, true) {
+        // Sans licence : les quatre captures seulement, quoi qu'il soit construit.
+        assert_eq!(actions_selon(false, true, true), base);
+        assert_eq!(actions_construites(false, true), base);
+        assert_eq!(
+            entrees_menu(&actions_construites(false, true), |_| None),
+            entrees_menu(&ACTIONS_DE_CAPTURE, |_| None)
+        );
+        for a in actions_selon(true, true, true) {
             assert!(
                 Mode::depuis_nom(a).is_some() || a == ACTION_HISTORIQUE,
                 "{a}"
@@ -3925,7 +4003,7 @@ mod tests {
             "texte" => Some("Ctrl + Maj + T".to_string()),
             _ => None,
         };
-        let m = entrees_menu(&actions_selon(true, true), raccourci);
+        let m = entrees_menu(&actions_selon(true, true, true), raccourci);
         assert_eq!(
             m,
             [
@@ -3942,7 +4020,7 @@ mod tests {
                 action(MENU_QUITTER, "Quitter BreezyShot"),
             ]
         );
-        let sans_texte = entrees_menu(&actions_selon(true, false), raccourci);
+        let sans_texte = entrees_menu(&actions_selon(true, true, false), raccourci);
         assert_eq!(sans_texte.len(), m.len() - 1);
         assert!(!sans_texte.contains(&action("capturer_texte", "Copier le texte\tCtrl + Maj + T")));
         assert_eq!(
@@ -3951,7 +4029,7 @@ mod tests {
         );
         // Sans historique ni texte : le menu de la 0.4.
         assert_eq!(
-            entrees_menu(&actions_selon(false, false), raccourci),
+            entrees_menu(&actions_selon(true, false, false), raccourci),
             entrees_menu(&ACTIONS_DE_CAPTURE, |_| None)
         );
         assert_eq!(mode_du_menu(MENU_HISTORIQUE), None);
