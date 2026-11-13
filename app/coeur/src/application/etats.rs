@@ -3,6 +3,8 @@
 //! La table suit le tableau « États » du document de workflow. Ajouter un état ou un
 //! passage, c'est ajouter des lignes à `PASSAGES` ; `suivant` ne change pas.
 
+use std::time::{Duration, Instant};
+
 /// L'état de l'app, toujours un seul à la fois.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Etat {
@@ -220,17 +222,32 @@ pub fn suivant(etat: Etat, declencheur: Declencheur) -> Option<Etat> {
 #[derive(Debug)]
 pub struct Automate {
     etat: Etat,
+    /// Depuis quand l'automate est dans `etat` (journal d'un appui ignoré, veille).
+    depuis: Instant,
 }
 
 impl Default for Automate {
     fn default() -> Self {
-        Automate { etat: Etat::Repos }
+        Automate::dans(Etat::Repos)
     }
 }
 
 impl Automate {
+    /// Un automate posé dans `etat`, à l'instant.
+    pub fn dans(etat: Etat) -> Automate {
+        Automate {
+            etat,
+            depuis: Instant::now(),
+        }
+    }
+
     pub fn etat(&self) -> Etat {
         self.etat
+    }
+
+    /// Le temps passé dans l'état courant.
+    pub fn depuis(&self) -> Duration {
+        self.depuis.elapsed()
     }
 
     /// Applique un déclencheur. Rend le nouvel état, ou `None` s'il est ignoré.
@@ -244,6 +261,7 @@ impl Automate {
                     declencheur.libelle()
                 );
                 self.etat = nouveau;
+                self.depuis = Instant::now();
                 Some(nouveau)
             }
             None => {
@@ -629,7 +647,7 @@ mod tests {
     fn parcours_avec_retardateur() {
         for depart in [E::Repos, E::Vignette] {
             for m in MODES_0_4 {
-                let mut a = Automate { etat: depart };
+                let mut a = Automate::dans(depart);
                 assert_eq!(a.traiter(D::DemandeDecompte(m)), Some(E::Decompte));
                 // Un second appui pendant le décompte est ignoré.
                 assert_eq!(a.traiter(D::DemandeCapture(m)), None);
