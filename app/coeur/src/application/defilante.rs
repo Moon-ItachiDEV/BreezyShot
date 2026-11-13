@@ -79,6 +79,10 @@ pub const PERDUES_AUTO_MAX: u32 = 4;
 /// En `Auto`, tant d'images `Ambigue` de suite comptent pour une image immobile (une page
 /// unie plus haute que la zone ne fait pas défiler sans fin).
 pub const AMBIGUES_MAX: u32 = 6;
+/// Images `Vu::ImmobileLu` de suite au plus petit pas après lesquelles elles comptent comme
+/// des images immobiles ordinaires : une vue au contenu fixe dont l'application dit qu'elle
+/// défile ne tourne pas jusqu'à `DUREE_MAX` (N4).
+pub const IMMOBILES_LUS_MAX: u32 = 3;
 
 /// Texte de la pilule de la page de contrôle.
 pub const LIBELLE_TERMINER: &str = "Terminer";
@@ -421,6 +425,8 @@ pub struct Course {
     /// Réductions de moitié pour retrouver du texte dans le recouvrement (images
     /// ambiguës) ; défaites à la première avance.
     reductions_ambigues: u32,
+    /// `Vu::ImmobileLu` de suite au plus petit pas (N4).
+    immobiles_lus: u32,
     /// Le dernier pas demandé (négatif : une remontée).
     dernier_pas: i32,
     /// Le moyen en cours a fait avancer la page : gardé pour toute la capture (R3).
@@ -453,6 +459,7 @@ impl Course {
             pas_plein: PAS_MIN,
             reductions: 0,
             reductions_ambigues: 0,
+            immobiles_lus: 0,
             dernier_pas: 0,
             moyen_choisi: false,
             avance_vue: false,
@@ -634,7 +641,10 @@ pub fn suite(course: &mut Course, vu: Vu, maintenant: Instant) -> Vec<Geste> {
         Vu::Image(mesure, position) => match course.conduite {
             // Aucune image n'est demandée pendant l'attente : rien à en faire.
             Conduite::Attente => Vec::new(),
-            Conduite::Auto => suite_auto(course, mesure, position, maintenant),
+            Conduite::Auto => {
+                course.immobiles_lus = 0;
+                suite_auto(course, mesure, position, maintenant)
+            }
             Conduite::Main => suite_main(course, mesure, position, maintenant),
         },
         Vu::ImmobileLu(position) => match course.conduite {
@@ -659,13 +669,17 @@ pub fn vu_image(mesure: Mesure, attendu: Attendu, position: Option<Position>) ->
 /// l'image est la même (grille répétitive, `e` multiple de la période). Ce n'est pas le
 /// bas : le pas est réduit de moitié, on remonte de la moitié du dernier mouvement pour
 /// sortir du multiple, et on réessaie. Au plus petit pas, on redescend. Seule une position
-/// lue en bas (≥ 99,9 %) en fait une image immobile ordinaire.
+/// lue en bas (≥ 99,9 %) en fait une image immobile ordinaire, ou `IMMOBILES_LUS_MAX`
+/// de suite au plus petit pas (contenu fixe, la vue dit qu'elle défile).
 fn suite_auto_immobile_lu(
     course: &mut Course,
     position: Option<Position>,
     maintenant: Instant,
 ) -> Vec<Geste> {
-    if en_bas_lu(position) {
+    if course.au_plus_petit() {
+        course.immobiles_lus = course.immobiles_lus.saturating_add(1);
+    }
+    if en_bas_lu(position) || course.immobiles_lus >= IMMOBILES_LUS_MAX {
         return suite_auto(course, Mesure::Immobile, position, maintenant);
     }
     if let Some(lue) = position.map(|p| p.pour_cent).filter(|p| p.is_finite()) {
@@ -1754,6 +1768,39 @@ mod tests {
             assert!(matches!(g[..], [Geste::Descendre(n)] if n < 0), "{g:?}");
         }
         assert_eq!(c.fin(), None);
+    }
+
+    #[test]
+    fn immobiles_lus_bornes_au_plus_petit_pas() {
+        // Contenu fixe dans une vue dont l'application dit qu'elle défile : chaque pas lu
+        // donne `Immobile`. Le pas est réduit jusqu'au plus petit (40), puis, après
+        // `IMMOBILES_LUS_MAX` de suite à ce pas, ce sont des images immobiles ordinaires.
+        let t0 = Instant::now();
+        let mut c = en_auto(t0);
+        let t = t0 + ms(600);
+        suite(&mut c, Vu::Image(Mesure::Avance(200), None), t);
+        let lu = Vu::ImmobileLu(None);
+        assert_eq!(suite(&mut c, lu, t), vec![Geste::Descendre(-100)]);
+        assert_eq!(suite(&mut c, lu, t), vec![Geste::Descendre(-50)]);
+        assert_eq!(suite(&mut c, lu, t), vec![Geste::Descendre(-25)]);
+        // Au plus petit pas : deux fois on redescend.
+        assert_eq!(suite(&mut c, lu, t), vec![Geste::Descendre(40)]);
+        assert_eq!(suite(&mut c, lu, t), vec![Geste::Descendre(40)]);
+        // Une autre image entre deux remet le compte à zéro.
+        assert_eq!(
+            suite(&mut c, Vu::Image(Mesure::Recul(5), None), t),
+            vec![Geste::Descendre(40)]
+        );
+        assert_eq!(suite(&mut c, lu, t), vec![Geste::Descendre(40)]);
+        assert_eq!(suite(&mut c, lu, t), vec![Geste::Descendre(40)]);
+        // La troisième de suite : une image immobile (la première des deux du bas).
+        assert_eq!(suite(&mut c, lu, t), vec![Geste::Descendre(40)]);
+        assert_eq!(suite(&mut c, lu, t), vec![Geste::Prendre(FIN_EN_BAS)]);
+        assert_eq!(
+            suite(&mut c, Vu::Image(Mesure::Immobile, None), t + FIN_EN_BAS),
+            vec![Geste::Finir(Fin::EnBas)]
+        );
+        assert_eq!(c.fin(), Some(Fin::EnBas));
     }
 
     #[test]

@@ -771,7 +771,9 @@ mouvement. Une image `Immobile` mesurée avec un lu non nul (`Vu::ImmobileLu`, p
 `regles::vu_image` : grille répétitive, lu multiple de la période, N4 de C) ne compte
 jamais pour le bas ni pour un repli : pas réduit de moitié, remontée de la moitié du
 dernier mouvement, puis on réessaie (au plus petit pas, on redescend) ; seule une position
-lue en bas la fait finir. Rien n'est alors constaté au défileur
+lue en bas la fait finir, ou `IMMOBILES_LUS_MAX` (3) de suite au plus petit pas, qui
+comptent alors comme des images immobiles ordinaires (contenu fixe dans une vue dont
+l'application dit qu'elle défile : sinon jusqu'à la limite de 10 min). Rien n'est alors constaté au défileur
 (`defilante: immobile avec un lu de <e> px: pas reduit`). Un cran de molette dans la zone passe à `Main` (définitif) : une image à chaque
 cran et toutes les 50 ms ; « Trop vite » sur une image perdue, caché quand l'image gardée
 est retrouvée. Une seule fin (bouton, Entrée, en bas, limite), puis `Finit` (la fenêtre
