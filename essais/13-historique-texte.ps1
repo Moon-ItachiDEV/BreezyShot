@@ -30,7 +30,8 @@
 # Cas A, texte (copie, vignette éteinte, animations réduites) :
 # (1) `texte langues` (une ligne, venue avec l'activation) contient en-US ; mémoire au
 #     repos sans licence notée ;
-# (2) menu : « Copier le texte<tab>Ctrl + Maj + T » en cinquième, séparateur,
+# (2) menu (lu par position) : « Capture défilante<tab>Ctrl + Maj + 5 » en cinquième (0.6,
+#     avec la licence), « Copier le texte<tab>Ctrl + Maj + T » en sixième, séparateur,
 #     « Historique<tab>Ctrl + Maj + H » ; Échap le ferme ;
 # (3) presse-papiers témoin ; Ctrl+Maj+T : `DemandeCapture texte`, `selection montree …
 #     mode texte` ; glisser réel autour des trois lignes : `zone texte` exacte, `Selection
@@ -79,7 +80,7 @@
 #      aucune sonde des langues.
 # Cas C, migration (licence.txt en place au démarrage : `licence active ESSAI-0001`) :
 #      reglages.json v3 où zone vaut Ctrl+Maj+T, trois PNG de la 0.4 sans aperçu : fichier
-#      passé en v4, `raccourci texte: aucun` ; historique : trois cases, `historique apercus
+#      passé en v5, `raccourci texte: aucun` ; historique : trois cases, `historique apercus
 #      faits 3`. (L'annonce « Aucun raccourci pour le texte » n'existe plus : rien attendu.)
 # Cas D, sans langue (BREEZYSHOT_ESSAI_SANS_TEXTE=1, licence en place) : `texte langues
 #      aucune (essai)` ; menu sans « Copier le texte » (avec « Historique ») ; aucune ligne
@@ -1223,8 +1224,11 @@ public static uint Crc32(byte[] o) {
             Point '(2) menu avec la licence' {
                 $m = Ouvrir-Menu '(2)'
                 $t = $m.Textes
-                $ok = ($t.Count -ge 7) -and ($t[4] -ceq "Copier le texte`tCtrl + Maj + T") -and ($t[5] -eq '') -and ($t[6] -ceq "Historique`tCtrl + Maj + H")
-                Verifier '(2) « Copier le texte<tab>Ctrl + Maj + T » en cinquième, séparateur, « Historique<tab>Ctrl + Maj + H »' $ok $m.Lus | Out-Null
+                # 0.6 : avec la licence, « Capture défilante » est la cinquième entrée, avant
+                # « Copier le texte » (contrat 0.6, §7.3) ; les réglages v3 du cas reçoivent son
+                # défaut Ctrl+Maj+5 à la mise à niveau.
+                $ok = ($t.Count -ge 8) -and ($t[4] -ceq "Capture défilante`tCtrl + Maj + 5") -and ($t[5] -ceq "Copier le texte`tCtrl + Maj + T") -and ($t[6] -eq '') -and ($t[7] -ceq "Historique`tCtrl + Maj + H")
+                Verifier '(2) « Capture défilante<tab>Ctrl + Maj + 5 » en cinquième, « Copier le texte<tab>Ctrl + Maj + T » en sixième, séparateur, « Historique<tab>Ctrl + Maj + H »' $ok $m.Lus | Out-Null
                 $menus = Compter-Motif -Motif 'menu: ' -Dossier $da
                 Fermer-Menu $m '(2)'
                 Verifier '(2) Échap ferme le menu, aucune entrée choisie' ((Compter-Motif -Motif 'menu: ' -Dossier $da) -eq $menus) | Out-Null
@@ -1817,7 +1821,7 @@ public static uint Crc32(byte[] o) {
                 $f = Lire-Reglages $dc
                 $texte = @($f.raccourcis.texte)
                 $histo = @($f.raccourcis.historique)
-                Verifier '(C) fichier passé en v4 : historique Ctrl+Maj+H, texte vide (Ctrl+Maj+T déjà donné)' (($f.version -eq 4) -and ($texte.Count -eq 0) -and ($histo.Count -eq 1) -and ($histo[0] -eq 'Ctrl+Maj+H') -and ((Compter-Motif -Motif 'reglages mis a niveau de la version 3 a la version 4$' -Dossier $dc) -eq 1)) "version $($f.version), texte [$($texte -join ',')], historique [$($histo -join ',')]" | Out-Null
+                Verifier '(C) fichier passé en v5 : historique Ctrl+Maj+H, texte vide (Ctrl+Maj+T déjà donné)' (($f.version -eq 5) -and ($texte.Count -eq 0) -and ($histo.Count -eq 1) -and ($histo[0] -eq 'Ctrl+Maj+H') -and ((Compter-Motif -Motif 'reglages mis a niveau de la version 3 a la version 5$' -Dossier $dc) -eq 1)) "version $($f.version), texte [$($texte -join ',')], historique [$($histo -join ',')]" | Out-Null
                 Verifier '(C) raccourci texte: aucun' ($lt -match 'raccourci texte: aucun$') $lt | Out-Null
                 $o = Ouvrir-Historique $dc '(C)'
                 $c = Attendre-Cases $o.H 3 '(C)'
