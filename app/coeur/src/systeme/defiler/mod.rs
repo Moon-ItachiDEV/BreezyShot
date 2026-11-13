@@ -11,8 +11,17 @@
 //!
 //! Le dialogue avec le cœur : `descendre` dit ce qui est parti (`Envoi`), jamais si la page
 //! a bougé. Le cœur le voit sur les images : il dit « elle a bougé de tant » par
-//! `constater` (le moyen est alors gardé pour toute la capture, et le nombre de crans du pas
-//! suivant s'ajuste), ou « rien n'a bougé » par `abandonner` (moyen suivant).
+//! `constater` (le nombre de crans du pas suivant s'ajuste, `avance_par_cran` le dit), ou
+//! « rien n'a bougé, passe au suivant » par `abandonner`. Le choix sur les deux premières
+//! commandes (R3) est fait par le cœur : `abandonner` passe toujours au suivant.
+//!
+//! Gardes communes à chaque pas (`garde`, pure) : rien ne part pendant que Ctrl, Maj, Alt,
+//! Win ou un bouton de souris est enfoncé (Ctrl + molette changerait le zoom de la page,
+//! Maj la ferait défiler de côté) ; le message posté exige que la fenêtre sous le centre de
+//! la zone soit de la cible ; la molette envoyée exige en plus le pointeur sur la zone,
+//! aucun menu, aucune capture de souris ni déplacement en cours dans le fil de la cible, et,
+//! sans « faire défiler les fenêtres inactives », le focus dans la cible. Une cible dont le
+//! processus, le fil ou la classe ont changé (HWND réutilisé) est laissée.
 //!
 //! Façade commune : `windows.rs` la réalise, `autre.rs` donne des réponses neutres
 //! ailleurs. Les règles (garde de la molette envoyée, ordre des moyens, crans d'un pas,
@@ -99,7 +108,7 @@ impl Moyen {
     fn unites_max(self) -> i32 {
         match self {
             Moyen::Message | Moyen::Molette => 8,
-            Moyen::Automation => 64,
+            Moyen::Automation => 32,
         }
     }
 }
@@ -119,16 +128,20 @@ pub struct Position {
 pub enum Envoi {
     /// Le pas est parti.
     Envoye,
-    /// Rien n'est parti : la garde de la molette envoyée l'a retenu (`peut_envoyer`, le
-    /// pointeur est peut-être sur « Terminer »), ou il n'y a plus aucun moyen
-    /// (`Defileur::moyen` est `None`), ou le pas demandé est nul. À retenter au tour
-    /// suivant.
+    /// Rien n'est parti : une garde l'a retenu (touche tenue, autre fenêtre sous le centre
+    /// ou le pointeur, pointeur sur « Terminer », menu ouvert…), UI Automation n'est pas
+    /// encore prêt ou n'a pas répondu à temps, il n'y a plus aucun moyen (`Defileur::moyen`
+    /// est `None`), ou le pas demandé est nul. À retenter au tour suivant.
     Saute,
 }
 
 /// Ce qui fait défiler une page, le temps d'une capture. Vit dans le fil `defilante` ; UI
 /// Automation tourne dans un fil MTA à lui (`defilante-automation`), qui finit avec le
-/// défileur. Aucune méthode n'attend plus d'une seconde (UI Automation borné).
+/// défileur. Attentes au plus : `descendre` 280 ms (moyen `Automation` : une position lue,
+/// 80 ms, puis le pas, 200 ms ; les autres moyens n'attendent pas), `position` 80 ms ;
+/// `preparer`, `abandonner`, `constater`, `moyen`, `envoyes`, `avance_par_cran`
+/// n'attendent jamais UI Automation. « Terminer », Entrée et Échap ne sont donc jamais
+/// retardés de plus de 280 ms par le défileur.
 #[derive(Debug)]
 pub struct Defileur {
     interne: plateforme::Defileur,
@@ -155,36 +168,49 @@ impl Defileur {
         plateforme::envoyes(&self.interne)
     }
 
-    /// « Rien n'a bougé, passe au suivant » (D8) : abandonne le moyen en cours pour le
-    /// suivant de `Moyen::ORDRE` qui peut servir ; rend le nouveau, `None` s'il n'y en a
-    /// plus. Un moyen gardé (`constater` avec une avance) ne s'abandonne plus : le moyen
-    /// gardé est rendu, inchangé.
+    /// « Rien n'a bougé, passe au suivant » (D8), ou « un cran est trop grand pour la
+    /// zone » : laisse le moyen en cours pour le suivant de `Moyen::ORDRE` qui peut servir ;
+    /// rend le nouveau, `None` s'il n'y en a plus. N'attend pas : si le suivant est
+    /// `Automation` et que sa recherche n'est pas finie, il est rendu, et `descendre` dit
+    /// `Saute` jusqu'à la fin de la recherche (1,5 s au plus après `preparer`).
     pub fn abandonner(&mut self) -> Option<Moyen> {
         plateforme::abandonner(&mut self.interne)
     }
 
     /// Ce que les images ont montré après la dernière commande partie, une fois par
     /// commande : la page a parcouru `avance` pixels réels dans le sens demandé (0 :
-    /// immobile). Une avance garde le moyen pour toute la capture (R3) et règle le nombre de
-    /// crans des pas suivants (jamais plus que ce qui a été vu par cran). Facultatif : sans
-    /// lui, chaque pas reste d'un cran (Automation : réglé sur la position lue).
+    /// immobile). Règle le nombre de crans des pas suivants (jamais plus que ce qui a été vu
+    /// par cran) ; 0 après un cran partiel coupe les crans partiels de ce moyen (l'app les
+    /// ignore). Facultatif : sans lui, chaque pas reste d'un cran (Automation : réglé sur la
+    /// position lue).
     pub fn constater(&mut self, avance: u32) {
         plateforme::constater(&mut self.interne, avance)
+    }
+
+    /// Ce qu'un cran (`Message`, `Molette`) ou un `SmallIncrement` (`Automation`) du moyen
+    /// en cours fait au plus, en pixels réels, d'après `constater` (et la position lue pour
+    /// `Automation`) ; `None` tant que rien n'a été vu. `Molette` et `Automation` ne font
+    /// jamais moins : si c'est plus que la hauteur utile moins `RECOUVREMENT_MIN`, chaque
+    /// pas perd des lignes, l'appelant passe au suivant (`abandonner`). `Message` envoie un
+    /// cran partiel (delta de moins de 120) pour un pas plus petit, tant que l'app le suit.
+    pub fn avance_par_cran(&self) -> Option<u32> {
+        plateforme::avance_par_cran(&self.interne)
     }
 
     /// Demande un pas de `pixels` pixels réels vers le bas (négatif : vers le haut). Le
     /// premier pas d'un moyen est d'une unité (un cran, un `SmallIncrement`), les suivants
     /// sont réglés sur ce qu'une unité a fait. Si le moyen en cours ne peut plus rien
-    /// envoyer (fenêtre fermée, message refusé, aucun `ScrollPattern`), il est laissé ici
-    /// même pour le suivant (`moyen()` le dit, l'appelant le compare à ce qu'il avait) ;
-    /// sans plus aucun moyen, `Saute`. `Err` n'est rendu aujourd'hui dans aucun cas (gardé
-    /// pour le contrat) ; ailleurs que sous Windows, aucun défileur n'existe.
+    /// envoyer (fenêtre fermée ou remplacée, message refusé, aucun `ScrollPattern`, UI
+    /// Automation trois fois sans réponse), il est laissé ici même pour le suivant
+    /// (`moyen()` le dit, l'appelant le compare à ce qu'il avait) ; sans plus aucun moyen,
+    /// `Saute`. `Err` n'est rendu aujourd'hui dans aucun cas (gardé pour le contrat) ;
+    /// ailleurs que sous Windows, aucun défileur n'existe.
     pub fn descendre(&mut self, pixels: i32) -> Result<Envoi, String> {
         plateforme::descendre(&mut self.interne, pixels)
     }
 
     /// La position lue (UI Automation, `ScrollPattern`), `None` si la page n'en donne pas
-    /// (ou pas encore, ou pas dans les 150 ms).
+    /// (ou pas encore, ou pas dans les 80 ms).
     pub fn position(&self) -> Option<Position> {
         plateforme::position(&self.interne)
     }
@@ -205,19 +231,53 @@ pub fn peut_envoyer(
         && (survol_actif || premier_plan == Some(racine_cible))
 }
 
-/// La garde entière d'une molette envoyée (pure) : le pointeur sur la zone, puis
-/// `peut_envoyer`. `pointeur` : `None` s'il n'a pas pu être lu.
+/// Ce que le système dit au moment d'un pas, lu par `windows.rs` (seulement ce dont le
+/// moyen a besoin).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 #[cfg_attr(not(windows), allow(dead_code))]
-fn garde_molette(
+struct Constat {
+    /// Ctrl, Maj, Alt, Win ou un bouton de souris est enfoncé.
+    touches_tenues: bool,
+    /// La racine de la fenêtre que la souris toucherait au centre de la zone.
+    racine_sous_centre: Option<isize>,
+    /// Le pointeur, `None` s'il n'a pas pu être lu.
     pointeur: Option<(i32, i32)>,
-    zone: Rect,
-    racine_sous_point: Option<isize>,
-    racine_cible: isize,
+    /// La racine de la fenêtre sous le pointeur.
+    racine_sous_pointeur: Option<isize>,
+    /// La racine de la fenêtre au premier plan.
     premier_plan: Option<isize>,
+    /// « Faire défiler les fenêtres inactives » est mis.
     survol_actif: bool,
-) -> Envoi {
-    let sur_zone = pointeur.is_some_and(|p| zone.contient(p));
-    if sur_zone && peut_envoyer(racine_sous_point, racine_cible, premier_plan, survol_actif) {
+    /// Le focus du fil de la cible est la cible, l'un de ses ancêtres ou l'une de ses
+    /// descendantes.
+    focus_dans_cible: bool,
+    /// Capture de souris, menu, déplacement ou redimensionnement en cours dans le fil de la
+    /// cible (ou illisible).
+    fil_occupe: bool,
+}
+
+/// La garde d'un pas (pure) : `Envoye` si le pas peut partir par `moyen`, sinon `Saute`.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn garde(moyen: Moyen, zone: Rect, racine_cible: isize, c: &Constat) -> Envoi {
+    if c.touches_tenues {
+        return Envoi::Saute;
+    }
+    let permis = match moyen {
+        Moyen::Automation => true,
+        Moyen::Message => racine_cible != 0 && c.racine_sous_centre == Some(racine_cible),
+        Moyen::Molette => {
+            c.pointeur.is_some_and(|p| zone.contient(p))
+                && peut_envoyer(
+                    c.racine_sous_pointeur,
+                    racine_cible,
+                    c.premier_plan,
+                    c.survol_actif,
+                )
+                && !c.fil_occupe
+                && (c.survol_actif || c.focus_dans_cible)
+        }
+    };
+    if permis {
         Envoi::Envoye
     } else {
         Envoi::Saute
@@ -251,15 +311,17 @@ pub struct Ecoute {
 
 /// Écoute la molette de l'utilisateur : `rappel` reçoit chaque cran sans la marque de
 /// l'app. Le crochet ne fait que poster le cran (il ne bloque jamais : Windows retire sans
-/// prévenir un crochet trop lent, `LowLevelHooksTimeout`) ; `rappel` est appelé d'un fil à
-/// part (`defilante-molette-rappel`), il ne doit que poster. Erreur ailleurs que sous
-/// Windows.
+/// prévenir un crochet trop lent, `LowLevelHooksTimeout`), dans un fil à la priorité
+/// « temps critique » ; `rappel` est appelé d'un fil à part (`defilante-molette-rappel`),
+/// il ne doit que poster (et ne jamais détruire l'`Ecoute`). Une fois l'`Ecoute` détruite,
+/// `rappel` n'est plus jamais appelé. Erreur ailleurs que sous Windows.
 pub fn ecouter_molette(rappel: impl Fn(Molette) + Send + 'static) -> Result<Ecoute, String> {
     plateforme::ecouter_molette(Box::new(rappel)).map(|interne| Ecoute { interne })
 }
 
 impl Ecoute {
-    /// Vrai tant que le crochet est posé.
+    /// Vrai depuis que le crochet est posé, jusqu'à ce que l'app le retire. Un retrait
+    /// silencieux par Windows (`LowLevelHooksTimeout` dépassé) n'est pas vu.
     pub fn active(&self) -> bool {
         plateforme::active(&self.interne)
     }
@@ -272,7 +334,7 @@ type RappelMolette = Box<dyn Fn(Molette) + Send + 'static>;
 // Règles pures, utilisées par `windows.rs`.
 
 /// Le choix du moyen pendant une capture (R3, D8) : l'ordre de `Moyen::ORDRE`, les moyens
-/// qui ne peuvent pas servir sautés, un moyen gardé dès qu'il a fait bouger la page.
+/// qui ne peuvent pas servir sautés.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(not(windows), allow(dead_code))]
 struct Choix {
@@ -282,8 +344,6 @@ struct Choix {
     en_cours: usize,
     /// Commandes parties avec le moyen en cours.
     envoyes: u32,
-    /// Le moyen en cours a fait bouger la page : il est gardé.
-    retenu: bool,
 }
 
 #[cfg_attr(not(windows), allow(dead_code))]
@@ -293,7 +353,6 @@ impl Choix {
             exclus: [false; 3],
             en_cours: 0,
             envoyes: 0,
-            retenu: false,
         }
     }
 
@@ -305,11 +364,6 @@ impl Choix {
         self.envoyes
     }
 
-    #[cfg(test)]
-    fn retenu(&self) -> bool {
-        self.retenu
-    }
-
     /// Passe au moyen suivant qui n'est pas exclu.
     fn avancer(&mut self) {
         self.en_cours = (self.en_cours + 1).min(Moyen::ORDRE.len());
@@ -317,7 +371,6 @@ impl Choix {
             self.en_cours += 1;
         }
         self.envoyes = 0;
-        self.retenu = false;
     }
 
     /// `m` ne peut pas servir ; s'il est en cours, le suivant le remplace. Rend le moyen en
@@ -330,9 +383,9 @@ impl Choix {
         self.moyen()
     }
 
-    /// Rien n'a bougé : le suivant, sauf si le moyen en cours est gardé.
+    /// Rien n'a bougé : le suivant.
     fn abandonner(&mut self) -> Option<Moyen> {
-        if !self.retenu && self.moyen().is_some() {
+        if self.moyen().is_some() {
             self.avancer();
         }
         self.moyen()
@@ -340,13 +393,6 @@ impl Choix {
 
     fn envoye(&mut self) {
         self.envoyes = self.envoyes.saturating_add(1);
-    }
-
-    /// La page a bougé avec le moyen en cours : il est gardé pour la capture.
-    fn retenir(&mut self) {
-        if self.moyen().is_some() {
-            self.retenu = true;
-        }
     }
 }
 
@@ -360,6 +406,8 @@ struct Etalon {
     par_unite: Option<f64>,
     /// Unités de la dernière commande partie (sans signe).
     derniere: u32,
+    /// Un cran partiel est resté sans effet : plus de crans partiels pour ce moyen.
+    partiel_refuse: bool,
 }
 
 #[cfg_attr(not(windows), allow(dead_code))]
@@ -379,21 +427,44 @@ impl Etalon {
         n.clamp(1, plafond) as i32 * pixels.signum()
     }
 
-    /// Une commande de `unites` est partie.
+    /// Le delta d'un cran partiel (1 à 119, sans signe) pour un pas de `pixels` plus petit
+    /// qu'une unité vue : `120 × |pixels| / unité`. `None` si l'unité est inconnue, si le pas
+    /// en vaut au moins une, ou si un cran partiel est déjà resté sans effet.
+    fn delta_partiel(&self, pixels: i32) -> Option<i32> {
+        let p = self.par_unite?;
+        let voulu = pixels.unsigned_abs() as f64;
+        if self.partiel_refuse || pixels == 0 || voulu >= p {
+            return None;
+        }
+        Some(((voulu * CRAN as f64 / p).round() as i32).clamp(1, CRAN - 1))
+    }
+
+    /// Une commande de `unites` unités entières est partie (un cran partiel compte pour une).
     fn envoye(&mut self, unites: i32) {
         self.derniere = unites.unsigned_abs();
     }
 
-    /// `unites` ont fait `pixels` (même signe attendu). La plus grande valeur vue est
-    /// gardée : un pas coupé par le bas de la page ne fait jamais envoyer plus de crans.
-    fn constater(&mut self, unites: i32, pixels: f64) {
-        if unites == 0 || !pixels.is_finite() {
+    /// `unites` (en unités, un cran partiel en fraction) ont fait `pixels` (même signe
+    /// attendu). La plus grande valeur vue est gardée : un pas coupé par le bas de la page ne
+    /// fait jamais envoyer plus de crans.
+    fn constater(&mut self, unites: f64, pixels: f64) {
+        if unites == 0.0 || !unites.is_finite() || !pixels.is_finite() {
             return;
         }
-        let par = pixels / unites as f64;
+        let par = pixels / unites;
         if par >= 1.0 {
             self.par_unite = Some(self.par_unite.map_or(par, |p| p.max(par)));
         }
+    }
+
+    /// Un cran partiel est resté sans effet.
+    fn refuser_partiel(&mut self) {
+        self.partiel_refuse = true;
+    }
+
+    /// Ce qu'une unité fait au plus, en pixels.
+    fn par_unite(&self) -> Option<u32> {
+        self.par_unite.map(|p| p.round() as u32)
     }
 }
 
@@ -582,6 +653,31 @@ fn sans_barre(element: Rect, barres: &[Rect]) -> Rect {
     r
 }
 
+/// L'indice du rectangle qui recouvre le plus `zone` (le plus petit à égalité) : l'élément
+/// qui défile est la page, pas un bloc intérieur.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn meilleur_recouvrement(rects: &[Rect], zone: Rect) -> Option<usize> {
+    let aire = |r: Rect| r.largeur as i64 * r.hauteur as i64;
+    rects
+        .iter()
+        .enumerate()
+        .filter_map(|(i, r)| r.intersection(zone).map(|c| (i, aire(c), aire(*r))))
+        .max_by(|a, b| a.1.cmp(&b.1).then(b.2.cmp(&a.2)))
+        .map(|(i, _, _)| i)
+}
+
+/// La classe d'une fenêtre telle qu'elle va au journal : coupée au premier `[` (WPF y met
+/// le nom de l'exécutable), « aucune » si vide.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn classe_pour_journal(classe: &str) -> &str {
+    let c = classe.split('[').next().unwrap_or("");
+    if c.is_empty() {
+        "aucune"
+    } else {
+        c
+    }
+}
+
 /// L'indice du plus petit rectangle qui contient `point`.
 #[cfg_attr(not(windows), allow(dead_code))]
 fn plus_petit_sous(rects: &[Rect], point: (i32, i32)) -> Option<usize> {
@@ -642,40 +738,101 @@ mod tests {
         assert!(!peut_envoyer(Some(0), 0, Some(0), true));
     }
 
+    fn constat_molette() -> Constat {
+        Constat {
+            pointeur: Some((150, 120)),
+            racine_sous_pointeur: Some(7),
+            racine_sous_centre: Some(7),
+            premier_plan: Some(7),
+            survol_actif: true,
+            focus_dans_cible: true,
+            ..Constat::default()
+        }
+    }
+
     #[test]
-    fn garde_saute_hors_de_la_zone() {
+    fn garde_molette_saute_hors_de_la_zone() {
         let zone = r(100, 100, 200, 150);
-        assert_eq!(
-            garde_molette(Some((50, 50)), zone, Some(7), 7, Some(7), true),
-            Envoi::Saute
-        );
+        let mut c = constat_molette();
+        assert_eq!(garde(Moyen::Molette, zone, 7, &c), Envoi::Envoye);
+        c.pointeur = Some((50, 50));
+        assert_eq!(garde(Moyen::Molette, zone, 7, &c), Envoi::Saute);
         // Bord droit et bord bas exclus.
+        c.pointeur = Some((300, 120));
+        assert_eq!(garde(Moyen::Molette, zone, 7, &c), Envoi::Saute);
+        c.pointeur = None;
+        assert_eq!(garde(Moyen::Molette, zone, 7, &c), Envoi::Saute);
+    }
+
+    #[test]
+    fn garde_molette_sur_la_zone_et_la_cible() {
+        let zone = r(100, 100, 200, 150);
+        // Sur la zone mais une autre fenêtre dessus (la pilule).
+        let mut c = constat_molette();
+        c.racine_sous_pointeur = Some(3);
+        assert_eq!(garde(Moyen::Molette, zone, 7, &c), Envoi::Saute);
+        // Survol coupé, la cible n'a pas le premier plan.
+        let mut c = constat_molette();
+        c.survol_actif = false;
+        c.premier_plan = Some(3);
+        assert_eq!(garde(Moyen::Molette, zone, 7, &c), Envoi::Saute);
+        // Survol coupé, premier plan mais le focus ailleurs.
+        c.premier_plan = Some(7);
+        c.focus_dans_cible = false;
+        assert_eq!(garde(Moyen::Molette, zone, 7, &c), Envoi::Saute);
+        c.focus_dans_cible = true;
+        assert_eq!(garde(Moyen::Molette, zone, 7, &c), Envoi::Envoye);
+        // Survol mis : le focus n'importe pas.
+        let mut c = constat_molette();
+        c.focus_dans_cible = false;
+        assert_eq!(garde(Moyen::Molette, zone, 7, &c), Envoi::Envoye);
+    }
+
+    #[test]
+    fn garde_molette_saute_si_le_fil_est_occupe() {
+        // Menu ouvert, capture de souris, déplacement en cours.
+        let mut c = constat_molette();
+        c.fil_occupe = true;
         assert_eq!(
-            garde_molette(Some((300, 120)), zone, Some(7), 7, Some(7), true),
-            Envoi::Saute
-        );
-        assert_eq!(
-            garde_molette(None, zone, Some(7), 7, Some(7), true),
+            garde(Moyen::Molette, r(100, 100, 200, 150), 7, &c),
             Envoi::Saute
         );
     }
 
     #[test]
-    fn garde_envoie_sur_la_zone_et_la_cible() {
+    fn garde_rien_ne_part_touche_tenue() {
         let zone = r(100, 100, 200, 150);
+        let mut c = constat_molette();
+        c.touches_tenues = true;
+        for m in Moyen::ORDRE {
+            assert_eq!(garde(m, zone, 7, &c), Envoi::Saute, "{m:?}");
+        }
+        c.touches_tenues = false;
+        for m in Moyen::ORDRE {
+            assert_eq!(garde(m, zone, 7, &c), Envoi::Envoye, "{m:?}");
+        }
+    }
+
+    #[test]
+    fn garde_du_message_au_centre() {
+        let zone = r(100, 100, 200, 150);
+        // Le message ne regarde ni le pointeur ni le premier plan.
+        let mut c = Constat {
+            racine_sous_centre: Some(7),
+            ..Constat::default()
+        };
+        assert_eq!(garde(Moyen::Message, zone, 7, &c), Envoi::Envoye);
+        // Une fenêtre posée devant le centre de la zone.
+        c.racine_sous_centre = Some(3);
+        assert_eq!(garde(Moyen::Message, zone, 7, &c), Envoi::Saute);
+        c.racine_sous_centre = None;
+        assert_eq!(garde(Moyen::Message, zone, 7, &c), Envoi::Saute);
+        c.racine_sous_centre = Some(0);
+        assert_eq!(garde(Moyen::Message, zone, 0, &c), Envoi::Saute);
+        // UI Automation ne passe pas par la souris.
         assert_eq!(
-            garde_molette(Some((150, 120)), zone, Some(7), 7, None, true),
+            garde(Moyen::Automation, zone, 7, &Constat::default()),
             Envoi::Envoye
-        );
-        // Sur la zone mais une autre fenêtre dessus (la pilule).
-        assert_eq!(
-            garde_molette(Some((150, 120)), zone, Some(3), 7, None, true),
-            Envoi::Saute
-        );
-        // Survol coupé, la cible n'a pas le premier plan.
-        assert_eq!(
-            garde_molette(Some((150, 120)), zone, Some(7), 7, Some(3), false),
-            Envoi::Saute
         );
     }
 
@@ -728,18 +885,13 @@ mod tests {
     }
 
     #[test]
-    fn un_moyen_qui_a_fait_bouger_est_garde() {
+    fn abandonner_passe_au_suivant_meme_apres_un_effet() {
+        // Un cran trop grand pour la zone : l'appelant laisse un moyen qui a fait bouger.
         let mut c = Choix::nouveau();
         c.envoye();
         c.envoye();
         assert_eq!(c.envoyes(), 2);
-        c.retenir();
-        assert!(c.retenu());
-        assert_eq!(c.abandonner(), Some(Moyen::Message));
-        assert_eq!(c.envoyes(), 2);
-        // Exclu (fenêtre fermée) : il part quand même.
-        assert_eq!(c.exclure(Moyen::Message), Some(Moyen::Automation));
-        assert!(!c.retenu());
+        assert_eq!(c.abandonner(), Some(Moyen::Automation));
         assert_eq!(c.envoyes(), 0);
     }
 
@@ -750,15 +902,9 @@ mod tests {
         assert_eq!(c.envoyes(), 1);
         c.abandonner();
         assert_eq!(c.envoyes(), 0);
-        c.retenir();
-        c.abandonner();
-        assert_eq!(c.moyen(), Some(Moyen::Automation));
-        let mut fin = Choix::nouveau();
-        fin.abandonner();
-        fin.abandonner();
-        fin.abandonner();
-        fin.retenir();
-        assert!(!fin.retenu());
+        c.envoye();
+        assert_eq!(c.exclure(Moyen::Automation), Some(Moyen::Molette));
+        assert_eq!(c.envoyes(), 0);
     }
 
     // --- Unités d'un pas ---
@@ -775,7 +921,7 @@ mod tests {
     fn pas_regles_sur_ce_qu_un_cran_a_fait() {
         let mut e = Etalon::default();
         e.envoye(1);
-        e.constater(1, 200.0);
+        e.constater(1.0, 200.0);
         assert_eq!(e.unites(225, 8), 1);
         assert_eq!(e.unites(450, 8), 2);
         assert_eq!(e.unites(100, 8), 1, "jamais moins d'une unité");
@@ -793,7 +939,7 @@ mod tests {
         let premiere = e.unites(225, 64);
         assert_eq!(premiere, 1);
         e.envoye(premiere);
-        e.constater(premiere, 16.0);
+        e.constater(premiere as f64, 16.0);
         let mut suite = Vec::new();
         for _ in 0..4 {
             let n = e.unites(225, 64);
@@ -806,17 +952,40 @@ mod tests {
     #[test]
     fn la_plus_grande_valeur_vue_est_gardee() {
         let mut e = Etalon::default();
-        e.constater(2, 200.0);
-        e.constater(1, 48.0); // coupé par le bas de la page
+        e.constater(2.0, 200.0);
+        e.constater(1.0, 48.0); // coupé par le bas de la page
         assert_eq!(e.par_unite, Some(100.0));
-        e.constater(-1, -120.0);
+        e.constater(-1.0, -120.0);
         assert_eq!(e.par_unite, Some(120.0));
         // Sens contraire, nul, infini : ignorés.
-        e.constater(1, -300.0);
-        e.constater(1, 0.0);
-        e.constater(0, 500.0);
-        e.constater(1, f64::NAN);
+        e.constater(1.0, -300.0);
+        e.constater(1.0, 0.0);
+        e.constater(0.0, 500.0);
+        e.constater(1.0, f64::NAN);
         assert_eq!(e.par_unite, Some(120.0));
+        assert_eq!(e.par_unite(), Some(120));
+        // Un cran partiel (delta 60) qui a fait 70 px : 140 px par cran.
+        e.constater(0.5, 70.0);
+        assert_eq!(e.par_unite(), Some(140));
+    }
+
+    #[test]
+    fn cran_partiel_pour_un_pas_plus_petit_qu_un_cran() {
+        let mut e = Etalon::default();
+        assert_eq!(e.delta_partiel(100), None, "cran inconnu");
+        e.constater(1.0, 600.0);
+        assert_eq!(e.delta_partiel(300), Some(60));
+        assert_eq!(e.delta_partiel(-300), Some(60), "sans signe");
+        assert_eq!(e.delta_partiel(1), Some(1), "au moins 1");
+        assert_eq!(e.delta_partiel(599), Some(119), "au plus 119");
+        assert_eq!(e.delta_partiel(600), None, "un cran entier");
+        assert_eq!(e.delta_partiel(0), None);
+        e.refuser_partiel();
+        assert_eq!(
+            e.delta_partiel(300),
+            None,
+            "l'app ignore les crans partiels"
+        );
     }
 
     #[test]
@@ -1024,6 +1193,33 @@ mod tests {
         // Une barre au milieu (contenu) ne compte pas.
         assert_eq!(sans_barre(element, &[r(200, 31, 17, 317)]), element);
         assert_eq!(sans_barre(element, &[]), element);
+    }
+
+    #[test]
+    fn l_element_qui_recouvre_le_plus_la_zone() {
+        let zone = r(100, 100, 400, 300);
+        // La page, un bloc intérieur qui défile, une barre latérale à côté.
+        let rects = [r(0, 0, 50, 900), r(120, 120, 100, 100), r(90, 90, 500, 900)];
+        assert_eq!(meilleur_recouvrement(&rects, zone), Some(2));
+        // À égalité, le plus petit.
+        let rects = [r(0, 0, 900, 900), r(100, 100, 400, 300)];
+        assert_eq!(meilleur_recouvrement(&rects, zone), Some(1));
+        assert_eq!(meilleur_recouvrement(&[r(0, 0, 10, 10)], zone), None);
+        assert_eq!(meilleur_recouvrement(&[], zone), None);
+    }
+
+    #[test]
+    fn classe_coupee_pour_le_journal() {
+        assert_eq!(
+            classe_pour_journal("HwndWrapper[Appli.exe;;3f2a-11]"),
+            "HwndWrapper"
+        );
+        assert_eq!(
+            classe_pour_journal("Chrome_WidgetWin_1"),
+            "Chrome_WidgetWin_1"
+        );
+        assert_eq!(classe_pour_journal(""), "aucune");
+        assert_eq!(classe_pour_journal("[x]"), "aucune");
     }
 
     #[test]

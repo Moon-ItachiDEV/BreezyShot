@@ -6,30 +6,39 @@
 //!   sans la barre) : lectures du système, sans message, quelques millisecondes. UI
 //!   Automation (`ScrollPattern`, `VerticallyScrollable`) seulement pour les fenêtres où rien
 //!   n'est trouvé (WPF, WinUI), dans un fil MTA à lui, attendu au plus `BUDGET_PAGES`.
+//!   Une page fille est coupée à la zone cliente de ses ancêtres et privée de ses sœurs plus
+//!   haut dans l'ordre d'empilement.
 //! - Moyens (R3) : `WM_MOUSEWHEEL` posté à la fenêtre fille sous le centre de la zone, avec
-//!   les coordonnées écran du centre ; UI Automation `Scroll(SmallIncrement)` ; molette
-//!   `SendInput` marquée (`MARQUE`), seulement si la garde `garde_molette` le permet.
-//!   Jamais de touches, jamais `SetScrollPercent`.
+//!   les coordonnées écran du centre (en pixels logiques pour une app non adaptée au DPI) ;
+//!   UI Automation `Scroll(SmallIncrement)` ; molette `SendInput` marquée (`MARQUE`). Chaque
+//!   pas passe par la garde pure `garde` (touches, fenêtre sous le centre ou le pointeur,
+//!   focus, menu, capture) ; la cible et sa racine sont comparées à leur processus, leur fil
+//!   et leur classe lus à `preparer` (HWND réutilisé). Jamais de touches, jamais
+//!   `SetScrollPercent`.
 //! - UI Automation vit dans le fil `defilante-automation`, un par défileur, entré dans le
 //!   MTA (`CoInitializeEx` MTA, rendu à sa fin ; l'app tient peut-être déjà le MTA par
 //!   `CoIncrementMTAUsage`, `systeme/texte` : ce fil s'y joint). Ses objets COM n'en
-//!   sortent jamais ; le défileur lui parle par messages et ne l'attend jamais longtemps
-//!   (150 ms pour une position, 1 s pour un pas, `RECHERCHE_MAX` pour la recherche).
-//!   `AutoSetFocus` est coupé : UI Automation ne prend jamais le focus à la page. Chromium
-//!   n'ouvre son arbre d'accessibilité qu'à la première demande (0,3 à 0,4 s mesurés) : la
-//!   recherche est refaite deux fois, à 400 ms d'écart.
+//!   sortent jamais ; le défileur lui parle par messages, chacun avec son échéance : le fil
+//!   laisse une demande en retard sans l'exécuter, et arrête un pas à l'échéance entre deux
+//!   `Scroll`. Le défileur n'attend jamais la recherche (`Saute` tant qu'elle court, au plus
+//!   `RECHERCHE_MAX`), 80 ms une position, 200 ms un pas. `AutoSetFocus` est coupé : UI
+//!   Automation ne prend jamais le focus à la page. Chromium n'ouvre son arbre
+//!   d'accessibilité qu'à la première demande (0,3 à 0,4 s mesurés) : la recherche est
+//!   refaite deux fois, à 400 ms d'écart.
 //! - Molette de l'utilisateur (R4) : crochet `WH_MOUSE_LL` posé dans le fil
-//!   `defilante-molette`, qui n'a que sa boucle de messages ; le crochet ne fait que mettre
-//!   le cran dans un canal (jamais bloquant) ; le rappel est appelé par le fil
-//!   `defilante-molette-rappel`. Un rappel lent ne retarde donc jamais le crochet
-//!   (`LowLevelHooksTimeout` le retirerait sans prévenir).
+//!   `defilante-molette` (priorité « temps critique »), qui n'a que sa boucle de messages ;
+//!   le crochet ne fait que mettre le cran dans un canal (jamais bloquant) ; le rappel est
+//!   appelé par le fil `defilante-molette-rappel`, jamais après la destruction de l'écoute.
+//!   Un rappel lent ne retarde donc jamais le crochet (`LowLevelHooksTimeout` le retirerait
+//!   sans prévenir).
 //!
-//! Journal : classes de fenêtre, nombres et codes seulement (jamais un titre).
+//! Journal : classes de fenêtre coupées au premier `[`, nombres et codes seulement (jamais
+//! un titre).
 
 use std::cell::{Cell, RefCell};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender, SyncSender, TryRecvError};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
@@ -40,7 +49,9 @@ use ::windows::Win32::System::Com::{
     CoCreateInstance, CoInitializeEx, CoUninitialize, CLSCTX_INPROC_SERVER, COINIT_MULTITHREADED,
 };
 use ::windows::Win32::System::LibraryLoader::GetModuleHandleW;
-use ::windows::Win32::System::Threading::GetCurrentThreadId;
+use ::windows::Win32::System::Threading::{
+    GetCurrentThread, GetCurrentThreadId, SetThreadPriority, THREAD_PRIORITY_TIME_CRITICAL,
+};
 use ::windows::Win32::System::Variant::VARIANT;
 use ::windows::Win32::UI::Accessibility::{
     CUIAutomation, CUIAutomation8, IUIAutomation, IUIAutomation2, IUIAutomationCacheRequest,
@@ -50,33 +61,49 @@ use ::windows::Win32::UI::Accessibility::{
     UIA_ControlTypePropertyId, UIA_IsScrollPatternAvailablePropertyId, UIA_ScrollBarControlTypeId,
     UIA_ScrollPatternId, UIA_ScrollVerticallyScrollablePropertyId,
 };
+use ::windows::Win32::UI::HiDpi::PhysicalToLogicalPointForPerMonitorDPI;
 use ::windows::Win32::UI::Input::KeyboardAndMouse::{
-    SendInput, INPUT, INPUT_0, INPUT_MOUSE, MOUSEEVENTF_WHEEL, MOUSEINPUT,
+    GetAsyncKeyState, SendInput, INPUT, INPUT_0, INPUT_MOUSE, MOUSEEVENTF_WHEEL, MOUSEINPUT,
+    VIRTUAL_KEY, VK_CONTROL, VK_LBUTTON, VK_LWIN, VK_MBUTTON, VK_MENU, VK_RBUTTON, VK_RWIN,
+    VK_SHIFT, VK_XBUTTON1, VK_XBUTTON2,
 };
 use ::windows::Win32::UI::WindowsAndMessaging::{
     CallNextHookEx, ChildWindowFromPointEx, DispatchMessageW, EnumChildWindows, GetAncestor,
-    GetClassNameW, GetClientRect, GetCursorPos, GetForegroundWindow, GetMessageW, GetScrollInfo,
-    GetWindowLongW, IsWindow, IsWindowVisible, PeekMessageW, PostMessageW, PostThreadMessageW,
-    SetWindowsHookExW, SystemParametersInfoW, TranslateMessage, UnhookWindowsHookEx,
-    WindowFromPoint, CWP_SKIPDISABLED, CWP_SKIPINVISIBLE, CWP_SKIPTRANSPARENT, GA_PARENT, GA_ROOT,
-    GWL_STYLE, HC_ACTION, MSG, MSLLHOOKSTRUCT, PM_NOREMOVE, SB_VERT, SCROLLINFO, SIF_PAGE,
-    SIF_RANGE, SPI_GETMOUSEWHEELROUTING, SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS, WH_MOUSE_LL,
-    WM_MOUSEWHEEL, WM_QUIT, WM_USER, WS_VSCROLL,
+    GetClassNameW, GetClientRect, GetCursorPos, GetForegroundWindow, GetGUIThreadInfo, GetMessageW,
+    GetScrollInfo, GetWindow, GetWindowLongW, GetWindowRect, GetWindowThreadProcessId, IsChild,
+    IsWindow, IsWindowVisible, PeekMessageW, PostMessageW, PostThreadMessageW, SetWindowsHookExW,
+    SystemParametersInfoW, TranslateMessage, UnhookWindowsHookEx, WindowFromPoint,
+    CWP_SKIPDISABLED, CWP_SKIPINVISIBLE, CWP_SKIPTRANSPARENT, GA_PARENT, GA_ROOT, GUITHREADINFO,
+    GUI_INMENUMODE, GUI_INMOVESIZE, GUI_POPUPMENUMODE, GWL_EXSTYLE, GWL_STYLE, GW_HWNDPREV,
+    HC_ACTION, MSG, MSLLHOOKSTRUCT, PM_NOREMOVE, SB_VERT, SCROLLINFO, SIF_PAGE, SIF_RANGE,
+    SPI_GETMOUSEWHEELROUTING, SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS, WH_MOUSE_LL, WM_MOUSEWHEEL,
+    WM_QUIT, WM_USER, WS_EX_TRANSPARENT, WS_VSCROLL,
 };
 
 use super::{
-    assembler, barre_utile, centre, cran_entendu, garde_molette, page_par_classe,
-    parametres_molette, pixels_entre, plus_petit_sous, position_lue, sans_barre, survol_actif,
-    Choix, Envoi, Etalon, FenetreInfo, Molette, Moyen, PageTrouvee, Position, RappelMolette, Rect,
-    BUDGET_PAGES, CRAN, MARQUE,
+    assembler, barre_utile, centre, classe_pour_journal, cran_entendu, garde,
+    meilleur_recouvrement, page_par_classe, parametres_molette, pixels_entre, plus_petit_sous,
+    position_lue, retirer, sans_barre, survol_actif, Choix, Constat, Envoi, Etalon, FenetreInfo,
+    Molette, Moyen, PageTrouvee, Position, RappelMolette, Rect, BUDGET_PAGES, CRAN, MARQUE,
 };
 
 /// Attente d'une position lue par UI Automation.
-const ATTENTE_POSITION: Duration = Duration::from_millis(150);
+const ATTENTE_POSITION: Duration = Duration::from_millis(80);
 
-/// Attente de la réponse d'un pas d'UI Automation (au-delà, il est compté comme parti :
-/// les images diront s'il a porté).
-const ATTENTE_PAS: Duration = Duration::from_secs(1);
+/// Attente de la réponse d'un pas d'UI Automation. Au-delà, le pas est `Saute` (il a pu
+/// partir en partie : les images le diront) ; `RETARDS_MAX` fois de suite, le moyen est
+/// laissé.
+const ATTENTE_PAS: Duration = Duration::from_millis(200);
+
+/// Le fil d'UI Automation ne commence plus rien à moins de ceci de l'échéance d'une
+/// demande : sa réponse arrive avant que le défileur cesse de l'attendre.
+const MARGE: Duration = Duration::from_millis(30);
+
+/// Pas d'UI Automation sans réponse à temps, de suite, avant de laisser le moyen.
+const RETARDS_MAX: u32 = 3;
+
+/// Au plus tant de sœurs regardées par ancêtre d'une page fille.
+const SOEURS_MAX: usize = 256;
 
 /// La recherche du `ScrollPattern` de la zone n'est jamais attendue au-delà de ce délai
 /// après `preparer` (Chromium : trois essais à 400 ms d'écart).
@@ -134,6 +161,83 @@ fn existe(h: HWND) -> bool {
 fn racine_de(h: HWND) -> HWND {
     // SAFETY : lecture d'état, sans message.
     unsafe { GetAncestor(h, GA_ROOT) }
+}
+
+/// Le processus, le fil et la classe d'une fenêtre : un HWND réutilisé par une autre
+/// fenêtre ne les a pas tous trois.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Identite {
+    processus: u32,
+    fil: u32,
+    classe: String,
+}
+
+fn identite(h: HWND) -> Option<Identite> {
+    let mut processus = 0u32;
+    // SAFETY : u32 de ce fil ; lecture d'état, sans message.
+    let fil = unsafe { GetWindowThreadProcessId(h, Some(&mut processus)) };
+    (fil != 0).then(|| Identite {
+        processus,
+        fil,
+        classe: classe(h),
+    })
+}
+
+/// Le rectangle de la fenêtre `h` en pixels du bureau.
+fn rect_fenetre(h: HWND) -> Option<Rect> {
+    let mut r = RECT::default();
+    // SAFETY : RECT de ce fil ; lecture d'état, sans message.
+    unsafe { GetWindowRect(h, &mut r) }.ok()?;
+    let rect = rect_de(r);
+    (!rect.est_vide()).then_some(rect)
+}
+
+/// Une sœur qui cache ce qui est sous elle : visible, non traversée par les clics, et pas la
+/// fenêtre `Intermediate D3D Window` que Chromium pose sur sa page.
+fn couvre(h: HWND) -> bool {
+    // SAFETY : lectures d'état, sans message.
+    let (visible, etendu) = unsafe { (IsWindowVisible(h), GetWindowLongW(h, GWL_EXSTYLE)) };
+    visible.as_bool()
+        && (etendu as u32) & WS_EX_TRANSPARENT.0 == 0
+        && classe(h) != "Intermediate D3D Window"
+}
+
+/// Ce qui reste visible de `rect`, la zone d'une fenêtre fille `h` : coupée à la zone
+/// cliente de chaque ancêtre jusqu'à la racine, privée des sœurs plus haut qu'elle (et que
+/// chaque ancêtre) dans l'ordre d'empilement. `None` si rien ne reste.
+fn part_visible(h: HWND, rect: Rect) -> Option<Rect> {
+    let racine = racine_de(h);
+    let mut reste = rect;
+    let mut courante = h;
+    for _ in 0..32 {
+        if courante == racine || courante.is_invalid() {
+            break;
+        }
+        let mut soeur = courante;
+        for _ in 0..SOEURS_MAX {
+            // SAFETY : lecture d'état, sans message.
+            let Ok(s) = (unsafe { GetWindow(soeur, GW_HWNDPREV) }) else {
+                break;
+            };
+            if s.is_invalid() {
+                break;
+            }
+            soeur = s;
+            if couvre(s) {
+                if let Some(b) = rect_fenetre(s) {
+                    reste = retirer(reste, b)?;
+                }
+            }
+        }
+        // SAFETY : idem.
+        let parent = unsafe { GetAncestor(courante, GA_PARENT) };
+        if parent.is_invalid() {
+            break;
+        }
+        reste = reste.intersection(zone_cliente(parent)?)?;
+        courante = parent;
+    }
+    Some(reste)
 }
 
 /// La zone cliente de `h` en pixels du bureau (sans bord ni barres de défilement).
@@ -200,7 +304,7 @@ unsafe extern "system" fn rappel_fille(h: HWND, donnee: LPARAM) -> BOOL {
     }
     // SAFETY : lecture d'état, sans message.
     if unsafe { IsWindowVisible(h) }.as_bool() && est_page(h) {
-        if let Some(rect) = zone_cliente(h) {
+        if let Some(rect) = zone_cliente(h).and_then(|r| part_visible(h, r)) {
             filles.liste.push(PageTrouvee {
                 rect,
                 fenetre: brut(h),
@@ -211,7 +315,8 @@ unsafe extern "system" fn rappel_fille(h: HWND, donnee: LPARAM) -> BOOL {
 }
 
 /// Les pages de la fenêtre de premier niveau `racine` qui se voient par les fenêtres :
-/// elle-même si elle a une barre verticale, puis ses descendantes.
+/// elle-même si elle a une barre verticale, puis ses descendantes (coupées à ce qui se voit
+/// d'elles dans la racine).
 fn pages_filles(racine: HWND) -> Vec<PageTrouvee> {
     let mut filles = Filles {
         liste: Vec::new(),
@@ -535,12 +640,14 @@ fn defilable_sous(element: &IUIAutomationElement, point: (i32, i32)) -> Option<T
 }
 
 /// Cherche l'élément qui défile sous `point` : la fenêtre cible elle-même, puis ses
-/// descendants (le plus petit qui contient le point), puis la même chose depuis la racine.
+/// descendants (parmi ceux qui contiennent le point, celui qui recouvre le mieux `zone` :
+/// la page plutôt qu'un bloc intérieur), puis la même chose depuis la racine.
 fn chercher(
     auto: &IUIAutomation,
     cible: isize,
     racine: isize,
     point: (i32, i32),
+    zone: Rect,
 ) -> Option<Trouve> {
     let condition = condition_defilable(auto).ok();
     let mut vues = Vec::new();
@@ -575,12 +682,14 @@ fn chercher(
                 continue;
             };
             // SAFETY : appel COM du fil du client.
-            if let Ok(r) = unsafe { e.CurrentBoundingRectangle() } {
-                rects.push(rect_de(r));
-                elements.push(e);
+            if let Ok(r) = unsafe { e.CurrentBoundingRectangle() }.map(rect_de) {
+                if r.contient(point) {
+                    rects.push(r);
+                    elements.push(e);
+                }
             }
         }
-        if let Some(i) = plus_petit_sous(&rects, point) {
+        if let Some(i) = meilleur_recouvrement(&rects, zone) {
             if let Some(t) = defilable_sous(&elements[i], point) {
                 return Some(t);
             }
@@ -599,39 +708,59 @@ fn lire_position(motif: &IUIAutomationScrollPattern) -> Option<Position> {
     }
 }
 
-/// `unites` pas `SmallIncrement` (négatif : `SmallDecrement`). `Err` seulement si
-/// l'élément n'existe plus avant le premier pas ; toute autre erreur est laissée aux images.
-fn faire_defiler(motif: &IUIAutomationScrollPattern, unites: i32) -> Result<(), String> {
+/// Jusqu'à `unites` pas `SmallIncrement` (négatif : `SmallDecrement`), aucun commencé après
+/// `echeance` ; rend ceux qui ont réussi. `Err` seulement si l'élément n'existe plus avant
+/// le premier pas ; toute autre erreur est laissée aux images.
+fn faire_defiler(
+    motif: &IUIAutomationScrollPattern,
+    unites: i32,
+    echeance: Instant,
+) -> Result<u32, String> {
     let sens = if unites > 0 {
         ScrollAmount_SmallIncrement
     } else {
         ScrollAmount_SmallDecrement
     };
+    let mut faits = 0;
     for k in 0..unites.unsigned_abs() {
-        // SAFETY : appel COM du fil du client.
-        if let Err(e) = unsafe { motif.Scroll(ScrollAmount_NoAmount, sens) } {
-            if k == 0 && e.code() == ELEMENT_DISPARU {
-                return Err(format!("Scroll {}", code(&e)));
-            }
+        if Instant::now() >= echeance {
             break;
         }
+        // SAFETY : appel COM du fil du client.
+        match unsafe { motif.Scroll(ScrollAmount_NoAmount, sens) } {
+            Ok(()) => faits += 1,
+            Err(e) if k == 0 && e.code() == ELEMENT_DISPARU => {
+                return Err(format!("Scroll {}", code(&e)));
+            }
+            Err(_) => break,
+        }
     }
-    Ok(())
+    Ok(faits)
 }
 
-/// Ce que le défileur demande au fil d'UI Automation.
+/// Ce que le défileur demande au fil d'UI Automation. L'`Instant` est l'échéance : passée,
+/// la demande est laissée sans être exécutée (personne n'attend plus sa réponse).
 enum Demande {
-    Position(SyncSender<Option<Position>>),
-    Defiler(i32, SyncSender<Result<(), String>>),
+    Position(Instant, SyncSender<Option<Position>>),
+    Defiler(i32, Instant, SyncSender<Result<u32, String>>),
+}
+
+impl Demande {
+    fn en_retard(&self) -> bool {
+        let echeance = match self {
+            Demande::Position(e, _) | Demande::Defiler(_, e, _) => *e,
+        };
+        Instant::now() >= echeance
+    }
 }
 
 /// Réponse quand aucun `ScrollPattern` n'est (encore) là.
 fn repondre_sans(d: Demande) {
     match d {
-        Demande::Position(r) => {
+        Demande::Position(_, r) => {
             let _ = r.send(None);
         }
-        Demande::Defiler(_, r) => {
+        Demande::Defiler(_, _, r) => {
             let _ = r.send(Err("aucun ScrollPattern".into()));
         }
     }
@@ -643,7 +772,7 @@ fn repondre_sans(d: Demande) {
 fn travailler(
     cible: isize,
     racine: isize,
-    point: (i32, i32),
+    zone: Rect,
     chromium: bool,
     demandes: Receiver<Demande>,
     recherche: SyncSender<Option<i32>>,
@@ -669,12 +798,13 @@ fn travailler(
     } else {
         (2, Duration::from_millis(300))
     };
+    let point = centre(zone);
     let debut = Instant::now();
     let mut trouve = None;
     let mut essai = 0;
     while essai < essais {
         essai += 1;
-        trouve = chercher(&auto, cible, racine, point);
+        trouve = chercher(&auto, cible, racine, point, zone);
         if trouve.is_some() || essai == essais {
             break;
         }
@@ -704,12 +834,15 @@ fn travailler(
     match trouve {
         Some(t) => {
             while let Ok(d) = demandes.recv() {
+                if d.en_retard() {
+                    continue;
+                }
                 match d {
-                    Demande::Position(r) => {
+                    Demande::Position(_, r) => {
                         let _ = r.send(lire_position(&t.motif));
                     }
-                    Demande::Defiler(n, r) => {
-                        let _ = r.send(faire_defiler(&t.motif, n));
+                    Demande::Defiler(n, echeance, r) => {
+                        let _ = r.send(faire_defiler(&t.motif, n, echeance));
                     }
                 }
             }
@@ -731,33 +864,31 @@ enum Recherche {
 }
 
 /// Le lien du défileur avec son fil d'UI Automation. Le détruire arrête le fil (sans
-/// l'attendre).
+/// l'attendre). Rien ici n'attend la recherche.
 #[derive(Debug)]
 struct Automation {
     demandes: Sender<Demande>,
     recherche: Receiver<Option<i32>>,
     etat: Cell<Recherche>,
     depuis: Instant,
+    /// Pas sans réponse à temps, de suite.
+    retards: Cell<u32>,
 }
 
 impl Automation {
-    fn lancer(
-        cible: isize,
-        racine: isize,
-        point: (i32, i32),
-        chromium: bool,
-    ) -> Option<Automation> {
+    fn lancer(cible: isize, racine: isize, zone: Rect, chromium: bool) -> Option<Automation> {
         let (dtx, drx) = mpsc::channel();
         let (rtx, rrx) = mpsc::sync_channel(1);
         let lance = thread::Builder::new()
             .name("defilante-automation".into())
-            .spawn(move || travailler(cible, racine, point, chromium, drx, rtx));
+            .spawn(move || travailler(cible, racine, zone, chromium, drx, rtx));
         match lance {
             Ok(_) => Some(Automation {
                 demandes: dtx,
                 recherche: rrx,
                 etat: Cell::new(Recherche::EnCours),
                 depuis: Instant::now(),
+                retards: Cell::new(0),
             }),
             Err(e) => {
                 log::warn!("defiler automation: fil impossible ({e})");
@@ -775,27 +906,18 @@ impl Automation {
         etat
     }
 
-    /// L'état de la recherche, sans attendre.
+    /// L'état de la recherche, sans attendre ; encore en cours après `RECHERCHE_MAX` :
+    /// `Absente`.
     fn etat(&self) -> Recherche {
         if self.etat.get() == Recherche::EnCours {
             match self.recherche.try_recv() {
                 Ok(r) => return self.noter(r),
                 Err(TryRecvError::Disconnected) => return self.noter(None),
+                Err(TryRecvError::Empty) if self.depuis.elapsed() >= RECHERCHE_MAX => {
+                    log::info!("defiler automation: recherche trop longue, laissee");
+                    return self.noter(None);
+                }
                 Err(TryRecvError::Empty) => {}
-            }
-        }
-        self.etat.get()
-    }
-
-    /// L'état de la recherche, en l'attendant au plus jusqu'à `RECHERCHE_MAX` après son
-    /// départ (encore en cours au-delà : `EnCours`).
-    fn attendre(&self) -> Recherche {
-        if self.etat() == Recherche::EnCours {
-            let reste = (self.depuis + RECHERCHE_MAX).saturating_duration_since(Instant::now());
-            match self.recherche.recv_timeout(reste) {
-                Ok(r) => return self.noter(r),
-                Err(RecvTimeoutError::Disconnected) => return self.noter(None),
-                Err(RecvTimeoutError::Timeout) => {}
             }
         }
         self.etat.get()
@@ -808,23 +930,39 @@ impl Automation {
         }
     }
 
+    /// La position lue, attendue au plus `ATTENTE_POSITION`.
     fn position(&self) -> Option<Position> {
         self.hauteur()?;
         let (tx, rx) = mpsc::sync_channel(1);
-        self.demandes.send(Demande::Position(tx)).ok()?;
+        let echeance = Instant::now() + ATTENTE_POSITION - MARGE;
+        self.demandes.send(Demande::Position(echeance, tx)).ok()?;
         rx.recv_timeout(ATTENTE_POSITION).ok().flatten()
     }
 
-    fn defiler(&self, unites: i32) -> Result<(), String> {
+    /// `unites` pas, attendus au plus `ATTENTE_PAS` : `Some(faits)`, ou `None` sans réponse à
+    /// temps. `Err` : le fil est arrêté, l'élément a disparu, ou `RETARDS_MAX` pas de suite
+    /// sont restés sans réponse.
+    fn defiler(&self, unites: i32) -> Result<Option<u32>, String> {
         let (tx, rx) = mpsc::sync_channel(1);
+        let echeance = Instant::now() + ATTENTE_PAS - MARGE;
         self.demandes
-            .send(Demande::Defiler(unites, tx))
+            .send(Demande::Defiler(unites, echeance, tx))
             .map_err(|_| "fil d'automation arrete".to_string())?;
         match rx.recv_timeout(ATTENTE_PAS) {
-            Ok(r) => r,
-            // Parti, sans réponse à temps : les images diront.
-            Err(RecvTimeoutError::Timeout) => Ok(()),
-            Err(RecvTimeoutError::Disconnected) => Err("fil d'automation arrete".into()),
+            Ok(r) => {
+                self.retards.set(0);
+                r.map(Some)
+            }
+            // Laissée par le fil (en retard) ou pas de réponse à temps.
+            Err(_) => {
+                let n = self.retards.get() + 1;
+                self.retards.set(n);
+                if n >= RETARDS_MAX {
+                    Err(format!("{n} pas sans reponse"))
+                } else {
+                    Ok(None)
+                }
+            }
         }
     }
 }
@@ -836,7 +974,10 @@ impl Automation {
 #[derive(Debug, Clone, Copy)]
 struct Derniere {
     moyen: Moyen,
-    unites: i32,
+    /// Unités parties, avec leur signe (un cran partiel en fraction de cran).
+    unites: f64,
+    /// Un cran partiel (`Message`).
+    partiel: bool,
     /// La position lue juste avant (moyen `Automation` seulement).
     position: Option<Position>,
 }
@@ -849,10 +990,25 @@ pub struct Defileur {
     cible: isize,
     /// Sa racine (0 : aucune).
     racine: isize,
+    /// Processus, fil et classe de la cible et de la racine, lus à `preparer`.
+    identite_cible: Option<Identite>,
+    identite_racine: Option<Identite>,
     choix: Choix,
     etalons: [Etalon; 3],
     automation: Option<Automation>,
     derniere: Option<Derniere>,
+    /// L'appelant a déjà dit ce que les images ont vu (`constater`) : la position n'est plus
+    /// lue pour régler les pas d'`Automation`.
+    par_images: bool,
+}
+
+/// Un moyen peut-il servir maintenant ?
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Dispo {
+    Oui,
+    /// UI Automation cherche encore (au plus `RECHERCHE_MAX` après `preparer`).
+    PasEncore,
+    Non,
 }
 
 /// La fenêtre de premier niveau (d'une autre app) sous `point` : la première de la liste
@@ -911,6 +1067,82 @@ fn cible_sous(donnee: Option<HWND>, racine: Option<HWND>, point: (i32, i32)) -> 
     Some(plus_profonde_sous(racine, point))
 }
 
+/// Ctrl, Maj, Alt, Win ou un bouton de souris est-il enfoncé ? (Ctrl + molette change le zoom
+/// de la page, Maj la fait défiler de côté.)
+fn touches_tenues() -> bool {
+    const TOUCHES: [VIRTUAL_KEY; 10] = [
+        VK_CONTROL,
+        VK_SHIFT,
+        VK_MENU,
+        VK_LWIN,
+        VK_RWIN,
+        VK_LBUTTON,
+        VK_RBUTTON,
+        VK_MBUTTON,
+        VK_XBUTTON1,
+        VK_XBUTTON2,
+    ];
+    TOUCHES.iter().any(|vk| {
+        // SAFETY : lecture d'état, sans message.
+        let etat = unsafe { GetAsyncKeyState(i32::from(vk.0)) };
+        (etat as u16) & 0x8000 != 0
+    })
+}
+
+/// L'état d'interface d'un fil (`0` : celui du premier plan).
+fn interface_du_fil(fil: u32) -> Option<GUITHREADINFO> {
+    let mut info = GUITHREADINFO {
+        cbSize: std::mem::size_of::<GUITHREADINFO>() as u32,
+        ..Default::default()
+    };
+    // SAFETY : GUITHREADINFO dont la taille est renseignée.
+    unsafe { GetGUIThreadInfo(fil, &mut info) }
+        .ok()
+        .map(|()| info)
+}
+
+/// Un menu, une capture de souris, un déplacement ou un redimensionnement en cours :
+/// la molette irait ailleurs que sous le pointeur.
+fn fil_pris(info: &GUITHREADINFO) -> bool {
+    let modes = GUI_INMENUMODE.0 | GUI_POPUPMENUMODE.0 | GUI_INMOVESIZE.0;
+    info.flags.0 & modes != 0
+        || !info.hwndCapture.is_invalid()
+        || !info.hwndMoveSize.is_invalid()
+        || !info.hwndMenuOwner.is_invalid()
+}
+
+/// Pour la molette envoyée à `h` : le focus de son fil est-il `h`, l'un de ses ancêtres ou
+/// l'une de ses descendantes ; son fil, ou celui du premier plan, est-il pris (illisible :
+/// pris) ?
+fn focus_et_fils(h: HWND) -> (bool, bool) {
+    // SAFETY : lecture d'état, sans message.
+    let fil = unsafe { GetWindowThreadProcessId(h, None) };
+    let Some(info) = (fil != 0).then(|| interface_du_fil(fil)).flatten() else {
+        return (false, true);
+    };
+    let focus = info.hwndFocus;
+    // SAFETY : lectures d'état, sans message.
+    let dans = !focus.is_invalid()
+        && (focus == h || unsafe { IsChild(h, focus).as_bool() || IsChild(focus, h).as_bool() });
+    let devant = interface_du_fil(0).is_some_and(|i| fil_pris(&i));
+    (dans, fil_pris(&info) || devant)
+}
+
+/// `point` (pixels réels) tel que l'attend `h` : en pixels logiques si `h` n'est pas
+/// adaptée au DPI (Windows convertit les vraies molettes, pas un message posté).
+fn point_pour(h: HWND, point: (i32, i32)) -> (i32, i32) {
+    let mut p = POINT {
+        x: point.0,
+        y: point.1,
+    };
+    // SAFETY : POINT de ce fil.
+    if unsafe { PhysicalToLogicalPointForPerMonitorDPI(Some(h), &mut p) }.as_bool() {
+        (p.x, p.y)
+    } else {
+        point
+    }
+}
+
 /// `SPI_GETMOUSEWHEELROUTING`, `None` s'il est illisible.
 fn routage() -> Option<u32> {
     let mut valeur = 0u32;
@@ -963,15 +1195,23 @@ pub fn preparer(zone: Rect, fenetre: Option<isize>) -> Result<Defileur, String> 
         None => racine_sous(point),
     };
     let cible = cible_sous(donnee, racine, point);
-    let classe_cible = cible.map(classe).unwrap_or_default();
-    let classe_racine = racine.map(classe).unwrap_or_default();
+    let identite_cible = cible.and_then(identite);
+    let identite_racine = racine.and_then(identite);
+    let classe_cible = identite_cible
+        .as_ref()
+        .map(|i| i.classe.clone())
+        .unwrap_or_default();
+    let classe_racine = identite_racine
+        .as_ref()
+        .map(|i| i.classe.clone())
+        .unwrap_or_default();
     let chromium = classe_racine.starts_with("Chrome_WidgetWin")
         || classe_cible == "Chrome_RenderWidgetHostHWND";
     let mut choix = Choix::nouveau();
-    if cible.is_none() {
+    if identite_cible.is_none() || identite_racine.is_none() {
         choix.exclure(Moyen::Message);
     }
-    if racine.is_none() {
+    if identite_racine.is_none() {
         choix.exclure(Moyen::Molette);
     }
     let automation = match (cible, racine) {
@@ -979,7 +1219,7 @@ pub fn preparer(zone: Rect, fenetre: Option<isize>) -> Result<Defileur, String> 
         (c, r) => Automation::lancer(
             c.or(r).map_or(0, brut),
             r.or(c).map_or(0, brut),
-            point,
+            zone,
             chromium,
         ),
     };
@@ -988,16 +1228,8 @@ pub fn preparer(zone: Rect, fenetre: Option<isize>) -> Result<Defileur, String> 
     }
     log::info!(
         "defiler cible {} racine {} moyen {}",
-        if classe_cible.is_empty() {
-            "aucune"
-        } else {
-            classe_cible.as_str()
-        },
-        if classe_racine.is_empty() {
-            "aucune"
-        } else {
-            classe_racine.as_str()
-        },
+        classe_pour_journal(&classe_cible),
+        classe_pour_journal(&classe_racine),
         choix.moyen().map_or("aucun", Moyen::nom)
     );
     Ok(Defileur {
@@ -1005,30 +1237,36 @@ pub fn preparer(zone: Rect, fenetre: Option<isize>) -> Result<Defileur, String> 
         centre: point,
         cible: cible.map_or(0, brut),
         racine: racine.map_or(0, brut),
+        identite_cible,
+        identite_racine,
         choix,
         etalons: [Etalon::default(); 3],
         automation,
         derniere: None,
+        par_images: false,
     })
 }
 
 impl Defileur {
-    /// Le moyen `m` peut-il servir ? (`Automation` : attend la fin de la recherche, borné.)
-    fn disponible(&self, m: Moyen) -> bool {
+    /// Le moyen `m` peut-il servir ? Sans attendre.
+    fn disponible(&self, m: Moyen) -> Dispo {
+        let oui = |b: bool| if b { Dispo::Oui } else { Dispo::Non };
         match m {
-            Moyen::Message => self.cible != 0 && existe(hwnd(self.cible)),
-            Moyen::Automation => self
-                .automation
-                .as_ref()
-                .is_some_and(|a| matches!(a.attendre(), Recherche::Trouvee { .. })),
-            Moyen::Molette => self.racine != 0,
+            Moyen::Message => oui(self.cible != 0 && existe(hwnd(self.cible))),
+            Moyen::Automation => match self.automation.as_ref().map(Automation::etat) {
+                Some(Recherche::Trouvee { .. }) => Dispo::Oui,
+                Some(Recherche::EnCours) => Dispo::PasEncore,
+                _ => Dispo::Non,
+            },
+            Moyen::Molette => oui(self.racine != 0),
         }
     }
 
-    /// Laisse les moyens en cours qui ne peuvent pas servir ; rend celui qui reste.
+    /// Laisse les moyens en cours qui ne peuvent pas servir ; rend celui qui reste (peut-être
+    /// `Automation` dont la recherche court encore). N'attend pas.
     fn assurer(&mut self) -> Option<Moyen> {
         while let Some(m) = self.choix.moyen() {
-            if self.disponible(m) {
+            if self.disponible(m) != Dispo::Non {
                 break;
             }
             let suivant = self.choix.exclure(m);
@@ -1041,15 +1279,60 @@ impl Defileur {
         self.choix.moyen()
     }
 
-    fn par_message(&self, unites: i32) -> Result<Envoi, String> {
-        let cible = hwnd(self.cible);
-        if self.cible == 0 || !existe(cible) {
-            return Err("fenetre fermee".into());
+    /// La cible et sa racine sont-elles encore les fenêtres de `preparer` (même processus,
+    /// même fil, même classe ; la cible encore dans la racine) ?
+    fn verifier(&self, m: Moyen) -> Result<(), String> {
+        if m == Moyen::Automation {
+            return Ok(());
         }
-        let delta = (if unites > 0 { -CRAN } else { CRAN }) as i16;
-        let (w, l) = parametres_molette(delta, self.centre);
+        let racine = hwnd(self.racine);
+        if self.racine == 0 || identite(racine) != self.identite_racine {
+            return Err("fenetre changee".into());
+        }
+        if m == Moyen::Message {
+            let cible = hwnd(self.cible);
+            if self.cible == 0 || !existe(cible) {
+                return Err("fenetre fermee".into());
+            }
+            if identite(cible) != self.identite_cible || racine_de(cible) != racine {
+                return Err("fenetre changee".into());
+            }
+        }
+        Ok(())
+    }
+
+    /// Ce que la garde de `m` doit savoir, lu maintenant.
+    fn constat(&self, m: Moyen) -> Constat {
+        let mut c = Constat {
+            touches_tenues: touches_tenues(),
+            ..Constat::default()
+        };
+        match m {
+            Moyen::Automation => {}
+            Moyen::Message => c.racine_sous_centre = racine_au_point(self.centre),
+            Moyen::Molette => {
+                c.pointeur = curseur();
+                c.racine_sous_pointeur = c.pointeur.and_then(racine_au_point);
+                c.premier_plan = premier_plan();
+                c.survol_actif = survol_actif(routage());
+                // La fenêtre fille visée ; fermée, la racine (vérifiée par `verifier`).
+                let vise = if self.cible != 0 && existe(hwnd(self.cible)) {
+                    self.cible
+                } else {
+                    self.racine
+                };
+                (c.focus_dans_cible, c.fil_occupe) = focus_et_fils(hwnd(vise));
+            }
+        }
+        c
+    }
+
+    /// Poste `n` fois `WM_MOUSEWHEEL` de `delta` ; rend combien sont partis (au moins un).
+    fn par_message(&self, delta: i16, n: u32) -> Result<u32, String> {
+        let cible = hwnd(self.cible);
+        let (w, l) = parametres_molette(delta, point_pour(cible, self.centre));
         let mut postes = 0;
-        for _ in 0..unites.unsigned_abs() {
+        for _ in 0..n {
             // SAFETY : message sans pointeur, posté (jamais attendu).
             match unsafe { PostMessageW(Some(cible), WM_MOUSEWHEEL, WPARAM(w), LPARAM(l)) } {
                 Ok(()) => postes += 1,
@@ -1057,33 +1340,12 @@ impl Defileur {
                 Err(_) => break,
             }
         }
-        Ok(Envoi::Envoye)
+        Ok(postes)
     }
 
-    fn par_automation(&self, unites: i32) -> Result<Envoi, String> {
-        let Some(a) = &self.automation else {
-            return Err("automation absente".into());
-        };
-        if !matches!(a.attendre(), Recherche::Trouvee { .. }) {
-            return Err("aucun ScrollPattern".into());
-        }
-        a.defiler(unites).map(|()| Envoi::Envoye)
-    }
-
-    fn par_molette(&self, unites: i32) -> Result<Envoi, String> {
-        let pointeur = curseur();
-        let garde = garde_molette(
-            pointeur,
-            self.zone,
-            pointeur.and_then(racine_au_point),
-            self.racine,
-            premier_plan(),
-            survol_actif(routage()),
-        );
-        if garde == Envoi::Saute {
-            return Ok(Envoi::Saute);
-        }
-        let delta = if unites > 0 { -CRAN } else { CRAN };
+    /// Envoie `n` crans de `delta` marqués ; rend combien sont partis (0 : entrée bloquée,
+    /// bureau sécurisé, à retenter).
+    fn par_molette(&self, delta: i32, n: u32) -> u32 {
         let cran = INPUT {
             r#type: INPUT_MOUSE,
             Anonymous: INPUT_0 {
@@ -1095,33 +1357,70 @@ impl Defileur {
                 },
             },
         };
-        let entrees = vec![cran; unites.unsigned_abs() as usize];
+        let entrees = vec![cran; n as usize];
         // SAFETY : entrées dont la taille est passée.
-        let parties = unsafe { SendInput(&entrees, std::mem::size_of::<INPUT>() as i32) };
-        // 0 : l'entrée est bloquée (bureau sécurisé, autre fil) ; à retenter.
-        Ok(if parties == 0 {
-            Envoi::Saute
-        } else {
-            Envoi::Envoye
-        })
+        unsafe { SendInput(&entrees, std::mem::size_of::<INPUT>() as i32) }
     }
 
-    /// Règle l'étalon d'`Automation` sur la position lue (les images n'ont rien dit).
-    fn etalonner(&mut self) {
-        let Some(d) = self.derniere.take() else {
-            return;
+    /// Envoie un pas de `pixels` par `m` (gardes passées). `Ok(None)` : rien n'est parti,
+    /// à retenter ; `Err` : `m` ne peut plus servir.
+    fn envoyer(&mut self, m: Moyen, pixels: i32) -> Result<Option<Derniere>, String> {
+        let etalon = self.etalons[m.rang()];
+        let signe = f64::from(pixels.signum());
+        let vers_le_bas = pixels > 0;
+        let derniere = |unites: f64, partiel: bool, position: Option<Position>| Derniere {
+            moyen: m,
+            unites: unites * signe,
+            partiel,
+            position,
         };
-        if d.moyen != Moyen::Automation {
-            return;
-        }
-        let (Some(avant), Some(a)) = (d.position, self.automation.as_ref()) else {
-            return;
-        };
-        let (Some(apres), Some(hauteur)) = (a.position(), a.hauteur()) else {
-            return;
-        };
-        if let Some(px) = pixels_entre(avant, apres, hauteur) {
-            self.etalons[d.moyen.rang()].constater(d.unites, px);
+        match m {
+            Moyen::Message => {
+                let (delta, n, partiel) = match etalon.delta_partiel(pixels) {
+                    Some(p) => (p, 1, true),
+                    None => (
+                        CRAN,
+                        etalon.unites(pixels, m.unites_max()).unsigned_abs(),
+                        false,
+                    ),
+                };
+                let delta = if vers_le_bas { -delta } else { delta } as i16;
+                let postes = self.par_message(delta, n)?;
+                let unites = if partiel {
+                    f64::from(delta.unsigned_abs()) / f64::from(CRAN)
+                } else {
+                    f64::from(postes)
+                };
+                Ok(Some(derniere(unites, partiel, None)))
+            }
+            Moyen::Automation => {
+                let Some(a) = self.automation.as_ref() else {
+                    return Err("automation absente".into());
+                };
+                // Une seule position lue par pas : elle règle le pas précédent et sert
+                // d'avant à celui-ci (seulement si l'appelant ne dit rien des images).
+                let lue = if self.par_images { None } else { a.position() };
+                if let (Some(d), Some(apres), Some(hauteur)) =
+                    (self.derniere.take(), lue, a.hauteur())
+                {
+                    if let (Moyen::Automation, Some(avant)) = (d.moyen, d.position) {
+                        if let Some(px) = pixels_entre(avant, apres, hauteur) {
+                            self.etalons[m.rang()].constater(d.unites, px);
+                        }
+                    }
+                }
+                let unites = self.etalons[m.rang()].unites(pixels, m.unites_max());
+                Ok(match a.defiler(unites)? {
+                    Some(faits) if faits > 0 => Some(derniere(f64::from(faits), false, lue)),
+                    _ => None,
+                })
+            }
+            Moyen::Molette => {
+                let n = etalon.unites(pixels, m.unites_max()).unsigned_abs();
+                let delta = if vers_le_bas { -CRAN } else { CRAN };
+                let parties = self.par_molette(delta, n);
+                Ok((parties > 0).then(|| derniere(f64::from(parties), false, None)))
+            }
         }
     }
 }
@@ -1134,57 +1433,78 @@ pub fn envoyes(d: &Defileur) -> u32 {
     d.choix.envoyes()
 }
 
+pub fn avance_par_cran(d: &Defileur) -> Option<u32> {
+    d.choix
+        .moyen()
+        .and_then(|m| d.etalons[m.rang()].par_unite())
+}
+
 pub fn abandonner(d: &mut Defileur) -> Option<Moyen> {
     let avant = d.choix.moyen();
     d.choix.abandonner();
-    if d.choix.moyen() != avant {
-        d.derniere = None;
-    }
-    d.assurer()
+    d.derniere = None;
+    let suivant = d.assurer();
+    log::info!(
+        "defiler {} laisse, suite {}",
+        avant.map_or("aucun", Moyen::nom),
+        suivant.map_or("aucun", Moyen::nom)
+    );
+    suivant
 }
 
 pub fn constater(d: &mut Defileur, avance: u32) {
     let Some(derniere) = d.derniere.take() else {
         return;
     };
-    if avance == 0 || d.choix.moyen() != Some(derniere.moyen) {
+    if d.choix.moyen() != Some(derniere.moyen) {
         return;
     }
-    d.choix.retenir();
-    let pixels = avance as f64 * derniere.unites.signum() as f64;
-    d.etalons[derniere.moyen.rang()].constater(derniere.unites, pixels);
+    d.par_images = true;
+    let etalon = &mut d.etalons[derniere.moyen.rang()];
+    if avance == 0 {
+        if derniere.partiel {
+            etalon.refuser_partiel();
+            log::info!("defiler {}: cran partiel sans effet", derniere.moyen.nom());
+        }
+        return;
+    }
+    etalon.constater(
+        derniere.unites,
+        f64::from(avance) * derniere.unites.signum(),
+    );
 }
 
 pub fn descendre(d: &mut Defileur, pixels: i32) -> Result<Envoi, String> {
     if pixels == 0 {
         return Ok(Envoi::Saute);
     }
-    d.etalonner();
     while let Some(m) = d.assurer() {
-        let unites = d.etalons[m.rang()].unites(pixels, m.unites_max());
-        let position = match (m, d.automation.as_ref()) {
-            (Moyen::Automation, Some(a)) => a.position(),
-            _ => None,
-        };
-        let essai = match m {
-            Moyen::Message => d.par_message(unites),
-            Moyen::Automation => d.par_automation(unites),
-            Moyen::Molette => d.par_molette(unites),
-        };
+        if d.disponible(m) == Dispo::PasEncore {
+            return Ok(Envoi::Saute);
+        }
+        let essai = d.verifier(m).and_then(|()| {
+            if garde(m, d.zone, d.racine, &d.constat(m)) == Envoi::Saute {
+                return Ok(None);
+            }
+            d.envoyer(m, pixels)
+        });
         match essai {
-            Ok(Envoi::Envoye) => {
+            Ok(Some(derniere)) => {
                 d.choix.envoye();
-                d.etalons[m.rang()].envoye(unites);
-                d.derniere = Some(Derniere {
-                    moyen: m,
-                    unites,
-                    position,
-                });
+                // Un cran partiel compte pour une unité.
+                let entieres = if derniere.partiel {
+                    1
+                } else {
+                    derniere.unites.abs().round() as i32
+                };
+                d.etalons[m.rang()].envoye(entieres);
+                d.derniere = Some(derniere);
                 return Ok(Envoi::Envoye);
             }
-            Ok(Envoi::Saute) => return Ok(Envoi::Saute),
+            Ok(None) => return Ok(Envoi::Saute),
             Err(cause) => {
                 let suivant = d.choix.exclure(m);
+                d.derniere = None;
                 log::info!(
                     "defiler {} impossible ({cause}), suite {}",
                     m.nom(),
@@ -1241,6 +1561,15 @@ fn boucle_crochet(
     fini: SyncSender<()>,
     actif: Arc<AtomicBool>,
 ) {
+    // Le système attend ce fil à chaque mouvement de souris : il passe avant tout le reste.
+    // SAFETY : pseudo-poignée de ce fil.
+    if let Err(e) = unsafe { SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_TIME_CRITICAL) }
+    {
+        log::info!(
+            "defiler molette: priorite du fil non changee ({})",
+            code(&e)
+        );
+    }
     let mut msg = MSG::default();
     // SAFETY : crée la file de messages de ce fil avant que `Drop` puisse y poster.
     unsafe {
@@ -1299,6 +1628,8 @@ fn boucle_crochet(
 pub struct Ecoute {
     fil: u32,
     actif: Arc<AtomicBool>,
+    /// Vrai jusqu'au `Drop` ; tenu par le fil du rappel pendant chaque appel.
+    ouvert: Arc<Mutex<bool>>,
     fini: Receiver<()>,
     poignee: Option<JoinHandle<()>>,
 }
@@ -1311,10 +1642,17 @@ pub fn ecouter_molette(rappel: RappelMolette) -> Result<Ecoute, String> {
     let actif_fil = Arc::clone(&actif);
     let abandonne = Arc::new(AtomicBool::new(false));
     let abandonne_fil = Arc::clone(&abandonne);
+    let ouvert = Arc::new(Mutex::new(true));
+    let ouvert_fil = Arc::clone(&ouvert);
     thread::Builder::new()
         .name("defilante-molette-rappel".into())
         .spawn(move || {
             for m in rx {
+                // Tenu pendant l'appel : `Drop` attend la fin d'un appel commencé.
+                let ouvert = ouvert_fil.lock().unwrap_or_else(|e| e.into_inner());
+                if !*ouvert {
+                    break;
+                }
                 rappel(m);
             }
         })
@@ -1327,6 +1665,7 @@ pub fn ecouter_molette(rappel: RappelMolette) -> Result<Ecoute, String> {
         Ok(Ok(fil)) => Ok(Ecoute {
             fil,
             actif,
+            ouvert,
             fini: fini_rx,
             poignee: Some(poignee),
         }),
@@ -1338,6 +1677,7 @@ pub fn ecouter_molette(rappel: RappelMolette) -> Result<Ecoute, String> {
             // Le fil voit l'abandon après sa réponse ; une réponse arrivée entre-temps est
             // reprise ici pour l'arrêter.
             abandonne.store(true, Ordering::SeqCst);
+            *ouvert.lock().unwrap_or_else(|e| e.into_inner()) = false;
             if let Ok(Ok(fil)) = pret_rx.try_recv() {
                 // SAFETY : message sans données, à la file du fil du crochet.
                 let _ = unsafe { PostThreadMessageW(fil, WM_QUIT, WPARAM(0), LPARAM(0)) };
@@ -1353,6 +1693,9 @@ pub fn active(e: &Ecoute) -> bool {
 
 impl Drop for Ecoute {
     fn drop(&mut self) {
+        // Plus aucun rappel à partir d'ici (un appel commencé est attendu : il ne fait que
+        // poster).
+        *self.ouvert.lock().unwrap_or_else(|e| e.into_inner()) = false;
         // SAFETY : message sans données, à la file du fil du crochet.
         let _ = unsafe { PostThreadMessageW(self.fil, WM_QUIT, WPARAM(0), LPARAM(0)) };
         if self.fini.recv_timeout(ARRET_MAX).is_ok() {
@@ -1367,13 +1710,14 @@ impl Drop for Ecoute {
 
 #[cfg(test)]
 mod tests {
-    //! Tests Windows, un à la fois (verrou `VERROU`) : ils posent des fenêtres, bougent le
-    //! pointeur et envoient des molettes. Les fenêtres d'essai sont en bas à droite de
-    //! l'écran principal, loin de celles du Gel (en haut à gauche).
+    //! Tests Windows, un à la fois : ils posent des fenêtres, bougent le pointeur et envoient
+    //! des molettes. Toutes les séances passent par une seule garde, `seance()`. Les
+    //! fenêtres d'essai sont en bas à droite de l'écran principal, loin de celles du Gel (en
+    //! haut à gauche).
 
     use super::*;
     use std::sync::atomic::{AtomicI32, AtomicIsize, AtomicUsize};
-    use std::sync::{Mutex, MutexGuard, Once};
+    use std::sync::{MutexGuard, Once};
 
     use ::windows::core::w;
     use ::windows::Win32::Foundation::{GetLastError, ERROR_CLASS_ALREADY_EXISTS};
@@ -1381,18 +1725,24 @@ mod tests {
         SetProcessDpiAwarenessContext, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2,
     };
     use ::windows::Win32::UI::WindowsAndMessaging::{
-        CreateWindowExW, DefWindowProcW, DestroyWindow, GetWindowRect, LoadCursorW, RegisterClassW,
-        SetCursorPos, IDC_ARROW, SB_BOTTOM, SB_LINEDOWN, SB_LINEUP, SB_PAGEDOWN, SB_PAGEUP,
-        SB_THUMBPOSITION, SB_THUMBTRACK, SB_TOP, SIF_POS, WM_VSCROLL, WNDCLASSW, WS_EX_NOACTIVATE,
-        WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP, WS_VISIBLE,
+        CreateWindowExW, DefWindowProcW, DestroyWindow, LoadCursorW, RegisterClassW, SetCursorPos,
+        SetWindowPos, HWND_TOP, HWND_TOPMOST, IDC_ARROW, SB_BOTTOM, SB_LINEDOWN, SB_LINEUP,
+        SB_PAGEDOWN, SB_PAGEUP, SB_THUMBPOSITION, SB_THUMBTRACK, SB_TOP, SIF_POS, SWP_NOACTIVATE,
+        SWP_NOMOVE, SWP_NOSIZE, WINDOW_EX_STYLE, WINDOW_STYLE, WM_VSCROLL, WNDCLASSW, WS_CHILD,
+        WS_CLIPCHILDREN, WS_CLIPSIBLINGS, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST,
+        WS_POPUP, WS_VISIBLE,
     };
 
     use crate::systeme::defiler as facade;
     use crate::systeme::gel::{self, Coins};
 
-    static VERROU: Mutex<()> = Mutex::new(());
+    /// Verrou des séances. ASSEMBLAGE : le remplacer par `crate::systeme::gel::VERROU_ECRAN`
+    /// (le verrou commun aux tests qui touchent l'écran ou le pointeur, Gel et A), ici
+    /// seulement : `seance()` est le seul endroit qui le prend.
+    static VERROU: std::sync::Mutex<()> = std::sync::Mutex::new(());
     static ECHELLE: Once = Once::new();
 
+    /// La garde de chaque test Windows de ce module.
     fn seance() -> MutexGuard<'static, ()> {
         ECHELLE.call_once(|| {
             // Comme l'app (manifeste). Un échec veut dire que c'est déjà posé.
@@ -1402,6 +1752,12 @@ mod tests {
             };
         });
         VERROU.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// Sur GitHub (`BREEZYSHOT_AUTOMATION_OBLIGATOIRE=1`), UI Automation doit marcher et la
+    /// molette doit partir : les issues de repli des tests sont interdites.
+    fn obligatoire() -> bool {
+        std::env::var("BREEZYSHOT_AUTOMATION_OBLIGATOIRE").as_deref() == Ok("1")
     }
 
     /// Attend `condition` au plus `delai`.
@@ -1421,12 +1777,18 @@ mod tests {
     const HAUTEUR: i32 = 240;
     /// Hauteur de la page d'essai, en pixels.
     const CONTENU: i32 = 6000;
-    /// Pixels par cran de molette (`WM_MOUSEWHEEL`).
+    /// Pixels par cran de molette (`WM_MOUSEWHEEL`) ; un cran partiel en fait d'autant moins.
     const PAR_CRAN: i32 = 40;
     /// Pixels par ligne (`WM_VSCROLL`, `SB_LINEDOWN` : ce qu'UI Automation envoie).
     const PAR_LIGNE: i32 = 20;
+    /// Bande du conteneur au-dessus de la page fille, et hauteur du couvercle posé sur elle.
+    const BANDE: i32 = 20;
+    const COUVERCLE: i32 = 60;
+    /// Une attente du défileur ne dépasse jamais ceci (280 ms promis, plus de quoi tenir
+    /// sur une machine chargée).
+    const ATTENTE_TENUE: Duration = Duration::from_millis(500);
 
-    /// La fenêtre qui défile (son HWND) ; l'autre est la sentinelle.
+    /// La fenêtre qui défile (son HWND) ; toutes les autres sont des sentinelles.
     static PAGE: AtomicIsize = AtomicIsize::new(0);
     static POSITION_PAGE: AtomicI32 = AtomicI32::new(0);
     static POSITION_SENTINELLE: AtomicI32 = AtomicI32::new(0);
@@ -1448,15 +1810,14 @@ mod tests {
         }
     }
 
-    /// Défile de `d` pixels, borné à la page.
+    /// Défile de `d` pixels, borné à la page. Une sentinelle compte tout mouvement.
     fn bouger(h: HWND, d: i32) {
-        let position = if brut(h) == PAGE.load(Ordering::SeqCst) {
-            &POSITION_PAGE
-        } else {
-            &POSITION_SENTINELLE
-        };
-        let nouvelle = (position.load(Ordering::SeqCst) + d).clamp(0, CONTENU - HAUTEUR);
-        position.store(nouvelle, Ordering::SeqCst);
+        if brut(h) != PAGE.load(Ordering::SeqCst) {
+            POSITION_SENTINELLE.fetch_add(d.abs().max(1), Ordering::SeqCst);
+            return;
+        }
+        let nouvelle = (POSITION_PAGE.load(Ordering::SeqCst) + d).clamp(0, CONTENU - HAUTEUR);
+        POSITION_PAGE.store(nouvelle, Ordering::SeqCst);
         regler_barre(h, nouvelle);
     }
 
@@ -1469,15 +1830,11 @@ mod tests {
         match message {
             WM_MOUSEWHEEL => {
                 let delta = (wparam.0 >> 16) as u16 as i16 as i32;
-                bouger(h, -(delta / CRAN) * PAR_CRAN);
+                bouger(h, -delta * PAR_CRAN / CRAN);
                 LRESULT(0)
             }
             WM_VSCROLL => {
-                let actuelle = if brut(h) == PAGE.load(Ordering::SeqCst) {
-                    POSITION_PAGE.load(Ordering::SeqCst)
-                } else {
-                    POSITION_SENTINELLE.load(Ordering::SeqCst)
-                };
+                let actuelle = POSITION_PAGE.load(Ordering::SeqCst);
                 let commande = (wparam.0 & 0xFFFF) as i32;
                 let d = match commande {
                     c if c == SB_LINEDOWN.0 => PAR_LIGNE,
@@ -1499,18 +1856,32 @@ mod tests {
         }
     }
 
-    /// La page d'essai (barre verticale, `WM_MOUSEWHEEL`, `WM_VSCROLL`) et, juste à sa
-    /// gauche, une sentinelle de même sorte qui ne doit jamais bouger. Leur fil à elles
-    /// tourne une boucle de messages (UI Automation leur parle depuis un autre fil).
+    /// Ce que l'essai pose.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    enum Forme {
+        /// La page est une fenêtre de premier niveau à barre verticale.
+        Simple,
+        /// La page est une fenêtre fille à barre verticale, dans un conteneur (sous une
+        /// bande de `BANDE` px), en partie couverte en bas par une sœur (`COUVERCLE` px).
+        Fille,
+    }
+
+    /// La page d'essai (barre verticale, `WM_MOUSEWHEEL`, `WM_VSCROLL`) ; à sa gauche, une
+    /// sentinelle de même sorte qui ne doit jamais bouger ; plus à gauche, une fenêtre nue
+    /// (sans barre, rien que UI Automation y trouverait). Leur fil à elles tourne une boucle
+    /// de messages (UI Automation leur parle depuis un autre fil).
     struct Fenetres {
         page: isize,
         sentinelle: isize,
+        nue: isize,
+        /// La fenêtre de premier niveau de la page (elle-même en `Simple`).
+        racine: isize,
         fil: u32,
         poignee: Option<JoinHandle<()>>,
     }
 
     impl Fenetres {
-        fn ouvrir() -> Fenetres {
+        fn ouvrir(forme: Forme) -> Fenetres {
             let principal = gel::ecrans()
                 .into_iter()
                 .find(|e| e.principal)
@@ -1524,6 +1895,10 @@ mod tests {
             };
             let sentinelle = Rect {
                 x: page.x - LARGEUR,
+                ..page
+            };
+            let nue = Rect {
+                x: page.x - 2 * LARGEUR,
                 ..page
             };
             POSITION_PAGE.store(0, Ordering::SeqCst);
@@ -1543,56 +1918,106 @@ mod tests {
                     if RegisterClassW(&classe) == 0 {
                         assert_eq!(GetLastError(), ERROR_CLASS_ALREADY_EXISTS);
                     }
-                    let creer = |r: Rect| {
+                    let creer = |r: Rect, style: WINDOW_STYLE, parent: Option<HWND>| {
+                        let etendu = if parent.is_some() {
+                            WINDOW_EX_STYLE(0)
+                        } else {
+                            WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE
+                        };
                         CreateWindowExW(
-                            WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
+                            etendu,
                             CLASSE,
                             w!(""),
-                            WS_POPUP | WS_VSCROLL | WS_VISIBLE,
+                            style | WS_VISIBLE,
                             r.x,
                             r.y,
                             r.largeur,
                             r.hauteur,
-                            None,
+                            parent,
                             None,
                             Some(instance),
                             None,
                         )
                         .unwrap()
                     };
-                    let p = creer(page);
+                    let mut creees = Vec::new();
+                    let (p, racine) = match forme {
+                        Forme::Simple => {
+                            let p = creer(page, WS_POPUP | WS_VSCROLL, None);
+                            creees.push(p);
+                            (p, p)
+                        }
+                        Forme::Fille => {
+                            let c = creer(page, WS_POPUP | WS_CLIPCHILDREN, None);
+                            let dedans = Rect {
+                                x: 0,
+                                y: BANDE,
+                                largeur: LARGEUR,
+                                hauteur: HAUTEUR - BANDE,
+                            };
+                            let style = WS_CHILD | WS_CLIPSIBLINGS;
+                            let p = creer(dedans, style | WS_VSCROLL, Some(c));
+                            let couvercle = Rect {
+                                y: HAUTEUR - COUVERCLE,
+                                hauteur: COUVERCLE,
+                                ..dedans
+                            };
+                            let k = creer(couvercle, style, Some(c));
+                            // Le couvercle au-dessus de la page, dans l'ordre des sœurs.
+                            let _ = SetWindowPos(
+                                k,
+                                Some(HWND_TOP),
+                                0,
+                                0,
+                                0,
+                                0,
+                                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
+                            );
+                            creees.push(c);
+                            (p, c)
+                        }
+                    };
                     PAGE.store(brut(p), Ordering::SeqCst);
                     regler_barre(p, 0);
-                    let s = creer(sentinelle);
+                    let s = creer(sentinelle, WS_POPUP | WS_VSCROLL, None);
                     regler_barre(s, 0);
-                    tx.send((brut(p), brut(s), GetCurrentThreadId())).unwrap();
+                    let n = creer(nue, WS_POPUP, None);
+                    creees.extend([s, n]);
+                    tx.send((
+                        brut(p),
+                        brut(s),
+                        brut(n),
+                        brut(racine),
+                        GetCurrentThreadId(),
+                    ))
+                    .unwrap();
                     let mut msg = MSG::default();
                     while GetMessageW(&mut msg, None, 0, 0).0 > 0 {
                         let _ = TranslateMessage(&msg);
                         DispatchMessageW(&msg);
                     }
-                    let _ = DestroyWindow(p);
-                    let _ = DestroyWindow(s);
+                    for h in creees {
+                        let _ = DestroyWindow(h);
+                    }
                 }
             });
-            let (page, sentinelle, fil) = rx
+            let (page, sentinelle, nue, racine, fil) = rx
                 .recv_timeout(Duration::from_secs(5))
                 .expect("fenetres d'essai creees");
             thread::sleep(Duration::from_millis(100));
             Fenetres {
                 page,
                 sentinelle,
+                nue,
+                racine,
                 fil,
                 poignee: Some(poignee),
             }
         }
 
         fn info(&self, h: isize) -> FenetreInfo {
-            let mut r = RECT::default();
-            // SAFETY : RECT de ce fil.
-            unsafe { GetWindowRect(hwnd(h), &mut r) }.unwrap();
             FenetreInfo {
-                rect: rect_de(r),
+                rect: rect_fenetre(hwnd(h)).expect("rectangle de la fenetre d'essai"),
                 titre: String::new(),
                 coins: Coins::Droits,
                 fenetre: h,
@@ -1601,6 +2026,23 @@ mod tests {
 
         fn zone(&self) -> Rect {
             zone_cliente(hwnd(self.page)).expect("zone cliente de la page")
+        }
+
+        /// Pose la sentinelle en `(x, y)`, au-dessus de toutes les fenêtres d'essai.
+        fn deplacer_sentinelle(&self, x: i32, y: i32) {
+            // SAFETY : fenêtre d'essai ; son fil tourne sa boucle de messages.
+            unsafe {
+                SetWindowPos(
+                    hwnd(self.sentinelle),
+                    Some(HWND_TOPMOST),
+                    x,
+                    y,
+                    0,
+                    0,
+                    SWP_NOSIZE | SWP_NOACTIVATE,
+                )
+            }
+            .expect("sentinelle deplacee");
         }
     }
 
@@ -1636,10 +2078,45 @@ mod tests {
         let _ = unsafe { SetCursorPos(p.0, p.1) };
     }
 
+    fn position_page() -> i32 {
+        POSITION_PAGE.load(Ordering::SeqCst)
+    }
+
+    fn sentinelles_immobiles() {
+        thread::sleep(Duration::from_millis(100));
+        assert_eq!(
+            POSITION_SENTINELLE.load(Ordering::SeqCst),
+            0,
+            "une sentinelle a bougé"
+        );
+    }
+
+    /// `descendre`, en vérifiant qu'il n'attend pas.
+    fn pas(d: &mut facade::Defileur, pixels: i32) -> Envoi {
+        let debut = Instant::now();
+        let envoi = d.descendre(pixels).unwrap();
+        let duree = debut.elapsed();
+        assert!(duree < ATTENTE_TENUE, "descendre a attendu {duree:?}");
+        envoi
+    }
+
+    /// Passe au moyen `m` (`abandonner` jusqu'à lui).
+    fn aller_a(d: &mut facade::Defileur, m: Moyen) {
+        for _ in 0..3 {
+            if d.moyen() == Some(m) {
+                break;
+            }
+            let debut = Instant::now();
+            d.abandonner();
+            assert!(debut.elapsed() < ATTENTE_TENUE, "abandonner a attendu");
+        }
+        assert_eq!(d.moyen(), Some(m));
+    }
+
     #[test]
     fn pages_trouve_la_fenetre_qui_defile_sans_sa_barre() {
         let _s = seance();
-        let f = Fenetres::ouvrir();
+        let f = Fenetres::ouvrir(Forme::Simple);
         let zone = f.zone();
         assert!(
             zone.largeur < LARGEUR,
@@ -1676,57 +2153,150 @@ mod tests {
     }
 
     #[test]
+    fn pages_d_une_fenetre_sans_barre_dans_le_budget() {
+        let _s = seance();
+        let f = Fenetres::ouvrir(Forme::Simple);
+        // Rien par les fenêtres : UI Automation est interrogé, et attendu au plus le budget.
+        let debut = Instant::now();
+        let liste = facade::pages(&[f.info(f.nue)], 8);
+        let duree = debut.elapsed();
+        assert!(
+            duree < BUDGET_PAGES + Duration::from_millis(100),
+            "pages en {duree:?}"
+        );
+        assert!(liste.iter().all(|p| p.fenetre != f.page), "{liste:?}");
+    }
+
+    #[test]
+    fn pages_et_message_d_une_fenetre_fille() {
+        let _s = seance();
+        let f = Fenetres::ouvrir(Forme::Fille);
+        let client = f.zone();
+        assert_ne!(f.page, f.racine);
+        let liste = facade::pages(&[f.info(f.racine), f.info(f.sentinelle)], 8);
+        let page = liste
+            .iter()
+            .find(|p| p.fenetre == f.page)
+            .copied()
+            .unwrap_or_else(|| panic!("page fille trouvee : {liste:?}"));
+        // Coupée par sa sœur (le couvercle) en bas.
+        assert_eq!(page.rect.x, client.x);
+        assert_eq!(page.rect.y, client.y);
+        assert_eq!(page.rect.largeur, client.largeur);
+        assert_eq!(
+            page.rect.bas(),
+            client.y as i64 + (HAUTEUR - BANDE - COUVERCLE) as i64,
+            "{page:?} dans {client:?}"
+        );
+        assert!(!liste.iter().any(|p| p.fenetre == f.racine), "{liste:?}");
+        // Zone tracée : la page fille sous le centre, depuis la seule racine.
+        let point = centre(page.rect);
+        assert_eq!(
+            cible_sous(None, Some(hwnd(f.racine)), point),
+            Some(hwnd(f.page))
+        );
+        // Page cliquée : le message va à la fille, ni au conteneur ni à la sentinelle.
+        let mut d = facade::preparer(page.rect, Some(page.fenetre)).unwrap();
+        assert_eq!(d.moyen(), Some(Moyen::Message));
+        assert_eq!(pas(&mut d, 100), Envoi::Envoye);
+        assert!(
+            attendre(Duration::from_secs(2), || position_page() > 0),
+            "la page fille n'a pas bougé"
+        );
+        assert_eq!(position_page(), PAR_CRAN);
+        sentinelles_immobiles();
+    }
+
+    #[test]
     fn message_poste_fait_defiler_la_page_pas_la_sentinelle() {
         let _s = seance();
-        let f = Fenetres::ouvrir();
+        let f = Fenetres::ouvrir(Forme::Simple);
         let zone = f.zone();
         let mut d = facade::preparer(zone, Some(f.page)).unwrap();
         assert_eq!(d.moyen(), Some(Moyen::Message));
-        assert_eq!(d.descendre(100).unwrap(), Envoi::Envoye);
+        assert_eq!(d.avance_par_cran(), None);
+        assert_eq!(pas(&mut d, 100), Envoi::Envoye);
         assert!(
-            attendre(Duration::from_secs(2), || POSITION_PAGE
-                .load(Ordering::SeqCst)
-                > 0),
+            attendre(Duration::from_secs(2), || position_page() > 0),
             "la page n'a pas bougé"
         );
         // Premier pas : un cran.
-        assert_eq!(POSITION_PAGE.load(Ordering::SeqCst), PAR_CRAN);
+        assert_eq!(position_page(), PAR_CRAN);
         assert_eq!(d.envoyes(), 1);
         // Les images ont vu 40 px : le pas suivant de 100 px fait deux crans.
         d.constater(PAR_CRAN as u32);
-        assert_eq!(d.descendre(100).unwrap(), Envoi::Envoye);
-        assert!(attendre(Duration::from_secs(2), || {
-            POSITION_PAGE.load(Ordering::SeqCst) == 3 * PAR_CRAN
-        }));
+        assert_eq!(d.avance_par_cran(), Some(PAR_CRAN as u32));
+        assert_eq!(pas(&mut d, 100), Envoi::Envoye);
+        assert!(attendre(Duration::from_secs(2), || position_page() == 3 * PAR_CRAN));
         // Remonter.
-        assert_eq!(d.descendre(-40).unwrap(), Envoi::Envoye);
-        assert!(attendre(Duration::from_secs(2), || {
-            POSITION_PAGE.load(Ordering::SeqCst) == 2 * PAR_CRAN
-        }));
-        // Gardé : abandonner ne change plus de moyen.
-        assert_eq!(d.abandonner(), Some(Moyen::Message));
-        assert_eq!(d.descendre(0).unwrap(), Envoi::Saute);
-        thread::sleep(Duration::from_millis(100));
-        assert_eq!(
-            POSITION_SENTINELLE.load(Ordering::SeqCst),
-            0,
-            "la sentinelle a bougé"
+        assert_eq!(pas(&mut d, -40), Envoi::Envoye);
+        assert!(attendre(Duration::from_secs(2), || position_page() == 2 * PAR_CRAN));
+        // Un pas plus petit qu'un cran : un cran partiel (delta 60, 20 px).
+        assert_eq!(pas(&mut d, PAR_CRAN / 2), Envoi::Envoye);
+        assert!(
+            attendre(Duration::from_secs(2), || position_page()
+                == 2 * PAR_CRAN + PAR_CRAN / 2),
+            "cran partiel : {}",
+            position_page()
         );
+        d.constater((PAR_CRAN / 2) as u32);
+        assert_eq!(d.avance_par_cran(), Some(PAR_CRAN as u32));
+        assert_eq!(pas(&mut d, 0), Envoi::Saute);
+        // Abandonner passe toujours au suivant, même après un effet.
+        assert_ne!(d.abandonner(), Some(Moyen::Message));
+        sentinelles_immobiles();
+    }
+
+    #[test]
+    fn rien_ne_part_quand_une_fenetre_couvre_la_zone() {
+        let _s = seance();
+        let f = Fenetres::ouvrir(Forme::Simple);
+        let zone = f.zone();
+        let fenetre = f.info(f.page).rect;
+        let ailleurs = f.info(f.sentinelle).rect;
+        // La sentinelle posée sur la page, devant le centre de la zone.
+        f.deplacer_sentinelle(fenetre.x, fenetre.y);
+        let mut d = facade::preparer(zone, Some(f.page)).unwrap();
+        assert_eq!(d.moyen(), Some(Moyen::Message));
+        assert_eq!(pas(&mut d, 100), Envoi::Saute, "message sous une fenêtre");
+        // La molette, le pointeur sur la sentinelle posée sur la zone.
+        let mut m = facade::preparer(zone, Some(f.page)).unwrap();
+        aller_a(&mut m, Moyen::Molette);
+        poser_pointeur(centre(zone));
+        assert_eq!(pas(&mut m, 100), Envoi::Saute, "molette sous une fenêtre");
+        thread::sleep(Duration::from_millis(100));
+        assert_eq!(position_page(), 0);
+        assert_eq!(POSITION_SENTINELLE.load(Ordering::SeqCst), 0);
+        // La sentinelle remise à sa place : le message part.
+        f.deplacer_sentinelle(ailleurs.x, ailleurs.y);
+        assert_eq!(pas(&mut d, 100), Envoi::Envoye);
+        assert!(attendre(Duration::from_secs(2), || position_page() > 0));
+        sentinelles_immobiles();
     }
 
     #[test]
     fn automation_fait_defiler_et_lit_la_position() {
         let _s = seance();
-        let f = Fenetres::ouvrir();
+        let f = Fenetres::ouvrir(Forme::Simple);
         let mut d = facade::preparer(f.zone(), Some(f.page)).unwrap();
-        // « Rien n'a bougé » : le moyen suivant.
-        let suivant = d.abandonner();
-        if suivant == Some(Moyen::Automation) {
-            assert_eq!(d.descendre(50).unwrap(), Envoi::Envoye);
+        // « Rien n'a bougé » : le moyen suivant, même si sa recherche court encore.
+        aller_a(&mut d, Moyen::Automation);
+        // Le pointeur hors de la zone : si UI Automation est laissé pendant un pas, la
+        // molette qui suit ne part pas.
+        poser_pointeur(centre(f.info(f.nue).rect));
+        let mut parti = false;
+        let fin = Instant::now() + Duration::from_secs(3);
+        while Instant::now() < fin && d.moyen() == Some(Moyen::Automation) {
+            if pas(&mut d, 50) == Envoi::Envoye {
+                assert_eq!(d.moyen(), Some(Moyen::Automation));
+                parti = true;
+                break;
+            }
+            thread::sleep(Duration::from_millis(50));
+        }
+        if parti {
             assert!(
-                attendre(Duration::from_secs(2), || POSITION_PAGE
-                    .load(Ordering::SeqCst)
-                    > 0),
+                attendre(Duration::from_secs(2), || position_page() > 0),
                 "la page n'a pas bougé par UI Automation"
             );
             assert!(
@@ -1738,68 +2308,59 @@ mod tests {
             );
         } else {
             // Sans `ScrollPattern` (proxy d'UI Automation absent) : la molette suit.
-            eprintln!("fenetre d'essai sans ScrollPattern : moyen suivant {suivant:?}");
-            assert_eq!(suivant, Some(Moyen::Molette));
+            assert!(
+                !obligatoire(),
+                "UI Automation n'a rien fait défiler (moyen {:?})",
+                d.moyen()
+            );
+            eprintln!("fenetre d'essai sans ScrollPattern : moyen {:?}", d.moyen());
+            assert_eq!(d.moyen(), Some(Moyen::Molette));
             assert_eq!(d.position(), None);
         }
-        thread::sleep(Duration::from_millis(100));
-        assert_eq!(
-            POSITION_SENTINELLE.load(Ordering::SeqCst),
-            0,
-            "la sentinelle a bougé"
-        );
+        sentinelles_immobiles();
     }
 
     #[test]
     fn molette_envoyee_seulement_le_pointeur_sur_la_zone() {
         let _s = seance();
-        let f = Fenetres::ouvrir();
+        let f = Fenetres::ouvrir(Forme::Simple);
         let zone = f.zone();
         let mut d = facade::preparer(zone, Some(f.page)).unwrap();
-        for _ in 0..3 {
-            if d.moyen() == Some(Moyen::Molette) {
-                break;
-            }
-            d.abandonner();
-        }
-        assert_eq!(d.moyen(), Some(Moyen::Molette));
+        aller_a(&mut d, Moyen::Molette);
         // Le pointeur sur la sentinelle : rien ne part.
         poser_pointeur(centre(zone_cliente(hwnd(f.sentinelle)).unwrap()));
-        assert_eq!(d.descendre(100).unwrap(), Envoi::Saute);
+        assert_eq!(pas(&mut d, 100), Envoi::Saute);
         thread::sleep(Duration::from_millis(100));
         assert_eq!(POSITION_SENTINELLE.load(Ordering::SeqCst), 0);
-        assert_eq!(POSITION_PAGE.load(Ordering::SeqCst), 0);
+        assert_eq!(position_page(), 0);
         // Le pointeur sur la zone : part si la garde le permet (« faire défiler les
         // fenêtres inactives » mis ; la fenêtre d'essai ne prend jamais le premier plan).
         let survol = survol_actif(routage());
         let mut parti = false;
         for _ in 0..30 {
             poser_pointeur(centre(zone));
-            if d.descendre(100).unwrap() == Envoi::Envoye {
+            if pas(&mut d, 100) == Envoi::Envoye {
                 parti = true;
                 break;
             }
-            // Une autre fenêtre de l'essai est peut-être passée dessus : on retente.
+            // Une autre fenêtre est peut-être passée dessus : on retente.
             thread::sleep(Duration::from_millis(100));
         }
         if survol {
             assert!(parti, "molette jamais envoyee sur la zone");
             assert!(
-                attendre(Duration::from_secs(2), || POSITION_PAGE
-                    .load(Ordering::SeqCst)
-                    > 0),
+                attendre(Duration::from_secs(2), || position_page() > 0),
                 "la page n'a pas bougé par la molette"
             );
         } else {
+            assert!(
+                !obligatoire(),
+                "faire defiler les fenetres inactives coupe sur la machine d'essai"
+            );
             eprintln!("faire defiler les fenetres inactives coupe : molette retenue");
             assert!(!parti);
         }
-        thread::sleep(Duration::from_millis(100));
-        assert_eq!(
-            POSITION_SENTINELLE.load(Ordering::SeqCst),
-            0,
-            "la sentinelle a bougé"
-        );
+        sentinelles_immobiles();
     }
 
     #[test]
@@ -1812,7 +2373,7 @@ mod tests {
     fn ecoute_entend_un_cran_sans_marque_et_ignore_le_cran_marque() {
         let _s = seance();
         // Les crans vont à la page d'essai, qui les prend sans rien déranger.
-        let f = Fenetres::ouvrir();
+        let f = Fenetres::ouvrir(Forme::Simple);
         poser_pointeur(centre(f.zone()));
         let (tx, rx) = mpsc::channel();
         let ecoute = facade::ecouter_molette(move |m| {
@@ -1845,7 +2406,7 @@ mod tests {
     #[test]
     fn le_crochet_est_retire_a_la_destruction() {
         let _s = seance();
-        let f = Fenetres::ouvrir();
+        let f = Fenetres::ouvrir(Forme::Simple);
         poser_pointeur(centre(f.zone()));
         let avant = CROCHETS.load(Ordering::SeqCst);
         let detruit = Arc::new(AtomicBool::new(false));
@@ -1863,7 +2424,11 @@ mod tests {
         assert!(attendre(Duration::from_secs(2), || recus
             .load(Ordering::SeqCst)
             == 1));
+        // Des crans encore dans le canal au moment du `Drop` ne sont jamais rendus.
+        envoyer_molette(-CRAN, 0);
+        envoyer_molette(-CRAN, 0);
         drop(ecoute);
+        let apres_drop = recus.load(Ordering::SeqCst);
         // `Drop` a attendu le fil du crochet : le crochet est retiré.
         assert_eq!(
             CROCHETS.load(Ordering::SeqCst),
@@ -1876,6 +2441,11 @@ mod tests {
         );
         envoyer_molette(-CRAN, 0);
         thread::sleep(Duration::from_millis(300));
-        assert_eq!(recus.load(Ordering::SeqCst), 1);
+        assert_eq!(
+            recus.load(Ordering::SeqCst),
+            apres_drop,
+            "rappel appelé après le Drop"
+        );
+        assert!(apres_drop <= 3);
     }
 }

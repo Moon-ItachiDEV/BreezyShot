@@ -31,6 +31,10 @@ pub fn constater(d: &mut Defileur, _avance: u32) {
     match *d {}
 }
 
+pub fn avance_par_cran(d: &Defileur) -> Option<u32> {
+    match *d {}
+}
+
 pub fn descendre(d: &mut Defileur, _pixels: i32) -> Result<Envoi, String> {
     match *d {}
 }
