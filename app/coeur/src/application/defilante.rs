@@ -443,6 +443,8 @@ pub struct Course {
     dernier_pas: i32,
     /// Le moyen en cours a fait avancer la page : gardé pour toute la capture (R3).
     moyen_choisi: bool,
+    /// Le moyen en cours a déjà donné une avance mesurée (pas seulement des pertes).
+    avance_vue: bool,
     /// Images immobiles de suite après un pas (D8, D15).
     immobiles: u32,
     /// Images ambiguës de suite en `Auto`, sans que la position lue bouge.
@@ -469,6 +471,7 @@ impl Course {
             pas_reduit: false,
             dernier_pas: 0,
             moyen_choisi: false,
+            avance_vue: false,
             immobiles: 0,
             ambigues: 0,
             perdues_auto: 0,
@@ -521,8 +524,10 @@ impl Course {
     /// décideront de nouveau (R3).
     pub fn moyen_change(&mut self) {
         self.moyen_choisi = false;
+        self.avance_vue = false;
         self.immobiles = 0;
         self.ambigues = 0;
+        self.perdues_auto = 0;
     }
 
     /// Finit la course par `fin` si elle ne l'est pas déjà (la première fin gagne). Vrai si
@@ -576,7 +581,7 @@ pub enum Geste {
     Apercu,
     /// Abandonner le moyen de défilement pour le suivant (D8) ; sans suivant, le fil
     /// appelle `Course::sans_moyen`.
-    Repli,
+    Repli(Raison),
     /// Finir la capture.
     Finir(Fin),
 }
@@ -670,6 +675,7 @@ fn suite_auto(
             course.ambigues = 0;
             course.perdues_auto = 0;
             course.moyen_choisi = true;
+            course.avance_vue = true;
             course.derniere_nouvelle = maintenant;
             vec![Geste::Apercu, course.descendre(course.pas)]
         }
@@ -687,7 +693,11 @@ fn suite_auto(
         }
         Mesure::Immobile => {
             course.ambigues = 0;
-            course.perdues_auto = 0;
+            // Après une remontée (image perdue), revenir sur l'image gardée ne dit pas que
+            // la page suit : seul un pas vers le bas immobile remet le compte à zéro.
+            if descente {
+                course.perdues_auto = 0;
+            }
             immobile_auto(course, en_bas, maintenant)
         }
         Mesure::Ambigue => {
@@ -721,6 +731,12 @@ fn suite_auto(
             }
             // Remonter d'un demi-pas, et réduire le pas de moitié, une fois au plus (D10).
             let demi = (course.pas / 2).max(1);
+            if !course.avance_vue && course.perdues_auto >= 2 {
+                // Ce moyen n'a jamais fait qu'aller trop loin, même au pas réduit (un cran
+                // plus grand que la zone, B) : le suivant, qui remonte d'abord.
+                course.moyen_change();
+                return vec![Geste::Repli(Raison::TropLoin), course.descendre(-demi)];
+            }
             if !course.pas_reduit {
                 course.pas_reduit = true;
                 course.pas = (course.pas / 2).max(PAS_MIN);
@@ -749,7 +765,10 @@ fn immobile_auto(course: &mut Course, en_bas: bool, maintenant: Instant) -> Vec<
     }
     // Les deux premières commandes de ce moyen sans effet : le suivant (R3, D8). Le fil
     // passe en `Main` s'il n'y en a plus (`sans_moyen`).
-    vec![Geste::Repli, course.descendre(course.pas)]
+    vec![
+        Geste::Repli(Raison::SansEffet),
+        course.descendre(course.pas),
+    ]
 }
 
 /// Une image prise pendant que la molette de l'utilisateur conduit.
@@ -1088,9 +1107,41 @@ pub fn ligne_moyen(moyen: Option<Moyen>) -> String {
 
 /// `defilante repli: <moyen> (<moyen> sans effet)`, ou `defilante repli: molette` quand il
 /// ne reste que la molette de l'utilisateur (D8).
-pub fn ligne_repli(ancien: Option<Moyen>, nouveau: Option<Moyen>) -> String {
+/// Pourquoi un moyen est laissé (journal).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Raison {
+    /// Deux pas sans effet (R3, D8).
+    SansEffet,
+    /// Le défileur l'a quitté de lui-même : il ne peut plus servir (B).
+    Impossible,
+    /// Un cran fait plus que la zone ne recouvre (B).
+    CranTropGrand,
+    /// Chaque pas, même réduit, va trop loin (image perdue), sans jamais d'avance.
+    TropLoin,
+}
+
+impl Raison {
+    /// Nom écrit au journal : `sans effet`, `impossible`, `cran trop grand`, `trop loin`.
+    pub fn nom(self) -> &'static str {
+        match self {
+            Raison::SansEffet => "sans effet",
+            Raison::Impossible => "impossible",
+            Raison::CranTropGrand => "cran trop grand",
+            Raison::TropLoin => "trop loin",
+        }
+    }
+}
+
+pub fn ligne_repli(ancien: Option<Moyen>, nouveau: Option<Moyen>, raison: Raison) -> String {
     match (nouveau, ancien) {
-        (Some(n), Some(a)) => format!("defilante repli: {} ({} sans effet)", n.nom(), a.nom()),
+        (Some(n), Some(a)) => {
+            format!(
+                "defilante repli: {} ({} {})",
+                n.nom(),
+                a.nom(),
+                raison.nom()
+            )
+        }
         (Some(n), None) => format!("defilante repli: {}", n.nom()),
         (None, _) => "defilante repli: molette".into(),
     }
@@ -1545,7 +1596,7 @@ mod tests {
             // Seconde sans effet : le moyen suivant ; la course ne compte pas les moyens.
             assert_eq!(
                 suite(&mut c, immobile, t),
-                vec![Geste::Repli, Geste::Descendre(200)]
+                vec![Geste::Repli(Raison::SansEffet), Geste::Descendre(200)]
             );
             assert_eq!(c.conduite(), Conduite::Auto);
         }
@@ -1573,7 +1624,7 @@ mod tests {
         assert_eq!(suite(&mut c, immobile, t), vec![Geste::Descendre(200)]);
         assert_eq!(
             suite(&mut c, immobile, t),
-            vec![Geste::Repli, Geste::Descendre(200)]
+            vec![Geste::Repli(Raison::SansEffet), Geste::Descendre(200)]
         );
     }
 
@@ -1586,7 +1637,7 @@ mod tests {
         assert_eq!(suite(&mut c, recul, t), vec![Geste::Descendre(200)]);
         assert_eq!(
             suite(&mut c, recul, t),
-            vec![Geste::Repli, Geste::Descendre(200)]
+            vec![Geste::Repli(Raison::SansEffet), Geste::Descendre(200)]
         );
         // Après une remontée voulue, un recul est attendu : on redescend.
         let mut c = en_auto(t0);
@@ -1834,6 +1885,48 @@ mod tests {
         assert_eq!(avance_constatee(Mesure::Recul(3)), None);
         assert_eq!(avance_constatee(Mesure::Perdue), None);
         assert_eq!(avance_constatee(Mesure::Ambigue), None);
+    }
+
+    #[test]
+    fn perdue_des_le_premier_pas_le_moyen_suivant() {
+        let t0 = Instant::now();
+        let mut c = en_auto(t0);
+        let t = t0 + ms(600);
+        let perdue = Vu::Image(Mesure::Perdue, None);
+        // Le premier pas va trop loin : remonter, pas réduit.
+        assert_eq!(suite(&mut c, perdue, t), vec![Geste::Descendre(-100)]);
+        assert_eq!(
+            suite(&mut c, Vu::Image(Mesure::Immobile, None), t),
+            vec![Geste::Descendre(100)]
+        );
+        // Encore trop loin au pas réduit, sans jamais d'avance : le moyen suivant.
+        assert_eq!(
+            suite(&mut c, perdue, t),
+            vec![Geste::Repli(Raison::TropLoin), Geste::Descendre(-50)]
+        );
+        assert_eq!(c.conduite(), Conduite::Auto);
+        // Le suivant repart de zéro.
+        assert_eq!(suite(&mut c, perdue, t), vec![Geste::Descendre(-50)]);
+    }
+
+    #[test]
+    fn perdue_puis_remontee_immobile_finit_en_main() {
+        let t0 = Instant::now();
+        let mut c = en_auto(t0);
+        let t = t0 + ms(600);
+        let perdue = Vu::Image(Mesure::Perdue, None);
+        let immobile = Vu::Image(Mesure::Immobile, None);
+        // Le moyen a fait avancer la page une fois.
+        suite(&mut c, Vu::Image(Mesure::Avance(200), None), t);
+        // Puis chaque pas perd l'image ; chaque remontée revient sur l'image gardée.
+        for _ in 0..PERDUES_AUTO_MAX {
+            let g = suite(&mut c, perdue, t);
+            assert!(matches!(g[..], [Geste::Descendre(p)] if p < 0), "{g:?}");
+            let g = suite(&mut c, immobile, t);
+            assert!(matches!(g[..], [Geste::Descendre(p)] if p > 0), "{g:?}");
+        }
+        assert_eq!(suite(&mut c, perdue, t), vec![Geste::Prendre(PRISE_MAIN)]);
+        assert_eq!(c.conduite(), Conduite::Main);
     }
 
     #[test]
@@ -2124,11 +2217,31 @@ mod tests {
         assert_eq!(ligne_moyen(Some(Moyen::Message)), "defilante moyen message");
         assert_eq!(ligne_moyen(None), "defilante moyen aucun");
         assert_eq!(
-            ligne_repli(Some(Moyen::Message), Some(Moyen::Automation)),
+            ligne_repli(
+                Some(Moyen::Message),
+                Some(Moyen::Automation),
+                Raison::SansEffet
+            ),
             "defilante repli: automation (message sans effet)"
         );
         assert_eq!(
-            ligne_repli(Some(Moyen::Molette), None),
+            ligne_repli(
+                Some(Moyen::Automation),
+                Some(Moyen::Molette),
+                Raison::Impossible
+            ),
+            "defilante repli: molette (automation impossible)"
+        );
+        assert_eq!(
+            ligne_repli(
+                Some(Moyen::Molette),
+                Some(Moyen::Message),
+                Raison::CranTropGrand
+            ),
+            "defilante repli: message (molette cran trop grand)"
+        );
+        assert_eq!(
+            ligne_repli(Some(Moyen::Molette), None, Raison::SansEffet),
             "defilante repli: molette"
         );
         assert_eq!(LIGNE_MAIN, "defilante main (molette)");

@@ -52,7 +52,7 @@ use tauri::{AppHandle, Manager};
 
 use super::defilante::{
     self as regles, Annulation, Conduite, Course, Etape, Fin, Geste, Impossible, Lancement,
-    Placement, Vu,
+    Placement, Raison, Vu,
 };
 use super::etats::{Declencheur, Mode};
 use super::{zone, CaptureEnCours, Evenement, GardeEcran};
@@ -625,6 +625,9 @@ pub(super) fn pilule_posee(app: &AppHandle, id: u64, x: f64, y: f64, largeur: f6
         let (Some(c), Some(l)) = (e.controle.clone(), e.lancee.as_mut()) else {
             return;
         };
+        // `Partir` n'arrive qu'une fois, la réception est encore là (sinon le filet ne
+        // jouerait plus).
+        debug_assert!(etape != Etape::Partir || l.reception.is_some());
         let depart = match etape {
             Etape::Partir => l.reception.take().map(|reception| {
                 (
@@ -1286,6 +1289,9 @@ struct Fil<S: Source, P: Pilote, A: Atelier> {
     position_gardee: Option<Position>,
     /// Les pixels commandés depuis la dernière image gardée.
     commande_depuis_gardee: i32,
+    /// Le décalage observé (positions lues) au dernier pas, depuis la dernière image
+    /// gardée : il vaut encore pour une image reprise sans pas entre-temps.
+    observe: Option<i32>,
     /// L'instant de l'ordre de fin (clic, Entrée).
     fin_recue: Option<Instant>,
 }
@@ -1309,6 +1315,7 @@ impl<S: Source, P: Pilote, A: Atelier> Fil<S, P, A> {
         log::info!("{}", regles::ligne_moyen(moyen));
         let mut prochaine = None;
         if moyen.is_none() {
+            log::info!("{}", regles::ligne_repli(None, None, Raison::SansEffet));
             // Aucun moyen : la molette de l'utilisateur, et des images (D8).
             for g in course.sans_moyen(maintenant) {
                 if let Geste::Prendre(delai) = g {
@@ -1355,6 +1362,7 @@ impl<S: Source, P: Pilote, A: Atelier> Fil<S, P, A> {
             relache_premiere,
             position_gardee,
             commande_depuis_gardee: 0,
+            observe: None,
             fin_recue: None,
         }
     }
@@ -1518,7 +1526,7 @@ impl<S: Source, P: Pilote, A: Atelier> Fil<S, P, A> {
                 log::info!("{}", regles::LIGNE_MAIN);
             } else {
                 // La page saute trop loin même à petit pas : la molette, sans rien dire.
-                log::info!("{}", regles::ligne_repli(None, None));
+                log::info!("{}", regles::ligne_repli(None, None, Raison::SansEffet));
             }
         }
         for g in gestes {
@@ -1547,7 +1555,7 @@ impl<S: Source, P: Pilote, A: Atelier> Fil<S, P, A> {
                     });
                 }
                 Geste::Apercu => self.apercu_voulu = true,
-                Geste::Repli => {
+                Geste::Repli(raison) => {
                     let (ancien, nouveau) = match self.pilote.as_mut() {
                         Some(p) => {
                             let ancien = p.moyen();
@@ -1555,7 +1563,7 @@ impl<S: Source, P: Pilote, A: Atelier> Fil<S, P, A> {
                         }
                         None => (None, None),
                     };
-                    log::info!("{}", regles::ligne_repli(ancien, nouveau));
+                    log::info!("{}", regles::ligne_repli(ancien, nouveau, raison));
                     if nouveau.is_none() {
                         self.sans_moyen();
                     }
@@ -1578,7 +1586,10 @@ impl<S: Source, P: Pilote, A: Atelier> Fil<S, P, A> {
         if regles::cran_trop_grand(avant, cran, utile) {
             // Chaque pas de ce moyen perdrait des lignes : le suivant (B), sans pas.
             let nouveau = p.abandonner();
-            log::info!("{}", regles::ligne_repli(avant, nouveau));
+            log::info!(
+                "{}",
+                regles::ligne_repli(avant, nouveau, Raison::CranTropGrand)
+            );
             self.course.moyen_change();
             if nouveau.is_none() {
                 self.sans_moyen();
@@ -1591,7 +1602,7 @@ impl<S: Source, P: Pilote, A: Atelier> Fil<S, P, A> {
         let apres = p.moyen();
         if apres != avant {
             // Le défileur est passé de lui-même à un autre moyen.
-            log::info!("{}", regles::ligne_repli(avant, apres));
+            log::info!("{}", regles::ligne_repli(avant, apres, Raison::Impossible));
             self.course.moyen_change();
         }
         match envoi {
@@ -1599,7 +1610,7 @@ impl<S: Source, P: Pilote, A: Atelier> Fil<S, P, A> {
                 if avant.is_some() {
                     // Déjà écrit ci-dessus.
                 } else {
-                    log::info!("{}", regles::ligne_repli(None, None));
+                    log::info!("{}", regles::ligne_repli(None, None, Raison::Impossible));
                 }
                 self.sans_moyen();
                 return;
@@ -1641,6 +1652,7 @@ impl<S: Source, P: Pilote, A: Atelier> Fil<S, P, A> {
         // Une seule lecture de la position par pas (elle peut être lente).
         let position = self.pilote.as_ref().and_then(|p| p.position());
         let utile = regles::hauteur_utile(self.reference.hauteur, self.fixes);
+        self.observe = regles::decalage_attendu(self.position_gardee, position, utile);
         let attendu = regles::attendu(
             self.position_gardee,
             position,
@@ -1724,7 +1736,9 @@ impl<S: Source, P: Pilote, A: Atelier> Fil<S, P, A> {
         }
         let attendu = match self.course.conduite() {
             Conduite::Main => None,
-            _ => (self.commande_depuis_gardee != 0).then_some(self.commande_depuis_gardee),
+            _ => self
+                .observe
+                .or((self.commande_depuis_gardee != 0).then_some(self.commande_depuis_gardee)),
         };
         let mesure = self.mesurer(attendu, None);
         let position = match mesure {
@@ -1760,6 +1774,7 @@ impl<S: Source, P: Pilote, A: Atelier> Fil<S, P, A> {
             std::mem::swap(&mut self.reference, &mut self.image);
             self.position_gardee = position;
             self.commande_depuis_gardee = 0;
+            self.observe = None;
         }
         if mesure == Mesure::Perdue {
             self.perdues += 1;
@@ -1996,6 +2011,8 @@ mod tests {
         sautes: u32,
         cran: Option<u32>,
         constats: Arc<Mutex<Vec<u32>>>,
+        /// La part visible de la page (`Position::vue`) ; `None` : position illisible.
+        vue: Option<f64>,
     }
 
     impl Pilote for FauxPilote {
@@ -2032,10 +2049,11 @@ mod tests {
             self.cran
         }
         fn position(&self) -> Option<Position> {
+            let vue = self.vue?;
             let p = self.page.lock().unwrap();
             Some(Position {
                 pour_cent: f64::from(p.position) * 100.0 / f64::from(p.bas.max(1)),
-                vue: 50.0,
+                vue,
             })
         }
     }
@@ -2043,13 +2061,24 @@ mod tests {
     struct FauxAtelier {
         lignes: u32,
         limite: u32,
+        attendus: Arc<Mutex<Vec<i32>>>,
     }
 
     impl Atelier for FauxAtelier {
         fn fixes(&self) -> Fixes {
             Fixes::default()
         }
-        fn mesurer(&self, avant: &Pixels, apres: &Pixels, _: Fixes, _: Option<i32>) -> Mesure {
+        fn mesurer(
+            &self,
+            avant: &Pixels,
+            apres: &Pixels,
+            _: Fixes,
+            attendu: Option<i32>,
+        ) -> Mesure {
+            // L'attente de page posée mesure sans attendu : seuls ceux transmis comptent.
+            if let Some(a) = attendu {
+                self.attendus.lock().unwrap().push(a);
+            }
             let d = position_de(apres) - position_de(avant);
             match d {
                 0 => Mesure::Immobile,
@@ -2088,6 +2117,8 @@ mod tests {
         signaux: Receiver<Signal>,
         arret: Arc<AtomicBool>,
         fil: std::thread::JoinHandle<()>,
+        /// Les attendus reçus par l'atelier.
+        attendus: Arc<Mutex<Vec<i32>>>,
     }
 
     fn lancer(page: Partagee, pilote: Option<FauxPilote>, limite: u32) -> Essai {
@@ -2114,13 +2145,19 @@ mod tests {
             }),
         };
         let source = FausseSource(Arc::clone(&page));
+        let attendus = Arc::new(Mutex::new(Vec::new()));
+        let pour_essai = Arc::clone(&attendus);
         let fil = std::thread::spawn(move || {
             let mut f = Fil::nouveau(
                 d,
                 sortie,
                 source,
                 pilote,
-                FauxAtelier { lignes: 0, limite },
+                FauxAtelier {
+                    lignes: 0,
+                    limite,
+                    attendus: Arc::clone(&attendus),
+                },
                 premiere,
                 Duration::ZERO,
                 Vec::new,
@@ -2133,6 +2170,7 @@ mod tests {
             signaux,
             arret,
             fil,
+            attendus: pour_essai,
         }
     }
 
@@ -2145,6 +2183,7 @@ mod tests {
             sautes: 0,
             cran: None,
             constats: Arc::new(Mutex::new(Vec::new())),
+            vue: Some(50.0),
         }
     }
 
@@ -2229,7 +2268,7 @@ mod tests {
     }
 
     #[test]
-    fn fil_terminer_pendant_l_auto_en_moins_de_150_ms() {
+    fn fil_terminer_pendant_l_auto_rend_l_instant_du_clic() {
         let p = page(1_000_000);
         let pi = pilote(&p, &[Moyen::Message], true);
         let e = lancer(p, Some(pi), 1_000_000);
@@ -2244,7 +2283,7 @@ mod tests {
     }
 
     #[test]
-    fn fil_terminer_arrive_vite() {
+    fn fil_terminer_interrompt_le_pas() {
         let p = page(1_000_000);
         let pi = pilote(&p, &[Moyen::Message], true);
         let e = lancer(p, Some(pi), 1_000_000);
@@ -2257,8 +2296,9 @@ mod tests {
                 break;
             }
         }
+        // Le budget de 150 ms se mesure à l'essai 14 ; ici, l'attente est interrompue.
         assert!(
-            a.elapsed() < Duration::from_millis(150),
+            a.elapsed() < Duration::from_millis(400),
             "{:?}",
             a.elapsed()
         );
@@ -2282,8 +2322,9 @@ mod tests {
                 break;
             }
         }
+        // Le budget de 150 ms se mesure à l'essai 14 ; ici, l'attente est interrompue.
         assert!(
-            a.elapsed() < Duration::from_millis(150),
+            a.elapsed() < Duration::from_millis(400),
             "{:?}",
             a.elapsed()
         );
@@ -2406,6 +2447,37 @@ mod tests {
         std::thread::sleep(Duration::from_millis(200));
         let (s, _) = e.terminer();
         assert_eq!(hauteur_assemblee(&s), 31);
+    }
+
+    #[test]
+    fn fil_attendu_commande_sans_position() {
+        let p = page(200);
+        let mut pi = pilote(&p, &[Moyen::Message], true);
+        pi.vue = None;
+        let e = lancer(p, Some(pi), 100_000);
+        let s = e.jusqu_a_la_fin();
+        e.fil.join().unwrap();
+        assert_eq!(hauteur_assemblee(&s), 201);
+        let a = e.attendus.lock().unwrap().clone();
+        // Les pixels commandés depuis l'image gardée : 40 à chaque pas, puis cumulés en
+        // bas, où plus rien n'est gardé.
+        assert_eq!(&a[..7], &[40, 40, 40, 40, 40, 40, 80], "{a:?}");
+    }
+
+    #[test]
+    fn fil_attendu_observe_d_apres_la_position() {
+        // Une ligne de zone, une vue de 0,1 % : 999 pixels de parcours, lus exactement.
+        let p = page(999);
+        let mut pi = pilote(&p, &[Moyen::Message], true);
+        pi.vue = Some(0.1);
+        let e = lancer(p, Some(pi), 100_000);
+        let s = e.jusqu_a_la_fin();
+        e.fil.join().unwrap();
+        assert_eq!(hauteur_assemblee(&s), 1_000);
+        let a = e.attendus.lock().unwrap().clone();
+        assert_eq!(&a[..3], &[40, 40, 40], "{a:?}");
+        // En bas, la position ne bouge plus : 0, et non le pas commandé.
+        assert_eq!(a.last(), Some(&0), "{a:?}");
     }
 
     #[test]
