@@ -24,6 +24,18 @@
 // ne passe par innerHTML.
 
 import { poserTheme, suivreTheme } from "../commun/theme.js";
+import { picto } from "../commun/pictos.js";
+
+// Pictogramme de chaque ligne de Réglages › Raccourcis : celui de l'entrée du menu de
+// l'icône qui lance la même action.
+const PICTO_ACTION = {
+  zone: "capturer_zone",
+  plein_ecran: "capturer_plein_ecran",
+  fenetre: "capturer_fenetre",
+  derniere_zone: "capturer_derniere_zone",
+  texte: "capturer_texte",
+  historique: "historique",
+};
 
 const tauri = window.__TAURI__;
 const $ = (s, r = document) => r.querySelector(s);
@@ -121,6 +133,8 @@ function poserRaccourcis(liste) {
       const id = `l-raccourci-${r.action}`;
       $('[data-valeur="libelle"]', ligne).id = id;
       $('[data-controle="saisie"]', ligne).setAttribute("aria-labelledby", id);
+      const nomPicto = PICTO_ACTION[r.action];
+      if (nomPicto) $("[data-picto]", ligne).append(picto(nomPicto));
       conteneur.append(ligne);
     }
     // Dans l'ordre de la vue ; une ligne déjà à sa place n'est pas déplacée (clic gardé).
@@ -195,14 +209,15 @@ function afficher(v) {
   const champ = $('[data-controle="modele_nom"]');
   if (document.activeElement !== champ && attenteNom === null) champ.value = v.modele_nom;
   $('[data-valeur="apercu_nom"]').textContent = v.apercu_nom;
-  // « BreezyShot » et le numéro en deux morceaux (habillage) ; le texte reste
-  // « BreezyShot <version> ».
+  // Bas du volet : le numéro seul à l'écran (le nom est en haut du volet) ; le texte, lu
+  // aussi par un lecteur d'écran, reste « BreezyShot <version> ».
   const nomApp = document.createElement("span");
-  nomApp.textContent = "BreezyShot";
+  nomApp.className = "cache";
+  nomApp.textContent = "BreezyShot ";
   const numero = document.createElement("span");
   numero.className = "numero";
   numero.textContent = v.version;
-  $('[data-valeur="version"]').replaceChildren(nomApp, " ", numero);
+  $('[data-valeur="version"]').replaceChildren(nomApp, numero);
   poserRaccourcis(v.raccourcis);
   poserLicence(v.licence_active === true);
   const alerte = $("[data-alerte]");
@@ -222,6 +237,7 @@ let licenceRefusee = false;
 function poserLicence(active) {
   $('[data-etat-licence="sans"]').hidden = active;
   $('[data-etat-licence="avec"]').hidden = !active;
+  $('[data-valeur="pro"]').hidden = !active;
   if (active) {
     champLicence.value = "";
     licenceRefusee = false;
@@ -495,7 +511,10 @@ function montrerRubrique(nom, focus) {
     o.tabIndex = oui ? 0 : -1;
     if (oui && focus) o.focus();
   }
+  const avant = $('[role="tabpanel"]:not([hidden])');
   for (const s of $$('[role="tabpanel"]')) s.hidden = s.dataset.rubrique !== nom;
+  // Une autre rubrique s'ouvre en haut.
+  if (avant?.dataset.rubrique !== nom) $(".contenu").scrollTop = 0;
 }
 for (const o of onglets) o.addEventListener("click", () => montrerRubrique(o.dataset.rubrique));
 $('[role="tablist"]').addEventListener("keydown", (e) => {

@@ -184,23 +184,23 @@
         "refus": null
       },
       {
-        "action": "historique",
-        "libelle": "Historique",
-        "touches": [
-          "Ctrl",
-          "Maj",
-          "H"
-        ],
-        "modifie": false,
-        "refus": null
-      },
-      {
         "action": "texte",
         "libelle": "Copier le texte",
         "touches": [
           "Ctrl",
           "Maj",
           "T"
+        ],
+        "modifie": false,
+        "refus": null
+      },
+      {
+        "action": "historique",
+        "libelle": "Historique",
+        "touches": [
+          "Ctrl",
+          "Maj",
+          "H"
         ],
         "modifie": false,
         "refus": null

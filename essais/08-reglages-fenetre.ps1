@@ -38,7 +38,7 @@
 # (9) Fichier changé de l'extérieur pendant que la fenêtre est ouverte : le changement
 #     suivant le relit et ne l'écrase pas.
 # (10) Thème Clair puis Sombre : le fond de la zone de contenu prend la couleur du jeton
-#     --reglages-fond clair (#FAFAFA) puis sombre (#1C1C1C).
+#     --reglages-contenu clair (#F9F9F9) puis sombre (#282828).
 # (11) Fermer : la fenêtre disparaît, l'app tourne ; mémoire notée ; arrêt propre.
 #
 # Ce que la machine GitHub ne prouve pas : le vrai démarrage de Windows avec la vraie clé,
@@ -828,9 +828,9 @@ public static string Titre(IntPtr h) {
     Verifier '(9) changement extérieur gardé, nouveau changement écrit' (($r.modele_nom -eq 'Externe {date}') -and ($r.copier_apres_capture -eq $false)) "$($r.modele_nom) / $($r.copier_apres_capture)" | Out-Null
     Cliquer-Interrupteur $fen 'Copier automatiquement' '(9) Copier rallumé'
 
-    # (10) Thème : le fond de la page prend le jeton --reglages-fond de l'habillage B, clair
-    # (#FAFAFA) puis sombre (#1C1C1C). Pixel lu dans la zone de contenu (en bas à droite, sous les groupes),
-    # jamais dans la colonne des rubriques ; lu en Clair d'abord pour prouver le changement.
+    # (10) Thème : le fond du contenu prend le jeton --reglages-contenu (piste B « Volet »),
+    # clair (#F9F9F9) puis sombre (#282828). Pixel lu dans la zone de contenu (en bas à droite,
+    # sous les cartes), jamais dans le volet ; lu en Clair d'abord pour prouver le changement.
     function Pixel-Contenu {
         $rc = New-Object BreezyShotEssai.Reglages+RECT
         $null = [BreezyShotEssai.Reglages]::GetClientRect($fen, [ref]$rc)
@@ -849,12 +849,12 @@ public static string Titre(IntPtr h) {
     $null = Attendre-Motif -Motif 'theme interface: clair$' -Dossier $cas -DelaiS 5 -Quoi '(10) thème clair'
     Start-Sleep -Milliseconds 600
     $c = Pixel-Contenu
-    Verifier '(10) fond clair (#FAFAFA ±6)' (Proche $c 0xFA) "$($c.R),$($c.G),$($c.B)" | Out-Null
+    Verifier '(10) fond clair (#F9F9F9 ±6)' (Proche $c 0xF9) "$($c.R),$($c.G),$($c.B)" | Out-Null
     Cliquer-Nom $fen 'Sombre' $RADIO '(10) Sombre'
     $null = Attendre-Motif -Motif 'theme interface: sombre$' -Dossier $cas -DelaiS 5 -Quoi '(10) thème sombre'
     Start-Sleep -Milliseconds 600
     $c = Pixel-Contenu
-    Verifier '(10) fond sombre (#1C1C1C ±6)' (Proche $c 0x1C) "$($c.R),$($c.G),$($c.B)" | Out-Null
+    Verifier '(10) fond sombre (#282828 ±6)' (Proche $c 0x28) "$($c.R),$($c.G),$($c.B)" | Out-Null
     Cliquer-Nom $fen 'Système' $RADIO '(10) Système'
 
     # (11) Fermer : la fenêtre disparaît, l'app tourne.

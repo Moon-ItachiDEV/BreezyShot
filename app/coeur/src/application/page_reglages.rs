@@ -992,8 +992,8 @@ mod tests {
                 ("Plein écran", "Ctrl+Maj+2".to_string()),
                 ("Fenêtre", "Ctrl+Maj+3".to_string()),
                 ("Refaire la dernière zone", "Ctrl+Maj+4".to_string()),
-                ("Historique", "Ctrl+Maj+H".to_string()),
                 ("Copier le texte", "Ctrl+Maj+T".to_string()),
+                ("Historique", "Ctrl+Maj+H".to_string()),
             ]
         );
         assert!(avec.licence_active);

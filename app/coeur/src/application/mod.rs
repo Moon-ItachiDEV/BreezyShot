@@ -120,12 +120,13 @@ pub fn actions_construites(pro: bool, texte_disponible: bool) -> Vec<&'static st
 /// construit (et la langue), `pro` qu'une licence valide est en place ; les droits sont lus
 /// ici et nulle part ailleurs.
 pub fn actions_selon(pro: bool, avec_historique: bool, avec_texte: bool) -> Vec<&'static str> {
+    // L'ordre du menu de l'icône : Copier le texte, puis l'historique.
     let mut actions = ACTIONS_DE_CAPTURE.to_vec();
-    if avec_historique && droits::ouverte(Fonction::Historique, pro) {
-        actions.push(ACTION_HISTORIQUE);
-    }
     if avec_texte && droits::ouverte(Fonction::Texte, pro) {
         actions.push(Mode::Texte.nom());
+    }
+    if avec_historique && droits::ouverte(Fonction::Historique, pro) {
+        actions.push(ACTION_HISTORIQUE);
     }
     actions
 }
@@ -4051,8 +4052,8 @@ mod tests {
                 "plein_ecran",
                 "fenetre",
                 "derniere_zone",
-                "historique",
-                "texte"
+                "texte",
+                "historique"
             ]
         );
         // Sans langue de lecture, jamais `texte` ; `historique` suit sa construction.
