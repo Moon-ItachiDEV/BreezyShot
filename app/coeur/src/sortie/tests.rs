@@ -1713,10 +1713,12 @@ fn png_de(pixels: &Pixels) -> Vec<u8> {
 }
 
 /// Des fichiers qui ne sont pas a nous, a cote des notres.
+// Le « .PNG » porte une autre heure que les captures des tests : sur un disque qui ne
+// distingue pas les majuscules (Windows, macOS), il serait sinon le meme fichier qu'elles.
 const ETRANGERS: [&str; 6] = [
     "notes.txt",
     "photo.png",
-    "20261111-194012-123.PNG",
+    "20261111-194012-777.PNG",
     "20261111-194012-123.png.bak",
     "x20261111-194012-123.png",
     "20261111-194012-123_1.png",
