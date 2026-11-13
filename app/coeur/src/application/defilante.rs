@@ -808,6 +808,54 @@ pub fn attendu(
     decalage_attendu(gardee, maintenant, hauteur_vue).or((commande != 0).then_some(commande))
 }
 
+/// Ce qu'un pas de `pas` pixels fait au plus, d'après l'avance par cran du moyen
+/// (`Defileur::avance_par_cran`, B) : un cran au moins, puis des crans entiers ; `partiel`
+/// (message posté) : un pas plus petit qu'un cran part en cran partiel. Sans avance connue,
+/// le pas lui-même. Un indice pour l'attendu (D10), jamais une mesure.
+pub fn avance_commandee(pas: i32, cran: Option<u32>, partiel: bool) -> i32 {
+    let Some(cran) = cran
+        .filter(|&c| c > 0)
+        .map(|c| c.min(i32::MAX as u32) as i32)
+    else {
+        return pas;
+    };
+    let crans = pas.unsigned_abs() as i32 / cran;
+    let avance = if crans > 0 {
+        crans.saturating_mul(cran)
+    } else if partiel {
+        pas.unsigned_abs() as i32
+    } else {
+        cran
+    };
+    avance * pas.signum()
+}
+
+/// Vrai si un cran du moyen en cours fait plus que la zone ne peut recouvrir : chaque pas
+/// perdrait des lignes, le moyen est laissé (B). `Message` envoie des crans partiels : il
+/// n'est jamais laissé pour cela.
+pub fn cran_trop_grand(moyen: Option<Moyen>, cran: Option<u32>, hauteur_utile: u32) -> bool {
+    let (Some(moyen), Some(cran)) = (moyen, cran) else {
+        return false;
+    };
+    if moyen == Moyen::Message || hauteur_utile == 0 {
+        return false;
+    }
+    let recouvrement = RECOUVREMENT_MIN.min(hauteur_utile / 4);
+    cran > hauteur_utile - recouvrement
+}
+
+/// L'avance à rendre au défileur après un pas vers le bas parti (`Defileur::constater`,
+/// B), mesurée contre l'image d'avant ce pas : `Avance(n)` donne `n`, une image immobile
+/// 0 (après un cran partiel, cela coupe les crans partiels de ce moyen). Rien pour une
+/// mesure qui ne dit pas l'avance (recul, perdue, ambiguë).
+pub fn avance_constatee(mesure: Mesure) -> Option<u32> {
+    match mesure {
+        Mesure::Avance(n) => Some(n),
+        Mesure::Immobile => Some(0),
+        Mesure::Recul(_) | Mesure::Perdue | Mesure::Ambigue => None,
+    }
+}
+
 /// Ce que le fil principal doit faire à une étape du lancement (R1, D4).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Etape {
@@ -1748,6 +1796,44 @@ mod tests {
         assert_eq!(c.pas(), 100);
         assert_eq!(c.conduite(), Conduite::Auto);
         assert!(!c.perdue());
+    }
+
+    #[test]
+    fn avance_d_un_pas_d_apres_le_cran() {
+        assert_eq!(avance_commandee(200, None, false), 200);
+        assert_eq!(avance_commandee(200, Some(0), false), 200);
+        // Des crans entiers, un au moins.
+        assert_eq!(avance_commandee(200, Some(60), false), 180);
+        assert_eq!(avance_commandee(40, Some(60), false), 60);
+        // Message : un cran partiel pour un pas plus petit qu'un cran.
+        assert_eq!(avance_commandee(40, Some(60), true), 40);
+        assert_eq!(avance_commandee(200, Some(60), true), 180);
+        // Vers le haut.
+        assert_eq!(avance_commandee(-100, Some(60), false), -60);
+        assert_eq!(avance_commandee(-20, Some(60), true), -20);
+    }
+
+    #[test]
+    fn cran_trop_grand_pour_la_zone() {
+        // 450 lignes utiles : au plus 450 - 48.
+        assert!(!cran_trop_grand(Some(Moyen::Molette), Some(402), 450));
+        assert!(cran_trop_grand(Some(Moyen::Molette), Some(403), 450));
+        assert!(cran_trop_grand(Some(Moyen::Automation), Some(403), 450));
+        assert!(!cran_trop_grand(Some(Moyen::Message), Some(1_000), 450));
+        assert!(!cran_trop_grand(Some(Moyen::Molette), None, 450));
+        assert!(!cran_trop_grand(None, Some(1_000), 450));
+        // Petite zone : un quart de recouvrement.
+        assert!(!cran_trop_grand(Some(Moyen::Molette), Some(75), 100));
+        assert!(cran_trop_grand(Some(Moyen::Molette), Some(76), 100));
+    }
+
+    #[test]
+    fn avance_rendue_au_defileur() {
+        assert_eq!(avance_constatee(Mesure::Avance(120)), Some(120));
+        assert_eq!(avance_constatee(Mesure::Immobile), Some(0));
+        assert_eq!(avance_constatee(Mesure::Recul(3)), None);
+        assert_eq!(avance_constatee(Mesure::Perdue), None);
+        assert_eq!(avance_constatee(Mesure::Ambigue), None);
     }
 
     #[test]

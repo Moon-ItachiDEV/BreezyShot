@@ -1021,6 +1021,10 @@ trait Pilote {
     fn abandonner(&mut self) -> Option<Moyen>;
     fn descendre(&mut self, pixels: i32) -> Result<Envoi, String>;
     fn position(&self) -> Option<Position>;
+    /// L'avance vue après un pas parti, 0 compris (`Defileur::constater`, B).
+    fn constater(&mut self, avance: u32);
+    /// Ce qu'un cran du moyen en cours fait au plus (`Defileur::avance_par_cran`, B).
+    fn avance_par_cran(&self) -> Option<u32>;
 }
 
 impl Pilote for defiler::Defileur {
@@ -1035,6 +1039,12 @@ impl Pilote for defiler::Defileur {
     }
     fn position(&self) -> Option<Position> {
         defiler::Defileur::position(self)
+    }
+    // À l'assemblage avec `0318bde` (B) : `defiler::Defileur::constater(self, avance)`.
+    fn constater(&mut self, _avance: u32) {}
+    // À l'assemblage avec `0318bde` (B) : `defiler::Defileur::avance_par_cran(self)`.
+    fn avance_par_cran(&self) -> Option<u32> {
+        None
     }
 }
 
@@ -1563,6 +1573,20 @@ impl<S: Source, P: Pilote, A: Atelier> Fil<S, P, A> {
             return;
         };
         let avant = p.moyen();
+        let cran = p.avance_par_cran();
+        let utile = regles::hauteur_utile(self.reference.hauteur, self.fixes);
+        if regles::cran_trop_grand(avant, cran, utile) {
+            // Chaque pas de ce moyen perdrait des lignes : le suivant (B), sans pas.
+            let nouveau = p.abandonner();
+            log::info!("{}", regles::ligne_repli(avant, nouveau));
+            self.course.moyen_change();
+            if nouveau.is_none() {
+                self.sans_moyen();
+            } else {
+                self.pas_demande = Some(pas);
+            }
+            return;
+        }
         let envoi = p.descendre(pas);
         let apres = p.moyen();
         if apres != avant {
@@ -1581,19 +1605,25 @@ impl<S: Source, P: Pilote, A: Atelier> Fil<S, P, A> {
                 return;
             }
             Ok(Envoi::Saute) => {
-                // Le point visé n'est pas sur la page (D7) : retenté au tour suivant.
+                // Retenu par B (touche ou bouton tenu, fenêtre devant la zone, menu,
+                // recherche d'UI Automation en cours…) : retenté au tour suivant, jamais
+                // compté comme un pas sans effet du moyen.
                 self.pas_demande = Some(pas);
                 self.pas_apres = Some(Instant::now() + regles::PRISE_POSEE);
                 return;
             }
             Ok(Envoi::Envoye) => {}
             // Compté comme sans effet : l'image le dira.
-            Err(e) => log::warn!("defilante: pas refuse ({e})"),
+            Err(ref e) => log::warn!("defilante: pas refuse ({e})"),
         }
         if apres.is_none() {
             self.sans_moyen();
         }
-        self.commande_depuis_gardee = self.commande_depuis_gardee.saturating_add(pas);
+        let parti = matches!(envoi, Ok(Envoi::Envoye));
+        // L'image d'avant ce pas est la dernière gardée : la mesure dira l'avance du pas.
+        let depuis_gardee = self.commande_depuis_gardee == 0;
+        let commande = regles::avance_commandee(pas, cran, avant == Some(Moyen::Message));
+        self.commande_depuis_gardee = self.commande_depuis_gardee.saturating_add(commande);
         let debut = Instant::now();
         let posee = self.attendre_posee();
         self.durees_pas.push(debut.elapsed());
@@ -1618,6 +1648,13 @@ impl<S: Source, P: Pilote, A: Atelier> Fil<S, P, A> {
             self.commande_depuis_gardee,
         );
         let mesure = self.mesurer(attendu, position);
+        if parti && pas > 0 && depuis_gardee {
+            if let (Some(avance), Some(p)) =
+                (regles::avance_constatee(mesure), self.pilote.as_mut())
+            {
+                p.constater(avance);
+            }
+        }
         self.vu_en_attente = Some(Vu::Image(mesure, position));
     }
 
@@ -1955,6 +1992,10 @@ mod tests {
         effet: bool,
         /// Le premier pas retire le dernier moyen et rend `Saute`.
         perd_au_pas: bool,
+        /// Pas retenus (`Saute`) avant de partir, comme une recherche d'UI Automation.
+        sautes: u32,
+        cran: Option<u32>,
+        constats: Arc<Mutex<Vec<u32>>>,
     }
 
     impl Pilote for FauxPilote {
@@ -1975,10 +2016,20 @@ mod tests {
                 self.moyens.clear();
                 return Ok(Envoi::Saute);
             }
+            if self.sautes > 0 {
+                self.sautes -= 1;
+                return Ok(Envoi::Saute);
+            }
             if self.effet {
                 p.position = (p.position + pixels).clamp(0, p.bas);
             }
             Ok(Envoi::Envoye)
+        }
+        fn constater(&mut self, avance: u32) {
+            self.constats.lock().unwrap().push(avance);
+        }
+        fn avance_par_cran(&self) -> Option<u32> {
+            self.cran
         }
         fn position(&self) -> Option<Position> {
             let p = self.page.lock().unwrap();
@@ -2091,6 +2142,9 @@ mod tests {
             moyens: moyens.to_vec(),
             effet,
             perd_au_pas: false,
+            sautes: 0,
+            cran: None,
+            constats: Arc::new(Mutex::new(Vec::new())),
         }
     }
 
@@ -2308,6 +2362,50 @@ mod tests {
         std::thread::sleep(Duration::from_millis(200));
         let (s, _) = e.terminer();
         assert_eq!(hauteur_assemblee(&s), 51);
+    }
+
+    #[test]
+    fn fil_constate_chaque_pas_parti() {
+        let p = page(200);
+        let pi = pilote(&p, &[Moyen::Message], true);
+        let constats = Arc::clone(&pi.constats);
+        let e = lancer(p, Some(pi), 100_000);
+        let s = e.jusqu_a_la_fin();
+        e.fil.join().unwrap();
+        assert_eq!(hauteur_assemblee(&s), 201);
+        let c = constats.lock().unwrap().clone();
+        // Cinq pas de 40 qui avancent, puis des pas immobiles en bas : 0.
+        assert_eq!(&c[..5], &[40, 40, 40, 40, 40]);
+        assert!(c.len() > 5 && c[5..].iter().all(|&a| a == 0), "{c:?}");
+    }
+
+    #[test]
+    fn fil_saute_n_est_pas_un_echec_du_moyen() {
+        let p = page(200);
+        let mut pi = pilote(&p, &[Moyen::Automation, Moyen::Molette], true);
+        // Plus qu'il n'en faut pour deux pas « sans effet » s'ils comptaient.
+        pi.sautes = 10;
+        let e = lancer(p, Some(pi), 100_000);
+        let s = e.jusqu_a_la_fin();
+        e.fil.join().unwrap();
+        assert_eq!(e.page.lock().unwrap().abandons, 0);
+        assert_eq!(hauteur_assemblee(&s), 201);
+    }
+
+    #[test]
+    fn fil_cran_trop_grand_laisse_le_moyen() {
+        let p = page(1_000);
+        let mut pi = pilote(&p, &[Moyen::Molette], true);
+        // L'image d'essai a une ligne : tout cran est trop grand.
+        pi.cran = Some(120);
+        let e = lancer(p, Some(pi), 100_000);
+        e.attendre(|p| p.abandons >= 1);
+        std::thread::sleep(Duration::from_millis(200));
+        assert_eq!(e.page.lock().unwrap().pas, 0);
+        e.rouler(30);
+        std::thread::sleep(Duration::from_millis(200));
+        let (s, _) = e.terminer();
+        assert_eq!(hauteur_assemblee(&s), 31);
     }
 
     #[test]
