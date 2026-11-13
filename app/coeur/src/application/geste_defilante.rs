@@ -227,6 +227,11 @@ pub fn capturer(app: &AppHandle, recu_a: Instant, bandeau_cache: bool) {
 /// fil `defilante-pages` (D2).
 pub fn selection_montree(app: &AppHandle, id: u64) {
     let numero = NUMERO.fetch_add(1, Ordering::SeqCst) + 1;
+    // Un menu de l'icône ouvert juste avant le départ montrerait encore ses actions, que
+    // `traiter` ignorerait : il se ferme.
+    if crate::fenetres::menu::cacher(app) {
+        log::info!("menu ferme: defilante");
+    }
     let ecrans = super::capture_en_cours(app)
         .as_ref()
         .map(|c| c.gel.ecrans.clone())

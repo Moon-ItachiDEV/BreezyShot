@@ -487,7 +487,11 @@ dans le dossier temporaire du système (`systeme::dossier_secours()`), sous le n
   des captures: oui|non`, `non (essai)` en essai capturable) : ouverte sur la zone, elle
   entrerait dans une image. L'exclusion est retirée à la première ouverture hors défilante
   (`menu exclusion des captures retiree: oui|non`), pour que le menu reste visible dans
-  les captures et les partages d'écran des autres outils.
+  les captures et les partages d'écran des autres outils. L'état est remis à faux à chaque
+  création de la fenêtre, pour que l'exclusion soit reposée sur une fenêtre neuve. Un menu
+  déjà ouvert quand une défilante commence se ferme (`selection_montree`, journal `menu
+  ferme: defilante`), et « Annoter » de l'Historique est ignoré pendant la défilante
+  (`historique: annoter ignore pendant la defilante`).
   Icônes 16 px
   (« Curseurs » pour Réglages), raccourcis à droite en `text-2`, faux verre peint
   (`acrylic-solid`, `shadow-8`). À l'ouverture, le moulinet de l'icône fait un quart de

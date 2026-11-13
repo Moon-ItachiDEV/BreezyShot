@@ -2240,6 +2240,18 @@ pub(super) fn abandonner(app: &AppHandle, declencheur: Declencheur, probleme: Op
     }
 }
 
+/// Une zone (ou une page) choisie sans capture pour la recevoir, hors défilante : la
+/// Sélection qui la garde à l'écran doit être cachée (`traiter_zone`, `Geste::Rien`).
+/// Fonction pure.
+fn cacher_selection_gardee(sans_capture: bool, arrivee: &Arrivee<'_>, defilante: bool) -> bool {
+    sans_capture
+        && !defilante
+        && matches!(
+            arrivee,
+            Arrivee::Selection(selection::Signal::Zone { .. } | selection::Signal::Fenetre { .. })
+        )
+}
+
 /// Un signal pendant une capture de zone (fil principal) : décision pure, puis gestes.
 fn traiter_zone(app: &AppHandle, arrivee: Arrivee<'_>) {
     let (geste, texte, defilante, sans_capture) = {
@@ -2270,14 +2282,11 @@ fn traiter_zone(app: &AppHandle, arrivee: Arrivee<'_>) {
         // jusqu'à ce que le cœur la cache : sans capture (ni défilante) pour la recevoir,
         // personne ne le ferait.
         Geste::Rien
-            if sans_capture
-                && matches!(
-                    arrivee,
-                    Arrivee::Selection(
-                        selection::Signal::Zone { .. } | selection::Signal::Fenetre { .. }
-                    )
-                )
-                && !geste_defilante::fenetres_bloquees(app) =>
+            if cacher_selection_gardee(
+                sans_capture,
+                &arrivee,
+                geste_defilante::fenetres_bloquees(app),
+            ) =>
         {
             log::warn!("selection gardee sans capture: cachee");
             if let Some(s) = app.try_state::<Selection>() {
@@ -4093,6 +4102,53 @@ fn arreter(app: &AppHandle) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn selection_gardee_sans_capture_cachee() {
+        let zone = selection::Signal::Zone {
+            id: 1,
+            depart: (0, 0),
+            arrivee: (10, 10),
+        };
+        let page = selection::Signal::Fenetre {
+            id: 1,
+            indice: 0,
+            point: (5, 5),
+        };
+        let annulee = selection::Signal::Annulee {
+            id: 1,
+            cause: selection::Cause::Echap,
+        };
+        // Une zone ou une page choisie sans capture pour la recevoir : cachée.
+        assert!(cacher_selection_gardee(
+            true,
+            &Arrivee::Selection(&zone),
+            false
+        ));
+        assert!(cacher_selection_gardee(
+            true,
+            &Arrivee::Selection(&page),
+            false
+        ));
+        // Avec une capture, ou pendant une défilante (qui la cache elle-même) : rien.
+        assert!(!cacher_selection_gardee(
+            false,
+            &Arrivee::Selection(&zone),
+            false
+        ));
+        assert!(!cacher_selection_gardee(
+            true,
+            &Arrivee::Selection(&zone),
+            true
+        ));
+        // Ni une annulation, ni Échap.
+        assert!(!cacher_selection_gardee(
+            true,
+            &Arrivee::Selection(&annulee),
+            false
+        ));
+        assert!(!cacher_selection_gardee(true, &Arrivee::Echap, false));
+    }
 
     #[test]
     fn desinstallation_ligne_du_demarrage() {
