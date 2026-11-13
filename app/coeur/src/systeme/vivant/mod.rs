@@ -49,7 +49,10 @@ impl Prise {
 
     /// Une image RGBA (alpha 255) de la zone dans `dest`, réutilisé (sa taille est mise à
     /// celle de la zone) ; rend la durée de la prise. Refuse tant que l'écran figé est
-    /// montré (même garde que `gel::figer_bureau`) : l'image serait celle de l'écran figé.
+    /// montré (`gel::ecran_fige_montre`, la garde de `gel::figer_bureau`) : l'image serait
+    /// celle de l'écran figé. La garde porte sur la fenêtre, pas sur la dernière image
+    /// composée : juste après avoir caché l'écran figé, attendre le compositeur (au moins un
+    /// `DwmFlush`, D4) avant la première prise.
     pub fn prendre(&mut self, dest: &mut Pixels) -> Result<Duration, String> {
         plateforme::prendre(&mut self.interne, dest)
     }

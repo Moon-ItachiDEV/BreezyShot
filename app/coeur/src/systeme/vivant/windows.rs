@@ -6,21 +6,16 @@
 //! sauf la première fois pour une destination vide). Le DC de l'écran est prêté par
 //! `GetDC` le temps d'une prise, comme pour la photo du Gel.
 //!
-//! Garde de l'écran figé : la même lecture que `gel::figer_bureau` (la fenêtre de l'écran
-//! figé est-elle visible ?), faite avant ET après la copie. Une fenêtre visible, même déjà
-//! démarquée mais pas encore cachée par son fil, ferait une image de l'écran figé : refus.
+//! Garde de l'écran figé : `gel::ecran_fige_montre` (la garde de `gel::figer_bureau` :
+//! marque « montré » ou fenêtre encore visible), lue avant ET après la copie, celle-ci
+//! vidée par `GdiFlush` avant la seconde lecture.
 
 use std::time::{Duration, Instant};
 
-use ::windows::Win32::Foundation::HWND;
 use ::windows::Win32::Graphics::Gdi::{
     BitBlt, CreateCompatibleDC, CreateDIBSection, DeleteDC, DeleteObject, GdiFlush, GetDC,
     ReleaseDC, SelectObject, BITMAPINFO, BITMAPINFOHEADER, BI_RGB, DIB_RGB_COLORS, HBITMAP, HDC,
     HGDIOBJ, SRCCOPY,
-};
-use ::windows::Win32::UI::WindowsAndMessaging::{
-    GetSystemMetrics, IsWindowVisible, SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN, SM_XVIRTUALSCREEN,
-    SM_YVIRTUALSCREEN,
 };
 
 use super::{couper_au_bureau, preparer_destination, Pixels, Rect};
@@ -28,37 +23,6 @@ use crate::systeme::gel;
 
 pub fn disponible() -> bool {
     true
-}
-
-/// Le bureau virtuel : tous les écrans, en pixels réels (comme `gel`).
-fn bureau_virtuel() -> Result<Rect, String> {
-    // SAFETY : lecture de constantes du système, sans tampon.
-    let (x, y, largeur, hauteur) = unsafe {
-        (
-            GetSystemMetrics(SM_XVIRTUALSCREEN),
-            GetSystemMetrics(SM_YVIRTUALSCREEN),
-            GetSystemMetrics(SM_CXVIRTUALSCREEN),
-            GetSystemMetrics(SM_CYVIRTUALSCREEN),
-        )
-    };
-    if largeur <= 0 || hauteur <= 0 {
-        return Err(format!("bureau virtuel invalide ({largeur}x{hauteur})"));
-    }
-    Ok(Rect {
-        x,
-        y,
-        largeur,
-        hauteur,
-    })
-}
-
-/// Vrai si l'écran figé est à l'écran : la lecture de `gel::figer_bureau` (style de la
-/// fenêtre, aucun message envoyé, possible depuis n'importe quel fil).
-fn ecran_fige_visible() -> bool {
-    gel::poignee_ecran_fige().is_some_and(|h| {
-        // SAFETY : simple lecture ; une poignée périmée rend faux.
-        unsafe { IsWindowVisible(HWND(h as *mut core::ffi::c_void)) }.as_bool()
-    })
 }
 
 // ---------------------------------------------------------------------------------------
@@ -216,7 +180,7 @@ impl std::fmt::Debug for Prise {
 }
 
 pub fn ouvrir(zone: Rect) -> Result<Prise, String> {
-    let zone = couper_au_bureau(zone, bureau_virtuel()?)?;
+    let zone = couper_au_bureau(zone, gel::bureau_virtuel()?)?;
     let dib = Dib::nouvelle(zone.largeur, zone.hauteur)?;
     Ok(Prise { zone, dib })
 }
@@ -226,7 +190,16 @@ pub fn zone(prise: &Prise) -> Rect {
 }
 
 pub fn prendre(prise: &mut Prise, dest: &mut Pixels) -> Result<Duration, String> {
-    if ecran_fige_visible() {
+    prendre_garde(prise, dest, &mut gel::ecran_fige_montre)
+}
+
+/// `prendre`, la garde de l'écran figé donnée par l'appelant (les tests la simulent).
+fn prendre_garde(
+    prise: &mut Prise,
+    dest: &mut Pixels,
+    ecran_fige_montre: &mut dyn FnMut() -> bool,
+) -> Result<Duration, String> {
+    if ecran_fige_montre() {
         return Err("ecran fige montre".into());
     }
     let debut = Instant::now();
@@ -250,9 +223,15 @@ pub fn prendre(prise: &mut Prise, dest: &mut Pixels) -> Result<Duration, String>
             )
         }
         .map_err(|e| format!("BitBlt de la zone: {e}"))?;
+        // GDI peut mettre la copie en lot : elle est faite ici, avant de rendre le DC de
+        // l'écran et avant la seconde lecture de la garde, qui l'encadre donc vraiment.
+        // SAFETY : sans paramètre ; vide le lot de ce fil.
+        unsafe {
+            let _ = GdiFlush();
+        }
     }
     // L'écran figé a pu paraître pendant la copie : l'image serait la sienne.
-    if ecran_fige_visible() {
+    if ecran_fige_montre() {
         return Err("ecran fige montre".into());
     }
     let octets = preparer_destination(dest, zone.largeur as u32, zone.hauteur as u32)?;
@@ -268,18 +247,19 @@ pub fn prendre(prise: &mut Prise, dest: &mut Pixels) -> Result<Duration, String>
 
 #[cfg(test)]
 mod tests {
-    //! Tests Windows. Un seul à la fois (`Seance`). Ceux qui montrent l'écran figé ou
-    //! comptent les objets GDI se jouent dans un processus à part (`dans_un_processus_a_part`) :
-    //! le verrou de séance des tests de `gel` est privé à leur module, et l'écran figé est
-    //! une ressource du processus (un seul fil peut le préparer) ; partager le processus
-    //! ferait échouer les tests de `gel` qui tourneraient en même temps.
+    //! Tests Windows. Un seul à la fois avec ceux de `gel` (`Seance`, verrou partagé
+    //! `gel::VERROU_ECRAN`). Ceux qui montrent l'écran figé ou comptent les objets GDI se
+    //! jouent en plus dans un processus à part (`dans_un_processus_a_part`), le parent
+    //! tenant le verrou partagé pendant que l'enfant tourne : le compte des objets GDI n'y
+    //! voit que la prise, et l'écran figé de l'enfant ne paraît jamais pendant un test de
+    //! `gel`.
 
     use super::*;
-    use std::sync::{Mutex, MutexGuard, Once};
+    use std::sync::{MutexGuard, Once};
 
     use ::windows::core::{w, PCWSTR};
     use ::windows::Win32::Foundation::{
-        GetLastError, COLORREF, ERROR_CLASS_ALREADY_EXISTS, HINSTANCE, LPARAM, LRESULT, RECT,
+        GetLastError, COLORREF, ERROR_CLASS_ALREADY_EXISTS, HINSTANCE, HWND, LPARAM, LRESULT, RECT,
         WPARAM,
     };
     use ::windows::Win32::Graphics::Dwm::{
@@ -296,20 +276,18 @@ mod tests {
     };
     use ::windows::Win32::UI::WindowsAndMessaging::{
         CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, GetWindowDisplayAffinity,
-        PeekMessageW, RegisterClassW, SetLayeredWindowAttributes, SetWindowDisplayAffinity,
-        SetWindowPos, ShowWindow, TranslateMessage, HWND_TOPMOST, LWA_ALPHA, MSG, PM_REMOVE,
-        SWP_NOACTIVATE, SWP_SHOWWINDOW, SW_HIDE, WDA_EXCLUDEFROMCAPTURE, WINDOW_EX_STYLE,
-        WM_ERASEBKGND, WM_PAINT, WNDCLASSW, WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
-        WS_EX_TOPMOST, WS_EX_TRANSPARENT, WS_POPUP,
+        IsWindowVisible, PeekMessageW, RegisterClassW, SetLayeredWindowAttributes,
+        SetWindowDisplayAffinity, SetWindowPos, ShowWindow, TranslateMessage, HWND_TOPMOST,
+        LWA_ALPHA, MSG, PM_REMOVE, SWP_NOACTIVATE, SWP_SHOWWINDOW, SW_HIDE, WDA_EXCLUDEFROMCAPTURE,
+        WINDOW_EX_STYLE, WM_ERASEBKGND, WM_PAINT, WNDCLASSW, WS_EX_LAYERED, WS_EX_NOACTIVATE,
+        WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_EX_TRANSPARENT, WS_POPUP,
     };
 
     use crate::systeme::vivant as facade;
 
-    static VERROU: Mutex<()> = Mutex::new(());
     static ECHELLE: Once = Once::new();
 
-    /// Un test qui touche à l'écran : un seul à la fois (parmi ceux-ci). Ne touche pas à
-    /// l'écran figé : dans le processus des tests, il est à ceux de `gel`.
+    /// Un test qui touche à l'écran : un seul à la fois, avec ceux de `gel` (même verrou).
     struct Seance {
         _verrou: MutexGuard<'static, ()>,
     }
@@ -325,7 +303,7 @@ mod tests {
                 };
             });
             Seance {
-                _verrou: VERROU.lock().unwrap_or_else(|e| e.into_inner()),
+                _verrou: gel::VERROU_ECRAN.lock().unwrap_or_else(|e| e.into_inner()),
             }
         }
     }
@@ -426,8 +404,8 @@ mod tests {
         durees[durees.len() / 2].as_secs_f64() * 1000.0
     }
 
-    /// Une prise, réessayée au plus 2 s : dans le processus des tests, un test de `gel`
-    /// peut montrer l'écran figé un instant, et la prise refuse alors (c'est voulu).
+    /// Une prise, réessayée au plus 2 s (filet : sous le verrou partagé, aucun test de `gel`
+    /// ne montre l'écran figé, mais une autre app de la machine pourrait gêner un instant).
     fn prendre_patient(prise: &mut facade::Prise, dest: &mut Pixels) -> Duration {
         let debut = Instant::now();
         loop {
@@ -708,7 +686,7 @@ mod tests {
     #[test]
     fn ouvrir_coupe_au_bureau_et_refuse_le_vide() {
         let _s = Seance::ouvrir();
-        let bureau = bureau_virtuel().unwrap();
+        let bureau = gel::bureau_virtuel().unwrap();
         let cheval = Rect {
             x: bureau.x - 5,
             y: bureau.y - 4,
@@ -768,7 +746,7 @@ mod tests {
         let (n, premier) = ecarts_aux_carres(&px, prise.zone()).unwrap();
         assert_eq!(n, 0, "{n} pixels faux, premier {premier:?}");
         eprintln!(
-            "vivant: prise {}x{} : mediane {:.1} ms sur 32 (budget 40 ms)",
+            "vivant: prise {}x{} : mediane {:.1} ms sur 32 (construction de test ; le budget de 40 ms se mesure en release, essai 14)",
             essai.rect.largeur,
             essai.rect.hauteur,
             mediane(durees)
@@ -857,6 +835,57 @@ mod tests {
         attendre_carres(&mut prise, &mut px).unwrap();
     }
 
+    /// La seconde lecture de la garde (après la copie) refuse aussi, et la destination
+    /// reste alors intacte. La garde est simulée : montrer l'écran figé pendant un `BitBlt`
+    /// ne se provoque pas.
+    #[test]
+    fn seconde_lecture_de_la_garde() {
+        let _s = Seance::ouvrir();
+        let bureau = gel::bureau_virtuel().unwrap();
+        let zone = Rect {
+            x: bureau.x,
+            y: bureau.y,
+            largeur: 8,
+            hauteur: 4,
+        };
+        let mut prise = facade::ouvrir(zone).unwrap();
+        let mut px = Pixels {
+            largeur: 1,
+            hauteur: 1,
+            rgba: vec![7, 7, 7, 7],
+        };
+        // Montré seulement à la seconde lecture : refus, destination intacte.
+        let mut lectures = 0;
+        let mut apres_la_copie = || {
+            lectures += 1;
+            lectures == 2
+        };
+        let e = prendre_garde(&mut prise.interne, &mut px, &mut apres_la_copie).unwrap_err();
+        assert!(e.contains("ecran fige"), "{e}");
+        assert_eq!(lectures, 2);
+        assert_eq!(
+            (px.largeur, px.hauteur, px.rgba.as_slice()),
+            (1, 1, &[7u8; 4][..])
+        );
+        // Montré à la première : refus avant toute copie (une seule lecture).
+        let mut lectures = 0;
+        let mut avant = || {
+            lectures += 1;
+            true
+        };
+        assert!(prendre_garde(&mut prise.interne, &mut px, &mut avant).is_err());
+        assert_eq!(lectures, 1);
+        // Jamais montré : deux lectures, l'image est rendue.
+        let mut lectures = 0;
+        let mut jamais = || {
+            lectures += 1;
+            false
+        };
+        prendre_garde(&mut prise.interne, &mut px, &mut jamais).unwrap();
+        assert_eq!(lectures, 2);
+        assert_eq!((px.largeur, px.hauteur), (8, 4));
+    }
+
     #[test]
     fn refus_pendant_l_ecran_fige() {
         // Le verrou est tenu pendant l'enfant : ses fenêtres ne gênent pas les autres tests
@@ -880,6 +909,7 @@ mod tests {
 
         gel::preparer_ecran_fige().unwrap();
         let hwnd = HWND(gel::poignee_ecran_fige().unwrap() as *mut core::ffi::c_void);
+        assert!(!gel::ecran_fige_montre(), "prepare mais cache");
         let image = gel::figer_bureau().unwrap();
         // Préparé mais caché : la prise marche.
         prise.prendre(&mut px).unwrap();
@@ -904,10 +934,11 @@ mod tests {
         let image = gel::figer_bureau().unwrap();
         gel::montrer_ecran_fige(&image).unwrap();
         std::thread::spawn(gel::cacher_ecran_fige).join().unwrap();
+        // Ce fil n'a rien distribué pendant `join` : la fenêtre est forcément visible.
         // SAFETY : lecture sur la fenêtre de l'écran figé.
-        if unsafe { IsWindowVisible(hwnd) }.as_bool() {
-            assert!(prise.prendre(&mut px).is_err());
-        }
+        assert!(unsafe { IsWindowVisible(hwnd) }.as_bool());
+        assert!(gel::ecran_fige_montre());
+        assert!(prise.prendre(&mut px).is_err());
         let debut = Instant::now();
         // SAFETY : idem.
         while unsafe { IsWindowVisible(hwnd) }.as_bool() {
@@ -979,7 +1010,7 @@ mod tests {
         eprintln!(
             "vivant: objets GDI avant {avant}, prise ouverte {ouverte}, apres 1000 prises \
              {pendant}, prise rendue {rendue}, apres 50 ouvertures {apres} ; prise {}x{} : \
-             mediane {:.1} ms, 95e centile {p95:.1} ms (budget 40 ms)",
+             mediane {:.1} ms, 95e centile {p95:.1} ms (construction de test ; le budget de 40 ms se mesure en release, essai 14)",
             zone.largeur,
             zone.hauteur,
             mediane(durees)

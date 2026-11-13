@@ -63,7 +63,7 @@ fn rect_de(r: RECT) -> Rect {
 }
 
 /// Le bureau virtuel : tous les écrans, en pixels réels.
-fn bureau_virtuel() -> Result<Rect, String> {
+pub fn bureau_virtuel() -> Result<Rect, String> {
     // SAFETY : lecture de constantes du système, sans tampon.
     let (x, y, largeur, hauteur) = unsafe {
         (
@@ -334,6 +334,11 @@ fn ecran_fige_visible() -> bool {
         // SAFETY : simple lecture, possible depuis n'importe quel fil.
         unsafe { IsWindowVisible(hwnd) }.as_bool()
     })
+}
+
+pub fn ecran_fige_montre() -> bool {
+    // La marque d'abord (posée avant l'affichage), puis la fenêtre (masquage posté).
+    verrouiller(&IMAGE).montre.is_some() || ecran_fige_visible()
 }
 
 pub fn figer_bureau() -> Result<Image, String> {
@@ -1408,7 +1413,6 @@ mod tests {
     const STYLE_ECRAN_FIGE: WINDOW_EX_STYLE =
         WINDOW_EX_STYLE(WS_EX_TOPMOST.0 | WS_EX_TOOLWINDOW.0 | WS_EX_NOACTIVATE.0);
 
-    static VERROU_ECRAN: Mutex<()> = Mutex::new(());
     static ECHELLE: Once = Once::new();
 
     /// Un test qui touche à l'écran : un seul à la fois. À la fin, même en échec, l'écran
@@ -1428,7 +1432,7 @@ mod tests {
                 };
             });
             Seance {
-                _verrou: verrouiller(&VERROU_ECRAN),
+                _verrou: verrouiller(&facade::VERROU_ECRAN),
             }
         }
     }

@@ -265,6 +265,26 @@ pub fn surveillance_session() -> bool {
     plateforme::surveillance_session()
 }
 
+/// Vrai tant que l'écran figé est montré : marqué « montré » (dès `montrer_ecran_fige`,
+/// jusqu'à la demande de le cacher) ou encore visible (masquage posté, pas encore traité).
+/// La garde de `figer_bureau`, pour les autres prises de l'écran (`vivant`). Porte sur la
+/// fenêtre, pas sur la dernière image composée : juste après le masquage, l'écran peut
+/// encore montrer l'image figée une ou deux périodes. N'importe quel fil. Hors Windows : faux.
+pub fn ecran_fige_montre() -> bool {
+    plateforme::ecran_fige_montre()
+}
+
+/// Le bureau virtuel (tous les écrans), en pixels réels. Erreur hors Windows ou si le
+/// système rend une taille nulle. N'importe quel fil.
+pub fn bureau_virtuel() -> Result<Rect, String> {
+    plateforme::bureau_virtuel()
+}
+
+/// Verrou de séance des tests qui touchent à l'écran (fenêtres, écran figé, objets GDI) :
+/// partagé par les tests de `gel` et de `vivant`, un seul à la fois dans le processus.
+#[cfg(all(test, windows))]
+pub(crate) static VERROU_ECRAN: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 /// Poignée système de la fenêtre de l'écran figé, pour poser la page de sélection juste
 /// au-dessus. `None` tant qu'elle n'est pas créée. N'importe quel fil.
 pub fn poignee_ecran_fige() -> Option<isize> {
