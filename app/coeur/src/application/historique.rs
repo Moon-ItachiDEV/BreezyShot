@@ -80,6 +80,9 @@ pub struct EtatHistorique {
     pub liste: Vec<EntreeRecente>,
     /// Noms dont la suppression attend la fin du délai d'Annuler.
     pub en_attente: Vec<String>,
+    /// Noms pris par l'échéance, la fermeture ou « Tout effacer », dont l'effacement est en
+    /// cours : jamais remontrés, toute action refusée.
+    pub en_effacement: BTreeSet<String>,
     pub echeance: Option<Instant>,
     /// Noms enregistrés depuis l'historique pendant la session.
     pub enregistrees: BTreeSet<String>,
@@ -97,6 +100,7 @@ impl EtatHistorique {
             affichee: false,
             liste: Vec::new(),
             en_attente: Vec::new(),
+            en_effacement: BTreeSet::new(),
             echeance: None,
             enregistrees: BTreeSet::new(),
             actions: BTreeMap::new(),
@@ -106,7 +110,30 @@ impl EtatHistorique {
 
     /// Les cases montrées.
     pub fn vues(&self) -> Vec<EntreePage> {
-        entrees_vues(&self.liste, &self.en_attente)
+        let caches: Vec<String> = self
+            .en_attente
+            .iter()
+            .chain(&self.en_effacement)
+            .cloned()
+            .collect();
+        entrees_vues(&self.liste, &caches)
+    }
+
+    /// Vrai si `nom` a le format exact, est dans la liste gardée et n'est pas en cours
+    /// d'effacement (une commande sur un autre nom est refusée).
+    pub fn connu(&self, nom: &str) -> bool {
+        nom_valide(nom)
+            && !self.en_effacement.contains(nom)
+            && self.liste.iter().any(|e| e.nom == nom)
+    }
+
+    /// L'effacement de `noms` est fini : ils quittent la liste gardée et l'ensemble en
+    /// effacement.
+    pub fn effaces(&mut self, noms: &[String]) {
+        self.liste.retain(|e| !noms.contains(&e.nom));
+        for n in noms {
+            self.en_effacement.remove(n);
+        }
     }
 
     /// Rang et taille de la case `nom` parmi les cases montrées (journal).
@@ -165,8 +192,9 @@ pub fn cle_action(nom: &str, action: ActionCase) -> String {
 }
 
 /// Ce que fait `action` sur la case `nom` : ignorée pour un nom qui n'est pas montré (en
-/// attente de suppression, inconnu), une image que l'éditeur refuse, ou une copie (un
-/// enregistrement) de la même case encore en cours depuis moins de `DELAI_SORTIE`.
+/// attente de suppression, en effacement, inconnu), une image que l'éditeur refuse, ou une
+/// copie (un enregistrement, une ouverture dans l'éditeur) de la même case encore en cours
+/// depuis moins de `DELAI_SORTIE`.
 pub fn decider(etat: &EtatHistorique, nom: &str, action: ActionCase, maintenant: Instant) -> Geste {
     let Some(entree) = etat.vues().into_iter().find(|e| e.nom == nom) else {
         return Geste::Ignore;
@@ -176,7 +204,7 @@ pub fn decider(etat: &EtatHistorique, nom: &str, action: ActionCase, maintenant:
         .get(&cle_action(nom, action))
         .is_some_and(|debut| maintenant.saturating_duration_since(*debut) < DELAI_SORTIE);
     match action {
-        ActionCase::Copier | ActionCase::Enregistrer if en_cours => Geste::Ignore,
+        _ if en_cours => Geste::Ignore,
         ActionCase::Copier => Geste::Copier,
         ActionCase::Enregistrer => Geste::Enregistrer {
             deja_fait: etat.enregistrees.contains(nom),
@@ -204,11 +232,50 @@ pub fn annuler_suppressions(etat: &mut EtatHistorique) -> Vec<String> {
 }
 
 /// Prend toute la série en attente pour l'effacer (échéance, fermeture, arrêt) : ses noms
-/// quittent aussi la liste gardée (ils ne reviennent pas avant la liste suivante).
+/// passent en effacement (jamais remontrés, même par une liste relue avant la fin).
 pub fn prendre_suppressions(etat: &mut EtatHistorique) -> Vec<String> {
     let noms = annuler_suppressions(etat);
-    etat.liste.retain(|e| !noms.contains(&e.nom));
+    etat.en_effacement.extend(noms.iter().cloned());
     noms
+}
+
+/// Ce que fait une demande d'ouverture de l'historique.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Ouverture {
+    /// Ouvert et prêt : ramené devant.
+    Ramener,
+    /// Ouvert, page pas encore prête : elle se montrera à `historique_pret`.
+    Rien,
+    /// Fenêtre encore en train d'être détruite : nouvel essai plus tard.
+    Attendre,
+    /// Plus d'essai : abandon.
+    Abandonner,
+    Creer,
+}
+
+/// `page_prete` : `None` sans historique ouvert ; `fenetre` : la fenêtre existe encore.
+pub fn ouverture(page_prete: Option<bool>, fenetre: bool, essais: u32) -> Ouverture {
+    match (page_prete, fenetre) {
+        (Some(true), _) => Ouverture::Ramener,
+        (Some(false), _) => Ouverture::Rien,
+        (None, true) if essais == 0 => Ouverture::Abandonner,
+        (None, true) => Ouverture::Attendre,
+        (None, false) => Ouverture::Creer,
+    }
+}
+
+/// Le filet tombe : la fenêtre `numero` est toujours là, sa page n'a jamais dit prête.
+pub fn page_muette(etat: &EtatHistorique, numero: u64) -> bool {
+    etat.numero == numero && !etat.page_prete
+}
+
+/// La vignette se ferme si elle montre (non partie) une capture de `noms` (`None` : toutes,
+/// « Tout effacer ») ; `recent` : son fichier de « Récents ».
+pub fn vignette_a_fermer(recent: Option<&Path>, partie: bool, noms: Option<&[String]>) -> bool {
+    !partie
+        && recent
+            .and_then(nom_du_chemin)
+            .is_some_and(|n| noms.is_none_or(|l| l.contains(&n)))
 }
 
 /// Vrai `DELAI_ANNULER` après la dernière suppression de la série.
@@ -419,6 +486,12 @@ mod tests {
             decider(&e, A, ActionCase::Copier, t + DELAI_SORTIE),
             Geste::Copier
         );
+        // Annoter en cours : une seconde ouverture est ignorée (Entrée tenue).
+        e.actions.insert(cle_action(A, ActionCase::Annoter), t);
+        assert_eq!(decider(&e, A, ActionCase::Annoter, t), Geste::Ignore);
+        assert_eq!(decider(&e, A, ActionCase::Supprimer, t), Geste::Supprimer);
+        e.actions.remove(&cle_action(A, ActionCase::Annoter));
+        assert_eq!(decider(&e, A, ActionCase::Annoter, t), Geste::Annoter);
         // Déjà enregistrée pendant la session.
         e.enregistrees.insert(B.to_string());
         assert_eq!(
@@ -462,7 +535,18 @@ mod tests {
         assert_eq!(prendre_suppressions(&mut e), vec![C.to_string()]);
         assert!(e.en_attente.is_empty());
         assert_eq!(e.rang(C), None);
+        assert!(!e.connu(C));
+        // Une liste relue avant la fin de l'effacement ne la remontre pas.
+        e.liste = vec![entree(A, 1024, 768), entree(B, 800, 600), entree(C, 1, 1)];
+        assert_eq!(e.vues().len(), 2);
+        for a in ActionCase::TOUTES {
+            assert_eq!(decider(&e, C, a, t), Geste::Ignore);
+        }
+        // Effacement fini : partie de la liste et de l'ensemble.
+        e.effaces(&[C.to_string()]);
+        assert!(e.en_effacement.is_empty());
         assert_eq!(e.liste.len(), 2);
+        assert!(e.connu(A) && !e.connu(C) && !e.connu("x.png"));
     }
 
     #[test]
@@ -525,6 +609,39 @@ mod tests {
             "historique ferme (cadre)"
         );
         assert_eq!(EtatResultat::DejaFait.nom(), "deja_fait");
+    }
+
+    #[test]
+    fn decision_d_ouverture() {
+        assert_eq!(ouverture(Some(true), true, 20), Ouverture::Ramener);
+        assert_eq!(ouverture(Some(false), true, 20), Ouverture::Rien);
+        assert_eq!(ouverture(None, true, 20), Ouverture::Attendre);
+        assert_eq!(ouverture(None, true, 1), Ouverture::Attendre);
+        assert_eq!(ouverture(None, true, 0), Ouverture::Abandonner);
+        assert_eq!(ouverture(None, false, 0), Ouverture::Creer);
+    }
+
+    #[test]
+    fn filet_de_la_page() {
+        let (mut e, _) = etat();
+        assert!(page_muette(&e, 1));
+        assert!(!page_muette(&e, 2));
+        e.page_prete = true;
+        assert!(!page_muette(&e, 1));
+    }
+
+    #[test]
+    fn vignette_concernee() {
+        let recent = PathBuf::from("/l/Recents").join(A);
+        let noms = [A.to_string()];
+        let autres = [B.to_string()];
+        assert!(vignette_a_fermer(Some(&recent), false, Some(&noms)));
+        assert!(!vignette_a_fermer(Some(&recent), false, Some(&autres)));
+        assert!(vignette_a_fermer(Some(&recent), false, None));
+        assert!(!vignette_a_fermer(Some(&recent), true, None));
+        assert!(!vignette_a_fermer(None, false, None));
+        let autre = Path::new("/l/Recents/capture.png");
+        assert!(!vignette_a_fermer(Some(autre), false, None));
     }
 
     #[test]

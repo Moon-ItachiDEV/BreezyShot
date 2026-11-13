@@ -143,8 +143,20 @@ fn emettre_resultat(
     fenetre::emettre(app, fenetre::EVENEMENT_RESULTAT, charge);
 }
 
-/// Lance `f` dans un fil nommé ; sans fil, le fait ici (rien n'est perdu).
-fn dans_un_fil(nom: &str, f: impl FnOnce() + Send + 'static) {
+/// Lance `f` dans un fil nommé ; faux (et rien de fait) si le fil n'a pas pu être lancé.
+fn dans_un_fil(nom: &str, f: impl FnOnce() + Send + 'static) -> bool {
+    match std::thread::Builder::new().name(nom.into()).spawn(f) {
+        Ok(_) => true,
+        Err(e) => {
+            log::warn!("historique: fil {nom} impossible ({e})");
+            false
+        }
+    }
+}
+
+/// Comme `dans_un_fil`, mais sans fil le fait ici : seulement pour un effacement, qui ne
+/// crée, ne montre ni ne détruit aucune fenêtre (il efface, relit et envoie).
+fn dans_un_fil_ou_ici(nom: &str, f: impl FnOnce() + Send + 'static) {
     let f = Arc::new(Mutex::new(Some(f)));
     let pour_fil = Arc::clone(&f);
     let lance = std::thread::Builder::new().name(nom.into()).spawn(move || {
@@ -176,27 +188,27 @@ pub fn ouvrir(app: &AppHandle) {
 /// destruction, ou crée la fenêtre cachée.
 fn ouvrir_maintenant(app: &AppHandle, demande_a: Instant, essais: u32) {
     let prete = super::historique_ouvert(app).as_ref().map(|e| e.page_prete);
-    match prete {
-        Some(true) => {
+    match historique::ouverture(prete, fenetre::ouverte(app), essais) {
+        historique::Ouverture::Ramener => {
             if fenetre::ramener_devant(app) {
                 log::info!("historique ramene devant");
             }
             return;
         }
         // La page se montrera d'elle-même à `historique_pret`.
-        Some(false) => return,
-        None => {}
-    }
-    if fenetre::ouverte(app) {
-        // Encore entre `destroy()` et `Destroyed`.
-        if essais == 0 {
+        historique::Ouverture::Rien => return,
+        historique::Ouverture::Abandonner => {
             log::warn!("historique impossible: fenetre (encore ouverte)");
             return;
         }
-        super::plus_tard_nomme(app, FIL_POSTE, ATTENTE_OUVERTURE, move |a| {
-            ouvrir_maintenant(a, demande_a, essais - 1)
-        });
-        return;
+        // Encore entre `destroy()` et `Destroyed`.
+        historique::Ouverture::Attendre => {
+            super::plus_tard_nomme(app, FIL_POSTE, ATTENTE_OUVERTURE, move |a| {
+                ouvrir_maintenant(a, demande_a, essais - 1)
+            });
+            return;
+        }
+        historique::Ouverture::Creer => {}
     }
     let numero = NUMERO.fetch_add(1, Ordering::SeqCst) + 1;
     // L'état est rangé avant la création, pour qu'une commande de la page le trouve.
@@ -240,8 +252,8 @@ fn armer_filet(app: &AppHandle, numero: u64) {
             }
             let pour = pour_fil.clone();
             let _ = pour_fil.run_on_main_thread(move || {
-                let muette = super::historique_ouvert(&pour)
-                    .take_if(|e| e.numero == numero && !e.page_prete);
+                let muette =
+                    super::historique_ouvert(&pour).take_if(|e| historique::page_muette(e, numero));
                 if muette.is_some() {
                     log::warn!("historique impossible: page muette");
                     fenetre::fermer(&pour);
@@ -318,6 +330,7 @@ fn relister(app: &AppHandle) -> Vec<EntreeRecente> {
 /// ancien), chacun annoncé dès qu'il est prêt. Fil `historique`.
 pub(super) fn lancer_liste(app: &AppHandle, numero: u64) {
     let app = app.clone();
+    // Sans fil : rien (jamais de disque sur le fil principal).
     dans_un_fil("historique", move || {
         let liste = relister(&app);
         faire_apercus_manquants(&app, numero, &liste);
@@ -405,10 +418,9 @@ pub fn rafraichir(app: &AppHandle) {
 
 /// La case `nom` est-elle dans la liste gardée ? (Commandes : sinon refusée.)
 pub(super) fn connue(app: &AppHandle, nom: &str) -> bool {
-    historique::nom_valide(nom)
-        && super::historique_ouvert(app)
-            .as_ref()
-            .is_some_and(|e| e.liste.iter().any(|x| x.nom == nom))
+    super::historique_ouvert(app)
+        .as_ref()
+        .is_some_and(|e| e.connu(nom))
 }
 
 /// Une action de la page sur la case `nom` (déjà connue).
@@ -460,20 +472,23 @@ fn lancer_lecture(
     heure: chrono::DateTime<chrono::Local>,
 ) {
     let debut = Instant::now();
-    if action != ActionCase::Annoter {
-        if let Some(e) = super::historique_ouvert(app).as_mut() {
-            e.actions
-                .insert(historique::cle_action(&nom, action), debut);
-        }
-    }
     let Some(chemin) = sortie::chemin_recent(&dossiers(app).recents, &nom) else {
         return;
     };
+    // Toute action lancée est en cours jusqu'à son résultat (Annoter : jusqu'au document
+    // posté ou à l'échec de la lecture) : Entrée tenue ne relit pas la capture.
+    if let Some(e) = super::historique_ouvert(app).as_mut() {
+        e.actions
+            .insert(historique::cle_action(&nom, action), debut);
+    }
     let base = super::demande_sortie(app, false);
-    let app = app.clone();
-    dans_un_fil("historique-action", move || {
+    let pour_fil = app.clone();
+    let (nom_fil, court_fil) = (nom.clone(), court.clone());
+    let lance = dans_un_fil("historique-action", move || {
+        let (app, nom, court) = (pour_fil, nom_fil, court_fil);
         let lu = sortie::lire_recent(&chemin);
         if action == ActionCase::Annoter {
+            retirer_action(&app, numero, &nom, action);
             annoter_lu(&app, &court, lu, heure, debut);
             return;
         }
@@ -504,6 +519,30 @@ fn lancer_lecture(
             log::warn!("historique: resultat non rendu: {e}");
         }
     });
+    if lance {
+        return;
+    }
+    // Sans fil : rien n'est fait ici (ni lecture, ni sortie, ni fenêtre).
+    retirer_action(app, numero, &nom, action);
+    if action == ActionCase::Annoter {
+        log::warn!("historique annoter {court} impossible");
+        super::afficher(app, editeur::message_impossible());
+        return;
+    }
+    let etat = EtatResultat::Echec;
+    log::info!("{}", historique::ligne_resultat(&court, action, etat));
+    let message = historique::message_illisible(action);
+    emettre_resultat(app, nom, action, etat, message);
+}
+
+/// L'action `action` sur `nom` n'est plus en cours (n'importe quel fil).
+fn retirer_action(app: &AppHandle, numero: u64, nom: &str, action: ActionCase) {
+    if let Some(e) = super::historique_ouvert(app)
+        .as_mut()
+        .filter(|e| e.numero == numero)
+    {
+        e.actions.remove(&historique::cle_action(nom, action));
+    }
 }
 
 /// Annoter : le document part à l'éditeur au tour suivant (fil de lecture).
@@ -568,13 +607,9 @@ fn action_finie(
 /// La vignette se ferme sans animation si elle montre une capture de `noms` (toutes avec
 /// `None`) ; ses pixels sont rendus, son fichier enregistré reste.
 fn fermer_vignette_de(app: &AppHandle, noms: Option<&[String]>) {
-    let concernee = super::montree(app).as_ref().is_some_and(|c| {
-        !c.partie
-            && c.recent
-                .as_deref()
-                .and_then(historique::nom_du_chemin)
-                .is_some_and(|n| noms.is_none_or(|l| l.contains(&n)))
-    });
+    let concernee = super::montree(app)
+        .as_ref()
+        .is_some_and(|c| historique::vignette_a_fermer(c.recent.as_deref(), c.partie, noms));
     if concernee {
         super::appliquer(app, Declencheur::VignetteFermee);
         super::fermer_vignette(app, "historique");
@@ -654,8 +689,12 @@ fn effacer(app: &AppHandle, noms: Vec<String>, ici: bool) {
             noms.len() - rates.len(),
             rates.len()
         );
-        // Fenêtre fermée (fermeture, arrêt) : aucune liste à lire ni à envoyer.
-        if super::historique_ouvert(app).is_some() {
+        // Effacés ou restés, ils quittent l'ensemble en effacement (une case restée revient
+        // par la liste relue). Fenêtre fermée (fermeture, arrêt) : rien à relire.
+        let ouvert = super::historique_ouvert(app)
+            .as_mut()
+            .map(|e| e.effaces(&noms));
+        if ouvert.is_some() {
             relister(app);
         }
         for nom in rates {
@@ -669,7 +708,7 @@ fn effacer(app: &AppHandle, noms: Vec<String>, ici: bool) {
     }
     super::compter_suppression(app, true);
     let pour = app.clone();
-    dans_un_fil("historique-suppression", move || {
+    dans_un_fil_ou_ici("historique-suppression", move || {
         fait(&pour);
         super::compter_suppression(&pour, false);
     });
@@ -678,20 +717,21 @@ fn effacer(app: &AppHandle, noms: Vec<String>, ici: bool) {
 /// « Tout effacer », confirmé par la page : « Récents », aperçus et `Glisser`, avec les
 /// suppressions en attente. Rien à annuler ensuite.
 pub(super) fn tout_effacer(app: &AppHandle) {
-    let ouvert = super::historique_ouvert(app).as_mut().map(|e| {
-        historique::prendre_suppressions(e);
+    let pris = super::historique_ouvert(app).as_mut().map(|e| {
+        let noms = historique::prendre_suppressions(e);
         e.liste.clear();
+        noms
     });
-    if ouvert.is_none() {
+    let Some(pris) = pris else {
         log::info!("historique tout_effacer refusee");
         return;
-    }
+    };
     emettre_liste(app, Vec::new());
     emettre_attente(app, 0);
     fermer_vignette_de(app, None);
     super::compter_suppression(app, true);
     let pour = app.clone();
-    dans_un_fil("historique-vidage", move || {
+    dans_un_fil_ou_ici("historique-vidage", move || {
         let d = dossiers(&pour);
         let bilan = sortie::vider(&d.recents, &d.apercus, &d.glisser);
         log::info!(
@@ -699,6 +739,9 @@ pub(super) fn tout_effacer(app: &AppHandle) {
             bilan.effaces,
             bilan.echecs
         );
+        if let Some(e) = super::historique_ouvert(&pour).as_mut() {
+            e.effaces(&pris);
+        }
         relister(&pour);
         super::compter_suppression(&pour, false);
     });
