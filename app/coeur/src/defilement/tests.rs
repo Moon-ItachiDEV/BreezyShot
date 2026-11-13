@@ -580,23 +580,35 @@ fn l_attendu_lu() {
             "{e:?}"
         );
     }
-    // Une page unie, ou une seule ligne de texte : sans lu, rien ne décide ; avec un lu,
-    // deux images égales sont immobiles (l'application ment ou n'a pas encore peint).
+    // Une page unie, ou une seule ligne de texte : sans lu, rien ne décide. Avec un lu,
+    // deux images égales qui ont du contenu sont immobiles (contenu fixe, ou page pas
+    // encore peinte) ; entièrement unies, le lu est rendu, dans la portée (252 ici).
     let vide = unie(400, 300, [240, 240, 240]);
     assert_eq!(
         mesurer(&vide, &vide, Fixes::default(), Attendu::Aucun, t),
         Mesure::Ambigue
     );
+    for (e, m) in [
+        (0, Mesure::Immobile),
+        (150, Mesure::Avance(150)),
+        (-40, Mesure::Recul(40)),
+        (252, Mesure::Avance(252)),
+        (253, Mesure::Perdue),
+    ] {
+        assert_eq!(
+            mesurer(&vide, &vide, Fixes::default(), Attendu::Lu(e), t),
+            m,
+            "{e}"
+        );
+    }
     let mut une = vide.clone();
     couvrir(&mut une, 100, &page_texte(400, 22, 10, 390, 9));
-    for im in [&vide, &une] {
-        for e in [Attendu::Lu(0), Attendu::Lu(150)] {
-            assert_eq!(
-                mesurer(im, im, Fixes::default(), e, t),
-                Mesure::Immobile,
-                "{e:?}"
-            );
-        }
+    for e in [Attendu::Lu(0), Attendu::Lu(150)] {
+        assert_eq!(
+            mesurer(&une, &une, Fixes::default(), e, t),
+            Mesure::Immobile,
+            "{e:?}"
+        );
     }
     assert_eq!(
         mesurer(&une, &une, Fixes::default(), Attendu::Aucun, t),
@@ -631,10 +643,10 @@ fn zones_unies_rien_d_invente() {
     );
     assert_eq!(
         mesurer(&vide, &bruitee, Fixes::default(), Attendu::Lu(100), t),
-        Mesure::Immobile
+        Mesure::Avance(100)
     );
-    // Une page dont la partie unie est plus haute que la zone : deux images égales. Sans
-    // lu, ambiguë et rien d'ajouté ; avec un lu, immobile (rien d'inventé non plus).
+    // Une page dont la partie unie est plus haute que la zone : deux images égales et
+    // unies. Sans lu, ambiguë et rien d'ajouté ; avec le lu, il est rendu.
     let mut page = page_texte(400, 1500, 10, 390, 6);
     rectangle(&mut page, 0, 400, 400, 500, BLANC);
     let a = z(&page, 450, 300);
@@ -645,7 +657,7 @@ fn zones_unies_rien_d_invente() {
     );
     assert_eq!(
         mesurer(&a, &b, Fixes::default(), Attendu::Lu(100), t),
-        Mesure::Immobile
+        Mesure::Avance(100)
     );
     let mut asm = Assemblage::nouveau(&a, sans_limite()).unwrap();
     assert_eq!(asm.ajouter(&b, &Mesure::Ambigue), Ajout::Rien);
@@ -1675,17 +1687,16 @@ fn r1_page_clairsemee_de_bout_en_bout() {
     // Réglages aux grands blancs, plus un blanc de 700 lignes (plus haut que la zone) :
     // avec le lu exact, la page entière, chaque mesure juste (deux images égales dans le
     // blanc : `Immobile`, la suivante rattrape) ; sans lu, jamais une mesure fausse, et
-    // ce qui est assemblé est le haut de la page. Limite : après un `Immobile` dans le
-    // blanc, la dernière image gardée reste ; si le décalage lu depuis elle dépasse la
-    // portée (zone 400, pas 200 : 400 > 352), `Perdue` (D doit réduire le pas).
+    // ce qui est assemblé est le haut de la page. Deux vues entièrement unies (dans le
+    // blanc) : le lu est rendu, la dernière image gardée suit (zone 400, pas 200).
     let mut page = page_reglages(900, 5000, 6);
     rectangle(&mut page, 0, 2000, 900, 700, [249, 249, 249]);
-    for (h, pas, complet) in [
-        (400u32, 150u32, true),
-        (600, 300, true),
-        (500, 120, true),
-        (400, 340, true),
-        (400, 200, false),
+    for (h, pas) in [
+        (400u32, 150u32),
+        (600, 300),
+        (500, 120),
+        (400, 340),
+        (400, 200),
     ] {
         let pos = positions(page.hauteur, h, pas);
         let images: Vec<Pixels> = pos.iter().map(|p| z(&page, *p, h)).collect();
@@ -1699,7 +1710,7 @@ fn r1_page_clairsemee_de_bout_en_bout() {
                     continue;
                 }
                 justes += usize::from(jamais_fausse(*m, *vrai, "page clairsemée"));
-                if avec_lu && *vrai <= i64::from(h - RECOUVREMENT_MIN) {
+                if avec_lu {
                     assert_eq!(*m, mesure_de(*vrai as i32), "{h} {pas} {k}");
                 }
             }
@@ -1710,7 +1721,7 @@ fn r1_page_clairsemee_de_bout_en_bout() {
             );
             egales(&finale, &z(&page, 0, finale.hauteur), "page clairsemée");
             if avec_lu {
-                assert_eq!(finale.hauteur == page.hauteur, complet, "{h} {pas}");
+                assert_eq!(finale.hauteur, page.hauteur, "{h} {pas}");
             }
         }
     }

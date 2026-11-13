@@ -33,7 +33,8 @@
 //!
 //! **Attendu.** Seule une position **lue** par l'application (`Attendu::Lu`) est passée,
 //! jamais le pas commandé. Deux images égales à la même place donnent `Immobile` quel que
-//! soit le lu. Sinon, si le recouvrement au lu (à `ATTENDU_A_PEU_PRES` lignes près, le lu
+//! soit le lu si elles ont des lignes porteuses ; entièrement unies, le lu est rendu (dans
+//! la portée, sinon `Perdue`). Sinon, si le recouvrement au lu (à `ATTENDU_A_PEU_PRES` lignes près, le lu
 //! d'abord) est cohérent (il passe, ou n'a aucune ligne différente : un blanc), il est
 //! rendu même si d'autres décalages passent, sauf si l'un d'eux le bat nettement
 //! (`Ambigue`, ou `Immobile` si c'est 0) ; sinon la mesure sans attendu, et `Ambigue` si
@@ -1077,8 +1078,10 @@ fn mesure_de(d: i32) -> Mesure {
 /// autres, sinon `Ambigue` (ou `Perdue` si tout est contredit).
 ///
 /// Avec un attendu **lu** `e` :
-/// - deux images égales à la même place (au bit près, ou à la tolérance de D12) donnent
-///   `Immobile`, quel que soit `e` (l'application ment ou n'a pas encore peint) ;
+/// - deux images égales à la même place (sans pixel d'encre différent à ± `canal`)
+///   donnent `Immobile` si elles ont des lignes porteuses, quel que soit `e` (contenu
+///   fixe, ou page pas encore peinte) ; entièrement unies, `e` est rendu (`Perdue`
+///   au-delà de la portée, `Immobile` pour 0) : le blanc est cohérent avec le mouvement ;
 /// - si le recouvrement à `e` (ou à 3 lignes près, `e` d'abord) est cohérent (il passe, ou
 ///   il n'a aucune ligne différente, même sans ligne porteuse : un blanc), `e` est rendu
 ///   même si d'autres décalages passent aussi ; si un autre décalage le contredit
@@ -1104,9 +1107,6 @@ pub fn mesurer(
         Attendu::Aucun => None,
         Attendu::Lu(e) => Some(e),
     };
-    if lu.is_some() && avant.rgba == apres.rgba {
-        return Mesure::Immobile;
-    }
     let (a, b) = (echantillonner(va), echantillonner(vb));
     let (la, lb) = (decrire(&a, t), decrire(&b, t));
     let h = b.h;
@@ -1125,10 +1125,27 @@ pub fn mesurer(
         d0[y] = differents(b.ligne(y), lb.fond[y], a.ligne(y), la.fond[y], t, den).min(den);
         statique[y] = d0[y] <= permis_ligne(den, t);
     }
+    let porteuses = |l: &Lignes| {
+        l.porteuse[haut..h - bas]
+            .iter()
+            .filter(|p| **p != 0)
+            .count()
+    };
     // Deux images égales à la même place, à la tolérance des valeurs près (pas à celle des
-    // lignes, qui accepterait une ligne de liste pour sa voisine) : rien n'a bougé.
-    if lu.is_some() && d0[haut..h - bas].iter().all(|n| *n == 0) {
-        return Mesure::Immobile;
+    // lignes, qui accepterait une ligne de liste pour sa voisine). Avec du contenu (des
+    // lignes porteuses) : rien n'a bougé, ou la page n'est pas encore peinte. Une vue
+    // entièrement unie est cohérente avec tout mouvement : le lu décide, dans la portée.
+    if let Some(e) = lu {
+        if d0[haut..h - bas].iter().all(|n| *n == 0) {
+            let unie = porteuses(&la) == 0 && porteuses(&lb) == 0;
+            return if !unie || e == 0 {
+                Mesure::Immobile
+            } else if e.unsigned_abs() as usize > utile - rec {
+                Mesure::Perdue
+            } else {
+                mesure_de(e)
+            };
+        }
     }
     let fixe_haut = (haut..h - bas).find(|y| !statique[*y]).unwrap_or(h - bas);
     let fixe_bas = (haut..h - bas)
@@ -1149,12 +1166,6 @@ pub fn mesurer(
     };
     // Assez de lignes porteuses dans les deux images, sinon rien ne peut passer : seul un
     // attendu lu peut alors décider.
-    let porteuses = |l: &Lignes| {
-        l.porteuse[haut..h - bas]
-            .iter()
-            .filter(|p| **p != 0)
-            .count()
-    };
     let assez =
         porteuses(&la) >= PORTEUSES_MIN as usize && porteuses(&lb) >= PORTEUSES_MIN as usize;
     let (normale, juges) = if assez {
