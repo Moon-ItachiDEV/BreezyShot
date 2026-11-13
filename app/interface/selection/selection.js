@@ -9,7 +9,7 @@
 //
 // Contrat avec le cœur (fenetres/selection.rs) :
 // - écoute `selection:montrer` { id, numero, largeur, hauteur, ecrans: [{ x, y, largeur,
-//   hauteur }], cote_min, mode: "zone" | "fenetre", fenetres: [{ x, y, largeur, hauteur,
+//   hauteur }], cote_min, mode: "zone" | "fenetre" | "texte", fenetres: [{ x, y, largeur, hauteur,
 //   rayon }], souris: { x, y } | null } : tout en pixels réels entiers, relatifs au coin haut
 //   gauche de la fenêtre (une fenêtre proposée peut en déborder ; `mode` absent vaut "zone",
 //   `fenetres` absent vaut []) (`largeur`, `hauteur` : rectangle réel de la fenêtre ; `numero` : celui de la
@@ -34,6 +34,13 @@
 //   `selection_terminee`.
 // - `selection_annulee` { id, numero, cause: "echap" | "clic_droit" }, une seule fois par
 //   affichage.
+// - Mode texte (Copier le texte, 0.5) : une zone, exactement comme le mode zone ; seul le nom
+//   change (« Copier le texte : sélectionnez une zone »). Après `selection_terminee`, le cœur
+//   envoie `selection:balayer` { id, x, y, largeur, hauteur, reduites } (pixels réels entiers
+//   relatifs à la fenêtre, comme `selection_terminee`) : la zone est posée là et joue le
+//   balayage (respiration, bande claire, teinte `accent`, --texte-balayage) ; `reduites` :
+//   --duree-reduite, sans bande ni mouvement. Le filet repart de ce moment. Rien n'est
+//   envoyé : le cœur cache la fenêtre quand la lecture et le balayage sont finis.
 // - `selection_chargee` {} une fois, quand les deux écoutes sont en place.
 // Gestes : glisser du bouton gauche ; Maj tenue : carré ; Espace tenue : la zone se déplace ;
 // Échap ou clic droit : annuler. Une zone reste sur l'écran où le glisser a commencé.
@@ -147,7 +154,7 @@ function valider(m) {
   }
   if (!entier(m.cote_min) || m.cote_min < 0) return rejeter("cote_min invalide");
   const md = m.mode === undefined ? "zone" : m.mode;
-  if (md !== "zone" && md !== "fenetre") return rejeter("mode inconnu");
+  if (md !== "zone" && md !== "fenetre" && md !== "texte") return rejeter("mode inconnu");
   const brutes = m.fenetres === undefined ? [] : m.fenetres;
   if (!Array.isArray(brutes)) return rejeter("fenetres invalides");
   const fen = [];
@@ -169,6 +176,7 @@ function valider(m) {
 function repos() {
   if (image) cancelAnimationFrame(image);
   image = 0;
+  finBalayage();
   glisser = null;
   appui = null;
   corps.classList.remove("glisse");
@@ -230,6 +238,7 @@ export function montrer(brut) {
   souris = m.souris;
   survol = null;
   document.documentElement.classList.toggle("mode-fenetre", mode === "fenetre");
+  nommer();
   attente = false;
   espace = false;
   maj = false;
@@ -386,16 +395,67 @@ function dessiner() {
     corps.classList.remove("glisse");
     return;
   }
-  const x0 = Math.min(a.x, b.x);
-  const x1 = Math.max(a.x, b.x) + 1;
-  const y0 = Math.min(a.y, b.y);
-  const y1 = Math.max(a.y, b.y) + 1;
+  poserZone(Math.min(a.x, b.x), Math.min(a.y, b.y), Math.max(a.x, b.x) + 1, Math.max(a.y, b.y) + 1);
+}
+
+/** La zone `[x0, x1[ × [y0, y1[` (pixels réels) et le voile autour. */
+function poserZone(x0, y0, x1, y1) {
   poserPanneau(morceaux.haut, 0, 0, largeur, y0);
   poserPanneau(morceaux.bas, 0, y1, largeur, hauteur - y1);
   poserPanneau(morceaux.gauche, 0, y0, x0, y1 - y0);
   poserPanneau(morceaux.droite, x1, y0, largeur - x1, y1 - y0);
   poser(morceaux.zone, x0, y0, x1 - x0, y1 - y0);
   corps.classList.add("glisse");
+}
+
+/** Le nom de la page : celui du mode texte seulement (les autres modes n'en ont pas). */
+function nommer() {
+  if (mode === "texte") {
+    corps.setAttribute("role", "application");
+    corps.setAttribute("aria-label", "Copier le texte : sélectionnez une zone");
+  } else {
+    corps.removeAttribute("role");
+    corps.removeAttribute("aria-label");
+  }
+}
+
+// Le balayage du mode texte : la bande (créée une fois) et sa minuterie.
+const bande = document.createElement("i");
+bande.className = "bande";
+morceaux.zone.append(bande);
+let balayage = 0;
+function finBalayage() {
+  clearTimeout(balayage);
+  balayage = 0;
+  corps.classList.remove("balaye", "reduit");
+}
+
+/** `selection:balayer` : la zone lue (pixels réels de la fenêtre) joue le balayage. Seulement
+ *  en mode texte, pour l'affichage en cours, une fois la zone envoyée. */
+export function balayer(m) {
+  const ok = m && m.id === id && id !== null && mode === "texte" && attente &&
+    [m.x, m.y, m.largeur, m.hauteur].every(entier) && m.largeur > 0 && m.hauteur > 0;
+  if (!ok) {
+    console.warn("selection : balayage ignoré");
+    return;
+  }
+  const x0 = borne(m.x, 0, largeur);
+  const y0 = borne(m.y, 0, hauteur);
+  poserZone(x0, y0, borne(m.x + m.largeur, x0, largeur), borne(m.y + m.hauteur, y0, hauteur));
+  finBalayage();
+  // Le gel peut rester jusqu'à 1,5 s après le relâcher : le filet repart d'ici.
+  clearTimeout(filet);
+  const tour = envoi;
+  filet = setTimeout(() => {
+    if (tour !== envoi || !attente) return;
+    attente = false;
+    repos();
+  }, FILET_MS);
+  corps.classList.toggle("reduit", m.reduites === true);
+  void morceaux.zone.offsetWidth; // l'animation repart de zéro
+  corps.classList.add("balaye");
+  const duree = parseFloat(getComputedStyle(morceaux.zone).getPropertyValue("--duree-balayage"));
+  balayage = setTimeout(finBalayage, duree || 0);
 }
 
 /** Au plus un dessin par image. */
@@ -572,6 +632,7 @@ if (tauri?.event?.listen) {
   Promise.all([
     tauri.event.listen("selection:montrer", (evenement) => montrer(evenement?.payload)),
     tauri.event.listen("selection:cachee", () => cachee()),
+    tauri.event.listen("selection:balayer", (evenement) => balayer(evenement?.payload)),
   ]).then(
     () => appeler("selection_chargee", {}),
     (e) => console.warn("selection : écoute impossible :", e),
@@ -589,5 +650,5 @@ if (tauri?.event?.listen) {
     });
   }
   // Pour les essais dans un navigateur seulement.
-  window.selectionApercu = { montrer, cachee };
+  window.selectionApercu = { montrer, cachee, balayer };
 }

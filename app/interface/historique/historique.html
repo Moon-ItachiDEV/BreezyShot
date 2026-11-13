@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Historique</title>
+<link rel="stylesheet" href="../commun/jetons.css">
+<link rel="stylesheet" href="historique.css">
+<script type="module" src="historique.js"></script>
+</head>
+<body>
+<!--
+  Structure seulement (contrat 0.5, §2.2 et §10) : la barre du haut, qui est aussi la barre
+  de la fenêtre sans cadre, la grille, le picto du vide, le menu « Plus d'options », la
+  confirmation et la pilule de la page. Le comportement (historique.js, grille.js) ne vise
+  que les identifiants, les data-*, les rôles et les noms ; l'habillage est dans
+  historique.css (jetons seulement). Pictogrammes : ceux de design/historique/index.html,
+  sans i-pin (Épingler hors périmètre, écart U1).
+-->
+<svg width="0" height="0" class="defs" aria-hidden="true">
+  <defs>
+    <symbol id="i-copy" viewBox="0 0 20 20"><rect x="6.5" y="6.5" width="10" height="10"
+      rx="1.5"/><path d="M13.5 6.5V4.5A1.5 1.5 0 0 0 12 3H4.5A1.5 1.5 0 0 0 3 4.5V12a1.5 1.5 0 0 0
+      1.5 1.5h2"/></symbol>
+    <symbol id="i-save" viewBox="0 0 20 20"><path d="M10 3v9M6.5 8.5 10 12l3.5-3.5"/>
+      <path d="M3.5 13v2a2 2 0 0 0 2 2h9a2 2 0 0 0 2-2v-2"/></symbol>
+    <symbol id="i-pen" viewBox="0 0 20 20"><path d="M4 16l1-3.5 8.5-8.5a1.8 1.8 0 0 1 2.5 2.5L7.5
+      15z"/><path d="M12 5.5l2.5 2.5"/></symbol>
+    <symbol id="i-trash" viewBox="0 0 20 20"><path d="M4 6h12M8 6V4.5h4V6M5.5 6l.8 10a1.5 1.5 0 0
+      0 1.5 1.4h4.4a1.5 1.5 0 0 0 1.5-1.4l.8-10"/></symbol>
+    <symbol id="i-check" viewBox="0 0 20 20"><path d="M5 10.4l3.2 3.2 6.8-7.2"/></symbol>
+    <symbol id="i-more" viewBox="0 0 20 20">
+      <circle cx="5" cy="10" r=".9" fill="currentColor"/>
+      <circle cx="10" cy="10" r=".9" fill="currentColor"/>
+      <circle cx="15" cy="10" r=".9" fill="currentColor"/></symbol>
+    <symbol id="i-img" viewBox="0 0 20 20"><rect x="3" y="3.5" width="14" height="13" rx="1.5"/>
+      <circle cx="7.5" cy="8" r="1.3"/><path d="M3.5 14.5l4-4 3 3 2-2 4 4"/></symbol>
+  </defs>
+</svg>
+
+<div class="fenetre" id="fenetre">
+  <header class="atb" id="barre-haut" data-tauri-drag-region>
+    <span class="t" data-tauri-drag-region>Historique</span>
+    <button class="ib plus" type="button" id="plus" aria-label="Plus d'options"
+      title="Plus d'options" aria-haspopup="menu" aria-expanded="false" aria-controls="menu"
+      disabled><svg class="ico"><use href="#i-more"/></svg></button>
+    <div class="capb">
+      <button type="button" id="reduire" aria-label="Réduire" title="Réduire"><svg
+        viewBox="0 0 10 10" aria-hidden="true"><path d="M1 5h8"/></svg></button>
+      <button type="button" id="fermer" class="fermer" aria-label="Fermer" title="Fermer"><svg
+        viewBox="0 0 10 10" aria-hidden="true"><path d="M1.5 1.5l7 7M8.5 1.5l-7 7"/></svg></button>
+    </div>
+  </header>
+
+  <main class="wbody" id="corps">
+    <div class="grid" id="grille" role="list" aria-label="Captures récentes" hidden></div>
+    <div class="vide" id="vide" hidden><svg class="ico" role="img" aria-label="Aucune capture">
+      <use href="#i-img"/></svg></div>
+  </main>
+
+  <div class="menu" id="menu" role="menu" aria-label="Plus d'options" hidden>
+    <button class="mi dz" type="button" role="menuitem" id="tout-effacer" tabindex="-1"><svg
+      class="ico" aria-hidden="true"><use href="#i-trash"/></svg>Tout effacer</button>
+  </div>
+
+  <div class="menu confirmation" id="confirmation" role="alertdialog"
+    aria-labelledby="confirmation-titre" aria-modal="true" hidden>
+    <b id="confirmation-titre">Tout effacer ?</b>
+    <div><button class="btn" type="button" id="confirmation-non">Annuler</button><button
+      class="btn danger" type="button" id="confirmation-oui">Effacer</button></div>
+  </div>
+
+  <div class="msg" id="pilule" role="status" aria-live="polite"><span class="ic" id="pilule-ic"
+    aria-hidden="true"></span><b id="pilule-texte"></b><button class="act" type="button"
+    id="pilule-annuler" hidden>Annuler</button></div>
+</div>
+</body>
+</html>

@@ -17,10 +17,12 @@ pub mod gel;
 pub mod glisser;
 pub mod installation;
 pub mod presse_papiers;
+pub mod texte;
 pub use composition::attendre_composition;
 pub use demarrage::{demarrage_avec_systeme, mettre_a_jour_chemin, EtatDemarrage};
 pub use dossier::{choisir_dossier, choisir_fichier_png};
 pub use gel::Rect;
+pub use texte::fin_de_ligne;
 
 #[cfg(windows)]
 #[path = "windows.rs"]

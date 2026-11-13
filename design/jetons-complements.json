@@ -502,6 +502,36 @@
     "value": "0 2px 3px rgba(0,0,0,0.25)",
     "usage": "Ombre portée des instruments (drop-shadow).",
     "origine": "design/editeur-epure/index.html, piste B (.tl .inst)."
+   },
+   {
+    "name": "historique-mica-teinte",
+    "value": {
+     "light": "rgba(205,222,245,0.55)",
+     "dark": "rgba(40,70,120,0.30)"
+    },
+    "usage": "Fenêtre Historique : première teinte du fond mica.",
+    "origine": "design/historique/index.html, variable --mica-tint (.win)."
+   },
+   {
+    "name": "historique-mica-teinte-2",
+    "value": {
+     "light": "rgba(232,224,248,0.45)",
+     "dark": "rgba(70,50,120,0.22)"
+    },
+    "usage": "Fenêtre Historique : seconde teinte du fond mica.",
+    "origine": "design/historique/index.html, variable --mica-tint2 (.win)."
+   },
+   {
+    "name": "historique-fermer-survol",
+    "value": "#C42B1C",
+    "usage": "Bouton Fermer de la barre de la fenêtre, survolé.",
+    "origine": "design/historique/index.html, .capb button:hover."
+   },
+   {
+    "name": "historique-fermer-survol-texte",
+    "value": "#FFFFFF",
+    "usage": "Croix du bouton Fermer survolé.",
+    "origine": "design/historique/index.html, .capb button:hover."
    }
   ]
  },
@@ -824,6 +854,84 @@
     "value": "1ms",
     "usage": "Animations réduites.",
     "origine": "design/editeur-epure/index.html, piste B (prefers-reduced-motion)."
+   },
+   {
+    "name": "duree-historique-ouverture",
+    "value": "250ms",
+    "usage": "Ouverture : entrée du contenu.",
+    "origine": "design/historique/index.html, .opening (winIn 250ms) ; contrat 0.5 §2.2."
+   },
+   {
+    "name": "duree-historique-age",
+    "value": "150ms",
+    "usage": "Fondu de la pastille d'âge et de la pilule d'actions.",
+    "origine": "design/historique/index.html, .ago."
+   },
+   {
+    "name": "duree-historique-actions",
+    "value": "260ms",
+    "usage": "Pilule d'actions : montée en ressort.",
+    "origine": "design/historique/index.html, .qa."
+   },
+   {
+    "name": "duree-historique-sortie-case",
+    "value": "160ms",
+    "usage": "Case supprimée qui part.",
+    "origine": "design/historique/index.html, .tile.gone."
+   },
+   {
+    "name": "duree-historique-flip",
+    "value": "300ms",
+    "usage": "Les autres cases glissent à leur place.",
+    "origine": "design/historique/index.html, render (FLIP 300 ms)."
+   },
+   {
+    "name": "duree-historique-entree-case",
+    "value": "260ms",
+    "usage": "Case nouvelle qui entre.",
+    "origine": "design/historique/index.html, render (260 ms)."
+   },
+   {
+    "name": "duree-historique-coche",
+    "value": "1200ms",
+    "usage": "Coche verte après Copier ou Enregistrer.",
+    "origine": "design/historique/index.html, done()."
+   },
+   {
+    "name": "duree-historique-pop",
+    "value": "300ms",
+    "usage": "Coche : apparition en ressort.",
+    "origine": "design/historique/index.html, @keyframes pop."
+   },
+   {
+    "name": "duree-historique-lisere",
+    "value": "400ms",
+    "usage": "Liseré vert de Ctrl + C.",
+    "origine": "design/historique/index.html, .tile.flashok::after."
+   },
+   {
+    "name": "duree-historique-pilule",
+    "value": "340ms",
+    "usage": "Pilule de la page : entrée en ressort.",
+    "origine": "design/historique/index.html, .msg."
+   },
+   {
+    "name": "duree-historique-erreur",
+    "value": "4000ms",
+    "usage": "Pilule d'erreur de la page (« Impossible de copier »).",
+    "origine": "design/historique/index.html, contrat 0.5 §12.2 (6)."
+   },
+   {
+    "name": "duree-historique-reduite",
+    "value": "1ms",
+    "usage": "Animations réduites.",
+    "origine": "design/historique/index.html, prefers-reduced-motion ; contrat 0.5 §2.2."
+   },
+   {
+    "name": "texte-balayage",
+    "value": "400ms",
+    "usage": "Balayage de Copier le texte.",
+    "origine": "design/historique/index.html, onglet « Copier le texte » ; contrat 0.5 §10."
    }
   ]
  },
@@ -2503,6 +2611,450 @@
     "value": "0.6",
     "usage": "Animation du recadrage : opacité de départ.",
     "origine": "design/editeur-epure/index.html, piste B (contrat 0.4)."
+   },
+   {
+    "name": "historique-case-min",
+    "value": "150px",
+    "usage": "Largeur minimale d'une case.",
+    "origine": "design/historique/index.html, .grid (minmax(150px, 1fr)) ; contrat 0.5 §10."
+   },
+   {
+    "name": "historique-ecart",
+    "value": "10px",
+    "usage": "Écart entre les cases.",
+    "origine": "design/historique/index.html, .grid (gap) ; contrat 0.5 §10."
+   },
+   {
+    "name": "historique-marge",
+    "value": "12px",
+    "usage": "Marge de la grille.",
+    "origine": "design/historique/index.html, .grid (padding) ; contrat 0.5 §10."
+   },
+   {
+    "name": "historique-case-rayon",
+    "value": "6px",
+    "usage": "Rayon d'une case.",
+    "origine": "design/historique/index.html, .tile ; contrat 0.5 §10."
+   },
+   {
+    "name": "historique-ecart-etroit",
+    "value": "8px",
+    "usage": "Fenêtre étroite : écart entre les cases.",
+    "origine": "design/historique/index.html, .desk.n .grid."
+   },
+   {
+    "name": "historique-marge-etroite",
+    "value": "8px",
+    "usage": "Fenêtre étroite : marge de la grille.",
+    "origine": "design/historique/index.html, .desk.n .grid."
+   },
+   {
+    "name": "historique-barre-hauteur",
+    "value": "32px",
+    "usage": "Barre du haut de la fenêtre.",
+    "origine": "design/historique/index.html, .atb."
+   },
+   {
+    "name": "historique-barre-marge",
+    "value": "12px",
+    "usage": "Marge gauche du titre.",
+    "origine": "design/historique/index.html, .atb (padding-left)."
+   },
+   {
+    "name": "historique-titre-taille",
+    "value": "12px",
+    "usage": "Titre de la barre.",
+    "origine": "design/historique/index.html, .atb (font-size)."
+   },
+   {
+    "name": "historique-legende-largeur",
+    "value": "44px",
+    "usage": "Boutons Réduire et Fermer.",
+    "origine": "design/historique/index.html, .capb button."
+   },
+   {
+    "name": "historique-legende-picto",
+    "value": "10px",
+    "usage": "Pictogrammes Réduire et Fermer.",
+    "origine": "design/historique/index.html, .capb svg."
+   },
+   {
+    "name": "historique-plus-largeur",
+    "value": "32px",
+    "usage": "Bouton « Plus d'options ».",
+    "origine": "design/historique/index.html, #hmore ; contrat 0.5 §2.2."
+   },
+   {
+    "name": "historique-plus-hauteur",
+    "value": "28px",
+    "usage": "Bouton « Plus d'options ».",
+    "origine": "design/historique/index.html, #hmore ; contrat 0.5 §2.2."
+   },
+   {
+    "name": "historique-plus-haut",
+    "value": "2px",
+    "usage": "Bouton « Plus d'options » : décalage du haut.",
+    "origine": "design/historique/index.html, #hmore (margin-top)."
+   },
+   {
+    "name": "historique-picto",
+    "value": "16px",
+    "usage": "Pictogrammes.",
+    "origine": "design/historique/index.html, .ico."
+   },
+   {
+    "name": "historique-vide-picto",
+    "value": "48px",
+    "usage": "Pictogramme « Aucune capture ».",
+    "origine": "design/historique/index.html, .empty svg."
+   },
+   {
+    "name": "historique-age-taille",
+    "value": "11px",
+    "usage": "Pastille d'âge : taille du texte.",
+    "origine": "design/historique/index.html, .ago."
+   },
+   {
+    "name": "historique-age-interligne",
+    "value": "16px",
+    "usage": "Pastille d'âge : interligne.",
+    "origine": "design/historique/index.html, .ago."
+   },
+   {
+    "name": "historique-age-place",
+    "value": "6px",
+    "usage": "Pastille d'âge : écart au coin.",
+    "origine": "design/historique/index.html, .ago."
+   },
+   {
+    "name": "historique-actions-bas",
+    "value": "6px",
+    "usage": "Pilule d'actions : écart au bas de la case.",
+    "origine": "design/historique/index.html, .qa."
+   },
+   {
+    "name": "historique-bouton-case",
+    "value": "24px",
+    "usage": "Boutons ronds de la pilule d'actions.",
+    "origine": "design/historique/index.html, .qa .ib."
+   },
+   {
+    "name": "historique-bouton-picto",
+    "value": "15px",
+    "usage": "Pictogrammes de la pilule d'actions.",
+    "origine": "design/historique/index.html, .qa .ib .ico."
+   },
+   {
+    "name": "historique-menu-largeur",
+    "value": "200px",
+    "usage": "Menu « Plus d'options ».",
+    "origine": "design/historique/index.html, #hmenu."
+   },
+   {
+    "name": "historique-confirmation-largeur",
+    "value": "220px",
+    "usage": "Confirmation « Tout effacer ? ».",
+    "origine": "design/historique/index.html, #hconfirm."
+   },
+   {
+    "name": "historique-menu-droite",
+    "value": "52px",
+    "usage": "Menu et confirmation : écart au bord droit.",
+    "origine": "design/historique/index.html, #hmenu."
+   },
+   {
+    "name": "historique-menu-haut",
+    "value": "34px",
+    "usage": "Menu et confirmation : écart au haut.",
+    "origine": "design/historique/index.html, #hmenu."
+   },
+   {
+    "name": "historique-menu-element",
+    "value": "32px",
+    "usage": "Ligne du menu.",
+    "origine": "design/historique/index.html, .mi."
+   },
+   {
+    "name": "historique-bouton-hauteur",
+    "value": "30px",
+    "usage": "Boutons de la confirmation.",
+    "origine": "design/historique/index.html, .btn."
+   },
+   {
+    "name": "historique-pilule-haut",
+    "value": "44px",
+    "usage": "Pilule de la page (« Supprimée », erreurs) : écart au haut de la fenêtre (le design la pose à 64 px du haut du bureau, sous la barre de capture absente ici).",
+    "origine": "design/historique/index.html, .msg ; écart U2 du contrat 0.5."
+   },
+   {
+    "name": "historique-pilule-pastille",
+    "value": "20px",
+    "usage": "Pastille de la pilule.",
+    "origine": "design/historique/index.html, .msg .ic."
+   },
+   {
+    "name": "historique-pilule-taille",
+    "value": "13px",
+    "usage": "Texte de la pilule.",
+    "origine": "design/historique/index.html, .msg."
+   },
+   {
+    "name": "historique-pilule-interligne",
+    "value": "18px",
+    "usage": "Interligne de la pilule.",
+    "origine": "design/historique/index.html, .msg."
+   },
+   {
+    "name": "historique-lisere",
+    "value": "2px",
+    "usage": "Liseré vert de Ctrl + C.",
+    "origine": "design/historique/index.html, .tile.flashok::after."
+   },
+   {
+    "name": "historique-glisser-seuil",
+    "value": "4px",
+    "usage": "Seuil du glisser d'une case (écart U3 : 4 px comme la vignette et l'éditeur ; design : 6).",
+    "origine": "design/historique/index.html, startDrag ; contrat 0.5 U3."
+   },
+   {
+    "name": "historique-ouverture-echelle",
+    "value": "0.97",
+    "usage": "Ouverture : échelle de départ du contenu.",
+    "origine": "design/historique/index.html, @keyframes winIn."
+   },
+   {
+    "name": "historique-sortie-echelle",
+    "value": "0.9",
+    "usage": "Case supprimée : échelle d'arrivée.",
+    "origine": "design/historique/index.html, @keyframes out."
+   },
+   {
+    "name": "historique-entree-echelle",
+    "value": "0.92",
+    "usage": "Case nouvelle : échelle de départ.",
+    "origine": "design/historique/index.html, render (animate scale(.92))."
+   },
+   {
+    "name": "historique-pop-echelle",
+    "value": "0.4",
+    "usage": "Coche : échelle de départ.",
+    "origine": "design/historique/index.html, @keyframes pop."
+   },
+   {
+    "name": "texte-survol",
+    "value": "14%",
+    "usage": "Mot reconnu survolé : part d'accent.",
+    "origine": "design/historique/index.html, onglet « Copier le texte » ; contrat 0.5 §10."
+   },
+   {
+    "name": "texte-choix",
+    "value": "30%",
+    "usage": "Mot reconnu choisi : part d'accent.",
+    "origine": "design/historique/index.html, onglet « Copier le texte » ; contrat 0.5 §10."
+   },
+   {
+    "name": "texte-teinte",
+    "value": "10%",
+    "usage": "Balayage : teinte d'accent qui s'efface.",
+    "origine": "design/historique/index.html, onglet « Copier le texte » ; contrat 0.5 §10."
+   },
+   {
+    "name": "texte-teinte-editeur",
+    "value": "6%",
+    "usage": "Balayage de l'image dans l'éditeur : teinte d'accent qui s'efface.",
+    "origine": "design/historique/index.html, .ov.ed .zone.scan::before."
+   },
+   {
+    "name": "historique-focus",
+    "value": "2px",
+    "usage": "Contour de focus.",
+    "origine": "design/historique/index.html, :focus-visible."
+   },
+   {
+    "name": "historique-focus-ecart",
+    "value": "1px",
+    "usage": "Écart du contour de focus.",
+    "origine": "design/historique/index.html, :focus-visible."
+   },
+   {
+    "name": "historique-trait",
+    "value": "1px",
+    "usage": "Traits (bords des cases, du corps, des menus).",
+    "origine": "design/historique/index.html, .tile, .wbody."
+   },
+   {
+    "name": "historique-barre-ecart",
+    "value": "4px",
+    "usage": "Écart entre les éléments de la barre du haut.",
+    "origine": "design/historique/index.html, .atb (gap)."
+   },
+   {
+    "name": "historique-age-marge-v",
+    "value": "1px",
+    "usage": "Pastille d'âge : marge verticale.",
+    "origine": "design/historique/index.html, .ago."
+   },
+   {
+    "name": "historique-age-marge-h",
+    "value": "6px",
+    "usage": "Pastille d'âge : marge horizontale.",
+    "origine": "design/historique/index.html, .ago."
+   },
+   {
+    "name": "historique-age-decalage",
+    "value": "2px",
+    "usage": "Pastille d'âge : montée à l'apparition.",
+    "origine": "design/historique/index.html, .ago."
+   },
+   {
+    "name": "historique-actions-decalage",
+    "value": "3px",
+    "usage": "Pilule d'actions : montée à l'apparition.",
+    "origine": "design/historique/index.html, .qa."
+   },
+   {
+    "name": "historique-actions-marge",
+    "value": "2px",
+    "usage": "Pilule d'actions : marge.",
+    "origine": "design/historique/index.html, .qa."
+   },
+   {
+    "name": "historique-actions-ecart",
+    "value": "1px",
+    "usage": "Pilule d'actions : écart entre les boutons.",
+    "origine": "design/historique/index.html, .qa."
+   },
+   {
+    "name": "historique-actions-flou",
+    "value": "20px",
+    "usage": "Pilule d'actions : flou du fond.",
+    "origine": "design/historique/index.html, .qa."
+   },
+   {
+    "name": "historique-menu-flou",
+    "value": "30px",
+    "usage": "Menu : flou du fond.",
+    "origine": "design/historique/index.html, .menu."
+   },
+   {
+    "name": "historique-menu-decalage",
+    "value": "6px",
+    "usage": "Menu : montée à l'ouverture.",
+    "origine": "design/historique/index.html, @keyframes menuIn."
+   },
+   {
+    "name": "historique-menu-marge",
+    "value": "4px",
+    "usage": "Menu : marge.",
+    "origine": "design/historique/index.html, .menu."
+   },
+   {
+    "name": "historique-menu-element-ecart",
+    "value": "12px",
+    "usage": "Ligne du menu : écart entre picto et texte.",
+    "origine": "design/historique/index.html, .mi."
+   },
+   {
+    "name": "historique-menu-element-marge",
+    "value": "10px",
+    "usage": "Ligne du menu : marge horizontale.",
+    "origine": "design/historique/index.html, .mi."
+   },
+   {
+    "name": "historique-confirmation-marge",
+    "value": "10px",
+    "usage": "Confirmation : marge.",
+    "origine": "design/historique/index.html, .confirm."
+   },
+   {
+    "name": "historique-confirmation-marge-bas",
+    "value": "6px",
+    "usage": "Confirmation : marge du bas.",
+    "origine": "design/historique/index.html, .confirm."
+   },
+   {
+    "name": "historique-confirmation-ecart",
+    "value": "10px",
+    "usage": "Confirmation : écart entre titre et boutons.",
+    "origine": "design/historique/index.html, .confirm."
+   },
+   {
+    "name": "historique-boutons-ecart",
+    "value": "8px",
+    "usage": "Confirmation : écart entre les boutons.",
+    "origine": "design/historique/index.html, .confirm div."
+   },
+   {
+    "name": "historique-bouton-taille",
+    "value": "13px",
+    "usage": "Boutons de la confirmation : taille du texte.",
+    "origine": "design/historique/index.html, .btn."
+   },
+   {
+    "name": "historique-bouton-interligne",
+    "value": "20px",
+    "usage": "Boutons de la confirmation : interligne.",
+    "origine": "design/historique/index.html, .btn."
+   },
+   {
+    "name": "historique-bouton-marge",
+    "value": "12px",
+    "usage": "Boutons de la confirmation : marge horizontale.",
+    "origine": "design/historique/index.html, .btn."
+   },
+   {
+    "name": "historique-pilule-marge-v",
+    "value": "6px",
+    "usage": "Pilule : marge verticale.",
+    "origine": "design/historique/index.html, .msg."
+   },
+   {
+    "name": "historique-pilule-marge-h",
+    "value": "8px",
+    "usage": "Pilule : marge horizontale.",
+    "origine": "design/historique/index.html, .msg."
+   },
+   {
+    "name": "historique-pilule-ecart",
+    "value": "10px",
+    "usage": "Pilule : écart entre pastille, texte et action.",
+    "origine": "design/historique/index.html, .msg."
+   },
+   {
+    "name": "historique-pilule-bord",
+    "value": "16px",
+    "usage": "Pilule : place laissée aux bords de la fenêtre.",
+    "origine": "design/historique/index.html, .msg (max-width)."
+   },
+   {
+    "name": "historique-pilule-montee",
+    "value": "10px",
+    "usage": "Pilule : montée à l'apparition.",
+    "origine": "design/historique/index.html, .msg."
+   },
+   {
+    "name": "historique-pilule-coche",
+    "value": "12px",
+    "usage": "Pilule : picto de la pastille.",
+    "origine": "design/historique/index.html, .msg .ic svg."
+   },
+   {
+    "name": "historique-pilule-action-v",
+    "value": "3px",
+    "usage": "Pilule : marge verticale de l'action.",
+    "origine": "design/historique/index.html, .msg .act."
+   },
+   {
+    "name": "historique-pilule-action-h",
+    "value": "8px",
+    "usage": "Pilule : marge horizontale de l'action.",
+    "origine": "design/historique/index.html, .msg .act."
+   },
+   {
+    "name": "historique-pilule-texte-marge",
+    "value": "4px",
+    "usage": "Pilule : marge après le texte.",
+    "origine": "design/historique/index.html, .msg b."
    }
   ]
  },

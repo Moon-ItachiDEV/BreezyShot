@@ -1,0 +1,21 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "historique",
+  "description": "Droits de la page de l'historique : écouter ses événements, appeler ses huit commandes, déplacer la fenêtre sans cadre, l'agrandir ou la restaurer par data-tauri-drag-region (start_dragging, internal_toggle_maximize) et la réduire, rien d'autre (ni fichiers, ni dialogues, ni shell).",
+  "windows": ["historique"],
+  "permissions": [
+    "core:event:allow-listen",
+    "core:event:allow-unlisten",
+    "core:window:allow-start-dragging",
+    "core:window:allow-internal-toggle-maximize",
+    "core:window:allow-minimize",
+    "allow-historique-pret",
+    "allow-historique-apercu",
+    "allow-historique-action",
+    "allow-historique-annuler",
+    "allow-historique-tout-effacer",
+    "allow-historique-glisser",
+    "allow-historique-affiche",
+    "allow-historique-fermer"
+  ]
+}

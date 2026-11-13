@@ -158,10 +158,19 @@ pub fn decider(capture: Option<Vue<'_>>, arrivee: Arrivee<'_>) -> Geste {
     }
 }
 
+/// `zone texte <x>,<y> <l>x<h>` : la zone lue par Copier le texte.
+pub fn ligne_zone_texte(zone: Rect) -> String {
+    format!(
+        "zone texte {},{} {}x{}",
+        zone.x, zone.y, zone.largeur, zone.hauteur
+    )
+}
+
 /// Vrai si le signal de choix (`Zone` ou `Fenetre`) est celui du mode montré.
 fn signal_du_mode(signal: &SignalSelection, mode: ModeSelection) -> bool {
     match signal {
-        SignalSelection::Zone { .. } => mode == ModeSelection::Zone,
+        // Copier le texte trace une zone comme le mode zone.
+        SignalSelection::Zone { .. } => mode == ModeSelection::Zone || mode == ModeSelection::Texte,
         SignalSelection::Fenetre { .. } => mode == ModeSelection::Fenetre,
         _ => true,
     }
@@ -269,6 +278,7 @@ pub fn message_capture_impossible() -> Message {
         titre: TITRE_CAPTURE_IMPOSSIBLE.into(),
         detail: String::new(),
         actions: Vec::new(),
+        duree_ms: None,
     }
 }
 
@@ -280,12 +290,14 @@ pub fn message_annonce(annonce: &Annonce) -> Message {
             titre: titre.clone(),
             detail: String::new(),
             actions: Vec::new(),
+            duree_ms: None,
         },
         Annonce::Erreur { titre, cause } => Message {
             genre: Genre::Erreur,
             titre: titre.clone(),
             detail: cause.clone(),
             actions: Vec::new(),
+            duree_ms: None,
         },
     }
 }
@@ -579,6 +591,47 @@ mod tests {
             mode: ModeSelection::Zone,
             fenetres: &[],
         }
+    }
+
+    #[test]
+    fn mode_texte_trace_une_zone() {
+        let e = ecrans();
+        let texte = Vue {
+            mode: ModeSelection::Texte,
+            ..vue(Some(1), &e)
+        };
+        let zone = SignalSelection::Zone {
+            id: 1,
+            depart: (10, 20),
+            arrivee: (209, 69),
+        };
+        assert_eq!(
+            decider(Some(texte), Arrivee::Selection(&zone)),
+            Geste::Decouper(r(10, 20, 200, 50))
+        );
+        // Trop petite : annulée sans message, comme une capture.
+        let petite = SignalSelection::Zone {
+            id: 1,
+            depart: (10, 20),
+            arrivee: (10, 20),
+        };
+        assert_eq!(
+            decider(Some(texte), Arrivee::Selection(&petite)),
+            abandon(Declencheur::SelectionAnnulee, None)
+        );
+        let clic = SignalSelection::Fenetre {
+            id: 1,
+            indice: 0,
+            point: (5, 5),
+        };
+        assert_eq!(
+            decider(Some(texte), Arrivee::Selection(&clic)),
+            abandon(Declencheur::SelectionImpossible, Some(Probleme::Selection))
+        );
+        assert_eq!(
+            ligne_zone_texte(r(-10, 20, 200, 50)),
+            "zone texte -10,20 200x50"
+        );
     }
 
     fn abandon(declencheur: Declencheur, probleme: Option<Probleme>) -> Geste {

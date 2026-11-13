@@ -2,7 +2,10 @@
 //!
 //! - Règle 1 : seule l'Application connaît les autres modules. `raccourcis`, `capture`,
 //!   `sortie`, `reglages` et `fenetres` ne s'importent pas entre eux ni `application` ;
-//!   tous peuvent utiliser `systeme`, qui ne connaît aucun module.
+//!   tous peuvent utiliser `systeme`, qui ne connaît aucun module. `texte` (0.5) n'utilise
+//!   que `systeme` ; `droits` n'utilise rien, et `droits::ouverte` n'est appelé que depuis
+//!   `application` (avenant 0.5, §2.2). `licence` (avenant « Licence ») n'utilise rien, et
+//!   `licence::verifier` n'est appelé que depuis `application`.
 //!   `crate as …` et `super::super` sont interdits partout (ils contourneraient le contrôle).
 //! - Règle 3 : hors de `systeme/`, aucun `cfg` (attribut, `cfg_attr` ou
 //!   `cfg!`) qui parle du système, et aucune crate `windows`, sous quelque nom que ce soit.
@@ -22,6 +25,9 @@ const MODULES: &[&str] = &[
     "fenetres",
     "installation",
     "systeme",
+    "texte",
+    "droits",
+    "licence",
 ];
 
 /// Dossiers où le code propre à un système est permis.
@@ -64,6 +70,29 @@ impl Controle<'_> {
     }
 
     fn verifier_chemin(&mut self, segments: &[String]) {
+        // `droits::ouverte` : l'Application seulement (et `droits` lui-même).
+        let ouverte = segments
+            .windows(2)
+            .any(|w| w[0] == "droits" && w[1] == "ouverte");
+        if ouverte && !matches!(self.module, Some("application" | "droits")) {
+            let module = self.module.unwrap_or("<racine>");
+            self.faute(format!("droits::ouverte appele depuis {module}"));
+        }
+        let verifier = segments
+            .windows(2)
+            .any(|w| w[0] == "licence" && w[1] == "verifier");
+        if verifier && !matches!(self.module, Some("application" | "licence")) {
+            let module = self.module.unwrap_or("<racine>");
+            self.faute(format!("licence::verifier appele depuis {module}"));
+        }
+        let pur = matches!(self.module, Some("droits" | "licence"));
+        if pur && segments.len() >= 2 && segments[0] == "crate" {
+            let module = self.module.unwrap_or_default();
+            self.faute(format!(
+                "le module {module} utilise {}",
+                segments.join("::")
+            ));
+        }
         match segments {
             [premier, second, ..] if premier == "crate" => {
                 let second = second.clone();
@@ -360,6 +389,16 @@ fn le_controle_repere_les_pieges() {
         (Some("capture"), "#[cfg(target_os = \"macos\")] fn f(){}"),
         (Some("capture"), "fn f(){ if cfg!(windows) {} }"),
         (Some("capture"), "use ::windows::Win32::Foundation::HWND;"),
+        (Some("texte"), "use crate::sortie::copier_texte;"),
+        (Some("texte"), "fn f(){ crate::application::lancer(); }"),
+        (Some("systeme"), "use crate::texte::lire;"),
+        (Some("droits"), "use crate::systeme;"),
+        (Some("sortie"), "fn f(){ crate::droits::ouverte(x); }"),
+        (Some("fenetres"), "use crate::droits::{ouverte, Fonction};"),
+        (None, "fn f(){ breezyshot::droits::ouverte(x); }"),
+        (Some("sortie"), "fn f(){ crate::licence::verifier(t); }"),
+        (Some("reglages"), "use crate::licence::verifier;"),
+        (Some("licence"), "use crate::systeme;"),
     ];
     for (module, source) in fautes {
         assert!(
@@ -385,6 +424,15 @@ fn le_controle_repere_les_pieges() {
             "#![cfg_attr(not(debug_assertions), windows_subsystem = \"windows\")]\nfn main(){ breezyshot::lancer(); }",
         ),
         (Some("reglages"), "// crate::application\nfn f(){ let _ = \"crate::application\"; }"),
+        (Some("texte"), "use crate::systeme::texte::{self, Reconnu};"),
+        (
+            Some("application"),
+            "use crate::droits::{self, Fonction};\n\
+             fn f(){ droits::ouverte(Fonction::Texte, true); }",
+        ),
+        (Some("droits"), "fn f(){ ouverte(Fonction::Texte, true); }"),
+        (Some("application"), "fn f(){ let _ = crate::licence::verifier(t); }"),
+        (Some("licence"), "fn f(){ let _ = verifier(t); }"),
     ];
     for (module, source) in permis {
         let f = controler(*module, source);

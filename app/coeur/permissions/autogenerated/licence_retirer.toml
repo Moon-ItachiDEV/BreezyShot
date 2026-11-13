@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-licence-retirer"
+description = "Enables the licence_retirer command without any pre-configured scope."
+commands.allow = ["licence_retirer"]
+
+[[permission]]
+identifier = "deny-licence-retirer"
+description = "Denies the licence_retirer command without any pre-configured scope."
+commands.deny = ["licence_retirer"]

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-historique-annuler"
+description = "Enables the historique_annuler command without any pre-configured scope."
+commands.allow = ["historique_annuler"]
+
+[[permission]]
+identifier = "deny-historique-annuler"
+description = "Denies the historique_annuler command without any pre-configured scope."
+commands.deny = ["historique_annuler"]

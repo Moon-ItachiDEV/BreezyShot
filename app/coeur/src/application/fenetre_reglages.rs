@@ -18,8 +18,8 @@ use super::page_reglages::{
     ALERTE_NON_ENREGISTRES,
 };
 use super::{
-    entrees_menu, icone, plateforme_reglages, zone, Application, ACTIONS_CONSTRUITES, VERSION,
-    VIGNETTE_CONSTRUITE,
+    actions_en_vigueur, plateforme_reglages, pro, refaire_menu as refaire_menu_actuel, zone,
+    Application, VERSION, VIGNETTE_CONSTRUITE,
 };
 use crate::fenetres::{reglages as fenetre, theme};
 use crate::raccourcis::{self, Raison};
@@ -141,7 +141,7 @@ fn relire(app: &AppHandle) -> Reglages {
     if let Ok(mut d) = etat(app).derniere_lecture.lock() {
         *d = Some(relu.clone());
     }
-    for action in ACTIONS_CONSTRUITES {
+    for action in actions_en_vigueur(app) {
         let nouveaux = relu.raccourcis.candidats(action).unwrap_or_default();
         if avant.raccourcis.candidats(action).unwrap_or_default() != nouveaux {
             changer_raccourci(app, action, nouveaux);
@@ -206,12 +206,13 @@ fn vue(app: &AppHandle) -> VueReglages {
     let contexte = Contexte {
         vignette_construite: VIGNETTE_CONSTRUITE,
         capture_disponible: gel::disponible(),
-        actions: &ACTIONS_CONSTRUITES,
+        actions: &actions_en_vigueur(app),
         bilan: &bilan,
         defaut: &defaut,
         refus_raccourcis: &refus,
         dossier_affiche,
         demarrage: systeme::demarrage_avec_systeme(None).unwrap_or(EtatDemarrage::Indisponible),
+        licence_active: pro(app),
         version: VERSION,
         alerte,
         maintenant: chrono::Local::now(),
@@ -222,6 +223,14 @@ fn vue(app: &AppHandle) -> VueReglages {
             .unwrap_or(false),
     };
     page::vue(&r, &contexte)
+}
+
+/// Envoie la vue à la page des Réglages si elle est ouverte (`suivre_les_actions` : les
+/// lignes de Réglages › Raccourcis suivent la licence et les langues de lecture).
+pub(super) fn envoyer_vue(app: &AppHandle) {
+    if fenetre::fenetre(app).is_some() {
+        fenetre::emettre_etat(app, vue(app));
+    }
 }
 
 fn reponse(app: &AppHandle, refus: Option<Refus>) -> Reponse {
@@ -237,13 +246,7 @@ fn refuser(app: &AppHandle, refus: Refus) -> Reponse {
 }
 
 fn refaire_menu(app: &AppHandle) {
-    let Some(r) = reservations(app) else {
-        return;
-    };
-    let bilan = r.bilan();
-    if let Err(e) = icone::changer_menu(app, &entrees_menu(|m| bilan.libelle_menu(m.nom()))) {
-        log::warn!("menu non refait: {e}");
-    }
+    refaire_menu_actuel(app);
 }
 
 fn noter_refus(app: &AppHandle, action: &str, texte: Option<String>) {
@@ -336,8 +339,8 @@ fn finir_saisie(app: &AppHandle, ligne: &str) {
     }
 }
 
-fn action_connue(action: &str) -> bool {
-    ACTIONS_CONSTRUITES.contains(&action)
+fn action_connue(app: &AppHandle, action: &str) -> bool {
+    actions_en_vigueur(app).contains(&action)
 }
 
 // Commandes de la page (fenêtre `reglages` seulement, capabilities/reglages.json). Sans
@@ -457,7 +460,7 @@ pub async fn reglages_parcourir(app: AppHandle) -> Reponse {
 /// fin d'une saisie de raccourci.
 #[tauri::command]
 pub fn reglages_saisie(app: AppHandle, action: String, active: bool) -> Reponse {
-    if !action_connue(&action) {
+    if !page::saisie_permise(active, action_connue(&app, &action)) {
         return refuser(&app, Refus::nouveau("raccourci", "", "action_inconnue"));
     }
     if !active {
@@ -494,7 +497,7 @@ pub fn reglages_saisie(app: AppHandle, action: String, active: bool) -> Reponse 
 /// Une touche tapée pendant la saisie : le nouveau raccourci de l'action.
 #[tauri::command]
 pub fn reglages_raccourci(app: AppHandle, action: String, saisie: Saisie) -> Reponse {
-    if !action_connue(&action) {
+    if !action_connue(&app, &action) {
         return refuser(&app, Refus::nouveau("raccourci", "", "action_inconnue"));
     }
     finir_saisie(&app, "raccourcis repris");
@@ -523,7 +526,7 @@ pub fn reglages_raccourci(app: AppHandle, action: String, saisie: Saisie) -> Rep
 /// « Rétablir » : la liste par défaut de l'action (avec son repli).
 #[tauri::command]
 pub fn reglages_retablir(app: AppHandle, action: String) -> Reponse {
-    if !action_connue(&action) {
+    if !action_connue(&app, &action) {
         return refuser(&app, Refus::nouveau("raccourci", "", "action_inconnue"));
     }
     finir_saisie(&app, "raccourcis repris");

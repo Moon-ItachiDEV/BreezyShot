@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 use chrono::{DateTime, Local, Utc};
 
 use super::fichier::{ecrire_sans_ecraser, existe};
+use super::historique::nettoyer_apercus;
 use super::nom::nom_affiche;
 
 /// Nombre de captures gardees dans « Recents ».
@@ -102,8 +103,8 @@ pub(super) fn a_supprimer_apres_ecriture(
     recents_a_supprimer(&autres, garder.saturating_sub(1))
 }
 
-/// Ecrit la capture dans « Recents » puis fait le menage.
-/// Un echec du menage n'est pas un echec de l'ecriture.
+/// Ecrit la capture dans « Recents » puis fait le menage (captures au-dela de 50 et leurs
+/// apercus, apercus orphelins). Un echec du menage n'est pas un echec de l'ecriture.
 pub(super) fn ecrire(
     dossier: &Path,
     maintenant: DateTime<Local>,
@@ -129,7 +130,10 @@ fn nettoyer(dossier: &Path, neuf: &Path) {
         .filter(|e| e.file_type().map(|t| t.is_file()).unwrap_or(false))
         .filter_map(|e| e.file_name().into_string().ok())
         .collect();
-    for nom in a_supprimer_apres_ecriture(&noms, nom_neuf, RECENTS_GARDES) {
-        let _ = fs::remove_file(dossier.join(nom));
-    }
+    let partis: Vec<String> = a_supprimer_apres_ecriture(&noms, nom_neuf, RECENTS_GARDES)
+        .into_iter()
+        .filter(|nom| fs::remove_file(dossier.join(nom)).is_ok())
+        .collect();
+    // Les apercus des captures parties, et ceux qui n'ont plus de capture (contrat 0.5).
+    nettoyer_apercus(dossier, &partis);
 }

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-editeur-copier-texte"
+description = "Enables the editeur_copier_texte command without any pre-configured scope."
+commands.allow = ["editeur_copier_texte"]
+
+[[permission]]
+identifier = "deny-editeur-copier-texte"
+description = "Denies the editeur_copier_texte command without any pre-configured scope."
+commands.deny = ["editeur_copier_texte"]

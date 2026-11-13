@@ -16,6 +16,7 @@ use super::zone::DELAI_SORTIE;
 use crate::fenetres::{Ecran, Genre, Message, Rect};
 use crate::sortie::{Bilan, Etape, EtapeFichier};
 use crate::systeme::gel::Pixels;
+use crate::texte::Lu;
 
 /// Côté maximal d'une capture annotable, pixels (R11).
 pub const COTE_MAX: u32 = 16_384;
@@ -71,6 +72,10 @@ pub struct EtatEditeur {
     pub sans_reponse: bool,
     /// La page a dit avoir dessiné l'image du document courant (`editeur_affiche`).
     pub affichee: bool,
+    /// La dernière lecture du bouton « Texte » (son numéro d'export et ce qui a été lu),
+    /// remplacée par la suivante, oubliée avec le document. Le texte ne quitte le cœur que
+    /// par `editeur_copier_texte`.
+    pub texte: Option<(u64, Lu)>,
 }
 
 /// Un export parti dans le fil `editeur-sortie`.
@@ -95,15 +100,18 @@ pub enum But {
     EnregistrerSous,
     Glisser,
     CopierFermer,
+    /// Lire le texte de l'image composée (0.5, R7) : rien n'est exporté.
+    Texte,
 }
 
 impl But {
-    pub const TOUS: [But; 5] = [
+    pub const TOUS: [But; 6] = [
         But::Copier,
         But::Enregistrer,
         But::EnregistrerSous,
         But::Glisser,
         But::CopierFermer,
+        But::Texte,
     ];
 
     /// Le nom de l'en-tête, du journal et de `editeur:resultat`.
@@ -114,6 +122,7 @@ impl But {
             But::EnregistrerSous => "enregistrer_sous",
             But::Glisser => "glisser",
             But::CopierFermer => "copier_fermer",
+            But::Texte => "texte",
         }
     }
 
@@ -229,6 +238,8 @@ pub struct ChargeEditeur {
     pub transparence: bool,
     pub reduites: bool,
     pub preferences: Option<String>,
+    /// Le bouton « Texte » est montré (Copier le texte est une action construite, R10).
+    pub texte: bool,
 }
 
 /// Pourquoi le cœur demande à la page de fermer (`editeur:fermer_demande`).
@@ -565,7 +576,26 @@ pub fn sortie_pour(etat: &EtatEditeur, but: But, version: u64) -> Sortie {
             enregistrer: false,
             ranger_recents,
         },
+        // Lire n'exporte pas : rien n'est copié, écrit ni rangé.
+        But::Texte => Sortie::Faire {
+            copier: false,
+            enregistrer: false,
+            ranger_recents: false,
+        },
     }
+}
+
+/// Le résultat de la lecture `numero` (bouton « Texte ») arrive : vrai, et l'export en
+/// cours oublié, si c'est elle qu'on attend. `exportee` n'est jamais touchée (lire
+/// n'exporte pas : le document reste « modifié »).
+pub fn prendre_lecture(etat: &mut EtatEditeur, numero: u64) -> bool {
+    let attendue = etat
+        .export
+        .is_some_and(|x| x.numero == numero && x.but == But::Texte);
+    if attendue {
+        etat.export = None;
+    }
+    attendue
 }
 
 /// Que faire d'un Annoter selon l'éditeur ouvert : ouvrir s'il n'y en a pas ; remplacer
@@ -602,7 +632,7 @@ pub fn message_echec(but: But, bilan: &Bilan) -> Option<&'static str> {
             matches!(bilan.enregistrement, EtapeFichier::Echec { .. })
                 .then_some(TITRE_ENREGISTREMENT_IMPOSSIBLE)
         }
-        But::Glisser => None,
+        But::Glisser | But::Texte => None,
     }
 }
 
@@ -616,7 +646,7 @@ pub fn message_sans_bilan(but: But) -> Option<&'static str> {
     match but {
         But::Copier | But::CopierFermer => Some(TITRE_COPIE_IMPOSSIBLE),
         But::Enregistrer | But::EnregistrerSous => Some(TITRE_ENREGISTREMENT_IMPOSSIBLE),
-        But::Glisser => None,
+        But::Glisser | But::Texte => None,
     }
 }
 
@@ -629,6 +659,7 @@ pub fn reussie(but: But, bilan: &Bilan) -> bool {
             matches!(bilan.enregistrement, EtapeFichier::Fait(_))
         }
         But::Glisser => !matches!(bilan.recent, Some(Err(_))),
+        But::Texte => false,
     }
 }
 
@@ -688,7 +719,12 @@ pub fn suite_export(ouvert: Option<&EtatEditeur>, fin: &FinExportEditeur) -> Sui
 }
 
 /// La charge de `editeur_pret` et de `editeur:charger`.
-pub fn charge(etat: &EtatEditeur, reduites: bool, preferences: Option<String>) -> ChargeEditeur {
+pub fn charge(
+    etat: &EtatEditeur,
+    reduites: bool,
+    preferences: Option<String>,
+    texte: bool,
+) -> ChargeEditeur {
     ChargeEditeur {
         id: etat.document.id,
         largeur: etat.document.pixels.largeur,
@@ -696,6 +732,7 @@ pub fn charge(etat: &EtatEditeur, reduites: bool, preferences: Option<String>) -
         transparence: etat.document.transparence,
         reduites,
         preferences,
+        texte,
     }
 }
 
@@ -715,6 +752,7 @@ pub fn message_impossible() -> Message {
         titre: TITRE_OUVERTURE_IMPOSSIBLE.into(),
         detail: String::new(),
         actions: Vec::new(),
+        duree_ms: None,
     }
 }
 
@@ -753,6 +791,7 @@ impl EtatEditeur {
             fermeture_demandee: None,
             sans_reponse: false,
             affichee: false,
+            texte: None,
         }
     }
 
@@ -1182,6 +1221,46 @@ mod tests {
         assert_eq!(export_perime(&mut e, t + Duration::from_secs(3600)), None);
         let r = resultat_sans_bilan(7, 4, But::Copier);
         assert_eq!((r.numero, r.etat), (4, "echec"));
+    }
+
+    #[test]
+    fn lire_le_texte_n_exporte_rien() {
+        assert_eq!(But::depuis_nom("texte"), Some(But::Texte));
+        let mut e = etat();
+        let rien = Sortie::Faire {
+            copier: false,
+            enregistrer: false,
+            ranger_recents: false,
+        };
+        assert_eq!(sortie_pour(&e, But::Texte, 1), rien);
+        let plan = plan_export(But::Texte, rien).expect("plan");
+        assert!(!plan.copier && !plan.enregistrer && !plan.ranger_recents && !plan.dialogue);
+        // Le vrai chemin : l'export noté par `accepter_export`, puis la lecture rendue.
+        e.exportee = Some(1);
+        let t = Instant::now();
+        let texte = EnTete {
+            but: But::Texte,
+            ..en_tete(40, 30)
+        };
+        assert_eq!(accepter_export(&e, &texte, 40 * 30 * 4, t), Ok(()));
+        let x = |numero, but| ExportEnCours {
+            numero,
+            but,
+            version: 3,
+            debut: t,
+            dialogue: false,
+        };
+        e.export = Some(x(5, But::Texte));
+        assert!(!prendre_lecture(&mut e, 4), "autre numero");
+        assert!(prendre_lecture(&mut e, 5));
+        assert_eq!(e.export, None);
+        assert!(!prendre_lecture(&mut e, 5), "une seule fois");
+        // Un export d'un autre but au même numéro n'est pas une lecture.
+        e.export = Some(x(6, But::Copier));
+        assert!(!prendre_lecture(&mut e, 6));
+        assert_eq!(e.export, Some(x(6, But::Copier)));
+        assert_eq!((e.exportee, e.enregistree, e.rangee), (Some(1), None, None));
+        assert_eq!(e.texte, None);
     }
 
     #[test]
@@ -1708,7 +1787,7 @@ mod tests {
     #[test]
     fn charge_et_preferences() {
         let e = etat();
-        let c = charge(&e, true, Some("{}".into()));
+        let c = charge(&e, true, Some("{}".into()), false);
         assert_eq!(
             (c.id, c.largeur, c.hauteur, c.transparence, c.reduites),
             (7, 40, 30, false, true)
@@ -1717,7 +1796,7 @@ mod tests {
             serde_json::to_string(&c).unwrap(),
             concat!(
                 r#"{"id":7,"largeur":40,"hauteur":30,"transparence":false,"#,
-                r#""reduites":true,"preferences":"{}"}"#
+                r#""reduites":true,"preferences":"{}","texte":false}"#
             )
         );
         let a = Some("a".to_string());
@@ -1865,8 +1944,9 @@ mod tests {
         assert!(m.actions.is_empty());
     }
 
-    /// L'éditeur n'est ni un état ni un déclencheur (§4.4, R4) : la table est celle de la
-    /// 0.4 « Confort », recopiée ici, et aucun déclencheur ne parle de l'éditeur.
+    /// L'éditeur n'est ni un état ni un déclencheur (§4.4, R4) : la table commence par
+    /// celle de la 0.4 « Confort », recopiée ici, et aucun déclencheur ne parle de
+    /// l'éditeur.
     #[test]
     fn editeur_hors_automate() {
         use Declencheur as D;
@@ -1929,7 +2009,16 @@ mod tests {
             (E::Decompte, D::DecompteFini(Mode::DerniereZone), E::Gel),
             (E::Decompte, D::DecompteAnnule, E::Repos),
         ];
-        assert_eq!(PASSAGES, confort);
+        // 0.5 : la table de la 0.4 en tête, puis les seules lignes de Copier le texte.
+        assert_eq!(&PASSAGES[..confort.len()], confort);
+        for (depart, d, arrivee) in &PASSAGES[confort.len()..] {
+            let texte = matches!(
+                d,
+                D::DemandeCapture(Mode::Texte) | D::PhotoPrise(Mode::Texte)
+            ) || *depart == E::Lecture
+                || *arrivee == E::Lecture;
+            assert!(texte, "{depart:?} {d:?}");
+        }
         // Tous les déclencheurs, sans exception (un nouveau ne compile pas sans être vu
         // ici) : aucun ne concerne l'éditeur.
         for (_, d, _) in PASSAGES {
@@ -1956,7 +2045,10 @@ mod tests {
                 | D::CaptureSupprimee
                 | D::DemandeDecompte(_)
                 | D::DecompteFini(_)
-                | D::DecompteAnnule => false,
+                | D::DecompteAnnule
+                | D::TexteChoisi
+                | D::TexteLu
+                | D::LectureImpossible => false,
             };
             assert!(!editeur);
         }

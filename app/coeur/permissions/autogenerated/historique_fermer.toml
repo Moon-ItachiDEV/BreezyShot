@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-historique-fermer"
+description = "Enables the historique_fermer command without any pre-configured scope."
+commands.allow = ["historique_fermer"]
+
+[[permission]]
+identifier = "deny-historique-fermer"
+description = "Denies the historique_fermer command without any pre-configured scope."
+commands.deny = ["historique_fermer"]

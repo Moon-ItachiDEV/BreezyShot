@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "reglages",
-  "description": "Droits de la page des Réglages : écouter ses événements et appeler ses sept commandes, rien d'autre (ni fichiers, ni dialogues, ni shell).",
+  "description": "Droits de la page des Réglages : écouter ses événements et appeler ses sept commandes et les trois de la licence, rien d'autre (ni fichiers, ni dialogues, ni shell).",
   "windows": ["reglages"],
   "permissions": [
     "core:event:allow-listen",
@@ -12,6 +12,9 @@
     "allow-reglages-parcourir",
     "allow-reglages-saisie",
     "allow-reglages-raccourci",
-    "allow-reglages-retablir"
+    "allow-reglages-retablir",
+    "allow-licence-etat",
+    "allow-licence-activer",
+    "allow-licence-retirer"
   ]
 }
