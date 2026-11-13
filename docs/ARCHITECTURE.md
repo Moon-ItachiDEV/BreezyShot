@@ -483,6 +483,11 @@ dans le dossier temporaire du système (`systeme::dossier_secours()`), sous le n
   « Quitter BreezyShot ». Pendant une capture défilante, le menu s'ouvre avec « Quitter
   BreezyShot » seul (`entrees_pendant_defilante`, journal `menu pendant la defilante:
   quitter seulement`), et `traiter` ignore de toute façon les autres entrées (§3.10).
+  Cette fenêtre-là est exclue des captures (`WDA_EXCLUDEFROMCAPTURE`, journal `menu exclu
+  des captures: oui|non`, `non (essai)` en essai capturable) : ouverte sur la zone, elle
+  entrerait dans une image. L'exclusion est retirée à la première ouverture hors défilante
+  (`menu exclusion des captures retiree: oui|non`), pour que le menu reste visible dans
+  les captures et les partages d'écran des autres outils.
   Icônes 16 px
   (« Curseurs » pour Réglages), raccourcis à droite en `text-2`, faux verre peint
   (`acrylic-solid`, `shadow-8`). À l'ouverture, le moulinet de l'icône fait un quart de

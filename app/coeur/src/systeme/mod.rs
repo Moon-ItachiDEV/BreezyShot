@@ -230,6 +230,12 @@ pub fn exclure_des_captures(fenetre: &tauri::WebviewWindow) -> bool {
     plateforme::exclure_des_captures(fenetre)
 }
 
+/// Retire l'exclusion des captures et dit si la fenêtre y est de nouveau visible (relu
+/// auprès du système). Hors Windows, rien n'est jamais exclu : `true`.
+pub fn inclure_dans_les_captures(fenetre: &tauri::WebviewWindow) -> bool {
+    plateforme::inclure_dans_les_captures(fenetre)
+}
+
 /// Cache la fenêtre sans passer par tao (Windows : `ShowWindow(SW_HIDE)`).
 pub fn cacher_sans_tao(fenetre: &tauri::WebviewWindow) -> Result<bool, String> {
     plateforme::cacher_sans_tao(fenetre)

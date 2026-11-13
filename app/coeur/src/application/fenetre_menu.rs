@@ -57,8 +57,10 @@ pub fn clic_icone(app: &AppHandle, rect: Rect) {
     if menu::vient_de_fermer() {
         return;
     }
-    let entrees = if geste_defilante::fenetres_bloquees(app) {
-        // Pendant une défilante, aucune entrée qui ouvrirait une fenêtre : Quitter seul.
+    let pendant_defilante = geste_defilante::fenetres_bloquees(app);
+    let entrees = if pendant_defilante {
+        // Pendant une défilante, aucune entrée qui ouvrirait une fenêtre : Quitter seul. Le
+        // menu est aussi exclu des captures : ouvert sur la zone, il entrerait dans une image.
         log::info!("menu pendant la defilante: quitter seulement");
         entrees_pendant_defilante()
     } else {
@@ -68,7 +70,7 @@ pub fn clic_icone(app: &AppHandle, rect: Rect) {
         };
         entrees
     };
-    if menu::ouvrir(app, Some(rect), lignes(&entrees)) {
+    if menu::ouvrir(app, Some(rect), lignes(&entrees), pendant_defilante) {
         icone::tourner(app);
     }
 }
