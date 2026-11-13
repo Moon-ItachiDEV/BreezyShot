@@ -478,9 +478,10 @@ const SANS_VIGNETTE = { ...VUE, lignes: ['copier', 'dossier', 'modele_nom', 'the
     ['fenetre', 'Fenêtre', 'Ctrl+Maj+3', true],
     ['derniere_zone', 'Refaire la dernière zone', 'Ctrl+Maj+4', true],
   ]);
+  // Dans l'ordre du menu de l'icône : Copier le texte, puis Historique.
   const six = JSON.stringify(JSON.parse(quatre).concat([
-    ['historique', 'Historique', 'Ctrl+Maj+H', true],
     ['texte', 'Copier le texte', 'Ctrl+Maj+T', true],
+    ['historique', 'Historique', 'Ctrl+Maj+H', true],
   ]));
   // Couleur d'erreur des champs des Réglages (jeton --danger), lue sur un témoin.
   const danger = (p) => p.evaluate(() => {
@@ -503,8 +504,8 @@ const SANS_VIGNETTE = { ...VUE, lignes: ['copier', 'dossier', 'modele_nom', 'the
     json(l));
     const ordre = await p.$$eval('[data-rubrique="general"] [data-reglage]',
       ls => ls.filter(e => !e.hidden).map(e => e.dataset.reglage));
-    verifier(json(ordre) === json(['version', 'theme', 'demarrage', 'licence']),
-      `11 ${theme} Général : logo et version, Thème, Lancer au démarrage, Licence`,
+    verifier(json(ordre) === json(['theme', 'demarrage', 'licence']),
+      `11 ${theme} Général : Thème, Lancer au démarrage, Licence (la version est dans le volet)`,
       json(ordre));
     const nom = await p.getByRole('textbox', { name: 'Licence' }).count();
     verifier(nom === 1, `11 ${theme} le champ s'appelle « Licence »`);
@@ -643,7 +644,7 @@ const SANS_VIGNETTE = { ...VUE, lignes: ['copier', 'dossier', 'modele_nom', 'the
       ...__vue, raccourcis: __vue.raccourcis.filter(r => r.action !== 'texte'),
     }));
     const cinq = await raccourcisMontres(p);
-    verifier(json(cinq) === json(JSON.parse(six).slice(0, 5)),
+    verifier(json(cinq) === json(JSON.parse(six).filter(r => r[0] !== 'texte')),
       '12 sans langue : cinq lignes, pas de « Copier le texte »', json(cinq));
     // La licence retirée pendant la saisie de « Historique » : la ligne part, la saisie est
     // rendue au cœur, qui reprend les raccourcis (fin de saisie jamais refusée).
@@ -680,11 +681,108 @@ const SANS_VIGNETTE = { ...VUE, lignes: ['copier', 'dossier', 'modele_nom', 'the
     await p.context().close();
   }
 
-  // Photos de la rubrique Capture à la taille de la fenêtre (680 × 512, échelle 2).
+  // 14. « Impr. écran ouvre BreezyShot » (0.5.3), en tête de Raccourcis : l'interrupteur
+  // suit la vue, un clic demande le changement au cœur, un refus du cœur est dit sur la
+  // ligne ; sans la ligne dans la vue (hors Windows), rien n'est montré.
+  {
+    const p = await page({ vue: REEL.vue });
+    await onglet(p, 'Raccourcis');
+    const inter = p.getByRole('switch', { name: 'Impr. écran ouvre BreezyShot' });
+    const avant = await inter.getAttribute('aria-checked');
+    const enTete = await p.evaluate(() => {
+      const l = document.querySelector('[data-reglage="impr_ecran"]');
+      const r = document.querySelector('[data-reglage="raccourci"]');
+      return !!l && !l.hidden && !!r && (l.compareDocumentPosition(r) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0;
+    });
+    await vider(p);
+    await p.evaluate(() => { window.__refus = { ligne: 'impr_ecran', texte: 'Windows garde la touche' }; });
+    await inter.click(); await p.waitForTimeout(50);
+    const a = await appels(p);
+    const refus = await p.$eval('[data-reglage="impr_ecran"] [data-refus]', e => e.hidden ? null : e.textContent);
+    verifier(avant === 'false' && enTete && json(a[0]) === json(['reglages_changer', { changement: { cle: 'impr_ecran', valeur: true } }])
+      && refus === 'Windows garde la touche',
+    '14 Impr. écran : éteinte, en tête de Raccourcis ; clic → impr_ecran oui ; refus dit sur la ligne', json([avant, enTete, a, refus]));
+    await p.evaluate((v) => __emettre('reglages:etat', { ...v, impr_ecran: true }), REEL.vue); await p.waitForTimeout(30);
+    const allumee = await inter.getAttribute('aria-checked');
+    await p.evaluate((v) => __emettre('reglages:etat', { ...v, lignes: v.lignes.filter(l => l !== 'impr_ecran') }), REEL.vue); await p.waitForTimeout(30);
+    const cachee = await p.$eval('[data-reglage="impr_ecran"]', e => e.hidden);
+    const carte = await p.$eval('[data-reglage="impr_ecran"]', e => getComputedStyle(e.closest('.carte')).display);
+    verifier(allumee === 'true' && cachee && carte === 'none', '14 Impr. écran : suit la vue ; hors Windows, ni ligne ni carte', json([allumee, cachee, carte]));
+    verifier(p.erreurs.length === 0, '14 aucune erreur de console', json(p.erreurs));
+    await p.context().close();
+  }
+
+  // 13. Piste B « Volet » (0.5.3), à la taille de la fenêtre (780 × 520, échelle 2) :
+  // volet à gauche (nom, Pro avec la licence, rubriques, version en bas), réglages en cartes
+  // à droite ; tout « Après la capture » tient sans défiler, Nom des fichiers déplié ;
+  // pictogrammes du menu de l'icône sur les raccourcis ; ronds et pastilles lisibles en
+  // sombre ; fenêtre étroite : le volet ne garde que les icônes.
+  const ecart = (a, b) => {
+    const v = (c) => c.match(/[\d.]+/g).slice(0, 3).map(Number);
+    const [x, y] = [v(a), v(b)];
+    return Math.max(...x.map((n, i) => Math.abs(n - y[i])));
+  };
   for (const theme of ['light', 'dark']) {
-    const p = await page({ theme, largeur: 680, hauteur: 512, echelle: 2 });
-    await p.screenshot({ path: `${SORTIE}/reglages-capture-680-${theme}.png` });
-    verifier(p.erreurs.length === 0, `10 ${theme} 680 × 512 : aucune erreur de console`, JSON.stringify(p.erreurs));
+    const p = await page({ theme, largeur: 780, hauteur: 520, echelle: 2, vue: { ...VUE_PRO, enregistrer: true } });
+    const poser = async (nom, exact = false) => { await p.getByRole('tab', { name: nom, exact }).click(); await p.waitForTimeout(450); };
+    await p.screenshot({ path: `${SORTIE}/reglages-volet-capture-${theme}.png` });
+    const volet = await p.evaluate(() => {
+      const r = (s) => document.querySelector(s).getBoundingClientRect();
+      const fond = (s) => getComputedStyle(document.querySelector(s)).backgroundColor;
+      return {
+        volet: Math.round(r('.volet').width), contenuX: Math.round(r('.contenu').left),
+        pro: !document.querySelector('[data-valeur="pro"]').hidden,
+        version: Math.round(r('[data-valeur="version"]').bottom),
+        rubriques: [...document.querySelectorAll('.volet [role="tab"]')].map(o => Math.round(o.getBoundingClientRect().left)),
+        fonds: [fond('body'), fond('.contenu'), fond('.carte')],
+        rayon: getComputedStyle(document.querySelector('.contenu')).borderTopLeftRadius,
+      };
+    });
+    verifier(volet.volet === 208 && volet.contenuX === 208 && volet.pro && volet.version > 470
+      && volet.rubriques.every(x => x === volet.rubriques[0]) && volet.rayon === '8px'
+      && new Set(volet.fonds).size === 3 && volet.fonds.every(f => !/rgba\(.*, 0(\.\d+)?\)$/.test(f)),
+    `13 ${theme} volet de 208 px, Pro, rubriques en colonne, version en bas ; trois gris unis`, json(volet));
+    await poser('Après la capture');
+    const deborde = await p.$eval('.contenu', e => e.scrollHeight - e.clientHeight);
+    const nom = await visible(p, '[data-reglage="modele_nom"]');
+    verifier(nom && deborde <= 0, `13 ${theme} « Après la capture » tient sans défiler, Nom des fichiers déplié`, json([nom, deborde]));
+    await p.screenshot({ path: `${SORTIE}/reglages-volet-apres-${theme}.png` });
+    // Ronds de l'interrupteur éteint et pastille du sélecteur : à l'écart de leur fond.
+    await poser('Capture', true);
+    const lisible = await p.evaluate(() => {
+      const fond = (e) => getComputedStyle(e).backgroundColor;
+      const sw = document.querySelector('[role="switch"][aria-checked="false"]');
+      const carte = fond(document.querySelector('.carte'));
+      const pastille = getComputedStyle(document.querySelector('.choix[data-choisi]'), '::before').backgroundColor;
+      const ombres = [getComputedStyle(sw.querySelector('.sw-bouton')).boxShadow,
+        getComputedStyle(document.querySelector('.choix[data-choisi]'), '::before').boxShadow];
+      const fondChoix = fond(document.querySelector('.choix[data-choisi]'));
+      return [fond(sw.querySelector('.sw-bouton')), carte, pastille, ombres, fondChoix];
+    });
+    // En clair, blanc sur blanc : l'ombre les détache, et le fond du sélecteur est teinté ;
+    // en sombre, la couleur.
+    const ombrees = lisible[3].every(o => o && o !== 'none');
+    verifier(ombrees && (theme === 'light'
+      ? !/rgba\(.*, 0\)$/.test(lisible[4]) && lisible[4] !== lisible[2]
+      : ecart(lisible[0], lisible[1]) >= 0x60 && ecart(lisible[2], lisible[1]) >= 0x18),
+      `13 ${theme} rond éteint et pastille du sélecteur se détachent de la carte`, json(lisible));
+    await poser('Raccourcis');
+    const pictos = await p.$$eval('[data-reglage="raccourci"]', ls => ls.map(l => l.querySelectorAll('[data-picto] svg > *').length));
+    verifier(pictos.length === 6 && pictos.every(n => n > 0), `13 ${theme} un pictogramme sur chaque raccourci`, json(pictos));
+    await p.screenshot({ path: `${SORTIE}/reglages-volet-raccourcis-${theme}.png` });
+    await poser('Général');
+    await p.screenshot({ path: `${SORTIE}/reglages-volet-general-${theme}.png` });
+    verifier(p.erreurs.length === 0, `13 ${theme} 780 × 520 : aucune erreur de console`, json(p.erreurs));
+    await p.context().close();
+  }
+  {
+    const p = await page({ largeur: 600, hauteur: 420 });
+    const etroit = await p.evaluate(() => [Math.round(document.querySelector('.volet').getBoundingClientRect().width),
+      [...document.querySelectorAll('.volet [role="tab"]')].map(o => o.textContent.trim()),
+      document.documentElement.scrollWidth <= innerWidth]);
+    verifier(etroit[0] === 56 && etroit[1].length === 4 && etroit[2],
+      '13 taille minimale 600 × 420 : volet de 56 px, rubriques nommées, rien ne déborde', json(etroit));
+    await p.screenshot({ path: `${SORTIE}/reglages-volet-etroit.png` });
     await p.context().close();
   }
 
