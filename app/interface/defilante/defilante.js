@@ -11,8 +11,9 @@
 //   apercu: { x, y, largeur, hauteur_max }, pilule: { x, y }, libelle, reduites } : le voile
 //   sur tout l'écran sauf la zone, le trait blanc dehors, la pilule (haut gauche donné) avec
 //   `libelle`. Puis `defilante_zone` { id, x, y, largeur, hauteur } : le rectangle de la
-//   pilule en pixels CSS, sans l'animation d'entrée ; une fois par affichage (de nouveau
-//   seulement s'il change). Charge invalide : console.warn, rien n'est montré.
+//   pilule en pixels CSS, sans l'animation d'entrée ; une fois par affichage, de nouveau
+//   seulement si le rectangle ou devicePixelRatio change. Tant que devicePixelRatio n'égale
+//   pas `echelle`, il attend (300 ms au plus). Charge invalide : console.warn, rien montré.
 // - écoute `defilante:apercu` { id, numero, hauteur } : la page demande les octets PNG par
 //   `defilante_apercu` { id, numero } (une demande à la fois ; seul le plus récent compte)
 //   et montre l'image, collée en bas, dans une bande haute de min(hauteur, hauteur_max).
@@ -20,7 +21,7 @@
 // - écoute `defilante:message` { id, texte } : `texte` (texte seul) en haut de l'écran, ou
 //   rien si `texte` est null.
 // - écoute `defilante:cacher` { id } : tout est effacé.
-// - `defilante_terminer` { id } au clic sur la pilule, une fois par affichage.
+// - `defilante_terminer` { id } au clic sur la pilule, une fois par id.
 // Un `id` qui n'est pas celui de l'affichage en cours est ignoré. Aucun texte ne passe par
 // innerHTML. La page ne prend jamais le focus : le clavier reste à la page visée.
 
@@ -43,6 +44,8 @@ const reduites = () => "reduites" in racine.dataset || reduitSysteme.matches;
 
 /** L'affichage en cours : { id, charge, k, zoneEnvoyee, termine, animation, apercu }. */
 let courant = null;
+/** Id de la dernière fin envoyée. */
+let dernierTermine = null;
 
 function appeler(commande, args) {
   if (!tauri?.core?.invoke) return Promise.reject(new Error("hors de l'app"));
@@ -112,6 +115,7 @@ function poserRect(el, x, y, largeur, hauteur, k) {
 function poser(lui) {
   const { zone: z, apercu: a, pilule: p } = lui.charge;
   const k = (lui.k = echelleDe(lui.charge));
+  lui.dpr = window.devicePixelRatio;
   poserRect(zone, z.x, z.y, z.largeur, z.hauteur, k);
   poserRect(apercu, a.x, a.y, a.largeur, null, k);
   if (lui.apercu.montre) poserHauteurApercu(lui);
@@ -123,25 +127,42 @@ function poserHauteurApercu(lui) {
   apercu.style.height = `${h / lui.k}px`;
 }
 
-/** Le rectangle de la pilule (pixels CSS), sans la translation de l'animation d'entrée. */
+/** Attente au plus de l'échelle de la charge avant d'envoyer la zone (la fenêtre posée
+ *  sur un écran d'une autre échelle que celui où elle est née) : bien en deçà du filet de
+ *  2 s du cœur (D4). */
+const ATTENTE_ECHELLE_MS = 300;
+const echelleAtteinte = (lui) => Math.abs((window.devicePixelRatio || 0) - lui.charge.echelle) <= 0.01;
+
+/** Le rectangle de la pilule (pixels CSS), sans la translation de l'animation d'entrée.
+ *  Tant que devicePixelRatio n'a pas rejoint l'échelle de la charge, rien ne part, sauf
+ *  après ATTENTE_ECHELLE_MS. Repart à chaque changement du rectangle ou de l'échelle. */
 function envoyerZone() {
   const lui = courant;
   if (!lui || scene.hidden) return;
+  if (lui.attenteEchelle) {
+    if (!echelleAtteinte(lui)) return;
+    clearTimeout(lui.attenteEchelle);
+    lui.attenteEchelle = 0;
+  }
   const r = pilule.getBoundingClientRect();
   const t = getComputedStyle(pilule).transform;
   const m = new DOMMatrixReadOnly(t === "none" ? undefined : t);
   const z = { id: lui.id, x: r.x - m.m41, y: r.y - m.m42, largeur: r.width, hauteur: r.height };
-  const cle = JSON.stringify(z);
+  const cle = JSON.stringify([z, window.devicePixelRatio]);
   if (cle === lui.zoneEnvoyee) return;
   lui.zoneEnvoyee = cle;
   signaler("defilante_zone", z);
 }
 new ResizeObserver(() => envoyerZone()).observe(pilule);
-addEventListener("resize", () => {
+function echelleChangee() {
   if (!courant) return;
   poser(courant);
   envoyerZone();
-});
+}
+addEventListener("resize", echelleChangee);
+/** Un changement d'échelle ne donne pas toujours `resize` (même taille CSS) : pendant un
+ *  affichage, devicePixelRatio est relu toutes les VEILLE_ECHELLE_MS. */
+const VEILLE_ECHELLE_MS = 100;
 
 function viderApercu(lui) {
   apercu.hidden = true;
@@ -156,6 +177,8 @@ function effacer() {
   const lui = courant;
   courant = null;
   if (lui?.animation) lui.animation.cancel();
+  if (lui?.attenteEchelle) clearTimeout(lui.attenteEchelle);
+  if (lui?.veille) clearInterval(lui.veille);
   viderApercu(lui);
   scene.hidden = true;
   message.hidden = true;
@@ -168,13 +191,18 @@ function effacer() {
 export function montrer(brut) {
   const charge = valider(brut);
   if (!charge) return;
+  // Un même id montré de nouveau (page rechargée, charge renvoyée) garde sa fin rendue.
+  const dejaTermine = dernierTermine === charge.id;
   effacer();
   const lui = {
     id: charge.id,
     charge,
     k: 1,
     zoneEnvoyee: null,
-    termine: false,
+    termine: dejaTermine,
+    attenteEchelle: 0,
+    dpr: 0,
+    veille: 0,
     animation: null,
     // Aperçu : dernier numéro demandé, celui montré, demande en cours, suivant en attente.
     apercu: { demande: -1, montre: null, enCours: false, attente: null, url: null },
@@ -196,7 +224,19 @@ export function montrer(brut) {
     easing: r ? "linear" : jeton("--courbe-ressort"),
   });
   // Tout de suite, sans attendre une image : la fenêtre est encore cachée et le cœur la
-  // montre à la réception de la zone.
+  // montre à la réception de la zone. Sauf si l'échelle n'est pas encore celle de l'écran
+  // de la zone : on attend `resize` (borné).
+  lui.veille = setInterval(() => {
+    if (courant === lui && window.devicePixelRatio !== lui.dpr) echelleChangee();
+  }, VEILLE_ECHELLE_MS);
+  if (!echelleAtteinte(lui)) {
+    lui.attenteEchelle = setTimeout(() => {
+      if (courant !== lui) return;
+      lui.attenteEchelle = 0;
+      poser(lui);
+      envoyerZone();
+    }, ATTENTE_ECHELLE_MS);
+  }
   envoyerZone();
 }
 
@@ -217,8 +257,12 @@ async function lireApercu(lui, numero, hauteur) {
     const img = new Image();
     img.alt = "";
     img.src = url;
-    await img.decode().catch(() => {});
-    if (courant !== lui || (a.montre && a.montre.numero >= numero)) {
+    const lisible = await img.decode().then(
+      () => img.naturalWidth > 0,
+      () => false,
+    );
+    // Illisible : l'aperçu montré reste tel quel (rien de montré qui ne marche pas).
+    if (!lisible || courant !== lui || (a.montre && a.montre.numero >= numero)) {
       URL.revokeObjectURL(url);
       return;
     }
@@ -274,7 +318,8 @@ export function cacher(c) {
 function terminer() {
   const lui = courant;
   if (!lui || lui.termine) return;
-  lui.termine = true; // une seule fin par affichage
+  lui.termine = true; // une seule fin par affichage (et par id)
+  dernierTermine = lui.id;
   signaler("defilante_terminer", { id: lui.id });
 }
 

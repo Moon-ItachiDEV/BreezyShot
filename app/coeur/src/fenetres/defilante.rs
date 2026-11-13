@@ -115,17 +115,21 @@ const TAILLE_INITIALE: (f64, f64) = (200.0, 200.0);
 /// `defilante_zone`.
 pub const TAILLE_PILULE_LOGIQUE: (f64, f64) = (100.0, 42.0);
 
-/// Vrai si le point (pixels réels du bureau) est dans `r` (bord droit et bas exclus).
-fn dans(r: Rect, (x, y): (f64, f64)) -> bool {
-    let (x0, y0) = (f64::from(r.x), f64::from(r.y));
-    x >= x0 && y >= y0 && x < x0 + f64::from(r.largeur) && y < y0 + f64::from(r.hauteur)
+/// `r` en rectangle de `place` (pixels réels du bureau), pour `contient` et `intervalle`.
+fn rect_place(r: Rect) -> super::Rect {
+    super::Rect {
+        x: r.x,
+        y: r.y,
+        largeur: r.largeur.max(0) as u32,
+        hauteur: r.hauteur.max(0) as u32,
+    }
 }
 
 /// La fenêtre doit-elle recevoir les clics ? Seulement montrée, avec une pilule, et quand
 /// la souris est dessus.
 fn cliquable(montree: bool, pilule: Option<Rect>, souris: Option<(f64, f64)>) -> bool {
     match (montree, pilule, souris) {
-        (true, Some(r), Some(p)) => !r.est_vide() && dans(r, p),
+        (true, Some(r), Some((x, y))) => !r.est_vide() && rect_place(r).contient(x, y),
         _ => false,
     }
 }
@@ -135,18 +139,31 @@ fn pilule_retenue(rect: Option<Rect>) -> Option<Rect> {
     rect.filter(|r| !r.est_vide())
 }
 
+/// Le fil de surveillance de l'affichage `affichage` continue-t-il ? Non dès que la
+/// fenêtre est détruite, cachée, ou qu'un autre affichage a commencé (`courant`).
+fn fil_continue(vivante: bool, courant: u64, affichage: u64, montree: bool) -> bool {
+    vivante && montree && courant == affichage
+}
+
+/// Le geste « cliquable » posté au fil principal s'applique-t-il encore ? Seulement s'il
+/// le demande, que la fenêtre est toujours montrée avec une pilule, et que son affichage
+/// (`affichage_geste`) est l'affichage en cours (`courant`) ; sinon les clics traversent.
+fn recoit_apres_geste(
+    voulu: bool,
+    montree: bool,
+    pilule: bool,
+    courant: u64,
+    affichage_geste: u64,
+) -> bool {
+    voulu && montree && pilule && courant == affichage_geste
+}
+
 /// Rythme de la surveillance : proche de la pilule, plus serré.
 fn intervalle(pilule: Option<Rect>, souris: Option<(f64, f64)>) -> Duration {
     let (Some(r), Some(p)) = (pilule, souris) else {
         return INTERVALLE_LOIN;
     };
-    let pilule = super::Rect {
-        x: r.x,
-        y: r.y,
-        largeur: r.largeur.max(0) as u32,
-        hauteur: r.hauteur.max(0) as u32,
-    };
-    super::intervalle(Some(p), Some(&pilule))
+    super::intervalle(Some(p), Some(&rect_place(r)))
 }
 
 /// Ce que partagent la fenêtre de contrôle et son fil de surveillance.
@@ -179,13 +196,16 @@ impl Partage {
 #[derive(Debug)]
 pub struct Controle {
     app: AppHandle,
-    /// Identifiant système (Windows : le HWND), gardé pour la surveillance de la souris.
+    /// Identifiant système (Windows : le HWND), rendu par `identifiant()` (journal,
+    /// conversion des places par le cœur).
     identifiant: Option<isize>,
     /// Faux une fois la fenêtre détruite.
     vivante: Arc<AtomicBool>,
     partage: Arc<Partage>,
     /// L'écran où la fenêtre est posée (pixels réels du bureau).
     ecran: Mutex<Option<Rect>>,
+    /// Vrai après `detruire` : `Drop` n'a plus rien à faire.
+    detruite: AtomicBool,
 }
 
 /// Crée la fenêtre de contrôle, cachée (fil principal, jamais dans un rappel de page :
@@ -203,6 +223,7 @@ pub fn creer(app: &AppHandle) -> Result<Controle, String> {
         vivante: outil.vivante,
         partage: Arc::new(Partage::default()),
         ecran: Mutex::new(None),
+        detruite: AtomicBool::new(false),
     })
 }
 
@@ -296,6 +317,7 @@ impl Controle {
     /// Cache puis détruit la fenêtre. Journal en WARN si elle ne l'est pas :
     /// `defilante: fenetre non detruite: <e>`.
     pub fn detruire(self) -> Result<(), String> {
+        self.detruite.store(true, Ordering::SeqCst);
         self.cacher();
         let Some(f) = self.fenetre() else {
             return Ok(());
@@ -323,14 +345,15 @@ impl Controle {
                 let mut attente = INTERVALLE_PROCHE;
                 loop {
                     std::thread::sleep(attente);
-                    if !vivante.load(Ordering::SeqCst)
-                        || partage.affichage.load(Ordering::SeqCst) != affichage
-                    {
-                        break;
-                    }
                     let pos = super::souris(&app);
                     let mut s = partage.souris();
-                    if !s.montree {
+                    let continuer = fil_continue(
+                        vivante.load(Ordering::SeqCst),
+                        partage.affichage.load(Ordering::SeqCst),
+                        affichage,
+                        s.montree,
+                    );
+                    if !continuer {
                         break;
                     }
                     let voulu = cliquable(s.montree, s.pilule, pos);
@@ -353,15 +376,56 @@ impl Controle {
     }
 }
 
+/// Filet : un `Controle` lâché sans `detruire` (chemin d'erreur) arrête son fil et fait
+/// détruire sa fenêtre sur le fil principal, si c'est toujours la sienne (`vivante` : une
+/// fenêtre détruite entre-temps n'est pas confondue avec une nouvelle de même étiquette).
+impl Drop for Controle {
+    fn drop(&mut self) {
+        if self.detruite.load(Ordering::SeqCst) {
+            return;
+        }
+        {
+            let mut s = self.partage.souris();
+            s.montree = false;
+            s.recoit = false;
+            s.pilule = None;
+        }
+        self.partage.affichage.fetch_add(1, Ordering::SeqCst);
+        if !self.vivante.load(Ordering::SeqCst) {
+            return;
+        }
+        log::warn!("defilante: fenetre lachee sans detruire");
+        let app = self.app.clone();
+        let vivante = Arc::clone(&self.vivante);
+        let poste = self.app.run_on_main_thread(move || {
+            if !vivante.load(Ordering::SeqCst) {
+                return;
+            }
+            if let Some(f) = app.get_webview_window(ETIQUETTE_DEFILANTE) {
+                super::cacher(&f);
+                if let Err(e) = f.destroy() {
+                    log::warn!("defilante: fenetre non detruite: {e}");
+                }
+            }
+        });
+        if let Err(e) = poste {
+            log::warn!("defilante: fenetre non detruite: {e}");
+        }
+    }
+}
+
 /// Geste posté par la surveillance (fil principal) : l'état est relu sous le verrou ; la
 /// fenêtre ne reçoit les clics que si l'affichage est toujours le même et montré.
 fn geste_clics(app: &AppHandle, partage: &Partage, affichage: u64, voulu: bool) {
     let recoit = {
         let mut s = partage.souris();
-        let ok = voulu
-            && s.montree
-            && s.pilule.is_some()
-            && partage.affichage.load(Ordering::SeqCst) == affichage;
+        let ok = recoit_apres_geste(
+            voulu,
+            s.montree,
+            s.pilule.is_some(),
+            partage.affichage.load(Ordering::SeqCst),
+            affichage,
+        );
         s.recoit = ok;
         ok
     };
@@ -420,6 +484,32 @@ mod tests {
         assert_eq!(intervalle(Some(p), Some((10.0, 10.0))), INTERVALLE_LOIN);
         assert_eq!(intervalle(None, Some((1050.0, 820.0))), INTERVALLE_LOIN);
         assert_eq!(intervalle(Some(p), None), INTERVALLE_LOIN);
+    }
+
+    #[test]
+    fn le_fil_s_arrete_detruite_cachee_ou_remplacee() {
+        assert!(fil_continue(true, 3, 3, true));
+        // Fenêtre détruite (`Destroyed`).
+        assert!(!fil_continue(false, 3, 3, true));
+        // `cacher`, `detruire` ou `Drop` : montree faux et numéro avancé.
+        assert!(!fil_continue(true, 3, 3, false));
+        assert!(!fil_continue(true, 4, 3, true));
+        // Un nouveau `montrer` : le fil de l'affichage 3 laisse la place à celui du 4.
+        assert!(!fil_continue(true, 4, 3, true));
+        assert!(fil_continue(true, 4, 4, true));
+    }
+
+    #[test]
+    fn le_geste_cliquable_ne_vaut_que_pour_son_affichage() {
+        assert!(recoit_apres_geste(true, true, true, 5, 5));
+        // Un geste « traversée » reste traversée.
+        assert!(!recoit_apres_geste(false, true, true, 5, 5));
+        // Affichage périmé : caché puis remontré pendant que le geste était en route.
+        assert!(!recoit_apres_geste(true, true, true, 6, 5));
+        // Fenêtre cachée.
+        assert!(!recoit_apres_geste(true, false, true, 5, 5));
+        // Pilule retirée.
+        assert!(!recoit_apres_geste(true, true, false, 5, 5));
     }
 
     #[test]

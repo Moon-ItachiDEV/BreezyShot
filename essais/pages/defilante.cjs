@@ -61,6 +61,7 @@ function simuler(o) {
           await new Promise((ok) => setTimeout(ok, window.__retard));
           const h = window.__hauteurs[a.numero];
           if (h === undefined) throw 'defilante';
+          if (window.__illisibles?.includes(a.numero)) return new Uint8Array([137, 80, 78, 71, 1, 2, 3]).buffer;
           if (window.__apercuPng) return Uint8Array.from(atob(window.__apercuPng), (x) => x.charCodeAt(0)).buffer;
           return png(window.__largeurApercu, h, a.numero);
         }
@@ -200,6 +201,63 @@ function simuler(o) {
     await fermer(p);
   }
 
+  // 3 bis. Un PNG illisible ne montre rien : ni bande vide, ni changement de l'aperçu montré.
+  {
+    const p = await ouvrir();
+    await p.evaluate((c) => { window.__hauteurs = { 1: 200, 2: 220, 3: 240 }; window.__illisibles = [1, 3]; __emettre('defilante:montrer', c); }, charge(10, 1));
+    await p.evaluate(() => __emettre('defilante:apercu', { id: 10, numero: 1, hauteur: 200 }));
+    await p.waitForTimeout(300);
+    const avant = await p.evaluate(() => [apercu.hidden, apercu.querySelectorAll('img').length]);
+    await p.evaluate(() => __emettre('defilante:apercu', { id: 10, numero: 2, hauteur: 220 }));
+    await p.waitForFunction(() => !apercu.hidden);
+    await p.evaluate(() => __emettre('defilante:apercu', { id: 10, numero: 3, hauteur: 240 }));
+    await p.waitForTimeout(300);
+    const apres = await p.evaluate(() => [apercu.hidden, apercu.querySelector('img').naturalHeight, apercu.getBoundingClientRect().height]);
+    verifier(avant[0] && avant[1] === 0 && !apres[0] && apres[1] === 220 && apres[2] === 220,
+      '3 bis PNG illisible : aucune bande vide, l\'aperçu montré reste', JSON.stringify({ avant, apres }));
+    await fermer(p);
+  }
+
+  // 3 ter. Échelle de la fenêtre différente de celle de la charge (fenêtre née sur un autre
+  //    écran) : la zone attend devicePixelRatio = echelle (borné), et repart à chaque
+  //    changement d'échelle avec le rectangle juste.
+  {
+    const zones = (p) => appels(p, 'defilante_zone').then((a) => a.map((x) => x[1]));
+    const echelle = (p, k) => p.context().newCDPSession(p).then((cdp) => cdp.send('Emulation.setDeviceMetricsOverride', { width: VIEWPORT.width, height: VIEWPORT.height, deviceScaleFactor: k, mobile: false }));
+    // (a) l'échelle arrive après montrer : une seule zone, la juste.
+    let p = await ouvrir({ k: 1 });
+    let c = charge(21, 1.5);
+    await p.evaluate((c) => __emettre('defilante:montrer', c), c);
+    await p.waitForTimeout(100);
+    const pendant = await zones(p);
+    await echelle(p, 1.5);
+    await p.waitForTimeout(500);
+    let z = await zones(p);
+    verifier(pendant.length === 0 && z.length === 1 && proche(z[0].x, c.pilule.x / 1.5, 0.01) && proche(z[0].y, c.pilule.y / 1.5, 0.01),
+      '3 ter (a) échelle arrivée après montrer : rien avant, puis une zone juste', JSON.stringify({ pendant, z }));
+    await fermer(p);
+    // (b) l'échelle n'arrive jamais : la zone part quand même après la borne.
+    p = await ouvrir({ k: 1 });
+    await p.evaluate((c) => __emettre('defilante:montrer', c), charge(22, 1.5));
+    await p.waitForTimeout(150);
+    const tot = await zones(p);
+    await p.waitForTimeout(450);
+    z = await zones(p);
+    verifier(tot.length === 0 && z.length === 1, '3 ter (b) échelle jamais atteinte : zone envoyée après 300 ms', JSON.stringify({ tot, z }));
+    await fermer(p);
+    // (c) l'échelle change après l'envoi : un second rectangle, juste.
+    p = await ouvrir({ k: 1.5 });
+    c = charge(23, 1.5);
+    await p.evaluate((c) => __emettre('defilante:montrer', c), c);
+    await p.waitForTimeout(400);
+    await echelle(p, 1.25);
+    await p.waitForTimeout(500);
+    z = await zones(p);
+    verifier(z.length === 2 && proche(z[0].x, c.pilule.x / 1.5, 0.01) && proche(z[1].x, c.pilule.x / 1.25, 0.01) && proche(z[1].y, c.pilule.y / 1.25, 0.01),
+      '3 ter (c) échelle changée après l\'envoi : second defilante_zone, juste', JSON.stringify(z));
+    await fermer(p);
+  }
+
   // 4. « Terminer » : un clic → defilante_terminer une fois ; focus jamais pris.
   {
     const p = await ouvrir();
@@ -231,6 +289,13 @@ function simuler(o) {
     await p.evaluate(() => { terminer.click(); terminer.click(); });
     const lecteur = (await appels(p, 'defilante_terminer')).filter((a) => a[1].id === 12).length;
     verifier(lecteur === 1, '4 clic sans pointeur : une fois', String(lecteur));
+    // Le même id montré de nouveau (charge renvoyée, page rechargée) : pas de seconde fin.
+    await p.evaluate((c) => __emettre('defilante:montrer', c), charge(12, 1));
+    await p.waitForTimeout(400);
+    const pl2 = await rect(p, '#pilule');
+    await p.mouse.click(pl2.x + pl2.l / 2, pl2.y + pl2.h / 2); await p.waitForTimeout(50);
+    const meme = (await appels(p, 'defilante_terminer')).filter((a) => a[1].id === 12).length;
+    verifier(meme === 1, '4 même id montré deux fois : defilante_terminer une seule fois', String(meme));
     await fermer(p);
   }
 
