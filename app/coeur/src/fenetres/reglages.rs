@@ -97,7 +97,20 @@ where
     if let Some(ecran) = ecran_sous(souris(app), &ecrans(app)) {
         let r = centrer(&ecran, taille_sur(&ecran));
         let _ = f.set_size(tauri::PhysicalSize::new(r.largeur, r.hauteur));
-        let _ = f.set_position(tauri::PhysicalPosition::new(r.x, r.y));
+        // Le coin placé est celui du cadre : centrer le cadre entier (barre de titre
+        // comprise), sans sortir du haut de la zone utile.
+        let (x, y) = match f.outer_size() {
+            Ok(ext) => {
+                let z = ecran.zone_utile;
+                (
+                    (i64::from(z.x) + (i64::from(z.largeur) - i64::from(ext.width)) / 2) as i32,
+                    (i64::from(z.y) + (i64::from(z.hauteur) - i64::from(ext.height)).max(0) / 2)
+                        as i32,
+                )
+            }
+            Err(_) => (r.x, r.y),
+        };
+        let _ = f.set_position(tauri::PhysicalPosition::new(x, y));
     } else {
         let _ = f.center();
     }

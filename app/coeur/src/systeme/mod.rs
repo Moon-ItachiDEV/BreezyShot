@@ -185,13 +185,17 @@ pub fn impr_ecran_pour_breezyshot() -> Option<bool> {
 /// (`false`) : la valeur `PrintScreenKeyForSnippingEnabled` de l'utilisateur (HKCU), celle
 /// qu'écrit Paramètres › Accessibilité › Clavier. Rend faux hors Windows (rien écrit).
 pub fn donner_impr_ecran(a_breezyshot: bool) -> Result<bool, String> {
-    installation::ecrire_cle(
+    let ecrit = installation::ecrire_cle(
         r"Control Panel\Keyboard",
         &[(
             "PrintScreenKeyForSnippingEnabled",
             installation::Valeur::Nombre(u32::from(!a_breezyshot)),
         )],
-    )
+    )?;
+    if ecrit {
+        plateforme::annoncer_clavier();
+    }
+    Ok(ecrit)
 }
 
 /// Build de Windows 11 23H2, à partir duquel Impr. écran ouvre l'Outil Capture par défaut.

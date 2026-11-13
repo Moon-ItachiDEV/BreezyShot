@@ -262,23 +262,31 @@ fn noter_refus(app: &AppHandle, action: &str, texte: Option<String>) {
 /// Essaie de donner `candidats` à l'action ; l'ancien raccourci reste tenu en cas d'échec.
 /// Rend vrai si un candidat est tenu.
 fn changer_raccourci(app: &AppHandle, action: &str, candidats: &[String]) -> bool {
-    let Some(r) = reservations(app) else {
-        return false;
-    };
+    changer_raccourci_choix(app, action, candidats)
+        .is_some_and(|c| candidats.is_empty() || c.retenu.is_some())
+}
+
+/// `changer_raccourci`, en rendant le choix (`None` : raccourcis pas encore en place).
+fn changer_raccourci_choix(
+    app: &AppHandle,
+    action: &str,
+    candidats: &[String],
+) -> Option<raccourcis::ChoixAction> {
+    let r = reservations(app)?;
     let choix = r.changer(app, action, candidats, systeme::impr_ecran_reserve());
     if candidats.is_empty() {
         // Liste vide (écrite à la main) : « pas de raccourci voulu », jamais un refus.
         log::info!("raccourci {action} change: aucun");
         noter_refus(app, action, None);
         refaire_menu(app);
-        return true;
+        return Some(choix);
     }
     match choix.retenu {
         Some(x) => {
             log::info!("raccourci {action} change: {}", x.canonique());
             noter_refus(app, action, None);
             refaire_menu(app);
-            true
+            Some(choix)
         }
         None => {
             let raison = choix
@@ -294,7 +302,7 @@ fn changer_raccourci(app: &AppHandle, action: &str, candidats: &[String]) -> boo
                 );
             }
             noter_refus(app, action, Some(page::texte_refus(&raison)));
-            false
+            Some(choix)
         }
     }
 }
@@ -386,12 +394,16 @@ pub fn reglages_changer(app: AppHandle, changement: Changement) -> Reponse {
         }
     }
     if let Changement::ImprEcran(oui) = changement {
-        if let Err(e) = systeme::donner_impr_ecran(oui) {
-            log::warn!("impr ecran: echec ({e})");
-            return refuser(
-                &app,
-                Refus::nouveau("impr_ecran", "Impossible de changer Impr. écran", "echec"),
-            );
+        let impossible =
+            || Refus::nouveau("impr_ecran", "Impossible de changer Impr. écran", "echec");
+        match systeme::donner_impr_ecran(oui) {
+            Ok(true) => {}
+            // Hors Windows : rien à changer (la ligne n'est pas montrée).
+            Ok(false) => return refuser(&app, Refus::nouveau("impr_ecran", "", "sans_objet")),
+            Err(e) => {
+                log::warn!("impr ecran: echec ({e})");
+                return refuser(&app, impossible());
+            }
         }
     }
     log::info!("{}", page::ligne_changement(&changement));
@@ -407,17 +419,37 @@ pub fn reglages_changer(app: AppHandle, changement: Changement) -> Reponse {
 /// Windows à jour (Impr. écran prise, ou rendue et remplacée par le candidat suivant).
 /// Allumée sans que la touche soit tenue : le refus dit où Windows la garde.
 fn reprendre_impr_ecran(app: &AppHandle, r: &Reglages, oui: bool) -> Option<Refus> {
-    let candidats = r.raccourcis.candidats("zone").unwrap_or_default().to_vec();
-    changer_raccourci(app, "zone", &candidats);
-    let tenue = reservations(app)
-        .and_then(|res| res.bilan().retenu("zone").copied())
+    let mut candidats = r.raccourcis.candidats("zone").unwrap_or_default().to_vec();
+    if !oui {
+        // Rendue à Windows : la zone ne la propose plus, l'ancienne réservation est lâchée
+        // même si aucun autre candidat n'est libre.
+        candidats.retain(|c| !page::est_impr_ecran(c));
+    }
+    let choix = changer_raccourci_choix(app, "zone", &candidats);
+    let tenue = choix
+        .as_ref()
+        .and_then(|c| c.retenu)
         .is_some_and(|x| x.est_impr_ecran_seule());
     log::info!(
         "impr ecran: breezyshot {}, touche {}",
         if oui { "oui" } else { "non" },
         if tenue { "tenue" } else { "non tenue" }
     );
-    (oui && !tenue).then(|| Refus::nouveau("impr_ecran", page::REFUS_IMPR_ECRAN, "gardee"))
+    if !oui || tenue {
+        return None;
+    }
+    // Allumée sans être tenue : la raison de l'écart d'Impr. écran, dite telle quelle.
+    let raison = choix?
+        .ecartes
+        .into_iter()
+        .find(|e| page::est_impr_ecran(&e.candidat))
+        .map(|e| e.raison)?;
+    Some(match raison {
+        Raison::ReserveParLeSysteme => {
+            Refus::nouveau("impr_ecran", page::REFUS_IMPR_ECRAN, "gardee")
+        }
+        r => Refus::nouveau("impr_ecran", &page::texte_refus(&r), "prise"),
+    })
 }
 
 #[derive(Debug, Clone, Serialize)]

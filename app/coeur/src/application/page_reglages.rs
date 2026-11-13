@@ -221,16 +221,14 @@ pub fn appliquer(r: &Reglages, c: &Changement) -> Result<Reglages, Refus> {
         Changement::Retardateur(s) if *s > reglages::RETARDATEUR_MAX_S => return Err(invalide()),
         Changement::Retardateur(s) => n.capture.retardateur_s = *s,
         Changement::Pointeur(b) => n.capture.pointeur = *b,
-        // Allumée : Impr. écran devient le premier raccourci de la zone, s'il n'y est pas.
-        // Éteinte : les raccourcis restent ; Windows reprenant la touche, la zone passe au
-        // candidat suivant.
+        // Allumée : Impr. écran devient le premier raccourci de la zone (déplacée en tête si
+        // elle y était plus bas). Éteinte : les raccourcis restent ; Windows reprenant la
+        // touche, la zone passe au candidat suivant.
         Changement::ImprEcran(true) => {
             let zone = n.raccourcis.candidats("zone").unwrap_or_default().to_vec();
-            if !zone.iter().any(|c| est_impr_ecran(c)) {
-                let mut nouveaux = vec![IMPR_ECRAN.to_string()];
-                nouveaux.extend(zone);
-                fixer_candidats(&mut n.raccourcis, "zone", nouveaux);
-            }
+            let mut nouveaux = vec![IMPR_ECRAN.to_string()];
+            nouveaux.extend(zone.into_iter().filter(|c| !est_impr_ecran(c)));
+            fixer_candidats(&mut n.raccourcis, "zone", nouveaux);
         }
         Changement::ImprEcran(false) => {}
     }
@@ -657,21 +655,23 @@ mod tests {
             n.raccourcis.candidats("zone").unwrap(),
             ["ImprEcran".to_string(), "Ctrl+Maj+1".to_string()]
         );
-        // Déjà là (sous une autre écriture) : rien ne bouge. Éteinte : rien ne bouge.
-        let mut deja = r.clone();
+        // Plus bas, sous une autre écriture : remise en tête, sans doublon.
+        let mut bas = r.clone();
         fixer_candidats(
-            &mut deja.raccourcis,
+            &mut bas.raccourcis,
             "zone",
-            vec!["Impr. écran".into(), "F9".into()],
+            vec!["F9".into(), "Impr. écran".into()],
         );
+        let n = appliquer(&bas, &Changement::ImprEcran(true)).unwrap();
         assert_eq!(
-            appliquer(&deja, &Changement::ImprEcran(true)).unwrap(),
-            deja
+            n.raccourcis.candidats("zone").unwrap(),
+            ["ImprEcran".to_string(), "F9".to_string()]
         );
-        assert_eq!(
-            appliquer(&deja, &Changement::ImprEcran(false)).unwrap(),
-            deja
-        );
+        // Éteinte : rien ne bouge.
+        assert_eq!(appliquer(&bas, &Changement::ImprEcran(false)).unwrap(), bas);
+        // La page envoie { cle, valeur } : lu tel quel.
+        let c: Changement = serde_json::from_str(r#"{"cle":"impr_ecran","valeur":true}"#).unwrap();
+        assert_eq!(c, Changement::ImprEcran(true));
         assert_eq!(
             ligne_changement(&Changement::ImprEcran(true)),
             "reglage change: impr_ecran oui"

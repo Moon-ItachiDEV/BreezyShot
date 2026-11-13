@@ -53,12 +53,21 @@ try {
     Verifier 'seconde instance : code de sortie 0' ($seconde.Code -eq 0) "code $($seconde.Code)" | Out-Null
     Verifier 'la première écrit « seconde instance: barre de capture »' (Attendre-Ligne -Texte 'seconde instance: barre de capture' -DelaiS 5) | Out-Null
     if ($IsWindows) {
-        Verifier 'la seconde instance ouvre la sélection et sa barre' (Attendre-Ligne -Texte 'selection montree' -DelaiS 10) | Out-Null
-        # Échap la referme avant la suite (l'Échap global ne laisse pas toujours de ligne).
+        # La sélection vraiment montrée (pas « selection montree … impossible »), puis Échap
+        # la referme et l'app revient au repos avant la suite.
+        $montree = $false; $repos = $false
+        $limite = [DateTime]::UtcNow.AddSeconds(10)
+        do {
+            $montree = (Lire-Journal) -match 'selection montree \d+ voulu'
+            if (-not $montree) { Start-Sleep -Milliseconds 100 }
+        } while (-not $montree -and [DateTime]::UtcNow -lt $limite)
+        Verifier 'la seconde instance ouvre la sélection et sa barre' $montree | Out-Null
+        $reposAvant = Compter-Lignes -Texte 'Decoupe -> Repos'
         Initialiser-Menu-Icone
         Start-Sleep -Milliseconds 300
         [BreezyShotEssai.MenuIcone]::Touche(0x1B)
-        Start-Sleep -Milliseconds 500
+        $repos = Attendre-Ligne -Texte 'Decoupe -> Repos' -Fois ($reposAvant + 1) -DelaiS 5
+        Verifier 'Échap referme la sélection (retour au repos)' $repos | Out-Null
     }
     Verifier 'un seul processus BreezyShot' ($restants.Count -eq 1) "$($restants.Count) processus" | Out-Null
     if (-not $seconde.Fini) { try { $seconde.Processus.Kill() } catch { } }

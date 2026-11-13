@@ -1,7 +1,10 @@
-//! Gestes propres à Windows. Lecture seule du registre : l'app n'y écrit jamais.
+//! Gestes propres à Windows. Lecture seule du registre ici (les écritures passent par
+//! `installation::ecrire_cle`).
 
 use ::windows::core::{w, PCWSTR};
-use ::windows::Win32::Foundation::{CloseHandle, ERROR_SUCCESS, HWND, POINT, RECT, WAIT_OBJECT_0};
+use ::windows::Win32::Foundation::{
+    CloseHandle, ERROR_SUCCESS, HWND, LPARAM, POINT, RECT, WAIT_OBJECT_0, WPARAM,
+};
 use ::windows::Win32::System::Registry::{
     RegCloseKey, RegGetValueW, RegNotifyChangeKeyValue, RegOpenKeyExW, HKEY, HKEY_CURRENT_USER,
     HKEY_LOCAL_MACHINE, KEY_NOTIFY, KEY_READ, REG_NOTIFY_CHANGE_LAST_SET, RRF_RT_REG_DWORD,
@@ -21,6 +24,9 @@ use ::windows::Win32::UI::WindowsAndMessaging::{
     SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SWP_SHOWWINDOW, SW_HIDE, SW_SHOWNOACTIVATE,
     SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS, WDA_EXCLUDEFROMCAPTURE, WS_EX_APPWINDOW, WS_EX_LAYERED,
     WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TRANSPARENT,
+};
+use ::windows::Win32::UI::WindowsAndMessaging::{
+    SendMessageTimeoutW, HWND_BROADCAST, SMTO_ABORTIFHUNG, WM_SETTINGCHANGE,
 };
 
 pub type RappelTheme = Box<dyn Fn(super::Theme) + Send + 'static>;
@@ -168,6 +174,33 @@ pub fn version_windows() -> Option<u32> {
     .trim()
     .parse()
     .ok()
+}
+
+/// Prévient les fenêtres que les réglages du clavier ont changé (comme le fait Paramètres
+/// après « Utiliser le bouton Impr. écran… »), dans un fil à part : une fenêtre bloquée
+/// ne retient pas l'app (au plus 1 s chacune).
+pub fn annoncer_clavier() {
+    let lance = std::thread::Builder::new()
+        .name("annonce-clavier".into())
+        .spawn(|| {
+            let mut resultat = 0usize;
+            // SAFETY : chaîne statique terminée par zéro ; `SMTO_ABORTIFHUNG` et le délai
+            // bornent l'attente.
+            unsafe {
+                let _ = SendMessageTimeoutW(
+                    HWND_BROADCAST,
+                    WM_SETTINGCHANGE,
+                    WPARAM(0),
+                    LPARAM(w!(r"Control Panel\Keyboard").as_ptr() as isize),
+                    SMTO_ABORTIFHUNG,
+                    1000,
+                    Some(&mut resultat),
+                );
+            }
+        });
+    if let Err(e) = lance {
+        log::warn!("annonce clavier: fil non lance ({e})");
+    }
 }
 
 pub fn lecture_impr_ecran() -> Option<(Option<u32>, Option<u32>)> {

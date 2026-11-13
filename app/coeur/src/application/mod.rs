@@ -1353,7 +1353,12 @@ pub fn traiter(app: &AppHandle, evenement: Evenement) {
                 // menu de l'icône). Au tour suivant de la boucle, comme une entrée du menu.
                 Commande::Demarrer => {
                     log::info!("seconde instance: barre de capture");
-                    poster_plus_tard(app, Evenement::Menu(id_menu(Mode::Zone)));
+                    if app.state::<Application>().demarree.load(Ordering::SeqCst) {
+                        poster_plus_tard(app, Evenement::Menu(id_menu(Mode::Zone)));
+                    } else if let Ok(mut a) = app.state::<Application>().capture_en_attente.lock() {
+                        log::info!("seconde instance: en attente du demarrage");
+                        *a = Some(Mode::Zone.nom().to_string());
+                    }
                 }
                 // Désinstaller via une seconde instance n'aurait pas de sens : ignoré.
                 Commande::Desinstaller => log::info!("seconde instance refusee"),
