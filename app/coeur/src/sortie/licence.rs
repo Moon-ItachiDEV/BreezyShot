@@ -1,6 +1,8 @@
-//! Le texte de la licence, gardé tel que collé dans `<dossier des réglages>/licence.txt`
-//! (avenant 0.5 « Licence », §3.1), écrit de façon atomique comme les réglages : fichier
-//! temporaire vidé sur le disque, puis renommé. Ce module ne lit ni ne vérifie la licence.
+//! Le texte de la licence, gardé nettoyé (blancs des deux bouts retirés, tel que la
+//! vérification l'a accepté) dans `<dossier des réglages>/licence.txt` (avenant 0.5
+//! « Licence », §3.1), écrit de façon atomique comme les réglages : fichier temporaire vidé
+//! sur le disque, puis renommé. Ce module ne lit ni ne vérifie la licence : il range le texte
+//! qu'on lui donne, tel quel.
 
 use std::fs;
 use std::io::{self, Read, Write};
@@ -15,9 +17,18 @@ const NOM_TEMPORAIRE: &str = "licence.txt.tmp";
 /// au plus 1 000 caractères ; ce qui dépasse sera refusé par la vérification).
 const TAILLE_MAX: u64 = 64 * 1024;
 
-/// Le texte rangé, `None` s'il n'y en a pas ou s'il est illisible.
+/// Le texte rangé, `None` s'il n'y en a pas ou s'il est illisible. Illisible (UTF-8
+/// invalide, dossier à la place du fichier, accès refusé) : `licence illisible` au journal,
+/// le fichier reste.
 pub fn lire_licence() -> Option<String> {
-    lire_dans(&systeme::dossiers().ok()?.reglages)
+    let lu = systeme::dossiers().and_then(|d| lire_dans(&d.reglages));
+    match lu {
+        Ok(texte) => texte,
+        Err(_) => {
+            log::warn!("licence illisible");
+            None
+        }
+    }
 }
 
 /// Range `texte` (remplace l'ancien).
@@ -30,14 +41,23 @@ pub fn effacer_licence() -> Result<(), String> {
     effacer_dans(&systeme::dossiers()?.reglages)
 }
 
-fn lire_dans(dossier: &Path) -> Option<String> {
+/// `Ok(None)` : pas de fichier. `Err` : il y a quelque chose, mais illisible. L'erreur ne
+/// contient jamais le texte lu.
+fn lire_dans(dossier: &Path) -> Result<Option<String>, String> {
+    let chemin = dossier.join(NOM_FICHIER);
+    let fichier = match fs::File::open(&chemin) {
+        Ok(f) => f,
+        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(e) => return Err(format!("{}: {e}", chemin.display())),
+    };
     let mut octets = Vec::new();
-    fs::File::open(dossier.join(NOM_FICHIER))
-        .ok()?
+    fichier
         .take(TAILLE_MAX)
         .read_to_end(&mut octets)
-        .ok()?;
-    String::from_utf8(octets).ok()
+        .map_err(|e| format!("{}: {e}", chemin.display()))?;
+    String::from_utf8(octets)
+        .map(Some)
+        .map_err(|_| format!("{}: UTF-8 invalide", chemin.display()))
 }
 
 fn ecrire_dans(dossier: &Path, texte: &str) -> Result<(), String> {
@@ -79,17 +99,27 @@ mod tests {
     fn ecrire_lire_effacer() {
         let d = tempfile::tempdir().unwrap();
         let dossier = d.path().join("reglages");
-        assert_eq!(lire_dans(&dossier), None);
+        assert_eq!(lire_dans(&dossier), Ok(None));
         assert_eq!(effacer_dans(&dossier), Ok(()));
-        // Gardé tel que collé, blancs compris ; le dossier est créé au besoin.
+        // Rangé tel que donné (le nettoyage est fait avant) ; le dossier est créé au besoin.
         ecrire_dans(&dossier, "  BS1.a.b\r\n").unwrap();
-        assert_eq!(lire_dans(&dossier).as_deref(), Some("  BS1.a.b\r\n"));
+        assert_eq!(lire_dans(&dossier), Ok(Some("  BS1.a.b\r\n".into())));
         ecrire_dans(&dossier, "BS1.c.d").unwrap();
-        assert_eq!(lire_dans(&dossier).as_deref(), Some("BS1.c.d"));
+        assert_eq!(lire_dans(&dossier), Ok(Some("BS1.c.d".into())));
         assert!(!dossier.join(NOM_TEMPORAIRE).exists());
         assert_eq!(effacer_dans(&dossier), Ok(()));
         assert!(!dossier.join(NOM_FICHIER).exists());
-        assert_eq!(lire_dans(&dossier), None);
+        assert_eq!(lire_dans(&dossier), Ok(None));
+    }
+
+    #[test]
+    fn ecrire_vide_remplace_l_ancien() {
+        // Le repli du retrait quand l'effacement échoue : un fichier vide, posé atomiquement.
+        let d = tempfile::tempdir().unwrap();
+        ecrire_dans(d.path(), "BS1.x.y").unwrap();
+        ecrire_dans(d.path(), "").unwrap();
+        assert_eq!(lire_dans(d.path()), Ok(Some(String::new())));
+        assert!(!d.path().join(NOM_TEMPORAIRE).exists());
     }
 
     #[test]
@@ -97,7 +127,7 @@ mod tests {
         let d = tempfile::tempdir().unwrap();
         fs::write(d.path().join(NOM_TEMPORAIRE), "reste").unwrap();
         ecrire_dans(d.path(), "BS1.x.y").unwrap();
-        assert_eq!(lire_dans(d.path()).as_deref(), Some("BS1.x.y"));
+        assert_eq!(lire_dans(d.path()), Ok(Some("BS1.x.y".into())));
         assert!(!d.path().join(NOM_TEMPORAIRE).exists());
     }
 
@@ -110,24 +140,57 @@ mod tests {
         fs::create_dir(&bloque).unwrap();
         fs::write(bloque.join("f"), "x").unwrap();
         assert!(ecrire_dans(d.path(), "nouveau").is_err());
-        assert_eq!(lire_dans(d.path()).as_deref(), Some("ancien"));
+        assert!(ecrire_dans(d.path(), "").is_err());
+        assert_eq!(lire_dans(d.path()), Ok(Some("ancien".into())));
     }
 
     #[test]
-    fn illisible_ou_enorme() {
+    fn octets_non_utf8_illisibles_et_gardes() {
         let d = tempfile::tempdir().unwrap();
-        fs::write(d.path().join(NOM_FICHIER), [0xffu8, 0xfe, b'B']).unwrap();
-        assert_eq!(lire_dans(d.path()), None);
+        let octets = [0xffu8, 0xfe, b'B', b'S', b'1'];
+        fs::write(d.path().join(NOM_FICHIER), octets).unwrap();
+        let erreur = lire_dans(d.path()).unwrap_err();
+        assert!(erreur.contains("UTF-8"), "{erreur}");
+        // Le fichier n'est pas effacé, ni changé.
+        assert_eq!(fs::read(d.path().join(NOM_FICHIER)).unwrap(), octets);
+    }
+
+    #[test]
+    fn dossier_a_la_place_du_fichier_illisible_et_garde() {
+        let d = tempfile::tempdir().unwrap();
+        let chemin = d.path().join(NOM_FICHIER);
+        fs::create_dir(&chemin).unwrap();
+        fs::write(chemin.join("dedans"), "x").unwrap();
+        assert!(lire_dans(d.path()).is_err());
+        assert!(chemin.is_dir());
+        assert!(chemin.join("dedans").is_file());
+        assert!(effacer_dans(d.path()).is_err());
+        assert!(chemin.join("dedans").is_file());
+    }
+
+    #[test]
+    fn enorme_lu_tronque() {
+        let d = tempfile::tempdir().unwrap();
         let enorme = "A".repeat(TAILLE_MAX as usize * 2);
         fs::write(d.path().join(NOM_FICHIER), &enorme).unwrap();
         assert_eq!(
-            lire_dans(d.path()).map(|t| t.len()),
-            Some(TAILLE_MAX as usize)
+            lire_dans(d.path()).map(|t| t.map(|t| t.len())),
+            Ok(Some(TAILLE_MAX as usize))
         );
-        // Un dossier à la place du fichier : illisible, pas de panique.
-        let autre = tempfile::tempdir().unwrap();
-        fs::create_dir(autre.path().join(NOM_FICHIER)).unwrap();
-        assert_eq!(lire_dans(autre.path()), None);
-        assert!(effacer_dans(autre.path()).is_err());
+        // C'est pourquoi le texte est rangé nettoyé : 70 000 espaces puis une licence, rangés
+        // bruts, perdraient la licence à la relecture.
+        let brut = format!("{}BS1.x.y", " ".repeat(70_000));
+        ecrire_dans(d.path(), &brut).unwrap();
+        let relu = lire_dans(d.path()).unwrap().unwrap();
+        assert_eq!(relu.len(), TAILLE_MAX as usize);
+        assert!(!relu.contains("BS1"));
+    }
+
+    #[test]
+    fn bom_garde_tel_quel() {
+        // `sortie` ne retire pas un BOM : c'est la vérification qui le refuse (`forme`).
+        let d = tempfile::tempdir().unwrap();
+        fs::write(d.path().join(NOM_FICHIER), "\u{feff}BS1.x.y").unwrap();
+        assert_eq!(lire_dans(d.path()), Ok(Some("\u{feff}BS1.x.y".into())));
     }
 }

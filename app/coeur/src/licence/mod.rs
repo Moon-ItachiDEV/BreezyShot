@@ -72,9 +72,15 @@ pub fn verifier(texte: &str) -> Result<Licence, Refus> {
     verifier_avec(texte, &CLES)
 }
 
+/// Le texte que `verifier` juge : espaces, tabulations et fins de ligne retirés des deux
+/// bouts. C'est aussi lui qui est rangé (avenant « Licence », gardé nettoyé).
+pub(crate) fn nettoyer(texte: &str) -> &str {
+    texte.trim_matches([' ', '\t', '\r', '\n'])
+}
+
 /// Pour les tests : même chose avec une autre liste de clés.
 pub(crate) fn verifier_avec(texte: &str, cles: &[[u8; 32]]) -> Result<Licence, Refus> {
-    let texte = texte.trim_matches([' ', '\t', '\r', '\n']);
+    let texte = nettoyer(texte);
     if texte.is_empty() {
         return Err(Refus::Vide);
     }

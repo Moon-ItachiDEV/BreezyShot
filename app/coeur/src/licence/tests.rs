@@ -232,6 +232,29 @@ fn espaces_et_fins_de_ligne_autour() {
 }
 
 #[test]
+fn bom_devant_refuse_forme() {
+    // Un `licence.txt` enregistré « UTF-8 avec BOM » : le BOM n'est pas un blanc retiré.
+    let nue = ESSAI.trim_end_matches('\n');
+    assert!(verifier(nue).is_ok());
+    assert_eq!(verifier(&format!("\u{feff}{nue}")), Err(Refus::Forme));
+    assert_eq!(verifier(&format!("\u{feff}{ESSAI}")), Err(Refus::Forme));
+    assert_eq!(
+        nettoyer(&format!("\u{feff}{nue}")),
+        format!("\u{feff}{nue}")
+    );
+}
+
+#[test]
+fn nettoyer_retire_les_seuls_blancs_des_bouts() {
+    let nue = ESSAI.trim_end_matches('\n');
+    assert_eq!(nettoyer(ESSAI), nue);
+    assert_eq!(nettoyer(&format!("{}{nue}\r\n\t", " ".repeat(70_000))), nue);
+    assert_eq!(nettoyer(" \r\n\t "), "");
+    assert_eq!(nettoyer(" a b "), "a b");
+    assert_eq!(nettoyer("\u{a0}a"), "\u{a0}a");
+}
+
+#[test]
 fn vide_et_trop_longue() {
     for texte in ["", "   ", "\r\n\t "] {
         assert_eq!(verifier(texte), Err(Refus::Vide), "{texte:?}");
