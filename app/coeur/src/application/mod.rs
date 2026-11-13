@@ -1329,10 +1329,16 @@ pub fn traiter(app: &AppHandle, evenement: Evenement) {
                         *a = Some(mode);
                     }
                 }
-                // Désinstaller via une seconde instance n'aurait pas de sens : ignoré.
-                Commande::Desinstaller | Commande::Demarrer => {
-                    log::info!("seconde instance refusee")
+                // Relancer l'app déjà ouverte (icône épinglée, menu Démarrer, double-clic) :
+                // les Réglages s'ouvrent, ou reviennent devant, comme un clic sur l'app dans
+                // le Dock. Ouverts à un tour suivant de la boucle (jamais une fenêtre Web
+                // créée au milieu d'un autre message).
+                Commande::Demarrer => {
+                    log::info!("seconde instance: reglages ouverts");
+                    poster_plus_tard(app, Evenement::Menu(MENU_REGLAGES.into()));
                 }
+                // Désinstaller via une seconde instance n'aurait pas de sens : ignoré.
+                Commande::Desinstaller => log::info!("seconde instance refusee"),
             }
         }
         Evenement::ThemeBarre(theme) => {
