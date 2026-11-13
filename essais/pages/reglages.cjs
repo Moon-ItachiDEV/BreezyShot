@@ -681,6 +681,37 @@ const SANS_VIGNETTE = { ...VUE, lignes: ['copier', 'dossier', 'modele_nom', 'the
     await p.context().close();
   }
 
+  // 14. « Impr. écran ouvre BreezyShot » (0.5.3), en tête de Raccourcis : l'interrupteur
+  // suit la vue, un clic demande le changement au cœur, un refus du cœur est dit sur la
+  // ligne ; sans la ligne dans la vue (hors Windows), rien n'est montré.
+  {
+    const p = await page({ vue: REEL.vue });
+    await onglet(p, 'Raccourcis');
+    const inter = p.getByRole('switch', { name: 'Impr. écran ouvre BreezyShot' });
+    const avant = await inter.getAttribute('aria-checked');
+    const enTete = await p.evaluate(() => {
+      const l = document.querySelector('[data-reglage="impr_ecran"]');
+      const r = document.querySelector('[data-reglage="raccourci"]');
+      return !!l && !l.hidden && !!r && (l.compareDocumentPosition(r) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0;
+    });
+    await vider(p);
+    await p.evaluate(() => { window.__refus = { ligne: 'impr_ecran', texte: 'Windows garde la touche' }; });
+    await inter.click(); await p.waitForTimeout(50);
+    const a = await appels(p);
+    const refus = await p.$eval('[data-reglage="impr_ecran"] [data-refus]', e => e.hidden ? null : e.textContent);
+    verifier(avant === 'false' && enTete && json(a[0]) === json(['reglages_changer', { changement: { cle: 'impr_ecran', valeur: true } }])
+      && refus === 'Windows garde la touche',
+    '14 Impr. écran : éteinte, en tête de Raccourcis ; clic → impr_ecran oui ; refus dit sur la ligne', json([avant, enTete, a, refus]));
+    await p.evaluate((v) => __emettre('reglages:etat', { ...v, impr_ecran: true }), REEL.vue); await p.waitForTimeout(30);
+    const allumee = await inter.getAttribute('aria-checked');
+    await p.evaluate((v) => __emettre('reglages:etat', { ...v, lignes: v.lignes.filter(l => l !== 'impr_ecran') }), REEL.vue); await p.waitForTimeout(30);
+    const cachee = await p.$eval('[data-reglage="impr_ecran"]', e => e.hidden);
+    const carte = await p.$eval('[data-reglage="impr_ecran"]', e => getComputedStyle(e.closest('.carte')).display);
+    verifier(allumee === 'true' && cachee && carte === 'none', '14 Impr. écran : suit la vue ; hors Windows, ni ligne ni carte', json([allumee, cachee, carte]));
+    verifier(p.erreurs.length === 0, '14 aucune erreur de console', json(p.erreurs));
+    await p.context().close();
+  }
+
   // 13. Piste B « Volet » (0.5.3), à la taille de la fenêtre (780 × 520, échelle 2) :
   // volet à gauche (nom, Pro avec la licence, rubriques, version en bas), réglages en cartes
   // à droite ; tout « Après la capture » tient sans défiler, Nom des fichiers déplié ;

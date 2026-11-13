@@ -175,6 +175,25 @@ pub fn impr_ecran_reserve() -> bool {
     }
 }
 
+/// Impr. écran ouvre BreezyShot : Windows ne la garde pas pour l'Outil Capture. `None` hors
+/// Windows (sans objet : la ligne des Réglages n'est pas montrée).
+pub fn impr_ecran_pour_breezyshot() -> Option<bool> {
+    plateforme::lecture_impr_ecran().map(|(valeur, build)| !decider_impr_ecran(valeur, build))
+}
+
+/// Donne la touche Impr. écran à BreezyShot (`true`) ou la rend à l'Outil Capture
+/// (`false`) : la valeur `PrintScreenKeyForSnippingEnabled` de l'utilisateur (HKCU), celle
+/// qu'écrit Paramètres › Accessibilité › Clavier. Rend faux hors Windows (rien écrit).
+pub fn donner_impr_ecran(a_breezyshot: bool) -> Result<bool, String> {
+    installation::ecrire_cle(
+        r"Control Panel\Keyboard",
+        &[(
+            "PrintScreenKeyForSnippingEnabled",
+            installation::Valeur::Nombre(u32::from(!a_breezyshot)),
+        )],
+    )
+}
+
 /// Build de Windows 11 23H2, à partir duquel Impr. écran ouvre l'Outil Capture par défaut.
 pub const BUILD_23H2: u32 = 22631;
 

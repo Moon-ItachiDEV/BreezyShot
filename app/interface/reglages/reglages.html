@@ -138,6 +138,13 @@
       <section id="rubrique-raccourcis" role="tabpanel" data-rubrique="raccourcis"
         aria-labelledby="onglet-raccourcis" hidden>
         <h2 class="titre">Raccourcis</h2>
+        <div class="groupe carte">
+          <div class="ligne" data-reglage="impr_ecran" hidden>
+            <div class="lb"><span class="libelle" id="l-impr-ecran">Impr. écran ouvre BreezyShot</span><p class="refus" data-refus role="status" hidden></p></div>
+            <button role="switch" data-controle="impr_ecran" aria-labelledby="l-impr-ecran"
+              aria-checked="false"><svg class="sw-picto sw-non" viewBox="0 0 14 14" aria-hidden="true"><path d="M3.5 3.5l7 7M10.5 3.5l-7 7"/></svg><svg class="sw-picto sw-oui" viewBox="0 0 14 14" aria-hidden="true"><path d="M2.5 7.5 5.5 10.5 11.5 3.5"/></svg><span class="sw-bouton" aria-hidden="true"><svg viewBox="0 0 12 12"><path d="M2.2 6.4 4.8 9 9.8 3.2"/></svg></span></button>
+          </div>
+        </div>
         <div class="groupe carte" data-liste="raccourcis"></div>
         <template data-modele="raccourci">
           <div class="ligne" data-reglage="raccourci">

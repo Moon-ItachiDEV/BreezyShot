@@ -212,6 +212,7 @@ fn vue(app: &AppHandle) -> VueReglages {
         refus_raccourcis: &refus,
         dossier_affiche,
         demarrage: systeme::demarrage_avec_systeme(None).unwrap_or(EtatDemarrage::Indisponible),
+        impr_ecran: systeme::impr_ecran_pour_breezyshot(),
         licence_active: pro(app),
         version: VERSION,
         alerte,
@@ -384,10 +385,39 @@ pub fn reglages_changer(app: AppHandle, changement: Changement) -> Reponse {
             }
         }
     }
+    if let Changement::ImprEcran(oui) = changement {
+        if let Err(e) = systeme::donner_impr_ecran(oui) {
+            log::warn!("impr ecran: echec ({e})");
+            return refuser(
+                &app,
+                Refus::nouveau("impr_ecran", "Impossible de changer Impr. écran", "echec"),
+            );
+        }
+    }
     log::info!("{}", page::ligne_changement(&changement));
     ecrire_et_garder(&app, nouveau.clone());
     appliquer_theme(&app, &nouveau);
+    if let Changement::ImprEcran(oui) = changement {
+        return reponse(&app, reprendre_impr_ecran(&app, &nouveau, oui));
+    }
     reponse(&app, None)
+}
+
+/// Après « Impr. écran ouvre BreezyShot » : la zone reprend ses candidats avec la règle de
+/// Windows à jour (Impr. écran prise, ou rendue et remplacée par le candidat suivant).
+/// Allumée sans que la touche soit tenue : le refus dit où Windows la garde.
+fn reprendre_impr_ecran(app: &AppHandle, r: &Reglages, oui: bool) -> Option<Refus> {
+    let candidats = r.raccourcis.candidats("zone").unwrap_or_default().to_vec();
+    changer_raccourci(app, "zone", &candidats);
+    let tenue = reservations(app)
+        .and_then(|res| res.bilan().retenu("zone").copied())
+        .is_some_and(|x| x.est_impr_ecran_seule());
+    log::info!(
+        "impr ecran: breezyshot {}, touche {}",
+        if oui { "oui" } else { "non" },
+        if tenue { "tenue" } else { "non tenue" }
+    );
+    (oui && !tenue).then(|| Refus::nouveau("impr_ecran", page::REFUS_IMPR_ECRAN, "gardee"))
 }
 
 #[derive(Debug, Clone, Serialize)]

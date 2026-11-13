@@ -198,6 +198,7 @@ function afficher(v) {
   poserInterrupteur("enregistrer", v.enregistrer);
   poserInterrupteur("vignette", v.vignette.afficher);
   poserInterrupteur("demarrage", v.demarrage === "oui");
+  poserInterrupteur("impr_ecran", v.impr_ecran === true);
   poserSegments("vignette_duree", v.durees, texteDuree);
   poserChoix("vignette_duree", v.vignette.duree_s);
   poserChoix("vignette_coin", v.vignette.coin);
@@ -541,7 +542,7 @@ if (tauri?.event?.listen) {
 } else {
   afficher({
     lignes: ["retardateur", "pointeur", "copier", "vignette", "vignette_duree",
-      "vignette_coin", "dossier", "enregistrer", "modele_nom", "theme", "demarrage", "licence",
+      "vignette_coin", "dossier", "enregistrer", "modele_nom", "impr_ecran", "theme", "demarrage", "licence",
       "version"],
     capture: { retardateur_s: 0, pointeur: false },
     retardateurs: [0, 3, 5, 10],
@@ -566,6 +567,7 @@ if (tauri?.event?.listen) {
         refus: null,
       },
     ],
+    impr_ecran: false,
     licence_active: false,
     version: "0.0.0",
     alerte: null,

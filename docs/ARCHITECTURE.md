@@ -1040,6 +1040,13 @@ Module pur : il reçoit le dossier où écrire, ne connaît ni Tauri ni les autr
   suivent son ordre : Copier le texte avant Historique (`page_reglages::ORDRE_RACCOURCIS`,
   affichage seulement ; l'ordre de réservation des raccourcis ne change pas). La fenêtre
   prend au plus 90 % de la zone utile (`reglages::taille_sur`), cadre compris.
+- **« Impr. écran ouvre BreezyShot » (0.5.3)**, en tête de Raccourcis, sous Windows
+  seulement (`systeme::impr_ecran_pour_breezyshot`) : allumée, l'app écrit
+  `PrintScreenKeyForSnippingEnabled = 0` (HKCU, la valeur de Paramètres › Accessibilité ›
+  Clavier), met Impr. écran en tête des candidats de la zone s'il n'y est pas, puis la zone
+  reprend ses candidats ; éteinte, la valeur repasse à 1 et la zone passe au candidat
+  suivant. Si la touche n'est pas tenue après coup, la ligne dit où Windows la garde
+  (`REFUS_IMPR_ECRAN`). Journal : `impr ecran: breezyshot oui|non, touche tenue|non tenue`.
 - **La page ne décide rien.** Elle appelle `reglages_lire` (à l'ouverture et à chaque retour
   du focus), `reglages_changer { changement: { cle, valeur } }`, `reglages_apercu_nom`,
   `reglages_parcourir`, `reglages_saisie`, `reglages_raccourci`, `reglages_retablir`. Chaque

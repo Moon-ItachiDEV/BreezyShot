@@ -47,7 +47,14 @@ pub fn lignes_montrees(vignette_construite: bool, capture_disponible: bool) -> V
     }
     // La licence (avenant 0.5 « Licence », §1) : toujours là, en dernier dans Général
     // (logo et version, Thème, Lancer au démarrage, Licence : décision du responsable).
-    l.extend(["modele_nom", "theme", "demarrage", "version", "licence"]);
+    l.extend([
+        "modele_nom",
+        "impr_ecran",
+        "theme",
+        "demarrage",
+        "version",
+        "licence",
+    ]);
     l
 }
 
@@ -66,6 +73,8 @@ pub enum Changement {
     Demarrage(bool),
     Retardateur(u32),
     Pointeur(bool),
+    /// « Impr. écran ouvre BreezyShot » : prendre la touche à l'Outil Capture de Windows.
+    ImprEcran(bool),
 }
 
 impl Changement {
@@ -82,6 +91,7 @@ impl Changement {
             Changement::Demarrage(_) => "demarrage",
             Changement::Retardateur(_) => "retardateur",
             Changement::Pointeur(_) => "pointeur",
+            Changement::ImprEcran(_) => "impr_ecran",
         }
     }
 }
@@ -123,7 +133,8 @@ pub fn ligne_changement(c: &Changement) -> String {
         | Changement::Enregistrer(b)
         | Changement::VignetteAfficher(b)
         | Changement::Demarrage(b)
-        | Changement::Pointeur(b) => oui_non(*b).to_string(),
+        | Changement::Pointeur(b)
+        | Changement::ImprEcran(b) => oui_non(*b).to_string(),
         Changement::VignetteDuree(n) | Changement::Retardateur(n) => n.to_string(),
         Changement::VignetteCoin(t) | Changement::Theme(t) => t.clone(),
         Changement::ModeleNom(_) => return "reglage change: modele_nom".into(),
@@ -178,6 +189,19 @@ pub fn code_pour_journal(texte: &str) -> String {
         .collect()
 }
 
+/// La touche Impr. écran seule, dans la notation des réglages.
+pub const IMPR_ECRAN: &str = "ImprEcran";
+
+/// Vrai si `candidat` est la touche Impr. écran seule (notation lue par `raccourcis`).
+pub fn est_impr_ecran(candidat: &str) -> bool {
+    raccourcis::analyser(candidat).is_ok_and(|r| r.est_impr_ecran_seule())
+}
+
+/// Refus de « Impr. écran ouvre BreezyShot » quand Windows garde la touche : la phrase dit
+/// où la lui reprendre.
+pub const REFUS_IMPR_ECRAN: &str =
+    "Windows garde la touche : Paramètres › Accessibilité › Clavier, désactivez « Utiliser le bouton Impr. écran pour ouvrir la capture d'écran »";
+
 /// Applique un changement à une copie des réglages et la valide par le module `reglages`.
 /// Fonction pure.
 pub fn appliquer(r: &Reglages, c: &Changement) -> Result<Reglages, Refus> {
@@ -197,6 +221,18 @@ pub fn appliquer(r: &Reglages, c: &Changement) -> Result<Reglages, Refus> {
         Changement::Retardateur(s) if *s > reglages::RETARDATEUR_MAX_S => return Err(invalide()),
         Changement::Retardateur(s) => n.capture.retardateur_s = *s,
         Changement::Pointeur(b) => n.capture.pointeur = *b,
+        // Allumée : Impr. écran devient le premier raccourci de la zone, s'il n'y est pas.
+        // Éteinte : les raccourcis restent ; Windows reprenant la touche, la zone passe au
+        // candidat suivant.
+        Changement::ImprEcran(true) => {
+            let zone = n.raccourcis.candidats("zone").unwrap_or_default().to_vec();
+            if !zone.iter().any(|c| est_impr_ecran(c)) {
+                let mut nouveaux = vec![IMPR_ECRAN.to_string()];
+                nouveaux.extend(zone);
+                fixer_candidats(&mut n.raccourcis, "zone", nouveaux);
+            }
+        }
+        Changement::ImprEcran(false) => {}
     }
     reglages::valider(&n).map_err(|e| refus_validation(c.ligne(), &e, &n))?;
     Ok(n)
@@ -422,6 +458,7 @@ pub struct VueReglages {
     pub apercu_nom: String,
     pub theme: &'static str,
     pub demarrage: &'static str,
+    pub impr_ecran: bool,
     /// Une ligne par action en vigueur (`Contexte.actions`) : « Historique » et « Copier le
     /// texte » seulement avec une licence (et, pour le texte, une langue de lecture).
     pub raccourcis: Vec<VueRaccourci>,
@@ -446,6 +483,9 @@ pub struct Contexte<'a> {
     pub refus_raccourcis: &'a std::collections::BTreeMap<String, String>,
     pub dossier_affiche: String,
     pub demarrage: EtatDemarrage,
+    /// Impr. écran ouvre BreezyShot (Windows ne la garde pas pour l'Outil Capture) ;
+    /// `None` hors Windows : la ligne n'est pas montrée.
+    pub impr_ecran: Option<bool>,
     pub licence_active: bool,
     pub version: &'static str,
     pub alerte: Option<String>,
@@ -482,6 +522,9 @@ pub fn vue(r: &Reglages, c: &Contexte<'_>) -> VueReglages {
     let mut lignes = lignes_montrees(c.vignette_construite, c.capture_disponible);
     if c.demarrage == EtatDemarrage::Indisponible {
         lignes.retain(|l| *l != "demarrage");
+    }
+    if c.impr_ecran.is_none() {
+        lignes.retain(|l| *l != "impr_ecran");
     }
     let mut actions: Vec<&str> = c.actions.to_vec();
     actions.sort_by_key(|a| {
@@ -531,6 +574,7 @@ pub fn vue(r: &Reglages, c: &Contexte<'_>) -> VueReglages {
         apercu_nom: apercu_nom(&r.modele_nom, c.maintenant),
         theme: r.theme.texte(),
         demarrage: nom_demarrage(c.demarrage),
+        impr_ecran: c.impr_ecran.unwrap_or(false),
         raccourcis,
         licence_active: c.licence_active,
         version: c.version,
@@ -571,6 +615,7 @@ mod tests {
                 "copier",
                 "dossier",
                 "modele_nom",
+                "impr_ecran",
                 "theme",
                 "demarrage",
                 "version",
@@ -588,6 +633,7 @@ mod tests {
                 "dossier",
                 "enregistrer",
                 "modele_nom",
+                "impr_ecran",
                 "theme",
                 "demarrage",
                 "version",
@@ -601,11 +647,44 @@ mod tests {
     }
 
     #[test]
+    fn impr_ecran_seulement_sous_windows_et_premier_raccourci_de_la_zone() {
+        let r = Reglages::par_defaut(Plateforme::Windows);
+        // Allumée sans Impr. écran dans la zone : elle passe en tête, le reste suit.
+        let mut sans = r.clone();
+        fixer_candidats(&mut sans.raccourcis, "zone", vec!["Ctrl+Maj+1".into()]);
+        let n = appliquer(&sans, &Changement::ImprEcran(true)).unwrap();
+        assert_eq!(
+            n.raccourcis.candidats("zone").unwrap(),
+            ["ImprEcran".to_string(), "Ctrl+Maj+1".to_string()]
+        );
+        // Déjà là (sous une autre écriture) : rien ne bouge. Éteinte : rien ne bouge.
+        let mut deja = r.clone();
+        fixer_candidats(
+            &mut deja.raccourcis,
+            "zone",
+            vec!["Impr. écran".into(), "F9".into()],
+        );
+        assert_eq!(
+            appliquer(&deja, &Changement::ImprEcran(true)).unwrap(),
+            deja
+        );
+        assert_eq!(
+            appliquer(&deja, &Changement::ImprEcran(false)).unwrap(),
+            deja
+        );
+        assert_eq!(
+            ligne_changement(&Changement::ImprEcran(true)),
+            "reglage change: impr_ecran oui"
+        );
+        assert!(est_impr_ecran("ImprEcran") && !est_impr_ecran("Ctrl+ImprEcran"));
+    }
+
+    #[test]
     fn lignes_de_la_capture() {
         // En tête, dans l'ordre de la page.
         let tout = lignes_montrees(true, true);
         assert_eq!(tout[..3], ["retardateur", "pointeur", "copier"]);
-        assert_eq!(tout.len(), 13);
+        assert_eq!(tout.len(), 14);
         // Rien de ce qui n'a pas d'effet en 0.4.
         for absent in ["barre", "format", "mise_a_jour"] {
             assert!(!tout.contains(&absent));
@@ -890,6 +969,7 @@ mod tests {
             refus_raccourcis: &refus,
             dossier_affiche: "Images › BreezyShot".into(),
             demarrage: EtatDemarrage::DesactiveParWindows,
+            impr_ecran: None,
             licence_active: false,
             version: "9.9.9",
             alerte: None,
@@ -989,6 +1069,7 @@ mod tests {
                 refus_raccourcis: &refus,
                 dossier_affiche: String::new(),
                 demarrage: EtatDemarrage::Inactif,
+                impr_ecran: None,
                 licence_active,
                 version: "1",
                 alerte: None,
@@ -1085,6 +1166,7 @@ mod essai_de_page {
             refus_raccourcis: &refus,
             dossier_affiche: "Images › BreezyShot".into(),
             demarrage: EtatDemarrage::Inactif,
+            impr_ecran: Some(false),
             licence_active: false,
             // Jamais la vraie version : l'essai ne la suppose pas.
             version: "7.8.9-essai",
