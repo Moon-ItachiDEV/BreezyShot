@@ -5,7 +5,7 @@
 // poignées et le recadrage en cours sont dessinés par la page, par-dessus la vue.
 
 import {
-  boiteForme, cadre, longueurPointe, mesureTexte, numeroAffiche, policeTexte, POLICE,
+  boite, boiteForme, cadre, longueurPointe, mesureTexte, numeroAffiche, policeTexte, POLICE,
   TRAITS, TRAITS_SURLIGNEUR,
 } from "./document.js";
 
@@ -65,8 +65,14 @@ function rectArrondi(c, x, y, w, h, r) {
 }
 
 // Les ombres du canevas ne suivent pas la transformation : elles sont mises à l'échelle à
-// la main, pour que la vue zoomée montre l'ombre de l'export.
+// la main, pour que la vue zoomée montre l'ombre de l'export. `sansOmbres` : l'encre seule,
+// pour le calque d'une encre gommée (son ombre est celle de ce qui reste, `OMBRES`).
+let sansOmbres = false;
 function poserOmbre(c, couleur, flou, dy) {
+  if (sansOmbres) {
+    c.shadowColor = "transparent";
+    return;
+  }
   const m = c.getTransform(), s = Math.hypot(m.a, m.b) || 1;
   c.shadowColor = couleur;
   c.shadowBlur = flou * s;
@@ -91,7 +97,7 @@ function pointe(c, tx, ty, ux, uy, hl) {
 function dessinerFleche(c, o) {
   const W = trait(o), dx = o.x2 - o.x1, dy = o.y2 - o.y1, L = Math.hypot(dx, dy);
   if (L < 3) return;
-  poserOmbre(c, "rgba(0,0,0,.22)", 6, 1.5);
+  poserOmbre(c, ...OMBRES.fleche);
   c.fillStyle = c.strokeStyle = o.couleur;
   c.lineJoin = "round";
   c.lineCap = "round";
@@ -207,22 +213,15 @@ function dessinerNumero(c, doc, o) {
   c.fillText(String(n), o.x, o.y + R * 0.06);
 }
 
-// Dessine un objet (hors masque, dans le fond, et hors projecteur, peint par `peindreVoile`)
-// dans `ctx`, dont la
-// transformation est déjà posée (échelle de la vue, ou 1 pour l'export). `doc` sert au
-// chiffre des numéros.
-export function dessinerObjet(ctx, doc, objet) {
-  const c = ctx, o = objet;
-  if (o.type === "masque" || o.type === "projecteur") return;
-  c.save();
-  c.globalAlpha = o.type === "surligneur" ? SURLIGNEUR_ALPHA : alphaDe(o);
+// L'encre de l'objet, dans la transformation et l'opacité déjà posées sur `c`.
+function encre(c, doc, o) {
   switch (o.type) {
     case "fleche":
       dessinerFleche(c, o);
       break;
     case "rectangle": case "ellipse": {
       const n = boiteForme(o);
-      poserOmbre(c, "rgba(0,0,0,.2)", 6, 1);
+      poserOmbre(c, ...OMBRES[o.type]);
       c.strokeStyle = c.fillStyle = o.couleur;
       c.lineWidth = trait(o);
       c.lineJoin = "round";
@@ -237,7 +236,7 @@ export function dessinerObjet(ctx, doc, objet) {
       break;
     }
     case "ligne":
-      poserOmbre(c, "rgba(0,0,0,.2)", 5, 1);
+      poserOmbre(c, ...OMBRES.ligne);
       c.strokeStyle = o.couleur;
       c.lineWidth = trait(o);
       c.lineCap = "round";
@@ -247,12 +246,11 @@ export function dessinerObjet(ctx, doc, objet) {
       c.stroke();
       break;
     case "crayon":
-      poserOmbre(c, "rgba(0,0,0,.18)", 4, 1);
+      poserOmbre(c, ...OMBRES.crayon);
       c.strokeStyle = c.fillStyle = o.couleur;
       trace(c, o.points, trait(o));
       break;
     case "surligneur":
-      c.globalCompositeOperation = "multiply";
       c.strokeStyle = c.fillStyle = o.couleur;
       trace(c, o.points, TRAITS_SURLIGNEUR[o.epaisseur] ?? TRAITS_SURLIGNEUR[1]);
       break;
@@ -263,7 +261,137 @@ export function dessinerObjet(ctx, doc, objet) {
       dessinerNumero(c, doc, o);
       break;
   }
+}
+
+// Ombre des encres : couleur, flou et décalage (px de l'image). Le surligneur n'en a pas.
+const OMBRES = {
+  fleche: ["rgba(0,0,0,.22)", 6, 1.5],
+  rectangle: ["rgba(0,0,0,.2)", 6, 1],
+  ellipse: ["rgba(0,0,0,.2)", 6, 1],
+  ligne: ["rgba(0,0,0,.2)", 5, 1],
+  crayon: ["rgba(0,0,0,.18)", 4, 1],
+};
+
+// Dessine un objet (hors masque, dans le fond, et hors projecteur, peint par `peindreVoile`)
+// dans `ctx`, dont la transformation est déjà posée (échelle de la vue, ou 1 pour l'export).
+// `doc` sert au chiffre des numéros. `enCours` : passages de gomme du geste en cours, en plus
+// de ceux de l'objet.
+export function dessinerObjet(ctx, doc, objet, enCours = null) {
+  const c = ctx, o = objet;
+  if (o.type === "masque" || o.type === "projecteur") return;
+  const gommes = enCours?.length ? (o.gommes || []).concat(enCours) : o.gommes;
+  c.save();
+  c.globalAlpha = o.type === "surligneur" ? SURLIGNEUR_ALPHA : alphaDe(o);
+  if (o.type === "surligneur") c.globalCompositeOperation = "multiply";
+  if (gommes?.length) dessinerGomme(c, doc, o, gommes);
+  else encre(c, doc, o);
   c.restore();
+}
+
+// ---------- encres gommées ----------
+
+// Un seul calque de travail pour toutes les encres gommées, agrandi au besoin, relâché avec
+// les toiles du document (`relacherCalque`).
+let calque = null;
+function prendreCalque(l, h) {
+  if (!calque || calque.width < l || calque.height < h) {
+    const t = toile(Math.max(l, calque?.width || 0), Math.max(h, calque?.height || 0));
+    relacherCalque();
+    calque = t;
+  }
+  const k = calque.getContext("2d");
+  k.setTransform(1, 0, 0, 1, 0, 0);
+  k.clearRect(0, 0, l, h);
+  return k;
+}
+export function relacherCalque() {
+  if (calque) calque.width = calque.height = 0;
+  calque = null;
+}
+
+// Efface de `k` les passages de gomme : traits ronds, en ligne brisée (celle que le geste a
+// suivie), dans la transformation posée.
+function passerGomme(k, gommes) {
+  k.globalCompositeOperation = "destination-out";
+  k.globalAlpha = 1;
+  k.shadowColor = "transparent";
+  k.fillStyle = k.strokeStyle = "#000";
+  k.lineCap = k.lineJoin = "round";
+  for (const g of gommes) {
+    const p = g.points;
+    if (!p.length) continue;
+    k.beginPath();
+    if (p.length === 1) {
+      k.arc(p[0][0], p[0][1], g.largeur / 2, 0, 2 * Math.PI);
+      k.fill();
+      continue;
+    }
+    k.lineWidth = g.largeur;
+    k.moveTo(p[0][0], p[0][1]);
+    for (let i = 1; i < p.length; i++) k.lineTo(p[i][0], p[i][1]);
+    k.stroke();
+  }
+}
+
+// Une encre gommée : l'encre seule sur un calque (pixels de la toile, borné à la boîte de
+// l'objet), les passages de gomme effacés, puis le calque posé avec l'opacité, le mélange et
+// l'ombre de l'objet. L'ombre est celle de ce qui reste : effacer un trait n'en laisse pas.
+function dessinerGomme(c, doc, o, gommes) {
+  const m = c.getTransform(), b = boite(o);
+  const x0 = Math.max(0, Math.floor(m.e + b.x * m.a) - 1);
+  const y0 = Math.max(0, Math.floor(m.f + b.y * m.d) - 1);
+  const x1 = Math.min(c.canvas.width, Math.ceil(m.e + (b.x + b.largeur) * m.a) + 1);
+  const y1 = Math.min(c.canvas.height, Math.ceil(m.f + (b.y + b.hauteur) * m.d) + 1);
+  const l = x1 - x0, h = y1 - y0;
+  if (l <= 0 || h <= 0) return;
+  const k = prendreCalque(l, h);
+  k.save();
+  k.setTransform(m.a, 0, 0, m.d, m.e - x0, m.f - y0);
+  sansOmbres = true;
+  try {
+    encre(k, doc, o);
+  } finally {
+    sansOmbres = false;
+  }
+  passerGomme(k, gommes);
+  k.restore();
+  if (OMBRES[o.type]) poserOmbre(c, ...OMBRES[o.type]);
+  c.setTransform(1, 0, 0, 1, 0, 0);
+  c.drawImage(calque, 0, 0, l, h, x0, y0, l, h);
+}
+
+// Ce que des passages de gomme changent à une encre : "rien" (aucun pixel : passage à côté
+// ou sur du déjà gommé), "efface", ou "vide" (il ne reste rien de visible : l'objet est à
+// retirer). Jugé sur l'encre seule, rendue à 512 px de côté au plus.
+const COTE_EFFET = 512;
+const RESTE_MIN = 10; // sur 255 : en dessous, une miette invisible
+export function effetGomme(doc, objet, passages) {
+  const b = boite(objet);
+  const s = Math.min(1, COTE_EFFET / Math.max(b.largeur, b.hauteur, 1));
+  const l = Math.max(1, Math.ceil(b.largeur * s)), h = Math.max(1, Math.ceil(b.hauteur * s));
+  const rendu = (gommes) => {
+    const t = toile(l, h), k = t.getContext("2d", { willReadFrequently: true });
+    k.setTransform(s, 0, 0, s, -b.x * s, -b.y * s);
+    sansOmbres = true;
+    try {
+      encre(k, doc, objet);
+    } finally {
+      sansOmbres = false;
+    }
+    passerGomme(k, gommes);
+    const d = k.getImageData(0, 0, l, h).data;
+    t.width = t.height = 0;
+    return d;
+  };
+  const avant = rendu(objet.gommes || []);
+  const apres = rendu((objet.gommes || []).concat(passages));
+  let change = false, reste = 0;
+  for (let i = 3; i < apres.length; i += 4) {
+    if (apres[i] !== avant[i]) change = true;
+    if (apres[i] > reste) reste = apres[i];
+  }
+  if (!change) return "rien";
+  return reste < RESTE_MIN ? "vide" : "efface";
 }
 
 // ---------- masques ----------
@@ -452,8 +580,10 @@ function accent() {
     || ACCENT_DE_SECOURS;
 }
 
-// Contour de sélection du design (accent, tirets 4/3, 70 %), en px de la toile.
-function contourSelection(c, o, vue) {
+// Contour de sélection du design (accent, tirets 4/3, 70 %), en px de la toile. Une flèche ou
+// une ligne choisie seule se reconnaît à ses poignées ; choisie avec d'autres (`plusieurs`),
+// elle n'en a pas : elle reçoit le cadre des autres objets.
+function contourSelection(c, o, vue, plusieurs = false) {
   const e = vue.echelle, d = vue.dpr || 1;
   const X = (x) => vue.x + x * e, Y = (y) => vue.y + y * e;
   c.save();
@@ -465,7 +595,7 @@ function contourSelection(c, o, vue) {
     c.beginPath();
     c.arc(X(o.x), Y(o.y), o.rayon * e + 4 * d, 0, 7);
     c.stroke();
-  } else if (o.type === "fleche" || o.type === "ligne") {
+  } else if ((o.type === "fleche" || o.type === "ligne") && !plusieurs) {
     if (o.cx != null) {
       c.globalAlpha = 0.35;
       c.beginPath();
@@ -560,7 +690,10 @@ function rectArrondiSuite(c, x, y, w, h, r) {
 // liste d'`id`. `options` (en plus du contrat) : { cacher: id à ne pas dessiner (texte en
 // saisie), ajout: objet en cours de tracé, dessiné au-dessus (un masque en cours y est
 // appliqué sur sa seule zone, un projecteur s'ajoute à la réunion), rayon: rayon des coins
-// de l'image affichée, en px de la toile (l'écran seul ; absent ou 0 : coins droits) }.
+// de l'image affichée, en px de la toile (l'écran seul ; absent ou 0 : coins droits),
+// gommes: Map id → passages de gomme du geste en cours (aperçu, pas encore dans le
+// document), cadres: vrai quand la page ne montre pas de poignées (une flèche ou une ligne
+// choisie reçoit alors un cadre) }.
 export function peindreVue(ctx, doc, fond, vue, selection, options = {}) {
   const c = ctx, e = vue.echelle, k = cadre(doc);
   c.save();
@@ -585,7 +718,10 @@ export function peindreVue(ctx, doc, fond, vue, selection, options = {}) {
   const ajout = options.ajout || null;
   if (ajout && ajout.type === "masque") masqueEnCours(c, doc, fond, ajout, vue);
   c.setTransform(e, 0, 0, e, vue.x, vue.y);
-  for (const o of doc.objets) if (o.id !== options.cacher) dessinerObjet(c, doc, o);
+  const gommes = options.gommes || null;
+  for (const o of doc.objets) {
+    if (o.id !== options.cacher) dessinerObjet(c, doc, o, gommes?.get(o.id));
+  }
   if (ajout && ajout.type !== "masque") dessinerObjet(c, doc, ajout);
   peindreVoile(c, projecteurs(doc.objets, ajout, options.cacher), doc.largeur, doc.hauteur);
   c.restore();
@@ -597,7 +733,9 @@ export function peindreVue(ctx, doc, fond, vue, selection, options = {}) {
   c.beginPath();
   c.rect(x0 - 7 * d, y0 - 7 * d, x1 - x0 + 14 * d, y1 - y0 + 14 * d);
   c.clip();
-  for (const o of doc.objets) if (choisis.has(o.id)) contourSelection(c, o, vue);
+  for (const o of doc.objets) {
+    if (choisis.has(o.id)) contourSelection(c, o, vue, choisis.size > 1 || !!options.cadres);
+  }
   c.restore();
 }
 

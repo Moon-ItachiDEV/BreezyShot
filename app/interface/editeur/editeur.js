@@ -65,6 +65,7 @@ const ed = {
   selection: [],
   prefs: null,
   enCours: null, // objet en cours de tracé (peint par peindreVue, option `ajout`), ou null
+  gommes: null, // Map id → passages de la gomme en cours (option `gommes`), ou null
   surcouche: null, // fonction (ctx) de outils.js : poignées, recadrage, cadre, pipette
   affiche: false,
   exportee: null, // dernière version exportée avec succès
@@ -91,7 +92,7 @@ export const DEFAUTS = {
     forme: rouge,
     numero: rouge,
   },
-  tailles: { fleche: 1, stylo: 1, surligneur: 1, texte: 1, forme: 1, numero: 1, flou: 1 },
+  tailles: { fleche: 1, stylo: 1, surligneur: 1, gomme: 1, texte: 1, forme: 1, numero: 1, flou: 1 },
   opacites: { fleche: 100, stylo: 100, texte: 100, forme: 100, numero: 100 },
   autre: "",
 };
@@ -145,6 +146,10 @@ ed.annuler = () => {
   if (!modele.peutAnnuler(ed.h)) return;
   modele.annuler(ed.h);
   apresChangement();
+};
+// Un geste abandonné (Échap) : son pas est défait, sans rester à rétablir.
+ed.abandonner = () => {
+  if (ed.h && modele.abandonner(ed.h)) apresChangement();
 };
 ed.retablir = () => {
   if (!ed.h || ed.outils?.gesteEnCours() || ed.outils?.saisieOuverte()) return;
@@ -391,6 +396,10 @@ function optionsVue() {
   if (ajout) options.ajout = ajout;
   const enEdition = ed.outils?.idEnEdition();
   if (enEdition) options.cacher = enEdition;
+  // Les passages de la gomme du geste en cours (aperçu : le document n'a pas encore changé).
+  if (ed.gommes?.size) options.gommes = ed.gommes;
+  // Sans poignées (stylo, surligneur, gomme en main), une flèche choisie reçoit un cadre.
+  if (ed.outils && !ed.outils.poignees()) options.cadres = true;
   return options;
 }
 function peindre() {
@@ -425,6 +434,7 @@ function relacherToiles() {
   }
   ed.fond = null;
   ed.ctxFond = null;
+  dessin.relacherCalque();
 }
 
 async function charger(charge) {
