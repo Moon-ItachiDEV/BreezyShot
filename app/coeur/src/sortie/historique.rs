@@ -277,23 +277,25 @@ fn effacer(chemin: &Path) -> Result<(), ErrorKind> {
     }
 }
 
-/// Efface le PNG de « Recents » et son apercu. `nom` doit etre, a l'octet pres, un nom que
-/// rend `lister_recents` : sinon refus, rien n'est efface (deja absent compris ; sous
-/// Windows, « …123.png » ne designe jamais un « …123.PNG »). Jamais le fichier enregistre
-/// ni le presse-papiers (R14). L'echec de l'apercu seul n'est pas un echec (il partira au
-/// prochain nettoyage).
+/// Efface le PNG de « Recents » et son apercu. `nom` doit avoir le format exact, sinon refus
+/// et rien n'est touche. Si `nom` est, a l'octet pres, un nom que rend `lister_recents` : le
+/// PNG et son apercu partent. Sinon (capture deja partie, « …123.PNG » que NTFS ouvrirait
+/// sous « …123.png », lien symbolique, fichier tronque) : rien n'est touche dans
+/// « Recents », seul l'apercu de ce nom part, et c'est un succes. Seul un apercu fichier
+/// ordinaire est efface (jamais un lien ni un dossier) ; absent, ou son echec, n'est pas une
+/// erreur (il partira au prochain nettoyage). Jamais le fichier enregistre ni le
+/// presse-papiers (R14).
 pub fn supprimer_recent(
     dossier_recents: &Path,
     dossier_apercus: &Path,
     nom: &str,
 ) -> Result<(), String> {
     let recent = chemin_recent(dossier_recents, nom).ok_or("nom refuse")?;
-    if !lister_recents(dossier_recents).iter().any(|e| e.nom == nom) {
-        return Err("nom refuse".into());
+    if lister_recents(dossier_recents).iter().any(|e| e.nom == nom) {
+        effacer(&recent).map_err(|_| "suppression refusee".to_string())?;
     }
-    effacer(&recent).map_err(|_| "suppression refusee".to_string())?;
     if let Some(apercu) = chemin_apercu(dossier_apercus, nom) {
-        if !apercu.is_dir() {
+        if apercu.symlink_metadata().is_ok_and(|m| m.is_file()) {
             let _ = effacer(&apercu);
         }
     }

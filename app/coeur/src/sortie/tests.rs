@@ -2103,16 +2103,17 @@ fn supprimer_recent_le_png_et_son_apercu_seulement() {
     etrangers_intacts(&d.recents);
     etrangers_intacts(&d.apercus);
 
-    // Deja parti : refuse. Nom hors format : refuse, rien de touche.
-    assert!(supprimer_recent(&d.recents, &d.apercus, nom).is_err());
+    // Deja parti : fait. Nom hors format : refuse, rien de touche.
+    supprimer_recent(&d.recents, &d.apercus, nom).expect("deja parti");
     for faux in ETRANGERS.iter().copied().chain(["../Images/x.png", ""]) {
         assert!(
             supprimer_recent(&d.recents, &d.apercus, faux).is_err(),
             "{faux}"
         );
     }
-    // Un sous-dossier au nom du format : refuse, gardé.
-    assert!(supprimer_recent(&d.recents, &d.apercus, "20261111-194012-999.png").is_err());
+    // Un sous-dossier au nom du format : pas dans la liste, gardé (le sous-dossier du meme
+    // nom dans les apercus aussi).
+    supprimer_recent(&d.recents, &d.apercus, "20261111-194012-999.png").expect("hors liste");
     etrangers_intacts(&d.recents);
     etrangers_intacts(&d.apercus);
     // Apercu absent : la capture part quand meme.
@@ -2353,23 +2354,7 @@ fn liste_partielle_aucun_apercu_juge_orphelin() {
 #[test]
 fn supprimer_recent_nom_de_la_liste_a_l_octet_pres() {
     let d = dossiers();
-    // Sous Windows, « …123.png » ouvrirait ce « …123.PNG » : il n'est pas dans la liste.
-    let majuscules = "20261111-194012-123.PNG";
-    let nom = "20261111-194012-123.png";
-    fs::write(d.recents.join(majuscules), png_de(&image(4, 4))).unwrap();
-    ranger_apercu(&d.apercus, nom, &image(2, 2)).unwrap();
-    assert!(lister_recents(&d.recents).is_empty());
-    assert!(supprimer_recent(&d.recents, &d.apercus, nom).is_err());
-    assert!(d.recents.join(majuscules).is_file());
-    assert!(d.apercus.join(nom).is_file());
-    // Au format mais tronque (pas dans la liste) : refuse, garde.
-    let tronque = "20261111-194012-124.png";
     let complet = png_de(&image(4, 4));
-    fs::write(d.recents.join(tronque), &complet[..complet.len() - 3]).unwrap();
-    ranger_apercu(&d.apercus, tronque, &image(2, 2)).unwrap();
-    assert!(supprimer_recent(&d.recents, &d.apercus, tronque).is_err());
-    assert!(d.recents.join(tronque).is_file());
-    assert!(d.apercus.join(tronque).is_file());
     // Dans la liste : le PNG et son apercu partent.
     let liste = "20261111-194012-125.png";
     fs::write(d.recents.join(liste), &complet).unwrap();
@@ -2378,10 +2363,57 @@ fn supprimer_recent_nom_de_la_liste_a_l_octet_pres() {
     supprimer_recent(&d.recents, &d.apercus, liste).expect("supprime");
     assert!(!d.recents.join(liste).exists());
     assert!(!d.apercus.join(liste).exists());
-    // Deja parti : refuse, l'apercu laisse par un autre reste (le nettoyage s'en charge).
-    ranger_apercu(&d.apercus, liste, &image(2, 2)).unwrap();
-    assert!(supprimer_recent(&d.recents, &d.apercus, liste).is_err());
-    assert!(d.apercus.join(liste).is_file());
+}
+
+#[test]
+fn supprimer_recent_hors_liste_n_efface_que_l_apercu() {
+    let d = dossiers();
+    let complet = png_de(&image(4, 4));
+    // Sous Windows, « …123.png » ouvrirait ce « …123.PNG » : il n'est pas dans la liste.
+    let majuscules = "20261111-194012-123.PNG";
+    let nom = "20261111-194012-123.png";
+    fs::write(d.recents.join(majuscules), &complet).unwrap();
+    ranger_apercu(&d.apercus, nom, &image(2, 2)).unwrap();
+    // Au format mais tronque : pas dans la liste non plus.
+    let tronque = "20261111-194012-124.png";
+    fs::write(d.recents.join(tronque), &complet[..complet.len() - 3]).unwrap();
+    ranger_apercu(&d.apercus, tronque, &image(2, 2)).unwrap();
+    assert!(lister_recents(&d.recents).is_empty());
+    let avant = noms_du_dossier(&d.recents);
+
+    // Absent de la liste, apercu present : apercu parti, succes, « Recents » intact.
+    supprimer_recent(&d.recents, &d.apercus, nom).expect("apercu seul");
+    supprimer_recent(&d.recents, &d.apercus, tronque).expect("apercu seul");
+    assert!(!d.apercus.join(nom).exists());
+    assert!(!d.apercus.join(tronque).exists());
+    assert_eq!(noms_du_dossier(&d.recents), avant);
+    assert_eq!(fs::read(d.recents.join(majuscules)).unwrap(), complet);
+    assert_eq!(
+        fs::read(d.recents.join(tronque)).unwrap(),
+        complet[..complet.len() - 3]
+    );
+
+    // Absent de la liste, sans apercu : succes, rien de touche.
+    let absent = "20261111-194012-126.png";
+    supprimer_recent(&d.recents, &d.apercus, absent).expect("rien a faire");
+    assert_eq!(noms_du_dossier(&d.recents), avant);
+
+    // Mauvais format : refus, l'apercu de ce nom reste.
+    let autre = "20261111-194012-127.png";
+    ranger_apercu(&d.apercus, autre, &image(2, 2)).unwrap();
+    for faux in [
+        majuscules,
+        "20261111-194012-127.png.bak",
+        "../Apercus/x.png",
+        "",
+    ] {
+        assert!(
+            supprimer_recent(&d.recents, &d.apercus, faux).is_err(),
+            "{faux}"
+        );
+    }
+    assert!(d.apercus.join(autre).is_file());
+    assert_eq!(noms_du_dossier(&d.recents), avant);
 }
 
 /// Cree le lien symbolique `lien` vers `cible` avec `ln -s` (pas de `cfg` de systeme hors de
@@ -2421,7 +2453,8 @@ fn lien_symbolique_ni_liste_ni_suivi() {
     lien_symbolique(&image_cible, &d.glisser.join("BreezyShot lien.png"));
 
     assert!(lister_recents(&d.recents).is_empty());
-    assert!(supprimer_recent(&d.recents, &d.apercus, nom).is_err());
+    // Hors liste : rien dans « Recents », et l'apercu lien n'est pas un fichier ordinaire.
+    supprimer_recent(&d.recents, &d.apercus, nom).expect("hors liste");
     assert_eq!(
         vider(&d.recents, &d.apercus, &d.glisser),
         BilanVidage::default()
