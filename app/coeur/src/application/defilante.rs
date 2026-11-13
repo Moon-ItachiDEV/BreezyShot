@@ -16,7 +16,7 @@ use std::time::{Duration, Instant};
 
 use super::editeur;
 pub use crate::defilement::RECOUVREMENT_MIN;
-use crate::defilement::{Fixes, Limite, Mesure};
+use crate::defilement::{Attendu, Fixes, Limite, Mesure};
 use crate::systeme::defiler::{self, Moyen, PageTrouvee, Position};
 use crate::systeme::gel::EcranInfo;
 use crate::systeme::Rect;
@@ -833,10 +833,15 @@ fn suite_main(
 /// Le décalage attendu d'une image mesurée contre la dernière image gardée (D10, décision
 /// du responsable) : le décalage observé, d'après la position lue à l'image gardée et
 /// maintenant, en pixels réels de la vue qui défile (`defiler::decalage_px`, B) ; une
-/// position inchangée donne 0. Sans positions lisibles, ou si la vue a changé de hauteur,
-/// rien : les pixels commandés ne sont jamais passés à la mesure (C, seconde relecture R6).
-pub fn attendu(gardee: Option<Position>, maintenant: Option<Position>) -> Option<i32> {
-    defiler::decalage_px(&gardee?, &maintenant?)
+/// position inchangée donne `Lu(0)`. `Lu` seulement si les deux positions ont été lues ;
+/// sinon, ou si la vue a changé de hauteur, `Aucun` : les pixels commandés ne sont jamais
+/// passés à la mesure (C, seconde reprise R1 et R3). Dans une vue unie, un `Lu(e)` non nul
+/// fait rendre `Avance(e)` (C, complément) : il ne vient donc que d'une vraie lecture.
+pub fn attendu(gardee: Option<Position>, maintenant: Option<Position>) -> Attendu {
+    match (gardee, maintenant) {
+        (Some(g), Some(m)) => defiler::decalage_px(&g, &m).map_or(Attendu::Aucun, Attendu::Lu),
+        _ => Attendu::Aucun,
+    }
 }
 
 /// Vrai si un cran du moyen en cours fait plus que la zone ne peut recouvrir : chaque pas
@@ -2109,27 +2114,27 @@ mod tests {
         };
         // Observé : vue de 400 px qui montre 20 % de la page, parcours de 1 600 px ; 10 %
         // de plus = 160 px (B, defiler::decalage_px), dans les deux sens.
-        assert_eq!(attendu(p(10.0), p(20.0)), Some(160));
-        assert_eq!(attendu(p(20.0), p(10.0)), Some(-160));
+        assert_eq!(attendu(p(10.0), p(20.0)), Attendu::Lu(160));
+        assert_eq!(attendu(p(20.0), p(10.0)), Attendu::Lu(-160));
         // Position inchangée : 0, jamais le pas commandé.
-        assert_eq!(attendu(p(10.0), p(10.0)), Some(0));
-        // Sans position : rien (le pas commandé n'est jamais passé à la mesure).
-        assert_eq!(attendu(None, p(10.0)), None);
-        assert_eq!(attendu(p(10.0), None), None);
-        assert_eq!(attendu(None, None), None);
+        assert_eq!(attendu(p(10.0), p(10.0)), Attendu::Lu(0));
+        // Sans position : `Aucun` (le pas commandé n'est jamais passé à la mesure).
+        assert_eq!(attendu(None, p(10.0)), Attendu::Aucun);
+        assert_eq!(attendu(p(10.0), None), Attendu::Aucun);
+        assert_eq!(attendu(None, None), Attendu::Aucun);
         // Vue illisible (toute la page visible), ou redimensionnée entre les deux : rien.
         let toute = Some(Position {
             pour_cent: 0.0,
             vue: 100.0,
             hauteur_vue: 400,
         });
-        assert_eq!(attendu(p(10.0), toute), None);
+        assert_eq!(attendu(p(10.0), toute), Attendu::Aucun);
         let plus_haute = Some(Position {
             pour_cent: 20.0,
             vue: 20.0,
             hauteur_vue: 500,
         });
-        assert_eq!(attendu(p(10.0), plus_haute), None);
+        assert_eq!(attendu(p(10.0), plus_haute), Attendu::Aucun);
     }
 
     // ----- lancement -----

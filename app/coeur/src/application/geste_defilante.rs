@@ -57,7 +57,7 @@ use super::defilante::{
 use super::etats::{Declencheur, Mode};
 use super::{zone, CaptureEnCours, Evenement, GardeEcran};
 use crate::capture;
-use crate::defilement::{self, Ajout, Assemblage, Fixes, Mesure, TOLERANCE};
+use crate::defilement::{self, Ajout, Assemblage, Attendu, Fixes, Mesure, TOLERANCE};
 use crate::fenetres::defilante::{
     self as controle, ApercuPage, ChargeApercu, ChargeCacher, ChargeMessage, ChargeMontrer,
     Controle, PointPage, RectPage,
@@ -1064,8 +1064,7 @@ impl Pilote for defiler::Defileur {
 /// Mesure et assemblage (`defilement` ; un faux dans les essais).
 trait Atelier {
     fn fixes(&self) -> Fixes;
-    fn mesurer(&self, avant: &Pixels, apres: &Pixels, fixes: Fixes, attendu: Option<i32>)
-        -> Mesure;
+    fn mesurer(&self, avant: &Pixels, apres: &Pixels, fixes: Fixes, attendu: Attendu) -> Mesure;
     fn ajouter(&mut self, image: &Pixels, mesure: &Mesure) -> Ajout;
     fn apercu(&self, largeur: u32, hauteur_max: u32) -> Pixels;
     /// Vrai si la dernière `Ajout::Limite` vient d'une mémoire refusée (D19).
@@ -1081,13 +1080,7 @@ impl Atelier for VraiAtelier {
     fn fixes(&self) -> Fixes {
         self.0.as_ref().map(|a| a.fixes()).unwrap_or_default()
     }
-    fn mesurer(
-        &self,
-        avant: &Pixels,
-        apres: &Pixels,
-        fixes: Fixes,
-        attendu: Option<i32>,
-    ) -> Mesure {
+    fn mesurer(&self, avant: &Pixels, apres: &Pixels, fixes: Fixes, attendu: Attendu) -> Mesure {
         defilement::mesurer(avant, apres, fixes, attendu, &TOLERANCE)
     }
     fn ajouter(&mut self, image: &Pixels, mesure: &Mesure) -> Ajout {
@@ -1312,7 +1305,7 @@ struct Fil<S: Source, P: Pilote, A: Atelier> {
     commande_depuis_gardee: i32,
     /// Le décalage observé (positions lues) au dernier pas, depuis la dernière image
     /// gardée : il vaut encore pour une image reprise sans pas entre-temps.
-    observe: Option<i32>,
+    observe: Attendu,
     /// L'instant de l'ordre de fin (clic, Entrée).
     fin_recue: Option<Instant>,
 }
@@ -1387,7 +1380,7 @@ impl<S: Source, P: Pilote, A: Atelier> Fil<S, P, A> {
             relache_premiere,
             position_gardee,
             commande_depuis_gardee: 0,
-            observe: None,
+            observe: Attendu::Aucun,
             fin_recue: None,
         }
     }
@@ -1727,9 +1720,9 @@ impl<S: Source, P: Pilote, A: Atelier> Fil<S, P, A> {
                 if self.precedente.rgba == self.image.rgba {
                     return Posee::Prise;
                 }
-                let m = self
-                    .atelier
-                    .mesurer(&self.precedente, &self.image, self.fixes, None);
+                let m =
+                    self.atelier
+                        .mesurer(&self.precedente, &self.image, self.fixes, Attendu::Aucun);
                 // Deux images de suite qui ne disent pas de mouvement : une page unie ou
                 // répétée rend `Ambigue` (C), et n'attend pas les 400 ms.
                 if matches!(m, Mesure::Immobile | Mesure::Ambigue) {
@@ -1771,7 +1764,7 @@ impl<S: Source, P: Pilote, A: Atelier> Fil<S, P, A> {
             return;
         }
         let attendu = match self.course.conduite() {
-            Conduite::Main => None,
+            Conduite::Main => Attendu::Aucun,
             _ => self.observe,
         };
         let mesure = self.mesurer(attendu, None);
@@ -1783,7 +1776,7 @@ impl<S: Source, P: Pilote, A: Atelier> Fil<S, P, A> {
     }
 
     /// Mesure `image` contre la dernière image gardée et l'ajoute (D10 à D13).
-    fn mesurer(&mut self, attendu: Option<i32>, position: Option<Position>) -> Mesure {
+    fn mesurer(&mut self, attendu: Attendu, position: Option<Position>) -> Mesure {
         if self.fini {
             return Mesure::Immobile;
         }
@@ -1820,7 +1813,7 @@ impl<S: Source, P: Pilote, A: Atelier> Fil<S, P, A> {
             std::mem::swap(&mut self.reference, &mut self.image);
             self.position_gardee = position;
             self.commande_depuis_gardee = 0;
-            self.observe = None;
+            self.observe = Attendu::Aucun;
         }
         if mesure == Mesure::Perdue {
             self.perdues += 1;
@@ -2127,15 +2120,9 @@ mod tests {
         fn fixes(&self) -> Fixes {
             Fixes::default()
         }
-        fn mesurer(
-            &self,
-            avant: &Pixels,
-            apres: &Pixels,
-            _: Fixes,
-            attendu: Option<i32>,
-        ) -> Mesure {
-            // L'attente de page posée mesure sans attendu : seuls ceux transmis comptent.
-            if let Some(a) = attendu {
+        fn mesurer(&self, avant: &Pixels, apres: &Pixels, _: Fixes, attendu: Attendu) -> Mesure {
+            // L'attente de page posée mesure sans attendu : seuls les lus transmis comptent.
+            if let Attendu::Lu(a) = attendu {
                 self.attendus.lock().unwrap().push(a);
             }
             let d = position_de(apres) - position_de(avant);

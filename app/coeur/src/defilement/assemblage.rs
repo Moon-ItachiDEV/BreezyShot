@@ -10,7 +10,7 @@
 //! remplies à mesure, réécrites en place), avec une copie de la dernière image gardée
 //! (`derniere`). `finir` fait la seule copie de toute l'image.
 
-use super::{Ajout, Fixes, Limite, Mesure, Paire, Vue, TOLERANCE};
+use super::{Ajout, Fixes, Limite, Mesure, Paire, Teinte, Vue, TOLERANCE};
 use crate::systeme::gel::Pixels;
 
 /// Lignes par bande.
@@ -118,8 +118,12 @@ impl Assemblage {
         let pied = self.fixes.bas.min(h - d);
         // Les lignes du haut à ne pas poser, sans laisser de trou : la précédente couvre
         // ses lignes `d..h`, son pied doit être recouvert.
+        // Les lignes déjà posées que la nouvelle image ne montre que teintées (survol,
+        // sélection à place fixe) sont gardées, et une ligne posée teintée est remplacée :
+        // la bande ne reste qu'une fois (au plus).
+        let teintes = paire.teintes(d as usize);
         let garde = paire
-            .haut_a_garder(d)
+            .haut_a_garder(d, &teintes)
             .max(self.fixes.haut)
             .min(h - d - pied);
         let position = self.position + d;
@@ -140,17 +144,18 @@ impl Assemblage {
             // Le corps jusqu'à la place du pied, puis le pied de cette image.
             let fin_corps = (finale as usize).saturating_sub(pied);
             if fin_corps > position + garde {
-                self.ecrire(
+                self.ecrire_sauf(
                     &image.rgba,
                     garde,
                     fin_corps - position - garde,
                     position + garde,
+                    &teintes,
                 );
             }
             let p = pied.min(finale as usize);
             self.ecrire(&image.rgba, h - p, p, finale as usize - p);
         } else {
-            self.ecrire(&image.rgba, garde, h - garde, position + garde);
+            self.ecrire_sauf(&image.rgba, garde, h - garde, position + garde, &teintes);
         }
         self.hauteur = finale;
         self.position = position as u32;
@@ -288,6 +293,22 @@ impl Assemblage {
             self.bandes.push(bande);
         }
         true
+    }
+
+    /// `ecrire`, sauf les lignes `y` de l'image que `teintes[y]` dit teintées sur une ligne
+    /// déjà posée sans teinte (celle-ci est gardée).
+    fn ecrire_sauf(&mut self, rgba: &[u8], y0: usize, n: usize, vers: usize, teintes: &[Teinte]) {
+        let garder = |y: usize| teintes.get(y) == Some(&Teinte::Neuve);
+        let mut y = y0;
+        while y < y0 + n {
+            if garder(y) {
+                y += 1;
+                continue;
+            }
+            let fin = (y..y0 + n).find(|k| garder(*k)).unwrap_or(y0 + n);
+            self.ecrire(rgba, y, fin - y, vers + (y - y0));
+            y = fin;
+        }
     }
 
     /// Écrit les lignes `y0..y0 + n` de `rgba` (une image de la zone) à partir de la ligne

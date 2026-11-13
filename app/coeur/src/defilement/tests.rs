@@ -242,7 +242,7 @@ fn page_lisse(l: u32, h: u32) -> Pixels {
     for y in 0..h {
         for x in 0..l {
             let (xf, yf) = (f64::from(x), f64::from(y));
-            let v = (x + 3 * y) % 510;
+            let v = (x + 9 * y) % 510;
             let r = if v < 256 { v } else { 509 - v } as u8;
             let g = (128.0 + 90.0 * (yf / 23.0 + xf / 50.0).sin()) as u8;
             let b = (128.0 + 90.0 * (yf / 41.0 - xf / 70.0).sin()) as u8;
@@ -313,7 +313,7 @@ fn couvrir(im: &mut Pixels, y0: u32, bande: &Pixels) {
 /// Rend l'image, les mesures et leurs durées.
 fn derouler(
     images: &[Pixels],
-    attendus: &[Option<i32>],
+    attendus: &[Attendu],
     limite: Limite,
 ) -> (Pixels, Vec<Mesure>, Vec<Duration>) {
     let mut a = Assemblage::nouveau(&images[0], limite).unwrap();
@@ -325,7 +325,7 @@ fn derouler(
             &gardee,
             image,
             a.fixes(),
-            attendus.get(i).copied().flatten(),
+            attendus.get(i).copied().unwrap_or(Attendu::Aucun),
             &TOLERANCE,
         );
         durees.push(debut.elapsed());
@@ -371,10 +371,16 @@ fn positions(p: u32, vue: u32, pas: u32) -> Vec<u32> {
     v
 }
 
-/// Les attendus d'un déroulé : le vrai pas, décalé de `faux`.
-fn attendus(pos: &[u32], faux: i32) -> Vec<Option<i32>> {
+/// Les attendus lus d'un déroulé : le vrai pas, décalé de `faux`.
+fn attendus(pos: &[u32], faux: i32) -> Vec<Attendu> {
     (0..pos.len())
-        .map(|k| (k > 0).then(|| (pos[k] - pos[k - 1]) as i32 + faux))
+        .map(|k| {
+            if k == 0 {
+                Attendu::Aucun
+            } else {
+                Attendu::Lu((pos[k] - pos[k - 1]) as i32 + faux)
+            }
+        })
         .collect()
 }
 
@@ -454,17 +460,20 @@ fn immobile_avance_recul_perdue() {
     let page = page_texte(600, 4000, 20, 580, 11);
     let h = 400;
     let a = z(&page, 1000, h);
-    assert_eq!(mesurer(&a, &a, Fixes::default(), None, t), Mesure::Immobile);
+    assert_eq!(
+        mesurer(&a, &a, Fixes::default(), Attendu::Aucun, t),
+        Mesure::Immobile
+    );
     for d in [1u32, 2, 3, 22, 37, 100, 150, 300] {
         let b = z(&page, 1000 + d, h);
         assert_eq!(
-            mesurer(&a, &b, Fixes::default(), None, t),
+            mesurer(&a, &b, Fixes::default(), Attendu::Aucun, t),
             Mesure::Avance(d),
             "avance {d}"
         );
         let c = z(&page, 1000 - d, h);
         assert_eq!(
-            mesurer(&a, &c, Fixes::default(), None, t),
+            mesurer(&a, &c, Fixes::default(), Attendu::Aucun, t),
             Mesure::Recul(d),
             "recul {d}"
         );
@@ -473,7 +482,7 @@ fn immobile_avance_recul_perdue() {
     for d in [360u32, 400, 1500] {
         let b = z(&page, 1000 + d, h);
         assert_eq!(
-            mesurer(&a, &b, Fixes::default(), None, t),
+            mesurer(&a, &b, Fixes::default(), Attendu::Aucun, t),
             Mesure::Perdue,
             "{d}"
         );
@@ -481,18 +490,18 @@ fn immobile_avance_recul_perdue() {
     // 49 lignes de recouvrement, deux lignes de texte : trop peu pour décider.
     let b = z(&page, 1351, h);
     assert!(matches!(
-        mesurer(&a, &b, Fixes::default(), None, t),
+        mesurer(&a, &b, Fixes::default(), Attendu::Aucun, t),
         Mesure::Ambigue | Mesure::Avance(351)
     ));
     // Tailles différentes ou incohérentes : perdue, sans panique.
     assert_eq!(
-        mesurer(&a, &z(&page, 0, 200), Fixes::default(), None, t),
+        mesurer(&a, &z(&page, 0, 200), Fixes::default(), Attendu::Aucun, t),
         Mesure::Perdue
     );
     let mut abimee = a.clone();
     abimee.rgba.pop();
     assert_eq!(
-        mesurer(&a, &abimee, Fixes::default(), None, t),
+        mesurer(&a, &abimee, Fixes::default(), Attendu::Aucun, t),
         Mesure::Perdue
     );
 }
@@ -508,7 +517,7 @@ fn texte_etroit_dans_une_zone_large() {
         let a = z(&page, 1000, h);
         for d in [0u32, 1, 11, 22, 150, 300, 540] {
             let b = z(&page, 1000 + d, h);
-            let m = mesurer(&a, &b, Fixes::default(), None, t);
+            let m = mesurer(&a, &b, Fixes::default(), Attendu::Aucun, t);
             assert_eq!(
                 m,
                 if d == 0 {
@@ -522,7 +531,7 @@ fn texte_etroit_dans_une_zone_large() {
         for d in [560u32, 800] {
             let b = z(&page, 1000 + d, h);
             assert_eq!(
-                mesurer(&a, &b, Fixes::default(), None, t),
+                mesurer(&a, &b, Fixes::default(), Attendu::Aucun, t),
                 Mesure::Perdue,
                 "{l} : {d}"
             );
@@ -531,57 +540,89 @@ fn texte_etroit_dans_une_zone_large() {
 }
 
 #[test]
-fn l_attendu_ne_fait_que_departager() {
-    // D passe comme attendu la position lue (fausse de quelques dizaines de pixels, ou
-    // franchement fausse) ou le pas commandé : il ne change pas une mesure que l'image
-    // décide, et n'invente jamais une avance.
+fn l_attendu_lu() {
+    // D passe la position lue par l'application. Exacte (ou à 3 lignes près), elle est
+    // rendue ; fausse, l'image la contredit : jamais une autre avance inventée, au pire
+    // `Ambigue`. Deux images égales : `Immobile`, quel que soit le lu.
     let t = &TOLERANCE;
     let page = page_texte(600, 3000, 20, 580, 5);
     let a = z(&page, 900, 400);
     let b = z(&page, 1050, 400);
     for e in [
-        None,
-        Some(150),
-        Some(120),
-        Some(180),
-        Some(400),
-        Some(-150),
-        Some(0),
-        Some(5000),
+        Attendu::Aucun,
+        Attendu::Lu(150),
+        Attendu::Lu(148),
+        Attendu::Lu(153),
     ] {
         assert_eq!(
             mesurer(&a, &b, Fixes::default(), e, t),
             Mesure::Avance(150),
             "{e:?}"
         );
+    }
+    for e in [120, 180, 400, -150, 0, 5000] {
+        let m = mesurer(&a, &b, Fixes::default(), Attendu::Lu(e), t);
+        assert!(
+            matches!(m, Mesure::Avance(150) | Mesure::Ambigue),
+            "{e} {m:?}"
+        );
+    }
+    for e in [
+        Attendu::Aucun,
+        Attendu::Lu(0),
+        Attendu::Lu(150),
+        Attendu::Lu(-40),
+        Attendu::Lu(5000),
+    ] {
         assert_eq!(
             mesurer(&a, &a, Fixes::default(), e, t),
             Mesure::Immobile,
             "{e:?}"
         );
     }
-    // Une page unie, ou une seule ligne de texte : rien ne décide, l'attendu non plus.
+    // Une page unie, ou une seule ligne de texte : sans lu, rien ne décide. Avec un lu,
+    // deux images égales qui ont du contenu sont immobiles (contenu fixe, ou page pas
+    // encore peinte) ; entièrement unies, le lu est rendu, dans la portée (252 ici).
     let vide = unie(400, 300, [240, 240, 240]);
-    for e in [None, Some(0), Some(150)] {
+    assert_eq!(
+        mesurer(&vide, &vide, Fixes::default(), Attendu::Aucun, t),
+        Mesure::Ambigue
+    );
+    for (e, m) in [
+        (0, Mesure::Immobile),
+        (150, Mesure::Avance(150)),
+        (-40, Mesure::Recul(40)),
+        (252, Mesure::Avance(252)),
+        (253, Mesure::Perdue),
+    ] {
         assert_eq!(
-            mesurer(&vide, &vide, Fixes::default(), e, t),
-            Mesure::Ambigue,
-            "{e:?}"
+            mesurer(&vide, &vide, Fixes::default(), Attendu::Lu(e), t),
+            m,
+            "{e}"
         );
     }
     let mut une = vide.clone();
     couvrir(&mut une, 100, &page_texte(400, 22, 10, 390, 9));
+    for e in [Attendu::Lu(0), Attendu::Lu(150)] {
+        assert_eq!(
+            mesurer(&une, &une, Fixes::default(), e, t),
+            Mesure::Immobile,
+            "{e:?}"
+        );
+    }
     assert_eq!(
-        mesurer(&une, &une, Fixes::default(), Some(150), t),
+        mesurer(&une, &une, Fixes::default(), Attendu::Aucun, t),
         Mesure::Ambigue
     );
     // Le bas d'une liste : trois lignes de texte puis du blanc, immobile.
     let mut bas = vide.clone();
     couvrir(&mut bas, 0, &page_texte(400, 66, 10, 390, 9));
-    assert_eq!(
-        mesurer(&bas, &bas, Fixes::default(), Some(150), t),
-        Mesure::Immobile
-    );
+    for e in [Attendu::Aucun, Attendu::Lu(150)] {
+        assert_eq!(
+            mesurer(&bas, &bas, Fixes::default(), e, t),
+            Mesure::Immobile
+        );
+    }
 }
 
 #[test]
@@ -596,37 +637,46 @@ fn zones_unies_rien_d_invente() {
             *v = (i32::from(*v) + h.entre(-4, 4)) as u8;
         }
     }
-    for e in [None, Some(100)] {
-        assert_eq!(
-            mesurer(&vide, &bruitee, Fixes::default(), e, t),
-            Mesure::Ambigue
-        );
-    }
-    // Une page dont la partie unie est plus haute que la zone : ambiguë, rien d'ajouté,
-    // attendu ou non (il ne traverse pas un blanc qu'aucune image ne mesure).
+    assert_eq!(
+        mesurer(&vide, &bruitee, Fixes::default(), Attendu::Aucun, t),
+        Mesure::Ambigue
+    );
+    assert_eq!(
+        mesurer(&vide, &bruitee, Fixes::default(), Attendu::Lu(100), t),
+        Mesure::Avance(100)
+    );
+    // Une page dont la partie unie est plus haute que la zone : deux images égales et
+    // unies. Sans lu, ambiguë et rien d'ajouté ; avec le lu, il est rendu.
     let mut page = page_texte(400, 1500, 10, 390, 6);
     rectangle(&mut page, 0, 400, 400, 500, BLANC);
     let a = z(&page, 450, 300);
     let b = z(&page, 550, 300);
-    for e in [None, Some(100)] {
-        assert_eq!(
-            mesurer(&a, &b, Fixes::default(), e, t),
-            Mesure::Ambigue,
-            "{e:?}"
-        );
-    }
+    assert_eq!(
+        mesurer(&a, &b, Fixes::default(), Attendu::Aucun, t),
+        Mesure::Ambigue
+    );
+    assert_eq!(
+        mesurer(&a, &b, Fixes::default(), Attendu::Lu(100), t),
+        Mesure::Avance(100)
+    );
     let mut asm = Assemblage::nouveau(&a, sans_limite()).unwrap();
     assert_eq!(asm.ajouter(&b, &Mesure::Ambigue), Ajout::Rien);
     assert_eq!(asm.hauteur(), 300);
-    // Une ligne de texte qui monte dans une zone unie (moins de 16 lignes porteuses).
+    // Une ligne de texte qui monte dans une zone unie (moins de 16 lignes porteuses) :
+    // sans lu, ambiguë ; le lu exact traverse le blanc ; un lu faux ne passe pas.
     let ligne = page_texte(400, 22, 10, 390, 2);
     let (mut avant, mut apres) = (vide.clone(), vide.clone());
     couvrir(&mut avant, 100, &ligne);
     couvrir(&mut apres, 40, &ligne);
-    assert_eq!(
-        mesurer(&avant, &apres, Fixes::default(), Some(60), t),
-        Mesure::Ambigue
-    );
+    for (e, m) in [
+        (Attendu::Aucun, Mesure::Ambigue),
+        (Attendu::Lu(60), Mesure::Avance(60)),
+        (Attendu::Lu(61), Mesure::Avance(60)),
+        (Attendu::Lu(90), Mesure::Ambigue),
+        (Attendu::Lu(0), Mesure::Ambigue),
+    ] {
+        assert_eq!(mesurer(&avant, &apres, Fixes::default(), e, t), m, "{e:?}");
+    }
 }
 
 #[test]
@@ -642,27 +692,36 @@ fn motif_qui_se_repete() {
     }
     let a = z(&page, 100, 400);
     let b = z(&page, 200, 400);
-    assert_eq!(mesurer(&a, &b, Fixes::default(), None, t), Mesure::Ambigue);
     assert_eq!(
-        mesurer(&a, &b, Fixes::default(), Some(100), t),
+        mesurer(&a, &b, Fixes::default(), Attendu::Aucun, t),
+        Mesure::Ambigue
+    );
+    assert_eq!(
+        mesurer(&a, &b, Fixes::default(), Attendu::Lu(100), t),
         Mesure::Avance(100)
     );
     assert_eq!(
-        mesurer(&a, &b, Fixes::default(), Some(102), t),
+        mesurer(&a, &b, Fixes::default(), Attendu::Lu(102), t),
         Mesure::Avance(100)
     );
     assert_eq!(
-        mesurer(&a, &b, Fixes::default(), Some(166), t),
+        mesurer(&a, &b, Fixes::default(), Attendu::Lu(166), t),
         Mesure::Avance(166)
     );
     assert_eq!(
-        mesurer(&a, &b, Fixes::default(), Some(120), t),
+        mesurer(&a, &b, Fixes::default(), Attendu::Lu(120), t),
         Mesure::Ambigue
     );
-    // Deux images identiques d'un motif : 0 n'est pas seul, ambiguë ; jamais une avance.
-    for e in [None, Some(66)] {
-        assert_eq!(mesurer(&a, &a, Fixes::default(), e, t), Mesure::Ambigue);
-    }
+    // Deux images identiques d'un motif : sans lu, 0 n'est pas seul, ambiguë ; avec un
+    // lu, immobile. Jamais une avance.
+    assert_eq!(
+        mesurer(&a, &a, Fixes::default(), Attendu::Aucun, t),
+        Mesure::Ambigue
+    );
+    assert_eq!(
+        mesurer(&a, &a, Fixes::default(), Attendu::Lu(66), t),
+        Mesure::Immobile
+    );
 }
 
 #[test]
@@ -673,13 +732,13 @@ fn liste_aux_noms_proches() {
     let h = 552;
     let a = z(&page, 440, h);
     for (d, e) in [
-        (0u32, None),
-        (0, Some(84)),
-        (22, None),
-        (84, None),
-        (84, Some(28)),
-        (88, None),
-        (132, None),
+        (0u32, Attendu::Aucun),
+        (0, Attendu::Lu(84)),
+        (22, Attendu::Aucun),
+        (84, Attendu::Aucun),
+        (84, Attendu::Lu(84)),
+        (88, Attendu::Aucun),
+        (132, Attendu::Lu(132)),
     ] {
         let b = z(&page, 440 + d, h);
         let m = mesurer(&a, &b, Fixes::default(), e, t);
@@ -693,19 +752,30 @@ fn liste_aux_noms_proches() {
             "{d} {e:?}"
         );
     }
+    // Un lu faux d'une ou plusieurs lignes de liste : pas une ligne voisine.
+    for e in [28, 62, 106, 64] {
+        let b = z(&page, 440 + 84, h);
+        let m = mesurer(&a, &b, Fixes::default(), Attendu::Lu(e), t);
+        assert!(
+            matches!(m, Mesure::Avance(84) | Mesure::Ambigue),
+            "{e} {m:?}"
+        );
+    }
     for d in [528u32, 540, 600, 1000] {
         let b = z(&page, 440 + d, h);
-        assert!(!jamais_fausse(
-            mesurer(&a, &b, Fixes::default(), None, t),
-            i64::from(d),
-            "liste"
-        ));
+        for e in [Attendu::Aucun, Attendu::Lu(d as i32)] {
+            assert!(!jamais_fausse(
+                mesurer(&a, &b, Fixes::default(), e, t),
+                i64::from(d),
+                "liste"
+            ));
+        }
     }
     // Déroulé par pas de la molette (84) : la liste exacte.
     let pos = positions(page.hauteur, h, 84);
     let images: Vec<Pixels> = pos.iter().map(|p| z(&page, *p, h)).collect();
-    for faux in [0, 30] {
-        let (finale, _, durees) = derouler(&images, &attendus(&pos, faux), sans_limite());
+    for att in [Vec::new(), attendus(&pos, 0), attendus(&pos, 2)] {
+        let (finale, _, durees) = derouler(&images, &att, sans_limite());
         noter("liste aux noms proches", &durees);
         egales(&finale, &page, "liste");
     }
@@ -732,7 +802,7 @@ fn barre_laterale_et_contenu_clairseme() {
         for d in [0u32, 130, 260, 400, 510, 520, 530, 560, 700, 1040] {
             let b = z(&page, p0 + d, h);
             let juste = jamais_fausse(
-                mesurer(&a, &b, Fixes::default(), None, t),
+                mesurer(&a, &b, Fixes::default(), Attendu::Aucun, t),
                 i64::from(d),
                 "barre latérale",
             );
@@ -750,32 +820,53 @@ fn barre_laterale_et_contenu_clairseme() {
 
 #[test]
 fn page_de_reglages_aux_grands_blancs() {
-    // Comme les pages de réglages : des blancs de 80 à 260 lignes. Contre la dernière
-    // image gardée, une mesure est juste ou dit qu'elle ne sait pas.
+    // Comme les pages de réglages : des blancs de 80 à 260 lignes. Enchaîné comme D le
+    // fait (contre la dernière image gardée) : sans lu, une mesure est juste ou dit
+    // qu'elle ne sait pas ; avec le lu exact, chaque mesure est juste et la page entière
+    // est assemblée.
     let t = &TOLERANCE;
     let page = page_reglages(900, 5000, 4);
-    for (h, pas) in [(600u32, 300u32), (500, 120), (400, 84), (700, 200)] {
+    for (h, pas) in [
+        (600u32, 300u32),
+        (500, 120),
+        (400, 84),
+        (700, 200),
+        (400, 340),
+    ] {
         let pos = positions(page.hauteur, h, pas);
         let images: Vec<Pixels> = pos.iter().map(|p| z(&page, *p, h)).collect();
-        let mut a = Assemblage::nouveau(&images[0], sans_limite()).unwrap();
-        let (mut gardee, mut pg) = (images[0].clone(), pos[0]);
-        let mut justes = 0;
-        for k in 1..images.len() {
-            let vrai = i64::from(pos[k]) - i64::from(pg);
-            let m = mesurer(&gardee, &images[k], a.fixes(), Some(vrai as i32 + 20), t);
-            justes += usize::from(jamais_fausse(m, vrai, "réglages"));
-            if !matches!(a.ajouter(&images[k], &m), Ajout::Rien) {
-                gardee = images[k].clone();
-                pg = pos[k];
+        for avec_lu in [false, true] {
+            let mut a = Assemblage::nouveau(&images[0], sans_limite()).unwrap();
+            let (mut gardee, mut pg) = (images[0].clone(), pos[0]);
+            let mut justes = 0;
+            for k in 1..images.len() {
+                let vrai = i64::from(pos[k]) - i64::from(pg);
+                let e = if avec_lu {
+                    Attendu::Lu(vrai as i32)
+                } else {
+                    Attendu::Aucun
+                };
+                let m = mesurer(&gardee, &images[k], a.fixes(), e, t);
+                justes += usize::from(jamais_fausse(m, vrai, "réglages"));
+                if avec_lu {
+                    assert_eq!(m, mesure_de(vrai as i32), "{h} {pas} {k}");
+                }
+                if !matches!(a.ajouter(&images[k], &m), Ajout::Rien) {
+                    gardee = images[k].clone();
+                    pg = pos[k];
+                }
+            }
+            eprintln!(
+                "reglages zone {h} pas {pas} lu {avec_lu} : {justes} justes sur {}",
+                images.len() - 1
+            );
+            // Ce qui est assemblé est exactement le haut de la page.
+            let finale = a.finir(&gardee).unwrap();
+            egales(&finale, &z(&page, 0, finale.hauteur), "réglages");
+            if avec_lu {
+                assert_eq!(finale.hauteur, page.hauteur, "{h} {pas}");
             }
         }
-        eprintln!(
-            "reglages zone {h} pas {pas} : {justes} justes sur {}",
-            images.len() - 1
-        );
-        // Ce qui est assemblé est exactement le haut de la page.
-        let finale = a.finir(&gardee).unwrap();
-        egales(&finale, &z(&page, 0, finale.hauteur), "réglages");
     }
 }
 
@@ -802,7 +893,7 @@ fn defilement_horizontal_jamais_une_avance() {
             }
         }
         assert!(!jamais_fausse(
-            mesurer(&a, &b, Fixes::default(), None, t),
+            mesurer(&a, &b, Fixes::default(), Attendu::Aucun, t),
             100,
             "horizontal"
         ));
@@ -821,7 +912,7 @@ fn lignes_fausses_eparses_ne_passent_pas() {
         }
     }
     assert!(!jamais_fausse(
-        mesurer(&a, &b, Fixes::default(), None, &TOLERANCE),
+        mesurer(&a, &b, Fixes::default(), Attendu::Aucun, &TOLERANCE),
         100,
         "éparses"
     ));
@@ -836,7 +927,7 @@ fn deroule_texte_realiste() {
     for (h, pas) in [(400u32, 180u32), (300, 37), (552, 276)] {
         let pos = positions(page.hauteur, h, pas);
         let images: Vec<Pixels> = pos.iter().map(|p| z(&page, *p, h)).collect();
-        for faux in [None, Some(0), Some(30), Some(-60), Some(4000)] {
+        for faux in [None, Some(0), Some(2), Some(-3)] {
             let att = faux.map_or_else(Vec::new, |f| attendus(&pos, f));
             let (finale, mesures, durees) = derouler(&images, &att, sans_limite());
             noter(&format!("texte {h} pas {pas} attendu {faux:?}"), &durees);
@@ -865,7 +956,7 @@ fn trop_vite_puis_reprise_contre_la_meme_image() {
     let mut gardee = images[0].clone();
     let mut vues = Vec::new();
     for image in &images[1..] {
-        let m = mesurer(&gardee, image, a.fixes(), None, &TOLERANCE);
+        let m = mesurer(&gardee, image, a.fixes(), Attendu::Aucun, &TOLERANCE);
         vues.push(m);
         if let Ajout::Ajoutees(_) = a.ajouter(image, &m) {
             gardee = image.clone();
@@ -894,7 +985,13 @@ fn entete_collant_et_pied_fixes() {
         .map(|p| zone(&page, *p, h, Some(&entete), Some(&pied)))
         .collect();
     let mut a = Assemblage::nouveau(&images[0], sans_limite()).unwrap();
-    let m = mesurer(&images[0], &images[1], a.fixes(), None, &TOLERANCE);
+    let m = mesurer(
+        &images[0],
+        &images[1],
+        a.fixes(),
+        Attendu::Aucun,
+        &TOLERANCE,
+    );
     assert_eq!(m, Mesure::Avance(115));
     assert_eq!(a.ajouter(&images[1], &m), Ajout::Ajoutees(115));
     assert_eq!(a.fixes(), Fixes { haut: 40, bas: 30 });
@@ -913,7 +1010,7 @@ fn entete_collant_et_pied_fixes() {
     // Avec les bandes connues, la mesure les met de côté.
     let f = Fixes { haut: 40, bas: 30 };
     assert_eq!(
-        mesurer(&images[1], &images[2], f, None, &TOLERANCE),
+        mesurer(&images[1], &images[2], f, Attendu::Aucun, &TOLERANCE),
         Mesure::Avance(115)
     );
 }
@@ -1061,7 +1158,13 @@ fn decalage_fractionnaire_par_moyenne_de_deux_lignes() {
         })
         .collect();
     // Sans attendu, la mesure tombe sur l'une des deux lignes.
-    let m = mesurer(&images[0], &images[1], Fixes::default(), None, &TOLERANCE);
+    let m = mesurer(
+        &images[0],
+        &images[1],
+        Fixes::default(),
+        Attendu::Aucun,
+        &TOLERANCE,
+    );
     assert!(
         matches!(m, Mesure::Avance(150) | Mesure::Avance(151)),
         "{m:?}"
@@ -1208,7 +1311,7 @@ fn survol_et_selection_de_l_explorateur() {
             survoler(&mut b, y0, 17);
             if inverser {
                 assert_eq!(
-                    mesurer(&a, &b, Fixes::default(), None, &TOLERANCE),
+                    mesurer(&a, &b, Fixes::default(), Attendu::Aucun, &TOLERANCE),
                     Mesure::Avance(d),
                     "pas {d}"
                 );
@@ -1218,7 +1321,7 @@ fn survol_et_selection_de_l_explorateur() {
             let mut b = z(&page, pos[1], h);
             survoler(&mut b, y0 + 22, 17);
             assert_eq!(
-                mesurer(&a, &b, Fixes::default(), None, &TOLERANCE),
+                mesurer(&a, &b, Fixes::default(), Attendu::Aucun, &TOLERANCE),
                 Mesure::Immobile
             );
         }
@@ -1246,7 +1349,7 @@ fn animation_jamais_une_fausse_avance() {
             30,
             [20, 120, 230],
         );
-        let m = mesurer(&a2, &b, Fixes::default(), None, &TOLERANCE);
+        let m = mesurer(&a2, &b, Fixes::default(), Attendu::Aucun, &TOLERANCE);
         jamais_fausse(m, 150, "animation");
         eprintln!("animation (a place fixe : {fixe}) : {m:?}");
     }
@@ -1296,7 +1399,7 @@ fn limite_d13_coupe_le_dernier_ajout() {
     let mut gardee = images[0].clone();
     let mut derniers = Vec::new();
     for image in &images[1..] {
-        let m = mesurer(&gardee, image, a.fixes(), None, &TOLERANCE);
+        let m = mesurer(&gardee, image, a.fixes(), Attendu::Aucun, &TOLERANCE);
         let r = a.ajouter(image, &m);
         derniers.push(r);
         if !matches!(r, Ajout::Rien) {
@@ -1345,7 +1448,13 @@ fn aucune_reallocation_et_une_copie_a_finir() {
     let mut a = Assemblage::nouveau(&images[0], sans_limite()).unwrap();
     let mut vues: Vec<(*const u8, usize)> = Vec::new();
     for k in 1..images.len() {
-        let m = mesurer(&images[k - 1], &images[k], a.fixes(), None, &TOLERANCE);
+        let m = mesurer(
+            &images[k - 1],
+            &images[k],
+            a.fixes(),
+            Attendu::Aucun,
+            &TOLERANCE,
+        );
         assert!(
             matches!(a.ajouter(&images[k], &m), Ajout::Ajoutees(_)),
             "{k} {m:?}"
@@ -1391,7 +1500,13 @@ fn apercu_le_bas_reduit() {
         .collect();
     let mut a = Assemblage::nouveau(&images[0], sans_limite()).unwrap();
     for k in 1..images.len() {
-        let m = mesurer(&images[k - 1], &images[k], a.fixes(), None, &TOLERANCE);
+        let m = mesurer(
+            &images[k - 1],
+            &images[k],
+            a.fixes(),
+            Attendu::Aucun,
+            &TOLERANCE,
+        );
         a.ajouter(&images[k], &m);
     }
     assert_eq!(a.hauteur(), 1830);
@@ -1438,22 +1553,28 @@ fn budget_de_la_mesure_et_de_l_apercu() {
             let b = z(&page, k * 300 + d, h);
             let debut = Instant::now();
             assert_eq!(
-                mesurer(&a, &b, Fixes::default(), None, t),
+                mesurer(&a, &b, Fixes::default(), Attendu::Aucun, t),
                 Mesure::Avance(d)
             );
             avance.push(debut.elapsed());
             let debut = Instant::now();
             assert_eq!(
-                mesurer(&a, &b, Fixes::default(), Some(d as i32 + 30), t),
+                mesurer(&a, &b, Fixes::default(), Attendu::Lu(d as i32), t),
                 Mesure::Avance(d)
             );
             avec.push(debut.elapsed());
             let debut = Instant::now();
-            assert_eq!(mesurer(&a, &a, Fixes::default(), None, t), Mesure::Immobile);
+            assert_eq!(
+                mesurer(&a, &a, Fixes::default(), Attendu::Aucun, t),
+                Mesure::Immobile
+            );
             immobile.push(debut.elapsed());
             let c = z(&page, k * 300 + h + 10, h);
             let debut = Instant::now();
-            assert_eq!(mesurer(&a, &c, Fixes::default(), None, t), Mesure::Perdue);
+            assert_eq!(
+                mesurer(&a, &c, Fixes::default(), Attendu::Aucun, t),
+                Mesure::Perdue
+            );
             perdue.push(debut.elapsed());
             let mut asm = Assemblage::nouveau(&a, sans_limite()).unwrap();
             let debut = Instant::now();
@@ -1461,7 +1582,7 @@ fn budget_de_la_mesure_et_de_l_apercu() {
             ajout.push(debut.elapsed());
         }
         noter(&format!("{l}x{h} avance"), &avance);
-        noter(&format!("{l}x{h} avance, attendu faux de 30"), &avec);
+        noter(&format!("{l}x{h} avance, attendu lu"), &avec);
         noter(&format!("{l}x{h} immobile"), &immobile);
         noter(&format!("{l}x{h} perdue"), &perdue);
         noter(&format!("{l}x{h} ajouter"), &ajout);
@@ -1496,26 +1617,283 @@ fn budget_de_la_mesure_et_de_l_apercu() {
 #[test]
 fn liste_large_lue_une_colonne_sur_pas() {
     // La même liste dans une zone large : une colonne sur deux, trois ou quatre est lue
-    // (jamais des suites de colonnes, qui cacheraient le chiffre qui change) ; un attendu
-    // faux d'une ligne de liste ne choisit pas une ligne voisine.
+    // (jamais des suites de colonnes, qui cacheraient le chiffre qui change) ; un lu faux
+    // d'une ligne de liste ne choisit pas une ligne voisine.
     let t = &TOLERANCE;
     for l in [1100u32, 1600, 2560] {
         let page = page_liste(l, 200, 7);
         let a = z(&page, 440, 552);
         for (d, e) in [
-            (84u32, None),
-            (84, Some(28)),
-            (84, Some(62)),
-            (84, Some(106)),
-            (84, Some(64)),
-            (66, Some(88)),
-            (66, None),
+            (84u32, Attendu::Aucun),
+            (84, Attendu::Lu(84)),
+            (66, Attendu::Lu(66)),
+            (66, Attendu::Aucun),
         ] {
             let b = z(&page, 440 + d, 552);
             assert_eq!(
                 mesurer(&a, &b, Fixes::default(), e, t),
                 Mesure::Avance(d),
                 "{l} {d} {e:?}"
+            );
+        }
+        for (d, e) in [(84u32, 28), (84, 62), (84, 106), (84, 64), (66, 88)] {
+            let b = z(&page, 440 + d, 552);
+            let m = mesurer(&a, &b, Fixes::default(), Attendu::Lu(e), t);
+            assert!(
+                m == Mesure::Avance(d) || m == Mesure::Ambigue,
+                "{l} {d} {e} {m:?}"
+            );
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------------------
+// Seconde relecture (R1 à R5)
+
+/// Enchaîné comme D (`suite_auto`) : chaque image mesurée contre `derniere()`, avec le
+/// lu exact (la position vraie depuis la dernière image gardée) ou sans attendu. Rend
+/// l'image finale et les mesures (vrai, mesure).
+fn comme_d(images: &[Pixels], pos: &[u32], avec_lu: bool) -> (Pixels, Vec<(i64, Mesure)>) {
+    let mut a = Assemblage::nouveau(&images[0], sans_limite()).unwrap();
+    let mut pg = pos[0];
+    let mut vues = Vec::new();
+    for k in 1..images.len() {
+        let vrai = i64::from(pos[k]) - i64::from(pg);
+        let e = if avec_lu {
+            Attendu::Lu(vrai as i32)
+        } else {
+            Attendu::Aucun
+        };
+        let m = mesurer(a.derniere(), &images[k], a.fixes(), e, &TOLERANCE);
+        vues.push((vrai, m));
+        if !matches!(a.ajouter(&images[k], &m), Ajout::Rien) {
+            pg = pos[k];
+        }
+    }
+    let derniere = a.derniere().clone();
+    (a.finir(&derniere).unwrap(), vues)
+}
+
+/// Les lignes de `vu` qui diffèrent de la page (même largeur).
+fn lignes_differentes(vu: &Pixels, page: &Pixels) -> usize {
+    let r = (vu.largeur * 4) as usize;
+    (0..vu.hauteur.min(page.hauteur) as usize)
+        .filter(|y| vu.rgba[y * r..(y + 1) * r] != page.rgba[y * r..(y + 1) * r])
+        .count()
+}
+
+#[test]
+fn r1_page_clairsemee_de_bout_en_bout() {
+    // Réglages aux grands blancs, plus un blanc de 700 lignes (plus haut que la zone) :
+    // avec le lu exact, la page entière, chaque mesure juste (deux images égales dans le
+    // blanc : `Immobile`, la suivante rattrape) ; sans lu, jamais une mesure fausse, et
+    // ce qui est assemblé est le haut de la page. Deux vues entièrement unies (dans le
+    // blanc) : le lu est rendu, la dernière image gardée suit (zone 400, pas 200).
+    let mut page = page_reglages(900, 5000, 6);
+    rectangle(&mut page, 0, 2000, 900, 700, [249, 249, 249]);
+    for (h, pas) in [
+        (400u32, 150u32),
+        (600, 300),
+        (500, 120),
+        (400, 340),
+        (400, 200),
+    ] {
+        let pos = positions(page.hauteur, h, pas);
+        let images: Vec<Pixels> = pos.iter().map(|p| z(&page, *p, h)).collect();
+        for avec_lu in [true, false] {
+            let (finale, vues) = comme_d(&images, &pos, avec_lu);
+            let mut justes = 0;
+            for (k, (vrai, m)) in vues.iter().enumerate() {
+                // Deux images égales (le blanc plus haut que la zone) : `Immobile` est juste.
+                let pareilles = images[k + 1] == z(&page, pos[k + 1] - *vrai as u32, h);
+                if pareilles && *m == Mesure::Immobile {
+                    continue;
+                }
+                justes += usize::from(jamais_fausse(*m, *vrai, "page clairsemée"));
+                if avec_lu {
+                    assert_eq!(*m, mesure_de(*vrai as i32), "{h} {pas} {k}");
+                }
+            }
+            eprintln!(
+                "r1 zone {h} pas {pas} lu {avec_lu} : {justes} avances justes sur {}, hauteur {}",
+                vues.len(),
+                finale.hauteur
+            );
+            egales(&finale, &z(&page, 0, finale.hauteur), "page clairsemée");
+            if avec_lu {
+                assert_eq!(finale.hauteur, page.hauteur, "{h} {pas}");
+            }
+        }
+    }
+}
+
+/// Une barre latérale (160 px) d'un gris presque uni, et un bloc de texte de 30 lignes
+/// toutes les 260 lignes ; `trame` : ± `trame` sur la barre, fixe dans la page.
+fn page_barre(trame: i32) -> Pixels {
+    let texte = page_texte(800, 4000, 200, 780, 21);
+    let mut page = unie(800, 4000, BLANC);
+    let mut hz = Hasard(9);
+    for y in 0..4000 {
+        for x in 0..800 {
+            let c = if x < 160 {
+                let v = if trame > 0 {
+                    hz.entre(-trame, trame)
+                } else {
+                    0
+                };
+                [200, 205, 215].map(|c: i32| (c + v) as u8)
+            } else if y % 260 < 30 && x >= 200 {
+                pixel(&texte, x, y)
+            } else {
+                BLANC
+            };
+            poser(&mut page, x, y, c);
+        }
+    }
+    page
+}
+
+#[test]
+fn r2_bruit_et_trame_sur_une_barre_laterale() {
+    // Un bruit de ± 8 sur la nouvelle image, ou une trame de ± 6 sur la barre, ne fait
+    // pas des lignes porteuses : jamais une fausse avance, avec ou sans lu exact.
+    let t = &TOLERANCE;
+    let h = 500;
+    for trame in [0, 6] {
+        let page = page_barre(trame);
+        for p in (0..3400u32).step_by(519) {
+            for d in [0i64, 7, 60, 150, 260, 400, 440, 480, 900, -100] {
+                let q = i64::from(p) + d;
+                if q < 0 || q + i64::from(h) > 4000 {
+                    continue;
+                }
+                let a = z(&page, p, h);
+                let mut b = z(&page, q as u32, h);
+                if trame == 0 {
+                    let mut hz = Hasard((i64::from(p) * 7 + d + 1000) as u64);
+                    for c in b.rgba.chunks_exact_mut(4) {
+                        for v in &mut c[..3] {
+                            *v = (i32::from(*v) + hz.entre(-8, 8)).clamp(0, 255) as u8;
+                        }
+                    }
+                }
+                for e in [Attendu::Aucun, Attendu::Lu(d as i32)] {
+                    jamais_fausse(mesurer(&a, &b, Fixes::default(), e, t), d, "barre");
+                }
+            }
+        }
+    }
+    // La trame seule : l'avance vraie est trouvée, et un recouvrement blanc n'est pas
+    // « perdu » (la barre tramée s'accorderait).
+    let page = page_barre(6);
+    let m = |p: u32, d: u32, e: Attendu| {
+        mesurer(&z(&page, p, h), &z(&page, p + d, h), Fixes::default(), e, t)
+    };
+    assert_eq!(m(346, 150, Attendu::Aucun), Mesure::Avance(150));
+    assert_eq!(m(0, 400, Attendu::Aucun), Mesure::Ambigue);
+    assert_eq!(m(0, 400, Attendu::Lu(400)), Mesure::Avance(400));
+}
+
+#[test]
+fn r3_liste_hors_de_portee() {
+    // Une liste aux noms proches dont le vrai décalage dépasse la portée : jamais une copie
+    // du motif (ni avance ni recul), sans attendu ou avec le lu (hors de portée lui aussi).
+    let t = &TOLERANCE;
+    for l in [524u32, 2560] {
+        let page = page_liste(l, 180, 7);
+        let h = 500;
+        for p in (0..page.hauteur - 1500).step_by(346) {
+            let a = z(&page, p, h);
+            for d in [460u32, 480, 900, 1400] {
+                if p + d + h > page.hauteur {
+                    continue;
+                }
+                let b = z(&page, p + d, h);
+                for e in [Attendu::Aucun, Attendu::Lu(d as i32)] {
+                    let m = mesurer(&a, &b, Fixes::default(), e, t);
+                    assert!(
+                        matches!(m, Mesure::Ambigue | Mesure::Perdue),
+                        "{l} {p} {d} {e:?} : {m:?}"
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn r4_page_immobile_aux_ecarts_wpf() {
+    // Quatre zones de 32 × 8 assombries de 14 sur une page immobile : `Immobile`, sans
+    // attendu et avec le lu 0 (jamais une avance de 1 ou 2 lignes).
+    let t = &TOLERANCE;
+    for graine in 0..3u32 {
+        let page = page_texte(800, 3000, 40, 760, 30 + graine);
+        for p in (0..2400u32).step_by(317) {
+            let a = z(&page, p, 500);
+            let mut b = a.clone();
+            let mut hz = Hasard(u64::from(p + graine));
+            for _ in 0..4 {
+                let (x0, y0) = (hz.entre(0, 760) as u32, hz.entre(0, 490) as u32);
+                for y in y0..y0 + 8 {
+                    for x in x0..x0 + 32 {
+                        let c = pixel(&b, x, y).map(|v| v.saturating_sub(14));
+                        poser(&mut b, x, y, c);
+                    }
+                }
+            }
+            for e in [Attendu::Aucun, Attendu::Lu(0)] {
+                assert_eq!(
+                    mesurer(&a, &b, Fixes::default(), e, t),
+                    Mesure::Immobile,
+                    "{graine} {p} {e:?}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn r5_la_ligne_survolee_au_plus_une_fois() {
+    // Le pointeur reste sur la liste : la ligne survolée (17 lignes inversées) ou
+    // sélectionnée (22 lignes teintées) à place fixe dans chaque image. L'image finale
+    // est la page, sauf au plus une bande.
+    let page = page_texte(524, 2400, 20, 500, 4);
+    let h = 552;
+    for (y0, pas) in [
+        (100u32, 150u32),
+        (40, 84),
+        (280, 276),
+        (100, 276),
+        (300, 200),
+    ] {
+        for inverser in [true, false] {
+            let pos = positions(page.hauteur, h, pas);
+            let images: Vec<Pixels> = pos
+                .iter()
+                .map(|p| {
+                    let mut im = z(&page, *p, h);
+                    if inverser {
+                        survoler(&mut im, y0, 17);
+                    } else {
+                        teinter(&mut im, y0, 22);
+                    }
+                    im
+                })
+                .collect();
+            let (finale, mesures, _) = derouler(&images, &[], sans_limite());
+            let avances = mesures
+                .iter()
+                .filter(|m| matches!(m, Mesure::Avance(_)))
+                .count();
+            let n = lignes_differentes(&finale, &page);
+            eprintln!(
+                "r5 y {y0} pas {pas} inverser {inverser} : {avances} avances sur {}, {n} lignes différentes de la page",
+                mesures.len()
+            );
+            assert_eq!(finale.hauteur, page.hauteur, "{y0} {pas} {inverser}");
+            assert!(
+                n <= if inverser { 17 } else { 22 },
+                "{y0} {pas} {inverser} : {n}"
             );
         }
     }
