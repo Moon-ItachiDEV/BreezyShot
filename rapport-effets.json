@@ -1,0 +1,160 @@
+{
+  "mica": {
+    "backdrop_filter": true,
+    "mesures": [
+      {
+        "animation": "entree-vignette",
+        "duree_ms": 300,
+        "ecart_max_ms": 15.7,
+        "ecart_median_ms": 15.6,
+        "images": 20,
+        "images_sautees": 0
+      },
+      {
+        "animation": "appui-bouton",
+        "duree_ms": 350,
+        "ecart_max_ms": 15.7,
+        "ecart_median_ms": 15.6,
+        "images": 23,
+        "images_sautees": 0
+      },
+      {
+        "animation": "sortie-coup-de-vent",
+        "duree_ms": 280,
+        "ecart_max_ms": 15.7,
+        "ecart_median_ms": 15.6,
+        "images": 18,
+        "images_sautees": 0
+      },
+      {
+        "animation": "entree-vignette",
+        "duree_ms": 300,
+        "ecart_max_ms": 15.7,
+        "ecart_median_ms": 15.6,
+        "images": 20,
+        "images_sautees": 0
+      },
+      {
+        "animation": "appui-bouton",
+        "duree_ms": 350,
+        "ecart_max_ms": 15.8,
+        "ecart_median_ms": 15.6,
+        "images": 23,
+        "images_sautees": 0
+      },
+      {
+        "animation": "sortie-coup-de-vent",
+        "duree_ms": 280,
+        "ecart_max_ms": 15.7,
+        "ecart_median_ms": 15.6,
+        "images": 18,
+        "images_sautees": 0
+      },
+      {
+        "animation": "entree-vignette",
+        "duree_ms": 300,
+        "ecart_max_ms": 15.7,
+        "ecart_median_ms": 15.6,
+        "images": 20,
+        "images_sautees": 0
+      },
+      {
+        "animation": "appui-bouton",
+        "duree_ms": 350,
+        "ecart_max_ms": 15.7,
+        "ecart_median_ms": 15.6,
+        "images": 23,
+        "images_sautees": 0
+      },
+      {
+        "animation": "sortie-coup-de-vent",
+        "duree_ms": 280,
+        "ecart_max_ms": 15.7,
+        "ecart_median_ms": 15.6,
+        "images": 18,
+        "images_sautees": 0
+      }
+    ],
+    "moteur": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36 Edg/156.0.0.0",
+    "ressort_cubic_bezier": true
+  },
+  "verre": {
+    "backdrop_filter": true,
+    "mesures": [
+      {
+        "animation": "entree-vignette",
+        "duree_ms": 300,
+        "ecart_max_ms": 15.7,
+        "ecart_median_ms": 15.6,
+        "images": 20,
+        "images_sautees": 0
+      },
+      {
+        "animation": "appui-bouton",
+        "duree_ms": 350,
+        "ecart_max_ms": 15.7,
+        "ecart_median_ms": 15.6,
+        "images": 23,
+        "images_sautees": 0
+      },
+      {
+        "animation": "sortie-coup-de-vent",
+        "duree_ms": 280,
+        "ecart_max_ms": 15.7,
+        "ecart_median_ms": 15.6,
+        "images": 18,
+        "images_sautees": 0
+      },
+      {
+        "animation": "entree-vignette",
+        "duree_ms": 300,
+        "ecart_max_ms": 15.7,
+        "ecart_median_ms": 15.6,
+        "images": 20,
+        "images_sautees": 0
+      },
+      {
+        "animation": "appui-bouton",
+        "duree_ms": 350,
+        "ecart_max_ms": 15.7,
+        "ecart_median_ms": 15.6,
+        "images": 23,
+        "images_sautees": 0
+      },
+      {
+        "animation": "sortie-coup-de-vent",
+        "duree_ms": 280,
+        "ecart_max_ms": 15.7,
+        "ecart_median_ms": 15.6,
+        "images": 18,
+        "images_sautees": 0
+      },
+      {
+        "animation": "entree-vignette",
+        "duree_ms": 300,
+        "ecart_max_ms": 15.7,
+        "ecart_median_ms": 15.6,
+        "images": 20,
+        "images_sautees": 0
+      },
+      {
+        "animation": "appui-bouton",
+        "duree_ms": 350,
+        "ecart_max_ms": 15.7,
+        "ecart_median_ms": 15.6,
+        "images": 23,
+        "images_sautees": 0
+      },
+      {
+        "animation": "sortie-coup-de-vent",
+        "duree_ms": 280,
+        "ecart_max_ms": 15.7,
+        "ecart_median_ms": 15.6,
+        "images": 18,
+        "images_sautees": 0
+      }
+    ],
+    "moteur": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36 Edg/156.0.0.0",
+    "ressort_cubic_bezier": true
+  }
+}
