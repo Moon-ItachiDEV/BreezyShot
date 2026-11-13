@@ -62,11 +62,11 @@ try {
             if (-not $montree) { Start-Sleep -Milliseconds 100 }
         } while (-not $montree -and [DateTime]::UtcNow -lt $limite)
         Verifier 'la seconde instance ouvre la sélection et sa barre' $montree | Out-Null
-        $reposAvant = Compter-Lignes -Texte 'Decoupe -> Repos'
+        $reposAvant = Compter-Lignes -Texte 'etat Selection -> Repos'
         Initialiser-Menu-Icone
         Start-Sleep -Milliseconds 300
         [BreezyShotEssai.MenuIcone]::Touche(0x1B)
-        $repos = Attendre-Ligne -Texte 'Decoupe -> Repos' -Fois ($reposAvant + 1) -DelaiS 5
+        $repos = Attendre-Ligne -Texte 'etat Selection -> Repos' -Fois ($reposAvant + 1) -DelaiS 5
         Verifier 'Échap referme la sélection (retour au repos)' $repos | Out-Null
     }
     Verifier 'un seul processus BreezyShot' ($restants.Count -eq 1) "$($restants.Count) processus" | Out-Null
