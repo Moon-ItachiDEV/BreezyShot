@@ -17,12 +17,17 @@ une flèche : tirer son point du milieu. La gomme efface là où elle passe. Rec
 un coin de l'image. « Copier » copie et ferme ; « … » : Enregistrer sous, Glisser vers une
 appli.
 
-Échap ou clic droit annule. Pour quitter : clic droit sur l'icône, près de l'horloge.
+Échap ou clic droit annule. L'icône près de l'horloge (clic gauche ou droit) ouvre le menu,
+d'où Réglages et Quitter. Relancer BreezyShot (icône épinglée à la barre des tâches) ouvre la
+capture de zone, comme Impr. écran.
 
 Réglages › Capture : retardateur (3, 5 ou 10 s ; Échap ou la croix l'annule), Inclure le
 pointeur dans l'image.
 
-Réglages : clic droit sur l'icône, « Réglages » : copie, dossier, nom des fichiers, raccourcis (cliquer puis taper le nouveau), thème, lancement au démarrage de Windows. Tout s'applique tout de suite.
+Réglages (menu de l'icône, « Réglages ») : rubriques dans le volet de gauche. Copie, dossier,
+nom des fichiers, raccourcis (cliquer puis taper le nouveau), thème, lancement au démarrage de
+Windows. Raccourcis › « Impr. écran ouvre BreezyShot » : la touche Impr. écran lance BreezyShot
+au lieu de l'Outil Capture de Windows. Tout s'applique tout de suite.
 
 Licence (0.5) : Réglages › Général, dernière ligne « Licence » : coller la licence, puis
 « Activer ». La licence d'essai est dans le fichier `essais/licence-essai.txt`. La ligne dit

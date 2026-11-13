@@ -1,11 +1,12 @@
-// Habillage de la fenêtre des Réglages (direction B « Épuré ») : rien que de l'affichage.
+// Habillage de la fenêtre des Réglages (piste B « Volet ») : rien que de l'affichage.
 // Aucune commande, aucun changement de réglage : ce module lit les états aria-* que pose
 // reglages.js et en tire
-// - la place du trait sous l'onglet choisi et des pastilles des choix (variables CSS) ;
+// - la place du repère d'accent devant la rubrique choisie (volet) et des pastilles des
+//   choix (variables CSS) ;
 // - le repli de ce qui dépend d'un interrupteur éteint (Nom des fichiers sous
 //   « Enregistrer automatiquement », Durée et Coin sous « Vignette ») : `data-replie` et
 //   `inert`, pour que le clavier n'entre pas dans une partie repliée.
-// Sans lui, la page marche et reste lisible (trait et pastilles absents, rien de replié).
+// Sans lui, la page marche et reste lisible (repère et pastilles absents, rien de replié).
 
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 const nav = document.querySelector('[role="tablist"]');
@@ -17,12 +18,12 @@ function sansAnimation(el, faire) {
   el.classList.remove("sans-animation");
 }
 
-function placerTrait(premiere) {
+function placerRepere(premiere) {
   const o = nav && nav.querySelector('[role="tab"][aria-selected="true"]');
   if (!o || !o.offsetParent) return;
   const poser = () => {
-    nav.style.setProperty("--trait-x", `${o.offsetLeft}px`);
-    nav.style.setProperty("--trait-l", `${o.offsetWidth}px`);
+    nav.style.setProperty("--repere-y", `${o.offsetTop}px`);
+    nav.style.setProperty("--repere-h", `${o.offsetHeight}px`);
   };
   if (premiere) sansAnimation(nav, poser);
   else poser();
@@ -55,7 +56,7 @@ function replier() {
 
 function tout(premiere = false) {
   replier();
-  placerTrait(premiere);
+  placerRepere(premiere);
   placerPastilles(premiere);
 }
 

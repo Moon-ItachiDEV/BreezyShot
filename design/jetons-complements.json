@@ -177,15 +177,6 @@
     "origine": "Maquette validée de l'installateur (d-mix.html, « A + C »). logo(), radialGradient et pales fill #fff."
    },
    {
-    "name": "reglages-fond",
-    "value": {
-     "light": "#FAFAFA",
-     "dark": "#1C1C1C"
-    },
-    "usage": "Fond de la fenêtre des Réglages.",
-    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), --micaB."
-   },
-   {
     "name": "reglages-reflet",
     "value": {
      "light": "rgba(255,255,255,0.75)",
@@ -247,12 +238,6 @@
     "value": "color-mix(in srgb, var(--accent) 18%, transparent)",
     "usage": "Halo autour du bouton d'un interrupteur au survol.",
     "origine": "design/reglages/premium.html, direction B « Épuré » (validée), .sw:hover .k."
-   },
-   {
-    "name": "reglages-logo-ombre",
-    "value": "drop-shadow(0 2px 6px rgba(240,80,154,0.25))",
-    "usage": "Ombre du logo en haut de Général.",
-    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), [data-dir=b] .alogo."
    },
    {
     "name": "decompte-fond",
@@ -472,6 +457,69 @@
     "value": "#FFFFFF",
     "usage": "Croix du bouton Fermer survolé.",
     "origine": "design/historique/index.html, .capb button:hover."
+   },
+   {
+    "name": "reglages-volet",
+    "value": {
+     "light": "#F3F3F3",
+     "dark": "#202020"
+    },
+    "usage": "Fond du volet des rubriques, à gauche (gris uni, sans Mica).",
+    "origine": "design/reglages-v2/index.html, piste B « Volet » (choix du 13/11/2026), --page."
+   },
+   {
+    "name": "reglages-contenu",
+    "value": {
+     "light": "#F9F9F9",
+     "dark": "#282828"
+    },
+    "usage": "Fond du contenu, à droite : un gris uni plus clair que le volet.",
+    "origine": "design/reglages-v2/index.html, piste B « Volet » (choix du 13/11/2026), --layer posé sur --page, rendu uni."
+   },
+   {
+    "name": "reglages-carte",
+    "value": {
+     "light": "#FFFFFF",
+     "dark": "#2F2F2F"
+    },
+    "usage": "Fond des cartes de réglages.",
+    "origine": "design/reglages-v2/index.html, piste B « Volet » (choix du 13/11/2026), --card posé sur --layer, rendu uni."
+   },
+   {
+    "name": "reglages-rond",
+    "value": {
+     "light": "#FFFFFF",
+     "dark": "#C5C5C5"
+    },
+    "usage": "Rond de l'interrupteur éteint : lisible sur son fond en sombre.",
+    "origine": "design/reglages-v2/index.html, piste B « Volet » (choix du 13/11/2026), --sw-rond (corrige le rond invisible de la 0.5 en sombre)."
+   },
+   {
+    "name": "reglages-rond-allume",
+    "value": {
+     "light": "#FFFFFF",
+     "dark": "#1F1F1F"
+    },
+    "usage": "Rond de l'interrupteur allumé, sur l'accent.",
+    "origine": "design/reglages-v2/index.html, piste B « Volet » (choix du 13/11/2026), --sw-rond-on."
+   },
+   {
+    "name": "reglages-pastille",
+    "value": {
+     "light": "#FFFFFF",
+     "dark": "#4A4A4A"
+    },
+    "usage": "Pastille du choix retenu dans un sélecteur segmenté : lisible sur son fond en sombre.",
+    "origine": "design/reglages-v2/index.html, piste B « Volet » (choix du 13/11/2026), --seg-on, rendu uni (corrige la pastille invisible de la 0.5 en sombre)."
+   },
+   {
+    "name": "reglages-pro-fond",
+    "value": {
+     "light": "rgba(0,103,192,0.10)",
+     "dark": "rgba(76,194,255,0.14)"
+    },
+    "usage": "Fond de la pastille Pro du volet.",
+    "origine": "design/reglages-v2/index.html, piste B « Volet » (choix du 13/11/2026), --pro-fond."
    },
    {
     "name": "editeur-inst-corps-0",
@@ -785,12 +833,6 @@
     "value": "420ms",
     "usage": "Arrêt en douceur du Moulinet sur un quart de tour.",
     "origine": "Maquette validée de l'installateur (d-mix.html, « A + C »). settle = { …, d: 420, … }."
-   },
-   {
-    "name": "duree-reglages-trait",
-    "value": "380ms",
-    "usage": "Fenêtre des Réglages.",
-    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), .npill transition."
    },
    {
     "name": "duree-reglages-repli",
@@ -1578,76 +1620,22 @@
     "origine": "Maquette validée de l'installateur (d-mix.html, « A + C »). :focus-visible outline 2px, offset 2px."
    },
    {
-    "name": "reglages-onglet-hauteur",
-    "value": "46px",
-    "usage": "Fenêtre des Réglages.",
-    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), .nv height."
-   },
-   {
-    "name": "reglages-onglet-marge",
-    "value": "14px",
-    "usage": "Fenêtre des Réglages.",
-    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), .nv padding."
-   },
-   {
-    "name": "reglages-onglet-texte",
-    "value": "13.5px",
-    "usage": "Fenêtre des Réglages.",
-    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), .nv font-size."
-   },
-   {
-    "name": "reglages-onglet-ecart",
-    "value": "2px",
-    "usage": "Fenêtre des Réglages.",
-    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), .snav gap."
-   },
-   {
-    "name": "reglages-trait",
-    "value": "2px",
-    "usage": "Fenêtre des Réglages.",
-    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), .npill height."
-   },
-   {
-    "name": "reglages-trait-retrait",
-    "value": "12px",
-    "usage": "Fenêtre des Réglages.",
-    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), .npill left/width."
-   },
-   {
-    "name": "reglages-contenu-largeur",
-    "value": "540px",
-    "usage": "Fenêtre des Réglages.",
-    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), .spane section max-width."
-   },
-   {
-    "name": "reglages-contenu-marge",
-    "value": "28px",
-    "usage": "Fenêtre des Réglages.",
-    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), .spane padding."
-   },
-   {
-    "name": "reglages-contenu-marge-bas",
-    "value": "12px",
-    "usage": "Fenêtre des Réglages.",
-    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), .spane padding-bottom."
-   },
-   {
     "name": "reglages-ligne-hauteur",
-    "value": "60px",
+    "value": "48px",
     "usage": "Fenêtre des Réglages.",
-    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), .row min-height."
+    "origine": "design/reglages-v2/index.html, piste B « Volet » (choix du 13/11/2026), .ligne."
    },
    {
     "name": "reglages-ligne-marge-v",
-    "value": "10px",
+    "value": "8px",
     "usage": "Fenêtre des Réglages.",
-    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), .row padding."
+    "origine": "design/reglages-v2/index.html, piste B « Volet » (choix du 13/11/2026), .ligne."
    },
    {
     "name": "reglages-ligne-marge-h",
-    "value": "12px",
+    "value": "16px",
     "usage": "Fenêtre des Réglages.",
-    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), .row padding / margin."
+    "origine": "design/reglages-v2/index.html, piste B « Volet » (choix du 13/11/2026), .ligne."
    },
    {
     "name": "reglages-ligne-ecart",
@@ -1657,15 +1645,9 @@
    },
    {
     "name": "reglages-sous-retrait",
-    "value": "28px",
+    "value": "32px",
     "usage": "Fenêtre des Réglages.",
-    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), .sub .row padding-left."
-   },
-   {
-    "name": "reglages-groupe-ecart",
-    "value": "28px",
-    "usage": "Fenêtre des Réglages.",
-    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), .card margin-bottom."
+    "origine": "design/reglages-v2/index.html, piste B « Volet » (choix du 13/11/2026), .ligne."
    },
    {
     "name": "reglages-libelle-taille",
@@ -1894,48 +1876,6 @@
     "value": "16px",
     "usage": "Fenêtre des Réglages.",
     "origine": "design/reglages/premium.html, direction B « Épuré » (validée), .prev line-height."
-   },
-   {
-    "name": "reglages-logo",
-    "value": "44px",
-    "usage": "Fenêtre des Réglages.",
-    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), .alogo."
-   },
-   {
-    "name": "reglages-apropos-hauteur",
-    "value": "72px",
-    "usage": "Fenêtre des Réglages.",
-    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), .about .row min-height."
-   },
-   {
-    "name": "reglages-apropos-ecart",
-    "value": "14px",
-    "usage": "Fenêtre des Réglages.",
-    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), .about .row gap."
-   },
-   {
-    "name": "reglages-apropos-marge",
-    "value": "20px",
-    "usage": "Fenêtre des Réglages.",
-    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), .about margin-bottom."
-   },
-   {
-    "name": "reglages-nom-interligne",
-    "value": "26px",
-    "usage": "Fenêtre des Réglages.",
-    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), .about .an line-height."
-   },
-   {
-    "name": "reglages-nom-approche",
-    "value": "-0.015em",
-    "usage": "Fenêtre des Réglages.",
-    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), .about .an letter-spacing."
-   },
-   {
-    "name": "reglages-version-texte",
-    "value": "12.5px",
-    "usage": "Fenêtre des Réglages.",
-    "origine": "design/reglages/premium.html, direction B « Épuré » (validée), .about .av font-size."
    },
    {
     "name": "reglages-entree-decalage",
@@ -3094,6 +3034,144 @@
     "value": "4px",
     "usage": "Pilule : marge après le texte.",
     "origine": "design/historique/index.html, .msg b."
+   },
+   {
+    "name": "reglages-volet-largeur",
+    "value": "208px",
+    "usage": "Fenêtre des Réglages, piste B « Volet ».",
+    "origine": "design/reglages-v2/index.html, piste B « Volet » (choix du 13/11/2026), .volet width."
+   },
+   {
+    "name": "reglages-volet-etroit",
+    "value": "56px",
+    "usage": "Fenêtre des Réglages, piste B « Volet ».",
+    "origine": "design/reglages-v2/index.html, piste B « Volet » (choix du 13/11/2026), @media (max-width:620px) .volet width : le volet ne garde que les icônes."
+   },
+   {
+    "name": "reglages-volet-marge",
+    "value": "8px",
+    "usage": "Fenêtre des Réglages, piste B « Volet ».",
+    "origine": "design/reglages-v2/index.html, piste B « Volet » (choix du 13/11/2026), .volet padding."
+   },
+   {
+    "name": "reglages-volet-ecart",
+    "value": "12px",
+    "usage": "Fenêtre des Réglages, piste B « Volet ».",
+    "origine": "design/reglages-v2/index.html, piste B « Volet » (choix du 13/11/2026), .volet gap."
+   },
+   {
+    "name": "reglages-id-hauteur",
+    "value": "40px",
+    "usage": "Fenêtre des Réglages, piste B « Volet ».",
+    "origine": "design/reglages-v2/index.html, piste B « Volet » (choix du 13/11/2026), .b-id height."
+   },
+   {
+    "name": "reglages-id-logo",
+    "value": "24px",
+    "usage": "Fenêtre des Réglages, piste B « Volet ».",
+    "origine": "design/reglages-v2/index.html, piste B « Volet » (choix du 13/11/2026), .b-id .logo."
+   },
+   {
+    "name": "reglages-rubrique-hauteur",
+    "value": "36px",
+    "usage": "Fenêtre des Réglages, piste B « Volet ».",
+    "origine": "design/reglages-v2/index.html, piste B « Volet » (choix du 13/11/2026), .b-liste [role=tab] height."
+   },
+   {
+    "name": "reglages-rubrique-ecart",
+    "value": "4px",
+    "usage": "Fenêtre des Réglages, piste B « Volet ».",
+    "origine": "design/reglages-v2/index.html, piste B « Volet » (choix du 13/11/2026), .b-liste gap."
+   },
+   {
+    "name": "reglages-rubrique-marge",
+    "value": "12px",
+    "usage": "Fenêtre des Réglages, piste B « Volet ».",
+    "origine": "design/reglages-v2/index.html, piste B « Volet » (choix du 13/11/2026), .b-liste [role=tab] padding."
+   },
+   {
+    "name": "reglages-repere-largeur",
+    "value": "3px",
+    "usage": "Fenêtre des Réglages, piste B « Volet ».",
+    "origine": "design/reglages-v2/index.html, piste B « Volet » (choix du 13/11/2026), .b-liste::before width."
+   },
+   {
+    "name": "reglages-repere-hauteur",
+    "value": "16px",
+    "usage": "Fenêtre des Réglages, piste B « Volet ».",
+    "origine": "design/reglages-v2/index.html, piste B « Volet » (choix du 13/11/2026), .b-liste::before height."
+   },
+   {
+    "name": "reglages-contenu-rayon",
+    "value": "8px",
+    "usage": "Fenêtre des Réglages, piste B « Volet ».",
+    "origine": "design/reglages-v2/index.html, piste B « Volet » (choix du 13/11/2026), .b-contenu border-top-left-radius."
+   },
+   {
+    "name": "reglages-contenu-marge-h",
+    "value": "28px",
+    "usage": "Fenêtre des Réglages, piste B « Volet ».",
+    "origine": "design/reglages-v2/index.html, piste B « Volet » (choix du 13/11/2026), .b-contenu padding."
+   },
+   {
+    "name": "reglages-contenu-haut",
+    "value": "20px",
+    "usage": "Fenêtre des Réglages, piste B « Volet ».",
+    "origine": "design/reglages-v2/index.html, piste B « Volet » (choix du 13/11/2026), .b-contenu padding-top."
+   },
+   {
+    "name": "reglages-titre-taille",
+    "value": "20px",
+    "usage": "Fenêtre des Réglages, piste B « Volet ».",
+    "origine": "design/reglages-v2/index.html, piste B « Volet » (choix du 13/11/2026), .b-contenu h2 font-size."
+   },
+   {
+    "name": "reglages-titre-interligne",
+    "value": "28px",
+    "usage": "Fenêtre des Réglages, piste B « Volet ».",
+    "origine": "design/reglages-v2/index.html, piste B « Volet » (choix du 13/11/2026), .b-contenu h2 line-height."
+   },
+   {
+    "name": "reglages-titre-marge",
+    "value": "16px",
+    "usage": "Fenêtre des Réglages, piste B « Volet ».",
+    "origine": "design/reglages-v2/index.html, piste B « Volet » (choix du 13/11/2026), .b-contenu h2 margin-bottom."
+   },
+   {
+    "name": "reglages-cartes-ecart",
+    "value": "12px",
+    "usage": "Fenêtre des Réglages, piste B « Volet ».",
+    "origine": "design/reglages-v2/index.html, piste B « Volet » (choix du 13/11/2026), .cartes gap."
+   },
+   {
+    "name": "reglages-carte-rayon",
+    "value": "8px",
+    "usage": "Fenêtre des Réglages, piste B « Volet ».",
+    "origine": "design/reglages-v2/index.html, piste B « Volet » (choix du 13/11/2026), .carte border-radius."
+   },
+   {
+    "name": "reglages-pro-hauteur",
+    "value": "20px",
+    "usage": "Fenêtre des Réglages, piste B « Volet ».",
+    "origine": "design/reglages-v2/index.html, piste B « Volet » (choix du 13/11/2026), .pro height."
+   },
+   {
+    "name": "reglages-pro-marge",
+    "value": "8px",
+    "usage": "Fenêtre des Réglages, piste B « Volet ».",
+    "origine": "design/reglages-v2/index.html, piste B « Volet » (choix du 13/11/2026), .pro padding."
+   },
+   {
+    "name": "reglages-pro-texte",
+    "value": "11px",
+    "usage": "Fenêtre des Réglages, piste B « Volet ».",
+    "origine": "design/reglages-v2/index.html, piste B « Volet » (choix du 13/11/2026), .pro font-size."
+   },
+   {
+    "name": "reglages-picto",
+    "value": "16px",
+    "usage": "Fenêtre des Réglages, piste B « Volet ».",
+    "origine": "design/reglages-v2/index.html, piste B « Volet » (choix du 13/11/2026), icônes des lignes de raccourcis et des rubriques."
    },
    {
     "name": "editeur-dock-hauteur",

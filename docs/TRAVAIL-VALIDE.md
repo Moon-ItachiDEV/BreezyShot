@@ -742,21 +742,23 @@ Ce qu'elle apporte :
 
 Vérifications, ici sous Linux :
 
-- Sur l'arbre fusionné avec main (menu de l'icône) : `cargo test --locked` : 665 tests du
-  cœur réussis, 2 ignorés, et les 2 tests d'architecture. `cargo fmt --check` et
+- Sur l'arbre fusionné avec main (menu de l'icône, puis Réglages en volet) :
+  `cargo test --locked` : 669 tests du cœur réussis, 2 ignorés, et les 2 tests
+  d'architecture. `cargo fmt --check` et
   `cargo clippy --locked --all-targets -- -D warnings` propres, sous Linux et pour la
   cible Windows (`x86_64-pc-windows-msvc`, vérifiée sans édition de liens : le code de
   `TextAngle` compile, il n'a pas tourné).
 - Les onze essais de pages, `ECHECS : 0` : `editeur.cjs` 243 points, `editeur-modele.cjs`
-  69, `selection.cjs` 232, `historique.cjs` 122, `reglages.cjs` 107, `vignette.cjs` 43,
+  69, `selection.cjs` 232, `historique.cjs` 122, `reglages.cjs` 119, `vignette.cjs` 43,
   `bandeau.cjs` 25, `decompte.cjs` 24, `installateur.cjs` 23, `menu.cjs` 20,
   `souffle.cjs` 12 ; `jetons.css` à jour.
 - Essais par mutation : sans le filet de 2 s, sans le plafond de 400 lignes ou sans la
   borne de 2 s du surlignage, un essai de la page de sélection échoue ; avec l'ancien appui
   de la gomme (5 bis), l'ancien sondage en travers (G3) ou sans `h.avant = null` dans
   `annuler` (G6), un essai de l'éditeur échoue.
-- Le passage GitHub de la demande de fusion (tests sur Windows, macOS et Linux, essais
-  Windows sur le vrai `.exe`) fait foi.
+- Passage GitHub de la demande de fusion avant les Réglages en volet : vert, dont 685
+  tests sous Windows et les 13 essais Windows sur le vrai `.exe` (l'essai 13 corrigé
+  compris). Le passage après la refusion fait foi.
 
 Relecture : deux agents distincts de l'auteur (Fable 5.2, effort élevé) ont relu le travail
 avant les corrections. L'un a relu l'éditeur : `document.js`, `outils.js`, `barre.js`,

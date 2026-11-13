@@ -354,8 +354,8 @@ dans le dossier temporaire du système (`systeme::dossier_secours()`), sous le n
 ### 3.4 Ligne de commande et instance unique
 
 - Une seule instance. Lancer `breezyshot.exe` une seconde fois (icône épinglée à la barre des
-  tâches, menu Démarrer) ouvre les Réglages dans la première, ou les ramène devant (depuis la
-  0.5.1) : la première écrit `seconde instance: reglages ouverts`, la seconde sort avec le
+  tâches, menu Démarrer) ouvre la barre de capture dans la première, comme Impr. écran
+  (depuis la 0.5.3 ; les Réglages en 0.5.1 et 0.5.2) : la première écrit `seconde instance: barre de capture`, la seconde sort avec le
   code 0. `--desinstaller` reçu par une seconde instance reste refusé (`seconde instance refusee`).
 - `breezyshot.exe --quitter` : demande à l'instance en cours de se fermer proprement (libère
   les raccourcis, retire l'icône, écrit `arret propre`), puis sort. Sans instance en cours,
@@ -377,7 +377,7 @@ dans le dossier temporaire du système (`systeme::dossier_secours()`), sous le n
   `icone invisible` (toujours `invisible` sous Linux, où Tauri ne donne pas ce rectangle).
 - Lignes du journal sur lesquelles les essais s'appuient : `demarrage BreezyShot <version>`,
   `systeme windows build <n>`, `echelle par ecran v2: oui|non|sans objet`, `icone installee`
-  (ou `icone non installee: …`), `icone visible|invisible`, `pret` (tout est en place), `seconde instance: reglages ouverts`,
+  (ou `icone non installee: …`), `icone visible|invisible`, `pret` (tout est en place), `seconde instance: barre de capture`,
   `--quitter recu: fermeture demandee`, `arret propre`, `--quitter: aucune instance en cours`.
 - `app/interface/index.html` est une page vide : elle n'existe que parce que Tauri veut un
   dossier d'interface non vide.
@@ -1025,13 +1025,29 @@ Module pur : il reçoit le dossier où écrire, ne connaît ni Tauri ni les autr
 
 ### 6.1 Fenêtre des Réglages (étape 10)
 
-- Fenêtre ordinaire unique (étiquette `reglages`, « Réglages de BreezyShot », 680 × 512,
-  560 × 420 au moins, redimensionnable, dans la barre des tâches), créée à la demande par le
+- Fenêtre ordinaire unique (étiquette `reglages`, « Réglages de BreezyShot », 780 × 520
+  depuis la 0.5.3, 600 × 420 au moins, redimensionnable, dans la barre des tâches), créée à la demande par le
   menu de l'icône et détruite à la fermeture ; une seconde demande la ramène devant. Elle
   s'ouvre centrée dans la zone utile de l'écran de la souris (`place::centrer`, pixels
   réels avec l'échelle de cet écran, bornée à la zone utile).
   `fenetres::reglages` la crée et l'envoie ; `application::fenetre_reglages` tient les
   commandes ; `application::page_reglages` prend toutes les décisions (fonctions pures).
+- **Habillage, piste B « Volet » (0.5.3).** Un volet à gauche (208 px : logo, nom, pastille
+  Pro avec une licence, les quatre rubriques en onglets verticaux avec un repère d'accent qui
+  glisse, la version en bas ; 56 px et les icônes seules sous 620 px de large) et le
+  contenu à droite (titre de la rubrique, réglages en cartes) sur un gris uni plus clair,
+  coin haut gauche arrondi ; ni Mica ni transparence. Les lignes de Raccourcis portent le
+  pictogramme de l'entrée du menu de l'icône (`commun/pictos.js`, partagé avec le menu), et
+  suivent son ordre : Copier le texte avant Historique (`page_reglages::ORDRE_RACCOURCIS`,
+  affichage seulement ; l'ordre de réservation des raccourcis ne change pas). La fenêtre
+  prend au plus 90 % de la zone utile (`reglages::taille_sur`), cadre compris.
+- **« Impr. écran ouvre BreezyShot » (0.5.3)**, en tête de Raccourcis, sous Windows
+  seulement (`systeme::impr_ecran_pour_breezyshot`) : allumée, l'app écrit
+  `PrintScreenKeyForSnippingEnabled = 0` (HKCU, la valeur de Paramètres › Accessibilité ›
+  Clavier), met Impr. écran en tête des candidats de la zone s'il n'y est pas, puis la zone
+  reprend ses candidats ; éteinte, la valeur repasse à 1 et la zone passe au candidat
+  suivant. Si la touche n'est pas tenue après coup, la ligne dit où Windows la garde
+  (`REFUS_IMPR_ECRAN`). Journal : `impr ecran: breezyshot oui|non, touche tenue|non tenue`.
 - **La page ne décide rien.** Elle appelle `reglages_lire` (à l'ouverture et à chaque retour
   du focus), `reglages_changer { changement: { cle, valeur } }`, `reglages_apercu_nom`,
   `reglages_parcourir`, `reglages_saisie`, `reglages_raccourci`, `reglages_retablir`. Chaque
