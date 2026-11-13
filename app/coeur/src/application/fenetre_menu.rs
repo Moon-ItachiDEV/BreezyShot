@@ -14,7 +14,7 @@
 use tauri::AppHandle;
 
 use super::icone::{self, EntreeMenu};
-use super::{menu_actuel, poster_plus_tard, Evenement};
+use super::{entrees_pendant_defilante, geste_defilante, menu_actuel, poster_plus_tard, Evenement};
 use crate::fenetres::menu::{self, Ligne, Ouverture};
 use crate::fenetres::{theme, Rect};
 
@@ -57,9 +57,16 @@ pub fn clic_icone(app: &AppHandle, rect: Rect) {
     if menu::vient_de_fermer() {
         return;
     }
-    let Some(entrees) = menu_actuel(app) else {
-        log::warn!("menu non ouvert: application pas prete");
-        return;
+    let entrees = if geste_defilante::fenetres_bloquees(app) {
+        // Pendant une défilante, aucune entrée qui ouvrirait une fenêtre : Quitter seul.
+        log::info!("menu pendant la defilante: quitter seulement");
+        entrees_pendant_defilante()
+    } else {
+        let Some(entrees) = menu_actuel(app) else {
+            log::warn!("menu non ouvert: application pas prete");
+            return;
+        };
+        entrees
     };
     if menu::ouvrir(app, Some(rect), lignes(&entrees)) {
         icone::tourner(app);

@@ -480,8 +480,10 @@ dans le dossier temporaire du système (`systeme::dossier_secours()`), sous le n
   première ouverture, puis gardée cachée et réutilisée. Groupes : les captures (zone, écran,
   fenêtre) ; « Refaire la dernière zone », « Capture défilante » (0.6, avec une licence,
   dans l'ordre `ORDRE_MENU`, §3.10) et « Copier le texte » ; « Historique » et « Réglages » ;
-  « Quitter BreezyShot ». Pendant une capture défilante, le menu ne s'ouvre pas, sauf pour
-  Quitter (§3.10). Icônes 16 px
+  « Quitter BreezyShot ». Pendant une capture défilante, le menu s'ouvre avec « Quitter
+  BreezyShot » seul (`entrees_pendant_defilante`, journal `menu pendant la defilante:
+  quitter seulement`), et `traiter` ignore de toute façon les autres entrées (§3.10).
+  Icônes 16 px
   (« Curseurs » pour Réglages), raccourcis à droite en `text-2`, faux verre peint
   (`acrylic-solid`, `shadow-8`). À l'ouverture, le moulinet de l'icône fait un quart de
   tour (`icone::tourner` : images tournées posées 420 ms, courbe ressort). Journal : `icone:

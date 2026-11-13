@@ -893,6 +893,15 @@ pub(super) fn menu_actuel(app: &AppHandle) -> Option<Vec<EntreeMenu>> {
     }))
 }
 
+/// Le menu pendant une capture défilante : rien qui ouvre une fenêtre, seulement
+/// « Quitter BreezyShot » (§3.10, R2).
+pub fn entrees_pendant_defilante() -> Vec<EntreeMenu> {
+    vec![EntreeMenu::Action {
+        id: MENU_QUITTER.into(),
+        texte: "Quitter BreezyShot".into(),
+    }]
+}
+
 /// Refait le menu de l'icône d'après `menu_actuel`.
 pub(super) fn refaire_menu(app: &AppHandle) {
     if let Some(entrees) = menu_actuel(app) {
@@ -4387,23 +4396,30 @@ mod tests {
             ]
         );
         assert_eq!(modes_au_menu(&tout).len(), 6);
+        // Groupes du menu web : les trois captures, un séparateur, puis la dernière zone,
+        // la défilante (cinquième action, choix U1) et le texte.
         let m = entrees_menu(&tout, raccourci);
+        assert_eq!(m[3], EntreeMenu::Separateur);
         assert_eq!(
             m[4],
-            action("capturer_defilante", "Capture défilante\tCtrl + Maj + 5")
+            action("capturer_derniere_zone", "Refaire la dernière zone")
         );
         assert_eq!(
             m[5],
+            action("capturer_defilante", "Capture défilante\tCtrl + Maj + 5")
+        );
+        assert_eq!(
+            m[6],
             action("capturer_texte", "Copier le texte\tCtrl + Maj + T")
         );
-        assert_eq!(m[6], EntreeMenu::Separateur);
+        assert_eq!(m[7], EntreeMenu::Separateur);
         // Sans langue de lecture : la défilante reste cinquième, suivie du séparateur.
         let sans_texte = entrees_menu(&actions_selon(true, true, false, true), raccourci);
         assert_eq!(
-            sans_texte[4],
+            sans_texte[5],
             action("capturer_defilante", "Capture défilante\tCtrl + Maj + 5")
         );
-        assert_eq!(sans_texte[5], EntreeMenu::Separateur);
+        assert_eq!(sans_texte[6], EntreeMenu::Separateur);
         // Sans licence : ni la défilante, ni rien de Pro, quoi qu'il soit construit.
         assert_eq!(actions_selon(false, true, true, true), ACTIONS_DE_CAPTURE);
         assert_eq!(
@@ -4419,6 +4435,15 @@ mod tests {
         assert_eq!(id_menu(Mode::Defilante), "capturer_defilante");
         assert_eq!(mode_du_menu("capturer_defilante"), Some(Mode::Defilante));
         assert_eq!(mode_journal("defilante"), "defilante");
+    }
+
+    /// Pendant une capture défilante, le menu de l'icône ne montre que Quitter.
+    #[test]
+    fn menu_pendant_la_defilante_quitter_seul() {
+        assert_eq!(
+            entrees_pendant_defilante(),
+            [action(MENU_QUITTER, "Quitter BreezyShot")]
+        );
     }
 
     /// Hors Windows, la capture défilante est absente, même avec une licence.
