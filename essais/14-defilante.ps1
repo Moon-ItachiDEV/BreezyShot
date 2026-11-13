@@ -15,14 +15,18 @@
 # tient, sinon l'app relancée) et le témoin en haut, pour que les suivants restent valables.
 #
 # L0, sans licence (fichier de réglages v4) : `licence absente` ; aucune ligne `raccourci
-#     defilante` ; menu de 8 positions sans « Capture défilante » ; Ctrl+Maj+5 libre ;
+#     defilante` ; menu web de l'icône de 9 positions (séparateurs comptés) sans « Capture
+#     défilante » ; Ctrl+Maj+5 libre ;
 #     `--capturer defilante` → `--capturer: mode non construit` ; fichier passé en v5
 #     (`defilante` = Ctrl+Maj+5, une ligne « de la version 4 a la version 5 ») ; aucune
 #     fenêtre `defilante`. Mémoire au repos notée.
 # Cas A (licence, non capturable : les fenêtres de l'app sont exclues des copies d'écran ;
 #     copie, vignette « toujours » ; un témoin de 600 × 6 000 en 40,80 et une sentinelle) :
 # (L1) `raccourci defilante: Ctrl+Maj+5` ; menu : « Capture défilante<tab>Ctrl + Maj + 5 »
-#     en cinquième ; aucune fenêtre `defilante` au repos ; mémoire au repos notée.
+#     à l'indice 5 (après les trois captures et un séparateur) ; aucune fenêtre `defilante`
+#     au repos ; mémoire au repos notée.
+# Le menu de l'icône est une fenêtre web (0.5.2) : ouvert, lu, cliqué et fermé par les aides
+# de commun.ps1 (Ouvrir-Menu-Icone, Cliquer-Ligne-Menu, Fermer-Menu-Icone), comme l'essai 13.
 # (A1) Ctrl+Maj+5 : `DemandeCapture defilante`, `selection montree … mode defilante`,
 #     `chrono selection prete`, `defilante pages <n>`, `selection <id>: pages proposees <n>`
 #     ou `selection <id>: pages retenues pour la premiere charge` (alors n est celui de
@@ -77,6 +81,10 @@
 #     effet ; « molette retenue, jamais sans effet » dit à part) ; clic réel sur « Terminer »
 #     (UI Automation, souris vue sur la pilule) : `fin bouton`, `fin-assemblee` ≤ 150 ms, PNG
 #     600 × 450 exact et égal à la référence, la page n'a pas bougé.
+#     Avant « Terminer », un clic sur l'icône : `menu pendant la defilante: quitter
+#     seulement`, le menu montre « Quitter BreezyShot » seul ; un second clic sur l'icône le
+#     ferme (pas Échap : l'app le tient pendant la course) ; ni `menu: …`, ni issue, l'app
+#     tourne encore.
 # (B2) témoin -EnTete tracé sur toute la fenêtre : `fixes haut 40 bas 0`, PNG 600 × 6 040,
 #     l'en-tête seulement sur les rangées 0 à 39, égal aux références (en-tête, page).
 # (B3) zone tracée de 80 × 60 : `defilante zone` de 120 × 120 autour d'elle, `agrandie oui` ;
@@ -403,12 +411,6 @@ static extern IntPtr WindowFromPoint(POINT p);
 static extern IntPtr GetAncestor(IntPtr h, uint quoi);
 [DllImport("user32.dll")]
 static extern bool GetCursorPos(out POINT p);
-[DllImport("user32.dll")]
-public static extern int GetMenuItemCount(IntPtr menu);
-[DllImport("user32.dll", CharSet = CharSet.Unicode, EntryPoint = "GetMenuStringW")]
-static extern int GetMenuString(IntPtr menu, uint item, System.Text.StringBuilder texte, int taille, uint drapeaux);
-[DllImport("user32.dll")]
-public static extern bool GetMenuItemRect(IntPtr h, IntPtr menu, uint item, out RECT r);
 
 // Gardes. Les appuis de souris ne partent que vers l'app (PidApp) ; les touches ne sont que
 // des raccourcis globaux que l'app tient (RegisterHotKey : la touche ne va à aucune
@@ -557,26 +559,6 @@ public static IntPtr[] VisiblesTitre(string titre) {
         return true;
     }, IntPtr.Zero);
     return liste.ToArray();
-}
-public static IntPtr[] Visibles(string classe) {
-    var liste = new System.Collections.Generic.List<IntPtr>();
-    EnumWindows((h, p) => {
-        if (IsWindowVisible(h) && Classe(h) == classe) liste.Add(h);
-        return true;
-    }, IntPtr.Zero);
-    return liste.ToArray();
-}
-public static IntPtr MenuDe(IntPtr fenetre) { return SendMessage(fenetre, 0x01E1, IntPtr.Zero, IntPtr.Zero); }
-public static string[] Textes(IntPtr menu) {
-    int n = GetMenuItemCount(menu);
-    if (n < 0) return null;
-    var textes = new string[n];
-    for (int i = 0; i < n; i++) {
-        var t = new System.Text.StringBuilder(256);
-        GetMenuString(menu, (uint)i, t, t.Capacity, 0x400);
-        textes[i] = t.ToString();
-    }
-    return textes;
 }
 
 // --- Images (BGRA, 4 octets par pixel, lignes de 4 l octets) -----------------------------
@@ -1117,48 +1099,27 @@ public static int[] ClasserResumes(int[] ra, int[] rb, int h, int minRecouvremen
             return @([int]($r.X + $r.Width / 2), [int]($r.Y + $r.Height / 2))
         }
 
-        # --- Menu de l'icône (essais 08 et 13) ------------------------------------------------
-        function Ouvrir-Menu([string]$Quoi) {
-            $icones = $NATIF::Fenetres($script:proc.Id, 'tray_icon_app')
-            if ($icones.Length -lt 1) { throw "$Quoi : aucune fenêtre tray_icon_app (menu de l'icône impossible à ouvrir)" }
-            $avant = @($NATIF::Visibles('#32768') | ForEach-Object { [long]$_ })
-            foreach ($h in $icones) { [void]$NATIF::PostMessage($h, 6002, [IntPtr]::Zero, [IntPtr]0x205) }
-            $limite = [DateTime]::UtcNow.AddSeconds(3)
-            do {
-                foreach ($f in @($NATIF::Visibles('#32768') | Where-Object { $avant -notcontains [long]$_ })) {
-                    $hm = $NATIF::MenuDe($f)
-                    if ($hm -eq [IntPtr]::Zero) { continue }
-                    $t = $NATIF::Textes($hm)
-                    if ($null -ne $t -and $t.Length -gt 0) {
-                        $lus = (@($t) | ForEach-Object { "« $($_ -replace "`t", '<tab>') »" }) -join ', '
-                        return [pscustomobject]@{ Fenetre = $f; Menu = $hm; Textes = @($t); Lus = $lus }
-                    }
-                }
-                Start-Sleep -Milliseconds 50
-            } while ([DateTime]::UtcNow -lt $limite)
-            throw "$Quoi : le menu de l'icône ne s'ouvre pas en 3 s"
+        # --- Menu de l'icône : fenêtre web, aides de commun.ps1 (comme l'essai 13) ------------
+        # Ouvert dans le dossier du cas en cours ($script:Cas) ; rend { Fenetre, Textes, Lus,
+        # Lignes, Carte, IdProc, Rect }, `Textes` dans l'ordre, '' pour un séparateur.
+        function Ouvrir-Menu([string]$Quoi, [string]$Dossier = $script:Cas.Dossier) {
+            return (Ouvrir-Menu-Icone $script:proc.Id $Dossier $Quoi)
         }
-        # Échap ferme le menu (le menu ouvert capte le clavier) ; sinon WM_CANCELMODE.
-        function Fermer-Menu($Menu, [string]$Quoi) {
-            $ouvert = { @($NATIF::Visibles('#32768') | Where-Object { [long]$_ -eq [long]$Menu.Fenetre }).Count -gt 0 }
-            $NATIF::AppuyerGlobal($AUCUN, $ECHAP)
-            $limite = [DateTime]::UtcNow.AddSeconds(2)
-            while ((& $ouvert) -and [DateTime]::UtcNow -lt $limite) { Start-Sleep -Milliseconds 50 }
-            if (& $ouvert) {
-                foreach ($h in $NATIF::Fenetres($script:proc.Id, 'tray_icon_app')) { [void]$NATIF::PostMessage($h, [uint32]0x1F, [IntPtr]::Zero, [IntPtr]::Zero) }
-                $limite = [DateTime]::UtcNow.AddSeconds(2)
-                while ((& $ouvert) -and [DateTime]::UtcNow -lt $limite) { Start-Sleep -Milliseconds 50 }
-            }
-            if (& $ouvert) { throw "$Quoi : ni Échap ni WM_CANCELMODE n'ont fermé le menu" }
-        }
+        function Fermer-Menu($Menu, [string]$Quoi) { Fermer-Menu-Icone $Menu $Quoi }
         function Cliquer-Entree($Menu, [string]$Texte, [string]$Quoi) {
-            $i = -1
-            for ($k = 0; $k -lt $Menu.Textes.Count; $k++) { if ($Menu.Textes[$k] -ceq $Texte -or $Menu.Textes[$k].StartsWith("$Texte`t", [StringComparison]::Ordinal)) { $i = $k; break } }
-            if ($i -lt 0) { throw "$Quoi : pas d'entrée « $Texte » ($($Menu.Lus))" }
-            $r = [BreezyShotEssai.Defilante+RECT]::new()
-            if (-not $NATIF::GetMenuItemRect([IntPtr]::Zero, $Menu.Menu, [uint32]$i, [ref]$r)) { throw "$Quoi : rectangle de « $Texte » illisible" }
-            $NATIF::Cliquer([int](($r.Left + $r.Right) / 2), [int](($r.Top + $r.Bottom) / 2))
+            Cliquer-Ligne-Menu $Menu $Texte $Quoi
             $NATIF::Poser($REPOS_X, $REPOS_Y)
+        }
+        # Pendant une défilante, sans Échap (l'app le tient en raccourci global : il annulerait
+        # la course) : un second clic sur l'icône referme le menu (`menu ferme`).
+        function Fermer-Menu-Par-Icone($Menu, [string]$Dossier, [string]$Quoi) {
+            $fermes = Compter-Motif 'menu ferme$' $Dossier
+            Start-Sleep -Milliseconds 400   # anti-rebond de l'icône (300 ms)
+            Clic-Icone $Menu.IdProc $Quoi
+            $null = Attendre-Suivante 'menu ferme$' $Dossier $fermes "$Quoi : menu ferme (second clic sur l'icône)" 3
+            $limite = [DateTime]::UtcNow.AddSeconds(2)
+            while ($NATIF::IsWindowVisible($Menu.Fenetre) -and [DateTime]::UtcNow -lt $limite) { Start-Sleep -Milliseconds 30 }
+            if ($NATIF::IsWindowVisible($Menu.Fenetre)) { throw "$Quoi : le menu est encore visible 2 s après « menu ferme »" }
         }
 
         # Fenêtres de premier niveau visibles de l'app (classe et titre), pour un diagnostic.
@@ -1177,7 +1138,7 @@ public static int[] ClasserResumes(int[] ra, int[] rb, int h, int minRecouvremen
             $NATIF::Poser($REPOS_X, $REPOS_Y)
             if ($Par -eq 'menu') {
                 $menus = Compter-Motif 'menu: capturer defilante$' $Dossier
-                $m = Ouvrir-Menu $Quoi
+                $m = Ouvrir-Menu $Quoi $Dossier
                 Cliquer-Entree $m 'Capture défilante' $Quoi
                 $null = Attendre-Suivante 'menu: capturer defilante$' $Dossier $menus "$Quoi : menu: capturer defilante" 5
             }
@@ -1538,7 +1499,7 @@ public static int[] ClasserResumes(int[] ra, int[] rb, int h, int minRecouvremen
                 Verifier '(L0) aucune ligne « raccourci defilante »' ((Compter-Motif 'raccourci defilante[: ]' $d0) -eq 0) (Message (Derniere-Ligne 'raccourci defilante' $d0)) | Out-Null
                 $m = Ouvrir-Menu '(L0)'
                 $sans = @($m.Textes | Where-Object { $_.StartsWith('Capture défilante', [StringComparison]::Ordinal) }).Count -eq 0
-                Verifier '(L0) menu de 8 positions sans « Capture défilante »' ($sans -and ($m.Textes.Count -eq 8)) $m.Lus | Out-Null
+                Verifier '(L0) menu de 9 positions (séparateurs comptés) sans « Capture défilante »' ($sans -and ($m.Textes.Count -eq 9)) $m.Lus | Out-Null
                 Fermer-Menu $m '(L0)'
                 Verifier '(L0) Ctrl+Maj+5 libre (l''essai le tient)' ((Tenir-Ailleurs ([int]$VK_5) 'cinq-l0') -eq 'tenu') | Out-Null
                 $recus = Compter-Motif '--capturer recu: defilante$' $d0
@@ -1583,8 +1544,8 @@ public static int[] ClasserResumes(int[] ra, int[] rb, int h, int minRecouvremen
             Point '(L1) licence' {
                 Verifier '(L1) raccourci defilante: Ctrl+Maj+5' ((Compter-Motif 'raccourci defilante: Ctrl\+Maj\+5$' $da) -eq 1) (Message (Derniere-Ligne 'raccourci defilante' $da)) | Out-Null
                 $m = Ouvrir-Menu '(L1)'
-                $ok = ($m.Textes.Count -ge 5) -and ($m.Textes[4] -ceq "Capture défilante`tCtrl + Maj + 5")
-                Verifier '(L1) menu : « Capture défilante<tab>Ctrl + Maj + 5 » en cinquième' $ok $m.Lus | Out-Null
+                $ok = ($m.Textes.Count -ge 6) -and ($m.Textes[5] -ceq "Capture défilante`tCtrl + Maj + 5")
+                Verifier '(L1) menu : « Capture défilante<tab>Ctrl + Maj + 5 » à l''indice 5 (séparateur compté)' $ok $m.Lus | Out-Null
                 Fermer-Menu $m '(L1)'
                 Verifier '(L1) aucune fenêtre « defilante » au repos' ((Compter-Motif $MOTIFS['Fenetre'] $da) -eq 0) | Out-Null
             }
@@ -1871,6 +1832,18 @@ public static int[] ClasserResumes(int[] ra, int[] rb, int h, int minRecouvremen
                 }
                 Verifier '(B1) les trois moyens sans effet : « defilante repli: molette » (pointeur au centre de la page)' $true $moyens | Out-Null
                 if (@(Apres $db 'Issue' $Cpt).Count -gt 0) { throw "(B1) la course a fini avant « Terminer » : $(Message (@(Apres $db 'Issue' $Cpt))[0])" }
+                # Le menu de l'icône pendant la course (témoin immobile : la course reste
+                # ouverte) : « Quitter BreezyShot » seul ; refermé par un second clic sur
+                # l'icône, sans rien choisir (aucune ligne qui commence par « menu: »).
+                $motifChoix = '^\S+\s+\S+\s+\S+\s+menu: '
+                $seuls = Compter-Motif 'menu pendant la defilante: quitter seulement$' $db
+                $choisis = Compter-Motif $motifChoix $db
+                $mq = Ouvrir-Menu '(B1) menu pendant la course' $db
+                $null = Attendre-Suivante 'menu pendant la defilante: quitter seulement$' $db $seuls '(B1) menu pendant la defilante: quitter seulement' 3
+                $seul = ($mq.Textes.Count -eq 1) -and ($mq.Textes[0] -ceq 'Quitter BreezyShot')
+                Fermer-Menu-Par-Icone $mq $db '(B1) menu pendant la course'
+                $vivante = -not $script:proc.HasExited
+                Verifier '(B1) clic sur l''icône pendant la course : « Quitter BreezyShot » seul, refermé sans quitter (ni « menu: », ni issue)' ($seul -and $vivante -and ((Compter-Motif $motifChoix $db) -eq $choisis) -and (@(Apres $db 'Issue' $Cpt).Count -eq 0)) "menu $($mq.Lus) ; app $(if ($vivante) { 'en marche' } else { 'sortie' })" | Out-Null
                 $el = Element $hc 'Terminer' $CT::Button 5
                 if ($null -eq $el) { throw "(B1) bouton « Terminer » introuvable ; $(Elements-Vus $hc)" }
                 $pt = Centre-Stable $el
