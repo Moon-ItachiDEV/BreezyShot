@@ -2074,13 +2074,30 @@ non envoye: <e>`, `surlignage sans fil (<e>): fin montree tout de suite`.
   Ctrl+Maj+H à l'historique affiché 188 ms (budget 700), 20 ouvertures entre 185 et 209
   ms ; historique ouvert 226,3 Mo, 186,3 Mo dix secondes après 20 fermetures ; poignées 396
   puis 415.
+- Essai Windows 14 (`14-defilante.ps1`, 0.6, 900 s au plus) : capture défilante sur un
+  témoin WPF dont chaque rangée de pixels porte son numéro (`temoin-defilant.ps1`) ; l'image
+  finale est relue rangée par rangée (chaque rangée une fois, dans l'ordre) et comparée au
+  pixel à la page de référence que le témoin écrit en BMP. Sans licence : rien de la
+  défilante, Ctrl + Maj + 5 libre. Avec : lancée par Ctrl + Maj + 5 et par le menu, clic sur
+  la page après la liste des pages, fin seule en bas, presse-papiers exact, budgets (départ,
+  mesure, fin, annonce, mémoire ; vitesse écrite, en échec sous 800 px/s, cible 1 500) ;
+  molette qui reprend la main, « Trop vite », Entrée ; Échap, appuis ignorés, « Terminer »,
+  en-tête collant, petite zone agrandie, limite de 16 384 px, `--quitter` ; fenêtre de
+  contrôle absente des copies d'écran (sentinelle), voile vu en cas capturable. Le focus de
+  la sélection pendant la création de la fenêtre de contrôle est dit par les lignes
+  `[focus]`. Échap et Entrée partent en raccourci global, une fois leur réservation au
+  journal ; un point en échec ramène l'app au repos (lignes `[repos]`). Edge et
+  l'Explorateur sont joués et notés seulement ; les suites d'images pour l'assemblage
+  (résumés de lignes `resume …`, paires `suite … paire`) et les lignes `vivant:` des tests
+  sont dans la sortie.
 - `essais/` : un script par étape (`01-socle.ps1`, `02-reglages.ps1`, `03-raccourci.ps1`,
   `04-zone.ps1`, `05-plein-ecran.ps1`, `06-fenetre.ps1`, `07-vignette.ps1`,
   `08-reglages-fenetre.ps1`, `09-installateur.ps1`, `10-confort.ps1`,
-  `11-pointeur.ps1`, `12-editeur.ps1`, `13-historique-texte.ps1`), tous les `NN-*.ps1`
+  `11-pointeur.ps1`, `12-editeur.ps1`, `13-historique-texte.ps1`,
+  `14-defilante.ps1`), tous les `NN-*.ps1`
   pris dans l'ordre sans liste écrite (les essais 01 à 12 tournent sans licence), lancés
   par `essais/lancer.ps1` sur le .exe de release (un essai pas fini en 600 s, 900 s pour
-  l'essai 13, est arrêté, avec ce qu'il a lancé, et compte comme échoué, les journaux de
+  les essais 13 et 14, est arrêté, avec ce qu'il a lancé, et compte comme échoué, les journaux de
   l'app qu'il laisse rangés avec les autres ; un bilan resté d'un passage d'avant est effacé avant
   l'essai ; après chaque essai, une app ou une aide restée ouverte est arrêtée et nommée,
   sinon elle retient la sortie de l'étape jusqu'à sa limite de temps, et de WebView2
