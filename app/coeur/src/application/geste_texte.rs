@@ -41,11 +41,41 @@ static NUMERO: AtomicU64 = AtomicU64::new(0);
 static ATTENDUE: Attendue = Attendue::new();
 
 /// L'écran figé d'une lecture : sa garde (prise à la libération) et quand il a été caché.
-struct EcranGarde {
+struct EcranGarde<G = GardeEcran> {
     numero: u64,
     relache: Instant,
-    garde: Option<GardeEcran>,
+    garde: Option<G>,
     cache_apres: Option<Duration>,
+}
+
+/// Prend la garde de l'écran figé de la lecture `numero` (pure, testée sans écran) : la
+/// garde si elle était encore là (`None` si elle a déjà été prise, à la borne par exemple),
+/// et le délai depuis le relâcher auquel l'écran a été caché ; `None` si l'écran rangé
+/// n'est pas celui de `numero`.
+fn prendre_garde<G>(
+    place: &mut Option<EcranGarde<G>>,
+    numero: u64,
+    maintenant: Instant,
+) -> Option<(Option<G>, Duration)> {
+    let e = place.as_mut().filter(|e| e.numero == numero)?;
+    let apres = *e
+        .cache_apres
+        .get_or_insert_with(|| maintenant.saturating_duration_since(e.relache));
+    Some((e.garde.take(), apres))
+}
+
+/// Écrans changés : la garde de l'écran de la lecture en cours, si elle est encore là ; la
+/// lecture n'est pas touchée. `(lecture en cours, garde prise)`.
+fn garde_pour_bureau<G>(
+    lecture: &Option<LectureEnCours>,
+    place: &mut Option<EcranGarde<G>>,
+    maintenant: Instant,
+) -> (bool, Option<G>) {
+    let Some(numero) = texte::lecture_a_liberer(lecture) else {
+        return (false, None);
+    };
+    let garde = prendre_garde(place, numero, maintenant).and_then(|(g, _)| g);
+    (true, garde)
 }
 
 /// L'écran figé de la lecture en cours (de n'importe quel fil ; verrou jamais tenu pendant
@@ -65,12 +95,7 @@ fn ecran() -> std::sync::MutexGuard<'static, Option<EcranGarde>> {
 /// (`gel::cacher_ecran_fige` ne connaît pas de numéro) ; la sélection, elle, ne cache que
 /// si aucun affichage n'est en cours.
 fn liberer_ecran(numero: u64) -> Option<Duration> {
-    let (garde, apres) = {
-        let mut place = ecran();
-        let e = place.as_mut().filter(|e| e.numero == numero)?;
-        let apres = *e.cache_apres.get_or_insert_with(|| e.relache.elapsed());
-        (e.garde.take(), apres)
-    };
+    let (garde, apres) = prendre_garde(&mut ecran(), numero, Instant::now())?;
     // Hors du verrou : la garde cache l'écran figé et la sélection, libère Échap.
     drop(garde);
     Some(apres)
@@ -364,13 +389,17 @@ fn finir(app: &AppHandle, fin: FinLecture) {
 /// figé et la sélection sont libérés tout de suite ; la lecture continue, finit, copie et
 /// dit son message comme d'habitude. Faux sans lecture en cours.
 pub fn bureau_change(app: &AppHandle) -> bool {
-    let Some(numero) = texte::lecture_a_liberer(&super::lecture_en_cours(app)) else {
-        return false;
+    let (en_lecture, garde) = {
+        let lecture = super::lecture_en_cours(app);
+        garde_pour_bureau(&lecture, &mut ecran(), Instant::now())
     };
-    if liberer_ecran(numero).is_some() {
+    // Seulement si l'écran était encore montré (pas déjà libéré à la borne, ni par un
+    // `Bureau` précédent). Hors des verrous : la garde cache l'écran figé et la sélection.
+    if let Some(g) = garde {
+        drop(g);
         log::info!("texte ecran libere: bureau change");
     }
-    true
+    en_lecture
 }
 
 /// L'image composée de l'éditeur à lire (export `texte` accepté, fil principal ; l'export
@@ -475,4 +504,68 @@ pub fn arreter(app: &AppHandle) {
     ATTENDUE.oublier();
     let ancien = ecran().take();
     drop(ancien);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn rangee(numero: u64, relache: Instant) -> Option<EcranGarde<&'static str>> {
+        Some(EcranGarde {
+            numero,
+            relache,
+            garde: Some("garde"),
+            cache_apres: None,
+        })
+    }
+
+    #[test]
+    fn la_garde_n_est_prise_qu_une_fois() {
+        let t = Instant::now();
+        let ms = Duration::from_millis;
+        let mut place = rangee(3, t);
+        assert!(prendre_garde(&mut place, 2, t).is_none(), "autre lecture");
+        assert_eq!(
+            prendre_garde(&mut place, 3, t + ms(1500)),
+            Some((Some("garde"), ms(1500)))
+        );
+        // Déjà prise (borne) : rien à cacher, le délai noté reste celui de la première fois.
+        assert_eq!(
+            prendre_garde(&mut place, 3, t + ms(2000)),
+            Some((None, ms(1500)))
+        );
+        assert!(prendre_garde(&mut None::<EcranGarde<&str>>, 3, t).is_none());
+    }
+
+    #[test]
+    fn ecrans_changes_prennent_la_garde_une_fois_sans_toucher_la_lecture() {
+        let t = Instant::now();
+        let mut place = rangee(4, t);
+        let fin = FinLecture {
+            numero: 4,
+            issue: crate::texte::Issue::Vide,
+            copie: None,
+            duree: Duration::ZERO,
+            document: None,
+            facteur: 1.0,
+        };
+        let lecture = Some(LectureEnCours {
+            numero: 4,
+            relache: t,
+            minimum: texte::BALAYAGE,
+            fin: Some(Box::new(fin.clone())),
+        });
+        assert_eq!(
+            garde_pour_bureau(&lecture, &mut place, t),
+            (true, Some("garde"))
+        );
+        // Un second `Bureau` : la lecture est toujours en cours, plus rien à libérer.
+        assert_eq!(garde_pour_bureau(&lecture, &mut place, t), (true, None));
+        // La lecture et son résultat gardé sont intacts.
+        assert_eq!(lecture.as_ref().and_then(|x| x.fin.as_deref()), Some(&fin));
+        // Hors Lecture : rien.
+        let mut autre = rangee(5, t);
+        assert_eq!(garde_pour_bureau(&None, &mut autre, t), (false, None));
+        assert!(autre.is_some_and(|e| e.garde.is_some()));
+    }
 }

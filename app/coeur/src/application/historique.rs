@@ -249,10 +249,11 @@ pub fn prendre_tout(etat: &mut EtatHistorique) -> Vec<String> {
     noms
 }
 
-/// Une capture fait-elle son aperçu à la sortie ? Seulement si l'historique est une
-/// action en vigueur (licence) : sinon rien n'est écrit dans `Apercus`.
-pub fn apercu_a_la_sortie(actions_en_vigueur: &[&str]) -> bool {
-    actions_en_vigueur.contains(&super::ACTION_HISTORIQUE)
+/// Une capture fait-elle son aperçu à la sortie ? Si l'historique est une action en
+/// vigueur (licence), ou si sa fenêtre est ouverte (licence retirée pendant qu'elle l'est :
+/// elle reste utilisable jusqu'à sa fermeture). Sinon rien n'est écrit dans `Apercus`.
+pub fn apercu_a_la_sortie(actions_en_vigueur: &[&str], fenetre_ouverte: bool) -> bool {
+    fenetre_ouverte || actions_en_vigueur.contains(&super::ACTION_HISTORIQUE)
 }
 
 /// Ce que fait une demande d'ouverture de l'historique.
@@ -688,18 +689,19 @@ mod tests {
 
     #[test]
     fn apercu_seulement_avec_l_historique() {
-        assert!(apercu_a_la_sortie(&["zone", "historique"]));
-        assert!(!apercu_a_la_sortie(&[
-            "zone",
-            "plein_ecran",
-            "fenetre",
-            "derniere_zone"
-        ]));
+        let sans = ["zone", "plein_ecran", "fenetre", "derniere_zone"];
+        assert!(apercu_a_la_sortie(&["zone", "historique"], false));
+        // Sans licence et fenêtre fermée : aucun aperçu, comme la 0.4.
+        assert!(!apercu_a_la_sortie(&sans, false));
+        // Licence retirée, fenêtre encore ouverte : l'aperçu est fait.
+        assert!(apercu_a_la_sortie(&sans, true));
         assert!(apercu_a_la_sortie(
-            &crate::application::actions_construites(true, false)
+            &crate::application::actions_construites(true, false),
+            false
         ));
         assert!(!apercu_a_la_sortie(
-            &crate::application::actions_construites(false, true)
+            &crate::application::actions_construites(false, true),
+            false
         ));
     }
 }

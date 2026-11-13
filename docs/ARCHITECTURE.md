@@ -1321,8 +1321,9 @@ nom dans `<local>/Apercus/` (`SOUS_DOSSIER_APERCUS`) : la partie 16:10 du haut �
 réduite pour couvrir 400 × 250, jamais agrandie (`capture::apercu_historique`). L'aperçu est
 fait après chaque sortie qui a rangé un fichier dans « Récents », dans le fil de la sortie
 ou de l'export de l'éditeur (`geste_historique::apres_sortie`), seulement si l'historique
-est une action en vigueur (`historique::apercu_a_la_sortie` : avec une licence ; sans
-elle, rien n'est écrit dans `Apercus`, la capture suit le chemin de la 0.4) ; ceux qui
+est une action en vigueur ou si sa fenêtre est ouverte (`historique::apercu_a_la_sortie` :
+avec une licence, ou une fenêtre restée ouverte après son retrait ; sans licence et fenêtre
+fermée, rien n'est écrit dans `Apercus`, la capture suit le chemin de la 0.4) ; ceux qui
 manquent sont faits à l'ouverture, dans le fil `historique`, du plus récent au plus ancien,
 chacun annoncé par `historique:apercu`. Le nettoyage à 50 efface aussi les aperçus des
 captures parties et les aperçus orphelins (§10).
