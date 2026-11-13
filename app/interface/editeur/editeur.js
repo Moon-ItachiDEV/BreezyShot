@@ -77,14 +77,13 @@ const ed = {
 
 // Couleurs de contenu : celles de dessin.js, par leur nom.
 const couleurDessin = (nom) => dessin.COULEURS.find((c) => c[1] === nom)[0];
-// `emplacement` : l'outil venu de « Ajouter » (vide : l'emplacement n'est pas montré) ;
 // `autre` : la couleur libre gardée (« Autre couleur »). Couleur, taille (rang 0 à 2) et
-// opacité : par outil, comme la maquette (S.col, S.w, S.a).
+// opacité : par outil, comme la maquette (S.col, S.w, S.a). Les préférences d'avant la barre
+// C (`emplacement`, variante « Courbe » de la flèche) sont ignorées.
 const rouge = couleurDessin("Rouge");
 export const DEFAUTS = {
   outil: "fleche",
-  emplacement: "",
-  variantes: { fleche: "droite", forme: "rectangle", flou: "pixeliser", projecteur: "rectangle" },
+  variantes: { forme: "rectangle", flou: "pixeliser", projecteur: "rectangle" },
   couleurs: {
     fleche: rouge,
     stylo: rouge,
@@ -119,6 +118,7 @@ function lirePreferences(texte) {
       if (lu[k] === undefined || typeof lu[k] !== typeof DEFAUTS[k]) continue;
       p[k] = PAR_OUTIL.includes(k) ? { ...p[k], ...lu[k] } : lu[k];
     }
+    delete p.variantes.fleche;
     if (!OUTILS_CONNUS.includes(p.outil)) p.outil = DEFAUTS.outil;
   } catch {
     // Préférences illisibles : les défauts.

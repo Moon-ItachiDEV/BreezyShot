@@ -227,25 +227,51 @@ const CHARGE = {
     await uneImage(p);
   };
   const bouton = (p, nom) => p.getByRole('button', { name: nom, exact: true });
+  // « Texte » du haut (Copier le texte), à ne pas confondre avec l'outil Texte de la barre.
+  const texteHaut = (p) =>
+    p.locator('#barre-haut').getByRole('button', { name: 'Texte', exact: true });
   const outil = async (p, nom) => {
-    await bouton(p, nom).click();
-    await uneImage(p);
-  };
-  const ajouter = async (p, nom) => {
-    await bouton(p, 'Ajouter').click();
-    await p.getByRole('menuitem', { name: nom, exact: true }).click();
+    await p.locator('#outils [data-outil]').and(bouton(p, nom)).click();
     await uneImage(p);
   };
   const ouvert = (p, sel) => p.$eval(sel, (m) => m.classList.contains('ouvert'));
+  // L'outil en main (son bouton enfoncé) et l'outil déplié dans la barre.
   const choisi = (p) =>
-    p.$$eval('#outils [aria-pressed="true"]', (bs) => bs.map((b) => b.getAttribute('aria-label')));
-  // Une variante par la bulle de l'outil (l'instrument recliqué).
-  const variante = async (p, outilNom, nom) => {
-    if (JSON.stringify(await choisi(p)) !== JSON.stringify([outilNom])) await outil(p, outilNom);
-    if (!(await ouvert(p, '#reglages-outil'))) await outil(p, outilNom);
-    await p.locator('#reglages-outil').getByRole('button', { name: nom, exact: true }).click();
+    p.$$eval('#outils [data-outil][aria-pressed="true"]', (bs) =>
+      bs.map((b) => b.getAttribute('aria-label')),
+    );
+  const deplie = (p) =>
+    p.$$eval('#outils .pli[data-on]', (ps) => ps.map((x) => x.dataset.pli));
+  // Le pli ouvert : les plis fermés sont inertes, mais Playwright y trouve encore les noms.
+  const pli = (p) => p.locator('#outils .pli[data-on]');
+  const reglage = async (p, nom) => {
+    await pli(p).getByRole('button', { name: nom, exact: true }).click();
     await uneImage(p);
   };
+  // Une variante dans le pli de l'outil (pris d'abord s'il ne l'est pas).
+  const variante = async (p, outilNom, nom) => {
+    if (JSON.stringify(await choisi(p)) !== JSON.stringify([outilNom])) await outil(p, outilNom);
+    await reglage(p, nom);
+  };
+  // Ce que montre le pli ouvert : ses groupes (nom, boutons, enfoncés), sa glissière.
+  const contenuPli = (p) =>
+    p.evaluate(() => {
+      const d = document.querySelector('#outils .pli[data-on] .in');
+      if (!d) return null;
+      const i = d.querySelector('input[type="range"]');
+      return {
+        groupes: [...d.querySelectorAll('[role="group"]')]
+          .filter((g) => !g.hidden)
+          .map((g) => [
+            g.getAttribute('aria-label'),
+            [...g.querySelectorAll('button')].map((b) => b.getAttribute('aria-label')),
+          ]),
+        enfonces: [...d.querySelectorAll('[aria-pressed="true"]')].map((b) =>
+          b.getAttribute('aria-label'),
+        ),
+        opacite: i && [i.min, i.max, i.step, i.value, i.getAttribute('aria-label')],
+      };
+    });
 
   // ---------- 1. chargement ----------
   {
@@ -293,10 +319,9 @@ const CHARGE = {
     await fin(p, '1');
   }
 
-  // ---------- 2. noms et rôles (avenant §4), absents, barre de la fenêtre ----------
+  // ---------- 2. noms et rôles (avenant §4, barre C), absents, barre de la fenêtre ----------
   {
     const p = await page();
-    const nb = async (role, nom) => p.getByRole(role, { name: nom, exact: true }).count();
     const haut = p.locator('#barre-haut');
     let ok = true;
     const manque = [];
@@ -305,45 +330,63 @@ const CHARGE = {
     }
     const pal = p.getByRole('toolbar', { name: 'Annotation', exact: true });
     ok = (await pal.count()) === 1;
-    for (const n of ['Annuler', 'Rétablir', 'Flèche', 'Stylo', 'Surligneur', 'Gomme']) {
+    for (const n of ['Annuler', 'Rétablir', 'Plus']) {
       if ((await pal.getByRole('button', { name: n, exact: true }).count()) !== 1) manque.push(n);
     }
-    for (const n of ['Ajouter', 'Plus']) {
-      if ((await pal.getByRole('button', { name: n, exact: true }).count()) !== 1) manque.push(n);
-    }
-    const ordre = await p.$$eval('#couleurs .dot', (bs) =>
-      bs.map((b) => b.getAttribute('aria-label')),
-    );
+    // Barre C : les neuf outils dans l'ordre, les quatre instruments dessinés puis un
+    // séparateur ; la Flèche en main est dépliée, les autres plis sont fermés et inertes.
+    const barre = await p.evaluate(() => {
+      const tous = (s) => [...document.querySelectorAll(s)];
+      return {
+        outils: tous('#outils [data-outil]').map((b) => b.getAttribute('aria-label')),
+        dessines: tous('#outils .tl.ib').map(
+          (b) => b.dataset.outil + (b.querySelector('svg.inst') ? '' : ' sans dessin'),
+        ),
+        separe: !!document
+          .querySelector('#outils .pli[data-pli="gomme"]')
+          .nextElementSibling?.classList.contains('dv'),
+        ouverts: tous('#outils .pli[data-on]').map((x) => x.dataset.pli),
+        inertes: tous('#outils .pli > .in')
+          .filter((x) => x.inert)
+          .map((x) => x.parentElement.dataset.pli),
+        anciens: [
+          '#bouton-ajouter',
+          '#menu-ajouter',
+          '#reglages-outil',
+          '#menu-couleur',
+          '#bouton-couleur',
+          '#couleurs',
+          '[data-place="emplacement"]',
+        ].filter((s) => document.querySelector(s)),
+      };
+    });
     verifier(
       ok &&
         !manque.length &&
-        JSON.stringify(ordre) === '["Rouge","Jaune","Vert","Autre couleur","Bleu","Noir","Blanc"]',
-      '2 barre du haut, palette « Annotation », pastilles dans l’ordre (Autre couleur 4e)',
-      JSON.stringify([manque, ordre]),
+        JSON.stringify(barre.outils) ===
+          '["Flèche","Stylo","Surligneur","Gomme","Texte","Forme","Numéro","Flou","Projecteur"]' &&
+        JSON.stringify(barre.dessines) === '["fleche","stylo","surligneur","gomme"]' &&
+        barre.separe &&
+        JSON.stringify(barre.ouverts) === '["fleche"]' &&
+        JSON.stringify(barre.inertes) ===
+          '["stylo","surligneur","gomme","texte","forme","numero","flou","projecteur"]' &&
+        barre.anciens.length === 0,
+      '2 barre « Annotation » : neuf outils dans l’ordre, quatre instruments dessinés, la Flèche seule dépliée, ni « Ajouter » ni bulle',
+      JSON.stringify([manque, barre]),
     );
-    const pastilles = [];
-    for (const n of ['Rouge', 'Jaune', 'Vert', 'Autre couleur', 'Bleu', 'Noir', 'Blanc'])
-      pastilles.push(await pal.getByRole('button', { name: n, exact: true }).count());
+    const c = await contenuPli(p);
     verifier(
-      pastilles.every((x) => x === 1),
-      '2 pastilles : boutons nommés',
-      String(pastilles),
+      c &&
+        JSON.stringify(c.groupes) ===
+          JSON.stringify([
+            ['Taille', ['Fin', 'Moyen', 'Épais']],
+            ['Couleur', ['Rouge', 'Jaune', 'Vert', 'Bleu', 'Noir', 'Blanc', 'Autre couleur']],
+          ]) &&
+        JSON.stringify(c.enfonces) === '["Moyen","Rouge"]' &&
+        JSON.stringify(c.opacite) === '["20","100","5","100","Opacité"]',
+      '2 Flèche dépliée : Taille, Couleur (six et « Autre couleur »), Opacité de 20 à 100 % par 5',
+      JSON.stringify(c),
     );
-    verifier(
-      (await p.locator('#bouton-couleur').getAttribute('aria-label')) === 'Couleur' &&
-        (await nb('button', 'Couleur')) === 0,
-      '2 « Couleur » nommé, caché en fenêtre large',
-    );
-    await bouton(p, 'Ajouter').click();
-    const menuA = p.getByRole('menu', { name: 'Ajouter', exact: true });
-    const itemsA = await menuA.getByRole('menuitem').allTextContents();
-    verifier(
-      JSON.stringify(itemsA.map((t) => t.trim())) ===
-        '["Texte","Forme","Numéro","Flou","Projecteur"]',
-      '2 menu « Ajouter » : Texte, Forme, Numéro, Flou, Projecteur',
-      JSON.stringify(itemsA),
-    );
-    await p.keyboard.press('Escape');
     await bouton(p, 'Plus').click();
     const itemsP = await p
       .getByRole('menu', { name: 'Plus', exact: true })
@@ -411,8 +454,8 @@ const CHARGE = {
       return { h: b.height, palH: pal.height, bas: innerHeight - pal.bottom };
     });
     verifier(
-      t.h === 52 && t.palH === 72 && t.bas === 16,
-      '2 barre 52 px, palette 72 px à 16 px du bas',
+      t.h === 52 && t.palH === 80 && t.bas === 14,
+      '2 barre 52 px, barre d’annotation 80 px à 14 px du bas',
       JSON.stringify(t),
     );
     await fin(p, '2');
@@ -473,16 +516,44 @@ const CHARGE = {
         o.epaisseur === 1 &&
         o.opacite === 1 &&
         o.cx == null &&
+        o.courbe === undefined &&
         o.id === 1 &&
-        (await p.evaluate(() => __ed.selection.length)) === 0,
-      '4 Flèche : flèche droite rouge (vrai modèle), non choisie après le tracé',
+        JSON.stringify(await p.evaluate(() => __ed.selection)) === '[1]',
+      '4 Flèche : flèche droite rouge (vrai modèle), restée choisie après le tracé',
       JSON.stringify(o),
     );
-    await variante(p, 'Flèche', 'Courbe');
-    await p.keyboard.press('Escape');
-    await glisser(p, [20, 60], [120, 90]);
-    o = (await objets(p, 'fleche'))[1];
-    verifier(o && o.cx != null && o.courbe === undefined, '4 Flèche courbe', JSON.stringify(o));
+    // Courbée directement : la poignée du milieu, tirée, fait passer la courbe par la
+    // pointe ; ramenée près du milieu de la corde, la flèche redevient droite.
+    const pasAvant = await p.evaluate(() => __ed.h.passe.length);
+    await glisser(p, [70, 30], [70, 70]);
+    o = (await objets(p, 'fleche'))[0];
+    const milieu = o && o.cx != null ? [(20 + 2 * o.cx + 120) / 4, (20 + 2 * o.cy + 40) / 4] : [];
+    verifier(
+      o &&
+        o.cx != null &&
+        Math.hypot(milieu[0] - 70, milieu[1] - 70) < 0.6 &&
+        o.x1 === 20 &&
+        o.y2 === 40 &&
+        (await p.evaluate(() => __ed.h.passe.length)) === pasAvant + 1 &&
+        JSON.stringify(await p.evaluate(() => __ed.selection)) === '[1]',
+      '4 Flèche courbée à sa poignée du milieu : la courbe passe par la pointe, un pas, bouts gardés',
+      JSON.stringify([o, milieu]),
+    );
+    await glisser(p, [70, 70], [71, 32]);
+    o = (await objets(p, 'fleche'))[0];
+    verifier(
+      o && o.cx === undefined && o.cy === undefined && (await objets(p, 'fleche')).length === 1,
+      '4 Flèche ramenée près du milieu de sa corde : droite de nouveau',
+      JSON.stringify(o),
+    );
+    // La poignée du milieu d'une flèche droite à peine tirée : rien ne change, aucun pas.
+    const pasDroite = await p.evaluate(() => __ed.h.passe.length);
+    await glisser(p, [70, 30], [72, 31]);
+    verifier(
+      (await p.evaluate(() => __ed.h.passe.length)) === pasDroite &&
+        (await objets(p, 'fleche'))[0].cx === undefined,
+      '4 poignée du milieu à peine tirée : la flèche reste droite, aucun pas d’annulation',
+    );
     await outil(p, 'Stylo');
     await glisser(p, [20, 120], [100, 150]);
     o = (await objets(p, 'crayon'))[0];
@@ -491,17 +562,17 @@ const CHARGE = {
     await glisser(p, [20, 170], [100, 170]);
     o = (await objets(p, 'surligneur'))[0];
     verifier(o && o.couleur === '#FFD43B', '4 Surligneur : jaune', JSON.stringify(o));
-    const avant = await p.$eval('[data-place="emplacement"]', (b) => b.hidden);
-    await ajouter(p, 'Forme');
-    const empl = await p.$eval('[data-place="emplacement"]', (b) => [
-      b.hidden,
-      b.getAttribute('aria-label'),
-      b.getAttribute('aria-pressed'),
-    ]);
+    await outil(p, 'Forme');
+    const forme = await contenuPli(p);
     verifier(
-      avant === true && JSON.stringify(empl) === '[false,"Forme","true"]',
-      '4 « Ajouter » → Forme : l’emplacement apparaît, nommé, choisi',
-      JSON.stringify([avant, empl]),
+      JSON.stringify(await choisi(p)) === '["Forme"]' &&
+        JSON.stringify(await deplie(p)) === '["forme"]' &&
+        forme &&
+        JSON.stringify(forme.groupes[0]) ===
+          '["Variante",["Rectangle","Ellipse","Ligne"]]' &&
+        forme.enfonces[0] === 'Rectangle',
+      '4 Forme prise et dépliée : Rectangle, Ellipse, Ligne (Rectangle enfoncé)',
+      JSON.stringify(forme),
     );
     await glisser(p, [150, 20], [230, 80]);
     o = (await objets(p, 'rectangle'))[0];
@@ -511,11 +582,10 @@ const CHARGE = {
       JSON.stringify(o),
     );
     await variante(p, 'Forme', 'Ellipse');
-    await p.keyboard.press('Escape');
     await glisser(p, [250, 80], [170, 120]);
     o = (await objets(p, 'ellipse'))[0];
     verifier(o && o.x1 < o.x2 && o.y1 < o.y2, '4 Forme : ellipse normalisée', JSON.stringify(o));
-    await ajouter(p, 'Numéro');
+    await outil(p, 'Numéro');
     await cliquer(p, 300, 30);
     await cliquer(p, 330, 30);
     const nums = await objets(p, 'numero');
@@ -524,7 +594,7 @@ const CHARGE = {
       '4 Numéro : deux numéros, ordres 1 et 2',
       JSON.stringify(nums),
     );
-    await ajouter(p, 'Flou');
+    await outil(p, 'Flou');
     await glisser(p, [260, 150], [380, 200]);
     o = (await objets(p, 'masque'))[0];
     verifier(
@@ -532,7 +602,7 @@ const CHARGE = {
       '4 Flou : masque pixeliser (graine du modèle)',
       JSON.stringify(o),
     );
-    await ajouter(p, 'Projecteur');
+    await outil(p, 'Projecteur');
     await glisser(p, [150, 200], [154, 204]);
     verifier((await objets(p, 'projecteur')).length === 0, '4 Projecteur de 6 px ou moins : rien');
     await glisser(p, [230, 280], [150, 220]);
@@ -548,7 +618,6 @@ const CHARGE = {
       JSON.stringify(o),
     );
     await variante(p, 'Projecteur', 'Ovale');
-    await p.keyboard.press('Escape');
     await glisser(p, [20, 200], [120, 280]);
     o = (await objets(p, 'projecteur'))[1];
     verifier(o && o.forme === 'ovale', '4 Projecteur ovale', JSON.stringify(o));
@@ -561,7 +630,7 @@ const CHARGE = {
     const enCours = await p.evaluate(() => __ed.enCours && __ed.enCours.type);
     await p.mouse.up();
     verifier(enCours === 'projecteur', '4 Projecteur : tracé en cours (ajout)');
-    await ajouter(p, 'Texte');
+    await outil(p, 'Texte');
     await cliquer(p, 340, 110);
     await p.keyboard.type('Bonjour');
     await p.keyboard.press('Enter');
@@ -572,17 +641,13 @@ const CHARGE = {
       '4 Texte : gras, contour, 28 px',
       JSON.stringify(o),
     );
-    verifier(
-      (await p.$eval('[data-place="emplacement"]', (b) => b.getAttribute('aria-label'))) ===
-        'Texte' && (await p.$$('#outils .tl:not([hidden])')).length === 5,
-      '4 l’emplacement montre le dernier outil de « Ajouter » (un seul)',
-    );
     await p.keyboard.press('b');
     await uneImage(p);
     verifier(
       JSON.stringify(await choisi(p)) === '["Flou"]' &&
+        JSON.stringify(await deplie(p)) === '["flou"]' &&
         (await p.evaluate(() => __ed.prefs.variantes.flou)) === 'pixeliser',
-      '4 touche B : Flou (Pixeliser) dans l’emplacement',
+      '4 touche B : Flou (Pixeliser), déplié',
     );
     await p.keyboard.press('a');
     await uneImage(p);
@@ -708,9 +773,7 @@ const CHARGE = {
     // aucun pas.
     await glisser(p, [300, 20], [300, 280]);
     await outil(p, 'Gomme');
-    await p.locator('#reglages-outil').getByRole('button', { name: 'Petite', exact: true }).click();
-    await p.keyboard.press('Escape');
-    await uneImage(p);
+    await reglage(p, 'Petite');
     const petite = await p.evaluate(() => __ed.prefs.tailles.gomme);
     await glisser(p, [100, 44], [100, 56]);
     r = await etat(p);
@@ -758,7 +821,7 @@ const CHARGE = {
 
     // Objets entiers (numéro) : la gomme qui passe dessus ne leur fait rien ; posée dessus,
     // elle les enlève en entier (clic ou frottement), cachés dès l'appui.
-    await ajouter(p, 'Numéro');
+    await outil(p, 'Numéro');
     await cliquer(p, 300, 100);
     await cliquer(p, 340, 60);
     await outil(p, 'Gomme');
@@ -804,33 +867,29 @@ const CHARGE = {
       JSON.stringify(r),
     );
 
-    // Gomme recliquée : ses trois tailles. La bulle ouverte, le geste part quand même.
+    // Gomme dépliée : ses trois tailles, ni couleur ni opacité.
     await outil(p, 'Stylo');
     await glisser(p, [300, 200], [320, 200]);
     await outil(p, 'Gomme');
-    await outil(p, 'Gomme');
     await calme(p);
-    const tailles = await p
-      .locator('#reglages-outil')
-      .getByRole('button')
-      .evaluateAll((bs) => bs.filter((b) => b.offsetParent).map((b) => b.getAttribute('aria-label')));
-    await p.locator('#reglages-outil').getByRole('button', { name: 'Grande', exact: true }).click();
-    await uneImage(p);
+    const gomme = await contenuPli(p);
+    await reglage(p, 'Grande');
     const grande = await p.evaluate(() => __ed.prefs.tailles.gomme);
-    const bulle = await ouvert(p, '#reglages-outil');
     const pas2 = (await etat(p)).pas;
     await glisser(p, [280, 200], [340, 200]);
     r = await etat(p);
     verifier(
-      egal(tailles, ['Petite', 'Moyenne', 'Grande']) && grande === 2 && bulle &&
+      gomme &&
+        egal(gomme.groupes, [['Taille', ['Petite', 'Moyenne', 'Grande']]]) &&
+        gomme.opacite === null &&
+        grande === 2 &&
         (await p.$eval('#curseur-gomme', (e) => e.style.width)) === '40px',
-      '5 Gomme recliquée : Petite, Moyenne, Grande ; Grande = rond de 40 px',
-      JSON.stringify([tailles, grande, bulle]),
+      '5 Gomme dépliée : Petite, Moyenne, Grande, sans couleur ; Grande = rond de 40 px',
+      JSON.stringify([gomme, grande]),
     );
     verifier(
-      !(await ouvert(p, '#reglages-outil')) && egal(r.types, ['fleche', 'fleche', 'fleche']) &&
-        r.pas === pas2 + 1,
-      '5 bulle ouverte : le geste la ferme et gomme ; un trait tout effacé disparaît (un pas)',
+      egal(r.types, ['fleche', 'fleche', 'fleche']) && r.pas === pas2 + 1,
+      '5 un trait tout effacé disparaît (un pas)',
       JSON.stringify([pas2, r]),
     );
     await p.keyboard.press('Control+z');
@@ -851,7 +910,7 @@ const CHARGE = {
   // ---------- 6. sélection, déplacement, suppression ----------
   {
     const p = await page();
-    await ajouter(p, 'Forme');
+    await outil(p, 'Forme');
     await glisser(p, [100, 100], [200, 180]);
     await outil(p, 'Flèche');
     await p.evaluate(() => {
@@ -888,6 +947,19 @@ const CHARGE = {
         r1.pas === pas0 + 1,
       '6 glissé : déplacé de 40 × 20, un pas, rien de créé',
       JSON.stringify(r1),
+    );
+    // Emmené puis ramené à sa place dans le même geste : aucun pas.
+    const [bx, by] = await point(p, 140, 160);
+    await p.mouse.move(bx, by);
+    await p.mouse.down();
+    await p.mouse.move(bx + 30, by + 10);
+    await p.mouse.move(bx, by);
+    await p.mouse.up();
+    await uneImage(p);
+    verifier(
+      (await p.evaluate(() => __ed.h.passe.length)) === pas0 + 1 &&
+        Math.round((await objets(p))[0].x1) === 140,
+      '6 emmené puis ramené à sa place : aucun pas de plus',
     );
     await p.keyboard.press('Delete');
     await uneImage(p);
@@ -1019,125 +1091,213 @@ const CHARGE = {
     await fin(p, '8');
   }
 
-  // ---------- 9. bulle « Réglages de l'outil » ----------
+  // ---------- 9. l'outil se déplie dans la barre (barre C) ----------
   {
     const p = await page();
-    verifier(!(await ouvert(p, '#reglages-outil')), '9 bulle fermée au départ');
+    // Prendre un outil le déplie ; recliqué, il reste déplié. Rien ne s'ouvre par-dessus.
+    await outil(p, 'Stylo');
+    const pris = await deplie(p);
+    await outil(p, 'Stylo');
+    const repris = await deplie(p);
     await outil(p, 'Flèche');
-    const bulle = p.getByRole('dialog', { name: 'Réglages de l’outil'.replace('’', "'") });
-    const r = await p.evaluate(() => {
-      const d = document.querySelector('#reglages-outil');
-      const i = d.querySelector('input[type="range"]');
-      return {
-        ouvert: d.classList.contains('ouvert'),
-        noms: [...d.querySelectorAll('.opt')].map((b) => b.getAttribute('aria-label')),
-        range: i && [i.min, i.max, i.step, i.value, i.getAttribute('aria-label')],
-        lignes: d.querySelectorAll('.row').length,
-      };
-    });
     verifier(
-      (await bulle.count()) === 1 &&
-        r.ouvert &&
-        JSON.stringify(r.noms) === '["Droite","Courbe","Fin","Moyen","Épais"]' &&
-        JSON.stringify(r.range) === '["20","100","5","100","Opacité"]' &&
-        r.lignes === 3,
-      '9 Flèche recliquée : variantes, trois tailles, Opacité 20 à 100 pas 5',
-      JSON.stringify(r),
+      JSON.stringify(pris) === '["stylo"]' &&
+        JSON.stringify(repris) === '["stylo"]' &&
+        JSON.stringify(await deplie(p)) === '["fleche"]' &&
+        (await p.$$('.pop.ouvert')).length === 0,
+      '9 prendre un outil le déplie, le recliquer le garde déplié, aucune bulle',
+      JSON.stringify([pris, repris]),
     );
-    await p.locator('#reglages-outil').getByRole('button', { name: 'Épais' }).click();
-    await p.$eval('#reglages-outil input', (i) => {
-      i.value = 55;
-      i.dispatchEvent(new Event('input', { bubbles: true }));
-      i.dispatchEvent(new Event('change', { bubbles: true }));
-    });
-    await outil(p, 'Flèche');
-    verifier(!(await ouvert(p, '#reglages-outil')), '9 recliquer referme la bulle');
+    await reglage(p, 'Épais');
+    await pli(p)
+      .locator('input[type="range"]')
+      .evaluate((i) => {
+        i.value = 55;
+        i.dispatchEvent(new Event('input', { bubbles: true }));
+        i.dispatchEvent(new Event('change', { bubbles: true }));
+      });
     await glisser(p, [20, 20], [120, 40]);
-    const o = (await objets(p, 'fleche'))[0];
+    let o = (await objets(p, 'fleche'))[0];
     verifier(
       o && o.epaisseur === 2 && o.opacite === 0.55,
-      '9 taille et opacité appliquées',
+      '9 taille et opacité de la Flèche : la flèche tracée les prend',
       JSON.stringify(o),
     );
-    // Objet choisi : la bulle le règle (un pas).
-    await cliquer(p, 70, 30);
-    await outil(p, 'Flèche');
-    await p.locator('#reglages-outil').getByRole('button', { name: 'Fin' }).click();
-    await uneImage(p);
-    verifier((await objets(p, 'fleche'))[0].epaisseur === 0, '9 l’objet choisi prend la taille');
-    await p.keyboard.press('Escape');
-    const contenu = async (aj, nom) => {
-      if (aj) await ajouter(p, aj);
+    // La flèche tracée reste choisie : le pli montre ses valeurs et les lui applique, en un
+    // pas ; la même valeur, aucun.
+    const c0 = await contenuPli(p);
+    const pas0 = await p.evaluate(() => __ed.h.passe.length);
+    await reglage(p, 'Fin');
+    const pas1 = await p.evaluate(() => __ed.h.passe.length);
+    await reglage(p, 'Fin');
+    o = (await objets(p, 'fleche'))[0];
+    verifier(
+      c0 &&
+        JSON.stringify(c0.enfonces) === '["Épais","Rouge"]' &&
+        c0.opacite[3] === '55' &&
+        o.epaisseur === 0 &&
+        pas1 === pas0 + 1 &&
+        (await p.evaluate(() => __ed.h.passe.length)) === pas1 &&
+        (await p.evaluate(() => __ed.prefs.tailles.fleche)) === 0,
+      '9 flèche choisie : le pli montre ses valeurs ; « Fin » la règle en un pas, recliqué aucun',
+      JSON.stringify([c0, o, pas0, pas1]),
+    );
+
+    // Ce que chaque outil déplie (Couleurs : les six et « Autre couleur »).
+    const resume = async (nom) => {
       await outil(p, nom);
-      if (!(await ouvert(p, '#reglages-outil'))) await outil(p, nom);
-      return p.evaluate(() => {
-        const d = document.querySelector('#reglages-outil');
-        return [
-          ...[...d.querySelectorAll('.opt')].map((b) => b.getAttribute('aria-label')),
-          ...(d.querySelector('input') ? ['Opacité'] : []),
-        ].join(',');
-      });
+      const c = await contenuPli(p);
+      if (!c) return '';
+      return c.groupes
+        .flatMap(([g, bs]) => (g === 'Couleur' ? ['Couleurs'] : bs))
+        .concat(c.opacite ? ['Opacité'] : [])
+        .join(',');
     };
-    const surl = await contenu(null, 'Surligneur');
-    await p.keyboard.press('Escape');
-    const texte = await contenu('Texte', 'Texte');
-    const tailles = await p.$$eval('#reglages-outil .opt .a', (s) =>
+    const vu = {};
+    for (const nom of ['Flèche', 'Stylo', 'Surligneur', 'Gomme', 'Texte']) vu[nom] = await resume(nom);
+    const glyphes = await p.$$eval('#outils .pli[data-on] .sz .a', (s) =>
       s.map((x) => getComputedStyle(x).fontSize),
     );
-    await p.locator('#reglages-outil').getByRole('button', { name: 'Épais' }).click();
+    await reglage(p, 'Grand');
     const tt = await p.evaluate(() => __ed.prefs.tailles.texte);
-    await p.keyboard.press('Escape');
-    const flou = await contenu('Flou', 'Flou');
-    await p.locator('#reglages-outil').getByRole('button', { name: 'Bloc noir' }).click();
-    await uneImage(p);
-    const bloc = await p.evaluate(() =>
-      [...document.querySelectorAll('#reglages-outil .opt')]
-        .map((b) => b.getAttribute('aria-label'))
-        .join(','),
-    );
-    await p.keyboard.press('Escape');
-    const spot = await contenu('Projecteur', 'Projecteur');
-    await p.keyboard.press('Escape');
-    const num = await contenu('Numéro', 'Numéro');
-    await p.keyboard.press('Escape');
+    for (const nom of ['Forme', 'Numéro', 'Flou']) vu[nom] = await resume(nom);
+    await reglage(p, 'Bloc noir');
+    const bloc = await contenuPli(p);
+    vu.Projecteur = await resume('Projecteur');
+    const attendu = {
+      Flèche: 'Fin,Moyen,Épais,Couleurs,Opacité',
+      Stylo: 'Fin,Moyen,Épais,Couleurs,Opacité',
+      Surligneur: 'Fin,Moyen,Épais,Couleurs',
+      Gomme: 'Petite,Moyenne,Grande',
+      Texte: 'Petit,Moyen,Grand,Couleurs,Opacité',
+      Forme: 'Rectangle,Ellipse,Ligne,Fin,Moyen,Épais,Couleurs,Opacité',
+      Numéro: 'Petit,Moyen,Grand,Couleurs,Opacité',
+      Flou: 'Pixeliser,Flouter,Bloc noir,Léger,Moyen,Fort',
+      Projecteur: 'Rectangle,Ovale',
+    };
     verifier(
-      surl === 'Fin,Moyen,Épais' &&
-        texte === 'Fin,Moyen,Épais,Opacité' &&
-        JSON.stringify(tailles) === '["12px","16px","21px"]' &&
+      JSON.stringify(vu) === JSON.stringify(attendu) &&
+        JSON.stringify(glyphes) === '["12px","16px","21px"]' &&
         tt === 2 &&
-        flou === 'Pixeliser,Flouter,Bloc noir,Léger,Moyen,Fort' &&
-        bloc === 'Pixeliser,Flouter,Bloc noir' &&
-        spot === 'Rectangle,Ovale' &&
-        num === 'Fin,Moyen,Épais,Opacité',
-      '9 lignes par outil (Surligneur, Texte, Bloc noir, Projecteur, Numéro)',
-      JSON.stringify({ surl, texte, tailles, tt, flou, bloc, spot, num }),
+        JSON.stringify(bloc.groupes) === '[["Variante",["Pixeliser","Flouter","Bloc noir"]]]',
+      '9 ce que chaque outil déplie ; Texte en A de trois tailles ; Bloc noir sans intensité',
+      JSON.stringify({ vu, glyphes, tt, bloc }),
+    );
+
+    // Un objet choisi déplie l'outil qui l'a fait, à ses valeurs ; l'outil en main ne change
+    // pas. Ce qu'on y règle va à l'objet et à son outil, pas à l'outil en main.
+    await outil(p, 'Forme');
+    await reglage(p, 'Rectangle');
+    await reglage(p, 'Vert');
+    await reglage(p, 'Épais');
+    await glisser(p, [100, 100], [200, 180]);
+    await outil(p, 'Flèche');
+    await cliquer(p, 100, 140);
+    const rect = (await objets(p, 'rectangle'))[0];
+    const c1 = await contenuPli(p);
+    verifier(
+      rect &&
+        JSON.stringify(await p.evaluate(() => __ed.selection)) === JSON.stringify([rect.id]) &&
+        JSON.stringify(await deplie(p)) === '["forme"]' &&
+        JSON.stringify(await choisi(p)) === '["Flèche"]' &&
+        JSON.stringify(c1.enfonces) === '["Rectangle","Épais","Vert"]',
+      '9 rectangle choisi avec la Flèche : la Forme se déplie à ses valeurs, la Flèche reste en main',
+      JSON.stringify([rect, c1]),
+    );
+    const pas2 = await p.evaluate(() => __ed.h.passe.length);
+    await reglage(p, 'Ellipse');
+    const conv = await p.evaluate(() => ({
+      types: __ed.h.doc.objets.map((x) => x.type),
+      o: __ed.h.doc.objets.find((x) => x.type === 'ellipse'),
+      pas: __ed.h.passe.length,
+      sel: __ed.selection,
+      pref: __ed.prefs.variantes.forme,
+    }));
+    verifier(
+      conv.o &&
+        JSON.stringify(conv.types) === '["fleche","ellipse"]' &&
+        conv.o.id === rect.id &&
+        conv.o.x1 === rect.x1 &&
+        conv.o.y2 === rect.y2 &&
+        conv.o.couleur === rect.couleur &&
+        conv.o.plein === false &&
+        conv.o.arrondi === undefined &&
+        conv.pas === pas2 + 1 &&
+        JSON.stringify(conv.sel) === JSON.stringify([rect.id]) &&
+        conv.pref === 'ellipse',
+      '9 « Ellipse » : le rectangle choisi devient une ellipse à la même place (un pas), et la Forme la garde',
+      JSON.stringify([conv, rect]),
+    );
+    await reglage(p, 'Bleu');
+    const couleurs = await p.evaluate(() => ({
+      o: __ed.h.doc.objets.find((x) => x.type === 'ellipse').couleur,
+      forme: __ed.prefs.couleurs.forme,
+      fleche: __ed.prefs.couleurs.fleche,
+    }));
+    verifier(
+      JSON.stringify(couleurs) === '{"o":"#0090FF","forme":"#0090FF","fleche":"#E5484D"}',
+      '9 « Bleu » : l’ellipse choisie et la Forme, pas la Flèche en main',
+      JSON.stringify(couleurs),
+    );
+    await outil(p, 'Stylo');
+    verifier(
+      (await p.evaluate(() => __ed.selection.length)) === 0 &&
+        JSON.stringify(await deplie(p)) === '["stylo"]',
+      '9 prendre le Stylo : plus rien de choisi, le Stylo se déplie',
     );
     await fin(p, '9');
   }
 
-  // ---------- 10. couleurs ----------
+  // ---------- 10. couleurs : le changement se voit sur l'instrument ----------
   {
     const p = await page();
-    await bouton(p, 'Vert').click();
-    await uneImage(p);
-    const r = await p.evaluate(() => ({
-      c: __ed.prefs.couleurs.fleche,
-      presse: [...document.querySelectorAll('#couleurs .dot[aria-pressed="true"]')].map((b) =>
-        b.getAttribute('aria-label'),
-      ),
-      inst: document.querySelector('[data-outil="fleche"]').style.getPropertyValue('--c'),
-    }));
+    const outilVu = (q, t) =>
+      q.evaluate((x) => {
+        const b = document.querySelector(`#outils [data-outil="${x}"]`);
+        const inst = b.querySelector('.inst');
+        const encre = inst && inst.querySelector('.i-encre');
+        return {
+          ink: b.style.getPropertyValue('--ink'),
+          ton: b.dataset.ton || '',
+          encre: inst ? inst.style.getPropertyValue('--encre') : null,
+          rempli: encre ? getComputedStyle(encre).fill : null,
+          saute: inst ? inst.classList.contains('saute') : null,
+          fonce: inst ? inst.classList.contains('encre-foncee') : null,
+          pale: inst ? inst.classList.contains('encre-pale') : null,
+          t: inst ? inst.getAttribute('data-t') : null,
+        };
+      }, t);
+    const enfoncee = (q) =>
+      q.$$eval('#outils .pli[data-on] .sw[aria-pressed="true"]', (bs) =>
+        bs.map((b) => b.getAttribute('aria-label')),
+      );
+    await reglage(p, 'Vert');
+    const saut = (await outilVu(p, 'fleche')).saute;
+    await calme(p);
+    const r = { c: await p.evaluate(() => __ed.prefs.couleurs.fleche), ...(await outilVu(p, 'fleche')) };
     verifier(
-      r.c === '#30A46C' && JSON.stringify(r.presse) === '["Vert"]' && r.inst === '#30A46C',
-      '10 Vert : couleur de l’outil, pastille et instrument',
-      JSON.stringify(r),
+      r.c === '#30A46C' &&
+        JSON.stringify(await enfoncee(p)) === '["Vert"]' &&
+        r.ink === '#30A46C' &&
+        r.encre === '#30A46C' &&
+        r.rempli === 'rgb(48, 164, 108)' &&
+        saut &&
+        !r.saute,
+      '10 Vert : couleur de la Flèche, nuance enfoncée, corps de l’instrument vert (il saute)',
+      JSON.stringify([saut, r]),
+    );
+    const autres = {};
+    for (const t of ['texte', 'numero', 'gomme', 'flou']) autres[t] = (await outilVu(p, t)).ink;
+    verifier(
+      JSON.stringify(autres) === '{"texte":"#E5484D","numero":"#E5484D","gomme":"","flou":""}',
+      '10 les outils repliés gardent un trait de leur couleur (aucun sans couleur)',
+      JSON.stringify(autres),
     );
     await glisser(p, [20, 20], [120, 40]);
-    await cliquer(p, 70, 30);
-    await bouton(p, 'Bleu').click();
-    await uneImage(p);
+    // La flèche tracée reste choisie : « Bleu » la recolore.
+    await reglage(p, 'Bleu');
     const o = (await objets(p, 'fleche'))[0];
-    verifier(o.couleur === '#0090FF', '10 objet choisi : sa couleur change', JSON.stringify(o));
+    verifier(o.couleur === '#0090FF', '10 flèche choisie : sa couleur change', JSON.stringify(o));
     await p.$eval('#autre-couleur', (i) => {
       i.value = '#8e4ec6';
       i.dispatchEvent(new Event('input', { bubbles: true }));
@@ -1145,7 +1305,7 @@ const CHARGE = {
     });
     await uneImage(p);
     const r2 = await p.evaluate(() => {
-      const w = document.querySelector('#couleurs .wheel');
+      const w = document.querySelector('#outils .pli[data-on] .sw.roue');
       return {
         c: __ed.h.doc.objets[0].couleur,
         autre: __ed.prefs.autre,
@@ -1160,12 +1320,32 @@ const CHARGE = {
     );
     await p.keyboard.press('Escape');
     await outil(p, 'Gomme');
-    const dis = await p.$$eval('#couleurs .dot', (bs) => bs.every((b) => b.disabled));
+    const nuancesGomme = (await p.$$('#outils .pli[data-on] .sw')).length;
     await outil(p, 'Surligneur');
-    const surl = await p.$eval('#couleurs .dot[aria-pressed="true"]', (b) =>
-      b.getAttribute('aria-label'),
+    const surl = await enfoncee(p);
+    verifier(
+      nuancesGomme === 0 && JSON.stringify(surl) === '["Jaune"]',
+      '10 Gomme : aucune couleur ; Surligneur : Jaune',
+      JSON.stringify([nuancesGomme, surl]),
     );
-    verifier(dis && surl === 'Jaune', '10 Gomme : pastilles grisées ; Surligneur : Jaune');
+    // Encre très foncée ou très pâle : un liseré plus marqué la détache de la barre.
+    await outil(p, 'Stylo');
+    await reglage(p, 'Noir');
+    await reglage(p, 'Épais');
+    const noir = await outilVu(p, 'stylo');
+    await reglage(p, 'Blanc');
+    const blanc = await outilVu(p, 'stylo');
+    verifier(
+      noir.ton === 'f' &&
+        noir.fonce &&
+        !noir.pale &&
+        noir.t === '2' &&
+        blanc.ton === 'p' &&
+        blanc.pale &&
+        !blanc.fonce,
+      '10 Stylo noir puis blanc : liseré marqué ; Épais : pointe large',
+      JSON.stringify([noir, blanc]),
+    );
     await fin(p, '10');
   }
 
@@ -1272,7 +1452,7 @@ const CHARGE = {
   // « fermee » suivie d'un editeur:charger (capture en attente) : la page se recharge.
   {
     const p = await page({ reponseFermer: 'fermee' });
-    await ajouter(p, 'Texte');
+    await outil(p, 'Texte');
     await cliquer(p, 50, 50);
     await p.keyboard.type('Saisi');
     await vider(p);
@@ -1651,12 +1831,12 @@ const CHARGE = {
     const p = await page({ theme });
     const r = await p.evaluate(() => {
       const cs = (s) => getComputedStyle(document.querySelector(s));
-      const pastille = document.querySelector('[data-outil="fleche"] .inst .b');
+      const bague = document.querySelector('[data-outil="fleche"] .inst .i-bague');
       return {
         barre: cs('#barre-haut').backgroundColor,
         scene: cs('#fenetre').backgroundColor,
         copier: cs('[data-act="copier"]').backgroundColor,
-        corps: getComputedStyle(pastille).fill,
+        corps: getComputedStyle(bague).fill,
         equerre: getComputedStyle(document.documentElement)
           .getPropertyValue('--editeur-equerre')
           .trim(),
@@ -1668,10 +1848,16 @@ const CHARGE = {
             'rgb(238, 240, 243)',
             'rgb(230, 232, 236)',
             'rgb(0, 103, 192)',
-            'rgb(194, 199, 207)',
+            'rgb(245, 246, 248)',
             '#1A1A1A',
           ]
-        : ['rgb(35, 35, 35)', 'rgb(23, 23, 23)', 'rgb(76, 194, 255)', 'url("#argent")', '#FFFFFF'];
+        : [
+            'rgb(35, 35, 35)',
+            'rgb(23, 23, 23)',
+            'rgb(76, 194, 255)',
+            'rgb(211, 215, 221)',
+            '#FFFFFF',
+          ];
     verifier(
       JSON.stringify([r.barre, r.scene, r.copier, r.corps, r.equerre]) === JSON.stringify(attendu),
       `16 ${theme} : mica, scène, Copier, instruments, équerres`,
@@ -1693,32 +1879,77 @@ const CHARGE = {
     await fin(p, `16 ${theme}`);
   }
 
-  // ---------- 17. fenêtre étroite : pastilles repliées dans « Couleur » ----------
+  // ---------- 17. fenêtre étroite : la barre défile ----------
   {
-    const p = await page({ largeur: 600, hauteur: 440 });
-    const r = await p.evaluate(() => ({
-      cols: getComputedStyle(document.querySelector('#couleurs')).display,
-      cur: getComputedStyle(document.querySelector('#bouton-couleur')).display,
-      pal: document.querySelector('#palette').getBoundingClientRect().height,
-      large: document.querySelector('#palette').getBoundingClientRect().width <= innerWidth,
-    }));
+    const p = await page({ largeur: 640, hauteur: 440 });
+    const mesure = () =>
+      p.evaluate(() => {
+        const pal = document.querySelector('#palette');
+        const b = pal.getBoundingClientRect();
+        return {
+          h: b.height,
+          g: b.left,
+          d: b.right,
+          l: innerWidth,
+          defile: pal.scrollWidth - pal.clientWidth,
+          x: pal.scrollLeft,
+          suite: pal.dataset.suite || '',
+        };
+      });
+    const r = await mesure();
     verifier(
-      r.cols === 'none' && r.cur !== 'none' && r.pal === 68 && r.large,
-      '17 600 × 440 : pastilles repliées, « Couleur » montré, palette 68 px',
+      r.h === 80 && r.g >= 0 && r.d <= r.l && r.defile > 0 && r.x === 0 && r.suite === 'fin',
+      '17 640 × 440 : la barre tient dans la fenêtre et défile, estompée du côté caché',
       JSON.stringify(r),
     );
-    await bouton(p, 'Couleur').click();
-    const dlg = p.getByRole('dialog', { name: 'Couleur', exact: true });
-    const noms = await dlg
-      .getByRole('button')
-      .evaluateAll((bs) => bs.map((b) => b.getAttribute('aria-label')));
-    await dlg.getByRole('button', { name: 'Noir' }).click();
+    const [cx, cy] = await p.$eval('#palette', (e) => {
+      const b = e.getBoundingClientRect();
+      return [b.left + b.width / 2, b.top + b.height / 2];
+    });
+    await p.mouse.move(cx, cy);
+    await p.mouse.wheel(0, 120);
+    await p
+      .waitForFunction(() => document.querySelector('#palette').scrollLeft > 0, null, {
+        timeout: 2000,
+      })
+      .catch(() => {});
     await uneImage(p);
+    const r1 = await mesure();
     verifier(
-      JSON.stringify(noms) === '["Rouge","Jaune","Vert","Autre couleur","Bleu","Noir","Blanc"]' &&
-        (await p.evaluate(() => __ed.prefs.couleurs.fleche)) === '#1A1A1A',
-      '17 « Couleur » : les pastilles, Noir choisi',
-      JSON.stringify(noms),
+      r1.x > 0 && r1.suite === 'deux',
+      '17 la molette fait défiler la barre, estompée des deux côtés',
+      JSON.stringify(r1),
+    );
+    // L'outil pris se montre en entier, son pli compris.
+    await p.mouse.move(cx, 20);
+    await outil(p, 'Numéro');
+    await p
+      .waitForFunction(
+        () => {
+          const pal = document.querySelector('#palette').getBoundingClientRect();
+          const x = document.querySelector('#outils .pli[data-pli="numero"]').getBoundingClientRect();
+          return (
+            x.left >= pal.left &&
+            x.right <= pal.right &&
+            document.getAnimations().every((a) => a.playState !== 'running')
+          );
+        },
+        null,
+        { timeout: 3000 },
+      )
+      .catch(() => {});
+    const vu = await p.evaluate(() => {
+      const pal = document.querySelector('#palette').getBoundingClientRect();
+      const x = document.querySelector('#outils .pli[data-pli="numero"]').getBoundingClientRect();
+      return { pal: [pal.left, pal.right], pli: [x.left, x.right] };
+    });
+    await reglage(p, 'Noir');
+    verifier(
+      vu.pli[0] >= vu.pal[0] &&
+        vu.pli[1] <= vu.pal[1] &&
+        (await p.evaluate(() => __ed.prefs.couleurs.numero)) === '#1A1A1A',
+      '17 Numéro pris : son pli se montre en entier dans la barre ; Noir choisi',
+      JSON.stringify(vu),
     );
     await p.screenshot({ path: path.join(SORTIE, 'editeur-etroit.png') });
     await fin(p, '17');
@@ -1792,14 +2023,12 @@ const CHARGE = {
   {
     // Préférences par outil : chacun garde sa couleur, sa taille, son opacité.
     const p = await page();
-    await bouton(p, 'Vert').click();
-    await outil(p, 'Flèche');
-    await p.locator('#reglages-outil').getByRole('button', { name: 'Épais' }).click();
-    await p.keyboard.press('Escape');
+    await reglage(p, 'Vert');
+    await reglage(p, 'Épais');
     await outil(p, 'Stylo');
     const r = await p.evaluate(() => ({
       presse: document
-        .querySelector('#couleurs .dot[aria-pressed="true"]')
+        .querySelector('#outils .pli[data-on] .sw[aria-pressed="true"]')
         .getAttribute('aria-label'),
       p: [__ed.prefs.couleurs, __ed.prefs.tailles.fleche, __ed.prefs.tailles.stylo],
     }));
@@ -1839,7 +2068,7 @@ const CHARGE = {
   {
     // La poignée d'un objet choisi passe avant l'équerre de recadrage.
     const p = await page({ reduit: true });
-    await ajouter(p, 'Forme');
+    await outil(p, 'Forme');
     await glisser(p, [100, 80], [1, 1]);
     await cliquer(p, 50, 1);
     const choisi1 = await p.evaluate(() => __ed.selection.slice());
@@ -1856,7 +2085,7 @@ const CHARGE = {
   {
     // Gomme : le bord d'un projecteur l'efface, le milieu non.
     const p = await page();
-    await ajouter(p, 'Projecteur');
+    await outil(p, 'Projecteur');
     await glisser(p, [100, 100], [300, 250]);
     await outil(p, 'Gomme');
     await cliquer(p, 200, 175);
@@ -1889,7 +2118,7 @@ const CHARGE = {
   // sa fin). Rend le numéro de l'export.
   const lireTexte = async (p, o = {}) => {
     const avant = await p.evaluate(() => __exports.length);
-    await bouton(p, 'Texte').click();
+    await texteHaut(p).click();
     await p.waitForFunction((n) => __exports.length > n, avant, { timeout: 3000 }).catch(() => {});
     const numero = await p.evaluate(() => __exports.at(-1).numero);
     await p.evaluate(
@@ -1935,18 +2164,17 @@ const CHARGE = {
     verifier(
       JSON.stringify(haut) ===
         '[["Fermer","Fermer"],["Texte","Copier le texte"],["Enregistrer","Enregistrer"],["Copier","Copier"]]' &&
-        (await p.getByRole('button', { name: 'Texte', exact: true }).count()) === 1,
+        (await texteHaut(p).count()) === 1,
       '21 « Texte » (infobulle « Copier le texte ») entre Fermer et Enregistrer',
       JSON.stringify(haut),
     );
     // R7 : un Bloc noir posé ; l'image lue est l'image composée, la vue du document.
-    await ajouter(p, 'Flou');
+    await outil(p, 'Flou');
     await variante(p, 'Flou', 'Bloc noir');
-    await p.keyboard.press('Escape');
     await glisser(p, [30, 70], [200, 110]);
     await vider(p);
     const t0 = await p.evaluate(() => performance.now());
-    await bouton(p, 'Texte').click();
+    await texteHaut(p).click();
     await p.waitForFunction(() => __exports.length > 0, null, { timeout: 3000 }).catch(() => {});
     const ex = await p.evaluate(() => {
       const e = __exports.at(-1);
@@ -2213,7 +2441,7 @@ const CHARGE = {
     );
     // Un résultat d'un autre document ou d'un autre numéro : rien.
     await vider(p);
-    await bouton(p, 'Texte').click();
+    await texteHaut(p).click();
     await p
       .waitForFunction(() => __appels.some((a) => a[0] === 'editeur_exporter'), null, {
         timeout: 3000,
@@ -2394,7 +2622,7 @@ const CHARGE = {
     });
     const avantNumero = async (escape) => {
       await p.evaluate(() => (window.__lacher = null));
-      await bouton(p, 'Texte').click();
+      await texteHaut(p).click();
       await p.waitForFunction(() => window.__lacher, null, { timeout: 3000 }).catch(() => {});
       await p.evaluate((mots) => {
         const n = __exports.at(-1).numero;
@@ -2559,7 +2787,7 @@ const CHARGE = {
       await p.evaluate(() => __exports.at(-1).numero),
     );
     const anneaux = [];
-    for (const sel of ['#barre-haut [data-act="copier"]', '#outils .tl']) {
+    for (const sel of ['#barre-haut [data-act="copier"]', '#outils .tl.ip', '#outils .sz']) {
       await p.keyboard.press('Shift');
       await p.$eval(sel, (b) => b.focus());
       anneaux.push(
@@ -2569,10 +2797,19 @@ const CHARGE = {
         }),
       );
     }
+    // L'instrument dessiné : un anneau intérieur (son masque coupe ce qui dépasse).
+    await p.keyboard.press('Shift');
+    await p.$eval('#outils .tl.ib', (b) => b.focus());
+    const anneauInstrument = await p.$eval('#outils .tl.ib', (b) => {
+      const s = getComputedStyle(b);
+      return [b.matches(':focus-visible'), s.outlineStyle, /inset/.test(s.boxShadow)];
+    });
     verifier(
-      JSON.stringify(anneaux) === '[[true,"solid","2px"],[true,"solid","2px"]]',
-      '21 anneau de focus sur « Copier » du haut et sur un outil',
-      JSON.stringify(anneaux),
+      JSON.stringify(anneaux) ===
+        '[[true,"solid","2px"],[true,"solid","2px"],[true,"solid","2px"]]' &&
+        JSON.stringify(anneauInstrument) === '[true,"none",true]',
+      '21 anneau de focus sur « Copier » du haut, un outil, un réglage et un instrument',
+      JSON.stringify([anneaux, anneauInstrument]),
     );
     await fin(p, '21 Alt, Espace, anneaux');
   }
@@ -2691,7 +2928,7 @@ const CHARGE = {
     const p = await page();
     const hist = (q) =>
       q.evaluate(() => ({ pas: __ed.h.passe.length, futur: __ed.h.futur.length }));
-    await ajouter(p, 'Forme');
+    await outil(p, 'Forme');
     await glisser(p, [100, 100], [200, 180]);
     await outil(p, 'Flèche');
     await glisser(p, [20, 250], [120, 250]);
@@ -2823,8 +3060,7 @@ const CHARGE = {
     await p.keyboard.press('Escape');
     await cliquer(p, 290, 120);
     const choisiAvant = await p.evaluate(() => __ed.selection.map((i) => __ed.objet(i).type));
-    await bouton(p, 'Bleu').click();
-    await uneImage(p);
+    await reglage(p, 'Bleu');
     const c = await p.evaluate(() => ({
       o: __ed.h.doc.objets.find((o) => o.type === 'surligneur').couleur,
       surligneur: __ed.prefs.couleurs.surligneur,

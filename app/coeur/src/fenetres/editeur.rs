@@ -29,9 +29,10 @@ pub const TITRE: &str = "Annoter la capture";
 pub const PAGE: &str = "editeur/editeur.html";
 /// Taille intérieure minimale, pixels logiques.
 pub const TAILLE_MIN: (f64, f64) = (640.0, 440.0);
-/// Ce que la page garde autour de l'image, pixels logiques (avenant §3) : 36 px de chaque
-/// côté ; barre du haut 52, réserve haute 14, palette 72 et sa réserve 34 en bas.
-pub const MARGES: (f64, f64) = (72.0, 172.0);
+/// Ce que la page garde autour de l'image, pixels logiques (avenant §3, barre C) : 36 px de
+/// chaque côté ; barre du haut 52, réserve haute 14, barre d'annotation 80 et sa réserve 34
+/// en bas.
+pub const MARGES: (f64, f64) = (72.0, 180.0);
 /// Part maximale de la zone utile prise par la fenêtre.
 pub const PART_MAX: f64 = 0.9;
 
@@ -270,7 +271,7 @@ mod tests {
         assert_eq!((r.x, r.y), (640, 296));
         // Juste : l'image à la taille réelle, plus les réserves de la page.
         let r = placer((1000, 600), &e);
-        assert_eq!((r.largeur, r.hauteur), (1072, 772));
+        assert_eq!((r.largeur, r.hauteur), (1072, 780));
         // Trop grande : 90 % de la zone utile.
         let r = placer((3000, 2000), &e);
         assert_eq!((r.largeur, r.hauteur), (1728, 928));
@@ -281,10 +282,10 @@ mod tests {
     #[test]
     fn echelles_de_100_a_200() {
         for (echelle, attendu) in [
-            (1.0, (1072, 772)),
-            (1.25, (1090, 815)),
-            (1.5, (1108, 858)),
-            (2.0, (1280, 944)),
+            (1.0, (1072, 780)),
+            (1.25, (1090, 825)),
+            (1.5, (1108, 870)),
+            (2.0, (1280, 960)),
         ] {
             let e = ecran(0, 0, 3840, 2160, echelle);
             let r = placer((1000, 600), &e);
@@ -303,9 +304,9 @@ mod tests {
         let e = ecran(-1920, -200, 1920, 1080, 1.0);
         let r = placer((400, 300), &e);
         assert!(dans(&r, &e.zone_utile));
-        // 400 + 72 sous la largeur minimale ; 300 + 172 = 472 de haut.
-        assert_eq!((r.largeur, r.hauteur), (640, 472));
-        assert_eq!((r.x, r.y), (-1920 + 640, -200 + 280));
+        // 400 + 72 sous la largeur minimale ; 300 + 180 = 480 de haut.
+        assert_eq!((r.largeur, r.hauteur), (640, 480));
+        assert_eq!((r.x, r.y), (-1920 + 640, -200 + 276));
         // Barre des tâches à gauche : la zone utile commence à 48.
         let gauche = Ecran {
             rect: Rect {
