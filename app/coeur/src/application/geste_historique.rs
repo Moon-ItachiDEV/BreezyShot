@@ -383,7 +383,10 @@ pub fn apres_sortie(app: &AppHandle, pixels: &Pixels, bilan: &sortie::Bilan) {
     let Some(nom) = historique::nom_du_chemin(chemin) else {
         return;
     };
-    if let Some(apercus) = chemin.parent().and_then(apercus_de) {
+    // Sans l'historique en vigueur (pas de licence) : le chemin de la 0.4, aucun aperçu ;
+    // les manquants se font à l'ouverture de l'historique.
+    let avec_apercu = historique::apercu_a_la_sortie(&super::actions_en_vigueur(app));
+    if let Some(apercus) = chemin.parent().and_then(apercus_de).filter(|_| avec_apercu) {
         let apercu = capture::apercu_historique(pixels);
         if sortie::ranger_apercu(&apercus, &nom, &apercu).is_err() {
             log::warn!("historique apercu non fait");
@@ -717,11 +720,9 @@ fn effacer(app: &AppHandle, noms: Vec<String>, ici: bool) {
 /// « Tout effacer », confirmé par la page : « Récents », aperçus et `Glisser`, avec les
 /// suppressions en attente. Rien à annuler ensuite.
 pub(super) fn tout_effacer(app: &AppHandle) {
-    let pris = super::historique_ouvert(app).as_mut().map(|e| {
-        let noms = historique::prendre_suppressions(e);
-        e.liste.clear();
-        noms
-    });
+    let pris = super::historique_ouvert(app)
+        .as_mut()
+        .map(historique::prendre_tout);
     let Some(pris) = pris else {
         log::info!("historique tout_effacer refusee");
         return;

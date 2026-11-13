@@ -48,28 +48,26 @@ fn lire_dans(dossier: &Path) -> Result<Option<String>, String> {
     let fichier = match fs::File::open(&chemin) {
         Ok(f) => f,
         Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(None),
-        Err(e) => return Err(format!("{}: {e}", chemin.display())),
+        Err(e) => return Err(format!("{:?}", e.kind())),
     };
     let mut octets = Vec::new();
     fichier
         .take(TAILLE_MAX)
         .read_to_end(&mut octets)
-        .map_err(|e| format!("{}: {e}", chemin.display()))?;
+        .map_err(|e| format!("{:?}", e.kind()))?;
     String::from_utf8(octets)
         .map(Some)
-        .map_err(|_| format!("{}: UTF-8 invalide", chemin.display()))
+        .map_err(|_| format!("{:?}", io::ErrorKind::InvalidData))
 }
 
 fn ecrire_dans(dossier: &Path, texte: &str) -> Result<(), String> {
-    fs::create_dir_all(dossier).map_err(|e| format!("{}: {e}", dossier.display()))?;
+    fs::create_dir_all(dossier).map_err(|e| format!("{:?}", e.kind()))?;
     let cible = dossier.join(NOM_FICHIER);
     let temporaire = dossier.join(NOM_TEMPORAIRE);
     let _ = fs::remove_file(&temporaire);
     let resultat = ecrire_temporaire(&temporaire, texte.as_bytes())
-        .map_err(|e| format!("{}: {e}", temporaire.display()))
-        .and_then(|()| {
-            fs::rename(&temporaire, &cible).map_err(|e| format!("{}: {e}", cible.display()))
-        });
+        .map_err(|e| format!("{:?}", e.kind()))
+        .and_then(|()| fs::rename(&temporaire, &cible).map_err(|e| format!("{:?}", e.kind())));
     if resultat.is_err() {
         let _ = fs::remove_file(&temporaire);
     }
@@ -87,7 +85,7 @@ fn effacer_dans(dossier: &Path) -> Result<(), String> {
     match fs::remove_file(&cible) {
         Ok(()) => Ok(()),
         Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(()),
-        Err(e) => Err(format!("{}: {e}", cible.display())),
+        Err(e) => Err(format!("{:?}", e.kind())),
     }
 }
 
@@ -150,7 +148,8 @@ mod tests {
         let octets = [0xffu8, 0xfe, b'B', b'S', b'1'];
         fs::write(d.path().join(NOM_FICHIER), octets).unwrap();
         let erreur = lire_dans(d.path()).unwrap_err();
-        assert!(erreur.contains("UTF-8"), "{erreur}");
+        // Un code court, jamais le chemin.
+        assert_eq!(erreur, "InvalidData");
         // Le fichier n'est pas effacé, ni changé.
         assert_eq!(fs::read(d.path().join(NOM_FICHIER)).unwrap(), octets);
     }

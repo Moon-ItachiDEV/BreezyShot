@@ -161,7 +161,12 @@ pub enum Evenement {
     /// L'échéance de la sortie numéro `n` est tombée (ou son fil s'est arrêté).
     SortieEchue(u64),
     /// Annonce du démarrage, postée par `demarrer` pour un tour de la boucle déjà lancée.
-    AnnonceDemarrage { local: PathBuf, bilan: Bilan },
+    /// `sans_texte` : la borne de l'attente a gagné, le bilan part sans le texte.
+    AnnonceDemarrage {
+        local: PathBuf,
+        bilan: Bilan,
+        sans_texte: bool,
+    },
     /// Signal de la vignette ou de son souffle.
     Vignette(carte::Signal),
     /// Copier ou Enregistrer de la vignette est fini (rendu par son fil).
@@ -724,6 +729,7 @@ fn demarrer(app: &AppHandle, commande: Commande, inconnus: &[String]) {
             Evenement::AnnonceDemarrage {
                 local: d.local.clone(),
                 bilan: bilan.clone(),
+                sans_texte: false,
             },
         );
     }
@@ -855,7 +861,7 @@ fn texte_devenu_disponible(app: &AppHandle, disponible: bool) {
         .texte_disponible
         .store(disponible, Ordering::SeqCst);
     let apparues = suivre_les_actions(app);
-    lacher_annonce(app, &apparues);
+    lacher_annonce(app, &apparues, false);
 }
 
 /// Range la licence en vigueur (`licence.rs`, après vérification et rangement), puis poste
@@ -931,7 +937,7 @@ pub fn bilan_avec(mut bilan: Bilan, apparues: &[raccourcis::ChoixAction]) -> Bil
 
 /// L'annonce du démarrage différée (le bilan attend le texte) part, complétée de
 /// `apparues` ; rien si elle est déjà partie.
-fn lacher_annonce(app: &AppHandle, apparues: &[raccourcis::ChoixAction]) {
+fn lacher_annonce(app: &AppHandle, apparues: &[raccourcis::ChoixAction], sans_texte: bool) {
     let differee = app
         .state::<Application>()
         .annonce_differee
@@ -943,7 +949,8 @@ fn lacher_annonce(app: &AppHandle, apparues: &[raccourcis::ChoixAction]) {
             app,
             Evenement::AnnonceDemarrage {
                 local,
-                bilan: bilan_avec(bilan, apparues),
+                bilan: bilan_au_depart(bilan, apparues, &actions_en_vigueur(app)),
+                sans_texte,
             },
         );
     }
@@ -969,13 +976,48 @@ fn borner_annonce(app: &AppHandle) {
                     .is_ok_and(|a| a.is_some());
                 if attend {
                     log::info!("annonce demarrage: langues non recues");
-                    lacher_annonce(&p, &[]);
+                    lacher_annonce(&p, &[], true);
                 }
             });
         });
     if let Err(e) = lance {
         log::warn!("attente de l'annonce impossible ({e}): annonce sans le texte");
-        lacher_annonce(app, &[]);
+        lacher_annonce(app, &[], true);
+    }
+}
+
+/// Le bilan qui part : complété des actions apparues, puis réduit aux actions en vigueur
+/// au moment de partir (licence retirée pendant l'attente : ni `historique` ni `texte`).
+pub fn bilan_au_depart(
+    bilan: Bilan,
+    apparues: &[raccourcis::ChoixAction],
+    en_vigueur: &[&str],
+) -> Bilan {
+    let mut b = bilan_avec(bilan, apparues);
+    b.actions
+        .retain(|a| en_vigueur.contains(&a.action.as_str()));
+    b
+}
+
+/// La règle commune (`raccourcis::decider_annonce`) ; si le bilan part sans le texte
+/// (borne), la situation retenue pour `texte` n'est ni effacée ni remplacée par « tout
+/// normal ».
+pub fn decider_annonce_demarrage(
+    derniere: Option<&raccourcis::Situation>,
+    bilan: &Bilan,
+    sans_texte: bool,
+) -> Decision {
+    let d = raccourcis::decider_annonce(derniere, bilan);
+    let garder = sans_texte
+        && d.a_retenir.is_none()
+        && derniere.is_some_and(|s| s.action == Mode::Texte.nom());
+    if garder {
+        Decision {
+            annonce: None,
+            a_retenir: derniere.cloned(),
+        }
+    } else {
+        d
     }
 }
 
@@ -1103,9 +1145,9 @@ pub fn ligne_annonce(decision: &Decision) -> Option<String> {
 }
 
 /// Lit la dernière situation, décide, montre l'annonce éventuelle, écrit ou efface.
-fn annoncer_raccourcis(app: &AppHandle, local: &std::path::Path, bilan: &Bilan) {
+fn annoncer_raccourcis(app: &AppHandle, local: &std::path::Path, bilan: &Bilan, sans_texte: bool) {
     let derniere = etat::lire_situation(local);
-    let decision = raccourcis::decider_annonce(derniere.as_ref(), bilan);
+    let decision = decider_annonce_demarrage(derniere.as_ref(), bilan, sans_texte);
     if let Some(ligne) = ligne_annonce(&decision) {
         log::info!("{ligne}");
     }
@@ -1332,7 +1374,7 @@ pub fn traiter(app: &AppHandle, evenement: Evenement) {
         Evenement::Selection(signal) => traiter_zone(app, Arrivee::Selection(&signal)),
         Evenement::Bureau(changement) => {
             log::info!("bureau change pendant la capture: {changement:?}");
-            if geste_texte::abandonner_lecture(app) {
+            if geste_texte::bureau_change(app) {
                 return;
             }
             if !annuler_si_decompte(app, ArriveeDecompte::Bureau(changement)) {
@@ -1347,7 +1389,11 @@ pub fn traiter(app: &AppHandle, evenement: Evenement) {
                 log::warn!("sortie {}: bilan perime ignore", fin.numero);
             }
         }
-        Evenement::AnnonceDemarrage { local, bilan } => annoncer_raccourcis(app, &local, &bilan),
+        Evenement::AnnonceDemarrage {
+            local,
+            bilan,
+            sans_texte,
+        } => annoncer_raccourcis(app, &local, &bilan, sans_texte),
         Evenement::CaptureCli(mode) => capturer_cli(app, &mode),
         Evenement::SortieEchue(numero) => {
             if prendre_sortie_attendue(app, numero) {
@@ -1409,6 +1455,8 @@ pub fn traiter(app: &AppHandle, evenement: Evenement) {
         // Aucune annonce à l'activation ni au retrait de la licence.
         Evenement::LicenceChangee => {
             suivre_les_actions(app);
+            // Première activation : les langues de lecture (une fois par lancement).
+            geste_texte::lancer_sonde(app);
         }
     }
 }
@@ -4240,6 +4288,52 @@ mod tests {
         assert_eq!(
             b.retenu("zone").map(|r| r.canonique()),
             Some("Ctrl+Maj+9".to_string())
+        );
+    }
+
+    #[test]
+    fn licence_retiree_pendant_l_attente_le_bilan_perd_le_pro() {
+        let texte = choix("texte", &["Ctrl+Maj+T"], None);
+        let sans = actions_construites(false, true);
+        let b = bilan_au_depart(bilan_du_demarrage(), std::slice::from_ref(&texte), &sans);
+        assert_eq!(
+            b.actions
+                .iter()
+                .map(|a| a.action.as_str())
+                .collect::<Vec<_>>(),
+            vec!["zone"]
+        );
+        assert_eq!(raccourcis::decider_annonce(None, &b).annonce, None);
+        // Licence toujours là : rien de retiré.
+        let b = bilan_au_depart(
+            bilan_du_demarrage(),
+            &[texte],
+            &actions_construites(true, true),
+        );
+        assert_eq!(b.actions.len(), 3);
+    }
+
+    #[test]
+    fn borne_gagnee_la_situation_du_texte_reste() {
+        let pris = choix("texte", &["Ctrl+Maj+T"], None);
+        let avec = bilan_avec(bilan_du_demarrage(), &[pris]);
+        let situation = raccourcis::decider_annonce(None, &avec)
+            .a_retenir
+            .expect("situation");
+        // Sans le texte (borne) : ni effacée ni remplacée, aucune annonce.
+        let d = decider_annonce_demarrage(Some(&situation), &bilan_du_demarrage(), true);
+        assert_eq!(d.annonce, None);
+        assert_eq!(d.a_retenir, Some(situation.clone()));
+        // Bilan complet « tout normal » : effacée, comme pour toutes les actions.
+        let d = decider_annonce_demarrage(Some(&situation), &bilan_du_demarrage(), false);
+        assert_eq!((d.annonce, d.a_retenir), (None, None));
+        // Une autre action en défaut l'emporte, borne ou non (une seule situation retenue).
+        let mut b = bilan_du_demarrage();
+        b.actions[1] = choix("historique", &["Ctrl+Maj+H"], None);
+        let d = decider_annonce_demarrage(Some(&situation), &b, true);
+        assert_eq!(
+            d.a_retenir.map(|s| s.action),
+            Some("historique".to_string())
         );
     }
 }

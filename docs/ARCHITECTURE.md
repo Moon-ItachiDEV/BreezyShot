@@ -201,11 +201,12 @@ absents partout (menu de l'icône, raccourcis, lignes de Réglages › Raccourci
   `licence_etat` et `licence_retirer` rendent `EtatLicence { active }` (`{"active":true}`),
   `licence_activer { texte }` rend `EtatLicence` ou le code du refus en erreur. La page
   n'appelle pas `licence_etat` : elle lit `licence_active` dans la vue (§6.1). Activer :
-  vérifier, ranger (le disque qui refuse : `licence non rangee: <erreur>`, la licence vaut
+  vérifier, ranger (le disque qui refuse : `licence non rangee: <ErrorKind>`, la licence vaut
   pour la session), `licence active <id>`. Retirer : effacer `licence.txt`, sinon le réécrire
-  vide (`licence non effacee: <erreur>`) ; si les deux échouent, la licence reste en vigueur
-  et l'état rendu le dit (`licence non retiree: <erreur>`), car elle reviendrait au
-  démarrage suivant.
+  vide (`licence non effacee: <ErrorKind>`) ; si les deux échouent, la licence reste en
+  vigueur et l'état rendu le dit (`licence non retiree: <ErrorKind>`), car elle reviendrait
+  au démarrage suivant. `<ErrorKind>` : le `io::ErrorKind` en `Debug` (`PermissionDenied`,
+  `InvalidData`…), jamais un chemin.
 - **Après un changement**, `poser_licence` range la licence en vigueur puis poste
   `Evenement::LicenceChangee` au tour suivant : `suivre_les_actions` compare la liste en
   vigueur à `actions_suivies` (rien si elle n'a pas changé), réserve le raccourci d'une
@@ -220,9 +221,9 @@ absents partout (menu de l'icône, raccourcis, lignes de Réglages › Raccourci
   pas qui recompile l'app après avoir changé `droits::ouverte` ou la liste des clés.
 - Journal (jamais le texte de la licence ; seuls l'`id` et le code du refus) : `licence
   absente`, `licence active <id>`, `licence refusee <vide|trop_longue|forme|signature|
-  charge|edition>`, `licence illisible`, `licence retiree`, `licence non rangee: <erreur>`,
-  `licence non effacee: <erreur>`, `licence non retiree: <erreur>`, `raccourci <action>
-  rendu`.
+  charge|edition>`, `licence illisible`, `licence retiree`, `licence non rangee:
+  <ErrorKind>`, `licence non effacee: <ErrorKind>`, `licence non retiree: <ErrorKind>`,
+  `raccourci <action> rendu`.
 - Tout ce qu'un lot futur devra étendre (table des états, liste des actions de la vignette,
   entrées du menu, raccourcis par nom d'action) est une liste que l'Application assemble,
   pas un cas écrit en dur dans un module.
@@ -302,8 +303,9 @@ Aucune ligne `DemandeDecompte(Texte)` : Copier le texte n'a pas de retardateur. 
 de la Sélection (annulée, écrans changés, muette…) servent telles quelles. En Lecture, toute
 demande de capture est ignorée (`capture deja en cours: appui ignore`). `TexteLu` finit une
 lecture qui a rendu un texte ou rien (« Aucun texte trouvé ») ; `LectureImpossible` une
-lecture sans langue, en échec ou échue, et aussi une lecture abandonnée parce que les écrans
-ont changé ou que la session s'est verrouillée (`texte abandonne: bureau change`, §6.4).
+lecture sans langue, en échec ou échue. Écrans changés ou session verrouillée pendant la
+Lecture : seuls l'écran figé et la sélection sont libérés, la lecture finit normalement
+(`texte ecran libere: bureau change`, §6.4).
 Libellés du journal : `DemandeCapture texte`, `PhotoPrise texte`, `TexteChoisi`, `TexteLu`,
 `LectureImpossible`. L'historique n'est pas un état (comme Réglages et l'éditeur).
 
@@ -770,8 +772,10 @@ Module pur : il reçoit le dossier où écrire, ne connaît ni Tauri ni les autr
   une licence, et `texte`, avec une licence et une langue de lecture, §2) et ne donne que
   celles-là au choix. Au démarrage, la table est faite avec la licence lue mais sans le
   texte (`actions_construites(pro, false)`) ; `texte` est réservé à chaud quand le fil
-  `texte-langues` poste `Evenement::TexteDisponible(true)`. Activer ou retirer la licence
-  réserve ou rend `historique` et `texte` à chaud (`suivre_les_actions`, §2). Les deux
+  `texte-langues` poste `Evenement::TexteDisponible(true)`. Ce fil ne part qu'avec une
+  licence : au démarrage si elle est en place, sinon à sa première activation
+  (`LicenceChangee`), une fois par lancement. Activer ou retirer la licence réserve ou rend
+  `historique` et `texte` à chaud (`suivre_les_actions`, §2). Les deux
   nouvelles actions se traitent après les quatre captures (`ACTIONS_PRIORITAIRES` : zone,
   plein écran, fenêtre, dernière zone, historique, texte). BreezyShot ne
   prend jamais à une autre application un raccourci qui ne ferait rien.
@@ -841,7 +845,11 @@ Module pur : il reçoit le dossier où écrire, ne connaît ni Tauri ni les autr
   `decider_annonce` que les autres (une liste vide n'annonce rien ; « Aucun raccourci pour
   le texte » une fois par situation, retenue dans `etat.json`). Borne : le fil
   `annonce-attente` dort `ATTENTE_ANNONCE_TEXTE` (3 s), puis, si l'annonce attend encore,
-  écrit `annonce demarrage: langues non recues` et la fait partir sans le texte. Sans
+  écrit `annonce demarrage: langues non recues` et la fait partir sans le texte ; la
+  situation retenue pour `texte` dans `etat.json` n'est alors ni effacée ni remplacée par
+  « tout normal » (`decider_annonce_demarrage`). Au départ, le bilan est réduit aux actions
+  en vigueur (`bilan_au_depart` : licence retirée pendant l'attente, ni `historique` ni
+  `texte`). Sans
   licence, l'annonce est postée comme en 0.4. Rien n'est annoncé à l'activation ni au
   retrait de la licence. Journal : `annonce demarrage: langues non recues`, `attente de
   l'annonce impossible (<e>): annonce sans le texte` ; à l'appui, `raccourci presse:
@@ -1312,7 +1320,9 @@ passage dans `etats.rs` (`historique_hors_automate`).
 nom dans `<local>/Apercus/` (`SOUS_DOSSIER_APERCUS`) : la partie 16:10 du haut à gauche,
 réduite pour couvrir 400 × 250, jamais agrandie (`capture::apercu_historique`). L'aperçu est
 fait après chaque sortie qui a rangé un fichier dans « Récents », dans le fil de la sortie
-ou de l'export de l'éditeur (`geste_historique::apres_sortie`), licence ou non ; ceux qui
+ou de l'export de l'éditeur (`geste_historique::apres_sortie`), seulement si l'historique
+est une action en vigueur (`historique::apercu_a_la_sortie` : avec une licence ; sans
+elle, rien n'est écrit dans `Apercus`, la capture suit le chemin de la 0.4) ; ceux qui
 manquent sont faits à l'ouverture, dans le fil `historique`, du plus récent au plus ancien,
 chacun annoncé par `historique:apercu`. Le nettoyage à 50 efface aussi les aperçus des
 captures parties et les aperçus orphelins (§10).
@@ -1381,7 +1391,9 @@ suite les suppressions en attente, dans un fil compté ; l'arrêt les fait sur l
 principal. Si la vignette montre une capture supprimée, elle se ferme dès Supprimer
 (`vignette fermee <id> historique`) et ne revient pas après Annuler. « Tout effacer »
 (confirmé par la page) : les suppressions en attente comprises, `sortie::vider` (« Récents »,
-aperçus et `.png` de `Glisser`), la vignette fermée, rien à annuler. Un Supprimer de la
+aperçus et `.png` de `Glisser`), la vignette fermée, rien à annuler ; toutes les cases
+passent en effacement (`historique::prendre_tout`) : une liste relue pendant le vidage ne
+les remontre pas. Un Supprimer de la
 vignette (§11) relit la liste (`rafraichir`) et efface l'aperçu d'une capture partie.
 
 **Page** (`interface/historique/`) : `historique.js` (IPC, liste, aperçus en `Blob`, quatre
@@ -1440,7 +1452,9 @@ image de 1 Mpx ou moins (`PETITE_IMAGE`) si le double tient, et réduit au-delà
 `assembler` (tout, fin de ligne `\r\n` sous Windows) et `extrait` (mots `debut` à `fin`),
 vers le presse-papiers.
 
-**Langues** (R10). Au démarrage, le fil `texte-langues` interroge le moteur
+**Langues** (R10). Avec une licence seulement (au démarrage si elle est en place, sinon à
+sa première activation ; une fois par lancement, `texte::sonder`), le fil `texte-langues`
+interroge le moteur
 (`texte langues <l1,l2,…>`, `texte langues aucune`, `texte langues aucune (essai)` ou
 `texte non pris en charge`), puis poste `Evenement::TexteDisponible(bool)`. Sans langue,
 la fonction est absente partout, comme sans licence ; une langue installée ensuite compte au
@@ -1466,8 +1480,8 @@ avant la fin du balayage attend (`texte::arrivee`, `balayage_fini`). À la fin
 Repos, le bandeau : « Texte copié » ; « Impossible de copier » (avec la cause) ; « Aucun
 texte trouvé » (erreur brève de 4 s avec « Réessayer », §6, qui relance Copier le texte) ;
 « Impossible de lire le texte » (sans langue, moteur en échec, échéance, fil arrêté).
-Écrans changés ou session verrouillée pendant la Lecture : `abandonner_lecture` (rien n'est
-copié, aucun message, écran figé et sélection libérés, `LectureImpossible` → Repos). Un fil
+Écrans changés ou session verrouillée pendant la Lecture : `bureau_change` libère tout de
+suite l'écran figé et la sélection ; la lecture finit normalement (copie et message). Un fil
 qui ne peut pas être lancé, ou le fil `texte` qui s'arrête (panique), finit la lecture en
 échec `fil` : jamais d'état Lecture sans fin. Limite connue, laissée : un fil suspendu entre
 la prise de la garde et sa destruction, repris après le début d'une capture suivante,
@@ -1502,7 +1516,7 @@ cree en <ms> ms`, `texte lu <n> lignes <m> mots en <ms> ms langue <l> facteur <f
 vide en <ms> ms`, `texte impossible: aucune_langue|echeance|moteur (<code>)` (`<code>` :
 `fil`, `deja_en_cours`, `taille`, `decoupe`, ou une étape et son HRESULT), `texte copie`,
 `texte copie echec (<code court>)`, `chrono texte relache-gel-cache <ms> relache-message
-<ms>`, `texte lu <n>: resultat perime ignore`, `texte abandonne: bureau change`, `editeur
+<ms>`, `texte lu <n>: resultat perime ignore`, `texte ecran libere: bureau change`, `editeur
 texte <id> <n> lu <l> lignes <m> mots en <ms> ms|vide|echec (<code>)`, `editeur texte <id>
 <n>: resultat perime ignore`, `editeur texte copie <id> <n> <k> mots|echec (<code>)`,
 `editeur copier_texte <id> ignoree`. En WARN : `langues de lecture non cherchees: <e>`,

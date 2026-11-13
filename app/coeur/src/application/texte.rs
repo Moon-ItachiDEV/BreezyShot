@@ -137,6 +137,18 @@ pub fn terminer(lecture: &mut Option<LectureEnCours>, numero: u64) -> Option<Lec
     lecture.take_if(|x| x.numero == numero)
 }
 
+/// Écrans changés pendant la Lecture : le numéro dont l'écran figé est à libérer ; la
+/// lecture elle-même (et un résultat déjà gardé) n'est pas touchée.
+pub fn lecture_a_liberer(lecture: &Option<LectureEnCours>) -> Option<u64> {
+    lecture.as_ref().map(|x| x.numero)
+}
+
+/// Faut-il chercher les langues de lecture maintenant ? Seulement si Copier le texte est
+/// construit, avec une licence, et une fois par lancement.
+pub fn sonder(construit: bool, pro: bool, deja_lancee: bool) -> bool {
+    construit && pro && !deja_lancee
+}
+
 /// Qui rend le résultat de la lecture attendue : le fil `texte` (et alors il copie) ou
 /// l'échéance, jamais les deux. `poser` à la zone choisie ; le premier `prendre` gagne.
 #[derive(Debug, Default)]
@@ -806,5 +818,29 @@ mod tests {
             ligne_copie(Some(&Etape::Echec("Accès refusé".into()))).as_deref(),
             Some("texte copie echec (presse_papiers)")
         );
+    }
+
+    #[test]
+    fn ecrans_changes_liberent_l_ecran_sans_toucher_la_lecture() {
+        let t = Instant::now();
+        let mut l = en_cours(4, t);
+        assert_eq!(arrivee(&mut l, fin(Issue::Vide, None), t), Arrivee::Perimee);
+        let f = FinLecture {
+            numero: 4,
+            ..fin(Issue::Vide, None)
+        };
+        assert_eq!(arrivee(&mut l, f.clone(), t), Arrivee::Gardee);
+        assert_eq!(lecture_a_liberer(&l), Some(4));
+        // Le résultat gardé est toujours là : la lecture finit et dit son message.
+        assert_eq!(balayage_fini(&mut l, 4), Some(f));
+        assert_eq!(lecture_a_liberer(&None), None);
+    }
+
+    #[test]
+    fn sonde_seulement_avec_la_licence_une_fois() {
+        assert!(sonder(true, true, false));
+        assert!(!sonder(true, false, false), "sans licence");
+        assert!(!sonder(true, true, true), "deja lancee");
+        assert!(!sonder(false, true, false));
     }
 }
