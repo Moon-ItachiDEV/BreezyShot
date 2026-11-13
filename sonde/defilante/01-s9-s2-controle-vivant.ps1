@@ -25,7 +25,9 @@ function Controle-Demarrer([string]$Genre, [int[]]$Zone) {
         '--zone', (Rect-Texte $Zone), '--pilule', (Rect-Texte $PILULE))
     if ($null -eq $p) { throw 'exemple controle absent (non construit)' }
     $o = [pscustomobject]@{ Genre = $Genre; P = $p; Etat = $etat; Cmd = $cmd }
-    $ok = Attendre -DelaiS 40 -PasMs 50 -Condition { $e = Lire-Etat $etat; ($e['dom_ms'] -as [int]) -gt 0 -and $e['visible'] -eq '1' }
+    # dom_ms n'est écrit que par la variante WebView2 (la page a répondu) ; la native est
+    # prête dès qu'elle est visible (premier passage : 7 × 40 s perdues à attendre dom_ms).
+    $ok = Attendre -DelaiS 40 -PasMs 50 -Condition { $e = Lire-Etat $etat; $e['visible'] -eq '1' -and ($Genre -ne 'webview' -or ($e['dom_ms'] -as [int]) -gt 0) }
     if (-not $ok) {
         $e = Lire-Etat $etat
         Controle-Arreter $o
@@ -140,7 +142,10 @@ if (Demarrer-Sonde -Nom 's9-s2' -Titre 'S9 et S2 : fenêtre de contrôle, molett
                         Section "S9 (a) (b) : molette à travers la fenêtre de contrôle, cible $g (suite)"
                     }
 
-                    # (a) molette sur la zone, à travers la fenêtre de contrôle.
+                    # (a) molette sur la zone, à travers la fenêtre de contrôle (qui ne compte
+                    # pas : WindowFromPoint passe à travers une fenêtre WS_EX_TRANSPARENT).
+                    $couverte = Degager $c
+                    if ($couverte) { Noter-Obstacles $c; NonMesurable "$v, (a) et (b) ($g)" "cible couverte par $couverte"; continue }
                     $avantCtrl = [int](Controle-Etat $o).molettes
                     $sAvant = Etat-Sentinelle $sent
                     $px = Crans $c 5 $centre[0] $centre[1]
@@ -217,6 +222,38 @@ if (Demarrer-Sonde -Nom 's9-s2' -Titre 'S9 et S2 : fenêtre de contrôle, molett
                     Resultat "rien devant l'écran figé ($($mode.Nom))" "fenêtre visible pendant la création : $vues fois ; une fenêtre du processus au-dessus de l'écran figé dans $devant échantillons sur $echantillons" '0 et 0' (Verdict ($vues -eq 0 -and $devant -eq 0))
                 }
                 Note 'La fenêtre de contrôle étant exclue des captures, « rien devant » se lit par l''ordre des fenêtres (EnumWindows) et IsWindowVisible, pas sur une image.'
+
+                # À froid : 20 créations, chacune dans un processus neuf sans autre vue Web (ce
+                # que voit la première capture défilante si l'app n'a pas encore de vue Web).
+                $froid = [System.Collections.Generic.List[double]]::new(); $lance = [System.Collections.Generic.List[double]]::new()
+                $mur = [System.Collections.Generic.List[double]]::new(); $echecsF = 0; $vuesF = 0
+                $limiteF = [DateTime]::UtcNow.AddSeconds(150)
+                for ($k = 0; $k -lt 20 -and [DateTime]::UtcNow -lt $limiteF; $k++) {
+                    $etat = Fichier-Temp "froid-$k.txt"
+                    $chronoF = [System.Diagnostics.Stopwatch]::StartNew()
+                    $p = Lancer-Exemple 'controle' @('--genre', 'creations', '--etat', "`"$etat`"", '--nombre', '1', '--sans-gardien')
+                    $tenu = @{ L = $null }
+                    $null = Attendre -DelaiS 15 -PasMs 20 -Condition { $x = @((Lire-Etat $etat).Keys | Where-Object { $_ -eq 'creation' }); if ($x.Count -gt 0) { $tenu.L = "creation $((Lire-Etat $etat)['creation'])"; $true } else { $false } }
+                    $ligne = $tenu.L
+                    $tMur = $chronoF.Elapsed.TotalMilliseconds
+                    if (-not $p.WaitForExit(5000)) { try { $p.Kill($true) } catch { } }
+                    if ($null -eq $ligne) { $e = Lire-Etat $etat; if ($e.ContainsKey('creation')) { $ligne = "creation $($e['creation'])" } elseif ($e.ContainsKey('erreur')) { Note "à froid, processus $($k + 1) : $($e['erreur'])" } }
+                    if ("$ligne" -match 'dom_ms ([\d.]+) pret_ms (\S+) visible_avant_pret (\d)(?: lancement_dom_ms ([\d.]+))?') {
+                        $froid.Add([double]$Matches[1]); $mur.Add($tMur)
+                        if ($Matches[4]) { $lance.Add([double]$Matches[4]) }
+                        if ($Matches[3] -eq '1') { $vuesF++ }
+                    }
+                    else { $echecsF++ }
+                }
+                if ($froid.Count -eq 0) { NonMesurable 'création à froid, processus neuf' "aucune page qui répond ($echecsF échec(s))" }
+                else {
+                    $fa = $froid.ToArray(); $la = $lance.ToArray(); $ma = $mur.ToArray()
+                    $sur = @($fa | Where-Object { $_ -ge 500 }).Count
+                    Resultat "création à froid dans un processus neuf ($($froid.Count) processus)" "fenêtre → page qui répond : première $(Ms $fa[0]) ; médiane $(Ms (Mediane $fa)) ; 95e centile $(Ms (Centile $fa 0.95)) ; max $(Ms (($fa | Measure-Object -Maximum).Maximum)) ; ≥ 500 ms : $sur/$($froid.Count) ; échecs $echecsF" 'moins de 500 ms (R1), à froid : ce que voit la première capture' $(if ($sur -eq 0) { 'passe' } else { 'échoue' })
+                    if ($la.Count -gt 0) { Resultat 'à froid : lancement du processus → page qui répond' "médiane $(Ms (Mediane $la)) ; max $(Ms (($la | Measure-Object -Maximum).Maximum)) (environnement WebView2 compris)" 'à lire (l''app est déjà lancée : borne haute)' 'à lire' }
+                    Resultat 'à froid : Start-Process → ligne écrite (vu de la sonde)' "médiane $(Ms (Mediane $ma)) ; max $(Ms (($ma | Measure-Object -Maximum).Maximum))" 'à lire' 'à lire'
+                    Resultat 'à froid : fenêtre visible avant la page' "$vuesF fois" '0' (Verdict ($vuesF -eq 0))
+                }
             }
             try { $fige.Kill($true) } catch { }
         }
@@ -256,12 +293,34 @@ if (Demarrer-Sonde -Nom 's9-s2' -Titre 'S9 et S2 : fenêtre de contrôle, molett
             if ($r['ok'] -eq '1') {
                 $dg = [int]$r.gdi_apres - [int]$r.gdi_avant
                 $dm = ([double]$r.prive_apres - [double]$r.prive_avant) / 1MB
-                Resultat '(c) bitblt, 1 000 images 1024 × 700' "objets GDI $($r.gdi_avant) → $($r.gdi_apres) ; mémoire privée $('{0:0.0}' -f ([double]$r.prive_avant / 1MB)) → $('{0:0.0}' -f ([double]$r.prive_apres / 1MB)) Mo ; médiane $(Ms ([double]$r.mediane_ms))" 'GDI identiques, mémoire + 1 Mo au plus' (Verdict ($dg -eq 0 -and $dm -le 1))
+                # Critère du contrat : objets GDI et mémoire « stables ». Lu comme : GDI
+                # identiques, et la mémoire ne monte plus pendant la seconde moitié (une fuite
+                # monte à chaque image ; un palier du début n'en est pas une). Plus de seuil
+                # propre à la sonde (premier passage : « + 1 Mo au plus », pas dans le contrat).
+                $q = @("$($r['prive_quarts'])" -split ';' | Where-Object { $_ } | ForEach-Object { [double]$_ })
+                $gq = "$($r['gdi_quarts'])"
+                $pente = if ($q.Count -ge 2) { ([double]$r.prive_apres - $q[1]) / 1MB } else { [double]::NaN }
+                $stable = $dg -eq 0 -and -not [double]::IsNaN($pente) -and $pente -le 0.25
+                Resultat '(c) bitblt, 1 000 images 1024 × 700' "objets GDI $($r.gdi_avant) → $($r.gdi_apres) (aux quarts : $gq) ; mémoire privée $('{0:0.0}' -f ([double]$r.prive_avant / 1MB)) → $('{0:0.0}' -f ([double]$r.prive_apres / 1MB)) Mo (aux quarts : $(($q | ForEach-Object { '{0:0.0}' -f ($_ / 1MB) }) -join ' ; ') Mo ; seconde moitié $('{0:+0.00;-0.00}' -f $pente) Mo) ; médiane $(Ms ([double]$r.mediane_ms))" 'GDI et mémoire stables (contrat) : GDI identiques, mémoire sans pente sur la seconde moitié (≤ 0,25 Mo)' $(if ($stable) { 'passe' } elseif ($dg -ne 0) { 'échoue' } else { 'à lire' })
             }
             else { NonMesurable '(c) bitblt, 1 000 images' "$($r['erreur'])" }
 
+            # (b) en détail : d'où viennent les 32 ms de BitBlt (premier passage : même médiane
+            # à 600 × 400 qu'à 1024 × 700).
+            $r = Jouer-Exemple 'vivant' @('--methode', 'bitblt-detail', '--zone', (Rect-Texte $Z2)) 60
+            if ($r['ok'] -ne '1') { NonMesurable '(b) bitblt en détail' "$($r['erreur'])" }
+            else {
+                Resultat '(b) DwmFlush seul (20 appels)' "médiane $(Ms ([double]$r.dwmflush_mediane_ms))$(if ($r.ContainsKey('dwmflush_erreur')) { " ; erreur $($r.dwmflush_erreur)" })" 'à lire : ≈ une image de l''écran (le moniteur Hyper-V est à 1 Hz d''après l''inventaire)' 'à lire'
+                foreach ($k in @($r.Keys | Where-Object { $_ -like 'detail_*' } | Sort-Object)) {
+                    $val = "$($r[$k])"
+                    if ($val -match '^([\d.]+);([\d.]+);([\d.]+)$') { $val = "médiane $(Ms ([double]$Matches[1])), 95e centile $(Ms ([double]$Matches[2])), max $(Ms ([double]$Matches[3])) sur 20" }
+                    else { $val = Ms ([double]$val) }
+                    Resultat "(b) bitblt $($k.Substring(7) -replace '_', ' ')" $val 'à lire : un temps fixe quelle que soit la taille, et qui tombe après DwmFlush, serait une attente de composition' 'à lire'
+                }
+            }
+
             # (d) contenu GPU : la canvas et les carrés animés (coordonnées CSS de longue.html).
-            $zv = [int[]]@($c.Zone[0] + 24, $c.Zone[1] + 64, 408, 120)
+            $zv = [int[]]@(($c.Zone[0] + 24), ($c.Zone[1] + 64), 408, 120)
             foreach ($m in $methodes) {
                 $d = Join-Path $script:Sonde.Temp "gpu-$m"
                 New-Item -ItemType Directory -Force -Path $d | Out-Null
@@ -276,9 +335,13 @@ if (Demarrer-Sonde -Nom 's9-s2' -Titre 'S9 et S2 : fenêtre de contrôle, molett
                 Resultat "(d) $m : canvas et animation CSS" ("canvas noire à {0:P0} ; images qui changent : $change/$($imgs.Count - 1)$(if ($png) { " ($png)" })" -f $noir) 'non noire (< 50 %) et animée' (Verdict ($noir -lt 0.5 -and $change -gt 0))
             }
 
-            # (e) pointeur : sur une partie immobile de la page, puis loin.
-            $zp = [int[]]@($c.Zone[0] + 120, $c.Zone[1] + 320, 300, 200)
-            foreach ($m in $methodes) {
+            # (e) pointeur : sur une partie immobile de la page, puis loin. Témoin : WGC avec le
+            # pointeur laissé dans l'image doit voir une différence, sinon le test ne prouve rien
+            # (le pointeur est caché sur une machine sans souris).
+            $zp = [int[]]@(($c.Zone[0] + 120), ($c.Zone[1] + 320), 300, 200)
+            Note "(e) pointeur montré (GetCursorInfo) : $($script:N::PointeurMontre())"
+            $temoinPointeur = -1
+            foreach ($m in @($methodes) + 'wgc-ecran-avec-pointeur') {
                 $images = @{}
                 foreach ($ou in 'dedans', 'dehors') {
                     if ($ou -eq 'dedans') { $script:N::Poser($zp[0] + 150, $zp[1] + 100) } else { $script:N::Poser($REPOS[0], $REPOS[1]) }
@@ -286,14 +349,18 @@ if (Demarrer-Sonde -Nom 's9-s2' -Titre 'S9 et S2 : fenêtre de contrôle, molett
                     if ($m -eq 'bitblt' -or $m -eq 'captureblt') { $images[$ou] = Prendre $zp -CaptureBlt:($m -eq 'captureblt') }
                     else {
                         $f = Fichier-Temp "pointeur-$m-$ou.png"
-                        $r = Jouer-Exemple 'vivant' @('--methode', $m, '--zone', (Rect-Texte $zp), '--images', '3', '--intervalle', '50', '--png', "`"$f`"") 30
+                        $aa = @('--methode', ($m -replace '-avec-pointeur$', ''), '--zone', (Rect-Texte $zp), '--images', '3', '--intervalle', '50', '--png', "`"$f`"")
+                        if ($m -like '*-avec-pointeur') { $aa += '--avec-pointeur' }
+                        $r = Jouer-Exemple 'vivant' $aa 30
                         if ($r['ok'] -eq '1' -and (Test-Path $f)) { $images[$ou] = (Lire-Png $f).O } else { $images[$ou] = $null }
                     }
                 }
                 if ($null -eq $images['dedans'] -or $null -eq $images['dehors']) { NonMesurable "(e) $m : pointeur absent" 'moyen indisponible'; continue }
                 $d = $script:N::Differences($images['dedans'], $images['dehors'], $zp[2], 0, 0, $zp[2], $zp[3])
-                Resultat "(e) $m : pointeur absent de l'image" "$d pixels différents (pointeur dans la zone contre loin)" '0' (Verdict ($d -eq 0))
+                if ($m -like '*-avec-pointeur') { $temoinPointeur = $d; Resultat "(e) témoin : WGC avec le pointeur laissé" "$d pixels différents" '> 0 (sinon le test (e) ne voit pas le pointeur)' $(if ($d -gt 0) { 'passe' } else { 'non mesurable' }) }
+                else { Resultat "(e) $m : pointeur absent de l'image" "$d pixels différents (pointeur dans la zone contre loin)" '0' (Verdict ($d -eq 0)) }
             }
+            if ($temoinPointeur -eq 0) { Note '(e) le témoin ne voit pas le pointeur : les « 0 » ci-dessus ne prouvent rien sur cette machine (pointeur caché sans souris) ; à vérifier chez l''utilisateur.' }
 
             # (f) clignotement du pointeur avec CAPTUREBLT, vu par GetCursorInfo et par DXGI.
             $script:N::Poser($zp[0] + 150, $zp[1] + 100)
@@ -308,17 +375,54 @@ if (Demarrer-Sonde -Nom 's9-s2' -Titre 'S9 et S2 : fenêtre de contrôle, molett
             }
             Note '(f) Une lecture « caché » de GetCursorInfo ou un pointeur invisible pour DXGI pendant les copies, et pas sans CAPTUREBLT, serait le clignotement. Zéro partout ne prouve pas son absence à l''œil : à regarder chez l''utilisateur.'
 
-            # Cadre jaune de Windows.Graphics.Capture : visible dans une copie GDI pendant la session ?
-            $avant = Prendre $ECRAN
-            $p = Lancer-Exemple 'vivant' @('--methode', 'wgc-ecran', '--zone', (Rect-Texte $Z1), '--images', '150', '--intervalle', '16')
-            if ($null -ne $p) {
+            # Cadre jaune de Windows.Graphics.Capture : avec le cadre demandé (témoin) puis
+            # avec IsBorderRequired = false, l'écran est copié pendant la session par BitBlt et
+            # par DXGI ; on compte les pixels jaunes et les pixels changés sur les 6 px du bord
+            # de l'écran (là où le cadre d'une capture d'écran se dessine).
+            $bord = 6
+            $cadres = @{}
+            foreach ($avecCadre in $true, $false) {
+                $nomC = if ($avecCadre) { 'cadre demandé (témoin)' } else { 'IsBorderRequired = false' }
+                $avant = Prendre $ECRAN
+                $fd0 = Fichier-Temp "ecran-avant-$avecCadre.png"
+                $r0 = Jouer-Exemple 'vivant' @('--methode', 'dxgi', '--zone', (Rect-Texte $ECRAN), '--images', '3', '--intervalle', '30', '--png', "`"$fd0`"") 30
+                $a = @('--methode', 'wgc-ecran', '--zone', (Rect-Texte $Z1), '--images', '300', '--intervalle', '16')
+                if ($avecCadre) { $a += '--avec-cadre' }
+                $p = Lancer-Exemple 'vivant' $a
+                if ($null -eq $p) { NonMesurable "(g) cadre WGC ($nomC)" 'exemple vivant absent'; continue }
                 Start-Sleep -Milliseconds 1500
                 $pendant = Prendre $ECRAN
+                $fd1 = Fichier-Temp "ecran-pendant-$avecCadre.png"
+                $r1 = Jouer-Exemple 'vivant' @('--methode', 'dxgi', '--zone', (Rect-Texte $ECRAN), '--images', '3', '--intervalle', '30', '--png', "`"$fd1`"") 30
                 $null = $p.WaitForExit(20000)
-                $ja = $script:N::PixelsProches($avant, 255, 220, 0, 50); $jp = $script:N::PixelsProches($pendant, 255, 220, 0, 50)
-                Resultat '(g) cadre jaune pendant une session WGC (copie GDI)' "pixels jaunes : $ja avant, $jp pendant" 'à lire : 0 ne prouve pas l''absence (le cadre peut être exclu des copies)' 'à lire'
-                $null = Enregistrer-Png $pendant $ECRAN[2] $ECRAN[3] 's2-pendant-wgc.png'
+                $LE = $ECRAN[2]; $HE = $ECRAN[3]
+                $bords = { param($x, $y) (($script:N::Differences($x, $y, $LE, 0, 0, $LE, $bord)) + ($script:N::Differences($x, $y, $LE, 0, ($HE - $bord), $LE, $HE)) + ($script:N::Differences($x, $y, $LE, 0, $bord, $bord, ($HE - $bord))) + ($script:N::Differences($x, $y, $LE, ($LE - $bord), $bord, $LE, ($HE - $bord)))) }
+                $gdi = "GDI : jaunes $($script:N::PixelsProches($avant, 255, 220, 0, 50)) avant, $($script:N::PixelsProches($pendant, 255, 220, 0, 50)) pendant ; bord changé $(& $bords $avant $pendant) px"
+                $dx = 'DXGI : indisponible'
+                if ($r0['ok'] -eq '1' -and $r1['ok'] -eq '1' -and (Test-Path $fd0) -and (Test-Path $fd1)) {
+                    $i0 = Lire-Png $fd0; $i1 = Lire-Png $fd1
+                    if ($i0.L -eq $LE -and $i1.L -eq $LE -and $i0.H -eq $HE -and $i1.H -eq $HE) {
+                        $cadres[$avecCadre] = & $bords $i0.O $i1.O
+                        $dx = "DXGI : jaunes $($script:N::PixelsProches($i0.O, 255, 220, 0, 50)) avant, $($script:N::PixelsProches($i1.O, 255, 220, 0, 50)) pendant ; bord changé $($cadres[$avecCadre]) px"
+                    }
+                }
+                Resultat "(g) cadre jaune pendant une session WGC, $nomC" "$gdi ; $dx" $(if ($avecCadre) { 'témoin : > 0 attendu (sinon le test ne voit pas le cadre)' } else { '0 (pas de cadre)' }) 'à lire'
+                if (-not $avecCadre) { $null = Enregistrer-Png $pendant $ECRAN[2] $ECRAN[3] 's2-pendant-wgc.png' }
             }
+            if ($cadres.ContainsKey($true) -and $cadres.ContainsKey($false)) {
+                $vt = $cadres[$true]; $vs = $cadres[$false]
+                Resultat '(g) cadre jaune absent avec IsBorderRequired = false' "bord changé (DXGI) : $vt px avec le cadre demandé, $vs px sans" 'témoin > 0 et 0 sans' $(if ($vt -gt 0 -and $vs -eq 0) { 'passe' } elseif ($vt -eq 0) { 'non mesurable' } else { 'échoue' })
+                if ($vt -eq 0) { Note '(g) le témoin ne voit aucun cadre (ni GDI ni DXGI) : le cadre est peut-être exclu des copies sur cette machine ; à regarder chez l''utilisateur.' }
+            }
+            # WGC : ce que dit la session (une app non empaquetée peut-elle retirer le cadre et le
+            # pointeur, temps jusqu'à la première image).
+            $r = Jouer-Exemple 'vivant' @('--methode', 'wgc-ecran', '--zone', (Rect-Texte $Z1), '--images', '5', '--intervalle', '16') 30
+            if ($r['ok'] -eq '1') {
+                Resultat '(g) WGC : IsBorderRequired = false accepté (app non empaquetée)' "$($r['wgc_sans_cadre']) ; relu $($r['wgc_cadre_relu']) ; accès « sans cadre » : $($r['wgc_acces_sans_cadre'])" '1 (accepté) et relu 0' (Verdict ("$($r['wgc_sans_cadre'])" -eq '1' -and "$($r['wgc_cadre_relu'])" -eq '0'))
+                Resultat '(g) WGC : IsCursorCaptureEnabled = false accepté' "$($r['wgc_sans_pointeur'])" '1' (Verdict ("$($r['wgc_sans_pointeur'])" -eq '1'))
+                Resultat '(g) WGC : temps jusqu''à la première image' "$($r['wgc_premiere_image_ms']) ms après StartCapture ; ouverture complète $($r['ouverture_ms']) ms" 'à lire' 'à lire'
+            }
+            else { NonMesurable '(g) WGC : session' "$($r['erreur'])" }
             foreach ($m in $methodes) { Resultat "(g) $m disponible" $(if ($dispo.ContainsKey($m)) { $dispo[$m] } else { 'non essayé' }) 'à lire' }
             Fermer-Cible $c
         }

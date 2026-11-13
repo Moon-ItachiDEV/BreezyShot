@@ -460,6 +460,42 @@ namespace BreezyShotSonde
             return new long[] { lignesExactes, lignesTol, lignes, pixExacts, pixTol, pix };
         }
 
+        /// Où sont les pixels différents pour le décalage d (même recouvrement que Comparer) :
+        /// {pixels différents, lignes touchées, groupes de lignes touchées contiguës,
+        /// colonnes touchées, x min, y min, x max, y max (dans b), écart max sur un canal,
+        /// pixels à plus de ± 8, lignes comparées, pixels différents dans les 4 premières ou
+        /// 4 dernières lignes comparées (bord)}. Sans différence : x min = y min = -1.
+        public static long[] Repartition(byte[] a, byte[] b, int l, int h, int d, int y0, int y1, int x0, int x1)
+        {
+            x0 = Math.Max(0, x0); x1 = Math.Min(l, x1);
+            long diff = 0, lignes = 0, groupes = 0, plus8 = 0, compare = 0, bord = 0; int ecart = 0;
+            int xmin = int.MaxValue, ymin = int.MaxValue, xmax = -1, ymax = -1;
+            var cols = new bool[Math.Max(0, l)];
+            int debut = Math.Max(y0, Math.Max(0, -d)), fin = Math.Min(Math.Min(y1, h), h - d);
+            bool precedente = false;
+            for (int y = debut; y < fin; y++)
+            {
+                compare++; long ici = 0;
+                for (int x = x0; x < x1; x++)
+                {
+                    int i = (y * l + x) * 4, j = ((y + d) * l + x) * 4;
+                    int d0 = Math.Abs(b[i] - a[j]), d1 = Math.Abs(b[i + 1] - a[j + 1]), d2 = Math.Abs(b[i + 2] - a[j + 2]);
+                    int m = Math.Max(d0, Math.Max(d1, d2));
+                    if (m == 0) continue;
+                    ici++; cols[x] = true;
+                    if (m > 8) plus8++;
+                    if (m > ecart) ecart = m;
+                    if (x < xmin) xmin = x; if (x > xmax) xmax = x;
+                    if (y < ymin) ymin = y; if (y > ymax) ymax = y;
+                }
+                if (ici > 0) { lignes++; diff += ici; if (!precedente) groupes++; if (y < debut + 4 || y >= fin - 4) bord += ici; }
+                precedente = ici > 0;
+            }
+            long nc = 0; foreach (bool c in cols) if (c) nc++;
+            if (diff == 0) { xmin = ymin = -1; }
+            return new long[] { diff, lignes, groupes, nc, xmin, ymin, xmax, ymax, ecart, plus8, compare, bord };
+        }
+
         /// Pixels différents (B, V ou R) entre deux images de même taille, dans le rectangle
         /// [x0, x1) × [y0, y1) ; -1 si les tailles diffèrent.
         public static int Differences(byte[] a, byte[] b, int l, int x0, int y0, int x1, int y1)
@@ -473,6 +509,21 @@ namespace BreezyShotSonde
                     if (a[i] != b[i] || a[i + 1] != b[i + 1] || a[i + 2] != b[i + 2]) n++;
                 }
             return n;
+        }
+
+        /// Les couleurs (BGR en hexadécimal) de la colonne x aux lignes [r0, r0 + n), pour dire
+        /// pourquoi une bande ne se lit pas.
+        public static string Pixels(byte[] a, int l, int x, int r0, int n)
+        {
+            var t = new StringBuilder();
+            for (int y = r0; y < r0 + n; y++)
+            {
+                int i = (y * l + x) * 4;
+                if (x < 0 || x >= l || i < 0 || i + 3 >= a.Length) break;
+                if (t.Length > 0) t.Append(' ');
+                t.Append(a[i + 2].ToString("X2")).Append(a[i + 1].ToString("X2")).Append(a[i].ToString("X2"));
+            }
+            return t.ToString();
         }
 
         public static bool Egales(byte[] a, byte[] b)

@@ -11,26 +11,13 @@
 
 . "$PSScriptRoot/commun.ps1"
 
-# Le ScrollPattern sous le centre de la zone, défilable ou non.
-function Uia-Motif($C) {
-    try {
-        $AE = [System.Windows.Automation.AutomationElement]; $SP = [System.Windows.Automation.ScrollPattern]
-        $pt = Centre $C.Zone
-        $e = $AE::FromPoint([System.Windows.Point]::new($pt[0], $pt[1]))
-        $w = [System.Windows.Automation.TreeWalker]::RawViewWalker
-        for ($i = 0; $i -lt 40 -and $null -ne $e; $i++) {
-            $m = $null
-            if ($e.TryGetCurrentPattern($SP::Pattern, [ref]$m)) { return [pscustomobject]@{ Element = $e; Motif = $m } }
-            $e = $w.GetParent($e)
-        }
-    }
-    catch { }
-    return $null
-}
-
+# Un cran au centre de la zone, si rien ne couvre la cible (remise au premier plan d'abord) ;
+# rend '' ou la raison du saut (écrite dans le journal par l'appelant).
+$script:Raison = ''
 function Cran($C) {
+    $d = Degager $C
+    if ($d) { $script:Raison = "cran sauté : sous le point $d"; return $false }
     $pt = Centre $C.Zone
-    if ($script:N::RacineSousPoint($pt[0], $pt[1]) -ne $C.Racine) { return $false }
     $script:N::Poser($pt[0], $pt[1])
     return ($script:N::Molette(-1, $script:N::MARQUE) -eq 1)
 }
@@ -42,15 +29,20 @@ if (Demarrer-Sonde -Nom 's5' -Titre 'S5 : savoir qu''on est en bas' -QuotaMo 1) 
             $c = $null
             try {
                 $c = Ouvrir-Cible $g
+                if ($c.Info) { Note $c.Info }
+                $d = Degager $c
+                if ($d) { Noter-Obstacles $c; throw "cible couverte par $d" }
+                # Même recherche que S1 et S4 (commun.ps1), avec l'attente que Chromium demande.
                 $c.Uia = Uia-Defilable $c
-                if ($null -eq $c.Uia) { NonMesurable "$g : ScrollPattern" 'aucun élément défilable trouvé par UI Automation' }
+                if ($null -eq $c.Uia) { NonMesurable "$g : ScrollPattern" 'aucun élément défilable trouvé par UI Automation en 2,5 s (sous le centre ni depuis la fenêtre)' }
+                else { Resultat "$g : ScrollPattern" "trouvé ($($c.Uia.Par)) en $(Ms $c.Uia.Ms) ; vue $('{0:0.#}' -f $c.Uia.Motif.Current.VerticalViewSize) %" 'trouvé' 'passe' }
                 # Lissage au milieu : 10 crans.
                 if ($null -ne $c.Uia) { try { $c.Uia.Motif.SetScrollPercent([System.Windows.Automation.ScrollPattern]::NoScroll, 30.0) } catch { } }
                 $img = (Attendre-Stable $c 1500).Image
                 $lis = [System.Collections.Generic.List[double]]::new()
                 for ($i = 0; $i -lt 10; $i++) {
                     $chrono = [System.Diagnostics.Stopwatch]::StartNew()
-                    if (-not (Cran $c)) { break }
+                    if (-not (Cran $c)) { Note $script:Raison; break }
                     $st = Attendre-Stable $c 1500 $chrono
                     $m = Mouvement $c $img $st.Image
                     if (-not [double]::IsNaN($m.Px) -and $m.Px -gt 0) { $lis.Add($st.Ms) }
@@ -67,7 +59,7 @@ if (Demarrer-Sonde -Nom 's5' -Titre 'S5 : savoir qu''on est en bas' -QuotaMo 1) 
                 $img = (Attendre-Stable $c 1500).Image
                 $immobiles = 0; $crans = 0
                 while ($immobiles -lt 2 -and $crans -lt 400) {
-                    if (-not (Cran $c)) { break }
+                    if (-not (Cran $c)) { Note $script:Raison; break }
                     $crans++
                     $st = Attendre-Stable $c 1000
                     $m = Mouvement $c $img $st.Image
@@ -76,7 +68,7 @@ if (Demarrer-Sonde -Nom 's5' -Titre 'S5 : savoir qu''on est en bas' -QuotaMo 1) 
                 }
                 $pc = Uia-Pourcent $c.Uia
                 if ($immobiles -lt 2) { NonMesurable 'bas atteint à la molette' "pas d'image immobile après $crans crans" }
-                elseif ([double]::IsNaN($pc)) { Resultat 'VerticalScrollPercent en bas' 'illisible (pas de ScrollPattern)' '≥ 99,9 (D15)' 'échoue' }
+                elseif ([double]::IsNaN($pc)) { NonMesurable 'VerticalScrollPercent en bas' 'illisible (pas de ScrollPattern)' '≥ 99,9 (D15)' }
                 else { Resultat 'VerticalScrollPercent en bas (atteint à la molette)' ('{0:R}' -f $pc) '≥ 99,9 (D15) ; 100 exactement attendu' (Verdict ($pc -ge 99.9)) }
                 # Un cran de plus : une seconde d'images.
                 $ref = Prendre $c.Zone
@@ -98,8 +90,8 @@ if (Demarrer-Sonde -Nom 's5' -Titre 'S5 : savoir qu''on est en bas' -QuotaMo 1) 
             $c = $null
             try {
                 $c = Ouvrir-Cible $g -Courte
-                $u = Uia-Motif $c
-                if ($null -eq $u) { NonMesurable 'page courte : VerticalScrollPercent' 'aucun ScrollPattern sous la zone' }
+                $u = Uia-Defilable $c 2500 -Tous
+                if ($null -eq $u) { NonMesurable 'page courte : VerticalScrollPercent' 'aucun ScrollPattern (sous le centre ni depuis la fenêtre, 2,5 s)' }
                 else {
                     $v = $u.Motif.Current.VerticalScrollPercent
                     Resultat 'page courte : VerticalScrollPercent' "$v (VerticallyScrollable $($u.Motif.Current.VerticallyScrollable))" '-1 (UIA_ScrollPatternNoScroll)' (Verdict ($v -eq -1))
@@ -114,6 +106,7 @@ if (Demarrer-Sonde -Nom 's5' -Titre 'S5 : savoir qu''on est en bas' -QuotaMo 1) 
         $c = $null
         try {
             $c = Ouvrir-Cible 'edge'
+            if ($c.Info) { Note $c.Info }
             $c.Uia = Uia-Defilable $c
             if ($null -ne $c.Uia) { try { $c.Uia.Motif.SetScrollPercent([System.Windows.Automation.ScrollPattern]::NoScroll, 40.0) } catch { } }
             $st = Attendre-Stable $c 1500
@@ -122,8 +115,9 @@ if (Demarrer-Sonde -Nom 's5' -Titre 'S5 : savoir qu''on est en bas' -QuotaMo 1) 
             $reculPx = 0; $reculPc = 0; $croissances = 0; $immobiles = 0; $crans = 0; $hPrec = $h0
             $chrono = [System.Diagnostics.Stopwatch]::StartNew()
             while ($immobiles -lt 3 -and $crans -lt 300 -and $chrono.Elapsed.TotalSeconds -lt 90) {
-                if (-not (Cran $c)) { break }
+                if (-not (Cran $c)) { Note $script:Raison; break }
                 $crans++
+                $avant = $st.Image
                 $st = Attendre-Stable $c 800
                 $p = Position-Bande $c $st.Image; $u = Uia-Pourcent $c.Uia; $h = Hauteur-Page $c
                 if ($h -gt $hPrec) { $croissances++ }
@@ -131,12 +125,19 @@ if (Demarrer-Sonde -Nom 's5' -Titre 'S5 : savoir qu''on est en bas' -QuotaMo 1) 
                     if ($p -lt $p0 - 0.5) { $reculPx++ }
                     if ([math]::Abs($p - $p0) -lt 0.5) { $immobiles++ } else { $immobiles = 0 }
                 }
+                elseif (-not $c.Bande) {
+                    # Sans bande : le mouvement lu sur les images.
+                    $mv = Mouvement $c $avant $st.Image
+                    if (-not [double]::IsNaN($mv.Px) -and $mv.Px -lt -0.5) { $reculPx++ }
+                    if (-not [double]::IsNaN($mv.Px) -and [math]::Abs($mv.Px) -lt 0.5) { $immobiles++ } else { $immobiles = 0 }
+                }
                 if (-not [double]::IsNaN($u) -and -not [double]::IsNaN($u0) -and $u -lt $u0 - 0.01) { $reculPc++ }
                 $p0 = $p; $u0 = $u; $hPrec = $h
             }
             Resultat 'hauteur du document' "$h0 → $hPrec px CSS ($croissances croissance(s) vues en $crans crans)" 'à lire (image paresseuse, 40 lignes ajoutées)' 'à lire'
             Resultat 'la position recule-t-elle (pixels, bande)' "$reculPx fois" '0 attendu (les ajouts sont sous la vue)' (Verdict ($reculPx -eq 0))
-            Resultat 'le pourcentage recule-t-il (UI Automation)' "$reculPc fois" 'à lire (un recul ferait croire D15 à une remontée)' 'à lire'
+            if ($null -eq $c.Uia) { NonMesurable 'le pourcentage recule-t-il (UI Automation)' 'pas de ScrollPattern sur Edge' }
+            else { Resultat 'le pourcentage recule-t-il (UI Automation)' "$reculPc fois" 'à lire (un recul ferait croire D15 à une remontée)' 'à lire' }
             Resultat 'fin' "$(if ($immobiles -ge 3) { 'bas atteint' } else { 'arrêté avant le bas' }) ; UI Automation $('{0:0.###}' -f (Uia-Pourcent $c.Uia)) %" '≥ 99,9 en bas' (Verdict ($immobiles -ge 3 -and (Uia-Pourcent $c.Uia) -ge 99.9))
         }
         catch { NonMesurable 'Edge, chargement en défilant' $_.Exception.Message }

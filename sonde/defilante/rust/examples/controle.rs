@@ -573,6 +573,7 @@ requestAnimationFrame(function(){{requestAnimationFrame(function(){{window.ipc.p
         pub fn creations(nombre: usize, sans_gardien: bool) -> Result<(), String> {
             let c = CONFIG.get().ok_or("config")?;
             let etat = c.etat.clone();
+            let lancement = c.debut;
             let b = bureau();
             let boucle = EventLoopBuilder::<String>::with_user_event().build();
             let proxy = boucle.create_proxy();
@@ -668,10 +669,16 @@ requestAnimationFrame(function(){{requestAnimationFrame(function(){{window.ipc.p
                         d.map(|d| format!("{:.1}", d.as_secs_f64() * 1000.0))
                             .unwrap_or_else(|| "absent".into())
                     };
+                    // Du lancement du processus à la page qui répond (création à froid
+                    // dans un processus neuf : ce que voit la première capture).
+                    let depuis_lancement = en_cours
+                        .as_ref()
+                        .and_then(|e| dom.map(|d| e.2.duration_since(lancement) + d));
                     lignes.push(format!(
-                        "creation {i} dom_ms {} pret_ms {} visible_avant_pret {vue}",
+                        "creation {i} dom_ms {} pret_ms {} visible_avant_pret {vue} lancement_dom_ms {}",
                         ms(dom),
-                        ms(pret)
+                        ms(pret),
+                        ms(depuis_lancement)
                     ));
                     courant.store(0, Ordering::SeqCst);
                     if let Some((f, v, _, _)) = en_cours.take() {

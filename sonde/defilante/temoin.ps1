@@ -34,10 +34,29 @@ $LIGNE = 20
 $NB = if ($Courte) { 10 } else { 300 }
 $CONTENU = $LIGNE * $NB
 
+# Écrit $Fichier d'un coup (temporaire puis renommage). Le renommage peut échouer pendant
+# que la sonde lit le fichier : quelques essais, puis l'écriture est sautée (la suivante
+# suffit). Jamais d'exception : au premier passage, une exception ici, dans la minuterie de
+# la sentinelle, ouvrait la boîte « Unhandled exception has occurred in your application »
+# de WinForms devant les cibles de S1.
 function Ecrire([string[]]$Lignes) {
-    $t = "$Fichier.tmp"
-    Set-Content -LiteralPath $t -Value $Lignes -Encoding ascii
-    Move-Item -LiteralPath $t -Destination $Fichier -Force
+    try {
+        $t = "$Fichier.tmp"
+        [System.IO.File]::WriteAllLines($t, $Lignes, [System.Text.Encoding]::ASCII)
+        for ($i = 0; $i -lt 10; $i++) {
+            try { [System.IO.File]::Move($t, $Fichier, $true); return }
+            catch { Start-Sleep -Milliseconds 15 }
+        }
+        $script:ecrituresSautees++
+    }
+    catch { Signaler "écriture de l'état" $_.Exception }
+}
+$script:ecrituresSautees = 0
+
+# Toute exception d'un gestionnaire d'événement est écrite dans le journal du job (la
+# sortie de ce processus est celle de l'étape), jamais montrée dans une boîte.
+function Signaler([string]$Ou, $Ex) {
+    try { [Console]::Out.WriteLine("témoin $Genre (pid $PID) : exception dans $Ou : $($Ex.GetType().FullName) : $($Ex.Message)") } catch { }
 }
 function Texte-Ligne([int]$i) {
     $mots = 'capture', 'page', 'molette', 'image', 'ligne', 'zone', 'ecran', 'temoin'
@@ -115,6 +134,7 @@ if ($Genre -eq 'wpf') {
     $sv.Content = $grille
     $f.Content = $sv
     $f.Add_ContentRendered({
+          try {
             $p = $sv.PointToScreen([System.Windows.Point]::new(0, 0))
             $src = [System.Windows.PresentationSource]::FromVisual($sv)
             $m = $src.CompositionTarget.TransformToDevice
@@ -122,14 +142,21 @@ if ($Genre -eq 'wpf') {
             Ecrire @("hwnd $([long]$hwnd)", "pid $PID",
                 "zone $(Rect-Texte $p.X $p.Y ($sv.ViewportWidth * $m.M11) ($sv.ViewportHeight * $m.M22))",
                 "defile $([long]$hwnd)", "contenu $([int]($CONTENU * $Echelle * $m.M22))", "echelle $($Echelle * $m.M22)")
+          }
+          catch { Signaler 'ContentRendered' $_.Exception }
         })
     $app = [System.Windows.Application]::new()
+    $app.Add_DispatcherUnhandledException({ param($s, $e) Signaler 'WPF (Dispatcher)' $e.Exception; $e.Handled = $true })
     [void]$app.Run($f)
     exit 0
 }
 
 Add-Type -AssemblyName System.Windows.Forms, System.Drawing
 try { [void][System.Windows.Forms.Application]::SetHighDpiMode([System.Windows.Forms.HighDpiMode]::PerMonitorV2) } catch { }
+# Garde générale : une exception d'un gestionnaire va au journal, pas dans une boîte.
+[System.Windows.Forms.Application]::SetUnhandledExceptionMode([System.Windows.Forms.UnhandledExceptionMode]::CatchException)
+[System.Windows.Forms.Application]::add_ThreadException({ param($s, $e) Signaler 'WinForms (ThreadException)' $e.Exception })
+[System.AppDomain]::CurrentDomain.add_UnhandledException({ param($s, $e) Signaler 'AppDomain' $e.ExceptionObject })
 
 function Nouvelle-Forme([string]$Titre, [int]$fx, [int]$fy, [int]$fl, [int]$fh) {
     $f = [System.Windows.Forms.Form]::new()
@@ -154,8 +181,11 @@ if ($Genre -eq 'fige') {
     $f.BackgroundImage = $photo
     $f.BackgroundImageLayout = [System.Windows.Forms.ImageLayout]::None
     $f.Add_Shown({
-            $f.Bounds = [System.Drawing.Rectangle]::new($ecran.X, $ecran.Y, $ecran.Width, $ecran.Height)
-            Ecrire @("hwnd $([long]$f.Handle)", "pid $PID", "zone $(Rect-Texte $ecran.X $ecran.Y $ecran.Width $ecran.Height)")
+            try {
+                $f.Bounds = [System.Drawing.Rectangle]::new($ecran.X, $ecran.Y, $ecran.Width, $ecran.Height)
+                Ecrire @("hwnd $([long]$f.Handle)", "pid $PID", "zone $(Rect-Texte $ecran.X $ecran.Y $ecran.Width $ecran.Height)")
+            }
+            catch { Signaler 'Shown' $_.Exception }
         })
     [System.Windows.Forms.Application]::Run($f)
     exit 0
@@ -173,9 +203,12 @@ if ($Genre -eq 'winforms') {
     $p.Controls.Add($pb)
     $f.Controls.Add($p)
     $f.Add_Shown({
-            $r = $p.RectangleToScreen($p.ClientRectangle)
-            Ecrire @("hwnd $([long]$f.Handle)", "pid $PID", "zone $(Rect-Texte $r.X $r.Y $r.Width $r.Height)",
-                "defile $([long]$p.Handle)", "contenu $CONTENU", 'echelle 1')
+            try {
+                $r = $p.RectangleToScreen($p.ClientRectangle)
+                Ecrire @("hwnd $([long]$f.Handle)", "pid $PID", "zone $(Rect-Texte $r.X $r.Y $r.Width $r.Height)",
+                    "defile $([long]$p.Handle)", "contenu $CONTENU", 'echelle 1')
+            }
+            catch { Signaler 'Shown' $_.Exception }
         })
     [System.Windows.Forms.Application]::Run($f)
     exit 0
@@ -189,21 +222,30 @@ if ($Genre -eq 'molette') {
     $pb.Dock = [System.Windows.Forms.DockStyle]::Fill
     $pb.Add_Paint({
             param($s, $e)
-            $e.Graphics.Clear([System.Drawing.Color]::White)
-            $e.Graphics.DrawImageUnscaled($image, 0, - $script:decalage)
+            try {
+                $e.Graphics.Clear([System.Drawing.Color]::White)
+                $e.Graphics.DrawImageUnscaled($image, 0, - $script:decalage)
+            }
+            catch { Signaler 'Paint' $_.Exception }
         })
     $pb.Add_MouseWheel({
             param($s, $e)
-            $max = [math]::Max(0, $CONTENU - $pb.ClientSize.Height)
-            $script:decalage = [math]::Min($max, [math]::Max(0, $script:decalage - [int]($e.Delta / 120 * 48)))
-            if ($e -is [System.Windows.Forms.HandledMouseEventArgs]) { $e.Handled = $true }
-            $pb.Invalidate(); $pb.Update()
+            try {
+                $max = [math]::Max(0, $CONTENU - $pb.ClientSize.Height)
+                $script:decalage = [math]::Min($max, [math]::Max(0, $script:decalage - [int]($e.Delta / 120 * 48)))
+                if ($e -is [System.Windows.Forms.HandledMouseEventArgs]) { $e.Handled = $true }
+                $pb.Invalidate(); $pb.Update()
+            }
+            catch { Signaler 'MouseWheel' $_.Exception }
         })
     $f.Controls.Add($pb)
     $f.Add_Shown({
-            $r = $pb.RectangleToScreen($pb.ClientRectangle)
-            Ecrire @("hwnd $([long]$f.Handle)", "pid $PID", "zone $(Rect-Texte $r.X $r.Y $r.Width $r.Height)",
-                "defile $([long]$pb.Handle)", "contenu $CONTENU", 'echelle 1')
+            try {
+                $r = $pb.RectangleToScreen($pb.ClientRectangle)
+                Ecrire @("hwnd $([long]$f.Handle)", "pid $PID", "zone $(Rect-Texte $r.X $r.Y $r.Width $r.Height)",
+                    "defile $([long]$pb.Handle)", "contenu $CONTENU", 'echelle 1')
+            }
+            catch { Signaler 'Shown' $_.Exception }
         })
     [System.Windows.Forms.Application]::Run($f)
     exit 0
@@ -218,7 +260,7 @@ $panneaux = [System.Collections.Generic.List[object]]::new()
 function Sentinelle([string]$Titre, [int]$fx, [int]$fy, [int]$fl, [int]$fh) {
     $f = Nouvelle-Forme $Titre $fx $fy $fl $fh
     $f.KeyPreview = $true
-    $f.Add_KeyDown({ $script:touches++ })
+    $f.Add_KeyDown({ try { $script:touches++ } catch { } })
     $p = [System.Windows.Forms.Panel]::new()
     $p.Dock = [System.Windows.Forms.DockStyle]::Fill
     $p.AutoScroll = $true
@@ -226,8 +268,8 @@ function Sentinelle([string]$Titre, [int]$fx, [int]$fy, [int]$fl, [int]$fh) {
     $pb.Size = [System.Drawing.Size]::new([math]::Max(100, $fl - 40), $CONTENU)
     $pb.Image = Image-Contenu ([math]::Max(100, $fl - 40)) $CONTENU
     $p.Controls.Add($pb)
-    $p.Add_MouseWheel({ $script:molettes++ })
-    $p.Add_Scroll({ $script:defilements++ })
+    $p.Add_MouseWheel({ try { $script:molettes++ } catch { } })
+    $p.Add_Scroll({ try { $script:defilements++ } catch { } })
     $f.Controls.Add($p)
     $panneaux.Add($p)
     return $f
@@ -238,12 +280,16 @@ $cote = Sentinelle 'Sentinelle cote BreezyShot' $X $Y $L $H
 $minuterie = [System.Windows.Forms.Timer]::new()
 $minuterie.Interval = 100
 $minuterie.Add_Tick({
-        $pos = 0
-        foreach ($p in $panneaux) { $pos += [math]::Abs($p.AutoScrollPosition.Y) }
-        $r = $panneaux[1].RectangleToScreen($panneaux[1].ClientRectangle)
-        Ecrire @("hwnd $([long]$cote.Handle)", "dessous $([long]$dessous.Handle)", "pid $PID",
-            "zone $(Rect-Texte $r.X $r.Y $r.Width $r.Height)",
-            "molettes $script:molettes", "defilements $script:defilements", "touches $script:touches", "position $pos")
+        try {
+            $pos = 0
+            foreach ($p in $panneaux) { $pos += [math]::Abs($p.AutoScrollPosition.Y) }
+            $r = $panneaux[1].RectangleToScreen($panneaux[1].ClientRectangle)
+            Ecrire @("hwnd $([long]$cote.Handle)", "dessous $([long]$dessous.Handle)", "pid $PID",
+                "zone $(Rect-Texte $r.X $r.Y $r.Width $r.Height)",
+                "molettes $script:molettes", "defilements $script:defilements", "touches $script:touches", "position $pos",
+                "ecritures_sautees $script:ecrituresSautees")
+        }
+        catch { Signaler 'minuterie' $_.Exception }
     })
-$dessous.Add_Shown({ $cote.Show(); $minuterie.Start() })
+$dessous.Add_Shown({ try { $cote.Show(); $minuterie.Start() } catch { Signaler 'Shown' $_.Exception } })
 [System.Windows.Forms.Application]::Run($dessous)

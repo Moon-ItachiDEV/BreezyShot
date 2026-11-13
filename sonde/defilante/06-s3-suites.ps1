@@ -11,6 +11,10 @@
 # bande_haut ; uia_pourcent ; decalage_images ; lignes_egales), et la mesure : les lignes de
 # deux images successives sont-elles égales au bit près une fois décalées (sans l'en-tête
 # collant ni la barre de défilement), et à la tolérance de D12.
+# Le pas passe par UI Automation quand la cible a un ScrollPattern, sinon par la molette
+# (3 crans) : au premier passage, aucune suite Edge n'avait été faite faute de ScrollPattern.
+# Tout le résumé de chaque suite est écrit dans le journal (Mesure-Suite) : nombre
+# d'images, pas vrai, paires égales au bit près, répartition des pixels différents.
 #   pwsh -NoProfile -File sonde/defilante/06-s3-suites.ps1
 
 . "$PSScriptRoot/commun.ps1"
@@ -35,6 +39,8 @@ if (Demarrer-Sonde -Nom 's3' -Titre 'S3 : suites d''images avec leur décalage v
                     # L'échelle forcée se voit-elle ? Hauteur de l'en-tête collant (56 px CSS) sur la bande.
                     Note "échelle demandée $($k.E) ; zone $(Rect-Texte $c.Zone)"
                 }
+                $d = Degager $c
+                if ($d) { Noter-Obstacles $c; throw "cible couverte par $d" }
                 $c.Uia = Uia-Defilable $c
                 if ($k.ContainsKey('Lissage')) {
                     $pt = Centre $c.Zone
@@ -42,8 +48,9 @@ if (Demarrer-Sonde -Nom 's3' -Titre 'S3 : suites d''images avec leur décalage v
                     $images = Suite $k.Nom $c $k.N $pas -Lissage
                 }
                 else {
-                    if ($null -eq $c.Uia) { NonMesurable "$($k.Nom) : suite" 'pas de ScrollPattern (le pas d''une demi-vue passe par UI Automation)'; continue }
-                    $pas = { Pas-UIA $c }
+                    if ($null -ne $c.Uia) { $pas = { Pas-UIA $c }; Note "$($k.Nom) : pas d'une demi-vue par UI Automation ($($c.Uia.Par), trouvé en $(Ms $c.Uia.Ms))" }
+                    elseif ($k.Genre -eq 'edge') { $pas = { Pas-Molette $c 3 }; Note "$($k.Nom) : pas de ScrollPattern ; pas de 3 crans de molette" }
+                    else { NonMesurable "$($k.Nom) : suite" 'pas de ScrollPattern'; continue }
                     $images = Suite $k.Nom $c $k.N $pas
                 }
                 Mesure-Suite $k.Nom $c $images $k.Haut

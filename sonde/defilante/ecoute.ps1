@@ -15,10 +15,17 @@ $ErrorActionPreference = 'Stop'
 Add-Type -TypeDefinition (Get-Content -LiteralPath (Join-Path $PSScriptRoot 'ecoute.cs') -Raw)
 $E = [BreezyShotSonde.Ecoute]
 
+# Temporaire puis renommage ; si la sonde tient le fichier, quelques essais puis l'écriture
+# est sautée (la suivante suffit) : jamais d'exception qui arrêterait l'écoute.
 function Ecrire([string]$Fichier, [string[]]$Lignes) {
-    $t = "$Fichier.tmp"
-    Set-Content -LiteralPath $t -Value $Lignes -Encoding ascii
-    Move-Item -LiteralPath $t -Destination $Fichier -Force
+    try {
+        $t = "$Fichier.tmp"
+        [System.IO.File]::WriteAllLines($t, $Lignes, [System.Text.Encoding]::ASCII)
+        for ($i = 0; $i -lt 10; $i++) {
+            try { [System.IO.File]::Move($t, $Fichier, $true); return } catch { Start-Sleep -Milliseconds 15 }
+        }
+    }
+    catch { [Console]::Out.WriteLine("écoute : état non écrit : $($_.Exception.Message)") }
 }
 
 $E::Demarrer()
@@ -37,7 +44,7 @@ try {
                     $f = $Matches[1].Trim('"')
                     $t = "$f.tmp"
                     [System.IO.File]::WriteAllText($t, $E::Detail())
-                    Move-Item -LiteralPath $t -Destination $f -Force
+                    [System.IO.File]::Move($t, $f, $true)
                 }
                 elseif ($l -eq 'quitter') { $quitter = $true }
             }

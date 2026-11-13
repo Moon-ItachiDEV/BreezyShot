@@ -4,6 +4,15 @@
 //!          [--images 200] [--intervalle 16] [--hwnd H] [--png f.png]
 //!          [--suite dossier --chaque 10] [--ressources]
 //!   vivant --methode clignotement --zone x,y,l,h --duree-ms 3000 [--captureblt]
+//!   vivant --methode bitblt-detail --zone x,y,l,h
+//!
+//! WGC : `--avec-cadre` laisse le cadre jaune demandé (IsBorderRequired non posé à faux),
+//! `--avec-pointeur` laisse le pointeur dans l'image (témoins de comparaison de S2).
+//! `--ressources` : mémoire privée et objets GDI avant, au quart, à la moitié, aux trois
+//! quarts et après les images (une fuite se voit comme une pente, pas comme un palier).
+//! `bitblt-detail` : d'où viennent les 32 ms de BitBlt au premier passage (quelle que soit la
+//! taille) : tailles 100 × 100, 600 × 400 et la zone ; 20 prises sans pause, 20 avec 16 ms
+//! de pause, 20 après DwmFlush ; temps de DwmFlush seul ; et avec timeBeginPeriod(1).
 //!
 //! Écrit sur la sortie une ligne « cle valeur » par mesure (lue par la sonde PowerShell).
 //! Une prise DXGI ou WGC ne bloque pas : s'il n'y a pas d'image neuve, la précédente est
@@ -47,6 +56,7 @@ mod windows_seul {
         D3D_DRIVER_TYPE, D3D_DRIVER_TYPE_HARDWARE, D3D_DRIVER_TYPE_UNKNOWN, D3D_DRIVER_TYPE_WARP,
     };
     use windows::Win32::Graphics::Direct3D11::*;
+    use windows::Win32::Graphics::Dwm::DwmFlush;
     use windows::Win32::Graphics::Dxgi::Common::{DXGI_FORMAT_B8G8R8A8_UNORM, DXGI_SAMPLE_DESC};
     use windows::Win32::Graphics::Dxgi::*;
     use windows::Win32::Graphics::Gdi::*;
@@ -417,8 +427,10 @@ mod windows_seul {
         fn ouvrir(
             zone: Rect,
             fenetre: Option<HWND>,
+            options: (bool, bool),
             notes: &mut Vec<String>,
         ) -> Result<Wgc, String> {
+            let (avec_cadre, avec_pointeur) = options;
             // SAFETY : initialisation WinRT du fil (MTA), puis objets COM et WinRT comptés.
             unsafe {
                 let _ = RoInitialize(RO_INIT_MULTITHREADED);
@@ -487,14 +499,30 @@ mod windows_seul {
                 let session = pool
                     .CreateCaptureSession(&item)
                     .map_err(|e| format!("CreateCaptureSession: {e}"))?;
-                notes.push(match session.SetIsCursorCaptureEnabled(false) {
-                    Ok(()) => "wgc_sans_pointeur 1".into(),
-                    Err(e) => format!("wgc_sans_pointeur 0 ({e})"),
-                });
-                notes.push(match session.SetIsBorderRequired(false) {
-                    Ok(()) => "wgc_sans_cadre 1".into(),
-                    Err(e) => format!("wgc_sans_cadre 0 ({})", e.code()),
-                });
+                if avec_pointeur {
+                    notes.push("wgc_sans_pointeur non demandé".into());
+                } else {
+                    notes.push(match session.SetIsCursorCaptureEnabled(false) {
+                        Ok(()) => "wgc_sans_pointeur 1".into(),
+                        Err(e) => format!("wgc_sans_pointeur 0 ({e})"),
+                    });
+                }
+                if avec_cadre {
+                    notes.push("wgc_sans_cadre non demandé".into());
+                } else {
+                    notes.push(match session.SetIsBorderRequired(false) {
+                        Ok(()) => "wgc_sans_cadre 1".into(),
+                        Err(e) => format!("wgc_sans_cadre 0 ({})", e.code()),
+                    });
+                }
+                notes.push(format!(
+                    "wgc_cadre_relu {}",
+                    session
+                        .IsBorderRequired()
+                        .map(|b| (b as u8).to_string())
+                        .unwrap_or_else(|e| format!("erreur {}", e.code()))
+                ));
+                let depart = Instant::now();
                 session
                     .StartCapture()
                     .map_err(|e| format!("StartCapture: {e}"))?;
@@ -514,8 +542,12 @@ mod windows_seul {
                         return Err("aucune première image en 3 s".into());
                     }
                     let _ = s.prendre(&mut tampon)?;
-                    std::thread::sleep(Duration::from_millis(5));
+                    std::thread::sleep(Duration::from_millis(1));
                 }
+                notes.push(format!(
+                    "wgc_premiere_image_ms {:.1}",
+                    depart.elapsed().as_secs_f64() * 1000.0
+                ));
                 notes.push(format!("wgc_zone {}x{}", l, h));
                 Ok(s)
             }
@@ -578,6 +610,9 @@ mod windows_seul {
         if methode == "clignotement" {
             return clignotement(zone, a);
         }
+        if methode == "bitblt-detail" {
+            return bitblt_detail(zone);
+        }
         let images: usize = a.get("images").and_then(|s| s.parse().ok()).unwrap_or(200);
         let intervalle = Duration::from_millis(
             a.get("intervalle")
@@ -613,7 +648,11 @@ mod windows_seul {
                     None
                 };
                 notes.push(format!("wgc_acces_sans_cadre {}", acces_sans_cadre()));
-                Box::new(Wgc::ouvrir(zone, h, &mut notes)?)
+                let options = (
+                    a.contains_key("avec-cadre"),
+                    a.contains_key("avec-pointeur"),
+                );
+                Box::new(Wgc::ouvrir(zone, h, options, &mut notes)?)
             }
             autre => return Err(format!("méthode inconnue « {autre} »")),
         };
@@ -629,7 +668,12 @@ mod windows_seul {
         let mut durees_neuves = Vec::new();
         let mut neuves = 0usize;
         let r1 = ressources();
+        let mut quarts: Vec<(u64, u32)> = Vec::new();
         for i in 0..images {
+            if suivre && i > 0 && images >= 4 && i % (images / 4) == 0 && quarts.len() < 3 {
+                let r = ressources();
+                quarts.push((r.0, r.2));
+            }
             let t = Instant::now();
             let neuve = source.prendre(&mut tampon)?;
             let d = t.elapsed();
@@ -671,12 +715,101 @@ mod windows_seul {
             println!("gdi_apres {}", r2.2);
             println!("user_avant {}", r1.3);
             println!("user_apres {}", r2.3);
+            let q: Vec<String> = quarts.iter().map(|(m, _)| m.to_string()).collect();
+            let g: Vec<String> = quarts.iter().map(|(_, o)| o.to_string()).collect();
+            println!("prive_quarts {}", q.join(";"));
+            println!("gdi_quarts {}", g.join(";"));
         }
         if let Some(png) = a.get("png") {
             let l = (tampon.len() / 4 / zone.h.max(1) as usize) as u32;
             let h = ((tampon.len() / 4) as u32).checked_div(l).unwrap_or(0);
             enregistrer_png_bgra(&PathBuf::from(png), &tampon, l, h)?;
             println!("png {png} {l}x{h}");
+        }
+        Ok(())
+    }
+
+    /// S2 (b) en détail : temps d'un BitBlt selon la taille et ce qui le précède.
+    fn bitblt_detail(zone: Rect) -> Result<(), String> {
+        let tailles = [
+            Rect {
+                x: zone.x,
+                y: zone.y,
+                l: 100.min(zone.l),
+                h: 100.min(zone.h),
+            },
+            Rect {
+                x: zone.x,
+                y: zone.y,
+                l: 600.min(zone.l),
+                h: 400.min(zone.h),
+            },
+            zone,
+        ];
+        let mut tampon = Vec::new();
+        let mediane = |d: &[Duration]| statistiques(d).0;
+        // SAFETY : DwmFlush n'a pas d'argument ; un échec est noté.
+        let flush = || unsafe { DwmFlush() };
+        let mut d_flush = Vec::new();
+        for _ in 0..20 {
+            let t = Instant::now();
+            let r = flush();
+            d_flush.push(t.elapsed());
+            if let Err(e) = r {
+                println!("dwmflush_erreur {}", e.code());
+                break;
+            }
+        }
+        println!("dwmflush_mediane_ms {:.2}", mediane(&d_flush));
+        for (k, z) in tailles.iter().enumerate() {
+            let nom = format!("{}x{}", z.l, z.h);
+            let mut g = Gdi::ouvrir(*z, false)?;
+            let t = Instant::now();
+            g.prendre(&mut tampon)?;
+            println!(
+                "detail_{nom}_premiere_ms {:.2}",
+                t.elapsed().as_secs_f64() * 1000.0
+            );
+            for (mode, pause, avec_flush) in [
+                ("suite", 0u64, false),
+                ("pause16", 16, false),
+                ("apres_dwmflush", 0, true),
+            ] {
+                let mut d = Vec::new();
+                for _ in 0..20 {
+                    if pause > 0 {
+                        std::thread::sleep(Duration::from_millis(pause));
+                    }
+                    if avec_flush {
+                        let _ = flush();
+                    }
+                    let t = Instant::now();
+                    g.prendre(&mut tampon)?;
+                    d.push(t.elapsed());
+                }
+                let (m, p, x) = statistiques(&d);
+                println!("detail_{nom}_{mode} {m:.2};{p:.2};{x:.2}");
+            }
+            if k == tailles.len() - 1 {
+                // Avec la minuterie du système à 1 ms (une attente arrondie au pas de 15,6 ms
+                // se verrait ici).
+                // SAFETY : appariés ; sans effet hors du processus à part la minuterie.
+                unsafe {
+                    let _ = windows::Win32::Media::timeBeginPeriod(1);
+                }
+                let mut d = Vec::new();
+                for _ in 0..20 {
+                    let t = Instant::now();
+                    g.prendre(&mut tampon)?;
+                    d.push(t.elapsed());
+                }
+                // SAFETY : idem.
+                unsafe {
+                    let _ = windows::Win32::Media::timeEndPeriod(1);
+                }
+                let (m, p, x) = statistiques(&d);
+                println!("detail_{nom}_minuterie1ms {m:.2};{p:.2};{x:.2}");
+            }
         }
         Ok(())
     }

@@ -4,19 +4,25 @@
      « Longue page BreezyShot <nom> h=<hauteur du document en px CSS> » (la sonde trouve
      sa fenêtre par ce titre et y lit la hauteur), puis « r=webgl » ou « r=2d ».
      - Bande de gauche (8 px CSS, une couleur par ligne CSS du document, voir
-       natif.cs CouleurLigne) : la sonde y lit le décalage vrai au pixel.
+       natif.cs CouleurLigne) : la sonde y lit le décalage vrai au pixel. Elle est faite
+       de canvas de 2 048 lignes au plus, l'une sous l'autre : une seule canvas de toute la
+       hauteur dépasse la taille de texture du rendu logiciel et ne s'affiche pas (premier
+       passage : « bande illisible » dans Edge et Firefox).
+     - Page en anglais (lang="en") : Edge et Chrome, en anglais sur la machine, ne
+       proposent pas de la traduire (premier passage : « Translate page from French? »).
      - En-tête collant de 56 px, une <canvas> WebGL animée (2D si WebGL manque, dit
        dans data-rendu), deux carrés tournés par une animation CSS, une image paresseuse
        sans taille réservée vers le milieu, et un « chargement en défilant » : arrivé
        près du bas, 40 lignes de plus sont ajoutées une fois, 300 ms plus tard. -->
-<html lang="fr">
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <title>Longue page BreezyShot</title>
 <style>
 html, body { margin: 0; padding: 0; background: #fff; color: #1d2433;
   font: 16px/24px "Segoe UI", Arial, sans-serif; }
-#bande { position: absolute; left: 0; top: 0; width: 8px; image-rendering: pixelated; z-index: 3; }
+#bande { position: absolute; left: 0; top: 0; width: 8px; z-index: 3; }
+#bande canvas { display: block; width: 8px; image-rendering: pixelated; image-rendering: crisp-edges; }
 header { position: sticky; top: 0; height: 56px; margin-left: 8px; z-index: 2;
   background: #1e3a5f; color: #fff; display: flex; align-items: center; padding: 0 16px;
   font-weight: 600; }
@@ -33,13 +39,13 @@ main { margin-left: 8px; padding: 0 16px; }
 </style>
 </head>
 <body>
-<canvas id="bande" width="1" height="1"></canvas>
-<header>BreezyShot · page témoin de la capture défilante</header>
+<div id="bande"></div>
+<header>BreezyShot - scrolling capture test page</header>
 <main>
   <div class="vivant"><canvas id="gl" width="240" height="120"></canvas>
     <div class="carre"></div><div class="carre b"></div></div>
   <div id="lignes"></div>
-  <div id="fin">fin de la page</div>
+  <div id="fin">end of page</div>
 </main>
 <script>
 (function () {
@@ -48,17 +54,17 @@ main { margin-left: 8px; padding: 0 16px; }
   var n = Math.max(1, parseInt(params.get('lignes') || '800', 10));
   var nom = decodeURIComponent(location.hash.replace(/^#/, ''));
   document.title = 'Longue page BreezyShot' + (nom ? ' ' + nom : '');
-  var mots = ['capture', 'défilante', 'molette', 'page', 'image', 'ligne', 'écran', 'zone',
-              'pilule', 'sentinelle', 'décalage', 'témoin'];
+  var mots = ['capture', 'scrolling', 'wheel', 'page', 'image', 'line', 'screen', 'area',
+              'button', 'sentinel', 'offset', 'witness'];
   var lignes = document.getElementById('lignes');
   function ajouter(debut, combien) {
     var f = document.createDocumentFragment();
     for (var i = debut; i < debut + combien; i++) {
       var d = document.createElement('div');
       d.className = 'l';
-      var t = 'Ligne ' + String(i + 1).padStart(4, '0') + ' · ';
+      var t = 'Line ' + String(i + 1).padStart(4, '0') + ' - ';
       for (var k = 0; k < 6; k++) t += mots[(i * 7 + k * 5) % mots.length] + ' ';
-      d.textContent = t + '· ' + (i * 37 % 1000);
+      d.textContent = t + '- ' + (i * 37 % 1000);
       f.appendChild(d);
       if (i === Math.floor(n / 2)) {
         var img = document.createElement('img');
@@ -77,21 +83,30 @@ main { margin-left: 8px; padding: 0 16px; }
   try { gl = cv.getContext('webgl'); } catch (e) { gl = null; }
   document.body.setAttribute('data-rendu', gl ? 'webgl' : '2d');
   var t0 = performance.now();
-  // Bande : une ligne de canvas par ligne CSS du document.
+  // Bande : une ligne de canvas par ligne CSS du document, par morceaux de 2 048 lignes.
   var bande = document.getElementById('bande');
+  var MORCEAU = 2048, hauteurBande = 0;
   function dessinerBande() {
     var h = Math.max(document.documentElement.scrollHeight, document.body.scrollHeight);
-    if (bande.height === h) return;
-    bande.width = 1; bande.height = h; bande.style.height = h + 'px';
-    var c = bande.getContext('2d');
-    var img = c.createImageData(1, h);
-    for (var y = 0; y < h; y++) {
-      img.data[y * 4] = y & 0xFF;
-      img.data[y * 4 + 1] = 0x40 | ((y >> 8) & 0x3F);
-      img.data[y * 4 + 2] = 0xA0 | ((y >> 14) & 0x0F);
-      img.data[y * 4 + 3] = 255;
+    if (hauteurBande === h) return;
+    hauteurBande = h;
+    bande.textContent = '';
+    for (var y0 = 0; y0 < h; y0 += MORCEAU) {
+      var n = Math.min(MORCEAU, h - y0);
+      var cv1 = document.createElement('canvas');
+      cv1.width = 1; cv1.height = n; cv1.style.height = n + 'px';
+      var c = cv1.getContext('2d');
+      var img = c.createImageData(1, n);
+      for (var k = 0; k < n; k++) {
+        var y = y0 + k;
+        img.data[k * 4] = y & 0xFF;
+        img.data[k * 4 + 1] = 0x40 | ((y >> 8) & 0x3F);
+        img.data[k * 4 + 2] = 0xA0 | ((y >> 14) & 0x0F);
+        img.data[k * 4 + 3] = 255;
+      }
+      c.putImageData(img, 0, 0);
+      bande.appendChild(cv1);
     }
-    c.putImageData(img, 0, 0);
     document.body.setAttribute('data-hauteur', String(h));
     document.title = 'Longue page BreezyShot' + (nom ? ' ' + nom : '') + ' h=' + h + ' r=' + (gl ? 'webgl' : '2d');
   }

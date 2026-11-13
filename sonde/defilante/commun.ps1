@@ -76,7 +76,9 @@ function Resultat {
     param([Parameter(Mandatory)][string]$Mesure, [object]$Valeur, [string]$Critere = '', [string]$Verdict = '')
     $s = $script:Sonde.Sections[$script:Sonde.Sections.Count - 1]
     $s.Lignes.Add([pscustomobject]@{ Mesure = $Mesure; Valeur = (Texte-Md $Valeur); Critere = (Texte-Md $Critere); Verdict = $Verdict })
-    Write-Host "  $Mesure : $Valeur$(if ($Verdict) { " [$Verdict]" })"
+    # Le journal du job est la seule lecture sûre (les artefacts peuvent ne pas être relus) :
+    # la ligne y porte aussi le critère.
+    Write-Host "  $Mesure : $Valeur$(if ($Critere) { " | critère : $Critere" })$(if ($Verdict) { " [$Verdict]" })"
 }
 
 function NonMesurable {
@@ -167,8 +169,17 @@ function Lancer-Pwsh {
 function Lire-Etat([string]$Fichier) {
     $t = @{}
     if (-not (Test-Path -LiteralPath $Fichier)) { return $t }
+    # Lu en partage complet (lecture, écriture, suppression) : l'écrivain remplace le fichier
+    # par renommage, ce qui échoue si un lecteur le tient sans FileShare.Delete (premier
+    # passage : exception dans la minuterie de la sentinelle, boîte « Unhandled exception »).
     $lignes = @()
-    try { $lignes = @(Get-Content -LiteralPath $Fichier -ErrorAction Stop) } catch { return $t }
+    try {
+        $fs = [System.IO.FileStream]::new($Fichier, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read,
+            [System.IO.FileShare]::ReadWrite -bor [System.IO.FileShare]::Delete)
+        try { $lu = [System.IO.StreamReader]::new($fs).ReadToEnd() } finally { $fs.Dispose() }
+        $lignes = @($lu -split "`r?`n")
+    }
+    catch { return $t }
     foreach ($l in $lignes) {
         $l = "$l".Trim()
         if (-not $l) { continue }
@@ -183,7 +194,11 @@ function Lire-Etat([string]$Fichier) {
 function Ecrire-Commande([string]$Fichier, [string]$Texte) {
     $tmp = "$Fichier.tmp"
     Set-Content -LiteralPath $tmp -Value $Texte -Encoding ascii
-    Move-Item -LiteralPath $tmp -Destination $Fichier -Force
+    for ($i = 0; $i -lt 20; $i++) {
+        try { [System.IO.File]::Move($tmp, $Fichier, $true); return }
+        catch { Start-Sleep -Milliseconds 25 }
+    }
+    throw "commande non écrite (fichier tenu) : $Fichier"
 }
 
 function Rect([string]$Texte) {
@@ -393,7 +408,8 @@ function Ouvrir-Cible {
     $script:Compteur++
     $nom = "$Genre-$($script:Compteur)"
     $c = [pscustomobject]@{ Genre = $Genre; Nom = $nom; Racine = [IntPtr]::Zero; Defile = [IntPtr]::Zero; Zone = $null
-        Bande = $false; Colonne = 1; Echelle = $Echelle; Contenu = 0; Processus = $null; Fermer = $null; Uia = $null; Info = '' }
+        Bande = $false; Colonne = 1; Echelle = $Echelle; Contenu = 0; Processus = $null; Fermer = $null; Uia = $null; Info = ''
+        Pids = [System.Collections.Generic.List[int]]::new() }
     if ($Genre -in 'wpf', 'winforms', 'molette') {
         $f = Fichier-Temp "temoin-$nom.txt"
         $a = @('-Genre', $Genre, '-X', $R[0], '-Y', $R[1], '-L', $R[2], '-H', $R[3], '-Fichier', "`"$f`"")
@@ -449,6 +465,54 @@ function Ouvrir-Cible {
         if ($null -eq $c.Zone) { throw 'Explorateur : liste des fichiers introuvable' }
         $c.Defile = $script:N::SousPoint((Centre $c.Zone)[0], (Centre $c.Zone)[1])
     }
+    elseif ($Genre -eq 'parametres') {
+        # L'app Paramètres (WinUI/XAML, hébergée par ApplicationFrameHost) sur la liste des
+        # applications installées, longue sur la machine de GitHub.
+        $exe = Join-Path $env:windir 'ImmersiveControlPanel\SystemSettings.exe'
+        if (-not (Test-Path -LiteralPath $exe)) { throw 'app Paramètres absente de la machine' }
+        foreach ($q in @(Get-Process -Name SystemSettings -ErrorAction SilentlyContinue)) { try { $q.Kill() } catch { } }
+        Start-Sleep -Milliseconds 500
+        Start-Process -FilePath 'explorer.exe' -ArgumentList 'ms-settings:appsfeatures'
+        $trouve = @{ Cadre = [IntPtr]::Zero; Contenu = [IntPtr]::Zero; Pid = 0 }
+        $ok = Attendre -DelaiS 30 -PasMs 300 -Condition {
+            $ps = @(Get-Process -Name SystemSettings -ErrorAction SilentlyContinue)
+            if ($ps.Count -eq 0) { return $false }
+            foreach ($h in $script:N::Fenetres(0)) {
+                if ($script:N::Classe($h) -ne 'ApplicationFrameWindow') { continue }
+                foreach ($f in $script:N::Filles($h)) {
+                    $pf = $script:N::Pid($f)
+                    if (@($ps | Where-Object { $_.Id -eq $pf }).Count -gt 0) { $trouve.Cadre = $h; $trouve.Contenu = $f; $trouve.Pid = $pf; return $true }
+                }
+            }
+            return $false
+        }
+        if (-not $ok) { throw 'Paramètres : fenêtre introuvable en 30 s' }
+        $c.Racine = $trouve.Cadre
+        $c.Defile = $trouve.Contenu
+        $c.Pids.Add($script:N::Pid($c.Racine)); $c.Pids.Add($trouve.Pid)
+        [void]$script:N::ShowWindow($c.Racine, 9)
+        [void]$script:N::MoveWindow($c.Racine, $R[0], $R[1], $R[2], $R[3], $true)
+        $cadre = $c.Racine; $pidP = $trouve.Pid; $NN = $script:N
+        $c.Fermer = {
+            try { [void]$NN::PostMessage($cadre, 0x10, [IntPtr]::Zero, [IntPtr]::Zero) } catch { }
+            Start-Sleep -Milliseconds 400
+            try { $q = [System.Diagnostics.Process]::GetProcessById($pidP); if (-not $q.HasExited) { $q.Kill() } } catch { }
+        }.GetNewClosure()
+        $script:Sonde.Fermer.Add($c.Fermer)
+        # La liste : le plus grand élément défilable de la fenêtre (attendu 15 s : la liste
+        # des applications se remplit après l'ouverture).
+        $z = @{ R = $null }
+        $null = Attendre -DelaiS 15 -PasMs 500 -Condition {
+            $u = Uia-Plus-Grand $c.Racine
+            if ($null -ne $u) { $b = $u.Current.BoundingRectangle; $z.R = [int[]]@([int]$b.X, [int]$b.Y, [int]$b.Width, [int]$b.Height); return $true }
+            return $false
+        }
+        if ($null -eq $z.R) { throw 'Paramètres : aucun élément défilable verticalement (UI Automation)' }
+        $c.Zone = $z.R
+        $c.Bande = $false
+        $c.Info = 'Paramètres (WinUI) : pas de bande, décalage mesuré sur les images'
+        $script:Sonde.Fermer.Remove($c.Fermer) | Out-Null
+    }
     else {
         $exe = Chemin-Navigateur $Genre
         if (-not $exe) { throw "$Genre absent de la machine" }
@@ -461,8 +525,14 @@ function Ouvrir-Cible {
                 '--no-first-run', '--no-default-browser-check', '--disable-sync', '--disable-extensions',
                 '--disable-background-networking', '--disable-component-update', '--disable-default-apps',
                 '--hide-crash-restore-bubble', '--disable-session-crashed-bubble', '--password-store=basic',
-                '--disable-features=msEdgeSidebarV2,msHubApps,msImplicitSignin,EdgeCollections,Translate')
+                '--disable-features=msEdgeSidebarV2,msHubApps,msImplicitSignin,EdgeCollections,Translate,msEdgeTranslate',
+                '--disable-translate', '--lang=en-US', '--force-color-profile=srgb')
             if ($Echelle -ne 1.0) { $a += "--force-device-scale-factor=$Echelle" }
+            # Traduction coupée aussi par la préférence du profil (premier passage : « Translate
+            # page from French? » devant Edge).
+            New-Item -ItemType Directory -Force -Path (Join-Path $profil 'Default') | Out-Null
+            Set-Content -LiteralPath (Join-Path $profil 'Default\Preferences') -Encoding ascii -Value '{"translate":{"enabled":false},"browser":{"has_seen_welcome_page":true},"translate_blocked_languages":["fr","en"]}'
+
             $c.Processus = Garder-Processus (Start-Process -FilePath $exe -ArgumentList $a -PassThru)
         }
         elseif ($Genre -eq 'firefox') {
@@ -470,7 +540,10 @@ function Ouvrir-Cible {
                 'user_pref("datareporting.policy.dataSubmissionEnabled", false);', 'user_pref("toolkit.telemetry.reportingpolicy.firstRun", false);',
                 'user_pref("browser.startup.homepage_override.mstone", "ignore");', 'user_pref("app.update.enabled", false);',
                 'user_pref("app.normandy.enabled", false);', 'user_pref("browser.tabs.warnOnClose", false);',
-                'user_pref("datareporting.healthreport.uploadEnabled", false);', 'user_pref("network.captive-portal-service.enabled", false);') |
+                'user_pref("datareporting.healthreport.uploadEnabled", false);', 'user_pref("network.captive-portal-service.enabled", false);',
+                'user_pref("gfx.color_management.mode", 0);', 'user_pref("browser.translations.enable", false);',
+                'user_pref("browser.translations.automaticallyPopup", false);', 'user_pref("trailhead.firstrun.didSeeAboutWelcome", true);',
+                'user_pref("browser.startup.page", 0);', 'user_pref("sidebar.revamp", false);') |
                 Set-Content -LiteralPath (Join-Path $profil 'user.js') -Encoding ascii
             $a = @('-no-remote', '-new-instance', '-profile', "`"$profil`"", '-width', $R[2], '-height', $R[3], "`"$url`"")
             $c.Processus = Garder-Processus (Start-Process -FilePath $exe -ArgumentList $a -PassThru)
@@ -485,8 +558,18 @@ function Ouvrir-Cible {
         $c.Racine = Trouver-Fenetre "Longue page BreezyShot $nom h=" 30
         if ($c.Racine -eq [IntPtr]::Zero) { throw "$Genre : fenêtre de la page introuvable en 30 s" }
         $pidFenetre = $script:N::Pid($c.Racine)
+        $c.Pids.Add($pidFenetre)
         [void]$script:N::MoveWindow($c.Racine, $R[0], $R[1], $R[2], $R[3], $true)
         Start-Sleep -Milliseconds 1500
+        # Bulles et invites du navigateur (traduction, bienvenue…) : d'autres fenêtres de
+        # premier niveau du même processus ; fermées et dites.
+        $bulles = [System.Collections.Generic.List[string]]::new()
+        foreach ($h in $script:N::Fenetres($pidFenetre)) {
+            if ($h -eq $c.Racine) { continue }
+            $bulles.Add($script:N::Decrire($h))
+            [void]$script:N::PostMessage($h, 0x10, [IntPtr]::Zero, [IntPtr]::Zero)
+        }
+        if ($bulles.Count -gt 0) { Write-Host "  note : $Genre : fenêtres en plus fermées : $($bulles -join ' ; ')"; Start-Sleep -Milliseconds 300 }
         $proc = $c.Processus; $racine = $c.Racine; $NN = $script:N
         $c.Fermer = {
             try { [void]$NN::PostMessage($racine, 0x10, [IntPtr]::Zero, [IntPtr]::Zero) } catch { }
@@ -505,11 +588,47 @@ function Ouvrir-Cible {
         $c.Contenu = 0
         $img = Prendre $c.Zone
         $col = $script:N::ColonneBande($img, $c.Zone[2], $c.Zone[3], 24, 0, [math]::Min(200, $c.Zone[3]))
-        if ($col -lt 0) { $c.Bande = $false; $c.Info = 'bande de la page illisible : décalage mesuré sur les images seulement' }
+        if ($col -lt 0) {
+            $c.Bande = $false
+            $y0 = [math]::Min([math]::Max(0, $c.Zone[3] - 1), [int](80 * $Echelle))
+            $c.Info = "bande de la page illisible : décalage mesuré sur les images seulement ; couleurs RRVVBB lues aux colonnes 0, 3, 6, lignes $y0 à $($y0 + 3) : $($script:N::Pixels($img, $c.Zone[2], 0, $y0, 4)) / $($script:N::Pixels($img, $c.Zone[2], 3, $y0, 4)) / $($script:N::Pixels($img, $c.Zone[2], 6, $y0, 4)) (attendu : la marque de natif.cs CouleurLigne, V entre 40 et 7F, B entre A0 et AF)"
+        }
         else { $c.Colonne = $col + [math]::Max(1, [int][math]::Floor($Echelle * 2)) }
     }
+    if ($c.Pids.Count -eq 0 -and $c.Racine -ne [IntPtr]::Zero) { $c.Pids.Add($script:N::Pid($c.Racine)) }
     $script:Sonde.Fermer.Add($c.Fermer)
     return $c
+}
+
+# '' si le centre de la zone est bien sur la cible (fenêtre de premier niveau de la cible,
+# ou fenêtre d'un de ses processus) ; sinon la description de la fenêtre qui la couvre.
+function Devant($C, [int[]]$Point = $null) {
+    $pt = if ($null -ne $Point) { $Point } else { Centre $C.Zone }
+    $h = $script:N::SousPoint($pt[0], $pt[1])
+    $r = $script:N::GetAncestor($h, 2)
+    if ($r -eq $C.Racine) { return '' }
+    if ($C.Pids -contains $script:N::Pid($h)) { return '' }
+    return "$($script:N::Decrire($r)) au point $($pt[0]),$($pt[1])"
+}
+
+# Comme Devant, mais essaie d'abord de remettre la cible au premier plan (sauf -SansPremierPlan).
+function Degager($C, [switch]$SansPremierPlan) {
+    $d = Devant $C
+    if (-not $d -or $SansPremierPlan) { return $d }
+    [void]$script:N::PremierPlan($C.Racine)
+    Start-Sleep -Milliseconds 150
+    return (Devant $C)
+}
+
+# Écrit dans le journal toutes les fenêtres visibles d'autres processus que la sonde qui
+# couvrent le centre de la zone (pour dire ce qui gêne).
+function Noter-Obstacles($C) {
+    $pt = Centre $C.Zone
+    foreach ($h in $script:N::Fenetres(0)) {
+        if ($h -eq $C.Racine) { break }
+        $b = $script:N::Bord($h)
+        if ($pt[0] -ge $b.Left -and $pt[0] -lt $b.Right -and $pt[1] -ge $b.Top -and $pt[1] -lt $b.Bottom) { Note "au-dessus de la cible $($C.Genre) : $($script:N::Decrire($h)) ($($b.Left),$($b.Top) → $($b.Right),$($b.Bottom))" }
+    }
 }
 
 function Fermer-Cible($C) {
@@ -537,25 +656,77 @@ function Zone-Uia([IntPtr]$Racine, [string]$Classe = '', [string]$Type = '') {
     catch { return $null }
 }
 
-# L'élément qui défile sous le centre de la zone (lui ou un parent avec ScrollPattern
-# défilable verticalement) : { Element, Motif } ou $null.
-function Uia-Defilable($C) {
+# Le plus grand élément de la fenêtre $Racine qui défile verticalement (ou $null).
+function Uia-Plus-Grand([IntPtr]$Racine) {
+    $AE = [System.Windows.Automation.AutomationElement]
+    $SP = [System.Windows.Automation.ScrollPattern]
     try {
-        $AE = [System.Windows.Automation.AutomationElement]
-        $SP = [System.Windows.Automation.ScrollPattern]
-        $pt = Centre $C.Zone
-        $e = $AE::FromPoint([System.Windows.Point]::new($pt[0], $pt[1]))
-        $marche = [System.Windows.Automation.TreeWalker]::RawViewWalker
-        for ($i = 0; $i -lt 40 -and $null -ne $e; $i++) {
+        $cond = [System.Windows.Automation.PropertyCondition]::new($AE::IsScrollPatternAvailableProperty, $true)
+        $meilleur = $null; $aire = 0.0
+        foreach ($x in @($AE::FromHandle($Racine).FindAll([System.Windows.Automation.TreeScope]::Descendants, $cond))) {
             $m = $null
-            if ($e.TryGetCurrentPattern($SP::Pattern, [ref]$m)) {
-                if ($m.Current.VerticallyScrollable) { return [pscustomobject]@{ Element = $e; Motif = $m } }
+            if (-not $x.TryGetCurrentPattern($SP::Pattern, [ref]$m) -or -not $m.Current.VerticallyScrollable) { continue }
+            $b = $x.Current.BoundingRectangle
+            if ($b.IsEmpty) { continue }
+            if ($b.Width * $b.Height -gt $aire) { $aire = $b.Width * $b.Height; $meilleur = $x }
+        }
+        return $meilleur
+    }
+    catch { return $null }
+}
+
+# Une recherche : sous le centre de la zone (l'élément ou un parent avec un ScrollPattern,
+# s'il est d'un processus de la cible), sinon depuis la fenêtre de la cible (le plus grand
+# élément défilable dont le rectangle contient le centre).
+function Uia-Chercher($C, [bool]$Tous) {
+    $AE = [System.Windows.Automation.AutomationElement]
+    $SP = [System.Windows.Automation.ScrollPattern]
+    $pt = Centre $C.Zone
+    $wp = [System.Windows.Point]::new($pt[0], $pt[1])
+    try {
+        $e = $AE::FromPoint($wp)
+        if ($null -ne $e -and ($C.Pids.Count -eq 0 -or $C.Pids -contains $e.Current.ProcessId)) {
+            $marche = [System.Windows.Automation.TreeWalker]::RawViewWalker
+            for ($i = 0; $i -lt 40 -and $null -ne $e; $i++) {
+                $m = $null
+                if ($e.TryGetCurrentPattern($SP::Pattern, [ref]$m) -and ($Tous -or $m.Current.VerticallyScrollable)) {
+                    return [pscustomobject]@{ Element = $e; Motif = $m; Par = 'sous le centre'; Ms = 0.0 }
+                }
+                $e = $marche.GetParent($e)
             }
-            $e = $marche.GetParent($e)
         }
     }
     catch { }
+    try {
+        $cond = [System.Windows.Automation.PropertyCondition]::new($AE::IsScrollPatternAvailableProperty, $true)
+        $meilleur = $null; $motif = $null; $aire = 0.0
+        foreach ($x in @($AE::FromHandle($C.Racine).FindAll([System.Windows.Automation.TreeScope]::Descendants, $cond))) {
+            $m = $null
+            if (-not $x.TryGetCurrentPattern($SP::Pattern, [ref]$m)) { continue }
+            if (-not $Tous -and -not $m.Current.VerticallyScrollable) { continue }
+            $b = $x.Current.BoundingRectangle
+            if ($b.IsEmpty -or -not $b.Contains($wp)) { continue }
+            if ($b.Width * $b.Height -gt $aire) { $aire = $b.Width * $b.Height; $meilleur = $x; $motif = $m }
+        }
+        if ($null -ne $meilleur) { return [pscustomobject]@{ Element = $meilleur; Motif = $motif; Par = 'depuis la fenêtre'; Ms = 0.0 } }
+    }
+    catch { }
     return $null
+}
+
+# L'élément qui défile pour la cible (ScrollPattern défilable verticalement ; -Tous : même
+# non défilable, pour une page courte) : { Element, Motif, Par, Ms } ou $null. Une seule
+# fonction pour tous les scripts. Chromium n'ouvre son arbre d'accessibilité qu'à la
+# première demande et le rend 0,3 à 0,4 s plus tard (premier passage) : la recherche est
+# répétée toutes les 150 ms jusqu'à AttenteMs ; Ms dit quand elle a abouti.
+function Uia-Defilable($C, [int]$AttenteMs = 2500, [switch]$Tous) {
+    $chrono = [System.Diagnostics.Stopwatch]::StartNew()
+    while ($true) {
+        $u = Uia-Chercher $C ([bool]$Tous)
+        if ($null -ne $u) { $u.Ms = $chrono.Elapsed.TotalMilliseconds; return $u }
+        if ($chrono.Elapsed.TotalMilliseconds -ge $AttenteMs) { return $null }
+        Start-Sleep -Milliseconds 150
+    }
 }
 
 function Uia-Pourcent($U) {
@@ -690,28 +861,61 @@ function Suite([string]$Cas, $C, [int]$N, [scriptblock]$Pas, [switch]$Lissage) {
     return $images
 }
 
+# Un pas de suite par la molette (pages web sans ScrollPattern) : $Crans crans au centre,
+# si rien ne couvre la cible.
+function Pas-Molette($C, [int]$Crans = 3) {
+    $d = Devant $C
+    if ($d) { throw "molette sautée : $d" }
+    $pt = Centre $C.Zone
+    $script:N::Poser($pt[0], $pt[1])
+    for ($i = 0; $i -lt $Crans; $i++) { [void]$script:N::Molette(-1, $script:N::MARQUE); Start-Sleep -Milliseconds 20 }
+}
+
 # Égalité au bit près des lignes de deux images successives, décalées du décalage trouvé
-# sur les images (et comparé au décalage vrai de la bande quand il est lisible).
+# sur les images (et comparé au décalage vrai de la bande quand il est lisible) ; tout le
+# résumé est écrit dans le journal (les PNG peuvent ne pas être relus) : nombre d'images,
+# pas vrai, paires égales au bit près, et pour les autres combien de pixels diffèrent et où
+# (une ou deux lignes, un bord, une zone, tout le texte), avec l'écart maximal par canal.
 function Mesure-Suite([string]$Cas, $C, $Images, [int]$Haut) {
     $l = $C.Zone[2]; $h = $C.Zone[3]
-    $paires = 0; $exactes = 0; $tol = 0; $accord = 0; $avecBande = 0; $lignesEx = 0L; $lignesTol = 0L; $lignesTot = 0L; $pixEx = 0L; $pixTot = 0L
+    $paires = 0; $exactes = 0; $tol = 0; $accord = 0; $avecBande = 0; $lignesEx = 0L; $lignesTot = 0L; $pixEx = 0L; $pixTot = 0L
+    $vrais = [System.Collections.Generic.List[double]]::new()
+    $diffs = [System.Collections.Generic.List[double]]::new(); $touchees = [System.Collections.Generic.List[double]]::new()
+    $ecartMax = 0; $plus8 = 0L; $genres = [ordered]@{ 'une ou deux lignes' = 0; 'bord (4 premières ou dernières lignes)' = 0; 'une zone (< 30 % des lignes)' = 0; 'tout le texte (≥ 30 % des lignes)' = 0 }
+    $detail = [System.Collections.Generic.List[string]]::new()
+    $immobiles = 0
     for ($i = 1; $i -lt $Images.Count; $i++) {
         $a = $Images[$i - 1]; $b = $Images[$i]
         $d = $script:N::Decalage($a.O, $b.O, $l, $h, 0, [math]::Max(1, $l - 24), [math]::Max(1, $h - 40))
-        if ($d[0] -eq 0) { continue }
+        $vrai = [double]::NaN
+        if ($null -ne $a.Bande -and $null -ne $b.Bande) { $vrai = (($b.Bande[0] + $b.Bande[1]) - ($a.Bande[0] + $a.Bande[1])) / 2; $vrais.Add($vrai) }
+        if ($d[0] -eq 0) { $immobiles++; continue }
         $paires++
-        if ($null -ne $a.Bande -and $null -ne $b.Bande) {
+        if (-not [double]::IsNaN($vrai)) {
             $avecBande++
-            $vrai = (($b.Bande[0] + $b.Bande[1]) - ($a.Bande[0] + $a.Bande[1])) / 2
             if ([math]::Abs($vrai - $d[0]) -le ($C.Echelle - 1 + 0.5)) { $accord++ }
         }
         $r = $script:N::Comparer($a.O, $b.O, $l, $h, $d[0], $Haut, $h, 0, [math]::Max(1, $l - 24))
-        $lignesEx += $r[0]; $lignesTol += $r[1]; $lignesTot += $r[2]; $pixEx += $r[3]; $pixTot += $r[5]
-        if ($r[2] -gt 0 -and $r[0] -eq $r[2]) { $exactes++ }
+        $lignesEx += $r[0]; $lignesTot += $r[2]; $pixEx += $r[3]; $pixTot += $r[5]
         if ($r[2] -gt 0 -and $r[1] * 100 -ge $r[2] * 97) { $tol++ }
+        $p = $script:N::Repartition($a.O, $b.O, $l, $h, $d[0], $Haut, $h, 0, [math]::Max(1, $l - 24))
+        $vu = if ([double]::IsNaN($vrai)) { '?' } else { '{0:0.##}' -f $vrai }
+        if ($r[2] -gt 0 -and $p[0] -eq 0) { $exactes++; $detail.Add("$($i):d=$($d[0])/vrai=$vu/égale"); continue }
+        $diffs.Add([double]$p[0]); $touchees.Add([double]$p[1] / [math]::Max(1, $p[10]))
+        $ecartMax = [math]::Max($ecartMax, [int]$p[8]); $plus8 += $p[9]
+        $g = if ($p[1] -le 2) { 'une ou deux lignes' } elseif ($p[11] * 2 -ge $p[0]) { 'bord (4 premières ou dernières lignes)' } elseif ($p[1] * 10 -lt $p[10] * 3) { 'une zone (< 30 % des lignes)' } else { 'tout le texte (≥ 30 % des lignes)' }
+        $genres[$g]++
+        $detail.Add("$($i):d=$($d[0])/vrai=$vu/$($p[0]) px sur $($p[1]) lignes ($($p[2]) groupes, x $($p[4])-$($p[6]), y $($p[5])-$($p[7]), écart max $($p[8]))")
     }
+    $pasVrai = if ($vrais.Count -gt 0) { $v = $vrais.ToArray(); "pas vrai (bande) médiane $('{0:0.##}' -f (Mediane $v)) px, de $('{0:0.##}' -f ($v | Measure-Object -Minimum).Minimum) à $('{0:0.##}' -f ($v | Measure-Object -Maximum).Maximum)" } else { 'pas vrai non lu (pas de bande)' }
+    Resultat "$Cas : suite" "$($Images.Count) images de $l × $h ; $pasVrai ; paires immobiles $immobiles" 'à lire' 'à lire'
     if ($paires -eq 0) { NonMesurable "$Cas : égalité au bit près" 'aucune paire d''images décalées'; return }
-    Resultat "$Cas : paires au bit près" "$exactes/$paires paires entièrement égales une fois décalées ; lignes égales $('{0:P2}' -f ($lignesEx / [math]::Max(1, $lignesTot))) ; pixels égaux $('{0:P3}' -f ($pixEx / [math]::Max(1, $pixTot)))" 'chantier C : décalage exact sur 100 % des images WPF, ≥ 99 % des images Edge' 'à lire'
+    Resultat "$Cas : paires au bit près" "$exactes/$paires paires entièrement égales une fois décalées (sous les $Haut premières lignes, sans les 24 colonnes de droite) ; lignes égales $('{0:P2}' -f ($lignesEx / [math]::Max(1, $lignesTot))) ; pixels égaux $('{0:P3}' -f ($pixEx / [math]::Max(1, $pixTot)))" 'chantier C : décalage exact sur 100 % des images WPF, ≥ 99 % des images Edge' 'à lire'
+    if ($diffs.Count -gt 0) {
+        $dv = $diffs.ToArray(); $tv = $touchees.ToArray()
+        Resultat "$Cas : pixels différents des $($diffs.Count) paires non égales" "médiane $([int](Mediane $dv)) px (max $([int](($dv | Measure-Object -Maximum).Maximum))) ; lignes touchées médiane $('{0:P1}' -f (Mediane $tv)) ; écart maximal sur un canal $ecartMax ; pixels à plus de ± 8 : $plus8 ; où : $(($genres.Keys | ForEach-Object { "$_ $($genres[$_])" }) -join ', ')" 'à lire : la tolérance que l''algorithme devra avoir' 'à lire'
+    }
     Resultat "$Cas : paires à la tolérance de D12" "$tol/$paires (97 % des lignes égales à ± 8 sur 90 % des pixels)" 'à lire' 'à lire'
     if ($avecBande -gt 0) { Resultat "$Cas : décalage des images contre le vrai (bande)" "$accord/$avecBande d'accord" 'tous' (Verdict ($accord -eq $avecBande)) }
+    Note "$Cas, paire par paire (i:d images/vrai/différences) : $(($detail | Select-Object -First 50) -join ' ; ')"
 }

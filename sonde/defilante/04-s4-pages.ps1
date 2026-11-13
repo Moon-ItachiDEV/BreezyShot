@@ -57,7 +57,7 @@ function Moyen2([IntPtr[]]$Fenetres) {
         if ($meilleure -ne [IntPtr]::Zero) {
             $r = [BreezyShotSonde.Natif+RECT]::new()
             [void]$script:N::GetWindowRect($meilleure, [ref]$r)
-            $rects.Add([pscustomobject]@{ R = [int[]]@($r.Left, $r.Top, $r.Right - $r.Left, $r.Bottom - $r.Top); F = $h; Quoi = $script:N::Classe($meilleure) })
+            $rects.Add([pscustomobject]@{ R = [int[]]@($r.Left, $r.Top, ($r.Right - $r.Left), ($r.Bottom - $r.Top)); F = $h; Quoi = $script:N::Classe($meilleure) })
         }
     }
     return [pscustomobject]@{ Ms = $chrono.Elapsed.TotalMilliseconds; Rects = $rects; Erreurs = 0 }
@@ -84,7 +84,7 @@ if (Demarrer-Sonde -Nom 's4' -Titre 'S4 : trouver la page sous un clic' -QuotaMo
                     foreach ($h in $script:N::Filles($c.Racine)) {
                         if ($script:N::Classe($h) -eq 'SHELLDLL_DefView') {
                             $r = [BreezyShotSonde.Natif+RECT]::new(); [void]$script:N::GetWindowRect($h, [ref]$r)
-                            $v = [int[]]@($r.Left, $r.Top, $r.Right - $r.Left, $r.Bottom - $r.Top); break
+                            $v = [int[]]@($r.Left, $r.Top, ($r.Right - $r.Left), ($r.Bottom - $r.Top)); break
                         }
                     }
                 }
@@ -143,6 +143,7 @@ if (Demarrer-Sonde -Nom 's4' -Titre 'S4 : trouver la page sous un clic' -QuotaMo
         else { NonMesurable 'ElementFromPoint' 'Edge absent' }
         Note 'Critère : moyen 1 si la liste est prête en moins de 300 ms après la photo et juste à 2 px près sur Edge, Explorateur et les témoins ; sinon 2 puis 1 en complément. Liste vide ou en retard : le clic ne vise rien et la sélection continue (D3).'
         Note 'Le vrai rectangle de l''Explorateur est pris comme la vue SHELLDLL_DefView (en-têtes de colonnes compris) : un écart de la hauteur de l''en-tête est à lire, pas un échec du moyen.'
+        Note 'Le vrai rectangle des témoins est leur zone sans la barre de défilement ; UI Automation rend le ScrollViewer WPF barre comprise (premier passage : 17 px d''écart à droite) : à lire, pas un faux candidat.'
         try { $fige.Kill($true) } catch { }
         foreach ($c in $cibles) { Fermer-Cible $c }
     }

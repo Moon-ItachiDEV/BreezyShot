@@ -11,10 +11,16 @@
 # longue.html, sinon décalage des lignes de deux images ; UI Automation quand elle existe),
 # pixels par commande, temps jusqu'à une image stable (lissage), une sentinelle (deux
 # fenêtres, à côté et sous la cible) a-t-elle bougé ; puis 10 commandes cible en arrière-plan
-# (moyens 1a, 2, 3, 4a), et la molette avec « Faire défiler les fenêtres inactives » coupé
+# (moyens 1a et 2), et la molette avec « Faire défiler les fenêtres inactives » coupé
 # (réglage remis à la fin). Avec Edge : UI Automation dès la première demande ?
 # Pendant les moyens 1, 3, 4 et 5, le pointeur est posé sur la sentinelle (un message mal
 # routé vers la fenêtre sous le pointeur s'y verrait).
+# Cibles : témoins WPF, WinForms et « molette seule », Edge, Chrome, Explorateur, l'app
+# Paramètres (WinUI), Firefox et Electron s'ils sont là.
+# Avant chaque série, la sonde vérifie que le centre de la zone est bien sur la cible ;
+# sinon la série est « non mesurable » avec la fenêtre qui la couvre (premier passage : une
+# boîte d'exception WinForms couvrait les cibles). La molette (2) ne saute une commande
+# que si le point n'est pas sur la cible après une remise au premier plan, et dit pourquoi.
 #   pwsh -NoProfile -File sonde/defilante/02-s1-defiler.ps1
 
 . "$PSScriptRoot/commun.ps1"
@@ -33,7 +39,7 @@ $MOYENS = [ordered]@{
 }
 
 # Envoie une commande ; rend '' si elle est partie, sinon « saute : … » ou « erreur : … ».
-function Commande($C, [string]$Moyen) {
+function Commande($C, [string]$Moyen, [bool]$ArrierePlan = $false) {
     $pt = Centre $C.Zone
     switch -Regex ($Moyen) {
         '^1' {
@@ -52,8 +58,10 @@ function Commande($C, [string]$Moyen) {
             catch { return "erreur : $($_.Exception.GetType().Name) $($_.Exception.Message)" }
         }
         '^2$' {
-            $racine = $script:N::RacineSousPoint($pt[0], $pt[1])
-            if ($racine -ne $C.Racine) { return "saute : sous le point $($script:N::Decrire($racine))" }
+            # Au premier plan, une cible couverte est d'abord remontée ; en arrière-plan, non
+            # (ce serait changer ce qu'on mesure).
+            $d = Degager $C -SansPremierPlan:$ArrierePlan
+            if ($d) { return "saute : sous le point $d" }
             $script:N::Poser($pt[0], $pt[1])
             if ($script:N::Molette(-1, $script:N::MARQUE) -ne 1) { return 'erreur : SendInput refusé' }
             return ''
@@ -92,7 +100,7 @@ function Ramener-EnHaut($C) {
             'winforms' { [void]$script:N::PosterDefilement($C.Defile, 6) }
             'molette' { for ($i = 0; $i -lt 150; $i++) { [void]$script:N::PosterMolette($C.Defile, 1, $pt[0], $pt[1]) } }
             default {
-                if ($script:N::RacineSousPoint($pt[0], $pt[1]) -eq $C.Racine) {
+                if (-not (Devant $C)) {
                     $script:N::Poser($pt[0], $pt[1])
                     for ($i = 0; $i -lt 60; $i++) { [void]$script:N::Molette(5, $script:N::MARQUE); Start-Sleep -Milliseconds 5 }
                 }
@@ -111,8 +119,12 @@ function Ramener-EnHaut($C) {
 function Serie($C, $S, [string]$Moyen, [int]$N, [switch]$ArrierePlan) {
     $r = [pscustomobject]@{ Moyen = $Moyen; Envoyees = 0; Bouge = 0; Immobile = 0; Recul = 0; Bas = 0; Sautees = 0
         Erreurs = [System.Collections.Generic.List[string]]::new(); Px = [System.Collections.Generic.List[double]]::new()
-        Lissage = [System.Collections.Generic.List[double]]::new(); Instables = 0; Sentinelle = ''; UiaSuit = 'sans UI Automation'; Par = ''; PremierPlan = '' }
+        Lissage = [System.Collections.Generic.List[double]]::new(); Instables = 0; Sentinelle = ''; UiaSuit = 'sans UI Automation'; Par = ''; PremierPlan = ''
+        Obstacle = '' }
     if ($Moyen -like '1*' -and $null -eq $C.Uia) { $r.Erreurs.Add('pas de ScrollPattern'); return $r }
+    # Rien ne doit couvrir la cible (au premier plan, elle est d'abord remontée).
+    $d = Degager $C -SansPremierPlan:$ArrierePlan
+    if ($d) { $r.Obstacle = $d; Noter-Obstacles $C; return $r }
     $haut = Ramener-EnHaut $C
     if (-not $haut) { $r.Erreurs.Add('remise en haut non vérifiée') }
     $sp = Centre $S.Zone
@@ -129,11 +141,14 @@ function Serie($C, $S, [string]$Moyen, [int]$N, [switch]$ArrierePlan) {
         $essais++
         if ($ArrierePlan -and $script:N::GetForegroundWindow() -eq $C.Racine) { $r.PremierPlan = 'la cible a repris le premier plan' }
         $chrono = [System.Diagnostics.Stopwatch]::StartNew()
-        $e = Commande $C $Moyen
+        $e = Commande $C $Moyen ([bool]$ArrierePlan)
         if ($e -like 'saute*') { $r.Sautees++; $r.Envoyees++; $r.Erreurs.Add($e); continue }
         if ($e) { $r.Erreurs.Add($e); $r.Envoyees++; continue }
         $st = Attendre-Stable $C 900 $chrono
         if (-not $st.Stable) { $r.Instables++ }
+        # Page jamais stable (animation sans bande lisible : Firefox au premier passage) : la
+        # série s'arrête après 5 commandes, non mesurable plutôt que 30 × 900 ms perdues.
+        if ($r.Instables -ge 5 -and $r.Bouge -eq 0 -and $r.Envoyees -lt 6) { $r.Obstacle = "page jamais stable en 900 ms sur 5 commandes (animation sans bande lisible ?)"; break }
         $m = Mouvement $C $img $st.Image
         $r.Par = $m.Par
         if (-not [double]::IsNaN($m.Px) -and $m.Px -gt 0.5) { $r.Bouge++; $r.Px.Add($m.Px); $r.Lissage.Add($st.Ms); $r.Envoyees++; $img = $st.Image }
@@ -158,6 +173,8 @@ function Serie($C, $S, [string]$Moyen, [int]$N, [switch]$ArrierePlan) {
 }
 
 function Resume-Serie($R, [int]$N) {
+    if ($R.Obstacle -like 'page jamais stable*') { return "non mesurable : $($R.Obstacle)" }
+    if ($R.Obstacle) { return "non mesurable : la cible est couverte par $($R.Obstacle)" }
     if ($R.Envoyees -eq 0) { return "aucune commande partie ($(($R.Erreurs | Select-Object -Unique) -join ' ; '))" }
     $px = $R.Px.ToArray(); $li = $R.Lissage.ToArray()
     $t = "bougé $($R.Bouge)/$($R.Envoyees)"
@@ -165,7 +182,7 @@ function Resume-Serie($R, [int]$N) {
     if ($li.Count -gt 0) { $t += " ; stable après $(Ms (Mediane $li)) (max $(Ms (($li | Measure-Object -Maximum).Maximum)))" }
     if ($R.Immobile) { $t += " ; immobile $($R.Immobile)" }
     if ($R.Recul) { $t += " ; à l'envers $($R.Recul)" }
-    if ($R.Sautees) { $t += " ; sautées (garde) $($R.Sautees)" }
+    if ($R.Sautees) { $t += " ; sautées (garde) $($R.Sautees) : $((@($R.Erreurs | Where-Object { $_ -like 'saute*' } | Select-Object -Unique -First 2)) -join ' ; ')" }
     if ($R.Bas) { $t += " ; bas atteint $($R.Bas) fois" }
     if ($R.Instables) { $t += " ; jamais stable en 900 ms : $($R.Instables)" }
     $t += " ; sentinelle $($R.Sentinelle) ; $($R.UiaSuit)"
@@ -178,6 +195,14 @@ function Resume-Serie($R, [int]$N) {
 function Passe($R, [int]$N) {
     $seuil = [math]::Ceiling($N * 29 / 30)
     return ($R.Envoyees -ge $N -and $R.Bouge -ge $seuil -and $R.Sentinelle -eq 'immobile')
+}
+
+# « passe », « échoue », ou « non mesurable » quand la cible était couverte ou que des
+# commandes ont été sautées par la garde (ce n'est pas une mesure négative).
+function Verdict-Serie($R, [int]$N) {
+    if (Passe $R $N) { return 'passe' }
+    if ($R.Obstacle -or $R.Sautees -gt 0) { return 'non mesurable' }
+    return 'échoue'
 }
 
 if (Demarrer-Sonde -Nom 's1' -Titre 'S1 : faire défiler la fenêtre d''une autre app' -QuotaMo 2) {
@@ -195,14 +220,16 @@ if (Demarrer-Sonde -Nom 's1' -Titre 'S1 : faire défiler la fenêtre d''une autr
             $c = $null
             try {
                 $c = Ouvrir-Cible $g
+                $d = Degager $c
+                if ($d) { NonMesurable "$g : première demande" "cible couverte par $d"; continue }
                 $chrono = [System.Diagnostics.Stopwatch]::StartNew()
-                $u = Uia-Defilable $c
+                $u = Uia-Defilable $c 0
                 $premier = $chrono.Elapsed.TotalMilliseconds
-                if ($null -ne $u) { Resultat "$g : ScrollPattern à la première demande" "trouvé en $(Ms $premier)" 'trouvé dès la première demande' 'passe' }
+                if ($null -ne $u) { Resultat "$g : ScrollPattern à la première demande" "trouvé en $(Ms $premier) ($($u.Par))" 'trouvé dès la première demande' 'passe' }
                 else {
-                    $ok = Attendre -DelaiS 8 -PasMs 250 -Condition { $null -ne (Uia-Defilable $c) }
+                    $u = Uia-Defilable $c 8000
                     $t = $chrono.Elapsed.TotalMilliseconds
-                    Resultat "$g : ScrollPattern à la première demande" $(if ($ok) { "absent à la première demande ($(Ms $premier)), trouvé après $(Ms $t)" } else { "absent pendant $(Ms $t)" }) 'trouvé dès la première demande' 'échoue'
+                    Resultat "$g : ScrollPattern à la première demande" $(if ($null -ne $u) { "absent à la première demande ($(Ms $premier)), trouvé après $(Ms $t) ($($u.Par))" } else { "absent pendant $(Ms $t)" }) 'trouvé dès la première demande (sinon : attendre, comme Uia-Defilable)' 'échoue'
                 }
             }
             catch { NonMesurable "$g : première demande" $_.Exception.Message }
@@ -210,25 +237,29 @@ if (Demarrer-Sonde -Nom 's1' -Titre 'S1 : faire défiler la fenêtre d''une autr
         }
 
         $bilan = [ordered]@{}
-        $cibles = 'wpf', 'winforms', 'molette', 'edge', 'chrome', 'explorateur', 'firefox', 'electron'
+        $cibles = 'wpf', 'winforms', 'molette', 'edge', 'chrome', 'explorateur', 'parametres', 'firefox', 'electron'
         foreach ($g in $cibles) {
             Section "S1 : cible $g"
             $c = $null
             try { $c = Ouvrir-Cible $g } catch { NonMesurable "cible $g" $_.Exception.Message; $bilan[$g] = 'absente'; continue }
             try {
                 if ($c.Info) { Note $c.Info }
+                $obstacle = Degager $c
+                if ($obstacle) { Noter-Obstacles $c }
                 $c.Uia = Uia-Defilable $c
-                Note "zone $(Rect-Texte $c.Zone) ; fenêtre sous le point : $($script:N::Decrire($script:N::SousPoint((Centre $c.Zone)[0], (Centre $c.Zone)[1]))) ; ScrollPattern : $(if ($null -ne $c.Uia) { "oui ($($c.Uia.Element.Current.ClassName), vue $('{0:0.#}' -f $c.Uia.Motif.Current.VerticalViewSize) %)" } else { 'non' }) ; décalage lu $(if ($c.Bande) { 'sur la bande' } else { 'sur les images' })"
+                Note "zone $(Rect-Texte $c.Zone) ; fenêtre sous le point : $($script:N::Decrire($script:N::SousPoint((Centre $c.Zone)[0], (Centre $c.Zone)[1])))$(if ($obstacle) { " (COUVERTE : $obstacle)" }) ; ScrollPattern : $(if ($null -ne $c.Uia) { "oui ($($c.Uia.Element.Current.ClassName), vue $('{0:0.#}' -f $c.Uia.Motif.Current.VerticalViewSize) %, $($c.Uia.Par), trouvé en $(Ms $c.Uia.Ms))" } else { 'non (cherché 2,5 s sous le centre et depuis la fenêtre)' }) ; décalage lu $(if ($c.Bande) { 'sur la bande' } else { 'sur les images' })"
                 $retenus = [System.Collections.Generic.List[string]]::new()
                 foreach ($m in $MOYENS.Keys) {
                     $r = Serie $c $sent $m $N_COMMANDES
                     $ok = Passe $r $N_COMMANDES
                     if ($ok) { $retenus.Add($m) }
-                    Resultat "$g · $m $($MOYENS[$m])" (Resume-Serie $r $N_COMMANDES) "≥ 29/30, sentinelle immobile" (Verdict $ok)
+                    Resultat "$g · $m $($MOYENS[$m])" (Resume-Serie $r $N_COMMANDES) "≥ 29/30, sentinelle immobile" (Verdict-Serie $r $N_COMMANDES)
                 }
-                foreach ($m in '1a', '2', '3', '4a') {
+                # En arrière-plan : les deux moyens que l'app garderait (1a, 2) ; 3 et 4 ne
+                # bougent aucune cible au premier plan au premier passage (allégé pour le temps).
+                foreach ($m in '1a', '2') {
                     $r = Serie $c $sent $m $N_VARIANTE -ArrierePlan
-                    Resultat "$g · $m en arrière-plan" (Resume-Serie $r $N_VARIANTE) "≥ 10/10, sentinelle immobile" (Verdict (Passe $r $N_VARIANTE))
+                    Resultat "$g · $m en arrière-plan" (Resume-Serie $r $N_VARIANTE) "≥ 10/10, sentinelle immobile" (Verdict-Serie $r $N_VARIANTE)
                 }
                 # « Faire défiler les fenêtres inactives » coupé.
                 if ($routageInitial -lt 0) { NonMesurable "$g · 2 survol coupé" "routage illisible ($routageInitial)" }
@@ -237,7 +268,7 @@ if (Demarrer-Sonde -Nom 's1' -Titre 'S1 : faire défiler la fenêtre d''une autr
                     if ($lu -ne 0) { NonMesurable "$g · 2 survol coupé" "SPI_SETMOUSEWHEELROUTING sans effet (relu $lu)" }
                     else {
                         $r = Serie $c $sent '2' $N_VARIANTE
-                        Resultat "$g · 2 survol coupé, cible au premier plan" (Resume-Serie $r $N_VARIANTE) '≥ 10/10' (Verdict (Passe $r $N_VARIANTE))
+                        Resultat "$g · 2 survol coupé, cible au premier plan" (Resume-Serie $r $N_VARIANTE) '≥ 10/10' (Verdict-Serie $r $N_VARIANTE)
                         $r = Serie $c $sent '2' $N_VARIANTE -ArrierePlan
                         Resultat "$g · 2 survol coupé, cible en arrière-plan" (Resume-Serie $r $N_VARIANTE) 'à lire (attendu : la molette va au premier plan, la sentinelle bouge)' 'à lire'
                     }

@@ -64,7 +64,14 @@ pub fn ecrire_etat(chemin: &Path, lignes: &[String]) {
     let mut texte = lignes.join("\n");
     texte.push('\n');
     if std::fs::write(&temporaire, texte).is_ok() {
-        let _ = std::fs::rename(&temporaire, chemin);
+        // Le renommage échoue tant qu'un lecteur tient le fichier sans partage de
+        // suppression : quelques essais (la dernière écriture, « fin », ne doit pas se perdre).
+        for _ in 0..20 {
+            if std::fs::rename(&temporaire, chemin).is_ok() {
+                return;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
     }
 }
 

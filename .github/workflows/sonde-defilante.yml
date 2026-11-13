@@ -56,33 +56,49 @@ jobs:
           cargo build --release --locked --examples
           Get-ChildItem target/release/examples -Filter *.exe | Format-Table Name, Length
 
-      - name: Electron (version figée, deux minutes au plus, sinon absent)
-        timeout-minutes: 3
+      - name: Electron (version figée, quatre minutes au plus, sinon absent)
+        timeout-minutes: 5
         continue-on-error: true
         working-directory: sonde/defilante/electron
         run: |
+          # Premier passage : « added 13 packages in 3s » sans electron.exe (le script
+          # d'installation d'electron, qui télécharge le binaire, n'avait pas tourné ou rien
+          # dit). On le dit, puis on joue install.js nous-mêmes, borné.
           $chrono = [Diagnostics.Stopwatch]::StartNew()
-          $p = Start-Process -FilePath 'npm.cmd' -ArgumentList 'ci', '--no-audit', '--no-fund' -NoNewWindow -PassThru
+          Remove-Item Env:ELECTRON_SKIP_BINARY_DOWNLOAD -ErrorAction SilentlyContinue
+          "npm config ignore-scripts : $(npm.cmd config get ignore-scripts)"
+          $p = Start-Process -FilePath 'npm.cmd' -ArgumentList 'ci', '--no-audit', '--no-fund', '--foreground-scripts' -NoNewWindow -PassThru
           $null = $p.Handle
           if (-not $p.WaitForExit(120000)) {
             try { $p.Kill($true) } catch { }
-            "Electron : pas installé en 2 min : absent pour la sonde"
+            "Electron : npm ci pas fini en 2 min : absent pour la sonde"
             exit 0
           }
           $exe = Join-Path (Get-Location) 'node_modules\electron\dist\electron.exe'
+          $installe = Join-Path (Get-Location) 'node_modules\electron\install.js'
+          if (-not (Test-Path $exe) -and (Test-Path $installe)) {
+            "npm ci fini (code $($p.ExitCode)) sans electron.exe : install.js joué à la main (100 s au plus)"
+            $q = Start-Process -FilePath 'node' -ArgumentList "`"$installe`"" -WorkingDirectory (Join-Path (Get-Location) 'node_modules\electron') -NoNewWindow -PassThru
+            $null = $q.Handle
+            if (-not $q.WaitForExit(100000)) { try { $q.Kill($true) } catch { }; "install.js pas fini en 100 s" }
+            else { "install.js fini (code $($q.ExitCode))" }
+          }
           if (Test-Path $exe) {
             "SONDE_ELECTRON=$exe" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
             "Electron installé en $([int]$chrono.Elapsed.TotalSeconds) s : $exe"
           }
-          else { "Electron : npm ci fini (code $($p.ExitCode)) sans electron.exe : absent pour la sonde" }
+          else {
+            "Electron : pas d'electron.exe après npm ci et install.js : absent pour la sonde"
+            Get-ChildItem -Recurse -Depth 2 (Join-Path (Get-Location) 'node_modules\electron') -ErrorAction SilentlyContinue | Select-Object -First 30 | ForEach-Object { "  $($_.FullName)" }
+          }
 
       - name: S9 et S2 (fenêtre de contrôle, molette, images vivantes)
-        timeout-minutes: 8
+        timeout-minutes: 10
         continue-on-error: true
         run: ./sonde/defilante/01-s9-s2-controle-vivant.ps1
 
       - name: S1 (faire défiler une autre app)
-        timeout-minutes: 12
+        timeout-minutes: 14
         continue-on-error: true
         run: ./sonde/defilante/02-s1-defiler.ps1
 
@@ -115,6 +131,12 @@ jobs:
         timeout-minutes: 4
         continue-on-error: true
         run: ./sonde/defilante/08-s8-echelles.ps1
+
+      - name: Remettre l'échelle de l'écran (après S8, quoi qu'il arrive)
+        if: always()
+        timeout-minutes: 1
+        continue-on-error: true
+        run: ./sonde/defilante/09-remettre-echelle.ps1
 
       - name: Envoyer les résultats de la sonde
         if: always()
