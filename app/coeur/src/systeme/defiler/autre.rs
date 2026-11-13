@@ -19,7 +19,15 @@ pub fn moyen(d: &Defileur) -> Option<Moyen> {
     match *d {}
 }
 
+pub fn envoyes(d: &Defileur) -> u32 {
+    match *d {}
+}
+
 pub fn abandonner(d: &mut Defileur) -> Option<Moyen> {
+    match *d {}
+}
+
+pub fn constater(d: &mut Defileur, _avance: u32) {
     match *d {}
 }
 
