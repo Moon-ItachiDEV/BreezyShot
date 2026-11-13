@@ -21,7 +21,7 @@ use super::recents::cle_recent;
 use crate::systeme::gel::Pixels;
 
 /// Nom du dossier des apercus, a cote de « Recents » (`<local>/Apercus`).
-pub(super) const SOUS_DOSSIER_APERCUS: &str = "Apercus";
+pub const SOUS_DOSSIER_APERCUS: &str = "Apercus";
 
 /// Octets lus pour connaitre la taille : signature (8), longueur et type du premier bloc
 /// (8), contenu de IHDR (13), son CRC (4).

@@ -25,8 +25,8 @@ pub const APERCU: (u32, u32) = (400, 250);
 /// Sans `historique_pret` de la page dans ce délai, la fenêtre est détruite.
 pub const DELAI_PAGE: Duration = Duration::from_secs(30);
 
-/// Dossier des aperçus, à côté de « Récents » (`<local>/Apercus`, chantier B).
-pub const SOUS_DOSSIER_APERCUS: &str = "Apercus";
+/// Dossier des aperçus, à côté de « Récents » (`<local>/Apercus`) : celui de `sortie`.
+pub const SOUS_DOSSIER_APERCUS: &str = crate::sortie::SOUS_DOSSIER_APERCUS;
 
 /// Messages de la page (`historique:resultat`).
 pub const MESSAGE_COPIER: &str = "Impossible de copier";
