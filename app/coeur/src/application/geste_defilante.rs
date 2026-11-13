@@ -2529,6 +2529,37 @@ mod tests {
     }
 
     #[test]
+    fn fil_trop_vite_quand_la_molette_roule_apres_un_passage_en_main_silencieux() {
+        // Relecture finale, P3 : sans défileur, l'app passe en `Main` d'elle-même ; la page
+        // part hors de portée sans molette (perdue, rien n'est montré). Puis l'utilisateur
+        // roule, la page reste trop loin : « Trop vite » ; il remonte : le message part.
+        let p = page(1_000);
+        let e = lancer(p, None, 100_000);
+        std::thread::sleep(regles::DEPART_AUTO + Duration::from_millis(150));
+        e.page.lock().unwrap().position = 200;
+        let messages = |e: &Essai, pendant: Duration| {
+            let fin = Instant::now() + pendant;
+            let mut vus = Vec::new();
+            while let Some(reste) = fin.checked_duration_since(Instant::now()) {
+                if let Ok(Signal::Message { texte, .. }) = e.signaux.recv_timeout(reste) {
+                    vus.push(texte);
+                }
+            }
+            vus
+        };
+        assert!(messages(&e, Duration::from_millis(400)).is_empty());
+        e.rouler(10);
+        assert_eq!(
+            messages(&e, Duration::from_millis(400)),
+            vec![Some(regles::TEXTE_TROP_VITE)]
+        );
+        e.rouler(-210);
+        assert_eq!(messages(&e, Duration::from_millis(400)), vec![None]);
+        let (s, _) = e.terminer();
+        assert_eq!(hauteur_assemblee(&s), 1);
+    }
+
+    #[test]
     fn fil_replis_jusqu_a_aucun_moyen_puis_la_main() {
         let p = page(1_000);
         let pi = pilote(&p, &Moyen::ORDRE, false);
