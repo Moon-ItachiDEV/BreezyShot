@@ -691,6 +691,7 @@ fn decrire_fenetre(hwnd: HWND, exclure: Option<u32>) -> Option<FenetreInfo> {
         rect,
         titre: titre(hwnd),
         coins: coins(hwnd, style),
+        fenetre: hwnd.0 as isize,
     })
 }
 

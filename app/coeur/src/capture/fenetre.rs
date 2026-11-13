@@ -133,6 +133,7 @@ mod tests {
             rect,
             titre: String::new(),
             coins: Coins::Arrondis,
+            fenetre: 0,
         }
     }
 

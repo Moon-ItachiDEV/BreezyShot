@@ -11,6 +11,7 @@
 use std::path::{Path, PathBuf};
 
 mod composition;
+pub mod defiler;
 pub mod demarrage;
 mod dossier;
 pub mod gel;
@@ -18,6 +19,7 @@ pub mod glisser;
 pub mod installation;
 pub mod presse_papiers;
 pub mod texte;
+pub mod vivant;
 pub use composition::attendre_composition;
 pub use demarrage::{demarrage_avec_systeme, mettre_a_jour_chemin, EtatDemarrage};
 pub use dossier::{choisir_dossier, choisir_fichier_png};

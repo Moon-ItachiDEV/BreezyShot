@@ -138,6 +138,14 @@ pub fn arrondir(pixels: &mut Pixels, rayon: i32, coins: [bool; 4]) {
 /// Taille que l'aperçu de l'historique doit couvrir (une case 16:10).
 const APERCU_HISTORIQUE: (u32, u32) = (400, 250);
 
+/// La partie 16:10 du haut à gauche d'une image (contrat 0.6, D16) : la découpe
+/// qu'`apercu_historique` réduit ensuite, pour l'aperçu de la vignette d'une capture
+/// défilante. Pur. Socle : l'image telle quelle (chantier C : la découpe, sortie
+/// d'`apercu_historique` sans changer son résultat).
+pub fn partie_16_10_du_haut(pixels: &Pixels) -> Pixels {
+    pixels.clone()
+}
+
 /// L'aperçu d'une case de l'historique (contrat 0.5, §3.1) : la partie 16:10 du haut à
 /// gauche (ce que montre la case), réduite pour couvrir 400 × 250, jamais agrandie. Pur.
 /// Une image vide ou incohérente est rendue telle quelle.

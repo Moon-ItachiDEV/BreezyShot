@@ -38,6 +38,11 @@ base64 = "0.23"
 # Copier le texte (0.5) : la lecture de Windows (Media.Ocr) et ce qu'elle demande pour
 # passer une image (Graphics.Imaging, Storage.Streams, Security.Cryptography) et ses langues
 # (Globalization), WinRT initialisé dans un fil (Win32_System_WinRT).
+# Capture défilante (0.6) : UI Automation pour faire défiler une page et lire sa position
+# (Win32_UI_Accessibility ; ses conditions prennent un VARIANT, Win32_System_Variant) ; le
+# reste (BitBlt, WM_MOUSEWHEEL posté, fenêtres filles, SendInput, crochet WH_MOUSE_LL) est
+# dans les fonctionnalités déjà là (Graphics_Gdi, UI_WindowsAndMessaging,
+# UI_Input_KeyboardAndMouse).
 windows = { version = "0.62", features = [
   "Foundation",
   "Foundation_Collections",
@@ -59,7 +64,9 @@ windows = { version = "0.62", features = [
   "Win32_System_Registry",
   "Win32_System_RemoteDesktop",
   "Win32_System_Threading",
+  "Win32_System_Variant",
   "Win32_System_WinRT",
+  "Win32_UI_Accessibility",
   "Win32_UI_HiDpi",
   "Win32_UI_Input_KeyboardAndMouse",
   "Win32_UI_Shell",

@@ -97,6 +97,9 @@ pub enum Mode {
     Fenetre,
     /// Copier le texte (0.5) : une zone, comme `Zone`, avec le nom et le voile du texte.
     Texte,
+    /// Capture défilante (0.6) : tracer une zone, comme `Zone`, **ou** cliquer sur une page
+    /// proposée en retard (`Selection::proposer`), comme `Fenetre`.
+    Defilante,
 }
 
 impl Mode {
@@ -106,6 +109,7 @@ impl Mode {
             Mode::Zone => "zone",
             Mode::Fenetre => "fenetre",
             Mode::Texte => "texte",
+            Mode::Defilante => "defilante",
         }
     }
 }
@@ -142,7 +146,8 @@ pub struct Demande {
 /// celui de `Demande::fenetres`.
 fn fenetres_de(demande: &Demande) -> Vec<FenetreProposee> {
     match demande.mode {
-        Mode::Zone | Mode::Texte => Vec::new(),
+        // Défilante : les pages arrivent après, par `Selection::proposer`.
+        Mode::Zone | Mode::Texte | Mode::Defilante => Vec::new(),
         Mode::Fenetre => demande
             .fenetres
             .iter()
@@ -1018,6 +1023,15 @@ impl Selection {
     /// ou si l'événement n'a pas pu partir : rien n'est joué.
     pub fn surligner(&self, lignes: &[Rect], reduites: bool, deroule: Surlignage) -> bool {
         self.interne.surligner(lignes, reduites, deroule)
+    }
+
+    /// Capture défilante (0.6) : propose à l'affichage `id` les pages qui défilent (pixels
+    /// réels du bureau, du premier plan vers le fond), calculées après la photo : nouvelle
+    /// charge, même affichage. `Signal::Fenetre::indice` est alors un indice de `pages`.
+    /// Fil principal. Un `id` qui n'est pas celui en cours : rien.
+    pub fn proposer(&self, id: u64, pages: Vec<FenetreProposee>) {
+        // Socle : rien (chantier F).
+        let _ = (id, pages);
     }
 
     /// Vrai entre `montrer` et la fin de l'affichage.

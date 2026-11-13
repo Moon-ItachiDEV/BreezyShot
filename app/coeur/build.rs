@@ -51,6 +51,10 @@ fn main() {
         "licence_etat",
         "licence_activer",
         "licence_retirer",
+        "defilante_pret",
+        "defilante_zone",
+        "defilante_terminer",
+        "defilante_apercu",
         "installateur_pret",
         "installateur_action",
     ]);

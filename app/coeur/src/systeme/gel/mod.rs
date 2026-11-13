@@ -122,6 +122,9 @@ pub struct FenetreInfo {
     /// Jamais écrit au journal.
     pub titre: String,
     pub coins: Coins,
+    /// Identifiant système de la fenêtre (Windows : le HWND ; 0 ailleurs). Sert à la
+    /// capture défilante (0.6) pour chercher la page qui défile dans cette fenêtre.
+    pub fenetre: isize,
 }
 
 /// Forme des coins d'une fenêtre, approchée : Windows ne donne pas le rayon des coins.

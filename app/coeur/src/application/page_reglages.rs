@@ -984,7 +984,10 @@ mod tests {
                 .map(|x| (x.libelle, x.touches.join("+")))
                 .collect::<Vec<_>>()
         };
-        let avec = vue_pour(&crate::application::actions_selon(true, true, true), true);
+        let avec = vue_pour(
+            &crate::application::actions_selon(true, true, true, false),
+            true,
+        );
         assert_eq!(
             lignes(&avec),
             [
@@ -1002,11 +1005,17 @@ mod tests {
             .iter()
             .all(|x| !x.modifie && x.refus.is_none()));
         // Sans langue : pas de « Copier le texte ».
-        let sans_langue = vue_pour(&crate::application::actions_selon(true, true, false), true);
+        let sans_langue = vue_pour(
+            &crate::application::actions_selon(true, true, false, false),
+            true,
+        );
         assert_eq!(sans_langue.raccourcis.len(), 5);
         assert_eq!(sans_langue.raccourcis[4].action, "historique");
         // Sans licence : les quatre lignes de la 0.4, même si tout est construit.
-        let sans = vue_pour(&crate::application::actions_selon(false, true, true), false);
+        let sans = vue_pour(
+            &crate::application::actions_selon(false, true, true, false),
+            false,
+        );
         assert_eq!(lignes(&sans), lignes(&avec)[..4]);
         assert!(!sans.licence_active);
         for v in [&avec, &sans] {
@@ -1081,7 +1090,7 @@ mod essai_de_page {
         // La même vue avec une licence, l'historique et le texte construits, une langue :
         // ce que la page montre après « Activer » (avenant 0.5 « Licence », §1).
         let vue_sans = vue(&r, &c);
-        let actions_pro = crate::application::actions_selon(true, true, true);
+        let actions_pro = crate::application::actions_selon(true, true, true, false);
         let mut table_pro = BTreeMap::new();
         for a in &actions_pro {
             table_pro.insert(a.to_string(), r.raccourcis.candidats(a).unwrap().to_vec());
