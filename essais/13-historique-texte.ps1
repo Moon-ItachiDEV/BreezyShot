@@ -36,8 +36,10 @@
 # (3) presse-papiers témoin ; Ctrl+Maj+T : `DemandeCapture texte`, `selection montree …
 #     mode texte` ; glisser réel autour des trois lignes : `zone texte` exacte, `Selection
 #     -> Lecture`, écran figé encore visible 100 ms après le relâcher (guetté toutes les
-#     2 ms), caché ensuite (≤ 1,5 s + marge) ; `texte lu 3 lignes 11 mots` ; presse-papiers
-#     = les trois lignes séparées par CR LF, exactement ; `bandeau affiche … reussite` ;
+#     2 ms), caché ensuite (≤ 1,5 s + surlignage réduit 0,49 s + marge) ; `texte lu 3
+#     lignes 11 mots` ; `selection surlignage … 3 lignes` (les lignes copiées surlignées) ;
+#     presse-papiers = les trois lignes séparées par CR LF, exactement ; `bandeau affiche …
+#     reussite` ;
 #     temps notés ; (3b) la ligne de 12 px : lue, notée ;
 # (4) zone blanche : `texte vide`, presse-papiers inchangé, `bandeau affiche … erreur`,
 #     `bandeau termine` entre 3,8 et 5 s (heures du journal) sans clic ;
@@ -1208,7 +1210,9 @@ public static uint Crc32(byte[] o) {
                 $cache = $E::TracerPuisGuetter($zone3.X0, $zone3.Y0, $zone3.X1, $zone3.Y1, $fige, 3000)
                 $E::Poser($REPOS_X, $REPOS_Y)
                 Noter-Mesure -Nom 'relache -> ecran fige cache (guette toutes les 2 ms)' -Valeur $cache -Unite 'ms'
-                Verifier '(3) écran figé encore visible 100 ms après le relâcher, caché ensuite (≤ 1 500 ms + 200)' (($cache -ge 100) -and ($cache -le 1700)) "caché à $cache ms (-1 : déjà caché au relâcher)" | Out-Null
+                # La lecture attendue au plus 1 500 ms, puis le surlignage des lignes copiées
+                # (animations réduites : 120 + 220 + 120 ms, et 30 ms de marge).
+                Verifier '(3) écran figé encore visible 100 ms après le relâcher, caché ensuite (≤ 1 500 ms + surlignage 490 + 200)' (($cache -ge 100) -and ($cache -le 2190)) "caché à $cache ms (-1 : déjà caché au relâcher)" | Out-Null
                 $z = Attendre-Motif -Motif 'zone texte ' -Dossier $da -DelaiS 5 -Quoi '(3) zone texte'
                 Verifier '(3) zone texte = la zone tracée' ($z -match "zone texte $(Texte-Zone $zone3)$") "$z ; tracée $(Texte-Zone $zone3)" | Out-Null
                 $null = Attendre-Suivante 'etat Selection -> Lecture \(TexteChoisi\)$' $da $lectures '(3) Selection -> Lecture' 5
@@ -1217,6 +1221,8 @@ public static uint Crc32(byte[] o) {
                 if ($lu -match 'en (\d+) ms') { Noter-Mesure -Nom 'lecture des trois lignes (budget 400)' -Valeur ([int]$Matches[1]) -Unite 'ms' }
                 $copie = Attendre-Motif -Motif 'texte copie' -Dossier $da -DelaiS 5 -Quoi '(3) texte copie'
                 Verifier '(3) texte copie' ($copie -match 'texte copie$') $copie | Out-Null
+                $surligne = Attendre-Motif -Motif 'selection surlignage \d+ \d+ lignes$' -Dossier $da -DelaiS 5 -Quoi '(3) surlignage'
+                Verifier '(3) les trois lignes copiées surlignées sur la zone' ($surligne -match 'selection surlignage \d+ 3 lignes$') $surligne | Out-Null
                 $attendu = $LIGNES_TEMOIN -join "`r`n"
                 $pp = Lire-Texte
                 Verifier '(3) presse-papiers = les trois lignes, séparées par CR LF, exactement' ($pp -ceq $attendu) "lu « $(Montrer $pp) »" | Out-Null
@@ -1225,7 +1231,7 @@ public static uint Crc32(byte[] o) {
                 $chrono = Attendre-Motif -Motif 'chrono texte relache-gel-cache (\d+) relache-message (\d+)$' -Dossier $da -DelaiS 5 -Quoi '(3) chrono'
                 $null = $chrono -match 'relache-gel-cache (\d+) relache-message (\d+)$'
                 Noter-Mesure -Nom 'relache -> gel cache (journal)' -Valeur ([int]$Matches[1]) -Unite 'ms'
-                Noter-Mesure -Nom 'relache -> Texte copie (budget max(400, lecture) + 150)' -Valeur ([int]$Matches[2]) -Unite 'ms'
+                Noter-Mesure -Nom 'relache -> Texte copie (budget max(120, lecture) + surlignage 490 + 150)' -Valeur ([int]$Matches[2]) -Unite 'ms'
                 $moteur = Derniere-Ligne -Motif 'texte moteur cree en \d+ ms$' -Dossier $da
                 if ($null -ne $moteur -and $moteur -match 'en (\d+) ms$') { Noter-Mesure -Nom 'texte moteur cree (R15 : 150)' -Valeur ([int]$Matches[1]) -Unite 'ms' }
             }
