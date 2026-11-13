@@ -5,7 +5,8 @@
 //! Points d'accroche de `mod.rs` : `lancer_sonde` (démarrage, fil `texte-langues`, qui
 //! poste `Evenement::TexteDisponible`), `zone_choisie` (zone choisie en mode texte),
 //! `texte_lu` et `echu` (`Evenement::TexteLu`, `Evenement::TexteEchu`), `lire_export`
-//! (bouton « Texte » de l'éditeur, export de but `texte`), `raccourci_reserve`, `arreter`.
+//! (bouton « Texte » de l'éditeur, export de but `texte`), `abandonner_lecture`,
+//! `arreter`. Aucune annonce ici : le raccourci du texte entre dans le bilan du démarrage.
 //!
 //! Aucune lecture ni copie sur le fil principal. L'écran figé (sa `GardeEcran`) est rangé
 //! à part, dans `ECRAN` : le fil `texte-ecran` le libère à `ECRAN_FIGE_MAX_LECTURE` sans
@@ -24,7 +25,6 @@ use super::{zone, CaptureEnCours, Evenement, GardeEcran};
 use crate::capture;
 use crate::fenetres::editeur as fenetre_editeur;
 use crate::fenetres::selection::Selection;
-use crate::raccourcis::ChoixAction;
 use crate::sortie::{self, Etape};
 use crate::systeme::gel::Pixels;
 use crate::systeme::{self, Rect};
@@ -109,12 +109,6 @@ pub fn lancer_sonde(app: &AppHandle) {
         log::warn!("langues de lecture non cherchees: {e}");
     }
 }
-
-/// Le raccourci de `texte` vient d'être réservé (ou non) à l'arrivée des langues de
-/// lecture ou de la licence. Rien n'est annoncé d'ici : une seule règle d'annonce pour
-/// toutes les actions, celle du bilan du démarrage (`raccourcis::decider_annonce`), que
-/// l'assemblage fait attendre `Evenement::TexteDisponible`.
-pub fn raccourci_reserve(_app: &AppHandle, _choix: &ChoixAction) {}
 
 /// Zone choisie en mode texte (fil principal, état Sélection, capture encore rangée) :
 /// Lecture, découpe (l'écran figé reste montré), Échap libéré, balayage, lecture dans le

@@ -895,9 +895,6 @@ fn suivre_les_actions(app: &AppHandle) -> Vec<raccourcis::ChoixAction> {
                 Some(x) => log::info!("raccourci {action}: {}", x.canonique()),
                 None => log::info!("raccourci {action}: aucun"),
             }
-            if *action == Mode::Texte.nom() {
-                geste_texte::raccourci_reserve(app, &choix);
-            }
             apparues.push(choix);
         }
         for action in avant.iter().filter(|a| !apres.contains(a)) {
