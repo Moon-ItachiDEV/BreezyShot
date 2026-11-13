@@ -842,6 +842,10 @@ mod tests {
             "Déjà pris par « Fenêtre »"
         );
         assert_eq!(
+            texte_refus(&Raison::DejaPrisParUneAutreAction("defilante".into())),
+            "Déjà pris par « Capture défilante »"
+        );
+        assert_eq!(
             texte_refus(&Raison::ReserveParLeSysteme),
             "Impr. écran est réservée par Windows"
         );
@@ -1107,6 +1111,23 @@ mod tests {
         }
         let json = serde_json::to_value(&sans).unwrap();
         assert_eq!(json["licence_active"], serde_json::json!(false));
+    }
+
+    /// Les captures de la rubrique Raccourcis suivent l'ordre du menu de l'icône.
+    #[test]
+    fn ordre_des_raccourcis_comme_le_menu() {
+        let menu: Vec<&str> = crate::application::ORDRE_MENU
+            .iter()
+            .map(|m| m.nom())
+            .filter(|n| ORDRE_RACCOURCIS.contains(n))
+            .collect();
+        let page: Vec<&str> = ORDRE_RACCOURCIS
+            .iter()
+            .copied()
+            .filter(|a| menu.contains(a))
+            .collect();
+        assert_eq!(page, menu);
+        assert_eq!(menu.len(), crate::application::ORDRE_MENU.len());
     }
 
     #[test]

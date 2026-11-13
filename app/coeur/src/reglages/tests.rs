@@ -1850,16 +1850,48 @@ fn raccourci_deja_donne_synonymes() {
 
 // ---------- Version 5 (0.6) ----------
 
-/// Le fichier par défaut de la 0.5 (version 4), tel qu'elle l'écrivait.
+/// Le fichier par défaut de la 0.5 (version 4), tel qu'elle l'écrivait (branche
+/// `version-0.5`, `85659bf`).
 fn fichier_v4_de_la_0_5() -> Value {
-    let mut v = defaut_json(|m| {
-        m["version"] = json!(4);
-    });
-    v["raccourcis"]
-        .as_object_mut()
-        .unwrap()
-        .shift_remove("defilante");
-    v
+    json!({
+        "version": 4,
+        "raccourcis": {
+            "zone": ["ImprEcran", "Ctrl+Maj+1"],
+            "plein_ecran": ["Ctrl+Maj+2"],
+            "fenetre": ["Ctrl+Maj+3"],
+            "derniere_zone": ["Ctrl+Maj+4"],
+            "historique": ["Ctrl+Maj+H"],
+            "texte": ["Ctrl+Maj+T"]
+        },
+        "copier_apres_capture": true,
+        "enregistrer_apres_capture": false,
+        "vignette": { "afficher": true, "duree_s": 6, "coin": "bas_gauche" },
+        "selection": { "loupe": false },
+        "capture": { "retardateur_s": 0, "pointeur": false },
+        "demarrer_avec_systeme": false,
+        "dossier_enregistrement": null,
+        "modele_nom": "BreezyShot {date} à {heure}",
+        "animations": "systeme",
+        "theme": "systeme"
+    })
+}
+
+/// Un fichier de la 0.4 où `Ctrl+Maj+5` est déjà donné passe par les deux mises à niveau :
+/// historique et texte reçoivent leur défaut, la défilante une liste vide.
+#[test]
+fn version_3_avec_ctrl_maj_5_pris_vers_5() {
+    let mut v = fichier_v3_de_la_0_4();
+    v["raccourcis"]["fenetre"] = json!(["Ctrl+Maj+5"]);
+    let (d, r, c) = charger_json(v);
+    assert_eq!(c, vec![Constat::MisANiveau { de: 3, a: 5 }]);
+    assert_eq!(r.raccourcis.fenetre, ["Ctrl+Maj+5"]);
+    assert_eq!(r.raccourcis.historique, ["Ctrl+Maj+H"]);
+    assert_eq!(r.raccourcis.texte, ["Ctrl+Maj+T"]);
+    assert!(r.raccourcis.defilante.is_empty());
+    let f = json_du_fichier(&d);
+    assert_eq!(f["version"], json!(5));
+    assert_eq!(f["raccourcis"]["defilante"], json!([]));
+    assert_stable(&d);
 }
 
 #[test]
