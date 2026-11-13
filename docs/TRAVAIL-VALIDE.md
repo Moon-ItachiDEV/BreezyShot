@@ -563,3 +563,120 @@ Noté, non corrigé :
   est perdu avec elle (la capture reste dans « Récents »).
 - Trois essais bloqués de suite (600 s chacun) dépasseraient les 30 minutes de l'étape.
 - Taille du fichier téléchargé : 11,2 Mo, à la limite de son budget.
+
+## MVP, version 0.5 « Historique et Copier le texte »
+
+La 0.5 est sur la branche `version-0.5` (dernier commit de l'app : `7eaec83` ; ensuite,
+`1f051d9` ne change qu'un test, `3d2dc0a` et `3b03c43` que les essais). La version passe à
+0.5.0. Contrat : `contrat-0.5-historique-texte.md`, avec ses avenants « Droits » et
+« Licence ».
+
+Ce qu'elle apporte, dans une seule app :
+
+- L'historique (Ctrl + Maj + H, ou le menu de l'icône) : les 50 captures de « Récents » en
+  grille, avec Copier, Enregistrer, Annoter, Supprimer (Annuler pendant 5 s), glisser et
+  Tout effacer.
+- « Copier le texte » (Ctrl + Maj + T, le menu, ou le bouton « Texte » de l'éditeur) : le
+  texte d'une zone va au presse-papiers, lu par le moteur de Windows dans les langues
+  installées. Dans l'éditeur, on choisit les mots à copier.
+- La licence, collée dans Réglages › Général, ouvre les deux fonctions, sans redémarrer.
+  Sans licence, l'app se comporte comme la 0.4, plus la ligne « Licence » (ni aperçu, ni
+  recherche des langues). Licence d'essai publique : `essais/licence-essai.txt`.
+
+Vérifications GitHub, pas encore toutes vertes :
+
+- Tests : 639 tests du cœur et 2 tests d'architecture (2 ignorés) ; dix essais de pages,
+  `ECHECS : 0` ; essais Windows 01 à 13 sur le vrai `.exe`.
+- Passage 65 : 10 essais Windows sur 13 réussis (voir « Trouvé sur Windows, corrigé »).
+- Second passage : …
+
+Chaque chantier a été écrit par un agent sur un contrat écrit d'abord, puis relu par un
+agent distinct de l'auteur (effort élevé) : L (licence) et B (données de l'historique)
+ensemble, puis A (moteur de texte), C (réglages), D (cœur de l'historique), E (cœur du
+texte), F (page de l'historique), G (pages du texte) et H (essai 13). Un autre agent
+distinct (effort élevé) a relu l'assemblage.
+
+### Trouvé par les relectures, corrigé
+
+- F, bloquant : Ctrl + Z et Ctrl + C étaient lus sur `e.code` ; sur un clavier AZERTY,
+  Ctrl + Z ne faisait rien et Ctrl + W annulait. Ils lisent `e.key`, et l'essai de la page
+  le prouve. Aussi : un aperçu qui pouvait ne jamais s'afficher, le focus perdu après
+  « Effacer ».
+- A : `RoUninitialize` pouvait défaire le MTA alors que la crate `windows` garde ses
+  fabriques WinRT en cache. Le MTA est tenu une fois pour tout le processus
+  (`CoIncrementMTAUsage`). Le `Debug` dérivé aurait écrit le texte lu au journal : il est
+  écrit à la main. Test Windows ajouté : `windows_lit_deux_fois_une_image_blanche`.
+- E : une lecture échue (plus de 10 s) copiait quand même plus tard, sans message. Un seul
+  des deux fils rend le résultat (`ATTENDUE`). Un fil impossible à lancer laissait l'état en
+  Lecture pour toujours. L'annonce propre au texte est retirée : une seule annonce au
+  démarrage, pour toutes les actions.
+- D : Annoter n'était pas limité (Entrée tenue lançait un fil par répétition) ; son repli
+  sur le fil principal aurait bloqué l'app, comme le défaut d'« Annoter » de la 0.4. Plus
+  aucune action n'est faite sur le fil principal. Une case effacée ne revient plus.
+- G : quand le focus quittait le calque « Choisir le texte », Échap fermait l'éditeur et
+  Ctrl + C copiait l'image. Le clavier est pris par le calque tant qu'il est ouvert. Aussi :
+  un export qui pouvait rester bloqué, un anneau de focus absent.
+- L : un retrait qui échouait laissait `licence.txt`, et la licence revenait au démarrage
+  suivant ; un collage précédé de beaucoup de blancs était tronqué à la relecture ; un
+  fichier illisible était dit absent.
+- B : `lire_recent` pouvait allouer 1 Gio avant de juger l'en-tête (plafond de 512 Mio,
+  en-tête jugé d'abord) ; une liste partielle faisait effacer des aperçus valides ;
+  Supprimer pouvait viser un autre fichier sur un disque sans casse.
+- C : une saisie en cours sur une ligne retirée avec la licence suspendait tous les
+  raccourcis 15 s. `Cmd` et `Win`, `Option` et `Alt` comptent pour la même touche. La ligne
+  « Licence » est la dernière de Général (décision du responsable).
+- H : Échap du menu de l'icône était refusé par la garde de premier plan de l'essai ;
+  « Réessayer » était cherché trop tard ; trois preuves creuses sont élargies ou retirées.
+- Assemblage : une lecture abandonnée parce que les écrans changeaient pouvait avoir déjà
+  copié, sans rien dire. Seul l'écran figé est libéré, la lecture finit normalement. Sans
+  licence, l'app faisait des aperçus et cherchait les langues : plus maintenant. Le journal
+  de la licence écrivait un chemin : il n'écrit plus que le genre d'erreur.
+
+### Non vérifié
+
+- Les corrections faites après les relectures de chantier n'ont été relues que par le
+  relecteur de l'assemblage. Celles de G (`63bfea5`), fusionnées après sa relecture, ne
+  l'ont pas été (le relecteur de l'essai 13 n'en a regardé que ce que son point (14)
+  utilise). Celles de la relecture de l'assemblage (`7eaec83`) et celles de l'essai 13
+  (`3d2dc0a`, `3b03c43`) n'ont pas été relues par un second agent.
+- Le français et les accents ne sont pas prouvés sur la machine GitHub : le témoin est en
+  anglais ASCII.
+- Un texte de 12 px est mal lu, même agrandi deux fois (« Hello areezyShct 2026, … »).
+- Le premier plan réel, le glisser vers une vraie app, un PC à un écran 2K et un PC à trois
+  écrans : à l'utilisateur, d'après la liste unique des tests à faire.
+
+### Limites acceptées
+
+- Trois copies de l'image dans le chemin de lecture : environ 100 Mo de pointe en 4K.
+- Le ménage à 50 compte les captures en attente de suppression.
+- « Déjà fait » est oublié à la fermeture de la fenêtre de l'historique.
+- Après Annuler, la vignette fermée par Supprimer ne revient pas.
+- Course théorique de `liberer_ecran`, documentée : un fil suspendu au mauvais moment
+  cacherait l'écran figé de la capture suivante.
+- L'export de but `texte` d'un éditeur déjà ouvert n'est pas revérifié après le retrait de
+  la licence.
+- Le test des liens symboliques ne prouve rien hors Unix.
+
+### Trouvé sur Windows, corrigé
+
+- Trois tests de `sortie` échouaient sur Windows et macOS (passage 63) : le fichier
+  étranger `…123.PNG` était le même fichier que la capture `…123.png` sur un disque sans
+  casse. Défaut du test (`1f051d9`).
+- Premier passage des essais (passage 65) : 10 essais sur 13 réussis. L'essai 02 attendait
+  la version 3 des réglages. L'essai 07 écrivait un fichier en version 3, que l'app met à
+  niveau et réécrit : son point « réglages non réécrits » échouait. Le point (17) de
+  l'essai 13 comptait toutes les suppressions en attente, et non celles du motif attendu.
+  Trois défauts des essais, aucun de l'app (`3b03c43`).
+
+### Mesures sur la machine Windows de GitHub (passage 65)
+
+- Repos sans licence : 174,1 Mo (app 6,8 Mo). Repos avec licence : 190,3 Mo.
+- Copier le texte : du relâcher à l'écran figé caché 230 ms ; lecture des trois lignes du
+  témoin 225 ms (budget 400) ; du relâcher à « Texte copié » 244 ms ; moteur créé en 0 ms ;
+  « Aucun texte trouvé » affiché 4,14 s ; écran entier 534 ms (budget 1 000).
+- Dix lectures : app 11,6 Mo avant, 12,6 Mo après.
+- Historique : de Ctrl + Maj + H à l'historique affiché 188 ms (budget 700), page prête en
+  137 ms ; 20 ouvertures entre 185 et 209 ms. Ouvert : 226,3 Mo ; 186,3 Mo dix secondes
+  après 20 fermetures. Fils 22 puis 22 ; poignées 396 puis 415.
+- Lecture d'une zone dans l'éditeur : 11 ms. Trois aperçus manquants faits en 24 ms.
+- Copier, Enregistrer et glisser depuis l'historique : exacts au pixel.

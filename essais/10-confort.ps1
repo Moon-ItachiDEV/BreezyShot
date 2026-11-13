@@ -114,8 +114,9 @@ function Horodatage([string]$Ligne) {
 }
 
 # Réglages du cas : Ctrl+Maj+1 (zone), Ctrl+Maj+2 (écran), Ctrl+Maj+4 (dernière zone),
-# copie seule, retardateur et vignette au choix. Version 3 complète : le fichier n'est pas
-# réécrit.
+# copie seule, retardateur et vignette au choix. Version 3 complète : depuis la 0.5, l'app
+# la met à niveau en version 4 au démarrage (historique et texte ajoutés) et réécrit le
+# fichier.
 function Ecrire-Reglages([string]$Dossier, [int]$Retardateur, [bool]$Vignette) {
     $r = [ordered]@{
         version                   = 3

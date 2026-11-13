@@ -17,6 +17,7 @@ use super::{
     fermer_ou_suivant, garder_preferences_editeur, preferences_editeur, reduites_editeur,
     texte_construit,
 };
+use super::{geste_texte, texte};
 use crate::fenetres::editeur as fenetre;
 use crate::fenetres::theme;
 
@@ -189,9 +190,16 @@ pub fn editeur_garder(app: AppHandle, id: u64) {
 }
 
 /// Copier les mots `debut` à `fin` (inclus) de la lecture `numero` du document `id`
-/// (contrat 0.5, §5.6). Socle : refusée (chantier E).
+/// (contrat 0.5, §5.6) : le texte est pris dans la lecture gardée par le cœur, copié dans
+/// un fil, puis `editeur:texte_copie`. Une autre lecture ou des bornes fausses : `echec`.
 #[tauri::command]
 pub fn editeur_copier_texte(app: AppHandle, id: u64, numero: u64, debut: u32, fin: u32) {
-    let _ = (&app, numero, debut, fin);
-    ignoree("copier_texte", id);
+    let fin_de_ligne = crate::systeme::texte::fin_de_ligne();
+    let Some(choix) = avec_editeur(&app, Some(id), |e| {
+        texte::extrait_choisi(e.texte.as_ref(), numero, debut, fin, fin_de_ligne)
+    }) else {
+        ignoree("copier_texte", id);
+        return;
+    };
+    geste_texte::copier_extrait(&app, id, numero, choix);
 }

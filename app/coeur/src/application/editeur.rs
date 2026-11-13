@@ -16,6 +16,7 @@ use super::zone::DELAI_SORTIE;
 use crate::fenetres::{Ecran, Genre, Message, Rect};
 use crate::sortie::{Bilan, Etape, EtapeFichier};
 use crate::systeme::gel::Pixels;
+use crate::texte::Lu;
 
 /// Côté maximal d'une capture annotable, pixels (R11).
 pub const COTE_MAX: u32 = 16_384;
@@ -71,6 +72,10 @@ pub struct EtatEditeur {
     pub sans_reponse: bool,
     /// La page a dit avoir dessiné l'image du document courant (`editeur_affiche`).
     pub affichee: bool,
+    /// La dernière lecture du bouton « Texte » (son numéro d'export et ce qui a été lu),
+    /// remplacée par la suivante, oubliée avec le document. Le texte ne quitte le cœur que
+    /// par `editeur_copier_texte`.
+    pub texte: Option<(u64, Lu)>,
 }
 
 /// Un export parti dans le fil `editeur-sortie`.
@@ -95,18 +100,18 @@ pub enum But {
     EnregistrerSous,
     Glisser,
     CopierFermer,
-    /// Lire le texte de l'image composée (0.5). Hors de `TOUS` tant que la lecture n'est
-    /// pas construite (chantier E) : `depuis_nom` le refuse.
+    /// Lire le texte de l'image composée (0.5, R7) : rien n'est exporté.
     Texte,
 }
 
 impl But {
-    pub const TOUS: [But; 5] = [
+    pub const TOUS: [But; 6] = [
         But::Copier,
         But::Enregistrer,
         But::EnregistrerSous,
         But::Glisser,
         But::CopierFermer,
+        But::Texte,
     ];
 
     /// Le nom de l'en-tête, du journal et de `editeur:resultat`.
@@ -580,6 +585,19 @@ pub fn sortie_pour(etat: &EtatEditeur, but: But, version: u64) -> Sortie {
     }
 }
 
+/// Le résultat de la lecture `numero` (bouton « Texte ») arrive : vrai, et l'export en
+/// cours oublié, si c'est elle qu'on attend. `exportee` n'est jamais touchée (lire
+/// n'exporte pas : le document reste « modifié »).
+pub fn prendre_lecture(etat: &mut EtatEditeur, numero: u64) -> bool {
+    let attendue = etat
+        .export
+        .is_some_and(|x| x.numero == numero && x.but == But::Texte);
+    if attendue {
+        etat.export = None;
+    }
+    attendue
+}
+
 /// Que faire d'un Annoter selon l'éditeur ouvert : ouvrir s'il n'y en a pas ; remplacer
 /// si sa page n'est pas encore prête (elle recevra le nouveau document à `editeur_pret`) ;
 /// sinon toujours demander à la page (décision du responsable : l'état gardé par
@@ -773,6 +791,7 @@ impl EtatEditeur {
             fermeture_demandee: None,
             sans_reponse: false,
             affichee: false,
+            texte: None,
         }
     }
 
@@ -1202,6 +1221,46 @@ mod tests {
         assert_eq!(export_perime(&mut e, t + Duration::from_secs(3600)), None);
         let r = resultat_sans_bilan(7, 4, But::Copier);
         assert_eq!((r.numero, r.etat), (4, "echec"));
+    }
+
+    #[test]
+    fn lire_le_texte_n_exporte_rien() {
+        assert_eq!(But::depuis_nom("texte"), Some(But::Texte));
+        let mut e = etat();
+        let rien = Sortie::Faire {
+            copier: false,
+            enregistrer: false,
+            ranger_recents: false,
+        };
+        assert_eq!(sortie_pour(&e, But::Texte, 1), rien);
+        let plan = plan_export(But::Texte, rien).expect("plan");
+        assert!(!plan.copier && !plan.enregistrer && !plan.ranger_recents && !plan.dialogue);
+        // Le vrai chemin : l'export noté par `accepter_export`, puis la lecture rendue.
+        e.exportee = Some(1);
+        let t = Instant::now();
+        let texte = EnTete {
+            but: But::Texte,
+            ..en_tete(40, 30)
+        };
+        assert_eq!(accepter_export(&e, &texte, 40 * 30 * 4, t), Ok(()));
+        let x = |numero, but| ExportEnCours {
+            numero,
+            but,
+            version: 3,
+            debut: t,
+            dialogue: false,
+        };
+        e.export = Some(x(5, But::Texte));
+        assert!(!prendre_lecture(&mut e, 4), "autre numero");
+        assert!(prendre_lecture(&mut e, 5));
+        assert_eq!(e.export, None);
+        assert!(!prendre_lecture(&mut e, 5), "une seule fois");
+        // Un export d'un autre but au même numéro n'est pas une lecture.
+        e.export = Some(x(6, But::Copier));
+        assert!(!prendre_lecture(&mut e, 6));
+        assert_eq!(e.export, Some(x(6, But::Copier)));
+        assert_eq!((e.exportee, e.enregistree, e.rangee), (Some(1), None, None));
+        assert_eq!(e.texte, None);
     }
 
     #[test]

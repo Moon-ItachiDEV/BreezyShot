@@ -18,7 +18,7 @@ use super::page_reglages::{
     ALERTE_NON_ENREGISTRES,
 };
 use super::{
-    actions_en_vigueur, plateforme_reglages, refaire_menu as refaire_menu_actuel, zone,
+    actions_en_vigueur, plateforme_reglages, pro, refaire_menu as refaire_menu_actuel, zone,
     Application, VERSION, VIGNETTE_CONSTRUITE,
 };
 use crate::fenetres::{reglages as fenetre, theme};
@@ -212,6 +212,7 @@ fn vue(app: &AppHandle) -> VueReglages {
         refus_raccourcis: &refus,
         dossier_affiche,
         demarrage: systeme::demarrage_avec_systeme(None).unwrap_or(EtatDemarrage::Indisponible),
+        licence_active: pro(app),
         version: VERSION,
         alerte,
         maintenant: chrono::Local::now(),
@@ -222,6 +223,14 @@ fn vue(app: &AppHandle) -> VueReglages {
             .unwrap_or(false),
     };
     page::vue(&r, &contexte)
+}
+
+/// Envoie la vue à la page des Réglages si elle est ouverte (`suivre_les_actions` : les
+/// lignes de Réglages › Raccourcis suivent la licence et les langues de lecture).
+pub(super) fn envoyer_vue(app: &AppHandle) {
+    if fenetre::fenetre(app).is_some() {
+        fenetre::emettre_etat(app, vue(app));
+    }
 }
 
 fn reponse(app: &AppHandle, refus: Option<Refus>) -> Reponse {
@@ -451,7 +460,7 @@ pub async fn reglages_parcourir(app: AppHandle) -> Reponse {
 /// fin d'une saisie de raccourci.
 #[tauri::command]
 pub fn reglages_saisie(app: AppHandle, action: String, active: bool) -> Reponse {
-    if !action_connue(&app, &action) {
+    if !page::saisie_permise(active, action_connue(&app, &action)) {
         return refuser(&app, Refus::nouveau("raccourci", "", "action_inconnue"));
     }
     if !active {

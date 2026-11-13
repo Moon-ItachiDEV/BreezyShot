@@ -45,7 +45,9 @@ pub fn lignes_montrees(vignette_construite: bool, capture_disponible: bool) -> V
     if vignette_construite {
         l.push("enregistrer");
     }
-    l.extend(["modele_nom", "theme", "demarrage", "version"]);
+    // La licence (avenant 0.5 « Licence », §1) : toujours là, en dernier dans Général
+    // (logo et version, Thème, Lancer au démarrage, Licence : décision du responsable).
+    l.extend(["modele_nom", "theme", "demarrage", "version", "licence"]);
     l
 }
 
@@ -216,8 +218,17 @@ pub fn libelle_action(action: &str) -> &'static str {
         "plein_ecran" => "Plein écran",
         "fenetre" => "Fenêtre",
         "derniere_zone" => "Refaire la dernière zone",
+        "historique" => "Historique",
+        "texte" => "Copier le texte",
         _ => "",
     }
+}
+
+/// Une saisie ne commence que pour une action en vigueur ; sa fin (`active` faux) passe
+/// toujours : la licence retirée pendant la saisie de « Historique », la page retire la
+/// ligne et rend la saisie, et les raccourcis doivent être repris tout de suite.
+pub fn saisie_permise(active: bool, action_en_vigueur: bool) -> bool {
+    !active || action_en_vigueur
 }
 
 /// Une touche tapée dans la page, telle que le navigateur la donne.
@@ -356,6 +367,8 @@ pub fn fixer_candidats(r: &mut Raccourcis, action: &str, candidats: Vec<String>)
         "plein_ecran" => &mut r.plein_ecran,
         "fenetre" => &mut r.fenetre,
         "derniere_zone" => &mut r.derniere_zone,
+        "historique" => &mut r.historique,
+        "texte" => &mut r.texte,
         _ => return false,
     };
     *cible = candidats;
@@ -409,7 +422,11 @@ pub struct VueReglages {
     pub apercu_nom: String,
     pub theme: &'static str,
     pub demarrage: &'static str,
+    /// Une ligne par action en vigueur (`Contexte.actions`) : « Historique » et « Copier le
+    /// texte » seulement avec une licence (et, pour le texte, une langue de lecture).
     pub raccourcis: Vec<VueRaccourci>,
+    /// Une licence valide est en place : la ligne « Licence » dit « Pro activé ».
+    pub licence_active: bool,
     pub version: &'static str,
     pub alerte: Option<String>,
     /// Vrai pendant la saisie d'un raccourci : faux, la page sort de « Appuyez… » (filet
@@ -429,6 +446,7 @@ pub struct Contexte<'a> {
     pub refus_raccourcis: &'a std::collections::BTreeMap<String, String>,
     pub dossier_affiche: String,
     pub demarrage: EtatDemarrage,
+    pub licence_active: bool,
     pub version: &'static str,
     pub alerte: Option<String>,
     pub maintenant: DateTime<Local>,
@@ -495,6 +513,7 @@ pub fn vue(r: &Reglages, c: &Contexte<'_>) -> VueReglages {
         theme: r.theme.texte(),
         demarrage: nom_demarrage(c.demarrage),
         raccourcis,
+        licence_active: c.licence_active,
         version: c.version,
         alerte: c.alerte.clone(),
         saisie_en_cours: c.saisie_en_cours,
@@ -535,7 +554,8 @@ mod tests {
                 "modele_nom",
                 "theme",
                 "demarrage",
-                "version"
+                "version",
+                "licence"
             ]
         );
         let avec = lignes_montrees(true, false);
@@ -551,7 +571,8 @@ mod tests {
                 "modele_nom",
                 "theme",
                 "demarrage",
-                "version"
+                "version",
+                "licence"
             ]
         );
         // Sans Gel, la rubrique Capture n'a aucun effet : aucune de ses lignes.
@@ -565,7 +586,7 @@ mod tests {
         // En tête, dans l'ordre de la page.
         let tout = lignes_montrees(true, true);
         assert_eq!(tout[..3], ["retardateur", "pointeur", "copier"]);
-        assert_eq!(tout.len(), 12);
+        assert_eq!(tout.len(), 13);
         // Rien de ce qui n'a pas d'effet en 0.4.
         for absent in ["barre", "format", "mise_a_jour"] {
             assert!(!tout.contains(&absent));
@@ -850,6 +871,7 @@ mod tests {
             refus_raccourcis: &refus,
             dossier_affiche: "Images › BreezyShot".into(),
             demarrage: EtatDemarrage::DesactiveParWindows,
+            licence_active: false,
             version: "9.9.9",
             alerte: None,
             maintenant: Local.with_ymd_and_hms(2026, 11, 12, 10, 42, 8).unwrap(),
@@ -910,7 +932,97 @@ mod tests {
         ));
         assert_eq!(r.derniere_zone, ["Ctrl+Maj+9"]);
         assert_eq!(libelle_action("derniere_zone"), "Refaire la dernière zone");
+        assert!(fixer_candidats(&mut r, "historique", vec!["F8".into()]));
+        assert_eq!(r.historique, ["F8"]);
+        assert!(fixer_candidats(&mut r, "texte", vec![]));
+        assert!(r.texte.is_empty());
+        assert_eq!(libelle_action("historique"), "Historique");
+        assert_eq!(libelle_action("texte"), "Copier le texte");
         assert!(!fixer_candidats(&mut r, "annoter", vec![]));
+        // Chaque action des réglages a son libellé et se fixe.
+        for a in Raccourcis::ACTIONS {
+            assert!(!libelle_action(a).is_empty(), "{a}");
+            assert!(fixer_candidats(&mut r, a, vec!["F9".into()]), "{a}");
+            assert_eq!(r.candidats(a), Some(&["F9".to_string()][..]), "{a}");
+        }
+    }
+
+    /// Réglages › Raccourcis (§7.2) : une ligne par action en vigueur. Avec licence (et une
+    /// langue), « Historique » et « Copier le texte » après la dernière zone ; sans licence,
+    /// les quatre lignes de la 0.4. La ligne « Licence » suit la licence.
+    #[test]
+    fn raccourcis_selon_la_licence() {
+        let r = defaut();
+        let defaut_r = Raccourcis::par_defaut(Plateforme::Windows);
+        let refus = BTreeMap::new();
+        let vue_pour = |actions: &[&str], licence_active: bool| {
+            let mut table = BTreeMap::new();
+            for a in actions {
+                table.insert(a.to_string(), r.raccourcis.candidats(a).unwrap().to_vec());
+            }
+            let bilan = choisir(&table, false, |_| true);
+            let c = Contexte {
+                vignette_construite: true,
+                capture_disponible: true,
+                actions,
+                bilan: &bilan,
+                defaut: &defaut_r,
+                refus_raccourcis: &refus,
+                dossier_affiche: String::new(),
+                demarrage: EtatDemarrage::Inactif,
+                licence_active,
+                version: "1",
+                alerte: None,
+                maintenant: Local.with_ymd_and_hms(2026, 11, 12, 10, 42, 8).unwrap(),
+                saisie_en_cours: false,
+            };
+            vue(&r, &c)
+        };
+        let lignes = |v: &VueReglages| {
+            v.raccourcis
+                .iter()
+                .map(|x| (x.libelle, x.touches.join("+")))
+                .collect::<Vec<_>>()
+        };
+        let avec = vue_pour(&crate::application::actions_selon(true, true, true), true);
+        assert_eq!(
+            lignes(&avec),
+            [
+                ("Zone", "Impr. écran".to_string()),
+                ("Plein écran", "Ctrl+Maj+2".to_string()),
+                ("Fenêtre", "Ctrl+Maj+3".to_string()),
+                ("Refaire la dernière zone", "Ctrl+Maj+4".to_string()),
+                ("Historique", "Ctrl+Maj+H".to_string()),
+                ("Copier le texte", "Ctrl+Maj+T".to_string()),
+            ]
+        );
+        assert!(avec.licence_active);
+        assert!(avec
+            .raccourcis
+            .iter()
+            .all(|x| !x.modifie && x.refus.is_none()));
+        // Sans langue : pas de « Copier le texte ».
+        let sans_langue = vue_pour(&crate::application::actions_selon(true, true, false), true);
+        assert_eq!(sans_langue.raccourcis.len(), 5);
+        assert_eq!(sans_langue.raccourcis[4].action, "historique");
+        // Sans licence : les quatre lignes de la 0.4, même si tout est construit.
+        let sans = vue_pour(&crate::application::actions_selon(false, true, true), false);
+        assert_eq!(lignes(&sans), lignes(&avec)[..4]);
+        assert!(!sans.licence_active);
+        for v in [&avec, &sans] {
+            let n = v.lignes.len();
+            assert_eq!(v.lignes[n - 2..], ["version", "licence"]);
+        }
+        let json = serde_json::to_value(&sans).unwrap();
+        assert_eq!(json["licence_active"], serde_json::json!(false));
+    }
+
+    #[test]
+    fn fin_de_saisie_toujours_permise() {
+        assert!(saisie_permise(true, true));
+        assert!(!saisie_permise(true, false));
+        assert!(saisie_permise(false, true));
+        assert!(saisie_permise(false, false));
     }
 
     #[test]
@@ -954,6 +1066,7 @@ mod essai_de_page {
             refus_raccourcis: &refus,
             dossier_affiche: "Images › BreezyShot".into(),
             demarrage: EtatDemarrage::Inactif,
+            licence_active: false,
             // Jamais la vraie version : l'essai ne la suppose pas.
             version: "7.8.9-essai",
             alerte: None,
@@ -965,7 +1078,26 @@ mod essai_de_page {
         seule_copie.vignette.afficher = false;
         seule_copie.enregistrer_apres_capture = false;
         let refus_copier = appliquer(&seule_copie, &Changement::Copier(false)).unwrap_err();
-        let tout = serde_json::json!({ "vue": vue(&r, &c), "refus_copier": refus_copier });
+        // La même vue avec une licence, l'historique et le texte construits, une langue :
+        // ce que la page montre après « Activer » (avenant 0.5 « Licence », §1).
+        let vue_sans = vue(&r, &c);
+        let actions_pro = crate::application::actions_selon(true, true, true);
+        let mut table_pro = BTreeMap::new();
+        for a in &actions_pro {
+            table_pro.insert(a.to_string(), r.raccourcis.candidats(a).unwrap().to_vec());
+        }
+        let bilan_pro = choisir(&table_pro, true, |_| true);
+        let c_pro = Contexte {
+            actions: &actions_pro,
+            bilan: &bilan_pro,
+            licence_active: true,
+            ..c
+        };
+        let tout = serde_json::json!({
+            "vue": vue_sans,
+            "vue_pro": vue(&r, &c_pro),
+            "refus_copier": refus_copier,
+        });
         serde_json::to_string_pretty(&tout).unwrap() + "\n"
     }
 

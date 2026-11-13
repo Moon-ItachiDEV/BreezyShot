@@ -38,7 +38,7 @@ pub use glisser::{
 };
 pub use historique::{
     chemin_apercu, chemin_recent, lire_recent, lister_recents, ranger_apercu, supprimer_recent,
-    vider, BilanVidage, EntreeRecente,
+    vider, BilanVidage, EntreeRecente, SOUS_DOSSIER_APERCUS,
 };
 pub use licence::{ecrire_licence, effacer_licence, lire_licence};
 pub use nom::{chemin_libre, nom_affiche, nom_fichier};

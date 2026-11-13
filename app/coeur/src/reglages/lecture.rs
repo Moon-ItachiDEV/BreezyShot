@@ -14,9 +14,9 @@ use super::modele::{
 /// le numéro de version est tenu par `interpreter`, pas par elle.
 pub(super) type MiseANiveau = fn(&mut Map<String, Value>, Plateforme);
 
-/// `MISES_A_NIVEAU[n]` fait passer de la version `n` à `n + 1`. Pour une version 4 un jour :
-/// ajouter `v3_vers_v4` à la fin, et `VERSION_ACTUELLE` passe à 4 tout seul.
-pub(super) const MISES_A_NIVEAU: &[MiseANiveau] = &[v0_vers_v1, v1_vers_v2, v2_vers_v3];
+/// `MISES_A_NIVEAU[n]` fait passer de la version `n` à `n + 1`. Pour une version 5 un jour :
+/// ajouter `v4_vers_v5` à la fin, et `VERSION_ACTUELLE` passe à 5 tout seul.
+pub(super) const MISES_A_NIVEAU: &[MiseANiveau] = &[v0_vers_v1, v1_vers_v2, v2_vers_v3, v3_vers_v4];
 
 /// Version 0 (aucun champ `version`) vers 1 : ajoute les champs de la version 1 qui manquent,
 /// y compris dans les sous-objets, sans toucher à ceux qui sont là (même invalides : la
@@ -60,6 +60,77 @@ fn v2_vers_v3(objet: &mut Map<String, Value>, plateforme: Plateforme) {
     let modele = json!({ "capture": { "retardateur_s": 0, "pointeur": false } });
     if let Value::Object(modele) = modele {
         completer(objet, &modele);
+    }
+}
+
+/// Version 3 vers 4 (0.5) : les raccourcis de l'historique et de Copier le texte. Chacun
+/// reçoit le défaut de la plateforme seulement si ce raccourci n'est pas déjà donné à une
+/// autre action (l'utilisateur a pu taper `Ctrl+Maj+T` en 0.4), sinon une liste vide. Une
+/// action déjà là est gardée ; un objet `raccourcis` absent n'est pas créé.
+fn v3_vers_v4(objet: &mut Map<String, Value>, plateforme: Plateforme) {
+    let Some(Value::Object(raccourcis)) = objet.get_mut("raccourcis") else {
+        return;
+    };
+    let r = Raccourcis::par_defaut(plateforme);
+    for (action, defaut) in [("historique", &r.historique), ("texte", &r.texte)] {
+        if raccourcis.contains_key(action) {
+            continue;
+        }
+        let pris = defaut.iter().any(|d| deja_donne(raccourcis, d));
+        let liste = if pris { Vec::new() } else { defaut.clone() };
+        raccourcis.insert(action.into(), json!(liste));
+    }
+}
+
+/// Vrai si une action de `raccourcis` (connue ou non) a `notation` parmi ses candidats.
+fn deja_donne(raccourcis: &Map<String, Value>, notation: &str) -> bool {
+    let voulu = forme_simple(notation);
+    raccourcis.values().any(|liste| {
+        liste.as_array().is_some_and(|l| {
+            l.iter()
+                .any(|c| c.as_str().map(forme_simple) == Some(voulu.clone()))
+        })
+    })
+}
+
+/// Une notation ramenée à une forme comparable sans le module `raccourcis` (qui n'est pas
+/// connu d'ici), avec la même règle que son `simplifier` : sans espaces ni points, en
+/// minuscules, sans accents (`Impr. écran` vaut `ImprEcran`), `Option` vaut `Alt` et `Cmd`
+/// vaut `Win` ; morceaux triés (`Maj + ctrl+T` vaut `Ctrl+Maj+T`).
+pub(super) fn forme_simple(notation: &str) -> Vec<String> {
+    let mut morceaux: Vec<String> = notation.split('+').map(morceau_simple).collect();
+    morceaux.sort();
+    morceaux
+}
+
+/// Un morceau d'une notation, comme `raccourcis::notation::simplifier` puis les synonymes
+/// des modificateurs.
+fn morceau_simple(morceau: &str) -> String {
+    let minuscules: String = morceau
+        .chars()
+        .filter(|c| !c.is_whitespace() && *c != '.')
+        .flat_map(char::to_lowercase)
+        .collect();
+    let simple: String = if minuscules.chars().count() <= 1 {
+        minuscules
+    } else {
+        minuscules
+            .chars()
+            .map(|c| match c {
+                'é' | 'è' | 'ê' | 'ë' => 'e',
+                'à' | 'â' => 'a',
+                'î' | 'ï' => 'i',
+                'ô' => 'o',
+                'û' | 'ù' => 'u',
+                'ç' => 'c',
+                autre => autre,
+            })
+            .collect()
+    };
+    match simple.as_str() {
+        "option" => "alt".into(),
+        "cmd" => "win".into(),
+        _ => simple,
     }
 }
 
