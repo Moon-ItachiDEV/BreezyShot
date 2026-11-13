@@ -16,6 +16,7 @@ use super::zone::DELAI_SORTIE;
 use crate::fenetres::{Ecran, Genre, Message, Rect};
 use crate::sortie::{Bilan, Etape, EtapeFichier};
 use crate::systeme::gel::Pixels;
+use crate::texte::Lu;
 
 /// Côté maximal d'une capture annotable, pixels (R11).
 pub const COTE_MAX: u32 = 16_384;
@@ -71,6 +72,10 @@ pub struct EtatEditeur {
     pub sans_reponse: bool,
     /// La page a dit avoir dessiné l'image du document courant (`editeur_affiche`).
     pub affichee: bool,
+    /// La dernière lecture du bouton « Texte » (son numéro d'export et ce qui a été lu),
+    /// remplacée par la suivante, oubliée avec le document. Le texte ne quitte le cœur que
+    /// par `editeur_copier_texte`.
+    pub texte: Option<(u64, Lu)>,
 }
 
 /// Un export parti dans le fil `editeur-sortie`.
@@ -95,18 +100,18 @@ pub enum But {
     EnregistrerSous,
     Glisser,
     CopierFermer,
-    /// Lire le texte de l'image composée (0.5). Hors de `TOUS` tant que la lecture n'est
-    /// pas construite (chantier E) : `depuis_nom` le refuse.
+    /// Lire le texte de l'image composée (0.5, R7) : rien n'est exporté.
     Texte,
 }
 
 impl But {
-    pub const TOUS: [But; 5] = [
+    pub const TOUS: [But; 6] = [
         But::Copier,
         But::Enregistrer,
         But::EnregistrerSous,
         But::Glisser,
         But::CopierFermer,
+        But::Texte,
     ];
 
     /// Le nom de l'en-tête, du journal et de `editeur:resultat`.
@@ -773,6 +778,7 @@ impl EtatEditeur {
             fermeture_demandee: None,
             sans_reponse: false,
             affichee: false,
+            texte: None,
         }
     }
 
@@ -1202,6 +1208,29 @@ mod tests {
         assert_eq!(export_perime(&mut e, t + Duration::from_secs(3600)), None);
         let r = resultat_sans_bilan(7, 4, But::Copier);
         assert_eq!((r.numero, r.etat), (4, "echec"));
+    }
+
+    #[test]
+    fn lire_le_texte_n_exporte_rien() {
+        assert_eq!(But::depuis_nom("texte"), Some(But::Texte));
+        let mut e = etat();
+        let rien = Sortie::Faire {
+            copier: false,
+            enregistrer: false,
+            ranger_recents: false,
+        };
+        assert_eq!(sortie_pour(&e, But::Texte, 1), rien);
+        let plan = plan_export(But::Texte, rien).expect("plan");
+        assert!(!plan.copier && !plan.enregistrer && !plan.ranger_recents && !plan.dialogue);
+        // Un bilan de but texte ne touche à aucune version notée : le document reste
+        // « modifié ».
+        e.noter_export(&fin(
+            But::Texte,
+            1,
+            Some(bilan(Etape::Faite, None, EtapeFichier::NonDemande)),
+        ));
+        assert_eq!((e.exportee, e.enregistree, e.rangee), (None, None, None));
+        assert_eq!(e.texte, None);
     }
 
     #[test]
