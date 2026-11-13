@@ -1401,12 +1401,17 @@ pub fn traiter(app: &AppHandle, evenement: Evenement) {
                     }
                 }
                 // Relancer l'app déjà ouverte (icône épinglée, menu Démarrer, double-clic) :
-                // les Réglages s'ouvrent, ou reviennent devant, comme un clic sur l'app dans
-                // le Dock. Ouverts à un tour suivant de la boucle (jamais une fenêtre Web
-                // créée au milieu d'un autre message).
+                // la barre de capture s'ouvre, comme Impr. écran (demande de l'utilisateur
+                // du 13/11/2026 ; en 0.5.1 et 0.5.2, c'étaient les Réglages, qui restent au
+                // menu de l'icône). Au tour suivant de la boucle, comme une entrée du menu.
                 Commande::Demarrer => {
-                    log::info!("seconde instance: reglages ouverts");
-                    poster_plus_tard(app, Evenement::Menu(MENU_REGLAGES.into()));
+                    log::info!("seconde instance: barre de capture");
+                    if app.state::<Application>().demarree.load(Ordering::SeqCst) {
+                        poster_plus_tard(app, Evenement::Menu(id_menu(Mode::Zone)));
+                    } else if let Ok(mut a) = app.state::<Application>().capture_en_attente.lock() {
+                        log::info!("seconde instance: en attente du demarrage");
+                        *a = Some(Mode::Zone.nom().to_string());
+                    }
                 }
                 // Désinstaller via une seconde instance n'aurait pas de sens : ignoré.
                 Commande::Desinstaller => log::info!("seconde instance refusee"),
