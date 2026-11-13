@@ -19,9 +19,6 @@ pub const CONSTRUIT: bool = true;
 /// Délai d'« Annuler » après Supprimer.
 pub const DELAI_ANNULER: Duration = Duration::from_secs(5);
 
-/// Taille couverte par l'aperçu d'une case.
-pub const APERCU: (u32, u32) = (400, 250);
-
 /// Sans `historique_pret` de la page dans ce délai, la fenêtre est détruite.
 pub const DELAI_PAGE: Duration = Duration::from_secs(30);
 
@@ -86,7 +83,7 @@ pub struct EtatHistorique {
     pub echeance: Option<Instant>,
     /// Noms enregistrés depuis l'historique pendant la session.
     pub enregistrees: BTreeSet<String>,
-    /// Copier ou Enregistrer en cours, par nom et action (`cle_action`).
+    /// Copier, Enregistrer ou Annoter en cours, par nom et action (`cle_action`).
     pub actions: BTreeMap<String, Instant>,
     pub glisser: bool,
 }
@@ -237,6 +234,25 @@ pub fn prendre_suppressions(etat: &mut EtatHistorique) -> Vec<String> {
     let noms = annuler_suppressions(etat);
     etat.en_effacement.extend(noms.iter().cloned());
     noms
+}
+
+/// « Tout effacer » : la série en attente et toutes les cases de la liste passent en
+/// effacement (une liste relue avant la fin du vidage ne les remontre pas).
+pub fn prendre_tout(etat: &mut EtatHistorique) -> Vec<String> {
+    let mut noms = prendre_suppressions(etat);
+    for e in &etat.liste {
+        if !noms.contains(&e.nom) {
+            noms.push(e.nom.clone());
+        }
+    }
+    etat.en_effacement.extend(noms.iter().cloned());
+    noms
+}
+
+/// Une capture fait-elle son aperçu à la sortie ? Seulement si l'historique est une
+/// action en vigueur (licence) : sinon rien n'est écrit dans `Apercus`.
+pub fn apercu_a_la_sortie(actions_en_vigueur: &[&str]) -> bool {
+    actions_en_vigueur.contains(&super::ACTION_HISTORIQUE)
 }
 
 /// Ce que fait une demande d'ouverture de l'historique.
@@ -650,5 +666,40 @@ mod tests {
         let apres = [entree(A, 1, 1), entree(C, 1, 1)];
         assert_eq!(noms_partis(&avant, &apres), vec![B.to_string()]);
         assert!(noms_partis(&BTreeSet::new(), &apres).is_empty());
+    }
+
+    #[test]
+    fn tout_effacer_prend_toutes_les_cases() {
+        let (mut e, t) = etat();
+        ajouter_suppression(&mut e, B.to_string(), t);
+        let mut pris = prendre_tout(&mut e);
+        pris.sort();
+        let mut attendus = vec![A.to_string(), B.to_string(), C.to_string()];
+        attendus.sort();
+        assert_eq!(pris, attendus);
+        assert!(e.en_attente.is_empty());
+        // Une liste relue avant la fin du vidage ne remontre aucune case.
+        e.liste = vec![entree(A, 1024, 768), entree(B, 800, 600), entree(C, 1, 1)];
+        assert!(e.vues().is_empty());
+        assert!(!e.connu(A));
+        e.effaces(&pris);
+        assert!(e.liste.is_empty() && e.en_effacement.is_empty());
+    }
+
+    #[test]
+    fn apercu_seulement_avec_l_historique() {
+        assert!(apercu_a_la_sortie(&["zone", "historique"]));
+        assert!(!apercu_a_la_sortie(&[
+            "zone",
+            "plein_ecran",
+            "fenetre",
+            "derniere_zone"
+        ]));
+        assert!(apercu_a_la_sortie(
+            &crate::application::actions_construites(true, false)
+        ));
+        assert!(!apercu_a_la_sortie(
+            &crate::application::actions_construites(false, true)
+        ));
     }
 }

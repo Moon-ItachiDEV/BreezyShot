@@ -5,14 +5,14 @@
 //! Points d'accroche de `mod.rs` : `lancer_sonde` (démarrage, fil `texte-langues`, qui
 //! poste `Evenement::TexteDisponible`), `zone_choisie` (zone choisie en mode texte),
 //! `texte_lu` et `echu` (`Evenement::TexteLu`, `Evenement::TexteEchu`), `lire_export`
-//! (bouton « Texte » de l'éditeur, export de but `texte`), `abandonner_lecture`,
+//! (bouton « Texte » de l'éditeur, export de but `texte`), `bureau_change`,
 //! `arreter`. Aucune annonce ici : le raccourci du texte entre dans le bilan du démarrage.
 //!
 //! Aucune lecture ni copie sur le fil principal. L'écran figé (sa `GardeEcran`) est rangé
 //! à part, dans `ECRAN` : le fil `texte-ecran` le libère à `ECRAN_FIGE_MAX_LECTURE` sans
 //! passer par la boucle, même si la lecture ne rend rien.
 
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{mpsc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -29,6 +29,9 @@ use crate::sortie::{self, Etape};
 use crate::systeme::gel::Pixels;
 use crate::systeme::{self, Rect};
 use crate::texte::{self as lecture, Issue};
+
+/// La sonde des langues de lecture est partie (une fois par lancement).
+static SONDE_LANCEE: AtomicBool = AtomicBool::new(false);
 
 /// Dernier numéro de lecture donné (raccourci et menu).
 static NUMERO: AtomicU64 = AtomicU64::new(0);
@@ -91,7 +94,12 @@ fn dormir_jusqu_a(moment: Instant) {
 /// Démarrage : cherche les langues de lecture dans un petit fil, puis poste
 /// `Evenement::TexteDisponible` (R10 : sans langue, la fonction reste absente).
 pub fn lancer_sonde(app: &AppHandle) {
-    if !texte::CONSTRUIT {
+    // Seulement avec une licence, une fois par lancement (le résultat reste connu après un
+    // retrait puis une nouvelle activation).
+    let deja = SONDE_LANCEE.load(Ordering::SeqCst);
+    if !texte::sonder(texte::CONSTRUIT, super::pro(app), deja)
+        || SONDE_LANCEE.swap(true, Ordering::SeqCst)
+    {
         return;
     }
     let pour = app.clone();
@@ -352,17 +360,16 @@ fn finir(app: &AppHandle, fin: FinLecture) {
     log::info!("{}", texte::ligne_chrono(gel_cache, x.relache.elapsed()));
 }
 
-/// Écrans changés ou session verrouillée pendant la Lecture (fil principal) : la lecture
-/// est abandonnée (rien n'est copié, aucun message), l'écran figé et la sélection sont
-/// libérés, retour au Repos. Faux sans lecture en cours.
-pub fn abandonner_lecture(app: &AppHandle) -> bool {
-    let Some(x) = super::lecture_en_cours(app).take() else {
+/// Écrans changés ou session verrouillée pendant la Lecture (fil principal) : l'écran
+/// figé et la sélection sont libérés tout de suite ; la lecture continue, finit, copie et
+/// dit son message comme d'habitude. Faux sans lecture en cours.
+pub fn bureau_change(app: &AppHandle) -> bool {
+    let Some(numero) = texte::lecture_a_liberer(&super::lecture_en_cours(app)) else {
         return false;
     };
-    ATTENDUE.oublier();
-    oublier_ecran(x.numero);
-    log::info!("texte abandonne: bureau change");
-    super::appliquer(app, Declencheur::LectureImpossible);
+    if liberer_ecran(numero).is_some() {
+        log::info!("texte ecran libere: bureau change");
+    }
     true
 }
 
