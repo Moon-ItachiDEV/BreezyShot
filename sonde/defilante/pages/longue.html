@@ -1,0 +1,125 @@
+<!doctype html>
+<!-- Page témoin de la sonde défilante (S1, S2 (d), S3, S5). Locale, sans aucune requête au
+     dehors. Ouverte par file:///…/longue.html?lignes=800#<nom> : le titre devient
+     « Longue page BreezyShot <nom> h=<hauteur du document en px CSS> » (la sonde trouve
+     sa fenêtre par ce titre et y lit la hauteur), puis « r=webgl » ou « r=2d ».
+     - Bande de gauche (8 px CSS, une couleur par ligne CSS du document, voir
+       natif.cs CouleurLigne) : la sonde y lit le décalage vrai au pixel.
+     - En-tête collant de 56 px, une <canvas> WebGL animée (2D si WebGL manque, dit
+       dans data-rendu), deux carrés tournés par une animation CSS, une image paresseuse
+       sans taille réservée vers le milieu, et un « chargement en défilant » : arrivé
+       près du bas, 40 lignes de plus sont ajoutées une fois, 300 ms plus tard. -->
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<title>Longue page BreezyShot</title>
+<style>
+html, body { margin: 0; padding: 0; background: #fff; color: #1d2433;
+  font: 16px/24px "Segoe UI", Arial, sans-serif; }
+#bande { position: absolute; left: 0; top: 0; width: 8px; image-rendering: pixelated; z-index: 3; }
+header { position: sticky; top: 0; height: 56px; margin-left: 8px; z-index: 2;
+  background: #1e3a5f; color: #fff; display: flex; align-items: center; padding: 0 16px;
+  font-weight: 600; }
+main { margin-left: 8px; padding: 0 16px; }
+.l { height: 24px; white-space: nowrap; overflow: hidden; }
+.l:nth-child(5n) { background: #f1f4f9; }
+.vivant { display: flex; gap: 24px; align-items: center; height: 136px; }
+#gl { width: 240px; height: 120px; background: #000; }
+.carre { width: 60px; height: 60px; background: #e4572e; animation: tourne 1.2s linear infinite; }
+.carre.b { background: #2e86ab; animation-duration: 2s; }
+@keyframes tourne { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+#paresseuse { display: block; max-width: 100%; }
+#fin { height: 24px; color: #888; }
+</style>
+</head>
+<body>
+<canvas id="bande" width="1" height="1"></canvas>
+<header>BreezyShot · page témoin de la capture défilante</header>
+<main>
+  <div class="vivant"><canvas id="gl" width="240" height="120"></canvas>
+    <div class="carre"></div><div class="carre b"></div></div>
+  <div id="lignes"></div>
+  <div id="fin">fin de la page</div>
+</main>
+<script>
+(function () {
+  'use strict';
+  var params = new URLSearchParams(location.search);
+  var n = Math.max(1, parseInt(params.get('lignes') || '800', 10));
+  var nom = decodeURIComponent(location.hash.replace(/^#/, ''));
+  document.title = 'Longue page BreezyShot' + (nom ? ' ' + nom : '');
+  var mots = ['capture', 'défilante', 'molette', 'page', 'image', 'ligne', 'écran', 'zone',
+              'pilule', 'sentinelle', 'décalage', 'témoin'];
+  var lignes = document.getElementById('lignes');
+  function ajouter(debut, combien) {
+    var f = document.createDocumentFragment();
+    for (var i = debut; i < debut + combien; i++) {
+      var d = document.createElement('div');
+      d.className = 'l';
+      var t = 'Ligne ' + String(i + 1).padStart(4, '0') + ' · ';
+      for (var k = 0; k < 6; k++) t += mots[(i * 7 + k * 5) % mots.length] + ' ';
+      d.textContent = t + '· ' + (i * 37 % 1000);
+      f.appendChild(d);
+      if (i === Math.floor(n / 2)) {
+        var img = document.createElement('img');
+        img.id = 'paresseuse'; img.loading = 'lazy'; img.alt = '';
+        img.src = 'paresseuse.png';
+        f.appendChild(img);
+      }
+    }
+    lignes.appendChild(f);
+  }
+  ajouter(0, n);
+
+  // Canvas animée : WebGL si possible.
+  var cv = document.getElementById('gl');
+  var gl = null;
+  try { gl = cv.getContext('webgl'); } catch (e) { gl = null; }
+  document.body.setAttribute('data-rendu', gl ? 'webgl' : '2d');
+  var t0 = performance.now();
+  // Bande : une ligne de canvas par ligne CSS du document.
+  var bande = document.getElementById('bande');
+  function dessinerBande() {
+    var h = Math.max(document.documentElement.scrollHeight, document.body.scrollHeight);
+    if (bande.height === h) return;
+    bande.width = 1; bande.height = h; bande.style.height = h + 'px';
+    var c = bande.getContext('2d');
+    var img = c.createImageData(1, h);
+    for (var y = 0; y < h; y++) {
+      img.data[y * 4] = y & 0xFF;
+      img.data[y * 4 + 1] = 0x40 | ((y >> 8) & 0x3F);
+      img.data[y * 4 + 2] = 0xA0 | ((y >> 14) & 0x0F);
+      img.data[y * 4 + 3] = 255;
+    }
+    c.putImageData(img, 0, 0);
+    document.body.setAttribute('data-hauteur', String(h));
+    document.title = 'Longue page BreezyShot' + (nom ? ' ' + nom : '') + ' h=' + h + ' r=' + (gl ? 'webgl' : '2d');
+  }
+  dessinerBande();
+  new ResizeObserver(dessinerBande).observe(document.body);
+
+  // Chargement en défilant, une fois.
+  var charge = false;
+  new IntersectionObserver(function (e) {
+    if (charge || !e[0].isIntersecting) return;
+    charge = true;
+    setTimeout(function () { ajouter(n, 40); dessinerBande(); }, 300);
+  }, { rootMargin: '200px' }).observe(document.getElementById('fin'));
+
+  function image(t) {
+    var s = (t - t0) / 1000;
+    if (gl) {
+      gl.clearColor(0.5 + 0.5 * Math.sin(s * 3), 0.5 + 0.5 * Math.sin(s * 2 + 1), 0.6, 1);
+      gl.clear(gl.COLOR_BUFFER_BIT);
+    } else {
+      var c = cv.getContext('2d');
+      c.fillStyle = 'hsl(' + Math.floor(s * 120) % 360 + ',70%,50%)';
+      c.fillRect(0, 0, cv.width, cv.height);
+    }
+    requestAnimationFrame(image);
+  }
+  requestAnimationFrame(image);
+})();
+</script>
+</body>
+</html>

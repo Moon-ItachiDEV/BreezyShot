@@ -1,0 +1,125 @@
+# Sonde provisoire (0.6, contrat de la capture défilante, partie I) : ce que la machine
+# Windows de GitHub permet pour la capture défilante (S1 à S9). Branche à part, jamais
+# fusionnée ; à retirer avant la demande d'intégration. Chaque étape de mesure borne son
+# temps, ne fait jamais échouer le job (elle écrit « non mesurable : <raison> ») et écrit
+# ses mesures dans le résumé du job et dans sonde-resultats/<question>.md.
+name: Sonde défilante
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - 'claude/project-thread-tkz3qd'
+    paths:
+      - 'sonde/defilante/**'
+      - '.github/workflows/sonde-defilante.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sonde-defilante-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  sonde:
+    name: Capture défilante sur windows-latest
+    runs-on: windows-latest
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      SONDE_RESULTATS: ${{ github.workspace }}\sonde-resultats
+      SONDE_EXEMPLES: ${{ github.workspace }}\sonde\defilante\rust\target\release\examples
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Inventaire (Windows, écran, navigateurs, .NET, PowerShell, session)
+        timeout-minutes: 2
+        continue-on-error: true
+        run: ./sonde/defilante/00-inventaire.ps1
+
+      - name: Rust (version figée)
+        uses: dtolnay/rust-toolchain@1.97.0
+
+      - name: Cache Rust
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: sonde/defilante/rust
+
+      - name: Construire les exemples Rust (controle, vivant, memoire)
+        timeout-minutes: 12
+        continue-on-error: true
+        working-directory: sonde/defilante/rust
+        run: |
+          cargo build --release --locked --examples
+          Get-ChildItem target/release/examples -Filter *.exe | Format-Table Name, Length
+
+      - name: Electron (version figée, deux minutes au plus, sinon absent)
+        timeout-minutes: 3
+        continue-on-error: true
+        working-directory: sonde/defilante/electron
+        run: |
+          $chrono = [Diagnostics.Stopwatch]::StartNew()
+          $p = Start-Process -FilePath 'npm.cmd' -ArgumentList 'ci', '--no-audit', '--no-fund' -NoNewWindow -PassThru
+          $null = $p.Handle
+          if (-not $p.WaitForExit(120000)) {
+            try { $p.Kill($true) } catch { }
+            "Electron : pas installé en 2 min : absent pour la sonde"
+            exit 0
+          }
+          $exe = Join-Path (Get-Location) 'node_modules\electron\dist\electron.exe'
+          if (Test-Path $exe) {
+            "SONDE_ELECTRON=$exe" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+            "Electron installé en $([int]$chrono.Elapsed.TotalSeconds) s : $exe"
+          }
+          else { "Electron : npm ci fini (code $($p.ExitCode)) sans electron.exe : absent pour la sonde" }
+
+      - name: S9 et S2 (fenêtre de contrôle, molette, images vivantes)
+        timeout-minutes: 8
+        continue-on-error: true
+        run: ./sonde/defilante/01-s9-s2-controle-vivant.ps1
+
+      - name: S1 (faire défiler une autre app)
+        timeout-minutes: 12
+        continue-on-error: true
+        run: ./sonde/defilante/02-s1-defiler.ps1
+
+      - name: S6 (molette de l'utilisateur, crochet et entrée brute)
+        timeout-minutes: 3
+        continue-on-error: true
+        run: ./sonde/defilante/03-s6-molette.ps1
+
+      - name: S4 (trouver la page sous un clic)
+        timeout-minutes: 3
+        continue-on-error: true
+        run: ./sonde/defilante/04-s4-pages.ps1
+
+      - name: S5 (savoir qu'on est en bas)
+        timeout-minutes: 4
+        continue-on-error: true
+        run: ./sonde/defilante/05-s5-en-bas.ps1
+
+      - name: S3 (suites d'images avec leur décalage vrai)
+        timeout-minutes: 5
+        continue-on-error: true
+        run: ./sonde/defilante/06-s3-suites.ps1
+
+      - name: S7 (mémoire et taille maximale)
+        timeout-minutes: 3
+        continue-on-error: true
+        run: ./sonde/defilante/07-s7-memoire.ps1
+
+      - name: S8 (échelles, plusieurs écrans)
+        timeout-minutes: 4
+        continue-on-error: true
+        run: ./sonde/defilante/08-s8-echelles.ps1
+
+      - name: Envoyer les résultats de la sonde
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sonde-defilante-resultats
+          path: sonde-resultats/
+          if-no-files-found: warn
