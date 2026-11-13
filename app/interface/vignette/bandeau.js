@@ -1,7 +1,8 @@
 // Bandeau de messages. La page montre et rapporte, le cœur décide (ARCHITECTURE.md §2.5, §6).
 //
 // Contrat avec le cœur :
-// - écoute `bandeau:afficher` { id, genre, titre, detail, actions: [{ id, libelle }] }
+// - écoute `bandeau:afficher` { id, genre, titre, detail, actions: [{ id, libelle }],
+//   duree_ms }
 //   genre : "reussite" | "info" | "erreur". Un nouveau message remplace l'ancien tout de suite ;
 //   l'ancien ne reçoit plus rien (ni bandeau_termine ni bandeau_action).
 //   Message invalide (id absent, genre inconnu, titre vide ou non texte) : console.warn, rien
@@ -18,7 +19,9 @@
 //   disque ; un décompte efface la pilule sans `bandeau_termine`.
 // - `bandeau:message_cache` { id } : le cœur a caché le message `id` (avant une capture) ;
 //   la pilule est effacée tout de suite, sans `bandeau_termine`. Un autre `id` : rien.
-// Réussite : part seule après --duree-bandeau-reussite. Info et erreur : restent jusqu'au clic.
+// Réussite : part seule après --duree-bandeau-reussite. Info et erreur : restent jusqu'au clic,
+// sauf avec `duree_ms` (entier > 0, 0.5 : « Aucun texte trouvé ») : elles gardent leur croix
+// et leurs actions, et partent seules après `duree_ms` (puis `bandeau_termine`).
 // Sans window.__TAURI__ (aperçu dans un navigateur) : ?demo=reussite|info|erreur
 // (et &tenir pour qu'une réussite ne parte pas), ou ?demo=decompte.
 //
@@ -106,6 +109,11 @@ function valider(m) {
     detail: m.genre !== "reussite" && typeof m.detail === "string" ? m.detail : "",
     actions,
     tenir: m.tenir === true,
+    // Absent, null ou invalide : le message reste jusqu'au clic (règle de la 0.4).
+    dureeMs:
+      m.genre !== "reussite" && Number.isSafeInteger(m.duree_ms) && m.duree_ms > 0
+        ? m.duree_ms
+        : 0,
   };
 }
 
@@ -202,6 +210,8 @@ export function afficher(brut) {
 
   if (lui.genre === "reussite" && !lui.tenir) {
     lui.minuterie = setTimeout(() => cacher(lui), duree("--duree-bandeau-reussite"));
+  } else if (lui.dureeMs && !lui.tenir) {
+    lui.minuterie = setTimeout(() => cacher(lui), lui.dureeMs);
   }
 }
 

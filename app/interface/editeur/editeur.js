@@ -9,7 +9,9 @@
 // `editeur_exporter` (corps brut, en-têtes x-editeur-*) → numéro ; `editeur_fermer` { id,
 // version, vide, force, preferences } → "fermee" | "demander" ; `editeur_garder` { id }.
 // Événements : `editeur:charger`, `editeur:fermer_demande`, `editeur:resultat`,
-// `editeur:glisser`, `interface:theme` (commun/theme.js).
+// `editeur:glisser`, `interface:theme` (commun/theme.js). Copier le texte (0.5, texte.js) :
+// `ChargeEditeur.texte`, export de but `texte`, `editeur_copier_texte`, `editeur:texte`,
+// `editeur:texte_copie`.
 //
 // Toiles : `base` (ImageBitmap de la capture), `fond` (base + masques, recalculée quand un
 // masque change), `vue` (la scène × devicePixelRatio). `vue` = { x, y, echelle, dpr } : place
@@ -21,6 +23,7 @@ import * as modele from "./document.js";
 import * as dessin from "./dessin.js";
 import { installerBarre } from "./barre.js";
 import { installerOutils } from "./outils.js";
+import { installerTexte } from "./texte.js";
 
 const tauri = window.__TAURI__;
 const $ = (s) => document.querySelector(s);
@@ -298,6 +301,7 @@ function placer() {
   ombre.style.width = `${(c.largeur * echelle) / dpr}px`;
   ombre.style.height = `${(c.hauteur * echelle) / dpr}px`;
   ed.outils?.placerSaisie();
+  ed.texte?.placer();
   ed.dessiner();
 }
 ed.placer = placer;
@@ -444,6 +448,8 @@ async function charger(charge) {
   ed.exportee = null;
   ed.exports.clear();
   exportEnCours = false;
+  ed.texte?.remiseAZero();
+  ed.texte?.poserBouton(charge.texte === true);
   ed.affiche = false;
   cleMasques = "";
   cleCadre = "";
@@ -509,13 +515,19 @@ function preferencesTexte() {
 let exportEnCours = false;
 let demandeEnAttente = null; // editeur:fermer_demande reçue avant la charge
 ed.exportEnCours = () => exportEnCours;
+// Un export à la fois : « Texte » est grisé pendant un export (contrat 0.5, §5.6).
+function poserExport(v) {
+  exportEnCours = v;
+  ed.texte?.synchroniser();
+}
+ed.finExport = () => poserExport(false);
 ed.exporter = async (but) => {
   if (!ed.charge || !ed.h || !ed.fond || exportEnCours) return null;
-  exportEnCours = true;
+  poserExport(true);
   ed.outils?.validerSaisie();
   await envoyerEtat();
   if (!ed.charge || !ed.fond) {
-    exportEnCours = false;
+    poserExport(false);
     return null;
   }
   const version = ed.h.version;
@@ -534,7 +546,7 @@ ed.exporter = async (but) => {
     ed.exports.set(numero, { but, version });
     return numero;
   } catch (e) {
-    exportEnCours = false;
+    poserExport(false);
     console.info("editeur_exporter :", e);
     return null;
   }
@@ -542,7 +554,7 @@ ed.exporter = async (but) => {
 
 function resultat(r) {
   if (!r || !ed.charge || r.id !== ed.charge.id) return;
-  exportEnCours = false;
+  poserExport(false);
   const e = ed.exports.get(r.numero);
   ed.exports.delete(r.numero);
   const reussi = r.etat === "fait" || r.etat === "deja_fait";
@@ -603,6 +615,12 @@ ed.barre = installerBarre(ed);
 // chargement ; rien en production.
 if (window.__essaiEditeur === true) Object.defineProperty(window, "__ed", { value: ed });
 ed.outils = installerOutils(ed);
+ed.texte = installerTexte(ed, {
+  appeler,
+  message: (texte, echec) => ed.barre.message(texte, echec),
+  reduites: () =>
+    "reduites" in racine.dataset || matchMedia("(prefers-reduced-motion: reduce)").matches,
+});
 
 async function demarrer() {
   await suivreTheme();
@@ -616,6 +634,8 @@ async function demarrer() {
         else if (id === ed.charge?.id) fermer(false);
       }),
       ecoute("editeur:resultat", (e) => resultat(e?.payload)),
+      ecoute("editeur:texte", (e) => ed.texte.recu(e?.payload)),
+      ecoute("editeur:texte_copie", (e) => ed.texte.copie(e?.payload)),
       ecoute("editeur:glisser", (e) => {
         if (e?.payload?.id === ed.charge?.id) ed.barre.glisserEnCours(e.payload.etat === "debut");
       }),
