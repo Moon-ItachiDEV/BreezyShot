@@ -43,6 +43,9 @@ const DECALAGE_COPIE = 16;
 const RECTANGULAIRES = { rectangle: 1, ellipse: 1, masque: 1, projecteur: 1 };
 const ENCRES = { fleche: 1, rectangle: 1, ellipse: 1, ligne: 1, crayon: 1, surligneur: 1 };
 const ANGLE = Math.PI / 12; // Maj : pas de 15°
+// Poignée du milieu d'une flèche tirée à moins de 6 px d'écran du milieu de la corde : la
+// flèche redevient droite.
+const AIMANT_DROIT = 6;
 
 // Marges des ombres et des traits autour de la forme (px de l'image), d'après le dessin :
 // une ombre de flou b décalée de d s'étend jusqu'à 1,5 b + d (écart type b / 2, trois écarts).
@@ -264,6 +267,52 @@ function norme(o) {
 // Milieu de la courbe (t = 1/2), où se tient la poignée `pc`.
 function milieuCourbe(o) {
   return [0.25 * o.x1 + 0.5 * o.cx + 0.25 * o.x2, 0.25 * o.y1 + 0.5 * o.cy + 0.25 * o.y2];
+}
+
+// Point et tangente (unitaire) de la flèche en t, droite ou courbe (une flèche droite est la
+// courbe dont le point de contrôle est le milieu de la corde).
+function pointFleche(o, t) {
+  const cx = o.cx ?? (o.x1 + o.x2) / 2, cy = o.cy ?? (o.y1 + o.y2) / 2, u = 1 - t;
+  return [u * u * o.x1 + 2 * u * t * cx + t * t * o.x2, u * u * o.y1 + 2 * u * t * cy + t * t * o.y2];
+}
+function tangenteFleche(o, t) {
+  const cx = o.cx ?? (o.x1 + o.x2) / 2, cy = o.cy ?? (o.y1 + o.y2) / 2;
+  let dx = 2 * (1 - t) * (cx - o.x1) + 2 * t * (o.x2 - cx);
+  let dy = 2 * (1 - t) * (cy - o.y1) + 2 * t * (o.y2 - cy);
+  if (!dx && !dy) { dx = o.x2 - o.x1; dy = o.y2 - o.y1; }
+  const l = Math.hypot(dx, dy);
+  return l ? [dx / l, dy / l] : [1, 0];
+}
+// Le point `a` vu de la flèche : t du point de la courbe le plus proche, écart le long de la
+// normale, et dépassement le long de la tangente (au-delà d'un bout seulement).
+function surFleche(o, a) {
+  const d2 = (t) => {
+    const [x, y] = pointFleche(o, t);
+    return (x - a[0]) ** 2 + (y - a[1]) ** 2;
+  };
+  const N = 32;
+  let t = 0, m = Infinity;
+  for (let i = 0; i <= N; i++) {
+    const v = d2(i / N);
+    if (v < m) { m = v; t = i / N; }
+  }
+  let g = Math.max(0, t - 1 / N), h = Math.min(1, t + 1 / N);
+  for (let i = 0; i < 24; i++) {
+    const u = g + (h - g) / 3, v = h - (h - g) / 3;
+    if (d2(u) < d2(v)) h = v; else g = u;
+  }
+  t = (g + h) / 2;
+  const [x, y] = pointFleche(o, t), [tx, ty] = tangenteFleche(o, t);
+  return [t, (a[0] - x) * -ty + (a[1] - y) * tx, (a[0] - x) * tx + (a[1] - y) * ty];
+}
+// Les passages de gomme de la flèche `q` portés sur la flèche `o` (même bouts, autre
+// courbe) : chaque point garde sa place le long de l'encre et son écart à elle.
+function gommesSurFleche(q, o) {
+  return gommesPar(q, (a) => {
+    const [t, n, e] = surFleche(q, a);
+    const [x, y] = pointFleche(o, t), [tx, ty] = tangenteFleche(o, t);
+    return [x - ty * n + tx * e, y + tx * n + ty * e];
+  });
 }
 
 // Points extrêmes d'une courbe quadratique (bouts et sommets par axe).
@@ -661,20 +710,38 @@ export function redimensionner(objet, origine, poignee, point, echelleVue, contr
       x = fx + Math.cos(an) * mini; y = fy + Math.sin(an) * mini;
     }
     if (poignee === "p1") { o.x1 = x; o.y1 = y; } else { o.x2 = x; o.y2 = y; }
-    if (q.gommes) {
-      // La similitude qui porte l'ancien segment sur le nouveau.
+    if (q.gommes || q.cx != null) {
+      // La similitude qui porte l'ancien segment sur le nouveau : une flèche courbe garde sa
+      // courbe, les passages de gomme suivent l'encre.
       const ux = q.x2 - q.x1, uy = q.y2 - q.y1, d = ux * ux + uy * uy || 1;
       const vx = o.x2 - o.x1, vy = o.y2 - o.y1;
       const re = (vx * ux + vy * uy) / d, im = (vy * ux - vx * uy) / d;
-      o.gommes = gommesPar(q, (a) => {
+      const porter = (a) => {
         const dx = a[0] - q.x1, dy = a[1] - q.y1;
         return [o.x1 + re * dx - im * dy, o.y1 + im * dx + re * dy];
-      }, Math.hypot(re, im));
+      };
+      if (q.cx != null) [o.cx, o.cy] = porter([q.cx, q.cy]);
+      if (q.gommes) o.gommes = gommesPar(q, porter, Math.hypot(re, im));
     }
     return;
   }
   if (poignee === "pc") {
-    o.cx = 2 * p.x - 0.5 * (q.x1 + q.x2); o.cy = 2 * p.y - 0.5 * (q.y1 + q.y2);
+    // La poignée du milieu courbe la flèche : la courbe passe par la pointe. Tirée près du
+    // milieu de la corde, la flèche redevient droite ; Maj : courbe symétrique (la pointe
+    // sur la médiatrice). Les passages de gomme suivent l'encre.
+    const mx = (q.x1 + q.x2) / 2, my = (q.y1 + q.y2) / 2;
+    let { x, y } = p;
+    if (contraint) {
+      const ux = q.x2 - q.x1, uy = q.y2 - q.y1, l = Math.hypot(ux, uy) || 1;
+      const ecart = ((x - mx) * -uy + (y - my) * ux) / l;
+      x = mx - (uy / l) * ecart; y = my + (ux / l) * ecart;
+    }
+    if (Math.hypot(x - mx, y - my) < AIMANT_DROIT / s) {
+      delete o.cx; delete o.cy;
+    } else {
+      o.cx = 2 * x - mx; o.cy = 2 * y - my;
+    }
+    if (q.gommes) o.gommes = gommesSurFleche(q, o);
     return;
   }
   const b = boiteForme(q);
@@ -724,6 +791,37 @@ export function redimensionner(objet, origine, poignee, point, echelleVue, contr
     o.points = q.points.map((a) => arrondirPoint(place(a)));
     if (q.gommes) o.gommes = gommesPar(q, place, Math.sqrt(sx * sy));
   }
+}
+
+// Une autre variante du même outil pour un objet choisi, à la même place et aux mêmes
+// réglages : rectangle, ellipse ou ligne (la ligne suit la diagonale de la boîte) ;
+// pixeliser, flouter ou bloc ; projecteur rectangle ou ovale. Rend vrai si l'objet change.
+const FORMES = ["rectangle", "ellipse", "ligne"];
+const MASQUES = ["pixeliser", "flouter", "bloc"];
+export function changerVariante(objet, variante) {
+  const o = objet;
+  if (o.type === "masque") {
+    if (!MASQUES.includes(variante) || o.sorte === variante) return false;
+    o.sorte = variante;
+    return true;
+  }
+  if (o.type === "projecteur") {
+    if ((variante !== "rectangle" && variante !== "ovale") || o.forme === variante) return false;
+    o.forme = variante;
+    return true;
+  }
+  if (!FORMES.includes(o.type) || !FORMES.includes(variante) || o.type === variante) return false;
+  o.type = variante;
+  if (variante === "ligne") {
+    delete o.plein;
+    delete o.arrondi;
+  } else {
+    o.plein ??= false;
+    if (variante === "rectangle") o.arrondi ??= 6;
+    else delete o.arrondi;
+    normaliser(o);
+  }
+  return true;
 }
 
 // ---------- ordre, copies, numéros ----------

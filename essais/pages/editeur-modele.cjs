@@ -548,12 +548,14 @@ async function partieDocument() {
     const f2 = JSON.parse(json(f));
     D.redimensionner(f2, f, 'p2', { x: 100, y: 300 }, 1);
     const e = json(f2.gommes) === '[{"largeur":20,"points":[[100,200],[120,200]]}]';
-    // La courbure tirée ne déplace pas les passages.
+    // La flèche courbée : les passages suivent l'encre (même place le long d'elle, même
+    // écart), leur largeur gardée.
     const f3 = JSON.parse(json(f));
     D.redimensionner(f3, f, 'pc', { x: 150, y: 150 }, 1);
-    const k = json(f3.gommes) === json(f.gommes) && f3.cy === 200;
+    const k = json(f3.gommes) === '[{"largeur":10,"points":[[150,150],[150,140]]}]'
+      && f3.cy === 200;
     verifier(a && b && c && d && e && k, 'G4 les passages de gomme suivent l\'objet déplacé, '
-      + 'dupliqué, redimensionné (tracé, rectangle, bout de flèche tourné)',
+      + 'dupliqué, redimensionné (tracé, rectangle, bout de flèche tourné, flèche courbée)',
     [a, b, c, d, e, k].join());
   }
   // (G5) Maj sur une poignée : 15° pour un bout, proportions gardées pour un coin.
@@ -614,6 +616,85 @@ async function partieDocument() {
     const d1 = D.abandonner(h2) && h2.futur.length === 0 && doc2.objets.length === 0;
     verifier(vide0 && a && b && c && d1, 'G6 abandonner : le pas du geste défait sans rester à '
       + 'rétablir, l\'ancien « à rétablir » rendu', [vide0, a, b, c, d1].join());
+  }
+  // (F) La flèche se courbe à sa poignée du milieu : la courbe passe par la pointe ; près du
+  // milieu de la corde (6 px d'écran), elle redevient droite ; Maj : courbe symétrique. Les
+  // bouts tirés gardent la courbe (similitude), les passages de gomme suivent.
+  {
+    const droite = { type: 'fleche', x1: 0, y1: 0, x2: 100, y2: 0, double: false,
+      couleur: '#E5484D', epaisseur: 1, opacite: 1 };
+    const pres = (u, v) => Math.abs(u - v) < 1e-9;
+    const f1 = JSON.parse(json(droite));
+    D.redimensionner(f1, droite, 'pc', { x: 50, y: 40 }, 1);
+    const pc1 = D.poignees(f1).find((q) => q[2] === 'pc');
+    const a = f1.cx === 50 && f1.cy === 80 && pres(pc1[0], 50) && pres(pc1[1], 40)
+      && f1.x1 === 0 && f1.x2 === 100;
+    // Ramenée à 4,5 px du milieu de la corde : droite (à l'échelle 1) ; à l'échelle 2, 6 px
+    // d'écran font 3 px de l'image : encore courbe.
+    const f2 = JSON.parse(json(f1));
+    D.redimensionner(f2, f1, 'pc', { x: 52, y: 4 }, 1);
+    const f2b = JSON.parse(json(f1));
+    D.redimensionner(f2b, f1, 'pc', { x: 52, y: 4 }, 2);
+    const b = !('cx' in f2) && !('cy' in f2) && f2b.cx === 54 && f2b.cy === 8;
+    // Maj : la pointe ramenée sur la médiatrice de la corde.
+    const f3 = JSON.parse(json(droite));
+    D.redimensionner(f3, droite, 'pc', { x: 80, y: 40 }, 1, true);
+    const c = pres(f3.cx, 50) && pres(f3.cy, 80);
+    // Un bout tiré d'un quart de tour : la courbe tourne avec la flèche.
+    const f4 = JSON.parse(json(f1));
+    D.redimensionner(f4, f1, 'p2', { x: 0, y: 100 }, 1);
+    const d = pres(f4.cx, -80) && pres(f4.cy, 50) && f4.x2 === 0 && f4.y2 === 100;
+    // Les passages de gomme suivent la courbe : au milieu, le long d'elle ; au départ, le
+    // départ ; leur largeur gardée.
+    const g = { ...JSON.parse(json(droite)),
+      gommes: [{ largeur: 10, points: [[50, 0], [50, -10], [0, 0]] }] };
+    const f5 = JSON.parse(json(g));
+    D.redimensionner(f5, g, 'pc', { x: 50, y: 40 }, 1);
+    const e = json(f5.gommes) === '[{"largeur":10,"points":[[50,40],[50,30],[0,0]]}]';
+    // Redevenue droite : les passages reviennent.
+    const f6 = JSON.parse(json(f5));
+    D.redimensionner(f6, f5, 'pc', { x: 50, y: 1 }, 1);
+    const k = !('cx' in f6) && json(f6.gommes) === json(g.gommes);
+    verifier(a && b && c && d && e && k, 'F flèche courbée à sa poignée du milieu : la courbe '
+      + 'passe par la pointe, aimant droit de 6 px d\'écran, Maj symétrique, bouts et passages '
+      + 'qui suivent', [a, b, c, d, e, k].join());
+  }
+  // (V) Une autre variante pour l'objet choisi : même place, mêmes réglages.
+  {
+    const rect = { type: 'rectangle', x1: 10, y1: 20, x2: 110, y2: 80, couleur: '#30A46C',
+      epaisseur: 2, plein: true, arrondi: 10, opacite: 0.5, id: 3 };
+    const r1 = JSON.parse(json(rect));
+    const a = D.changerVariante(r1, 'ellipse') && r1.type === 'ellipse' && !('arrondi' in r1)
+      && r1.plein === true && r1.couleur === '#30A46C' && r1.epaisseur === 2
+      && r1.opacite === 0.5 && r1.id === 3 && r1.x1 === 10 && r1.y2 === 80;
+    const b = D.changerVariante(r1, 'rectangle') && r1.type === 'rectangle' && r1.arrondi === 6
+      && r1.plein === true;
+    // Une ligne : la diagonale de la boîte, sans remplissage ni arrondi ; et retour.
+    const l1 = JSON.parse(json(rect));
+    const c = D.changerVariante(l1, 'ligne') && l1.type === 'ligne' && !('plein' in l1)
+      && !('arrondi' in l1) && l1.x1 === 10 && l1.y1 === 20 && l1.x2 === 110 && l1.y2 === 80;
+    const l2 = { type: 'ligne', x1: 110, y1: 80, x2: 10, y2: 20, couleur: '#E5484D',
+      epaisseur: 1, opacite: 1 };
+    const d = D.changerVariante(l2, 'ellipse') && l2.type === 'ellipse' && l2.plein === false
+      && l2.x1 === 10 && l2.x2 === 110 && l2.y1 === 20 && l2.y2 === 80;
+    const m = { type: 'masque', x1: 0, y1: 0, x2: 50, y2: 50, sorte: 'pixeliser', intensite: 2,
+      graine: 7 };
+    const e = D.changerVariante(m, 'bloc') && m.sorte === 'bloc' && m.intensite === 2
+      && m.graine === 7 && D.changerVariante(m, 'flouter') && m.sorte === 'flouter';
+    const s = { type: 'projecteur', x1: 0, y1: 0, x2: 50, y2: 50, forme: 'rectangle' };
+    const f = D.changerVariante(s, 'ovale') && s.forme === 'ovale';
+    // Rien ne change : même variante, variante d'un autre outil, objet sans variante.
+    const tous = [JSON.parse(json(rect)), JSON.parse(json(m)), JSON.parse(json(s)),
+      { type: 'fleche', x1: 0, y1: 0, x2: 10, y2: 0 }, { type: 'crayon', points: [[0, 0]] }];
+    const avant = json(tous);
+    const g = !D.changerVariante(tous[0], 'rectangle') && !D.changerVariante(tous[0], 'ovale')
+      && !D.changerVariante(tous[0], 'bloc') && !D.changerVariante(tous[1], 'flouter')
+      && !D.changerVariante(tous[1], 'ellipse') && !D.changerVariante(tous[2], 'ovale')
+      && !D.changerVariante(tous[2], 'ellipse') && !D.changerVariante(tous[3], 'ligne')
+      && !D.changerVariante(tous[4], 'rectangle') && json(tous) === avant;
+    verifier(a && b && c && d && e && f && g, 'V changerVariante : forme, masque, projecteur à '
+      + 'la même place et aux mêmes réglages ; rien pour une même variante ou un autre outil',
+    [a, b, c, d, e, f, g].join());
   }
   // Rectangles normalisés ; crayon lissé (Chaikin deux fois).
   {
