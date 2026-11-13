@@ -310,25 +310,30 @@ export function relacherCalque() {
 }
 
 // Efface de `k` les passages de gomme : traits ronds, en ligne brisée (celle que le geste a
-// suivie), dans la transformation posée.
+// suivie), dans la transformation posée. Un seul tracé par largeur : des passages qui se
+// recouvrent ne comptent qu'une fois, le bord d'un trou ne s'use pas quand on repasse dedans.
 function passerGomme(k, gommes) {
   k.globalCompositeOperation = "destination-out";
   k.globalAlpha = 1;
   k.shadowColor = "transparent";
-  k.fillStyle = k.strokeStyle = "#000";
+  k.strokeStyle = "#000";
   k.lineCap = k.lineJoin = "round";
+  const parLargeur = new Map();
   for (const g of gommes) {
-    const p = g.points;
-    if (!p.length) continue;
+    if (!g.points.length) continue;
+    const l = parLargeur.get(g.largeur);
+    if (l) l.push(g.points);
+    else parLargeur.set(g.largeur, [g.points]);
+  }
+  for (const [largeur, traces] of parLargeur) {
+    k.lineWidth = largeur;
     k.beginPath();
-    if (p.length === 1) {
-      k.arc(p[0][0], p[0][1], g.largeur / 2, 0, 2 * Math.PI);
-      k.fill();
-      continue;
+    for (const p of traces) {
+      k.moveTo(p[0][0], p[0][1]);
+      // Un seul point : un trait presque nul, que les bouts ronds changent en disque.
+      if (p.length === 1) k.lineTo(p[0][0] + 0.01, p[0][1]);
+      for (let i = 1; i < p.length; i++) k.lineTo(p[i][0], p[i][1]);
     }
-    k.lineWidth = g.largeur;
-    k.moveTo(p[0][0], p[0][1]);
-    for (let i = 1; i < p.length; i++) k.lineTo(p[i][0], p[i][1]);
     k.stroke();
   }
 }

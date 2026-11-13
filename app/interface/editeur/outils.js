@@ -204,6 +204,12 @@ export function installerOutils(ed) {
       };
       ed.gommes = geste.passages;
       passer(p, p);
+      // La gomme posée sur un objet entier (texte, numéro, masque, projecteur), sans encre
+      // dessous : il part en entier, et disparaît dès l'appui.
+      if (!geste.passages.size) {
+        const o = ed.modele.objetSous(ed.h.doc, p, tolerance(), ENTIERS);
+        if (o) ed.gommeEntier = geste.entier = o.id;
+      }
       placerRond(e);
       ed.dessiner();
       return;
@@ -314,10 +320,12 @@ export function installerOutils(ed) {
       }
     }
   }
-  // Fin du geste : un seul pas, pour ce qui a vraiment changé. Rien d'effacé et pas de
-  // mouvement : le clic enlève l'objet entier sous la gomme, s'il y en a un.
+  // Fin du geste : un seul pas, pour ce qui a vraiment changé (les encres gommées, l'objet
+  // entier pris à l'appui). Rien de changé et pas de mouvement : le clic enlève l'objet entier
+  // sous la gomme, s'il y en a un (une encre déjà gommée à cet endroit le couvrait).
   function finirGomme(g) {
     ed.gommes = null;
+    ed.gommeEntier = null;
     const doc = ed.h.doc;
     const effets = [];
     for (const [id, passages] of g.passages) {
@@ -325,17 +333,19 @@ export function installerOutils(ed) {
       const effet = o ? ed.dessin.effetGomme(doc, o, passages) : "rien";
       if (effet !== "rien") effets.push([id, passages, effet]);
     }
-    if (effets.length) {
+    const otes = effets.filter((x) => x[2] === "vide").map((x) => x[0]);
+    if (g.entier != null && ed.objet(g.entier)) otes.push(g.entier);
+    else if (!effets.length && !g.bouge) {
+      const o = ed.modele.objetSous(doc, g.depart, tolerance(), ENTIERS);
+      if (o) otes.push(o.id);
+    }
+    if (effets.length || otes.length) {
       ed.modifier((d) => {
-        const vides = effets.filter((x) => x[2] === "vide").map((x) => x[0]);
         for (const [id, passages, effet] of effets) {
           if (effet === "efface") ed.modele.gommer(d, id, passages);
         }
-        if (vides.length) ed.modele.supprimer(d, vides);
+        if (otes.length) ed.modele.supprimer(d, otes);
       });
-    } else if (!g.bouge) {
-      const o = ed.modele.objetSous(doc, g.depart, tolerance(), ENTIERS);
-      if (o) ed.modifier((d) => ed.modele.supprimer(d, [o.id]));
     }
     ed.dessiner();
   }
@@ -590,6 +600,7 @@ export function installerOutils(ed) {
     clearTimeout(g.minuterie);
     ed.enCours = null;
     ed.gommes = null;
+    ed.gommeEntier = null;
     rond.classList.remove("appui");
     if (g.mode === "pan") {
       scene.dataset.curseur = espace ? "grab" : "";
@@ -956,6 +967,7 @@ export function installerOutils(ed) {
       dernier = null;
       survol = null;
       ed.gommes = null;
+      ed.gommeEntier = null;
       cacherRond();
       edition = null;
       saisie.hidden = true;

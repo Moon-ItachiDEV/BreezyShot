@@ -66,6 +66,7 @@ const ed = {
   prefs: null,
   enCours: null, // objet en cours de tracé (peint par peindreVue, option `ajout`), ou null
   gommes: null, // Map id → passages de la gomme en cours (option `gommes`), ou null
+  gommeEntier: null, // id de l'objet entier pris par la gomme en cours (caché), ou null
   surcouche: null, // fonction (ctx) de outils.js : poignées, recadrage, cadre, pipette
   affiche: false,
   exportee: null, // dernière version exportée avec succès
@@ -396,6 +397,7 @@ function optionsVue() {
   if (ajout) options.ajout = ajout;
   const enEdition = ed.outils?.idEnEdition();
   if (enEdition) options.cacher = enEdition;
+  else if (ed.gommeEntier != null) options.cacher = ed.gommeEntier;
   // Les passages de la gomme du geste en cours (aperçu : le document n'a pas encore changé).
   if (ed.gommes?.size) options.gommes = ed.gommes;
   // Sans poignées (stylo, surligneur, gomme en main), une flèche choisie reçoit un cadre.
