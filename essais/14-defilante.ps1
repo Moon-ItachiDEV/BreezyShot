@@ -154,6 +154,7 @@ $MOTIFS = [ordered]@{
     EchapL     = 'echap global libere$'
     EchapR     = 'echap global reserve$'
     DefPages   = 'defiler pages: '
+    DefMesure  = 'defiler pages (detail|tardives|fin): '
     Avert      = '^\S+\s+(WARN|ERROR)\s+\S+\s+(defilante|defiler|entree globale|echap global)'
     Ignore     = 'raccourci ignore pendant la defilante$'
     Presse     = 'raccourci presse: '
@@ -1224,17 +1225,78 @@ public static int[] ClasserResumes(int[] ra, int[] rb, int h, int minRecouvremen
             $dl = @(Apres $Dossier 'DPages' $Base)
             $lignePages = if ($dp.Count) { Message $dp[-1] } else { '<aucune ligne « defiler pages: »>' }
             Write-Host "[pages] $Quoi : $lignePages ; $(if ($dl.Count) { Message $dl[-1] }) ; $pages page(s) proposée(s) à la sélection $id"
-            return [pscustomobject]@{ Id = $id; Selection = $hs; Controle = $hc; Pages = $pages; Focus = $focus; Base = $Base; LignePages = $lignePages }
+            # Les mesures de la recherche (lancement, COM et client, chaque fenêtre : classe,
+            # ms, éléments ; tardives ; fin) : recopiées ici, et de nouveau par Attendre-Pages.
+            $mesures = @(Lignes-Mesure $Dossier $Base)
+            foreach ($m in $mesures) { Write-Host "[pages] $Quoi : $m" }
+            return [pscustomobject]@{ Id = $id; Selection = $hs; Controle = $hc; Pages = $pages; Focus = $focus; Base = $Base; LignePages = $lignePages; Dossier = $Dossier; Mesures = $mesures }
         }
 
-        # Un clic sur une page n'a de sens que si des pages ont été proposées : sinon un échec
-        # qui le dit. La durée de la recherche (B, budget de 300 ms) est notée avec sa marge.
+        # Les lignes de mesure de la recherche des pages venues après les compteurs $Base
+        # (`defiler pages:`, `defiler pages detail|tardives|fin:`), sans horodatage.
+        function Lignes-Mesure([string]$Dossier, $Base) {
+            # Les deux motifs sont disjoints : les lignes d'avant $Base sont les premières.
+            $t = @(Lignes-Journal $Dossier | Where-Object { $_ -match $MOTIFS['DefPages'] -or $_ -match $MOTIFS['DefMesure'] })
+            $deja = $Base['DefPages'] + $Base['DefMesure']
+            if ($t.Count -le $deja) { return @() }
+            return @($t[$deja..($t.Count - 1)] | ForEach-Object { Message $_ })
+        }
+
+        # Le nombre de pages proposées à la sélection de $Visee : le plus grand n de
+        # `selection <id>: pages proposees <n>` (la liste grandit quand UI Automation répond
+        # en retard), ou, si la liste a été retenue pour la première charge, celui de
+        # `defilante pages <n>` ; -1 sans rien.
+        function Pages-Proposees($Visee) {
+            $lignes = Lignes-Journal $Visee.Dossier
+            $n = -1
+            foreach ($l in $lignes) {
+                if ($l -match "selection $($Visee.Id)`: pages proposees (\d+)$") { $n = [math]::Max($n, [int]$Matches[1]) }
+            }
+            if (@($lignes | Where-Object { $_ -match "selection $($Visee.Id)`: pages retenues pour la premiere charge$" }).Count -gt 0) {
+                foreach ($l in @(Apres $Visee.Dossier 'DPages' $Visee.Base)) { $n = [math]::Max($n, (Nombre $l 'defilante pages (\d+) en ')) }
+            }
+            return $n
+        }
+
+        # Avant un clic sur une page : la page doit avoir été proposée à la sélection (ligne du
+        # journal), attendue $DelaiS s au plus après la visée prête (les pages d'UI Automation
+        # peuvent suivre la première liste, jusqu'à 1,5 s après son début) ; venue en retard,
+        # 200 ms de plus pour que la page de sélection la prenne (une image). Met à jour
+        # $Visee.Pages et $Visee.Mesures, écrit les mesures venues depuis la visée ; rend le
+        # nombre de pages.
+        function Attendre-Pages($Visee, [string]$Quoi, [double]$DelaiS = 2) {
+            $n = Pages-Proposees $Visee
+            if ($n -lt 1) {
+                $sw = [System.Diagnostics.Stopwatch]::StartNew()
+                while ($n -lt 1 -and $sw.Elapsed.TotalSeconds -lt $DelaiS) {
+                    Start-Sleep -Milliseconds 30
+                    $n = Pages-Proposees $Visee
+                }
+                if ($n -ge 1) {
+                    Start-Sleep -Milliseconds 200
+                    Write-Host "[pages] $Quoi : $n page(s) proposée(s) en retard, $($sw.ElapsedMilliseconds) ms après la visée prête"
+                }
+            }
+            $Visee.Pages = [math]::Max($Visee.Pages, $n)
+            $mesures = @(Lignes-Mesure $Visee.Dossier $Visee.Base)
+            if ($mesures.Count -gt $Visee.Mesures.Count) {
+                foreach ($m in $mesures[$Visee.Mesures.Count..($mesures.Count - 1)]) { Write-Host "[pages] $Quoi : $m" }
+            }
+            $Visee.Mesures = $mesures
+            return $Visee.Pages
+        }
+
+        # Un clic sur une page n'a de sens que si des pages ont été proposées (attendues 2 s
+        # au plus, Attendre-Pages) : sinon un échec qui le dit, avec les mesures de la
+        # recherche. La durée de la première liste (B, budget de 300 ms) est notée avec sa marge.
         function Exiger-Pages($Visee, [string]$Quoi) {
+            $n = Attendre-Pages $Visee $Quoi
             $ms = Nombre $Visee.LignePages ' en (\d+) ms$'
             $retard = Nombre $Visee.LignePages 'en retard (\d+)\)'
             if ($ms -ge 0) { Noter-Mesure -Nom "$Quoi recherche des pages (budget de B 300 ms ; marge = 300 - durée ; en retard $retard)" -Valeur "$ms ms, marge $(300 - $ms) ms" }
-            if ($Visee.Pages -lt 1) {
-                throw "$Quoi : aucune page proposée à la sélection : le clic au centre du témoin ne viserait rien$(if ($ms -gt 300) { ' (recherche des pages hors budget)' }) ; $($Visee.LignePages)"
+            if ($n -lt 1) {
+                $mesures = if ($Visee.Mesures.Count) { $Visee.Mesures -join ' | ' } else { $Visee.LignePages }
+                throw "$Quoi : aucune page proposée à la sélection en 2 s après la visée prête : le clic au centre du témoin ne viserait rien$(if ($ms -gt 300) { ' (recherche des pages hors budget)' }) ; mesures : $mesures"
             }
         }
 
@@ -1558,6 +1620,7 @@ public static int[] ClasserResumes(int[] ra, int[] rb, int h, int minRecouvremen
                 $nPos = @(Positions $t).Count
                 $Cpt = Compteurs $da
                 $Visee = Viser $da 'raccourci' '(A1)' $Cpt
+                $null = Attendre-Pages $Visee '(A1)'
                 Verifier "(A1) visée prête : sélection en mode défilante, $($Visee.Pages) page(s) proposée(s), fenêtre de contrôle et sa page prêtes" ($Visee.Pages -ge 1) | Out-Null
                 # Le premier plan pendant la visée est noté (lignes [focus]) : le terminal de la
                 # machine peut le prendre sans faute de l'app ; le contrat demande l'absence de
@@ -1957,7 +2020,10 @@ public static int[] ClasserResumes(int[] ra, int[] rb, int h, int minRecouvremen
                 $Cpt = Compteurs $dn
                 $Visee = Viser $dn 'raccourci' $Quoi $Cpt
                 $Choix = $null
-                if ($null -ne $Clic) { $Choix = Choisir $dn $Visee $Quoi -Clic $Clic -SansReprise }
+                if ($null -ne $Clic) {
+                    $null = Attendre-Pages $Visee $Quoi
+                    $Choix = Choisir $dn $Visee $Quoi -Clic $Clic -SansReprise
+                }
                 if ($null -eq $Choix) {
                     # Sans page sous le clic, la sélection continue : on trace.
                     $Choix = Choisir $dn $Visee $Quoi -Trace $Trace
