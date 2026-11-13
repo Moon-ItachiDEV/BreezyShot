@@ -47,6 +47,12 @@
 //!   cachée, puis `selection:cachee` part vers la page.
 //! - Mode texte (0.5) : la zone choisie laisse la fenêtre montrée (le premier plan n'est
 //!   pas encore rendu) pour le balayage (`balayer`) ; `cacher` la cache ensuite.
+//! - Mode défilante (0.6) : tracer (`Signal::Zone`) **ou** cliquer sur une page proposée
+//!   (`Signal::Fenetre`, indice dans la liste de `proposer`). Les pages arrivent après
+//!   `montrer` (ou jamais) : `proposer` les pose sur l'affichage en cours, même numéro de
+//!   charge (le repère ne change pas : un geste compté avant reste valable), et la page les
+//!   prend sans perdre son geste. L'une ou l'autre fin laisse la fenêtre montrée, comme le
+//!   mode texte (`garder_si_defilante`), jusqu'à `cacher`.
 //! - Aucun verrou n'est tenu pendant un appel à Tauri, un `emit` ou le rappel.
 //! - Sous Windows la fenêtre est montrée et cachée par `systeme`, jamais par tao : `show()`
 //!   de tao réécrit les styles étendus (window_state.rs, `apply_diff`) et remettrait la
@@ -67,8 +73,9 @@ use crate::systeme::{self, Rect};
 /// Étiquette de la fenêtre (aussi dans `capabilities/selection.json`).
 pub const ETIQUETTE_SELECTION: &str = "selection";
 /// Événement écouté par la page : `{ id, numero, largeur, hauteur, ecrans: [RectFenetre],
-/// cote_min, mode, fenetres: [{ x, y, largeur, hauteur, rayon }], souris: { x, y } | null }`,
-/// tout en pixels réels relatifs au coin de la fenêtre.
+/// cote_min, mode, fenetres: [{ x, y, largeur, hauteur, rayon }], souris: { x, y } | null,
+/// suite? }`, tout en pixels réels relatifs au coin de la fenêtre. `suite: true` (mode
+/// défilante, `proposer`) : la même charge, pages ajoutées ; la page garde son geste.
 pub const EVENEMENT_MONTRER: &str = "selection:montrer";
 /// Événement écouté par la page : la fenêtre est cachée, retour au repos.
 pub const EVENEMENT_CACHEE: &str = "selection:cachee";
@@ -515,6 +522,12 @@ struct ChargeMontrer {
     /// La souris relue à chaque envoi (`avec_souris`), pour entourer la bonne fenêtre avant
     /// tout mouvement ; `null` si elle est inconnue ou hors de la fenêtre.
     souris: Option<PointPage>,
+    /// Vrai seulement pour l'envoi de `proposer` (mode défilante) : même affichage, même
+    /// numéro, seules les fenêtres (les pages) changent ; la page ne revient pas au repos.
+    /// Jamais gardé dans la charge courante (un renvoi remet la page au repos). Absent du
+    /// JSON quand il est faux.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    suite: bool,
     /// Le rectangle réel de la fenêtre, repère de cette charge (non envoyé).
     #[serde(skip)]
     repere: Rect,
@@ -561,6 +574,7 @@ fn charge_pour(
             })
             .collect(),
         souris: None,
+        suite: false,
         repere: fenetre,
     }
 }
@@ -642,11 +656,14 @@ impl Affichage {
     }
 }
 
-/// Un affichage en mode texte fini par sa zone, gardé à l'écran pour le balayage jusqu'à
-/// `cacher` (Copier le texte, 0.5).
+/// Un affichage fini et gardé à l'écran jusqu'à `cacher` : mode texte fini par sa zone (le
+/// balayage, Copier le texte, 0.5), ou mode défilante fini par sa zone ou sa page (la
+/// sélection reste le temps que la fenêtre de contrôle soit montrée, 0.6).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct Gardee {
     id: u64,
+    /// Seul un affichage gardé du mode texte reçoit le balayage et le surlignage.
+    mode: Mode,
     /// Rectangle réel de la fenêtre (repère de la zone envoyée à la page).
     fenetre: Rect,
     /// La fenêtre au premier plan avant l'affichage, à qui le rendre.
@@ -703,7 +720,7 @@ struct Etat {
     dernier_id: u64,
     dernier_numero: u64,
     en_cours: Option<Affichage>,
-    /// Mode texte : l'affichage fini par sa zone et encore montré (balayage).
+    /// Mode texte (balayage) ou défilante : l'affichage fini et encore montré.
     gardee: Option<Gardee>,
     page_chargee: bool,
 }
@@ -810,13 +827,57 @@ impl Etat {
     fn garder_si_texte(&mut self, affichage: &Affichage, signal: &Signal) -> bool {
         let garder = affichage.mode == Mode::Texte && matches!(signal, Signal::Zone { .. });
         if garder {
-            self.gardee = Some(Gardee {
-                id: affichage.id,
-                fenetre: affichage.fenetre,
-                avant: affichage.avant,
-            });
+            self.garder(affichage);
         }
         garder
+    }
+
+    /// Fin d'un affichage (déjà retiré par `terminer`) : vrai s'il reste montré, gardé
+    /// jusqu'à `cacher` (mode défilante, zone tracée ou page cliquée : D4, la sélection
+    /// reste le temps que la fenêtre de contrôle paraisse) ; sinon il est à cacher tout de
+    /// suite. Une annulation n'est jamais gardée.
+    fn garder_si_defilante(&mut self, affichage: &Affichage, signal: &Signal) -> bool {
+        let garder = affichage.mode == Mode::Defilante
+            && matches!(signal, Signal::Zone { .. } | Signal::Fenetre { .. });
+        if garder {
+            self.garder(affichage);
+        }
+        garder
+    }
+
+    fn garder(&mut self, affichage: &Affichage) {
+        self.gardee = Some(Gardee {
+            id: affichage.id,
+            mode: affichage.mode,
+            fenetre: affichage.fenetre,
+            avant: affichage.avant,
+        });
+    }
+
+    /// `proposer` (mode défilante) : les `pages` (pixels réels du bureau, les
+    /// `FENETRES_MAX` premières) remplacent la liste de l'affichage `id`, et la charge
+    /// courante est refaite avec elles, **même numéro** (le repère ne change pas). Rend la
+    /// charge à envoyer (`suite` vrai), ou `None` : `id` n'est plus en cours, n'est pas en
+    /// mode défilante, ou n'a pas encore de charge (la première, faite ensuite, portera les
+    /// pages).
+    fn proposer(&mut self, id: u64, pages: Vec<FenetreProposee>) -> Option<ChargeMontrer> {
+        let a = self.courant_mut(id).filter(|a| a.mode == Mode::Defilante)?;
+        a.fenetres = pages.into_iter().take(FENETRES_MAX).collect();
+        let (numero, repere) = a.charge.as_ref().map(|c| (c.numero, c.repere))?;
+        let charge = charge_pour(
+            id,
+            numero,
+            repere,
+            &a.ecrans,
+            a.cote_min,
+            a.mode,
+            &a.fenetres,
+        );
+        a.charge = Some(charge.clone());
+        Some(ChargeMontrer {
+            suite: true,
+            ..charge
+        })
     }
 
     /// `cacher` : l'affichage en cours ou gardé est oublié ; rend la fenêtre à qui rendre
@@ -830,7 +891,7 @@ impl Etat {
     /// La charge du balayage de `zone` (pixels réels du bureau) sur l'affichage gardé ;
     /// `None` s'il n'y en a pas.
     fn charge_balayer(&self, zone: Rect, reduites: bool) -> Option<ChargeBalayer> {
-        let g = self.gardee?;
+        let g = self.gardee.filter(|g| g.mode == Mode::Texte)?;
         let r = vers_page(zone, g.fenetre);
         Some(ChargeBalayer {
             id: g.id,
@@ -850,7 +911,7 @@ impl Etat {
         reduites: bool,
         deroule: Surlignage,
     ) -> Option<ChargeSurligner> {
-        let g = self.gardee?;
+        let g = self.gardee.filter(|g| g.mode == Mode::Texte)?;
         if lignes.is_empty() {
             return None;
         }
@@ -1027,11 +1088,12 @@ impl Selection {
 
     /// Capture défilante (0.6) : propose à l'affichage `id` les pages qui défilent (pixels
     /// réels du bureau, du premier plan vers le fond), calculées après la photo : nouvelle
-    /// charge, même affichage. `Signal::Fenetre::indice` est alors un indice de `pages`.
-    /// Fil principal. Un `id` qui n'est pas celui en cours : rien.
+    /// charge, même affichage, même numéro de charge (le repère ne change pas) ; la page
+    /// garde son geste en cours. `Signal::Fenetre::indice` est alors un indice de `pages`
+    /// (les `FENETRES_MAX` premières). Fil principal (posté sinon). Un `id` qui n'est pas
+    /// celui en cours, ou pas en mode défilante : rien.
     pub fn proposer(&self, id: u64, pages: Vec<FenetreProposee>) {
-        // Socle : rien (chantier F).
-        let _ = (id, pages);
+        self.interne.proposer(id, pages);
     }
 
     /// Vrai entre `montrer` et la fin de l'affichage.
@@ -1247,8 +1309,13 @@ impl Interne {
         let Some(affichage) = self.etat().terminer(id) else {
             return;
         };
-        // Mode texte, zone choisie : la fenêtre reste pour le balayage, `cacher` la cache.
-        let gardee = self.etat().garder_si_texte(&affichage, &signal);
+        // Mode texte, zone choisie : la fenêtre reste pour le balayage ; mode défilante, zone
+        // ou page choisie : elle reste jusqu'à la fenêtre de contrôle. `cacher` la cache.
+        let gardee = {
+            let mut etat = self.etat();
+            etat.garder_si_texte(&affichage, &signal)
+                || etat.garder_si_defilante(&affichage, &signal)
+        };
         if !gardee {
             self.masquer(affichage.avant);
         }
@@ -1314,6 +1381,27 @@ impl Interne {
                 log::warn!("selection surlignage {id} non envoye: {e}");
                 false
             }
+        }
+    }
+
+    /// `proposer` public. Hors du fil principal, posté sur le fil principal (l'état et
+    /// l'envoi suivent l'ordre des charges).
+    fn proposer(self: &Arc<Self>, id: u64, pages: Vec<FenetreProposee>) {
+        if !self.sur_fil_principal() {
+            let i = Arc::clone(self);
+            if let Err(e) = self.app.run_on_main_thread(move || i.proposer(id, pages)) {
+                log::warn!("selection {id}: pages non proposees: {e}");
+            }
+            return;
+        }
+        let n = pages.len().min(FENETRES_MAX);
+        let Some(charge) = self.etat().proposer(id, pages) else {
+            log::info!("selection {id}: pages sans affichage en cours");
+            return;
+        };
+        match self.emettre_charge(charge) {
+            Ok(()) => log::info!("selection {id}: pages proposees {n}"),
+            Err(e) => log::warn!("selection {id}: pages non envoyees: {e}"),
         }
     }
 
@@ -2609,5 +2697,235 @@ mod tests {
         let (id2, _) = e.commencer(&demande(), Some(5), Some(5), Instant::now());
         assert_eq!(e.charge_balayer(r(0, 0, 10, 10), false), None);
         assert_eq!(e.terminer(id2).and_then(|a| a.avant), Some(77));
+    }
+
+    #[test]
+    fn mode_defilante_permet_les_deux_signaux() {
+        assert_eq!(garde_mode(Mode::Defilante, Mode::Zone), Ok(()));
+        assert_eq!(garde_mode(Mode::Defilante, Mode::Fenetre), Ok(()));
+        // Les autres modes ne changent pas.
+        assert_eq!(
+            garde_mode(Mode::Texte, Mode::Fenetre),
+            Err("clic en mode texte".into())
+        );
+        assert_eq!(garde_mode(Mode::Texte, Mode::Zone), Ok(()));
+        assert!(garde_mode(Mode::Zone, Mode::Fenetre).is_err());
+        assert!(garde_mode(Mode::Fenetre, Mode::Zone).is_err());
+        assert_eq!(Mode::Defilante.nom(), "defilante");
+        assert_eq!(
+            serde_json::to_string(&Mode::Defilante).unwrap(),
+            r#""defilante""#
+        );
+        // Sans pages proposées, la demande n'en porte aucune (elles viennent après).
+        let mut d = demande();
+        d.mode = Mode::Defilante;
+        d.fenetres = vec![fp(0, 0, 500, 500, 0)];
+        assert!(fenetres_de(&d).is_empty());
+    }
+
+    #[test]
+    fn proposer_nouvelle_charge_meme_affichage() {
+        let mut d = demande();
+        d.bureau = r(-1920, 0, 3840, 1080);
+        d.ecrans = vec![r(-1920, 0, 1920, 1080), r(0, 0, 1920, 1080)];
+        d.mode = Mode::Defilante;
+        let mut e = Etat::default();
+        let (id, _) = e.commencer(&d, Some(77), Some(5), Instant::now());
+        // Avant la première charge : rien à envoyer, mais la liste est retenue et la première
+        // charge la porte.
+        assert_eq!(e.proposer(id, vec![fp(-1800, 100, 900, 700, 0)]), None);
+        let c1 = e.nouvelle_charge(id, d.bureau).expect("charge");
+        assert_eq!(c1.fenetres.len(), 1);
+        assert!(!c1.suite);
+        // Pages arrivées après : même affichage, même numéro, même repère, pages relatives.
+        let pages = vec![fp(-1800, 100, 900, 700, 0), fp(200, 50, 1000, 900, 8)];
+        let c2 = e.proposer(id, pages.clone()).expect("charge des pages");
+        assert_eq!((c2.id, c2.numero, c2.repere), (id, c1.numero, c1.repere));
+        assert!(c2.suite);
+        assert_eq!(c2.mode, Mode::Defilante);
+        assert_eq!(c2.ecrans, c1.ecrans);
+        assert_eq!(
+            c2.fenetres,
+            vec![
+                FenetrePage {
+                    x: 120,
+                    y: 100,
+                    largeur: 900,
+                    hauteur: 700,
+                    rayon: 0
+                },
+                FenetrePage {
+                    x: 2120,
+                    y: 50,
+                    largeur: 1000,
+                    hauteur: 900,
+                    rayon: 8
+                },
+            ]
+        );
+        // Un geste compté sur la charge d'avant reste celui de la charge courante.
+        assert!(e.charge_courante(id, c1.numero));
+        // La charge courante n'est pas une suite : un renvoi remet la page au repos.
+        let courante = e
+            .courant(id)
+            .and_then(|a| a.charge.clone())
+            .expect("charge");
+        assert!(!courante.suite);
+        assert_eq!(courante.fenetres, c2.fenetres);
+        // `suite` n'est écrit que vrai.
+        let json = serde_json::to_value(&c2).expect("json");
+        assert_eq!(json["suite"], true);
+        assert_eq!(json["mode"], "defilante");
+        assert!(serde_json::to_value(&courante)
+            .expect("json")
+            .get("suite")
+            .is_none());
+        // Le clic se décide sur les pages proposées : indice dans `pages`.
+        let a = e.courant(id).expect("affichage").clone();
+        assert_eq!(a.fenetres, pages);
+        assert_eq!(
+            decider_fenetre((2300.0, 400.0), a.fenetre, &a.fenetres, &a.ecrans, 3),
+            DecisionFenetre::Fenetre {
+                indice: 1,
+                point: (380, 400)
+            }
+        );
+        assert_eq!(
+            decider_fenetre((10.0, 10.0), a.fenetre, &a.fenetres, &a.ecrans, 3),
+            DecisionFenetre::Rien
+        );
+        // Une liste vide efface les pages.
+        let c3 = e.proposer(id, Vec::new()).expect("charge");
+        assert!(c3.fenetres.is_empty() && c3.numero == c1.numero);
+        // Liste trop longue : tronquée.
+        let longue = vec![fp(0, 0, 200, 200, 0); FENETRES_MAX + 3];
+        let c4 = e.proposer(id, longue).expect("charge");
+        assert_eq!(c4.fenetres.len(), FENETRES_MAX);
+        // Un autre id, ou après la fin : rien.
+        assert_eq!(e.proposer(id + 1, pages.clone()), None);
+        let fin = e.terminer(id).expect("affichage");
+        assert!(e.garder_si_defilante(
+            &fin,
+            &Signal::Zone {
+                id,
+                depart: (0, 0),
+                arrivee: (300, 300)
+            }
+        ));
+        assert_eq!(e.proposer(id, pages), None);
+    }
+
+    #[test]
+    fn proposer_hors_mode_defilante_ne_change_rien() {
+        for mode in [Mode::Zone, Mode::Fenetre, Mode::Texte] {
+            let mut d = demande();
+            d.mode = mode;
+            d.fenetres = vec![fp(10, 10, 500, 500, 8)];
+            let mut e = Etat::default();
+            let (id, _) = e.commencer(&d, None, None, Instant::now());
+            let c = e.nouvelle_charge(id, d.bureau).expect("charge");
+            assert_eq!(
+                e.proposer(id, vec![fp(0, 0, 900, 900, 0)]),
+                None,
+                "{mode:?}"
+            );
+            let a = e.courant(id).expect("affichage");
+            assert_eq!(a.fenetres, fenetres_de(&d), "{mode:?}");
+            assert_eq!(a.charge.as_ref(), Some(&c), "{mode:?}");
+        }
+    }
+
+    #[test]
+    fn garder_si_defilante_zone_ou_page() {
+        let zone = |id| Signal::Zone {
+            id,
+            depart: (-100, 10),
+            arrivee: (299, 259),
+        };
+        let page = |id| Signal::Fenetre {
+            id,
+            indice: 0,
+            point: (10, 10),
+        };
+        for signal in [zone as fn(u64) -> Signal, page] {
+            let mut e = Etat::default();
+            let mut d = demande();
+            d.bureau = r(-1920, 0, 3840, 1080);
+            d.mode = Mode::Defilante;
+            let (id, _) = e.commencer(&d, Some(77), Some(5), Instant::now());
+            let a = e.terminer(id).expect("affichage");
+            let s = signal(id);
+            assert!(!e.garder_si_texte(&a, &s), "pas le mode texte");
+            assert!(e.garder_si_defilante(&a, &s), "{s:?} : gardee");
+            // Ni balayage ni surlignage sur une défilante gardée.
+            assert_eq!(e.charge_balayer(r(0, 0, 10, 10), false), None);
+            let deroule = Surlignage {
+                trace: 1,
+                pas: 1,
+                tenue: 1,
+                sortie: 1,
+            };
+            assert_eq!(e.charge_surligner(&[r(0, 0, 9, 9)], false, deroule), None);
+            // `cacher` l'oublie et rend le premier plan à celle d'avant.
+            assert_eq!(e.tout_oublier(), Some(77));
+            assert_eq!(e.tout_oublier(), None);
+        }
+        // Un affichage suivant, la sélection au premier plan, reprend la fenêtre d'avant.
+        let mut e = Etat::default();
+        let mut d = demande();
+        d.mode = Mode::Defilante;
+        let (id, _) = e.commencer(&d, Some(77), Some(5), Instant::now());
+        let a = e.terminer(id).expect("affichage");
+        assert!(e.garder_si_defilante(&a, &page(id)));
+        let (id2, _) = e.commencer(&demande(), Some(5), Some(5), Instant::now());
+        assert_eq!(e.terminer(id2).and_then(|a| a.avant), Some(77));
+    }
+
+    #[test]
+    fn hors_mode_defilante_ou_annulation_rien_n_est_garde() {
+        let fins = |id| {
+            [
+                Signal::Annulee {
+                    id,
+                    cause: Cause::Echap,
+                },
+                Signal::Muette { id },
+                Signal::Impossible {
+                    id,
+                    cause: "x".into(),
+                },
+            ]
+        };
+        let mut e = Etat::default();
+        let mut d = demande();
+        d.mode = Mode::Defilante;
+        let (id, _) = e.commencer(&d, None, None, Instant::now());
+        let a = e.terminer(id).expect("affichage");
+        for s in fins(id) {
+            assert!(!e.garder_si_defilante(&a, &s), "{s:?}");
+        }
+        assert_eq!(e.tout_oublier(), None);
+        for mode in [Mode::Zone, Mode::Fenetre, Mode::Texte] {
+            let mut e = Etat::default();
+            let mut d = demande();
+            d.mode = mode;
+            let (id, _) = e.commencer(&d, Some(3), None, Instant::now());
+            let a = e.terminer(id).expect("affichage");
+            for s in [
+                Signal::Zone {
+                    id,
+                    depart: (0, 0),
+                    arrivee: (9, 9),
+                },
+                Signal::Fenetre {
+                    id,
+                    indice: 0,
+                    point: (0, 0),
+                },
+            ] {
+                assert!(!e.garder_si_defilante(&a, &s), "{mode:?} {s:?}");
+            }
+            assert_eq!(e.tout_oublier(), None, "{mode:?}");
+        }
     }
 }
