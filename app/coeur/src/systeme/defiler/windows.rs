@@ -8,7 +8,9 @@
 //!   n'est trouvé (WPF, WinUI) et qui ne sont pas écartées (barre des tâches), une fenêtre
 //!   par fil d'un bassin de `FILS_PAGES` fils MTA durables (fil
 //!   `defilante-pages-automation`, client créé une fois par fil, à la première visée
-//!   défilante, `preparer_pages` ; un fil s'en va après `INACTIF_MAX` sans demande) : une
+//!   défilante, `preparer_pages`, une création à la fois ; raté, il est recréé à la demande
+//!   suivante, et un fil sans client rend la demande à la file au lieu d'y répondre par une
+//!   erreur ; un fil s'en va après `INACTIF_MAX` sans demande) : une
 //!   fenêtre lente ne retient pas les autres. Parcours en largeur de la vue des contrôles,
 //!   borné (`pages_d_une_fenetre`). Première liste au plus tard à `BUDGET_PAGES`, pages
 //!   tardives ajoutées jusqu'à `PAGES_TARDIVES_MAX` (`pages.rs`). Journal : `defiler
@@ -92,8 +94,8 @@ use ::windows::Win32::UI::WindowsAndMessaging::{
 };
 
 use super::pages::{
-    a_fouiller, ecartee, ligne_detail, ligne_fin, ligne_pages, ligne_tardives, EtatAutomation,
-    Lancement, Regard, Suivi, Vue,
+    a_fouiller, ecartee, ligne_detail, ligne_fin, ligne_pages, ligne_tardives,
+    refaire_avec_un_client_neuf, EtatAutomation, Lancement, Regard, Suivi, Vue,
 };
 use super::{
     barre_utile, centre, classe_pour_journal, cran_entendu, decalage_px, garde,
@@ -408,16 +410,18 @@ pub fn chercher_pages(
     }
     let duree_filles = debut.elapsed();
     let mut automation = EtatAutomation::Inutile;
+    let mut rates = None;
     let mut reception = None;
     if !manquent.is_empty() {
         let (tx, rx) = mpsc::channel();
         let echeance = debut + PAGES_TARDIVES_MAX;
-        automation = demander(
+        (automation, rates) = demander(
             manquent.iter().map(|&(i, h)| DemandePage {
                 i,
                 h,
                 echeance,
                 reponse: tx.clone(),
+                rendue: false,
             }),
             Instant::now(),
         );
@@ -431,6 +435,7 @@ pub fn chercher_pages(
         liste: debut.saturating_duration_since(depart.fil),
         filles: duree_filles,
         automation,
+        rates,
     };
     let mut suivi = Suivi::nouveau(bords, recues);
     let mut premiere = true;
@@ -583,6 +588,9 @@ struct DemandePage {
     /// en cours s'arrête entre deux appels.
     echeance: Instant,
     reponse: Sender<Nouvelle>,
+    /// Déjà rendue à la file par un fil sans client : le suivant répond, même par une
+    /// erreur.
+    rendue: bool,
 }
 
 /// Ce que le bassin dit d'une demande.
@@ -607,9 +615,18 @@ struct Fouille {
     noeuds: u32,
     coupee: bool,
     erreur: Option<String>,
+    /// Le code de l'erreur d'UI Automation, s'il y en a un (pour refaire la fouille).
+    echec: Option<u32>,
 }
 
 impl Fouille {
+    fn erreur(e: String) -> Fouille {
+        Fouille {
+            erreur: Some(e),
+            ..Fouille::default()
+        }
+    }
+
     fn regard(self, pages: usize, debut: Instant) -> Regard {
         match self.erreur {
             Some(code) => Regard::Erreur {
@@ -649,6 +666,9 @@ struct Bassin {
     file: Arc<Mutex<Receiver<DemandePage>>>,
     vivants: usize,
     preparation: Preparation,
+    /// Clients ratés (création), et le dernier code.
+    rates: u32,
+    dernier_rate: Option<String>,
 }
 
 impl Bassin {
@@ -659,6 +679,8 @@ impl Bassin {
             file: Arc::new(Mutex::new(file)),
             vivants: 0,
             preparation: Preparation::EnCours(Instant::now()),
+            rates: 0,
+            dernier_rate: None,
         }
     }
 }
@@ -692,15 +714,19 @@ fn garnir(b: &mut Bassin) {
 }
 
 /// Envoie les demandes au bassin (créé ou complété au besoin) ; rend l'état de sa
-/// préparation à `maintenant`.
-fn demander(demandes: impl Iterator<Item = DemandePage>, maintenant: Instant) -> EtatAutomation {
+/// préparation à `maintenant`, et les clients ratés depuis sa création.
+fn demander(
+    demandes: impl Iterator<Item = DemandePage>,
+    maintenant: Instant,
+) -> (EtatAutomation, Option<(u32, String)>) {
     let mut g = bassin();
     let b = g.get_or_insert_with(Bassin::nouveau);
     for d in demandes {
         let _ = b.envoi.send(d);
     }
     garnir(b);
-    match &b.preparation {
+    let rates = b.dernier_rate.clone().map(|d| (b.rates, d));
+    let etat = match &b.preparation {
         Preparation::EnCours(depuis) => EtatAutomation::EnPreparation {
             depuis: maintenant.saturating_duration_since(*depuis),
         },
@@ -710,6 +736,15 @@ fn demander(demandes: impl Iterator<Item = DemandePage>, maintenant: Instant) ->
             depuis: maintenant.saturating_duration_since(*a),
         },
         Preparation::Impossible(e) => EtatAutomation::Impossible(e.clone()),
+    };
+    (etat, rates)
+}
+
+/// Note un client raté (sa création), pour le journal.
+fn noter_rate(e: &str) {
+    if let Some(b) = bassin().as_mut() {
+        b.rates += 1;
+        b.dernier_rate = Some(e.to_owned());
     }
 }
 
@@ -741,22 +776,51 @@ struct Client {
     marcheur: IUIAutomationTreeWalker,
 }
 
+/// Les créations de clients, une à la fois dans tout le processus : quatre fils qui
+/// créent chacun le leur au même instant, à la première visée, ont rendu `E_FAIL` sur la
+/// machine de CI (passage 98).
+static CREATION: Mutex<()> = Mutex::new(());
+
+#[cfg(test)]
+thread_local! {
+    /// Essais : tant de créations de client à faire rater sur ce fil.
+    static CLIENTS_RATES: Cell<u32> = const { Cell::new(0) };
+}
+
+/// Essais de création d'un client, et leur écart.
+const CREATIONS_CLIENT: u32 = 2;
+const ENTRE_CREATIONS_CLIENT: Duration = Duration::from_millis(20);
+
 impl Client {
-    fn creer() -> ::windows::core::Result<Client> {
-        let auto = automation()?;
+    /// Un client, ou l'étape et le code de l'échec (`client <étape> <code>`).
+    fn creer() -> Result<Client, String> {
+        let _une_a_la_fois = CREATION.lock().unwrap_or_else(|e| e.into_inner());
+        #[cfg(test)]
+        if CLIENTS_RATES.with(|c| {
+            let n = c.get();
+            c.set(n.saturating_sub(1));
+            n > 0
+        }) {
+            return Err("client essai 0x80004005".into());
+        }
+        let etape = |nom: &str| {
+            let nom = nom.to_owned();
+            move |e: ::windows::core::Error| format!("client {nom} {}", code(&e))
+        };
+        let auto = automation().map_err(etape("CoCreateInstance"))?;
         // SAFETY : appels COM du fil du client.
         unsafe {
-            let vrai = auto.CreateTrueCondition()?;
-            let cache = auto.CreateCacheRequest()?;
+            let vrai = auto.CreateTrueCondition().map_err(etape("condition"))?;
+            let cache = auto.CreateCacheRequest().map_err(etape("cache"))?;
             for p in [
                 UIA_BoundingRectanglePropertyId,
                 UIA_ControlTypePropertyId,
                 UIA_IsScrollPatternAvailablePropertyId,
                 UIA_ScrollVerticallyScrollablePropertyId,
             ] {
-                cache.AddProperty(p)?;
+                cache.AddProperty(p).map_err(etape("propriete"))?;
             }
-            let marcheur = auto.ControlViewWalker()?;
+            let marcheur = auto.ControlViewWalker().map_err(etape("marcheur"))?;
             Ok(Client {
                 auto,
                 vrai,
@@ -767,20 +831,70 @@ impl Client {
     }
 }
 
+/// COM et le client d'un fil du bassin. Un client qui manque (création ratée) est recréé à
+/// la demande suivante ; un client qui rend une erreur est remplacé, et la fouille refaite
+/// une fois.
+struct Poste {
+    // Le client part avant COM (ordre des champs : ordre de destruction).
+    client: Result<Client, String>,
+    com: Result<Com, String>,
+}
+
+impl Poste {
+    /// COM (MTA) et un client ; rend aussi leurs durées.
+    fn ouvrir() -> (Poste, Duration, Duration) {
+        let debut = Instant::now();
+        let com = Com::ouvrir();
+        let duree_com = debut.elapsed();
+        let client = creer_client(&com);
+        let duree_client = debut.elapsed().saturating_sub(duree_com);
+        (Poste { client, com }, duree_com, duree_client)
+    }
+
+    /// Le client du fil, recréé s'il manque.
+    fn client(&mut self) -> Result<&Client, String> {
+        if self.client.is_err() {
+            self.client = creer_client(&self.com);
+        }
+        self.client.as_ref().map_err(Clone::clone)
+    }
+
+    /// Un client neuf à la place de celui du fil.
+    fn recreer(&mut self) -> Result<&Client, String> {
+        self.client = Err("remplace".into());
+        self.client()
+    }
+}
+
+/// Un client sur ce fil (COM ouvert) : `CREATIONS_CLIENT` essais, chaque échec noté.
+fn creer_client(com: &Result<Com, String>) -> Result<Client, String> {
+    if let Err(e) = com {
+        return Err(e.clone());
+    }
+    let mut dernier = String::new();
+    for essai in 0..CREATIONS_CLIENT {
+        if essai > 0 {
+            thread::sleep(ENTRE_CREATIONS_CLIENT);
+        }
+        match Client::creer() {
+            Ok(c) => return Ok(c),
+            Err(e) => {
+                noter_rate(&e);
+                dernier = e;
+            }
+        }
+    }
+    Err(dernier)
+}
+
 /// Un fil du bassin : COM (MTA) et son client une fois, puis les demandes, jusqu'à
 /// `INACTIF_MAX` sans demande.
 fn fil_du_bassin(file: Arc<Mutex<Receiver<DemandePage>>>) {
-    let debut = Instant::now();
-    let com = Com::ouvrir();
-    let duree_com = debut.elapsed();
-    let client = match &com {
-        Ok(_) => Client::creer().map_err(|e| format!("client {}", code(&e))),
-        Err(e) => Err(e.clone()),
-    };
-    match &client {
+    let (mut poste, duree_com, duree_client) = Poste::ouvrir();
+    match &poste.client {
         Ok(_) => noter_preparation(Preparation::Prete {
             com: duree_com,
-            client: debut.elapsed().saturating_sub(duree_com),
+            client: duree_client,
             a: Instant::now(),
         }),
         Err(e) => noter_preparation(Preparation::Impossible(e.clone())),
@@ -806,36 +920,84 @@ fn fil_du_bassin(file: Arc<Mutex<Receiver<DemandePage>>>) {
                 }
             }
         };
-        servir(client.as_ref(), demande);
+        match servir(&mut poste, demande) {
+            Suite::Continuer => {}
+            // Sans client, ce fil ne prend plus rien : la demande retourne à la file pour un
+            // autre fil, et la visée suivante en relance un.
+            Suite::Rendre(d) => {
+                if let Some(b) = bassin().as_mut() {
+                    let _ = b.envoi.send(d);
+                    b.vivants = b.vivants.saturating_sub(1);
+                }
+                break;
+            }
+            Suite::Partir => {
+                if let Some(b) = bassin().as_mut() {
+                    b.vivants = b.vivants.saturating_sub(1);
+                }
+                break;
+            }
+        }
     }
-    // Le client part avant COM (ordre inverse de la création).
-    drop(client);
-    drop(com);
 }
 
-/// Une demande : laissée si son échéance est passée, sinon fouillée et rendue.
-fn servir(client: Result<&Client, &String>, d: DemandePage) {
+/// Ce que fait un fil du bassin après une demande.
+enum Suite {
+    Continuer,
+    /// Sans client : la demande (jamais commencée) retourne à la file, le fil s'en va.
+    Rendre(DemandePage),
+    /// Sans client, la demande déjà rendue une fois : l'erreur est répondue, le fil s'en va.
+    Partir,
+}
+
+/// Une demande : laissée si son échéance est passée, sinon fouillée et rendue. Le client
+/// du fil est recréé s'il manque ; s'il manque encore, la demande retourne à la file (une
+/// fois) au lieu de recevoir une erreur : un fil sans client répondrait en 0 ms à toutes
+/// les fenêtres avant les fils qui en ont un (passage 98). Une fouille refusée par UI
+/// Automation est refaite une fois avec un client neuf (`refaire_avec_un_client_neuf`).
+fn servir(poste: &mut Poste, d: DemandePage) -> Suite {
     let debut = Instant::now();
     if debut >= d.echeance {
-        return;
+        return Suite::Continuer;
+    }
+    let sans_client = poste.client().err();
+    if let Some(e) = &sans_client {
+        if !d.rendue {
+            return Suite::Rendre(DemandePage { rendue: true, ..d });
+        }
+        let _ = d.reponse.send(Nouvelle::Fin {
+            i: d.i,
+            pages: Vec::new(),
+            fouille: Fouille {
+                erreur: Some(e.clone()),
+                duree: debut.elapsed(),
+                fin: Some(Instant::now()),
+                ..Fouille::default()
+            },
+        });
+        return Suite::Partir;
     }
     if d.reponse
         .send(Nouvelle::Debut { i: d.i, a: debut })
         .is_err()
     {
         // Plus personne n'attend cette recherche.
-        return;
+        return Suite::Continuer;
     }
-    let (pages, mut fouille) = match client {
-        Ok(c) => pages_d_une_fenetre(c, hwnd(d.h), d.echeance),
-        Err(e) => (
-            Vec::new(),
-            Fouille {
-                erreur: Some(e.clone()),
-                ..Fouille::default()
-            },
-        ),
+    let h = hwnd(d.h);
+    let mut resultat = match poste.client() {
+        Ok(c) => pages_d_une_fenetre(c, h, d.echeance),
+        Err(e) => (Vec::new(), Fouille::erreur(e)),
     };
+    if let Some(echec) = resultat.1.echec {
+        if refaire_avec_un_client_neuf(echec, existe(h), Instant::now() < d.echeance) {
+            resultat = match poste.recreer() {
+                Ok(c) => pages_d_une_fenetre(c, h, d.echeance),
+                Err(e) => (Vec::new(), Fouille::erreur(e)),
+            };
+        }
+    }
+    let (pages, mut fouille) = resultat;
     fouille.duree = debut.elapsed();
     fouille.fin = Some(Instant::now());
     let _ = d.reponse.send(Nouvelle::Fin {
@@ -843,6 +1005,7 @@ fn servir(client: Result<&Client, &String>, d: DemandePage) {
         pages,
         fouille,
     });
+    Suite::Continuer
 }
 
 /// Un booléen ramené dans le cache de `e` (faux s'il manque ou n'est pas un booléen).
@@ -896,6 +1059,7 @@ fn pages_d_une_fenetre(c: &Client, h: HWND, echeance: Instant) -> (Vec<PageTrouv
         Ok(r) => r,
         Err(e) => {
             fouille.erreur = Some(code(&e));
+            fouille.echec = Some(e.code().0 as u32);
             return (pages, fouille);
         }
     };
@@ -2604,6 +2768,69 @@ mod tests {
         ] {
             assert!(a_fouiller(t.0), "{t:?}");
         }
+    }
+
+    /// Une demande de fouille de `h`, et sa réception.
+    fn demande_page(h: isize, rendue: bool) -> (DemandePage, Receiver<Nouvelle>) {
+        let (reponse, rx) = mpsc::channel();
+        let d = DemandePage {
+            i: 3,
+            h,
+            echeance: Instant::now() + Duration::from_secs(2),
+            reponse,
+            rendue,
+        };
+        (d, rx)
+    }
+
+    /// La fin de la fouille (la ligne `Debut` passée).
+    fn fin_recue(rx: &Receiver<Nouvelle>) -> Option<(usize, Fouille)> {
+        while let Ok(n) = rx.recv_timeout(Duration::from_secs(3)) {
+            if let Nouvelle::Fin { i, fouille, .. } = n {
+                return Some((i, fouille));
+            }
+        }
+        None
+    }
+
+    #[test]
+    fn un_client_rate_est_recree_a_la_demande_suivante() {
+        // Passage 98 : un fil dont le client avait raté à sa création répondait `E_FAIL` en
+        // 0 ms à toutes les fenêtres, 17 s plus tard. Le client se recrée à la demande.
+        let _s = seance();
+        let f = Fenetres::ouvrir(Forme::Simple);
+        CLIENTS_RATES.with(|c| c.set(CREATIONS_CLIENT));
+        let (mut poste, _, _) = Poste::ouvrir();
+        assert!(poste.client.is_err(), "le client devait rater");
+        let (d, rx) = demande_page(f.nue, false);
+        assert!(matches!(servir(&mut poste, d), Suite::Continuer));
+        let (i, fouille) = fin_recue(&rx).expect("fin de la fouille");
+        assert_eq!(i, 3);
+        assert_eq!(fouille.erreur, None);
+        assert!(fouille.elements >= 1, "{fouille:?}");
+        assert!(poste.client.is_ok());
+        CLIENTS_RATES.with(|c| c.set(0));
+    }
+
+    #[test]
+    fn un_fil_sans_client_rend_la_demande_puis_repond_l_erreur() {
+        let _s = seance();
+        let f = Fenetres::ouvrir(Forme::Simple);
+        CLIENTS_RATES.with(|c| c.set(10 * CREATIONS_CLIENT));
+        let (mut poste, _, _) = Poste::ouvrir();
+        // Jamais rendue : elle retourne à la file, rien n'est répondu.
+        let (d, rx) = demande_page(f.nue, false);
+        match servir(&mut poste, d) {
+            Suite::Rendre(d) => assert!(d.rendue && d.i == 3 && d.h == f.nue),
+            _ => panic!("la demande devait retourner à la file"),
+        }
+        assert!(rx.try_recv().is_err(), "rien ne devait être répondu");
+        // Déjà rendue : l'erreur est répondue, avec l'étape ; le fil s'en va.
+        let (d, rx) = demande_page(f.nue, true);
+        assert!(matches!(servir(&mut poste, d), Suite::Partir));
+        let (_, fouille) = fin_recue(&rx).expect("fin");
+        assert_eq!(fouille.erreur.as_deref(), Some("client essai 0x80004005"));
+        CLIENTS_RATES.with(|c| c.set(0));
     }
 
     #[test]

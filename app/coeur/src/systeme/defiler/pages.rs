@@ -251,6 +251,20 @@ pub struct Lancement {
     pub liste: Duration,
     pub filles: Duration,
     pub automation: EtatAutomation,
+    /// Clients d'UI Automation ratés depuis la création du bassin, et le dernier code.
+    pub rates: Option<(u32, String)>,
+}
+
+/// `UIA_E_ELEMENTNOTAVAILABLE` : la fenêtre ou l'élément n'existe plus.
+const ELEMENT_DISPARU: u32 = 0x8004_0201;
+
+/// Une fouille refusée par UI Automation (`code`) est-elle refaite une fois, avec un client
+/// neuf ? Oui, sauf si la fenêtre n'existe plus (`existe` faux, ou
+/// `UIA_E_ELEMENTNOTAVAILABLE`) ou si l'échéance est passée (`reste` faux) : un client
+/// devenu inutilisable rend `E_FAIL` ou une erreur de RPC tout de suite, pour chaque
+/// fenêtre.
+pub fn refaire_avec_un_client_neuf(code: u32, existe: bool, reste: bool) -> bool {
+    existe && reste && code != ELEMENT_DISPARU
 }
 
 fn ms(d: Duration) -> u128 {
@@ -356,6 +370,9 @@ pub fn ligne_detail(lancement: &Lancement, vues: &[Vue]) -> String {
         ms(lancement.filles),
         texte_automation(&lancement.automation)
     );
+    if let Some((n, dernier)) = &lancement.rates {
+        l.push_str(&format!(", clients rates {n} (dernier {dernier})"));
+    }
     if !vues.is_empty() {
         l.push_str(" ; ");
         l.push_str(&texte_vues(vues));
@@ -509,6 +526,18 @@ mod tests {
     }
 
     #[test]
+    fn une_fouille_refusee_est_refaite_une_fois_avec_un_client_neuf() {
+        // E_FAIL, RPC coupé, objet déconnecté : refaite.
+        for code in [0x8000_4005, 0x8001_0108, 0x8007_06BA, 0x8001_0012] {
+            assert!(refaire_avec_un_client_neuf(code, true, true), "{code:#x}");
+        }
+        // Fenêtre partie, ou plus de temps : non.
+        assert!(!refaire_avec_un_client_neuf(ELEMENT_DISPARU, true, true));
+        assert!(!refaire_avec_un_client_neuf(0x8000_4005, false, true));
+        assert!(!refaire_avec_un_client_neuf(0x8000_4005, true, false));
+    }
+
+    #[test]
     fn fenetres_ecartees_et_types_sans_enfants() {
         assert!(ecartee("Shell_TrayWnd"));
         assert!(ecartee("Shell_SecondaryTrayWnd"));
@@ -583,6 +612,7 @@ mod tests {
                 client: ms(35),
                 depuis: ms(180),
             },
+            rates: None,
         };
         assert_eq!(
             ligne_detail(&lancement, &v),
@@ -597,6 +627,13 @@ mod tests {
             ..lancement.clone()
         };
         assert!(ligne_detail(&sans, &[]).ends_with("automation en preparation depuis 20 ms"));
+        let ratee = Lancement {
+            rates: Some((3, "client CoCreateInstance 0x80004005".into())),
+            ..lancement.clone()
+        };
+        assert!(ligne_detail(&ratee, &[]).ends_with(
+            "client 35 ms), clients rates 3 (dernier client CoCreateInstance 0x80004005)"
+        ));
         let impossible = Lancement {
             automation: EtatAutomation::Impossible("CoInitializeEx 0x80010106".into()),
             ..lancement
