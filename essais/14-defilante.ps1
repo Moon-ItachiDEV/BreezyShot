@@ -332,12 +332,13 @@ function Verifier-Avertissements([string]$Dossier, $Cpt, [string]$Quoi) {
 # Fin d'une course : les recherches des pages depuis les compteurs $Cpt (visées tracées
 # comprises). Aucune fenêtre laissée sans réponse faute de client d'UI Automation
 # (`automation erreur client …` : une telle fenêtre n'est jamais reprise ensuite) ; les
-# créations de client ratées (`clients rates …`, la dernière ligne qui les dit) notées.
+# créations de client ratées (`clients rates …`, la dernière ligne qui les dit) notées. COM
+# qui ne s'ouvre pas (`automation erreur CoInitializeEx …`) compte comme un client manquant.
 function Verifier-Recherche([string]$Dossier, $Cpt, [string]$Quoi) {
     $l = @(@(Apres $Dossier 'DefPages' $Cpt) + @(Apres $Dossier 'DefMesure' $Cpt) | ForEach-Object { Message $_ })
     if ($l.Count -eq 0) { return }
-    $err = @($l | Where-Object { $_ -match 'automation erreur client ' })
-    Verifier "$Quoi aucune fenêtre sans réponse faute de client d'UI Automation (« automation erreur client »)" ($err.Count -eq 0) "$($err.Count) ligne(s) : $($err -join ' | ')" | Out-Null
+    $err = @($l | Where-Object { $_ -match 'automation erreur (client|CoInitializeEx)\b' })
+    Verifier "$Quoi aucune fenêtre sans réponse faute de client d'UI Automation (« automation erreur client » ou « CoInitializeEx »)" ($err.Count -eq 0) "$($err.Count) ligne(s) : $($err -join ' | ')" | Out-Null
     $r = @($l | Where-Object { $_ -match 'clients rates \d+ \(\d+ pendant la recherche, dernier [^)]*\)' })
     if ($r.Count -gt 0) {
         $null = $r[-1] -match 'clients rates (\d+) \((\d+) pendant la recherche, dernier ([^)]*)\)'
