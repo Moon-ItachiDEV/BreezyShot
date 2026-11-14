@@ -3,7 +3,9 @@
 use std::path::Path;
 use std::time::Duration;
 
-use super::{Codeur, Parametres, Pixels};
+use super::{Codeur, Lecture, Parametres, Pixels};
+
+const NON_DISPONIBLE: &str = "video non disponible sur ce systeme";
 
 pub fn bibliotheques() -> bool {
     false
@@ -18,7 +20,7 @@ pub fn codeur_h264_present() -> bool {
 pub enum Ecrivain {}
 
 pub fn creer(_chemin: &Path, _p: &Parametres) -> Result<Ecrivain, String> {
-    Err("video non disponible sur ce systeme".into())
+    Err(NON_DISPONIBLE.into())
 }
 
 pub fn codeur(e: &Ecrivain) -> Codeur {
@@ -43,4 +45,11 @@ pub fn finir(e: Ecrivain) -> Result<Duration, String> {
 
 pub fn abandonner(e: Ecrivain) {
     match e {}
+}
+
+pub fn lire(
+    _chemin: &Path,
+    _voir: &mut dyn FnMut(u64, Duration, &Pixels),
+) -> Result<Lecture, String> {
+    Err(NON_DISPONIBLE.into())
 }
