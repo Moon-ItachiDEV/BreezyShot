@@ -13,6 +13,12 @@
 //! que si `droits::ouverte` le dit, ici seulement (`actions_construites`), d'après la
 //! licence en vigueur (`licence.rs`, `Evenement::LicenceChangee`).
 //!
+//! 0.6 : la capture défilante (`geste_defilante`, `fenetre_defilante`, décisions dans
+//! `defilante.rs`, assemblage dans `crate::defilement`) ne touche ce fichier que par ses
+//! points d'accroche : `apres_gel`, la Sélection en mode défilante (`montrer_selection`,
+//! `traiter_zone`, `abandonner`, `proposer_pages`), Échap, Entrée et le bureau en
+//! Défilement, `Evenement::Defilante`, `arreter`, et `lancer_sortie(…, apercu_du_haut)`.
+//!
 //! Retardateur (0.4) : `demarrer_capture` entre en Décompte (`commencer_decompte`), le fil
 //! `decompte` poste `DecompteFini`, puis la séquence du mode part (`apres_gel`) ;
 //! `decompte.rs` décide (fonctions pures). Dernière zone : `capturer_derniere_zone`.
@@ -24,13 +30,16 @@
 
 pub mod arguments;
 pub mod decompte;
+pub mod defilante;
 pub mod editeur;
 pub mod etat;
 pub mod etats;
+pub mod fenetre_defilante;
 pub mod fenetre_editeur;
 pub mod fenetre_historique;
 pub mod fenetre_menu;
 pub mod fenetre_reglages;
+pub mod geste_defilante;
 pub mod geste_historique;
 pub mod geste_texte;
 pub mod historique;
@@ -107,19 +116,27 @@ pub const MENU_HISTORIQUE: &str = "historique";
 /// Les actions construites : seules celles-ci reçoivent un raccourci (§5), une entrée au
 /// menu, une ligne dans Réglages › Raccourcis (et, pour `texte`, le bouton de l'éditeur).
 /// `historique` si l'historique est construit et ouvert (`droits`) ; `texte` si Copier le
-/// texte est construit, ouvert, et si une langue de lecture existe (R10).
+/// texte est construit, ouvert, et si une langue de lecture existe (R10) ; `defilante` si
+/// la capture défilante est construite, ouverte, et si le système prend des images
+/// vivantes (contrat 0.6, §6 : hors Windows, jamais).
 pub fn actions_construites(pro: bool, texte_disponible: bool) -> Vec<&'static str> {
     actions_selon(
         pro,
         historique::CONSTRUIT,
         texte::CONSTRUIT && texte_disponible,
+        defilante::CONSTRUITE && systeme::vivant::disponible(),
     )
 }
 
-/// Règle pure de `actions_construites` : `avec_historique`, `avec_texte` disent ce qui est
-/// construit (et la langue), `pro` qu'une licence valide est en place ; les droits sont lus
-/// ici et nulle part ailleurs.
-pub fn actions_selon(pro: bool, avec_historique: bool, avec_texte: bool) -> Vec<&'static str> {
+/// Règle pure de `actions_construites` : `avec_historique`, `avec_texte`, `avec_defilante`
+/// disent ce qui est construit (et la langue, et le système), `pro` qu'une licence valide
+/// est en place ; les droits sont lus ici et nulle part ailleurs.
+pub fn actions_selon(
+    pro: bool,
+    avec_historique: bool,
+    avec_texte: bool,
+    avec_defilante: bool,
+) -> Vec<&'static str> {
     let mut actions = ACTIONS_DE_CAPTURE.to_vec();
     if avec_historique && droits::ouverte(Fonction::Historique, pro) {
         actions.push(ACTION_HISTORIQUE);
@@ -127,16 +144,20 @@ pub fn actions_selon(pro: bool, avec_historique: bool, avec_texte: bool) -> Vec<
     if avec_texte && droits::ouverte(Fonction::Texte, pro) {
         actions.push(Mode::Texte.nom());
     }
+    if avec_defilante && droits::ouverte(Fonction::Defilante, pro) {
+        actions.push(Mode::Defilante.nom());
+    }
     actions
 }
 
 /// L'ordre des entrées de capture dans le menu de l'icône (celui des raccourcis 1 à 4,
-/// puis Copier le texte). Seuls les modes construits y paraissent.
-pub const ORDRE_MENU: [Mode; 5] = [
+/// la capture défilante, puis Copier le texte). Seuls les modes construits y paraissent.
+pub const ORDRE_MENU: [Mode; 6] = [
     Mode::Zone,
     Mode::PleinEcran,
     Mode::Fenetre,
     Mode::DerniereZone,
+    Mode::Defilante,
     Mode::Texte,
 ];
 
@@ -204,6 +225,8 @@ pub enum Evenement {
     TexteDisponible(bool),
     /// La licence a été activée ou retirée (`licence.rs`) : listes refaites.
     LicenceChangee,
+    /// Signal d'un fil de la capture défilante (0.6), traité par `geste_defilante::traiter`.
+    Defilante(geste_defilante::Signal),
 }
 
 /// Ce que le fil d'une action de la vignette rend au fil principal.
@@ -394,6 +417,8 @@ pub struct Application {
     licence: Mutex<Option<crate::licence::Licence>>,
     /// Les actions construites que tiennent le menu et les raccourcis (`suivre_les_actions`).
     actions_suivies: Mutex<Vec<&'static str>>,
+    /// La capture défilante en cours (0.6, `geste_defilante`), de la visée à sa fin.
+    defilante: Mutex<Option<geste_defilante::EnCours>>,
 }
 
 /// Une annonce envoyée au bandeau, dont la situation attend d'être retenue.
@@ -507,6 +532,10 @@ fn lancer_app(contexte: tauri::Context, commande: Commande, inconnus: Vec<String
             licence::licence_etat,
             licence::licence_activer,
             licence::licence_retirer,
+            fenetre_defilante::defilante_pret,
+            fenetre_defilante::defilante_zone,
+            fenetre_defilante::defilante_terminer,
+            fenetre_defilante::defilante_apercu,
             fenetre_menu::menu_pret,
             fenetre_menu::menu_choisi,
             fenetre_menu::menu_fermer
@@ -805,6 +834,18 @@ pub(super) fn lecture_en_cours(
         .unwrap_or_else(|e| e.into_inner())
 }
 
+/// La capture défilante en cours, sous son verrou (repris s'il est empoisonné). Fil
+/// principal ; verrou jamais tenu pendant un appel à Tauri ou à un module.
+pub(super) fn defilante_en_cours(
+    app: &AppHandle,
+) -> std::sync::MutexGuard<'_, Option<geste_defilante::EnCours>> {
+    app.state::<Application>()
+        .inner()
+        .defilante
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+}
+
 /// Vrai si une langue de lecture existe (`Evenement::TexteDisponible`).
 fn texte_disponible(app: &AppHandle) -> bool {
     app.state::<Application>()
@@ -850,6 +891,15 @@ pub(super) fn menu_actuel(app: &AppHandle) -> Option<Vec<EntreeMenu>> {
     Some(entrees_menu(&actions_en_vigueur(app), |a| {
         bilan.libelle_menu(a)
     }))
+}
+
+/// Le menu pendant une capture défilante : rien qui ouvre une fenêtre, seulement
+/// « Quitter BreezyShot » (§3.10, R2).
+pub fn entrees_pendant_defilante() -> Vec<EntreeMenu> {
+    vec![EntreeMenu::Action {
+        id: MENU_QUITTER.into(),
+        texte: "Quitter BreezyShot".into(),
+    }]
 }
 
 /// Refait le menu de l'icône d'après `menu_actuel`.
@@ -1233,6 +1283,7 @@ pub fn libelle_menu(mode: Mode) -> &'static str {
         Mode::Fenetre => "Capturer une fenêtre",
         Mode::DerniereZone => "Refaire la dernière zone",
         Mode::Texte => "Copier le texte",
+        Mode::Defilante => "Capture défilante",
     }
 }
 
@@ -1305,6 +1356,8 @@ pub fn traiter(app: &AppHandle, evenement: Evenement) {
             | Evenement::SortieFaite(_)
             | Evenement::SortieEchue(_)
             | Evenement::Raccourci(raccourcis::Signal::Echap)
+            | Evenement::Raccourci(raccourcis::Signal::Entree)
+            | Evenement::Defilante(_)
             | Evenement::Vignette(_)
             | Evenement::ActionFaite(_)
             | Evenement::SuppressionFaite { .. }
@@ -1380,6 +1433,10 @@ pub fn traiter(app: &AppHandle, evenement: Evenement) {
                 log::info!("menu: quitter");
                 app.exit(0);
             }
+            // Pendant une défilante, aucune fenêtre ne s'ouvre sur la zone (R2).
+            (_, _) if geste_defilante::fenetres_bloquees(app) => {
+                log::info!("menu ignore pendant la defilante");
+            }
             (MENU_REGLAGES, _) => {
                 log::info!("menu: reglages");
                 fenetre_reglages::ouvrir(app);
@@ -1397,14 +1454,23 @@ pub fn traiter(app: &AppHandle, evenement: Evenement) {
         },
         Evenement::Raccourci(raccourcis::Signal::Echap) => {
             log::info!("echap global presse");
-            if !annuler_si_decompte(app, ArriveeDecompte::Echap) {
+            // En Défilement, Échap annule la défilante ; sinon le décompte ou la Sélection.
+            if !geste_defilante::echap(app) && !annuler_si_decompte(app, ArriveeDecompte::Echap) {
                 traiter_zone(app, Arrivee::Echap);
             }
         }
-        Evenement::Selection(signal) => traiter_zone(app, Arrivee::Selection(&signal)),
+        Evenement::Raccourci(raccourcis::Signal::Entree) => {
+            log::info!("entree globale presse");
+            geste_defilante::entree(app);
+        }
+        Evenement::Selection(signal) => {
+            if !geste_defilante::signal_selection(app, &signal) {
+                traiter_zone(app, Arrivee::Selection(&signal));
+            }
+        }
         Evenement::Bureau(changement) => {
             log::info!("bureau change pendant la capture: {changement:?}");
-            if geste_texte::bureau_change(app) {
+            if geste_texte::bureau_change(app) || geste_defilante::bureau_change(app, changement) {
                 return;
             }
             if !annuler_si_decompte(app, ArriveeDecompte::Bureau(changement)) {
@@ -1434,6 +1500,10 @@ pub fn traiter(app: &AppHandle, evenement: Evenement) {
         }
         Evenement::Raccourci(raccourcis::Signal::Presse(action)) => {
             log::info!("raccourci presse: {action}");
+            if geste_defilante::fenetres_bloquees(app) {
+                log::info!("raccourci ignore pendant la defilante");
+                return;
+            }
             let construite = actions_en_vigueur(app).contains(&action.as_str());
             match Mode::depuis_nom(&action) {
                 Some(mode) if construite => lancer_capture(app, mode),
@@ -1488,6 +1558,7 @@ pub fn traiter(app: &AppHandle, evenement: Evenement) {
             // Première activation : les langues de lecture (une fois par lancement).
             geste_texte::lancer_sonde(app);
         }
+        Evenement::Defilante(signal) => geste_defilante::traiter(app, signal),
     }
 }
 
@@ -1611,6 +1682,7 @@ fn apres_gel(app: &AppHandle, mode: Mode, recu_a: Instant, bandeau_cache: bool) 
         Mode::PleinEcran => capturer_plein_ecran(app, recu_a, bandeau_cache),
         Mode::DerniereZone => capturer_derniere_zone(app, recu_a, bandeau_cache),
         Mode::Texte => capturer_avec_selection(app, recu_a, Mode::Texte, bandeau_cache),
+        Mode::Defilante => geste_defilante::capturer(app, recu_a, bandeau_cache),
     }
 }
 
@@ -1800,8 +1872,9 @@ fn annuler_decompte(app: &AppHandle, cause: Cause) {
 /// `GelImpossible` (Repos) et bandeau d'erreur ; rend `None`.
 pub(super) fn photographier(app: &AppHandle, deja_cache: bool, mode: Mode) -> Option<capture::Gel> {
     // Lu avant l'attente du compositeur : rien entre l'attente et la photo. Copier le
-    // texte ne prend jamais le pointeur.
-    let avec_pointeur = reglages_lus(app).capture.pointeur && mode != Mode::Texte;
+    // texte et la capture défilante ne prennent jamais le pointeur (D1).
+    let avec_pointeur =
+        reglages_lus(app).capture.pointeur && mode != Mode::Texte && mode != Mode::Defilante;
     let vignette_cachee = fermer_vignette(app, "capture");
     let bandeau_cache = app.try_state::<Bandeau>().is_some_and(|b| b.cacher());
     if (bandeau_cache || vignette_cachee || deja_cache)
@@ -1885,7 +1958,7 @@ fn decouper_sans_selection(
     let duree_decoupe = debut.elapsed();
     drop(gel_pris);
     match pixels {
-        Ok(pixels) => lancer_sortie(app, pixels, rect, duree_decoupe, recu_a, false),
+        Ok(pixels) => lancer_sortie(app, pixels, rect, duree_decoupe, recu_a, false, false),
         Err(e) => {
             log::warn!("decoupe impossible: {e}");
             appliquer(app, Declencheur::DecoupeImpossible);
@@ -1992,6 +2065,9 @@ fn montrer_selection(app: &AppHandle, recu_a: Instant, mode: Mode, gel_pris: cap
         )
     } else if mode == Mode::Texte {
         (selection::Mode::Texte, Vec::new())
+    } else if mode == Mode::Defilante {
+        // Les pages sont proposées après, sans être attendues (D2, `proposer_pages`).
+        (selection::Mode::Defilante, Vec::new())
     } else {
         (selection::Mode::Zone, Vec::new())
     };
@@ -2027,12 +2103,13 @@ fn montrer_selection(app: &AppHandle, recu_a: Instant, mode: Mode, gel_pris: cap
         Some(s) => s.montrer(demande),
         None => Err("selection absente".into()),
     };
-    match montree {
+    let id = match montree {
         Ok(id) => {
             if !noter_selection(app, id) {
                 // Terminée pendant `montrer` : rien à réserver.
                 return;
             }
+            id
         }
         Err(e) => {
             log::warn!("selection non montree: {e}");
@@ -2043,9 +2120,41 @@ fn montrer_selection(app: &AppHandle, recu_a: Instant, mode: Mode, gel_pris: cap
             );
             return;
         }
-    }
+    };
     // 6. Échap global, le temps de la sélection.
     reserver_echap(app);
+    if mode_selection == selection::Mode::Defilante {
+        geste_defilante::selection_montree(app, id);
+    }
+}
+
+/// Capture défilante (D2) : propose `pages` (pixels réels du bureau, du premier plan vers
+/// le fond) à l'affichage de sélection `id` de la capture en cours, et les range comme la
+/// liste dont `Signal::Fenetre::indice` est un indice. Fil principal. Faux si la capture
+/// en cours n'est plus celle de cet affichage, ou n'est pas en mode défilante : rien n'est
+/// proposé.
+pub(super) fn proposer_pages(
+    app: &AppHandle,
+    id: u64,
+    pages: Vec<selection::FenetreProposee>,
+) -> bool {
+    {
+        let mut c = capture_en_cours(app);
+        let Some(capture) = c
+            .as_mut()
+            .filter(|c| c.selection == Some(id) && c.mode == selection::Mode::Defilante)
+        else {
+            return false;
+        };
+        capture.fenetres.clone_from(&pages);
+    }
+    match app.try_state::<Selection>() {
+        Some(s) => {
+            s.proposer(id, pages);
+            true
+        }
+        None => false,
+    }
 }
 
 /// La capture en cours, sous son verrou. Un verrou empoisonné (panique pendant qu'il
@@ -2119,19 +2228,39 @@ pub(super) fn abandonner(app: &AppHandle, declencheur: Declencheur, probleme: Op
     let Some(mut capture) = ranger_capture(app, None) else {
         return;
     };
+    let defilante = capture.mode == selection::Mode::Defilante;
     capture.garde.cacher_tout();
     drop(capture);
     appliquer(app, declencheur);
+    if defilante {
+        geste_defilante::visee_abandonnee(app);
+    }
     if let Some(p) = probleme {
         afficher_probleme(app, p);
     }
 }
 
+/// Une zone (ou une page) choisie sans capture pour la recevoir, hors défilante : la
+/// Sélection qui la garde à l'écran doit être cachée (`traiter_zone`, `Geste::Rien`).
+/// Fonction pure.
+fn cacher_selection_gardee(sans_capture: bool, arrivee: &Arrivee<'_>, defilante: bool) -> bool {
+    sans_capture
+        && !defilante
+        && matches!(
+            arrivee,
+            Arrivee::Selection(selection::Signal::Zone { .. } | selection::Signal::Fenetre { .. })
+        )
+}
+
 /// Un signal pendant une capture de zone (fil principal) : décision pure, puis gestes.
 fn traiter_zone(app: &AppHandle, arrivee: Arrivee<'_>) {
-    let (geste, texte) = {
+    let (geste, texte, defilante, sans_capture) = {
         let c = capture_en_cours(app);
+        let sans_capture = c.is_none();
         let texte = c.as_ref().is_some_and(|c| c.mode == selection::Mode::Texte);
+        let defilante = c
+            .as_ref()
+            .is_some_and(|c| c.mode == selection::Mode::Defilante);
         let geste = zone::decider(
             c.as_ref().map(|c| Vue {
                 selection: c.selection,
@@ -2141,9 +2270,29 @@ fn traiter_zone(app: &AppHandle, arrivee: Arrivee<'_>) {
             }),
             arrivee,
         );
-        (geste, texte)
+        (geste, texte, defilante, sans_capture)
+    };
+    // Capture défilante : la page cliquée, par son indice dans la liste proposée.
+    let page = match arrivee {
+        Arrivee::Selection(selection::Signal::Fenetre { indice, .. }) => Some(*indice),
+        _ => None,
     };
     match geste {
+        // Une zone choisie en mode texte ou défilante est gardée à l'écran par la Sélection
+        // jusqu'à ce que le cœur la cache : sans capture (ni défilante) pour la recevoir,
+        // personne ne le ferait.
+        Geste::Rien
+            if cacher_selection_gardee(
+                sans_capture,
+                &arrivee,
+                geste_defilante::fenetres_bloquees(app),
+            ) =>
+        {
+            log::warn!("selection gardee sans capture: cachee");
+            if let Some(s) = app.try_state::<Selection>() {
+                s.cacher();
+            }
+        }
         Geste::Rien => {}
         Geste::Abandonner {
             declencheur,
@@ -2151,6 +2300,11 @@ fn traiter_zone(app: &AppHandle, arrivee: Arrivee<'_>) {
         } => abandonner(app, declencheur, probleme),
         // Copier le texte : la zone est lue, jamais découpée comme une capture.
         Geste::Decouper(zone) if texte => geste_texte::zone_choisie(app, zone),
+        // Capture défilante : la zone (ou la page) est défilée, jamais découpée ici.
+        Geste::Decouper(zone) if defilante => geste_defilante::zone_choisie(app, zone, None),
+        Geste::DecouperFenetre { zone, .. } if defilante => {
+            geste_defilante::zone_choisie(app, zone, page)
+        }
         Geste::Decouper(zone) => decouper(app, zone, None),
         Geste::DecouperFenetre { zone, rayon, coins } => decouper(app, zone, Some((rayon, coins))),
     }
@@ -2201,7 +2355,15 @@ fn decouper(app: &AppHandle, zone: systeme::Rect, fenetre: Option<(i32, [bool; 4
     }
     let transparence = fenetre.is_some_and(|(rayon, coins)| zone::avec_transparence(rayon, coins));
     match pixels {
-        Ok(pixels) => lancer_sortie(app, pixels, zone, duree_decoupe, relache, transparence),
+        Ok(pixels) => lancer_sortie(
+            app,
+            pixels,
+            zone,
+            duree_decoupe,
+            relache,
+            transparence,
+            false,
+        ),
         Err(e) => {
             log::warn!("decoupe impossible: {e}");
             appliquer(app, Declencheur::DecoupeImpossible);
@@ -2286,7 +2448,7 @@ fn sortir_et_mesurer(
     demande: sortie::Demande,
     duree_decoupe: Duration,
     relache: Instant,
-    (capture, vignette): (systeme::Rect, bool),
+    (capture, vignette, du_haut): (systeme::Rect, bool, bool),
 ) -> Box<FinSortie> {
     let debut = Instant::now();
     let (bilan, duree_sortie, apercu) = std::thread::scope(|portee| {
@@ -2294,7 +2456,7 @@ fn sortir_et_mesurer(
             .then(|| {
                 std::thread::Builder::new()
                     .name("apercu".into())
-                    .spawn_scoped(portee, || faire_apercu(pixels))
+                    .spawn_scoped(portee, || faire_apercu(pixels, du_haut))
                     .ok()
             })
             .flatten();
@@ -2302,7 +2464,7 @@ fn sortir_et_mesurer(
         let duree = debut.elapsed();
         let apercu = match fil {
             Some(f) => f.join().ok().flatten(),
-            None if vignette => faire_apercu(pixels),
+            None if vignette => faire_apercu(pixels, du_haut),
             None => None,
         };
         (bilan, duree, apercu)
@@ -2336,9 +2498,17 @@ pub(super) fn sortir_ou_echec(
     })
 }
 
-/// L'aperçu de la vignette : pixels réduits, en PNG.
-fn faire_apercu(pixels: &gel::Pixels) -> Option<Apercu> {
-    let petit = capture::reduire(pixels, vignette::APERCU_COTE_MAX);
+/// L'aperçu de la vignette : pixels réduits, en PNG. `du_haut` (capture défilante, D16) :
+/// la partie 16:10 du haut à gauche, puis réduite.
+fn faire_apercu(pixels: &gel::Pixels, du_haut: bool) -> Option<Apercu> {
+    let haut;
+    let source = if du_haut {
+        haut = capture::partie_16_10_du_haut(pixels);
+        &haut
+    } else {
+        pixels
+    };
+    let petit = capture::reduire(source, vignette::APERCU_COTE_MAX);
     let png = sortie::encoder_png(&petit).ok()?;
     Some((Arc::new(png), (petit.largeur, petit.hauteur)))
 }
@@ -2347,6 +2517,8 @@ fn faire_apercu(pixels: &gel::Pixels) -> Option<Apercu> {
 /// presse-papiers), puis le bilan revient au fil principal (`SortieFaite`). Un second
 /// petit fil tient l'échéance (`zone::DELAI_SORTIE`) : sans nouvelles du fil de sortie à
 /// temps, il poste `SortieEchue`, et l'automate ne reste jamais en Découpe.
+/// `apercu_du_haut` : l'aperçu de la vignette montre le haut de l'image (capture
+/// défilante, D16) ; toutes les autres captures gardent leur aperçu.
 fn lancer_sortie(
     app: &AppHandle,
     pixels: gel::Pixels,
@@ -2354,6 +2526,7 @@ fn lancer_sortie(
     duree_decoupe: Duration,
     relache: Instant,
     transparence: bool,
+    apercu_du_haut: bool,
 ) {
     let etat = app.state::<Application>();
     let numero = etat.derniere_sortie.fetch_add(1, Ordering::SeqCst) + 1;
@@ -2367,7 +2540,7 @@ fn lancer_sortie(
         reglages_lus(app).vignette.afficher,
         app.try_state::<Vignette>().is_some(),
     );
-    let quoi = (capture, voulue);
+    let quoi = (capture, voulue, apercu_du_haut);
     let pixels = Arc::new(pixels);
     let (fini, attente) = std::sync::mpsc::channel::<()>();
     let pour_fil = app.clone();
@@ -3871,6 +4044,8 @@ fn arreter(app: &AppHandle) {
     annuler_decompte(app, Cause::Arret);
     // Lecture de texte en cours : oubliée (son résultat arrivera trop tard).
     geste_texte::arreter(app);
+    // Capture défilante en cours : annulée (`defilante annulee arret`), sa fenêtre détruite.
+    geste_defilante::arreter(app);
     // Capture en cours : la garde cache tout et libère Échap. Puis la sélection est
     // fermée avant la destruction de l'écran figé, et l'image du bureau rendue.
     let capture = ranger_capture(app, None);
@@ -3927,6 +4102,53 @@ fn arreter(app: &AppHandle) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn selection_gardee_sans_capture_cachee() {
+        let zone = selection::Signal::Zone {
+            id: 1,
+            depart: (0, 0),
+            arrivee: (10, 10),
+        };
+        let page = selection::Signal::Fenetre {
+            id: 1,
+            indice: 0,
+            point: (5, 5),
+        };
+        let annulee = selection::Signal::Annulee {
+            id: 1,
+            cause: selection::Cause::Echap,
+        };
+        // Une zone ou une page choisie sans capture pour la recevoir : cachée.
+        assert!(cacher_selection_gardee(
+            true,
+            &Arrivee::Selection(&zone),
+            false
+        ));
+        assert!(cacher_selection_gardee(
+            true,
+            &Arrivee::Selection(&page),
+            false
+        ));
+        // Avec une capture, ou pendant une défilante (qui la cache elle-même) : rien.
+        assert!(!cacher_selection_gardee(
+            false,
+            &Arrivee::Selection(&zone),
+            false
+        ));
+        assert!(!cacher_selection_gardee(
+            true,
+            &Arrivee::Selection(&zone),
+            true
+        ));
+        // Ni une annulation, ni Échap.
+        assert!(!cacher_selection_gardee(
+            true,
+            &Arrivee::Selection(&annulee),
+            false
+        ));
+        assert!(!cacher_selection_gardee(true, &Arrivee::Echap, false));
+    }
 
     #[test]
     fn desinstallation_ligne_du_demarrage() {
@@ -4024,7 +4246,10 @@ mod tests {
                 Mode::DerniereZone
             ]
         );
-        assert_eq!(modes_au_menu(&actions_selon(true, true, true)), ORDRE_MENU);
+        assert_eq!(
+            modes_au_menu(&actions_selon(true, true, true, true)),
+            ORDRE_MENU
+        );
         assert_eq!(id_menu(Mode::Texte), "capturer_texte");
         assert_eq!(id_menu(Mode::DerniereZone), "capturer_derniere_zone");
         assert_eq!(texte_capturer(Mode::Fenetre, None), "Capturer une fenêtre");
@@ -4034,9 +4259,9 @@ mod tests {
     fn liste_des_actions_construites() {
         let base = ["zone", "plein_ecran", "fenetre", "derniere_zone"];
         assert_eq!(ACTIONS_DE_CAPTURE, base);
-        assert_eq!(actions_selon(true, false, false), base);
+        assert_eq!(actions_selon(true, false, false, false), base);
         assert_eq!(
-            actions_selon(true, true, false),
+            actions_selon(true, true, false, false),
             [
                 "zone",
                 "plein_ecran",
@@ -4046,11 +4271,11 @@ mod tests {
             ]
         );
         assert_eq!(
-            actions_selon(true, false, true),
+            actions_selon(true, false, true, false),
             ["zone", "plein_ecran", "fenetre", "derniere_zone", "texte"]
         );
         assert_eq!(
-            actions_selon(true, true, true),
+            actions_selon(true, true, true, false),
             [
                 "zone",
                 "plein_ecran",
@@ -4071,13 +4296,13 @@ mod tests {
             texte::CONSTRUIT
         );
         // Sans licence : les quatre captures seulement, quoi qu'il soit construit.
-        assert_eq!(actions_selon(false, true, true), base);
+        assert_eq!(actions_selon(false, true, true, false), base);
         assert_eq!(actions_construites(false, true), base);
         assert_eq!(
             entrees_menu(&actions_construites(false, true), |_| None),
             entrees_menu(&ACTIONS_DE_CAPTURE, |_| None)
         );
-        for a in actions_selon(true, true, true) {
+        for a in actions_selon(true, true, true, false) {
             assert!(
                 Mode::depuis_nom(a).is_some() || a == ACTION_HISTORIQUE,
                 "{a}"
@@ -4177,7 +4402,7 @@ mod tests {
             "texte" => Some("Ctrl + Maj + T".to_string()),
             _ => None,
         };
-        let m = entrees_menu(&actions_selon(true, true, true), raccourci);
+        let m = entrees_menu(&actions_selon(true, true, true, false), raccourci);
         assert_eq!(
             m,
             [
@@ -4194,7 +4419,7 @@ mod tests {
                 action(MENU_QUITTER, "Quitter BreezyShot"),
             ]
         );
-        let sans_texte = entrees_menu(&actions_selon(true, true, false), raccourci);
+        let sans_texte = entrees_menu(&actions_selon(true, true, false, false), raccourci);
         assert_eq!(sans_texte.len(), m.len() - 1);
         assert!(!sans_texte.contains(&action("capturer_texte", "Copier le texte\tCtrl + Maj + T")));
         assert_eq!(
@@ -4203,10 +4428,95 @@ mod tests {
         );
         // Sans historique ni texte : le menu de la 0.4.
         assert_eq!(
-            entrees_menu(&actions_selon(true, false, false), raccourci),
+            entrees_menu(&actions_selon(true, false, false, false), raccourci),
             entrees_menu(&ACTIONS_DE_CAPTURE, |_| None)
         );
         assert_eq!(mode_du_menu(MENU_HISTORIQUE), None);
+    }
+
+    /// Menu de la 0.6 (§7.3) : « Capture défilante » en cinquième, avant « Copier le
+    /// texte » ; six modes au plus ; sans licence, le menu de la 0.5 sans licence.
+    #[test]
+    fn menu_avec_la_defilante() {
+        let raccourci = |a: &str| match a {
+            "defilante" => Some("Ctrl + Maj + 5".to_string()),
+            "texte" => Some("Ctrl + Maj + T".to_string()),
+            _ => None,
+        };
+        let tout = actions_selon(true, true, true, true);
+        assert_eq!(
+            tout,
+            [
+                "zone",
+                "plein_ecran",
+                "fenetre",
+                "derniere_zone",
+                "historique",
+                "texte",
+                "defilante"
+            ]
+        );
+        assert_eq!(modes_au_menu(&tout).len(), 6);
+        // Groupes du menu web : les trois captures, un séparateur, puis la dernière zone,
+        // la défilante (cinquième action, choix U1) et le texte.
+        let m = entrees_menu(&tout, raccourci);
+        assert_eq!(m[3], EntreeMenu::Separateur);
+        assert_eq!(
+            m[4],
+            action("capturer_derniere_zone", "Refaire la dernière zone")
+        );
+        assert_eq!(
+            m[5],
+            action("capturer_defilante", "Capture défilante\tCtrl + Maj + 5")
+        );
+        assert_eq!(
+            m[6],
+            action("capturer_texte", "Copier le texte\tCtrl + Maj + T")
+        );
+        assert_eq!(m[7], EntreeMenu::Separateur);
+        // Sans langue de lecture : la défilante reste cinquième, suivie du séparateur.
+        let sans_texte = entrees_menu(&actions_selon(true, true, false, true), raccourci);
+        assert_eq!(
+            sans_texte[5],
+            action("capturer_defilante", "Capture défilante\tCtrl + Maj + 5")
+        );
+        assert_eq!(sans_texte[6], EntreeMenu::Separateur);
+        // Sans licence : ni la défilante, ni rien de Pro, quoi qu'il soit construit.
+        assert_eq!(actions_selon(false, true, true, true), ACTIONS_DE_CAPTURE);
+        assert_eq!(
+            entrees_menu(&actions_selon(false, true, true, true), raccourci),
+            entrees_menu(&ACTIONS_DE_CAPTURE, |_| None)
+        );
+        // Non construite (ou sans images vivantes) : absente, même avec une licence.
+        assert!(!actions_selon(true, true, true, false).contains(&"defilante"));
+        assert_eq!(
+            actions_construites(true, true).contains(&"defilante"),
+            defilante::CONSTRUITE && systeme::vivant::disponible()
+        );
+        assert_eq!(id_menu(Mode::Defilante), "capturer_defilante");
+        assert_eq!(mode_du_menu("capturer_defilante"), Some(Mode::Defilante));
+        assert_eq!(mode_journal("defilante"), "defilante");
+    }
+
+    /// Pendant une capture défilante, le menu de l'icône ne montre que Quitter.
+    #[test]
+    fn menu_pendant_la_defilante_quitter_seul() {
+        assert_eq!(
+            entrees_pendant_defilante(),
+            [action(MENU_QUITTER, "Quitter BreezyShot")]
+        );
+    }
+
+    /// Hors Windows, la capture défilante est absente, même avec une licence.
+    #[test]
+    fn defilante_absente_sans_images_vivantes() {
+        if !systeme::vivant::disponible() {
+            for pro in [false, true] {
+                for texte in [false, true] {
+                    assert!(!actions_construites(pro, texte).contains(&"defilante"));
+                }
+            }
+        }
     }
 
     #[test]

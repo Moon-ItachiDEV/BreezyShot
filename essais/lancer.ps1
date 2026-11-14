@@ -1,5 +1,5 @@
-# Joue tous les essais essais/NN-*.ps1 dans l'ordre (01-socle … 12-editeur), chacun dans
-# son propre pwsh. Les aides (temoin.ps1, tenir-raccourci.ps1, cible-glisser.ps1) ne sont
+# Joue tous les essais essais/NN-*.ps1 dans l'ordre (01-socle … 14-defilante), chacun dans
+# son propre pwsh. Les aides (temoin*.ps1, tenir-raccourci.ps1, cible-glisser.ps1) ne sont
 # pas des essais.
 # Sort avec 1 si un essai échoue. Écrit un résumé lisible, aussi dans $env:GITHUB_STEP_SUMMARY.
 #
@@ -10,11 +10,12 @@ param(
     [string]$Sortie = 'essais-resultats',
     # Un essai qui n'a pas fini dans ce délai est arrêté (lui et tout ce qu'il a lancé) et
     # compte comme échoué : les suivants se jouent quand même. L'essai 13 (historique, texte
-    # et licence, six à sept minutes s'il réussit) a au moins 900 s.
+    # et licence, six à sept minutes s'il réussit) et l'essai 14 (capture défilante, une
+    # douzaine de défilantes, Edge et l'Explorateur) ont au moins 900 s.
     [int]$LimiteS = 600
 )
 
-$LIMITES_PROPRES = @{ '13-historique-texte' = 900 }
+$LIMITES_PROPRES = @{ '13-historique-texte' = 900; '14-defilante' = 900 }
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'

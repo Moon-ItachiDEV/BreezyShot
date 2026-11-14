@@ -673,6 +673,12 @@
     },
     "usage": "Ombre portée des instruments.",
     "origine": "design/annotation-instruments/index.html, dessin B « Couleur » choisi le 13/11 (--i-ombre)."
+   },
+   {
+    "name": "defilante-apercu-ombre",
+    "value": "0 0 0 1px rgba(255,255,255,0.55), 0 8px 16px rgba(0,0,0,0.35)",
+    "usage": "Liseré clair et ombre de l'aperçu en direct de la capture défilante (les mêmes dans les deux thèmes, comme tout ce qui est posé sur l'écran).",
+    "origine": "design/defilante/index.html, .prev box-shadow."
    }
   ]
  },
@@ -3406,6 +3412,78 @@
     "value": "6px",
     "usage": "Écart de part et d'autre d'un séparateur de la barre.",
     "origine": "design/annotation-pistes/index.html, barre C « Souffle » gardée le 13/11 (.dv)."
+   },
+   {
+    "name": "defilante-apercu-largeur",
+    "value": "84px",
+    "usage": "Largeur de l'aperçu en direct, à côté de la zone (le cœur la donne en pixels réels ; valeur par défaut de la page).",
+    "origine": "design/defilante/index.html, .prev width:84px ; contrat 0.6 §12."
+   },
+   {
+    "name": "defilante-ecart",
+    "value": "12px",
+    "usage": "Écart entre la zone et l'aperçu en direct (placement fait par le cœur, §10).",
+    "origine": "design/defilante/index.html, pl=z.x+z.w+12 ; contrat 0.6 §12."
+   },
+   {
+    "name": "defilante-trait",
+    "value": "1px",
+    "usage": "Épaisseur du trait blanc autour de la zone, tracé dehors (écart E8 du contrat 0.6).",
+    "origine": "design/defilante/index.html, .zone border:1px solid var(--sel)."
+   },
+   {
+    "name": "defilante-pilule-marge",
+    "value": "4px",
+    "usage": "Marge intérieure de la pilule « Terminer », autour du bouton.",
+    "origine": "design/defilante/index.html, .pill padding:4px."
+   },
+   {
+    "name": "defilante-bouton-hauteur",
+    "value": "32px",
+    "usage": "Hauteur du bouton « Terminer » (aussi son interligne).",
+    "origine": "design/defilante/index.html, .pill button height:32px ; line-height 32px."
+   },
+   {
+    "name": "defilante-bouton-marge",
+    "value": "16px",
+    "usage": "Marge horizontale du bouton « Terminer ».",
+    "origine": "design/defilante/index.html, .pill button padding:0 16px."
+   },
+   {
+    "name": "defilante-bouton-largeur",
+    "value": "90px",
+    "usage": "Largeur minimale du bouton « Terminer » : « Terminer » en Segoe UI 600 14 px avec ses deux marges de 16 px, pour que la pilule ait la taille connue du cœur (TAILLE_PILULE_LOGIQUE, 100 × 42).",
+    "origine": "design/defilante/index.html, .pill button (largeur du texte mesurée) ; contrat 0.6 §10 (placement de la pilule par le cœur)."
+   },
+   {
+    "name": "defilante-appui-echelle",
+    "value": "0.97",
+    "usage": "Bouton « Terminer » appuyé.",
+    "origine": "design/defilante/index.html, .pill button:active transform:scale(.97)."
+   },
+   {
+    "name": "defilante-pilule-entree-decalage",
+    "value": "8px",
+    "usage": "Départ vertical de l'entrée en ressort de la pilule (elle monte vers sa place, sous la zone).",
+    "origine": "Contrat 0.6 §12 (entrée de la pilule en courbe-ressort) ; la maquette n'anime pas la pilule : valeur choisie, plus courte que celle du bandeau (-12px) puisque la pilule est près de la zone."
+   },
+   {
+    "name": "defilante-message-haut",
+    "value": "14px",
+    "usage": "Distance du haut de l'écran au message « Trop vite. Remontez un peu. ».",
+    "origine": "design/defilante/index.html, .msg top:14px ; contrat 0.6 §10."
+   },
+   {
+    "name": "defilante-message-marge-haut",
+    "value": "7px",
+    "usage": "Marge verticale du message (forme hud).",
+    "origine": "design/defilante/index.html, .msg padding:7px 14px."
+   },
+   {
+    "name": "defilante-message-marge-cote",
+    "value": "14px",
+    "usage": "Marge horizontale du message (forme hud).",
+    "origine": "design/defilante/index.html, .msg padding:7px 14px."
    }
   ]
  },

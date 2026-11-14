@@ -57,8 +57,20 @@ pub fn surveillance_session() -> bool {
     false
 }
 
+pub fn verrouillages_de_session() -> u64 {
+    0
+}
+
 pub fn poignee_ecran_fige() -> Option<isize> {
     None
+}
+
+pub fn ecran_fige_montre() -> bool {
+    false
+}
+
+pub fn bureau_virtuel() -> Result<Rect, String> {
+    Err("gel non disponible sur ce systeme".into())
 }
 
 pub fn lire_pointeur() -> Result<Option<Pointeur>, String> {

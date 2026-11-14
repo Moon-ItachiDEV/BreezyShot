@@ -6,6 +6,7 @@
 //! Le module crée, place, montre et cache ; il ne décide de rien. L'Application lui donne
 //! les lignes et reçoit le choix (`menu_choisi`).
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
@@ -65,6 +66,9 @@ pub struct Ouverture {
 /// Dernière fermeture (pour `ANTI_REBOND`) et lignes en attente de la page.
 static FERME_A: Mutex<Option<Instant>> = Mutex::new(None);
 static EN_ATTENTE: Mutex<Option<Ouverture>> = Mutex::new(None);
+/// Vrai tant que la fenêtre du menu est exclue des captures (posé par `ouvrir`, remis à
+/// faux à chaque création de la fenêtre).
+static EXCLU: AtomicBool = AtomicBool::new(false);
 
 fn fenetre(app: &AppHandle) -> Option<WebviewWindow> {
     app.get_webview_window(ETIQUETTE_MENU)
@@ -136,6 +140,8 @@ pub fn ouvert(app: &AppHandle) -> bool {
 }
 
 fn creer(app: &AppHandle) -> Result<WebviewWindow, String> {
+    // Une fenêtre neuve n'est exclue de rien : l'exclusion sera reposée si elle est voulue.
+    EXCLU.store(false, Ordering::SeqCst);
     let f = WebviewWindowBuilder::new(app, ETIQUETTE_MENU, WebviewUrl::App(PAGE.into()))
         .title("BreezyShot")
         .inner_size(LARGEUR + 2.0 * MARGE, 200.0)
@@ -175,9 +181,11 @@ pub fn rect_inconnu(r: &Rect) -> bool {
 
 /// Ouvre le menu au-dessus de l'icône (`icone` : son rectangle, pixels réels ; `None` ou
 /// inconnu : sous la souris). La première fois, la fenêtre est créée et la page envoie
-/// `menu_pret` : les lignes lui sont données à ce moment-là. Rend vrai si le menu est
-/// montré.
-pub fn ouvrir(app: &AppHandle, icone: Option<Rect>, lignes: Vec<Ligne>) -> bool {
+/// `menu_pret` : les lignes lui sont données à ce moment-là. `exclu` : la fenêtre est
+/// exclue des captures pour cette ouverture (pendant une défilante, où elle pourrait
+/// entrer dans une image), et l'exclusion est retirée à la première ouverture sans. Rend
+/// vrai si le menu est montré.
+pub fn ouvrir(app: &AppHandle, icone: Option<Rect>, lignes: Vec<Ligne>, exclu: bool) -> bool {
     let icone = icone.filter(|r| !rect_inconnu(r));
     let ancre = icone.or_else(|| {
         super::souris(app).map(|(x, y)| Rect {
@@ -210,6 +218,7 @@ pub fn ouvrir(app: &AppHandle, icone: Option<Rect>, lignes: Vec<Ligne>) -> bool 
             }
         },
     };
+    regler_exclusion(&f, exclu);
     let _ = f.set_position(tauri::PhysicalPosition::new(place.x, place.y));
     let _ = f.set_size(tauri::PhysicalSize::new(place.largeur, place.hauteur));
     if nouvelle {
@@ -230,6 +239,34 @@ pub fn ouvrir(app: &AppHandle, icone: Option<Rect>, lignes: Vec<Ligne>) -> bool 
     log::info!("menu ouvert");
     surveiller_clics(app, place);
     true
+}
+
+/// Pose ou retire l'exclusion des captures, avant que la fenêtre soit montrée. Seulement
+/// quand elle change : hors défilante, rien n'est appelé ni écrit. En essai capturable
+/// (`BREEZYSHOT_ESSAI_CAPTURABLE=1`), rien n'est exclu, comme pour les autres fenêtres.
+fn regler_exclusion(f: &WebviewWindow, exclu: bool) {
+    if exclu == EXCLU.load(Ordering::SeqCst) {
+        return;
+    }
+    if exclu {
+        if systeme::essai_capturable() {
+            log::info!("menu exclu des captures: non (essai)");
+            return;
+        }
+        let fait = systeme::exclure_des_captures(f);
+        EXCLU.store(fait, Ordering::SeqCst);
+        log::info!(
+            "menu exclu des captures: {}",
+            if fait { "oui" } else { "non" }
+        );
+    } else {
+        let fait = systeme::inclure_dans_les_captures(f);
+        EXCLU.store(!fait, Ordering::SeqCst);
+        log::info!(
+            "menu exclusion des captures retiree: {}",
+            if fait { "oui" } else { "non" }
+        );
+    }
 }
 
 /// Ferme le menu au premier clic hors de lui, même s'il n'a jamais reçu le focus

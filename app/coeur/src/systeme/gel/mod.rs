@@ -122,6 +122,9 @@ pub struct FenetreInfo {
     /// Jamais écrit au journal.
     pub titre: String,
     pub coins: Coins,
+    /// Identifiant système de la fenêtre (Windows : le HWND ; 0 ailleurs). Sert à la
+    /// capture défilante (0.6) pour chercher la page qui défile dans cette fenêtre.
+    pub fenetre: isize,
 }
 
 /// Forme des coins d'une fenêtre, approchée : Windows ne donne pas le rayon des coins.
@@ -261,6 +264,34 @@ pub fn quand_bureau_change(rappel: impl Fn(Changement) + Send + Sync + 'static) 
 pub fn surveillance_session() -> bool {
     plateforme::surveillance_session()
 }
+
+/// Le nombre de verrouillages de session vus depuis le lancement, que l'écran figé soit
+/// montré ou caché (la fenêtre figée reste créée et inscrite) : la capture défilante le
+/// relit pendant le défilement (R9). Ne compte que si `surveillance_session()`. Hors
+/// Windows : 0.
+pub fn verrouillages_de_session() -> u64 {
+    plateforme::verrouillages_de_session()
+}
+
+/// Vrai tant que l'écran figé est montré : marqué « montré » (dès `montrer_ecran_fige`,
+/// jusqu'à la demande de le cacher) ou encore visible (masquage posté, pas encore traité).
+/// La garde de `figer_bureau`, pour les autres prises de l'écran (`vivant`). Porte sur la
+/// fenêtre, pas sur la dernière image composée : juste après le masquage, l'écran peut
+/// encore montrer l'image figée une ou deux périodes. N'importe quel fil. Hors Windows : faux.
+pub fn ecran_fige_montre() -> bool {
+    plateforme::ecran_fige_montre()
+}
+
+/// Le bureau virtuel (tous les écrans), en pixels réels. Erreur hors Windows ou si le
+/// système rend une taille nulle. N'importe quel fil.
+pub fn bureau_virtuel() -> Result<Rect, String> {
+    plateforme::bureau_virtuel()
+}
+
+/// Verrou de séance des tests qui touchent à l'écran (fenêtres, écran figé, objets GDI) :
+/// partagé par les tests de `gel` et de `vivant`, un seul à la fois dans le processus.
+#[cfg(all(test, windows))]
+pub(crate) static VERROU_ECRAN: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 /// Poignée système de la fenêtre de l'écran figé, pour poser la page de sélection juste
 /// au-dessus. `None` tant qu'elle n'est pas créée. N'importe quel fil.
