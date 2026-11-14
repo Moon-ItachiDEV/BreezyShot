@@ -36,7 +36,8 @@
 #     450, sans son, durée à 200 ms, ≥ 28 images par seconde, k sans recul, premier k après
 #     le décompte, dernier à l'arrêt à 300 ms, pastilles ± 8, bords blancs, pointeur pendant
 #     sa seconde et plus après) ; A7 fraîcheur sur le témoin -Rapide (10 s) ; A8
-#     presse-papiers (un .mp4 aux octets du fichier), « Récents » inchangé, `Films` vide
+#     presse-papiers (le .mp4 rangé dans le dossier d'enregistrement lui-même, aucun lien
+#     dans `Glisser`), « Récents » inchangé, `Films` vide
 #     (choix U4 : le film est déplacé dans le dossier d'enregistrement) ; copie d'écran sans
 #     cadre ni voile ni pilule (non capturable). Budgets du §9 sur les lignes `film debut` et
 #     `chrono film`.
@@ -48,16 +49,18 @@
 # Cas C (pause, vidéo puis GIF) ; D (annulations : Échap, croix, Arrêter, session pendant le
 #     décompte, Échap pendant la visée) ; E (gardes : Ctrl+Maj+2 et 7 ignorés pendant une
 #     vidéo, menu « Quitter » seul, Ctrl+Maj+6 l'arrête ; Ctrl+Maj+6 ignoré pendant un GIF,
-#     Ctrl+Maj+7 l'arrête ; --quitter pendant un film) ; F (80 × 60 agrandie à 120 × 120,
+#     Ctrl+Maj+7 l'arrête ; --quitter pendant un film : `film arret: fichier range`, le
+#     film dans le dossier d'enregistrement au nom du modèle, relu entier) ; F (80 × 60 agrandie à 120 × 120,
 #     601 × 451 : vidéo 600 × 450, GIF 601 × 451 ; GIF laissé à la limite de 60 s, sur le
 #     témoin simple, avec I) ; F125 (échelle 125 %, capturable, « non joué » si la session
 #     ne suit pas) ; G (sans vignette, annonces) ; H (copie éteinte : Copier, Supprimer puis
 #     Annuler, Supprimer puis le délai) ; I (vidéo de 30 s, GIF jusqu'à la limite : processeur
 #     et mémoire ; 10 s après la vignette ; cinq films de suite) ; J (sans Media Foundation) ;
 #     K (session, veille, écrans 800 × 600, disque virtuel de 300 Mo plein) ; L (app tuée
-#     pendant une vidéo, relancée propre).
+#     pendant une vidéo, relancée propre, le film coupé gardé dans `Films`).
 # Fin de chaque cas : aucune ligne `fin deja rendue`, `fil arrete (panique)`, `ecran fige
-# encore montre`, `source precedente non rendue` ; aucune ligne ERROR d'un film.
+# encore montre`, `source precedente non rendue`, `fil sans reponse a la fermeture` ;
+# aucune ligne ERROR d'un film.
 #
 # Non vérifiable sur GitHub (un écran 1024 × 768 à 100 %, sans carte graphique, sans
 # micro) : la liste de fin du §15.3 du contrat (micro, codeur matériel, duplication sur une
@@ -80,7 +83,7 @@ $script:Cas = $null
 # La licence d'essai, telle que rangée par le chantier L (une ligne, blancs retirés).
 $LICENCE = (Get-Content -LiteralPath (Join-Path $PSScriptRoot 'licence-essai.txt') -Raw).Trim()
 $CULTURE = [System.Globalization.CultureInfo]::InvariantCulture
-$INTERDITES = 'film \d+: fin deja rendue|film: fil arrete \(panique\)|film: ecran fige encore montre|source precedente non rendue|film-sortie: fil interrompu'
+$INTERDITES = 'film \d+: fin deja rendue|film: fil arrete \(panique\)|film: ecran fige encore montre|source precedente non rendue|film-sortie: fil interrompu|film: fil sans reponse a la fermeture'
 
 # --- Aides du journal (même forme que les essais 13 et 14) --------------------------------
 
@@ -226,7 +229,7 @@ function Point([string]$Nom, [scriptblock]$Corps) {
 # Fin d'un cas : aucune ligne qui ne doit jamais paraître (§8), aucune ERROR d'un film.
 function Verifier-Interdites([string]$Dossier, [string]$Quoi) {
     $l = @(Lignes-Journal $Dossier | Where-Object { $_ -match $INTERDITES } | ForEach-Object { Message $_ })
-    Verifier "$Quoi aucune ligne « fin deja rendue », « fil arrete (panique) », « ecran fige encore montre », « source precedente non rendue »" ($l.Count -eq 0) ($l -join ' | ') | Out-Null
+    Verifier "$Quoi aucune ligne « fin deja rendue », « fil arrete (panique) », « ecran fige encore montre », « source precedente non rendue », « fil sans reponse a la fermeture »" ($l.Count -eq 0) ($l -join ' | ') | Out-Null
     $e = @(Lignes-Journal $Dossier | Where-Object { $_ -match '^\S+\s+ERROR\s' -and $_ -match 'film' } | ForEach-Object { Message $_ })
     Verifier "$Quoi aucune ligne ERROR d'un film" ($e.Count -eq 0) ($e -join ' | ') | Out-Null
     $w = @(Lignes-Journal $Dossier | Where-Object { $_ -match '^\S+\s+WARN\s+\S+\s+(film|--capturer)' } | ForEach-Object { Message $_ } | Select-Object -Unique)
@@ -611,6 +614,11 @@ try {
             }
             return @($noms)
         }
+        # Sans licence, aucun des huit. Avec licence, au repos : rien hors de la référence
+        # et des onze de F32 (mf.dll comprise : depuis les corrections, elle n'est plus
+        # chargée à la demande par l'éditeur de liens, qui n'en garde que quatre — mfplat,
+        # mfreadwrite, dxgi, d3d11 —, mais la garde de systeme::mp4 la charge elle-même
+        # depuis System32 avec la recherche du codeur ; la liste reste une permission).
         $SURVEILLES = @('mfplat.dll', 'mfreadwrite.dll', 'mf.dll', 'dxgi.dll', 'd3d11.dll', 'mmdevapi.dll', 'audioses.dll', 'msmpeg2enc.dll')
         $ONZE_F32 = @('appxdeploymentclient.dll', 'cfgmgr32.dll', 'comppkgsup.dll', 'imagehlp.dll', 'mf.dll', 'mfplat.dll', 'mfreadwrite.dll', 'rtworkq.dll', 'windows.applicationmodel.dll', 'windows.media.dll', 'windows.staterepositoryps.dll')
 
@@ -968,12 +976,15 @@ try {
             $texte = if ($script:FenetreVignette -ne [IntPtr]::Zero) { Element $script:FenetreVignette $duree $null 2 } else { $null }
             Verifier "$Quoi vignette : carte « Enregistrement terminé », durée « $duree »" (($null -ne $carte) -and ($null -ne $texte)) $(if ($null -eq $carte -or $null -eq $texte) { Elements-Vus $script:FenetreVignette } else { '' }) | Out-Null
         }
-        # Le presse-papiers : une liste d'un fichier de l'extension, aux octets du fichier
-        # enregistré. Rend le chemin listé.
+        # Le presse-papiers : une liste d'un fichier de l'extension, le fichier rangé dans
+        # le dossier d'enregistrement lui-même (corrections M1, M2 : rangé d'abord, copié
+        # depuis Images, aucun lien dans Glisser). Rend le chemin listé.
         function Verifier-PressePapiers([string]$Quoi, $Film, [string]$Ext) {
             $l = @(Fichiers-PressePapiers)
-            $ok = ($l.Count -eq 1) -and ([System.IO.Path]::GetExtension($l[0]) -eq $Ext) -and (Test-Path -LiteralPath $l[0]) -and $Film.Enregistre -and ((Empreinte $l[0]) -eq (Empreinte $Film.Enregistre))
-            Verifier "$Quoi presse-papiers : une liste d'un fichier $Ext, aux octets du fichier enregistré" $ok "$($l.Count) fichier(s) : $(@($l | ForEach-Object { Split-Path -Leaf $_ }) -join ', ')" | Out-Null
+            $meme = ($l.Count -eq 1) -and $Film.Enregistre -and ([System.IO.Path]::GetFullPath($l[0]) -ieq [System.IO.Path]::GetFullPath($Film.Enregistre))
+            $ok = $meme -and ([System.IO.Path]::GetExtension($l[0]) -eq $Ext) -and (Test-Path -LiteralPath $l[0]) -and ((Empreinte $l[0]) -eq (Empreinte $Film.Enregistre))
+            $liens = @(Fichiers-De $script:Cas.Glisser | Where-Object { [System.IO.Path]::GetExtension($_) -in '.mp4', '.gif' })
+            Verifier "$Quoi presse-papiers : une liste d'un fichier $Ext, le fichier rangé dans le dossier d'enregistrement ; aucun lien de film dans Glisser" ($ok -and ($liens.Count -eq 0)) "$($l.Count) fichier(s) : $(@($l | ForEach-Object { $_ }) -join ', ') ; enregistré $($Film.Enregistre) ; Glisser $($liens.Count)" | Out-Null
             if ($l.Count -ge 1) { return $l[0] }
             return $null
         }
@@ -1512,9 +1523,12 @@ try {
                 Verifier '(B) témoin -Fixe, 3 s : une ou deux images, délais de 3 s (à la durée près), moins de 100 Ko' (($a.Images -ge 1) -and ($a.Images -le 2) -and ([math]::Abs($a.DureeMs - $fX.Duree) -le 100) -and ([math]::Abs($fX.Duree - 3000) -le 300) -and ($a.Octets -lt 100KB)) "$($a.Images) images, $($a.DureeMs) ms (film $($fX.Duree) ms), $($a.Octets) octets" | Out-Null
             }
             Point '(E) --quitter pendant une vidéo' {
+                # Correction B1 : le film arrêté par --quitter est rangé dans le dossier
+                # d'enregistrement, au nom du modèle, sans copie (même disque ici) ; ni
+                # presse-papiers, ni vignette, ni ligne `sortie film`.
                 $seq = $script:Natif::GetClipboardSequenceNumber()
-                $images = @(Fichiers-De $script:Cas.Images)
-                $filmsAvant = @(Fichiers-De $script:Cas.Films)
+                $imagesAvant = @(Fichiers-De $script:Cas.Images '*.mp4')
+                $filmsAvant = @(Fichiers-De $script:Cas.Films '*.mp4')
                 $fQ = Faire-Film -Sorte video -Quoi '(E quitter)' -DureeS 0 -Arret aucun -SansSortie -Pendant {
                     param($F)
                     Start-Sleep -Milliseconds 1500
@@ -1524,14 +1538,20 @@ try {
                 $sorti = $script:proc.WaitForExit(6000)
                 $la = Attendre-Apres 'arret propre$' $da $fQ.Base 3 '(E) arret propre'
                 $ferme = Trouver-Apres 'film arret: fichier ferme en \d+ ms$' $da $fQ.Base
+                $range = Trouver-Apres 'film arret: fichier (range$|a ranger au prochain lancement)' $da $fQ.Base
                 $ms = ((Heure-Ligne $la.Ligne) - $fQ.QuitterHeure).TotalMilliseconds
                 Verifier '(E) --quitter pendant le film : film fin arret, film arret: fichier ferme, arret propre en moins de 4 s' (($fQ.Cause -eq 'arret') -and ($null -ne $ferme) -and $sorti -and ($ms -lt 4000)) "$($fQ.Fin) ; $(if ($ferme) { Message $ferme.Ligne }) ; arret propre $([math]::Round($ms)) ms après --quitter" | Out-Null
-                $neuf = @(Fichiers-De $script:Cas.Films '*.mp4' | Where-Object { $filmsAvant -notcontains $_ })
+                $neufs = @(Fichiers-De $script:Cas.Images '*.mp4' | Where-Object { $imagesAvant -notcontains $_ })
+                $restes = @(Fichiers-De $script:Cas.Films '*.mp4' | Where-Object { $filmsAvant -notcontains $_ })
+                $registre = Join-Path $script:Cas.Films 'a-ranger.txt'
+                $note = if (Test-Path -LiteralPath $registre) { (Get-Content -LiteralPath $registre -Raw).Trim() } else { '' }
+                $nom = if ($neufs.Count -eq 1) { Split-Path -Leaf $neufs[0] } else { '' }
+                Verifier '(E) film arret: fichier range ; un .mp4 de plus dans le dossier d''enregistrement, au nom du modèle ; rien de plus dans Films, rien dans a-ranger.txt' (($null -ne $range) -and ((Message $range.Ligne) -eq 'film arret: fichier range') -and ($neufs.Count -eq 1) -and $nom.StartsWith('BreezyShot ', [StringComparison]::Ordinal) -and ($restes.Count -eq 0) -and ($note -eq '')) "$(if ($range) { Message $range.Ligne } else { 'aucune ligne de rangement' }) ; dossier : $($neufs.Count) nouveau(x) $nom ; Films : $($restes.Count) ; a-ranger.txt : « $note »" | Out-Null
                 $sortie = @(Toutes-Apres 'sortie film ' $da $fQ.Base)
-                Verifier '(E) aucune ligne sortie film, presse-papiers inchangé, rien de plus dans le dossier d''enregistrement' (($sortie.Count -eq 0) -and ($script:Natif::GetClipboardSequenceNumber() -eq $seq) -and (@(Fichiers-De $script:Cas.Images).Count -eq $images.Count)) "sortie $($sortie.Count) ; dossier $(@(Fichiers-De $script:Cas.Images).Count) (avant $($images.Count))" | Out-Null
-                if ($neuf.Count -ne 1) { throw "(E) $($neuf.Count) film(s) nouveau(x) dans <local>/Films" }
-                $a = Relire-Mp4 $neuf[0] '(E quitter)'
-                Verifier '(E) le fichier de <local>/Films, relu, est entier (durée du film à 200 ms près)' ([math]::Abs($a.DureeMs - $fQ.Duree) -le 200) "$($a.DureeMs) ms, $($a.Images) images ; film $($fQ.Duree) ms" | Out-Null
+                Verifier '(E) aucune ligne sortie film, presse-papiers inchangé' (($sortie.Count -eq 0) -and ($script:Natif::GetClipboardSequenceNumber() -eq $seq)) "sortie $($sortie.Count)" | Out-Null
+                if ($neufs.Count -ne 1) { throw "(E) $($neufs.Count) film(s) nouveau(x) dans le dossier d'enregistrement" }
+                $a = Relire-Mp4 $neufs[0] '(E quitter)'
+                Verifier '(E) le film rangé, relu, est entier (durée du film à 200 ms près)' ([math]::Abs($a.DureeMs - $fQ.Duree) -le 200) "$($a.DureeMs) ms, $($a.Images) images ; film $($fQ.Duree) ms" | Out-Null
             }
             Arreter-Temoin $script:Cas.Temoin
             Verifier-Interdites $da '(A)'
@@ -1663,13 +1683,13 @@ try {
                     Start-Sleep -Milliseconds 400
                     Cliquer-Vignette $id 'annuler' "(H $sorte) Annuler"
                     $null = Attendre-Motif "vignette suppression $id annulee$" $dh 3 "(H $sorte) suppression annulée"
-                    Verifier "(H) $sorte : Supprimer puis Annuler : le fichier enregistré et le lien de Glisser encore là" ((Test-Path -LiteralPath $fH.Enregistre) -and $lien -and (Test-Path -LiteralPath $lien)) "lien $(if ($lien) { Split-Path -Leaf $lien })" | Out-Null
+                    Verifier "(H) $sorte : Supprimer puis Annuler : le fichier enregistré (celui du presse-papiers) encore là" ((Test-Path -LiteralPath $fH.Enregistre) -and $lien -and (Test-Path -LiteralPath $lien)) "presse-papiers $(if ($lien) { Split-Path -Leaf $lien })" | Out-Null
                     Cliquer-Vignette $id 'supprimer' "(H $sorte) Supprimer (2)"
                     $null = Attendre-Motif "vignette suppression $id en attente$" $dh 3 "(H $sorte) suppression en attente (2)" ($suppr + 2)
                     $lf = Attendre-Motif "vignette suppression $id faite " $dh 8 "(H $sorte) suppression faite"
                     Start-Sleep -Milliseconds 300
                     $restent = @(@($fH.Enregistre, $lien) | Where-Object { $_ -and (Test-Path -LiteralPath $_) })
-                    Verifier "(H) $sorte : Supprimer puis la fin du délai : le fichier de Films, le fichier enregistré et le lien de Glisser partis" (($restent.Count -eq 0) -and (@(Fichiers-De $script:Cas.Films).Count -eq 0)) "$(Message $lf) ; restent : $($restent.Count) ; Films $(@(Fichiers-De $script:Cas.Films).Count)" | Out-Null
+                    Verifier "(H) $sorte : Supprimer puis la fin du délai : le fichier enregistré parti, rien dans Films" (($restent.Count -eq 0) -and (@(Fichiers-De $script:Cas.Films).Count -eq 0)) "$(Message $lf) ; restent : $($restent.Count) ; Films $(@(Fichiers-De $script:Cas.Films).Count)" | Out-Null
                 }
             }
             Arreter-Temoin $script:Cas.Temoin
@@ -1772,7 +1792,12 @@ try {
                 $vis = @(Visibles-App)
                 $msg = @(Toutes-Apres 'bandeau affiche ' $dl $base)
                 Verifier '(L) relancée après Stop-Process pendant une vidéo : démarrage normal, sans fenêtre ni message' (($vis.Count -eq 0) -and ($msg.Count -eq 0)) "visibles : $($vis -join ', ') ; messages : $(@($msg | ForEach-Object { Message $_ }) -join ' | ')" | Out-Null
-                Noter-Mesure -Nom '(L) film laissé dans <local>/Films (non relu : R17, MP4 ordinaire)' -Valeur "$(@(Fichiers-De $script:Cas.Films).Count) fichier(s)"
+                # Le fichier d'un film tué n'est pas noté (il n'a jamais été fermé) : il reste
+                # dans Films, et le nettoyage du lancement garde toujours le film le plus récent.
+                $restes = @(Fichiers-De $script:Cas.Films '*.mp4')
+                $ranges = Trouver-Apres 'films ranges au lancement: ' $dl $base
+                Verifier '(L) le film coupé reste dans <local>/Films après le nettoyage du lancement (le plus récent est gardé)' ($restes.Count -ge 1) "$($restes.Count) fichier(s) ; $(if ($ranges) { Message $ranges.Ligne } else { 'aucune ligne films ranges au lancement' })" | Out-Null
+                Noter-Mesure -Nom '(L) film laissé dans <local>/Films (non relu : R17, MP4 sans fin)' -Valeur "$($restes.Count) fichier(s) ; $(if ($ranges) { Message $ranges.Ligne } else { 'rien rangé au lancement' })"
                 Arreter-Temoin $script:Cas.Temoin
                 Verifier-Interdites $dl '(L)'
                 Fermer-Cas $script:proc $dl '(L)'

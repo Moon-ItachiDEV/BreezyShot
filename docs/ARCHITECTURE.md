@@ -2248,21 +2248,26 @@ non envoye: <e>`, `surlignage sans fil (<e>): fin montree tout de suite`.
   licence (rien du film, modules comparés à `docs/sonde-film-modules-0.6.1.txt`, réglages
   passés en v6) ; L1 (raccourcis, menu, Réglages, modules hors des onze de F32) ; A vidéo de
   6 s (visée, décompte, styles et premier plan, duplication, pilule, Échap libéré, durée
-  lue, pointeur, « Arrêter », vignette, fichier relu au pas de 100 ms, presse-papiers,
-  `Films` vide), A7 fraîcheur sur le témoin `-Rapide`, A9 capturable (cadre, voile, pilule) ;
+  lue, pointeur, « Arrêter », vignette, fichier relu au pas de 100 ms, presse-papiers qui
+  liste le fichier rangé dans Images lui-même sans lien dans `Glisser`, `Films` vide), A7 fraîcheur sur le témoin `-Rapide`, A9 capturable (cadre, voile, pilule) ;
   B GIF (raccourci, menu, témoin fixe) ; C pause ; D annulations (Échap, croix, Arrêter,
   session, visée) ; E gardes (Ctrl+Maj+2 et 7 ignorés pendant une vidéo, Ctrl+Maj+6 qui
-  l'arrête, Ctrl+Maj+6 ignoré pendant un GIF, menu « Quitter » seul, `--quitter`) ; F zones
+  l'arrête, Ctrl+Maj+6 ignoré pendant un GIF, menu « Quitter » seul, `--quitter` : `film
+  arret: fichier range`, le film dans Images au nom du modèle et relu entier, rien dans
+  `a-ranger.txt`) ; F zones
   (80 × 60, 601 × 451, GIF à la limite de 60 s), F125 si la session suit l'échelle ; G sans
   vignette ; H copie éteinte (Copier, Supprimer, Annuler) ; I processeur et mémoire (vidéo de
   30 s, GIF), cinq films de suite ; J sans Media Foundation ; K session, veille, écrans
   800 × 600, disque virtuel de 300 Mo (diskpart) laissé à 2 Mo de la marge ; L app tuée
-  pendant une vidéo puis relancée. Budgets du §9 sur `film debut` et `chrono film`. Non
+  pendant une vidéo puis relancée (le film coupé, jamais fermé ni noté, reste dans `Films` :
+  le nettoyage garde le plus récent). Budgets du §9 sur `film debut` et `chrono film`. Non
   vérifiable sur la machine GitHub (un écran 1024 × 768 à 100 %, sans carte graphique ni
   micro) : le micro et le son, le codeur matériel, la duplication sur une vraie carte,
   l'écran 2K et 150 %, plusieurs écrans, la vraie veille et la reprise, UAC, l'arrêt de
-  Windows, OneDrive, le collage dans d'autres applications et la lecture dans les lecteurs
-  du système ; ces points sont dans la liste de tests de l'utilisateur.
+  Windows et la vraie fin de session (rangement B1), le rangement au lancement suivant
+  d'un film noté (dossier d'enregistrement sur un autre disque) ou gardé après une panique
+  du fil (M8), le refus du codeur AAC, OneDrive, le collage dans d'autres applications et la
+  lecture dans les lecteurs du système ; ces points sont dans la liste de tests de l'utilisateur.
 - `essais/` : un script par étape (`01-socle.ps1`, `02-reglages.ps1`, `03-raccourci.ps1`,
   `04-zone.ps1`, `05-plein-ecran.ps1`, `06-fenetre.ps1`, `07-vignette.ps1`,
   `08-reglages-fenetre.ps1`, `09-installateur.ps1`, `10-confort.ps1`,
