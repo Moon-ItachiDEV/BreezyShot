@@ -2010,7 +2010,7 @@ non envoye: <e>`, `surlignage sans fil (<e>): fin montree tout de suite`.
   sombre, trait du pli, intensité en trois points, marge du dernier groupe, nuance bordée
   des outils repliés, Bloc noir noir et bordé dans les deux thèmes, focus de l'intensité
   qui part rendu à la variante), couleurs, menu « Fermer » et ses issues,
-  « Copier » qui ferme, vignette de prise, règle de `fermer_demande`, un seul export à la
+  « Copier » qui ferme, bouton Glisser, règle de `fermer_demande`, un seul export à la
   fois, clair, sombre, largeur d'ouverture (chaque outil déplié tient), fenêtre étroite
   (seuls les outils défilent, Annuler, Rétablir et Plus restent, l'outil pris se montre,
   même quand son pli s'élargit),

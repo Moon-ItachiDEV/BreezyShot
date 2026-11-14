@@ -2067,12 +2067,6 @@
     "origine": "design/editeur-epure/index.html, piste B (.rng .ico)."
    },
    {
-    "name": "editeur-picto-vignette",
-    "value": "16px",
-    "usage": "Picto de prise de la vignette.",
-    "origine": "design/editeur-epure/index.html, piste B (.ghost svg)."
-   },
-   {
     "name": "editeur-barre-hauteur",
     "value": "52px",
     "usage": "Barre du haut (et de la fenêtre).",
@@ -2413,36 +2407,6 @@
     "value": "12px",
     "usage": "Message : coche.",
     "origine": "design/editeur-epure/index.html, piste B (.msg i svg)."
-   },
-   {
-    "name": "editeur-vignette-droite",
-    "value": "20px",
-    "usage": "Vignette de prise : écart au bord droit.",
-    "origine": "design/editeur-epure/index.html, piste B (.ghost)."
-   },
-   {
-    "name": "editeur-vignette-ecart",
-    "value": "30px",
-    "usage": "Vignette de prise : au-dessus de la palette.",
-    "origine": "design/editeur-epure/index.html, piste B (dragOut())."
-   },
-   {
-    "name": "editeur-vignette-largeur",
-    "value": "150px",
-    "usage": "Vignette de prise : largeur.",
-    "origine": "design/editeur-epure/index.html, piste B (.ghost)."
-   },
-   {
-    "name": "editeur-vignette-rayon",
-    "value": "12px",
-    "usage": "Vignette de prise : rayon.",
-    "origine": "design/editeur-epure/index.html, piste B (.ghost)."
-   },
-   {
-    "name": "editeur-vignette-ecart-interne",
-    "value": "4px",
-    "usage": "Vignette de prise : écart image-picto.",
-    "origine": "design/editeur-epure/index.html, piste B (.ghost)."
    },
    {
     "name": "editeur-saisie-trait",

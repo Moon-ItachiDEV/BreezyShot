@@ -279,7 +279,6 @@
   --editeur-focus: 2px;
   --editeur-picto: 20px;
   --editeur-picto-petit: 18px;
-  --editeur-picto-vignette: 16px;
   --editeur-barre-hauteur: 52px;
   --editeur-barre-ecart: 8px;
   --editeur-barre-marge: 10px;
@@ -337,11 +336,6 @@
   --editeur-message-depart: -8px;
   --editeur-message-icone: 20px;
   --editeur-message-coche: 12px;
-  --editeur-vignette-droite: 20px;
-  --editeur-vignette-ecart: 30px;
-  --editeur-vignette-largeur: 150px;
-  --editeur-vignette-rayon: 12px;
-  --editeur-vignette-ecart-interne: 4px;
   --editeur-saisie-trait: 1.5px;
   --editeur-saisie-ecart: 4px;
   --editeur-saisie-marge: 28px;
