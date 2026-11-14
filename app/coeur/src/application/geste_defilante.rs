@@ -55,6 +55,10 @@ use super::defilante::{
     Placement, Raison, Vu,
 };
 use super::etats::{Declencheur, Mode};
+use super::film;
+use super::geste_film::Jeton;
+#[cfg(test)]
+use super::geste_film::VERROU_SOURCE_ESSAIS;
 use super::{zone, CaptureEnCours, Evenement, GardeEcran};
 use crate::capture;
 use crate::defilement::{self, Ajout, Assemblage, Attendu, Fixes, Mesure, TOLERANCE};
@@ -1182,6 +1186,17 @@ fn defiler_et_assembler(d: Depart, sortie: impl FnMut(Signal) + Send + 'static) 
     // L'écran figé vient d'être caché : la dernière image composée doit être la vraie page.
     if !systeme::attendre_composition(super::ATTENTE_COMPOSITION) {
         log::warn!("defilante: composition non attendue");
+    }
+    // Une seule source d'images vivantes à la fois, celle d'un film comprise : une défilante
+    // lancée juste après un film attend que la source du film soit rendue (au plus
+    // `SOURCE_RENDUE_MAX`, puis elle part quand même). Rendu à la fin du fil, après la prise.
+    let attendu = Instant::now();
+    let jeton = Jeton::prendre(film::SOURCE_RENDUE_MAX);
+    if jeton.is_none() {
+        log::warn!(
+            "defilante: source precedente non rendue apres {} ms",
+            attendu.elapsed().as_millis()
+        );
     }
     let mut prise = match vivant::ouvrir(d.zone) {
         // Une zone coupée au bord du bureau ne serait plus celle placée et montrée.
@@ -3511,5 +3526,45 @@ mod tests {
                 b.resume()
             );
         }
+    }
+
+    /// La défilante prend le même jeton que le film (`geste_film::Jeton`) avant d'ouvrir sa
+    /// prise : lancée pendant qu'une source de film est encore ouverte, elle attend qu'elle
+    /// soit rendue (jamais deux sources du même écran, la seconde serait refusée), puis rend
+    /// le jeton à la fin de son fil. Arrêt demandé dès le départ : le fil ne fait que prendre
+    /// le jeton, ouvrir la prise (ou échouer hors Windows) et sortir.
+    #[test]
+    fn la_defilante_attend_la_source_du_film() {
+        let _verrou = VERROU_SOURCE_ESSAIS
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let source_du_film = Jeton::prendre(Duration::ZERO).expect("jeton libre");
+        let (envoi, reception) = mpsc::channel();
+        let arret = Arc::new(AtomicBool::new(true));
+        let d = Depart {
+            numero: 1,
+            zone: ZONE,
+            fenetre: None,
+            relache: Instant::now(),
+            ecrans: Vec::new(),
+            apercu: Arc::new(Mutex::new(None)),
+            apercu_taille: (84, 200),
+            reception,
+            envoi,
+            arret,
+            verrouillages: 0,
+        };
+        let debut = Instant::now();
+        let fil = std::thread::spawn(move || defiler_et_assembler(d, |_| {}));
+        std::thread::sleep(Duration::from_millis(150));
+        assert!(!fil.is_finished(), "la défilante attend la source du film");
+        drop(source_du_film);
+        fil.join().unwrap();
+        assert!(debut.elapsed() >= Duration::from_millis(150));
+        assert!(
+            debut.elapsed() < film::SOURCE_RENDUE_MAX,
+            "partie dès la source rendue, pas au bout du délai"
+        );
+        drop(Jeton::prendre(Duration::ZERO).expect("rendu à la fin du fil"));
     }
 }

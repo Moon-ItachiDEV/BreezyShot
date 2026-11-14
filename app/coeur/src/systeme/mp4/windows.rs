@@ -149,14 +149,17 @@ pub fn codeur_h264_present() -> bool {
         return false;
     }
     let _com = Com::ouvrir();
-    let Ok(_mf) = Mf::demarrer(MFSTARTUP_LITE) else {
+    // Le démarrage et les drapeaux mesurés par la sonde (S2, L1), à l'identique.
+    let Ok(_mf) = Mf::demarrer(MFSTARTUP_FULL) else {
         return false;
     };
     codeurs_h264() > 0
 }
 
 /// Les codeurs H.264 de `MFTEnumEx`, comptés **sans en activer aucun** : chaque
-/// `IMFActivate` est rendu, puis le tableau.
+/// `IMFActivate` est rendu, puis le tableau. Les drapeaux de la sonde : synchrones,
+/// asynchrones et matériels, triés et filtrés (`SORTANDFILTER` écarte les MFT bloqués ;
+/// ni `FIELDOFUSE`, à déverrouiller par l'application, ni `TRANSCODE_ONLY`).
 fn codeurs_h264() -> u32 {
     let sortie = MFT_REGISTER_TYPE_INFO {
         guidMajorType: MFMediaType_Video,
@@ -169,7 +172,10 @@ fn codeurs_h264() -> u32 {
     unsafe {
         if MFTEnumEx(
             MFT_CATEGORY_VIDEO_ENCODER,
-            MFT_ENUM_FLAG_ALL,
+            MFT_ENUM_FLAG_SYNCMFT
+                | MFT_ENUM_FLAG_ASYNCMFT
+                | MFT_ENUM_FLAG_HARDWARE
+                | MFT_ENUM_FLAG_SORTANDFILTER,
             None,
             Some(&sortie),
             &mut tableau,
@@ -340,7 +346,7 @@ const REGLAGES: [Reglage; 2] = [Reglage::Qualite, Reglage::Debit];
 
 /// Les paramètres du codeur passés à `SetInputMediaType` (clés `CODECAPI_*`).
 fn parametres_codeur(p: &Parametres) -> Result<IMFAttributes, String> {
-    let a = attributs(3)?;
+    let a = attributs(4)?;
     // SAFETY : attributs créés ici, clés connues.
     unsafe {
         ctx(
@@ -361,6 +367,13 @@ fn parametres_codeur(p: &Parametres) -> Result<IMFAttributes, String> {
                 p.cadence.saturating_mul(SECONDES_PAR_IMAGE_CLE),
             ),
         )?;
+        // Aucune image B : un codeur matériel au profil « High » pourrait en faire, et le
+        // fichier relu montrerait chaque image à l'instant de la suivante. Un codeur qui
+        // refuse la clé passe au réglage `Debit`.
+        ctx(
+            "CODECAPI_AVEncMPVDefaultBPictureCount",
+            a.SetUINT32(&CODECAPI_AVEncMPVDefaultBPictureCount, 0),
+        )?;
     }
     Ok(a)
 }
@@ -377,6 +390,8 @@ enum Panne {
     Demarrage,
     /// `WriteSample` refusé pour l'image écrite de ce rang.
     Image(u64),
+    /// `SetInputMediaType` du son refusé (avec ou sans codeur matériel).
+    Son,
 }
 
 #[cfg(test)]
@@ -431,6 +446,25 @@ fn arreter_recepteur(sw: &IMFSinkWriter) {
     }
 }
 
+/// Efface `chemin` avant d'y ouvrir un écrivain. Après l'abandon d'un codeur matériel, ses
+/// fils de travail peuvent tenir le fichier encore quelques millisecondes : l'effacement
+/// est réessayé toutes les 10 ms, 500 ms au plus (I2 de la relecture du système), et un
+/// échec est écrit au journal.
+fn effacer_avec_essais(chemin: &Path) {
+    let debut = Instant::now();
+    loop {
+        match std::fs::remove_file(chemin) {
+            Ok(()) => return,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return,
+            Err(e) if debut.elapsed() >= Duration::from_millis(500) => {
+                log::warn!("film: fichier encore tenu ({:?})", e.kind());
+                return;
+            }
+            Err(_) => std::thread::sleep(Duration::from_millis(10)),
+        }
+    }
+}
+
 /// Ouvre un écrivain sur `chemin` (le fichier est d'abord effacé), codeur matériel permis
 /// ou non, avec `reglage`. Un réglage refusé est une erreur (le suivant est essayé par
 /// `ouvrir_au_mieux`).
@@ -440,7 +474,7 @@ fn ouvrir(
     materiel: bool,
     reglage: Reglage,
 ) -> Result<Ouvert, String> {
-    let _ = std::fs::remove_file(chemin);
+    effacer_avec_essais(chemin);
     let a = attributs(2)?;
     let url = HSTRING::from(chemin.as_os_str());
     // SAFETY : objets COM créés ici, chemin et types valides.
@@ -478,6 +512,8 @@ fn ouvrir(
             )?;
             let audio = if p.son {
                 let s = ctx("AddStream (son)", sw.AddStream(&type_son(true)?))?;
+                #[cfg(test)]
+                panne_simulee(true, Panne::Son, "SetInputMediaType (son)")?;
                 ctx(
                     "SetInputMediaType (son)",
                     sw.SetInputMediaType(s, &type_son(false)?, None),
@@ -588,29 +624,49 @@ pub struct Ecrivain {
     _com: Com,
 }
 
+/// Ouvre avec le codeur matériel d'abord s'il est permis, puis le logiciel.
+fn ouvrir_codeur(chemin: &Path, p: &Parametres) -> Result<Ouvert, String> {
+    if !p.materiel {
+        return ouvrir_au_mieux(chemin, p, false);
+    }
+    match ouvrir_au_mieux(chemin, p, true) {
+        Ok(o) => Ok(o),
+        Err(refus) => {
+            // Écrit seulement si le logiciel prend le relais : un refus qui ne vient pas du
+            // codeur matériel n'est pas mis à son compte.
+            let o = ouvrir_au_mieux(chemin, p, false)?;
+            log::info!(
+                "film codeur logiciel (materiel refuse: {})",
+                code_de(&refus)
+            );
+            Ok(o)
+        }
+    }
+}
+
+/// L'erreur vient de la piste son (`AddStream (son)`, `SetInputMediaType (son)`).
+fn refus_du_son(erreur: &str) -> bool {
+    erreur.contains("(son)")
+}
+
 pub fn creer(chemin: &Path, p: &Parametres) -> Result<Ecrivain, String> {
     if !bibliotheques() {
         return Err("media foundation absente".into());
     }
     let com = Com::ouvrir();
     let mf = Mf::demarrer(MFSTARTUP_FULL)?;
-    let ouvert = if p.materiel {
-        match ouvrir_au_mieux(chemin, p, true) {
-            Ok(o) => o,
-            Err(refus) => {
-                // Écrit seulement si le logiciel prend le relais : un refus qui ne vient
-                // pas du codeur matériel n'est pas mis à son compte.
-                let o = ouvrir_au_mieux(chemin, p, false)?;
-                log::info!(
-                    "film codeur logiciel (materiel refuse: {})",
-                    code_de(&refus)
-                );
-                o
-            }
+    // Le codeur du son refusé (Windows « N », codeur AAC absent) : la vidéo se fait sans
+    // piste son plutôt que de finir en « codeur ».
+    let (ouvert, p) = match ouvrir_codeur(chemin, p) {
+        Err(refus) if p.son && refus_du_son(&refus) => {
+            let sans_son = Parametres { son: false, ..*p };
+            let o = ouvrir_codeur(chemin, &sans_son)?;
+            log::info!("film son non (codeur du son refuse: {})", code_de(&refus));
+            (o, sans_son)
         }
-    } else {
-        ouvrir_au_mieux(chemin, p, false)?
+        r => (r?, *p),
     };
+    let p = &p;
     Ok(Ecrivain {
         sw: Some(ouvert.sw),
         video: ouvert.video,
@@ -1024,7 +1080,12 @@ fn lire_ouvert(
             .GetPresentationAttribute(MF_SOURCE_READER_MEDIASOURCE.0 as u32, &MF_PD_DURATION)
         {
             Ok(mut pv) => {
-                let d = pv.Anonymous.Anonymous.Anonymous.uhVal;
+                // Une durée qui n'est pas un entier de 64 bits sans signe n'est pas lue.
+                let d = if pv.Anonymous.Anonymous.vt == ::windows::Win32::System::Variant::VT_UI8 {
+                    pv.Anonymous.Anonymous.Anonymous.uhVal
+                } else {
+                    0
+                };
                 let _ = PropVariantClear(&mut pv);
                 d
             }
@@ -1481,6 +1542,28 @@ mod tests {
         assert_eq!(e.codeur(), Codeur::Materiel);
         e.abandonner();
         assert!(std::fs::remove_file(&f).is_ok() || !f.exists());
+    }
+
+    /// Mineur 4 : le codeur du son refusé, la vidéo se fait sans piste son et se relit.
+    #[test]
+    fn film_sans_son_si_le_son_est_refuse() {
+        if sans_codeur() {
+            return;
+        }
+        PANNE.with(|p| p.set(Some(Panne::Son)));
+        let d = tempfile::tempdir().unwrap();
+        let f = d.path().join("sans-son.mp4");
+        let mut e = mp4::creer(&f, &params(600, 450, true)).unwrap();
+        for n in 0..30 {
+            e.image(&image_essai(600, 450, n), instant(n)).unwrap();
+            e.son(&[0; 1600], instant(n)).unwrap();
+        }
+        e.finir().unwrap();
+        PANNE.with(|p| p.set(None));
+        let r = relire(&f, 600, 450);
+        assert!(r.fautes.is_empty(), "{:#?}", r.fautes);
+        assert!(!r.lecture.son);
+        assert_eq!(r.numeros.last(), Some(&29));
     }
 
     /// Ce que l'écrivain refuse : une image d'une autre taille, un instant qui recule,

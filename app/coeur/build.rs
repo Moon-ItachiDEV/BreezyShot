@@ -8,13 +8,9 @@ fn main() {
         // Vidéo et GIF (contrat 0.7, F31) : Media Foundation, DXGI et Direct3D 11 ne sont
         // chargés qu'au premier appel, derrière la garde de `systeme::mp4` ; sans licence,
         // aucun ne l'est (la 0.6.1 n'en charge aucun au repos, mesuré par la sonde).
-        for dll in [
-            "mfplat.dll",
-            "mfreadwrite.dll",
-            "mf.dll",
-            "dxgi.dll",
-            "d3d11.dll",
-        ] {
+        // `mf.dll` n'y est pas : aucune fonction importée n'en vient (l'éditeur de liens
+        // l'écrivait, LNK4199) ; la garde la charge elle-même, depuis System32.
+        for dll in ["mfplat.dll", "mfreadwrite.dll", "dxgi.dll", "d3d11.dll"] {
             println!("cargo:rustc-link-arg=/DELAYLOAD:{dll}");
         }
         println!("cargo:rustc-link-arg=delayimp.lib");

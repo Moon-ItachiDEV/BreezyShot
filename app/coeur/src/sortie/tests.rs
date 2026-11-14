@@ -666,6 +666,17 @@ fn presse_papiers_causes_en_francais() {
         }),
         "Le presse-papiers a refusé l'image."
     );
+    // M9 : un film refusé ne parle pas d'image.
+    assert_eq!(
+        presse_papiers::cause_fichier(&arboard::Error::Unknown {
+            description: "x".to_string()
+        }),
+        "Le presse-papiers a refusé le fichier."
+    );
+    assert_eq!(
+        presse_papiers::cause_fichier(&arboard::Error::ClipboardOccupied),
+        "Le presse-papiers est occupé par une autre application."
+    );
 }
 
 // ---------- Ecriture (pur) ----------
@@ -2513,9 +2524,10 @@ mod films {
     use crate::sortie::presse_papiers::{relire_fichiers, sonder as sonder_fichiers};
     use crate::sortie::{
         a_effacer, annonce_film, chemin_film, copier_film, effacer_film, enregistrer_film,
-        fichier_a_glisser, films_a_retirer, nettoyer_films, sortir_film, supprimer, BilanFilm,
-        FilmGarde, SorteFilm, Suppression, FILMS_AGE_MAX, FILMS_GARDES, FILMS_OCTETS_MAX,
-        FILM_JEUNE, GLISSER_GARDES, SOUS_DOSSIER_FILMS,
+        fichier_a_glisser, film_a_glisser, films_a_ranger, films_a_retirer, nettoyer_films,
+        noter_film_ferme, oublier_film, ranger_film, sortir_film, supprimer, BilanFilm, FilmGarde,
+        SorteFilm, Suppression, FILMS_AGE_MAX, FILMS_GARDES, FILMS_OCTETS_MAX, FILM_JEUNE,
+        GLISSER_GARDES, REGISTRE_A_RANGER, SOUS_DOSSIER_FILMS,
     };
 
     const MO: u64 = 1024 * 1024;
@@ -2951,10 +2963,7 @@ mod films {
         let mut d = l.demande.clone();
         d.copier = true;
         let b = sortir_film(&absent, SorteFilm::Video, &d, true);
-        assert_eq!(
-            b.copie,
-            Etape::Echec("Le fichier du film est introuvable.".into())
-        );
+        assert_eq!(b.copie, Etape::Echec("Le fichier est introuvable.".into()));
         assert!(matches!(b.enregistrement, EtapeFichier::Echec { .. }));
         assert_eq!(b.lien, None);
     }
@@ -3018,17 +3027,26 @@ mod films {
                 println!("copier_pose_un_lien_au_nom_du_modele : pas de presse-papiers ici.");
             }
         }
-        // Le lien garde les octets après le déplacement du film (choix U4).
+        // Copier et enregistrer, film déplacé (choix U4) : rangé d'abord, puis le fichier
+        // rangé lui-même est donné, sans lien dans Glisser (M1, M2).
         let mut d = l.demande.clone();
         d.copier = true;
         let b = sortir_film(&f, SorteFilm::Gif, &d, true);
-        let second = b.lien.expect("lien");
-        assert_eq!(
-            second,
-            l.glisser.join("BreezyShot 2026-11-11 à 19.40.12 (2).gif")
-        );
+        assert_eq!(b.lien, None);
+        let EtapeFichier::Fait(range) = &b.enregistrement else {
+            panic!("rangé : {:?}", b.enregistrement);
+        };
         assert!(!f.exists());
-        assert_eq!(fs::read(&second).unwrap().len(), 4000);
+        assert_eq!(fs::read(range).unwrap().len(), 4000);
+        assert!(!l
+            .glisser
+            .join("BreezyShot 2026-11-11 à 19.40.12 (2).gif")
+            .exists());
+        if sonder_fichiers().is_ok() {
+            assert_eq!(b.copie, Etape::Faite);
+            let relu = relire_fichiers().expect("relu");
+            assert!(meme_fichier(&relu[0], range), "{relu:?} contre {range:?}");
+        }
         // Sans « Recents » utilisable, pas de Glisser : le fichier lui-même est donné.
         let mut d = l.demande.clone();
         d.dossier_recents = PathBuf::new();
@@ -3269,5 +3287,108 @@ mod films {
             plus_grosse < MO as usize,
             "plus grosse allocation {plus_grosse}"
         );
+    }
+
+    /// B1 : le registre des films fermés pas encore rangés : noté une fois, oublié, élagué
+    /// des fichiers partis ; un nom étranger n'y entre pas ; vide, il est effacé.
+    #[test]
+    fn registre_des_films_a_ranger() {
+        let l = local();
+        let f = film(&l, SorteFilm::Video, 10);
+        let g = chemin_film(&l.films, instant() + TimeDelta::seconds(1), SorteFilm::Gif)
+            .expect("chemin");
+        fs::write(&g, b"g").unwrap();
+        assert!(films_a_ranger(&l.films).is_empty());
+        noter_film_ferme(&f);
+        noter_film_ferme(&f);
+        noter_film_ferme(&g);
+        noter_film_ferme(&l.films.join("mon film.mp4"));
+        assert_eq!(films_a_ranger(&l.films), vec![f.clone(), g.clone()]);
+        fs::remove_file(&g).unwrap();
+        assert_eq!(films_a_ranger(&l.films), vec![f.clone()]);
+        oublier_film(&f);
+        assert!(films_a_ranger(&l.films).is_empty());
+        assert!(!l.films.join(REGISTRE_A_RANGER).exists());
+    }
+
+    /// B1 : le nettoyage ne retire jamais un film noté à ranger, même très vieux.
+    #[test]
+    fn nettoyage_garde_les_films_a_ranger() {
+        let l = local();
+        fs::create_dir_all(&l.films).unwrap();
+        let ici = SystemTime::now();
+        let vieux = l.films.join("20261101-010000-000.mp4");
+        let autre = l.films.join("20261101-020000-000.mp4");
+        let recent = l.films.join("20261101-030000-000.mp4");
+        for (f, jours) in [(&vieux, 32), (&autre, 31), (&recent, 30)] {
+            fs::write(f, vec![0u8; 10]).unwrap();
+            dater(f, ici - heures(24 * jours));
+        }
+        noter_film_ferme(&vieux);
+        // Le plus récent reste toujours ; le noté aussi ; l'autre part.
+        assert_eq!(nettoyer_films(&l.films, &l.glisser, ici, &[]), (1, 10));
+        assert!(vieux.exists());
+        assert!(!autre.exists());
+        assert!(recent.exists());
+        assert!(
+            l.films.join(REGISTRE_A_RANGER).exists(),
+            "le registre reste"
+        );
+    }
+
+    /// B1 : à l'arrêt, le film est rangé sans copie sur le même disque ; sur un autre
+    /// disque, rien n'est copié (`Err`) et le fichier de travail reste.
+    #[test]
+    fn ranger_film_sans_jamais_copier() {
+        let l = local();
+        let f = film(&l, SorteFilm::Video, 500);
+        let range = ranger_film(&f, SorteFilm::Video, &l.demande).expect("rangé");
+        assert_eq!(
+            range.parent(),
+            Some(l.demande.dossier_enregistrement.as_path())
+        );
+        assert_eq!(fs::read(&range).unwrap().len(), 500);
+        assert!(!f.exists());
+        // Un autre disque : /dev/shm (tmpfs) quand il existe ici.
+        let Ok(ailleurs) = tempfile::tempdir_in("/dev/shm") else {
+            println!("ranger_film_sans_jamais_copier : pas de /dev/shm ici.");
+            return;
+        };
+        let g = film(&l, SorteFilm::Gif, 500);
+        let mut d = l.demande.clone();
+        d.dossier_enregistrement = ailleurs.path().join("Images");
+        assert!(ranger_film(&g, SorteFilm::Gif, &d).is_err());
+        assert!(g.is_file());
+        let copies = fs::read_dir(&d.dossier_enregistrement)
+            .map(|r| r.count())
+            .unwrap_or(0);
+        assert_eq!(copies, 0, "rien de copié ni réservé");
+    }
+
+    /// I3 : le glisser d'un film ne copie jamais : un film rangé donne lui-même, un fichier
+    /// de travail un lien déjà posé, sinon un lien dur neuf, et un fichier absent rien.
+    #[test]
+    fn film_a_glisser_sans_copie() {
+        let l = local();
+        let f = film(&l, SorteFilm::Video, 300);
+        let lien = film_a_glisser(&f, &l.glisser, "BreezyShot film", &[]).expect("lien");
+        assert_eq!(lien, l.glisser.join("BreezyShot film.mp4"));
+        assert_eq!(fs::read(&lien).unwrap(), fs::read(&f).unwrap());
+        // Le même lien est redonné (pas de « (2) »).
+        let encore = film_a_glisser(
+            &f,
+            &l.glisser,
+            "BreezyShot film",
+            std::slice::from_ref(&lien),
+        )
+        .expect("lien");
+        assert_eq!(encore, lien);
+        // Rangé (hors de Films) : le fichier lui-même.
+        let range = ranger_film(&f, SorteFilm::Video, &l.demande).expect("rangé");
+        assert_eq!(
+            film_a_glisser(&range, &l.glisser, "BreezyShot film", &[lien]),
+            Ok(range.clone())
+        );
+        assert!(film_a_glisser(&f, &l.glisser, "BreezyShot film", &[]).is_err());
     }
 }

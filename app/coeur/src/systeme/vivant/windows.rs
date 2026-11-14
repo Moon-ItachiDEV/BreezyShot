@@ -1584,6 +1584,12 @@ mod tests {
             }
             let mut source = ouvrir_sur(essai.rect);
             let moyen = source.moyen();
+            // Une source neuve rend `Perdue` tant qu'elle n'a reçu aucune image du bureau :
+            // la première arrive 25 à 30 ms après l'ouverture de la duplication (mesuré sur
+            // GitHub, `perte_simulee_puis_reprise`), soit plus de 100 prises de cette boucle
+            // (0,2 ms chacune). L'échauffement attend donc d'abord cette première image ;
+            // compter en prises seules mettait ces `Perdue` dans le compte (29 à la course
+            // du 14/11, sans aucune perte).
             // Le premier moyen, puis `BitBlt` (25 à 30 ms par prise sur la machine GitHub ;
             // `mille_prises_sans_fuite_gdi` le prouve déjà pour `Prise`). Chaque tour
             // commence par des prises d'échauffement : Direct3D, DXGI et le rendu logiciel
@@ -1595,7 +1601,9 @@ mod tests {
             for (tour, (echauffement, nombre)) in
                 [(300usize, 3000usize), (50, 1000)].into_iter().enumerate()
             {
+                let (attente, _) = attendre_carres_source(&mut source, &mut px).unwrap();
                 prendre_en_boucle(&mut source, &essai, &mut px, echauffement);
+                let pertes_avant = source::pertes_pour_essai(&source.interne).len();
                 let (poignees_avant, gdi_avant) = (poignees(), objets_gdi());
                 let premier_tiers = prendre_en_boucle(&mut source, &essai, &mut px, nombre / 3);
                 let poignees_tiers = poignees();
@@ -1606,15 +1614,46 @@ mod tests {
                     premier_tiers.1 + reste.1,
                     premier_tiers.2 + reste.2,
                 );
+                let series = [premier_tiers.4.as_slice(), reste.4.as_slice()].concat();
+                let pertes = source::pertes_pour_essai(&source.interne)[pertes_avant..].to_vec();
                 eprintln!(
-                    "vivant: {} : {echauffement} prises d'echauffement puis {nombre} prises, \
-                     {nouvelles} nouvelles, {inchangees} inchangees, {perdues} perdues ; \
+                    "vivant: {} : premiere image apres {:.0} ms, {echauffement} prises \
+                     d'echauffement puis {nombre} prises, {nouvelles} nouvelles, {inchangees} \
+                     inchangees, {perdues} perdues ({} series {series:?}, pertes {pertes:?}) ; \
                      mediane {:.2} ms ; poignees {poignees_avant} -> {poignees_tiers} (tiers) \
                      -> {poignees_fin}, objets GDI {gdi_avant} -> {gdi_fin}",
                     source.moyen().nom(),
+                    attente.as_secs_f64() * 1000.0,
+                    series.len(),
                     mediane([premier_tiers.3, reste.3].concat()),
                 );
-                assert!(perdues <= 3, "{perdues} prises perdues sur un ecran stable");
+                // Une prise `Perdue` n'a qu'une cause, une perte vue par la source : sans
+                // perte, aucune (sinon le code rend `Perdue` à tort, une régression).
+                // Une vraie perte (la machine) est permise, rarement, si elle est reprise :
+                // au plus 3 en 3 000 prises, chaque série de `Perdue` finie avant la fin
+                // du tour et plus courte que 600 ms (un essai tout de suite, puis 500 ms).
+                assert!(
+                    perdues == 0 || !pertes.is_empty(),
+                    "{perdues} prises perdues sans aucune perte"
+                );
+                assert_eq!(
+                    series.iter().map(|serie| serie.prises).sum::<usize>(),
+                    perdues,
+                    "series mal comptees"
+                );
+                assert!(pertes.len() <= 3, "trop de pertes : {pertes:?}");
+                assert!(
+                    series.len() <= pertes.len(),
+                    "{} series de prises perdues pour {} pertes",
+                    series.len(),
+                    pertes.len()
+                );
+                for serie in &series {
+                    assert!(
+                        serie.reprise && serie.duree < Duration::from_millis(600),
+                        "perte non reprise : {serie:?}"
+                    );
+                }
                 assert!(
                     poignees_fin <= poignees_avant + 8,
                     "fuite de poignees : {poignees_avant} -> {poignees_fin}"
@@ -1659,17 +1698,28 @@ mod tests {
             );
         }
 
+        /// Une suite de prises `Perdue` : sa longueur, sa durée, et si une image l'a finie.
+        #[derive(Debug, Clone)]
+        struct SerieDePerdues {
+            prises: usize,
+            duree: Duration,
+            reprise: bool,
+        }
+
         /// `nombre` prises, la fenêtre d'essai repeinte avant chacune (la duplication a
         /// alors un rectangle sale dans la zone : l'image est copiée). Rend les nouvelles,
-        /// les inchangées, les perdues et les durées.
+        /// les inchangées, les perdues, les durées et les séries de perdues. Une série encore
+        /// ouverte à la fin est prolongée jusqu'à 600 ms pour savoir si elle se reprend.
         fn prendre_en_boucle(
             source: &mut Source,
             essai: &FenetreEssai,
             px: &mut Pixels,
             nombre: usize,
-        ) -> (usize, usize, usize, Vec<Duration>) {
+        ) -> (usize, usize, usize, Vec<Duration>, Vec<SerieDePerdues>) {
             let mut durees = Vec::with_capacity(nombre);
             let (mut nouvelles, mut inchangees, mut perdues) = (0, 0, 0);
+            let mut series: Vec<SerieDePerdues> = Vec::new();
+            let mut ouverte: Option<(Instant, usize)> = None;
             for _ in 0..nombre {
                 // SAFETY : fenêtre de ce fil.
                 unsafe {
@@ -1683,8 +1733,34 @@ mod tests {
                     Image::Inchangee => inchangees += 1,
                     Image::Perdue => perdues += 1,
                 }
+                if image == Image::Perdue {
+                    ouverte.get_or_insert((Instant::now(), 0)).1 += 1;
+                } else if let Some((debut, prises)) = ouverte.take() {
+                    series.push(SerieDePerdues {
+                        prises,
+                        duree: debut.elapsed(),
+                        reprise: true,
+                    });
+                }
             }
-            (nouvelles, inchangees, perdues, durees)
+            if let Some((debut, prises)) = ouverte {
+                let reprise = loop {
+                    match source.prendre(px) {
+                        Ok((Image::Perdue, _)) | Err(_) => {}
+                        Ok(_) => break true,
+                    }
+                    if debut.elapsed() >= Duration::from_millis(600) {
+                        break false;
+                    }
+                    pomper();
+                };
+                series.push(SerieDePerdues {
+                    prises,
+                    duree: debut.elapsed(),
+                    reprise,
+                });
+            }
+            (nouvelles, inchangees, perdues, durees, series)
         }
     }
 }
@@ -1704,16 +1780,18 @@ mod tests {
 // duplication est refaite à la prise suivante, puis au plus toutes les 500 ms (F33).
 //
 // `dxgi.dll` et `d3d11.dll` sont chargées à la demande (`build.rs`) : la première
-// ouverture d'une source les charge ; elles existent sur tout Windows 11 (F31, sans garde).
+// ouverture d'une source les charge, depuis le dossier système (`dll_du_systeme`) et non
+// depuis celui de l'exécutable ; elles existent sur tout Windows 11 (F31).
 
 pub use source::{
     moyen_source, ouvrir_source, prendre_source, repli_source, replier_source, zone_source, Source,
 };
 
 mod source {
+    use std::sync::OnceLock;
     use std::time::{Duration, Instant};
 
-    use ::windows::core::Interface;
+    use ::windows::core::{Interface, HSTRING};
     use ::windows::Win32::Foundation::{HMODULE, RECT};
     use ::windows::Win32::Graphics::Direct3D::D3D_DRIVER_TYPE_UNKNOWN;
     use ::windows::Win32::Graphics::Direct3D11::{
@@ -1731,6 +1809,7 @@ mod source {
         DXGI_OUTDUPL_MOVE_RECT,
     };
     use ::windows::Win32::Graphics::Gdi::{BitBlt, GdiFlush, SRCCOPY};
+    use ::windows::Win32::System::LibraryLoader::{LoadLibraryExW, LOAD_LIBRARY_SEARCH_SYSTEM32};
 
     use super::{couper_au_bureau, DcEcran, Dib, Pixels, Rect};
     use crate::systeme::gel;
@@ -1765,11 +1844,29 @@ mod source {
         dans_sortie: Rect,
     }
 
+    /// Charge `dxgi.dll` et `d3d11.dll` depuis le dossier système, une fois. Les appels
+    /// chargés à la demande trouvent ensuite ces modules : une DLL du même nom posée à
+    /// côté de l'exécutable n'est jamais prise.
+    fn dll_du_systeme() -> bool {
+        static CHARGEES: OnceLock<bool> = OnceLock::new();
+        *CHARGEES.get_or_init(|| {
+            ["dxgi.dll", "d3d11.dll"].iter().all(|nom| {
+                let n = HSTRING::from(*nom);
+                // SAFETY : nom terminé par zéro, tenu pendant l'appel ; aucune fonction de
+                // la DLL n'est appelée ici, et le module reste chargé.
+                unsafe { LoadLibraryExW(&n, None, LOAD_LIBRARY_SEARCH_SYSTEM32) }.is_ok()
+            })
+        })
+    }
+
     /// Parcourt les cartes et leurs sorties (fabrique neuve : à jour après un changement de
     /// mode), choisit celle qui porte la zone (`choisir_sortie`), crée le périphérique sur
     /// sa carte et la duplication. Rien n'est acquis ici : à l'ouverture d'un film, l'écran
     /// figé peut encore être montré.
     fn ouvrir_duplication(zone: Rect, ecran: Rect) -> Result<Duplication, Refus> {
+        if !dll_du_systeme() {
+            return Err("dll systeme".into());
+        }
         // SAFETY : énumération DXGI ; chaque objet COM est rendu par son compte de
         // références ; les descriptions sont copiées.
         let (carte, sortie, bureau) = unsafe {
@@ -2005,6 +2102,17 @@ mod source {
             Err(e) => return Acquis::Perte(code_hex(e.code().0), false),
         };
         let z = d.dans_sortie;
+        // Une boîte hors de la texture ou un autre format ne rendrait aucune erreur : la
+        // copie serait ignorée et l'image précédente rendue comme si rien n'avait changé.
+        let mut desc = D3D11_TEXTURE2D_DESC::default();
+        // SAFETY : texture vivante ; la description est copiée.
+        unsafe { texture.GetDesc(&mut desc) };
+        if desc.Format != DXGI_FORMAT_B8G8R8A8_UNORM
+            || (z.x + z.largeur) as u32 > desc.Width
+            || (z.y + z.hauteur) as u32 > desc.Height
+        {
+            return Acquis::Perte("texture differente".into(), false);
+        }
         let boite = D3D11_BOX {
             left: z.x as u32,
             top: z.y as u32,
@@ -2074,6 +2182,11 @@ mod source {
         changement: Option<(Moyen, String)>,
         /// Échecs de prise (autres que l'accès perdu) en série : un WARN par série.
         serie: Serie,
+        /// Pour les tests : chaque perte (accès perdu ou échec), par son code, dans
+        /// l'ordre. Les journaux ne sont pas lus par les tests ; c'est ce qui dit si une
+        /// prise `Perdue` vient d'une vraie perte.
+        #[cfg(test)]
+        pertes: Vec<String>,
     }
 
     // SAFETY : le périphérique Direct3D 11 et la duplication peuvent servir depuis
@@ -2115,6 +2228,8 @@ mod source {
             interne,
             changement,
             serie: Serie::default(),
+            #[cfg(test)]
+            pertes: Vec::new(),
         })
     }
 
@@ -2198,6 +2313,8 @@ mod source {
                         if !acces_perdu {
                             noter_echec(&mut source.serie, &code);
                         }
+                        #[cfg(test)]
+                        source.pertes.push(code.clone());
                         // La duplication (et l'image acquise) sont rendues ici.
                         *duplication = None;
                         suivi.perdue(Instant::now());
@@ -2210,6 +2327,8 @@ mod source {
                     Ok(()) => {}
                     Err(code) => {
                         noter_echec(&mut source.serie, &code);
+                        #[cfg(test)]
+                        source.pertes.push(code);
                         return Ok((Image::Perdue, debut.elapsed()));
                     }
                 }
@@ -2271,6 +2390,12 @@ mod source {
 
     pub fn repli_source(source: &mut Source) -> Option<(Moyen, String)> {
         source.changement.take()
+    }
+
+    /// Pour les tests : les pertes vues depuis l'ouverture, par leur code.
+    #[cfg(test)]
+    pub(super) fn pertes_pour_essai(source: &Source) -> &[String] {
+        &source.pertes
     }
 
     /// Pour les tests : une perte simulée (comme `DXGI_ERROR_ACCESS_LOST`).

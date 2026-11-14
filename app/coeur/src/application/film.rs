@@ -45,6 +45,9 @@ pub const DELAI_PAGE: Duration = Duration::from_secs(2);
 pub const DELAI_PRET: Duration = Duration::from_secs(3);
 /// Le fichier doit être fermé dans ce délai après la fin (F29).
 pub const DELAI_FERMETURE: Duration = Duration::from_secs(10);
+/// Ce que le fil principal attend en plus de `DELAI_FERMETURE` avant de finir lui-même une
+/// Finalisation dont le fil `film` ne dit plus rien (I1 de la relecture).
+pub const MARGE_FERMETURE: Duration = Duration::from_secs(2);
 /// L'arrêt de l'app attend la fermeture du fichier au plus ce délai (F35).
 pub const DELAI_ARRET: Duration = Duration::from_secs(3);
 /// Sans image pendant ce délai, `BitBlt` est essayé (F33).
@@ -185,6 +188,11 @@ impl Sorte {
     }
 
     /// Images par seconde (F13).
+    /// L'écart entre deux images de la grille (une seconde / la cadence).
+    pub fn pas(self) -> Duration {
+        Duration::from_secs(1) / self.cadence()
+    }
+
     pub fn cadence(self) -> u32 {
         match self {
             Sorte::Video => CADENCE_VIDEO,
@@ -674,6 +682,10 @@ pub fn suite(cours: &mut Cours, vu: Vu) -> Vec<Geste> {
         Vu::Micro => match cours.micro {
             Some(ouvert) if phase != Phase::Attente => {
                 cours.micro = Some(!ouvert);
+                if !ouvert {
+                    // Rouvert après un refus : plus rien à dire au départ (M4).
+                    cours.micro_a_dire = false;
+                }
                 let geste = if ouvert {
                     Geste::CouperMicro
                 } else {
@@ -1501,6 +1513,26 @@ mod tests {
             vec![Geste::CouperMicro, Geste::Etat]
         );
         assert_eq!(charge_etat(1, &c).micro.unwrap().libelle, "Micro");
+    }
+
+    /// M4 : perdu pendant le décompte, puis rouvert avant le départ : rien n'est dit au
+    /// départ (le micro marche).
+    #[test]
+    fn micro_rouvert_avant_le_depart_rien_a_dire() {
+        let mut c = Cours::nouveau(Sorte::Video, 3);
+        c.micro_present(true);
+        suite(&mut c, Vu::PageMontree);
+        suite(&mut c, Vu::Micro);
+        assert_eq!(suite(&mut c, Vu::MicroPerdu), vec![Geste::Etat]);
+        assert_eq!(
+            suite(&mut c, Vu::Micro),
+            vec![Geste::OuvrirMicro, Geste::Etat]
+        );
+        suite(&mut c, Vu::Pret);
+        assert_eq!(
+            suite(&mut c, Vu::DecompteFini),
+            vec![Geste::Demarrer, Geste::Etat]
+        );
     }
 
     #[test]

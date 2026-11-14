@@ -1208,7 +1208,11 @@ fn preparer_capture(app: &AppHandle) {
                 }
             );
         }
-        Err(e) => log::warn!("ecran fige non prepare: {e}"),
+        Err(e) => {
+            log::warn!("ecran fige non prepare: {e}");
+            // Sans sa fenêtre, ni la fin de session ni la veille annoncée n'arrivent.
+            log::warn!("fin de session non suivie");
+        }
     }
     // Fil principal bloqué avec l'écran figé montré : on arrête tout plutôt que de laisser
     // l'écran couvert (rappel appelé depuis le fil de garde).
@@ -1221,8 +1225,8 @@ fn preparer_capture(app: &AppHandle) {
     let pour_bureau = app.clone();
     gel::quand_bureau_change(move |c| poster_plus_tard(&pour_bureau, Evenement::Bureau(c)));
     // Fin de session Windows (F35) : la fenêtre de l'écran figé est sur le fil principal ;
-    // le rappel ferme le fichier d'un film avant que Windows ait sa réponse (sans film,
-    // il ne fait rien).
+    // le rappel ferme le fichier d'un film avant que Windows ait sa réponse et poste le
+    // reste (sans film, il ne fait rien).
     let pour_session = app.clone();
     gel::quand_session_finit(Box::new(move || geste_film::fin_de_session(&pour_session)));
     let pour_selection = app.clone();
@@ -3338,12 +3342,15 @@ pub(super) fn fermer_vignette(app: &AppHandle, raison: &str) -> bool {
 /// le fichier du film, et `fichier_a_glisser` en garde l'extension.
 fn demander_glisser(app: &AppHandle, id: u64) {
     let Some(prete) = avec_montree(app, id, |c| {
-        vignette::glisser_possible(c).map(|r| (r.to_path_buf(), c.maintenant))
+        vignette::glisser_possible(c).map(|r| {
+            let film = c.contenu.film().is_some();
+            (r.to_path_buf(), c.maintenant, film, c.liens.clone())
+        })
     }) else {
         return;
     };
     let glisser = app.state::<Application>().glisser.load(Ordering::SeqCst);
-    let Some((recent, maintenant)) = prete.filter(|_| !glisser) else {
+    let Some((recent, maintenant, film, liens)) = prete.filter(|_| !glisser) else {
         log::info!("vignette glisser {id} indisponible");
         return;
     };
@@ -3351,13 +3358,24 @@ fn demander_glisser(app: &AppHandle, id: u64) {
         Some(d) => {
             let nom = sortie::nom_fichier(&reglages_lus(app).modele_nom, maintenant);
             let dossier = d.local.join(vignette::SOUS_DOSSIER_GLISSER);
-            sortie::fichier_a_glisser(&recent, &dossier, &nom)
+            if film {
+                // Jamais de copie ici, sur le fil principal (I3).
+                sortie::film_a_glisser(&recent, &dossier, &nom, &liens)
+            } else {
+                sortie::fichier_a_glisser(&recent, &dossier, &nom)
+            }
         }
         None => Ok(recent),
     };
     match chemin {
         Ok(chemin) => {
-            avec_montree(app, id, |c| c.liens.push(chemin.clone()));
+            avec_montree(app, id, |c| {
+                // Le fichier du film lui-même n'est pas un lien à effacer avec la carte.
+                let lui_meme = c.contenu.film().is_some_and(|(f, _)| f == chemin.as_path());
+                if !lui_meme && !c.liens.contains(&chemin) {
+                    c.liens.push(chemin.clone());
+                }
+            });
             poster_plus_tard(app, Evenement::LancerGlisser { id, chemin });
         }
         Err(e) => log::info!("vignette glisser {id} refuse ({e})"),

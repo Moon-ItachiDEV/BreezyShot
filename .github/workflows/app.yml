@@ -18,7 +18,7 @@ jobs:
   windows:
     name: Windows (tests, .exe, essais)
     runs-on: windows-latest
-    timeout-minutes: 80
+    timeout-minutes: 105
     defaults:
       run:
         shell: pwsh
@@ -93,11 +93,17 @@ jobs:
         working-directory: app
         run: npx tauri build --no-bundle -- --locked
 
+      - name: Construire le lecteur de films (exemple lire_film)
+        # L'essai 15 relit chaque MP4 image par image avec lui.
+        working-directory: app/coeur
+        run: cargo build --locked --example lire_film
+
       - name: Essais
-        # 01 à 14 ; une étape bloquée ne doit pas manger tout le job.
-        timeout-minutes: 60
+        # 01 à 15 ; une étape bloquée ne doit pas manger tout le job.
+        timeout-minutes: 80
         env:
           BREEZYSHOT_SORTIE_TESTS: ${{ runner.temp }}/tests-sortie.txt
+          BREEZYSHOT_LIRE_FILM: ${{ github.workspace }}/app/coeur/target/debug/examples/lire_film.exe
         run: ./essais/lancer.ps1 -Exe app/coeur/target/release/breezyshot.exe -Sortie essais-resultats
 
       - name: Envoyer le .exe
@@ -206,6 +212,12 @@ jobs:
           NODE_PATH: ${{ github.workspace }}/app/node_modules
           SORTIE: ${{ github.workspace }}/essais-resultats/pages
         run: node essais/pages/menu.cjs
+
+      - name: Essai de la page de contrôle d'un film
+        env:
+          NODE_PATH: ${{ github.workspace }}/app/node_modules
+          SORTIE: ${{ github.workspace }}/essais-resultats/pages
+        run: node essais/pages/film.cjs
 
       - name: Envoyer les captures de la page
         if: always()

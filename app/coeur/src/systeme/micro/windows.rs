@@ -26,8 +26,8 @@ use std::time::Duration;
 use ::windows::Win32::Foundation::E_INVALIDARG;
 use ::windows::Win32::Media::Audio::{
     eCapture, eConsole, IAudioCaptureClient, IAudioClient, IMMDevice, IMMDeviceEnumerator,
-    MMDeviceEnumerator, AUDCLNT_BUFFERFLAGS_SILENT, AUDCLNT_E_UNSUPPORTED_FORMAT,
-    AUDCLNT_SHAREMODE_SHARED, AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM,
+    MMDeviceEnumerator, AUDCLNT_BUFFERFLAGS_DATA_DISCONTINUITY, AUDCLNT_BUFFERFLAGS_SILENT,
+    AUDCLNT_E_UNSUPPORTED_FORMAT, AUDCLNT_SHAREMODE_SHARED, AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM,
     AUDCLNT_STREAMFLAGS_SRC_DEFAULT_QUALITY, DEVICE_STATE_ACTIVE, WAVEFORMATEX, WAVE_FORMAT_PCM,
 };
 use ::windows::Win32::System::Com::{
@@ -204,8 +204,22 @@ fn ouvrir_flux() -> Result<Flux, Erreur> {
 }
 
 /// Relève le tampon de l'appareil jusqu'à l'arrêt ; rend le code d'un échec (appareil
-/// perdu).
+/// perdu). Les trous annoncés par l'appareil sont comptés et écrits au journal à la fin.
 fn relever(flux: &mut Flux, rappel: &mut Rappel, arret: &AtomicBool) -> Result<(), String> {
+    let mut trous = 0u32;
+    let r = relever_en_comptant(flux, rappel, arret, &mut trous);
+    if trous > 0 {
+        log::info!("film micro: {trous} trous annonces par l'appareil");
+    }
+    r
+}
+
+fn relever_en_comptant(
+    flux: &mut Flux,
+    rappel: &mut Rappel,
+    arret: &AtomicBool,
+    trous: &mut u32,
+) -> Result<(), String> {
     let code = |e: ::windows::core::Error| code_hex(e.code().0);
     let mut pcm: Vec<i16> = Vec::with_capacity(FREQUENCE as usize / 10);
     while !arret.load(Ordering::SeqCst) {
@@ -227,6 +241,9 @@ fn relever(flux: &mut Flux, rappel: &mut Rappel, arret: &AtomicBool) -> Result<(
             .map_err(code)?;
             if trames == 0 {
                 break;
+            }
+            if drapeaux & AUDCLNT_BUFFERFLAGS_DATA_DISCONTINUITY.0 as u32 != 0 {
+                *trous = trous.saturating_add(1);
             }
             let n = trames as usize;
             let silence = drapeaux & AUDCLNT_BUFFERFLAGS_SILENT.0 as u32 != 0 || donnees.is_null();

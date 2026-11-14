@@ -70,20 +70,27 @@ use crate::sortie::{self, BilanFilm, Etape, EtapeFichier};
 use crate::systeme::gel::{self, Changement, EcranInfo, Pixels, Pointeur};
 use crate::systeme::{self, micro, mp4, vivant, Rect};
 
-/// Une source de film est-elle ouverte ? Une seule à la fois (`Jeton`).
+/// Une source d'images vivantes est-elle ouverte (film ou défilante) ? Une seule à la fois
+/// (`Jeton`).
 static SOURCE: (Mutex<bool>, Condvar) = (Mutex::new(false), Condvar::new());
 
-/// Le droit d'ouvrir la source d'un film : pris avant `vivant::ouvrir_source`, rendu avec
-/// elle (dès la fin du film, avant la fermeture du fichier, ou à la fin du fil). Windows
-/// refuse une seconde duplication du même écran (`0x80070057`) : sans ce jeton, le film
-/// qui suit de près un film annulé partirait en BitBlt.
+/// Les tests qui prennent le jeton (il est global) passent l'un après l'autre.
+#[cfg(test)]
+pub(super) static VERROU_SOURCE_ESSAIS: Mutex<()> = Mutex::new(());
+
+/// Le droit d'ouvrir une source d'images vivantes : pris avant `vivant::ouvrir_source`
+/// (film) ou `vivant::ouvrir` (défilante, `geste_defilante`), rendu avec elle (pour un film
+/// dès sa fin, avant la fermeture du fichier, ou à la fin du fil ; pour une défilante à la
+/// fin de son fil). Windows refuse une seconde duplication du même écran (`0x80070057`) :
+/// sans ce jeton, le film qui suit de près un film annulé partirait en BitBlt, et une
+/// source ouverte juste après un film pourrait trouver la sienne encore là.
 #[derive(Debug)]
-struct Jeton(());
+pub(super) struct Jeton(());
 
 impl Jeton {
     /// Attend au plus `delai` que la source précédente soit rendue ; `None` si elle ne
-    /// l'est pas (le film part quand même, sans jeton).
-    fn prendre(delai: Duration) -> Option<Jeton> {
+    /// l'est pas (le film ou la défilante part quand même, sans jeton).
+    pub(super) fn prendre(delai: Duration) -> Option<Jeton> {
         let (tenue, rendue) = &SOURCE;
         let g = tenue.lock().unwrap_or_else(|e| e.into_inner());
         let (mut g, _) = rendue
@@ -281,8 +288,8 @@ struct Lancee {
     envoi: Sender<Courrier>,
     /// Les pas tenus par le fil `film` (images écrites).
     envoyees: Arc<AtomicU64>,
-    /// Le fil d'écriture a fermé (ou abandonné) le fichier (F35).
-    fermeture: Option<Receiver<()>>,
+    /// Le fil d'écriture a fermé (le fichier complet) ou abandonné le fichier (F35).
+    fermeture: Option<Receiver<Fini>>,
     /// L'`id` du disque du décompte dans le bandeau (0 : aucun).
     decompte: u64,
     /// `film:montrer` envoyé pour la page en cours.
@@ -893,6 +900,33 @@ fn finir(app: &AppHandle, numero: u64, fin: Fin) {
     cacher_decompte(app, decompte);
     super::liberer_echap(app);
     super::appliquer(app, Declencheur::EnregistrementArrete);
+    armer_echeance(app, numero);
+}
+
+/// L'échéance de la Finalisation tenue aussi par le fil principal (I1) : si le fil `film`
+/// ne répond plus (micro, pilote), le film de ce numéro encore en Finalisation passé
+/// `DELAI_FERMETURE` et une marge finit en « Impossible d'enregistrer » ; l'app revient au
+/// Repos.
+fn armer_echeance(app: &AppHandle, numero: u64) {
+    let arme = super::plus_tard_nomme(
+        app,
+        "film-echeance-poste",
+        film::DELAI_FERMETURE + film::MARGE_FERMETURE,
+        move |app| {
+            let encore = super::film_en_cours(app)
+                .as_ref()
+                .filter(|e| e.numero == numero)
+                .and_then(|e| e.lancee.as_ref())
+                .is_some_and(|l| l.finalisation);
+            if encore {
+                log::warn!("film: fil sans reponse a la fermeture");
+                rendre_impossible(app, numero, "delai");
+            }
+        },
+    );
+    if !arme {
+        log::warn!("film: echeance de la fermeture non armee");
+    }
 }
 
 /// Tout ce que tient `e` est rendu : le disque caché, l'écran figé et la sélection cachés
@@ -1139,6 +1173,7 @@ fn lancer_sortie(app: &AppHandle, mut s: SortieFaite) {
         return;
     }
     let nom = nom_de(&s.fichier);
+    let id = s.id;
     SORTIES
         .lock()
         .unwrap_or_else(|e| e.into_inner())
@@ -1170,6 +1205,14 @@ fn lancer_sortie(app: &AppHandle, mut s: SortieFaite) {
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .retain(|n| *n != nom);
+        // La carte n'attend pas un bilan qui ne viendra pas (M10) ; le film reste noté à
+        // ranger au lancement suivant.
+        super::avec_montree(app, id, |c| {
+            c.copie = None;
+            c.enregistrement = None;
+            c.enregistrer_attendu = false;
+        });
+        super::afficher(app, message(film::TITRE_FICHIER_IMPOSSIBLE));
     }
 }
 
@@ -1222,6 +1265,10 @@ fn sortie_faite(app: &AppHandle, s: SortieFaite) {
         EtapeFichier::Fait(p) => Some(p.clone()),
         _ => None,
     };
+    // Rangé : plus à ranger au lancement suivant (B1) ; sinon, il le sera.
+    if enregistre.is_some() {
+        sortie::oublier_film(&s.fichier);
+    }
     let etat = super::avec_montree(app, s.id, |c| {
         c.copie = None;
         c.enregistrement = None;
@@ -1276,6 +1323,30 @@ fn sortie_faite(app: &AppHandle, s: SortieFaite) {
         Some(zone::message_annonce(&annonce))
     };
     if let Some(m) = message {
+        afficher_hors_decompte(app, m, ANNONCE_ESSAIS);
+    }
+}
+
+/// L'annonce d'une sortie attend la fin du décompte d'un film suivant : le bandeau porte
+/// alors le disque du décompte et sa croix, qu'elle remplacerait (M14). Relue toutes les
+/// 500 ms, 30 s au plus, puis montrée quand même.
+const ANNONCE_ESSAIS: u32 = 60;
+const ANNONCE_ATTENTE: Duration = Duration::from_millis(500);
+
+fn afficher_hors_decompte(app: &AppHandle, m: Message, essais: u32) {
+    let en_decompte = super::film_en_cours(app)
+        .as_ref()
+        .and_then(|e| e.lancee.as_ref())
+        .is_some_and(|l| l.decompte != 0);
+    if !en_decompte || essais == 0 {
+        super::afficher(app, m);
+        return;
+    }
+    let pour = m.clone();
+    let poste = super::plus_tard_nomme(app, "film-annonce-poste", ANNONCE_ATTENTE, move |app| {
+        afficher_hors_decompte(app, pour, essais - 1);
+    });
+    if !poste {
         super::afficher(app, m);
     }
 }
@@ -1292,15 +1363,45 @@ pub fn lancer_recherche(app: &AppHandle) {
     let films = super::dossier_films(app);
     let (_, glisser) = super::dossiers_vignette(app);
     let proteges = films_proteges(app);
+    let demande = demande_d_arret(app);
     let lance = std::thread::Builder::new()
         .name("film-codeurs".into())
         .spawn(move || {
+            ranger_les_restes(&films, &demande);
             nettoyer(&films, &glisser, &proteges);
             let present = mp4::codeur_h264_present();
             super::traiter(&pour, Evenement::VideoDisponible(present));
         });
     if let Err(e) = lance {
         log::warn!("codeur video non cherche: {e}");
+    }
+}
+
+/// Les films fermés d'un lancement précédent pas encore rangés (B1 : arrêt sur un autre
+/// disque, fermeture tardive, sortie coupée) vont dans le dossier d'enregistrement, avant le
+/// nettoyage, déplacés (copiés puis effacés sur un autre disque) ; ni copie au
+/// presse-papiers, ni annonce. Le nom vient de l'heure du fichier (la fin du film).
+fn ranger_les_restes(films: &Path, base: &sortie::Demande) {
+    let (mut ranges, mut restes) = (0usize, 0usize);
+    for f in sortie::films_a_ranger(films) {
+        let sorte = match f.extension().and_then(|e| e.to_str()) {
+            Some("gif") => sortie::SorteFilm::Gif,
+            _ => sortie::SorteFilm::Video,
+        };
+        let mut demande = base.clone();
+        if let Ok(t) = std::fs::metadata(&f).and_then(|m| m.modified()) {
+            demande.maintenant = DateTime::<Local>::from(t);
+        }
+        match sortie::sortir_film(&f, sorte, &demande, true).enregistrement {
+            EtapeFichier::Fait(_) => {
+                sortie::oublier_film(&f);
+                ranges += 1;
+            }
+            _ => restes += 1,
+        }
+    }
+    if ranges + restes > 0 {
+        log::info!("films ranges au lancement: {ranges} (restes {restes})");
     }
 }
 
@@ -1351,7 +1452,7 @@ pub fn lancer_action_vignette(app: &AppHandle, id: u64, copier: bool) {
             let pour_traiter = pour.clone();
             let rendu = pour.run_on_main_thread(move || {
                 if let Some(l) = lien {
-                    super::avec_montree(&pour_traiter, id, |c| c.liens.push(l));
+                    garder_ou_effacer_lien(&pour_traiter, id, l);
                 }
                 super::traiter(&pour_traiter, Evenement::ActionFaite(fin));
             });
@@ -1365,6 +1466,34 @@ pub fn lancer_action_vignette(app: &AppHandle, id: u64, copier: bool) {
             c.copie = None;
             c.enregistrement = None;
         });
+    }
+}
+
+/// Le lien posé par un « Copier » fini : rangé dans la carte ; si sa suppression est déjà
+/// lancée (carte supprimée pendant la copie), effacé aussi (M11).
+fn garder_ou_effacer_lien(app: &AppHandle, id: u64, lien: PathBuf) {
+    let gardee = super::avec_montree(app, id, |c| {
+        let lancee = c.suppression == EtatSuppression::Lancee;
+        if !lancee {
+            c.liens.push(lien.clone());
+        }
+        !lancee
+    });
+    let supprimee = match gardee {
+        Some(g) => !g,
+        None => app
+            .state::<Application>()
+            .retenues
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .contains(&id),
+    };
+    if supprimee {
+        let tardive = sortie::Suppression {
+            liens: vec![lien],
+            ..Default::default()
+        };
+        super::lancer_suppression(app, id, tardive, true);
     }
 }
 
@@ -1426,94 +1555,198 @@ pub fn lire(app: &AppHandle, id: u64) {
     }
 }
 
-/// Attend la fermeture du fichier sur `fermeture`, `delai` au plus : vrai si elle est
-/// faite (ou si personne ne peut plus l'écrire : le fil d'écriture est parti).
-fn attendre_fermeture(fermeture: &Receiver<()>, delai: Duration) -> bool {
-    !matches!(
-        fermeture.recv_timeout(delai),
-        Err(RecvTimeoutError::Timeout)
-    )
+/// Attend la fermeture du fichier sur `fermeture`, `delai` au plus : `None` si elle n'est
+/// pas faite à temps ; `Some(fichier)` sinon, `fichier` le film fermé et complet (`None` :
+/// abandonné, refusé, ou le fil d'écriture est parti).
+fn attendre_fermeture(fermeture: &Receiver<Fini>, delai: Duration) -> Option<Fini> {
+    match fermeture.recv_timeout(delai) {
+        Ok(fini) => Some(fini),
+        Err(RecvTimeoutError::Disconnected) => Some(None),
+        Err(RecvTimeoutError::Timeout) => None,
+    }
 }
 
-/// Arrêt de l'app (F35) : demande la fin au fil `film`, puis attend la fermeture du
-/// fichier sur un canal, `delai` au plus. Vrai si rien n'était en cours ou si le fichier
-/// est fermé ; faux sinon (`arreter` écrit alors `film: fichier non ferme a l'arret`).
+/// Arrêt de l'app (F35) : demande la fin au fil `film`, attend la fermeture du fichier sur
+/// un canal, `delai` au plus, range le film dans le dossier d'enregistrement s'il est sur
+/// le même disque, puis rend le reste (fenêtres, automate). Vrai si rien n'était en cours
+/// ou si le fichier est fermé ; faux sinon (`arreter` écrit alors `film: fichier non ferme
+/// a l'arret`).
 pub fn fermer_pour_arret(app: &AppHandle, delai: Duration) -> bool {
     // Pris sous le verrou, détruit hors du verrou.
     let ancien = super::film_en_cours(app).take();
-    match ancien {
-        Some(e) => fermer_en_arret(app, e, delai),
-        None => true,
-    }
+    let Some(mut e) = ancien else {
+        return true;
+    };
+    let arret = fermer_le_fichier(&mut e, demande_d_arret(app), delai);
+    let ferme = arret.ferme;
+    rendre_apres_arret(app, e, arret);
+    ferme
 }
 
-/// La fin de session Windows (F35, `gel::quand_session_finit`) : le même chemin que
-/// l'arrêt. Appelé dans la procédure de la fenêtre de l'écran figé, peut-être deux fois
-/// (`WM_QUERYENDSESSION` puis `WM_ENDSESSION`) : un verrou pris ailleurs n'est pas attendu.
+/// La fin de session Windows (F35, `gel::quand_session_finit`). Appelé dans la procédure
+/// de la fenêtre de l'écran figé, sur le fil principal, peut-être deux fois
+/// (`WM_QUERYENDSESSION` puis `WM_ENDSESSION`) : ici, seulement ce qui ferme le fichier
+/// (l'ordre au fil, l'attente du canal, le rangement) ; les fenêtres et l'automate sont
+/// rendus à un tour suivant de la boucle (I1 de la relecture du système), comme
+/// `quand_bureau_change`. Le verrou du film, pris ailleurs, est réessayé 100 ms au plus.
 pub fn fin_de_session(app: &AppHandle) {
     let etat = app.state::<Application>();
-    let pris = match etat.film.try_lock() {
-        Ok(mut g) => g.take(),
-        Err(std::sync::TryLockError::Poisoned(p)) => p.into_inner().take(),
-        Err(std::sync::TryLockError::WouldBlock) => {
-            log::warn!("film: fin de session pendant un geste");
-            return;
+    let mut pris = None;
+    for essai in 0..ESSAIS_SESSION {
+        match etat.film.try_lock() {
+            Ok(mut g) => {
+                pris = Some(g.take());
+                break;
+            }
+            Err(std::sync::TryLockError::Poisoned(p)) => {
+                pris = Some(p.into_inner().take());
+                break;
+            }
+            Err(std::sync::TryLockError::WouldBlock) if essai + 1 < ESSAIS_SESSION => {
+                std::thread::sleep(ENTRE_ESSAIS_SESSION);
+            }
+            Err(std::sync::TryLockError::WouldBlock) => {}
         }
+    }
+    let Some(pris) = pris else {
+        log::warn!("film: fin de session pendant un geste");
+        return;
     };
-    let Some(e) = pris else {
+    let Some(mut e) = pris else {
         return;
     };
     log::info!("film: fin de session");
-    if !fermer_en_arret(app, e, film::DELAI_ARRET) {
+    let arret = fermer_le_fichier(&mut e, demande_d_arret(app), film::DELAI_ARRET);
+    if !arret.ferme {
         log::warn!("film: fichier non ferme a l'arret");
+    }
+    let poste = super::plus_tard_nomme(app, "film-session-poste", Duration::ZERO, move |app| {
+        rendre_apres_arret(app, e, arret);
+    });
+    if !poste {
+        log::warn!("film: fin de session non rendue");
     }
 }
 
-/// Une seule chose est faite : fermer le fichier (F35). En marche, `Finir(arret)` (le film
-/// reste dans `<local>/Films`, ni copie, ni vignette, ni annonce) ; avant, l'annulation.
-/// Puis l'attente de la fermeture sur le canal. L'automate revient au Repos (une fin de
-/// session refusée laisse l'app en marche).
-fn fermer_en_arret(app: &AppHandle, mut e: EnCours, delai: Duration) -> bool {
-    let Some(l) = e.lancee.as_mut() else {
-        fermer(app, e);
-        return true;
-    };
+/// Fin de session : essais du verrou du film, et leur écart (100 ms en tout).
+const ESSAIS_SESSION: u32 = 5;
+const ENTRE_ESSAIS_SESSION: Duration = Duration::from_millis(20);
+
+/// La demande d'un film rangé à l'arrêt (choix U4) : le dossier d'enregistrement et le
+/// nom du modèle ; ni copie, ni « Récents ».
+fn demande_d_arret(app: &AppHandle) -> sortie::Demande {
+    let (mut demande, _) = film::demande_film(&super::demande_sortie(app, false));
+    demande.copier = false;
+    demande
+}
+
+/// Ce que l'arrêt a fait du film, pour la suite (`rendre_apres_arret`).
+#[derive(Debug)]
+struct Arret {
+    /// Du début de l'arrêt à la fermeture du fichier (journal).
+    en: Duration,
+    phase: Phase,
+    /// Le film est gardé (fini en marche, ou déjà en Finalisation).
+    gardee: bool,
+    /// `EnregistrementArrete` reste à appliquer.
+    arrete: bool,
+    ferme: bool,
+}
+
+/// L'arrêt, sans Tauri ni automate (F35) : en marche, `Finir(arret)` ; avant, l'annulation ;
+/// puis l'attente de la fermeture sur le canal, et le film fermé rangé dans le dossier
+/// d'enregistrement s'il est sur le même disque (B1, choix U4 ; sinon, au lancement
+/// suivant). Ni copie, ni vignette, ni annonce.
+fn fermer_le_fichier(e: &mut EnCours, demande: sortie::Demande, delai: Duration) -> Arret {
     let a = Instant::now();
-    let phase = l.cours.phase();
-    let images = l.envoyees.load(Ordering::SeqCst);
-    let gardee = if l.finalisation {
-        true
-    } else if !phase.avant() && images > 0 {
-        l.ordre_final = true;
-        l.finalisation = true;
-        let _ = l.envoi.send(Courrier::Ordre(Ordre::Finir(Fin::Arret, a)));
-        super::appliquer(app, Declencheur::EnregistrementArrete);
-        true
-    } else if !phase.avant() {
-        super::appliquer(app, Declencheur::EnregistrementImpossible);
-        log::info!("{}", film::ligne_impossible("source"));
-        false
-    } else {
-        super::appliquer(app, Declencheur::EnregistrementAnnule);
-        log::info!("{}", film::ligne_annule(phase, Annulation::Arret));
-        false
+    let Some(l) = e.lancee.as_mut() else {
+        return Arret {
+            en: Duration::ZERO,
+            phase: Phase::Attente,
+            gardee: false,
+            arrete: false,
+            ferme: true,
+        };
     };
-    let fermeture = l.fermeture.take();
+    let phase = l.cours.phase();
+    let sorte = l.cours.sorte();
+    let images = l.envoyees.load(Ordering::SeqCst);
+    let (gardee, arrete) = if l.finalisation {
+        (true, false)
+    } else if !l.ordre_final {
+        l.ordre_final = true;
+        if !phase.avant() && images > 0 {
+            l.finalisation = true;
+            let _ = l.envoi.send(Courrier::Ordre(Ordre::Finir(Fin::Arret, a)));
+            (true, true)
+        } else {
+            let _ = l.envoi.send(Courrier::Ordre(Ordre::Annuler));
+            (false, false)
+        }
+    } else {
+        (false, false)
+    };
+    let fini = match l.fermeture.take() {
+        Some(f) => attendre_fermeture(&f, delai),
+        None => Some(None),
+    };
+    let en = a.elapsed();
+    if let Some(Some(fichier)) = &fini {
+        match sortie::ranger_film(fichier, sorte.sortie(), &demande) {
+            Ok(_) => {
+                sortie::oublier_film(fichier);
+                log::info!("film arret: fichier range");
+            }
+            Err(e) => log::info!("film arret: fichier a ranger au prochain lancement ({e})"),
+        }
+    }
+    Arret {
+        en,
+        phase,
+        gardee,
+        arrete,
+        ferme: fini.is_some(),
+    }
+}
+
+/// La suite de l'arrêt, sur le fil principal hors de toute procédure de fenêtre : les
+/// fenêtres et Échap rendus (`fermer`), puis l'automate revient au Repos (une fin de
+/// session refusée laisse l'app en marche).
+fn rendre_apres_arret(app: &AppHandle, e: EnCours, arret: Arret) {
+    let avant = e
+        .lancee
+        .as_ref()
+        .map_or(Phase::Attente, |l| l.cours.phase());
+    let lancee = e.lancee.is_some();
     fermer(app, e);
-    let ferme = fermeture.is_none_or(|f| attendre_fermeture(&f, delai));
-    if gardee {
-        if ferme {
-            log::info!("{}", film::ligne_arret_ferme(a.elapsed()));
+    if !lancee {
+        return;
+    }
+    if arret.arrete {
+        super::appliquer(app, Declencheur::EnregistrementArrete);
+    }
+    if arret.gardee {
+        if arret.ferme {
+            log::info!("{}", film::ligne_arret_ferme(arret.en));
             super::appliquer(app, Declencheur::ImagePreteSansVignette);
         } else {
             super::appliquer(app, Declencheur::FinalisationImpossible);
         }
+    } else if !avant.avant() {
+        super::appliquer(app, Declencheur::EnregistrementImpossible);
+        log::info!("{}", film::ligne_impossible("source"));
+    } else {
+        super::appliquer(app, Declencheur::EnregistrementAnnule);
+        log::info!("{}", film::ligne_annule(arret.phase, Annulation::Arret));
     }
-    ferme
 }
 
 // ---------------------------------------------------------------------------------------
 // Les fils du film.
+
+/// Ce que le fil d'écriture dit à l'arrêt (F35) : le fichier fermé et complet, ou rien
+/// (abandonné, refusé, fil parti).
+type Fini = Option<PathBuf>;
 
 /// Ce que le fil `film` reçoit au départ.
 struct Depart {
@@ -1530,7 +1763,7 @@ struct Depart {
     envoi: Sender<Courrier>,
     envoyees: Arc<AtomicU64>,
     /// Prévient `fermer_pour_arret` que le fichier est fermé.
-    fini: Sender<()>,
+    fini: Sender<Fini>,
     dossier_films: PathBuf,
     dossier_glisser: PathBuf,
     proteges: Vec<String>,
@@ -1540,6 +1773,19 @@ struct Depart {
 /// Lance le fil `film`. Une panique dans le fil finit le film (`fil`).
 fn lancer_fil(app: &AppHandle, depart: Depart) -> std::io::Result<()> {
     let numero = depart.numero;
+    // Le filet de la page (F5) dans un petit fil à lui, à l'heure : le fil `film` peut
+    // être pris par le micro, le jeton ou l'ouverture de la source (M6).
+    let borne = depart.relache + film::DELAI_PAGE;
+    let pour_filet = app.clone();
+    let filet = std::thread::Builder::new()
+        .name("film-filet".into())
+        .spawn(move || {
+            std::thread::sleep(borne.saturating_duration_since(Instant::now()));
+            filet_de_la_page(&pour_filet, numero);
+        });
+    if let Err(e) = filet {
+        log::warn!("film: filet de la page impossible ({e})");
+    }
     let pour = app.clone();
     std::thread::Builder::new()
         .name("film".into())
@@ -1660,8 +1906,6 @@ fn filmer(d: Depart, app: AppHandle) {
         ouvrir_micro: Box::new(ouvrir_micro),
         apercu: |p| super::faire_apercu(p, false),
     };
-    let pour_filet = app.clone();
-    let filet: Box<dyn FnOnce() + Send> = Box::new(move || filet_de_la_page(&pour_filet, numero));
     let mut fil = Fil::nouveau(
         Lancement {
             numero,
@@ -1685,13 +1929,14 @@ fn filmer(d: Depart, app: AppHandle) {
         },
         bureau,
         Delais::du_film(d.sorte),
-        Some(filet),
+        // Le filet est dans le fil `film-filet` (`lancer_fil`).
+        None,
     );
     fil.tenir(jeton);
     boucler(fil, d.reception);
 }
 
-/// Le filet de F5, depuis le fil `film` : sans pilule posée, l'écran figé et la sélection
+/// Le filet de F5, depuis le fil `film-filet` : sans pilule posée, l'écran figé et la sélection
 /// sont cachés tout de suite (même si la boucle est prise), puis le film finit sur le fil
 /// principal (`PageEnRetard`).
 fn filet_de_la_page(app: &AppHandle, numero: u64) {
@@ -1890,6 +2135,8 @@ struct Fil<P: Prise> {
     gel_a: Option<Instant>,
     micro: Option<Box<dyn Ouvert>>,
     micro_voulu: bool,
+    /// Ouvertures du micro demandées, pas encore rendues : seule la dernière compte (M3).
+    micros_en_cours: u32,
     prises: Mediane,
     file_vue: usize,
 }
@@ -1939,6 +2186,7 @@ impl<P: Prise> Fil<P> {
             gel_a: None,
             micro: None,
             micro_voulu: false,
+            micros_en_cours: 0,
             prises: Mediane::default(),
             file_vue: 0,
             l,
@@ -2064,7 +2312,13 @@ impl<P: Prise> Fil<P> {
                 let echeance = fin + self.delais.pret;
                 if a >= echeance && !self.pret_dit && !self.echu_dit {
                     self.echu_dit = true;
-                    self.dire(Vu::PretEchu);
+                    // Le fichier prêt mais aucune image : la source ne donne rien (I2).
+                    if self.pret.is_some() && !self.a_image {
+                        log::info!("film source sans image");
+                        self.fin_vue(Vu::SourceFinie, a);
+                    } else {
+                        self.dire(Vu::PretEchu);
+                    }
                 }
                 for borne in [fin, echeance] {
                     if borne > a {
@@ -2104,7 +2358,9 @@ impl<P: Prise> Fil<P> {
             self.prochains_ecrans = Some(a + self.delais.ecrans);
             let ecrans = (self.bureau.ecrans)();
             // Une liste vide est une lecture ratée, pas un changement.
-            if !ecrans.is_empty() && ecrans != self.l.ecrans {
+            // Rectangles et échelles seulement, comme la défilante : une barre ancrée qui
+            // change la zone utile ne finit pas le film (M7).
+            if !ecrans.is_empty() && defilante::ecrans_changes(&self.l.ecrans, &ecrans) {
                 self.fin_vue(Vu::Ecrans, a);
                 return;
             }
@@ -2137,6 +2393,21 @@ impl<P: Prise> Fil<P> {
         };
         if let Ok((vivant::Image::Nouvelle, _)) = s.prendre(&mut self.brute) {
             self.a_image = self.taille_juste();
+            self.dire_pret();
+        }
+    }
+
+    /// `pret` (F9, F11) : le fichier et le codeur prêts **et** une première image prise
+    /// (I2) ; sans image, `DELAI_PRET` refuse le départ plutôt qu'un film vide.
+    fn dire_pret(&mut self) {
+        if self.pret.is_some()
+            && self.a_image
+            && self.source.is_some()
+            && !self.pret_dit
+            && !self.echec_dit
+        {
+            self.pret_dit = true;
+            self.dire(Vu::Pret);
         }
     }
 
@@ -2272,7 +2543,9 @@ impl<P: Prise> Fil<P> {
     /// `SOURCE_PERDUE_MAX`, `BitBlt` est essayé ; s'il ne rend rien non plus pendant
     /// `SOURCE_REPLI_MAX`, fin `source`.
     fn perdue(&mut self, a: Instant) {
-        if !self.a_image {
+        // Avant une première image, l'écran figé peut encore être montré ; en marche, une
+        // perte compte toujours (I2).
+        if !self.a_image && !self.en_marche() {
             return;
         }
         let depuis = *self.perdue.get_or_insert_with(|| {
@@ -2315,10 +2588,7 @@ impl<P: Prise> Fil<P> {
             Courrier::Pret { fichier, a: t } => {
                 self.pret = Some(t);
                 self.fichier = Some(fichier);
-                if self.source.is_some() && !self.pret_dit && !self.echec_dit {
-                    self.pret_dit = true;
-                    self.dire(Vu::Pret);
-                }
+                self.dire_pret();
             }
             Courrier::Echec(cause) => match self.etape {
                 Moment::Fermeture { .. } => self.fermer(Err(cause), a),
@@ -2337,19 +2607,28 @@ impl<P: Prise> Fil<P> {
                     self.fermer(issue, a);
                 }
             }
-            Courrier::Micro(Ok(m)) => {
-                if self.micro_voulu
-                    && !matches!(self.etape, Moment::Fermeture { .. } | Moment::Finie)
-                {
-                    self.micro = Some(m);
-                    self.liens.ouvert.store(true, Ordering::SeqCst);
-                    log::info!("{}", film::ligne_micro("ouvert"));
-                }
-            }
-            Courrier::Micro(Err(_)) => {
-                if std::mem::take(&mut self.micro_voulu) {
-                    log::info!("{}", film::ligne_micro("indisponible"));
-                    self.dire(Vu::MicroPerdu);
+            Courrier::Micro(r) => {
+                self.micros_en_cours = self.micros_en_cours.saturating_sub(1);
+                // Une ouverture dépassée par une autre demandée après : jetée.
+                let derniere = self.micros_en_cours == 0;
+                match r {
+                    Ok(m) => {
+                        if derniere
+                            && self.micro_voulu
+                            && !matches!(self.etape, Moment::Fermeture { .. } | Moment::Finie)
+                        {
+                            self.micro = Some(m);
+                            self.liens.ouvert.store(true, Ordering::SeqCst);
+                            log::info!("{}", film::ligne_micro("ouvert"));
+                        }
+                    }
+                    Err(_) => {
+                        if derniere && self.micro_voulu {
+                            self.couper_micro();
+                            log::info!("{}", film::ligne_micro("indisponible"));
+                            self.dire(Vu::MicroPerdu);
+                        }
+                    }
                 }
             }
         }
@@ -2388,6 +2667,7 @@ impl<P: Prise> Fil<P> {
             Ordre::Micro(true) => {
                 if self.micro.is_none() && !self.micro_voulu {
                     self.micro_voulu = true;
+                    self.micros_en_cours += 1;
                     let calage = Arc::clone(&self.liens.calage);
                     (self.bureau.ouvrir_micro)(calage, self.l.moi.clone());
                 }
@@ -2418,8 +2698,23 @@ impl<P: Prise> Fil<P> {
 
     /// La fin gardée (F27 à F29) : la durée du film arrêtée là (ou au gel), le fichier
     /// fermé par le fil d'écriture, l'aperçu fait ici pendant ce temps.
+    ///
+    /// La Fermeture commence avant de lâcher le micro et la source, qui peuvent attendre un
+    /// pilote (I1) : l'échéance court déjà. Un `Finir` hors marche (le fil principal ne
+    /// l'envoie qu'après une image) abandonne le fichier et rend `Ferme(Err)`.
     fn finir(&mut self, fin: Fin, t: Instant) {
         if !self.en_marche() {
+            if !matches!(self.etape, Moment::Fermeture { .. } | Moment::Finie) {
+                let _ = self.liens.ecriture.send(Envoi::Abandonner);
+                self.couper_micro();
+                self.rendre_source();
+                self.etape = Moment::Finie;
+                let numero = self.l.numero;
+                self.poster(Signal::Ferme {
+                    numero,
+                    issue: Err("fichier"),
+                });
+            }
             return;
         }
         let jusqu_a = self.gel_a.map_or(t, |g| g.min(t));
@@ -2431,8 +2726,6 @@ impl<P: Prise> Fil<P> {
         let images = self.l.envoyees.load(Ordering::SeqCst);
         log::info!("{}", film::ligne_fin(fin, duree, images, self.sautees));
         let _ = self.liens.ecriture.send(Envoi::Finir { duree });
-        self.couper_micro();
-        self.rendre_source();
         let derniere = Arc::new(std::mem::replace(&mut self.brute, vide()));
         let apercu = (self.bureau.apercu)(&derniere);
         self.etape = Moment::Fermeture {
@@ -2442,6 +2735,8 @@ impl<P: Prise> Fil<P> {
             derniere,
             apercu,
         };
+        self.couper_micro();
+        self.rendre_source();
     }
 
     /// Le fil d'écriture a fermé le fichier (ou n'a pas pu).
@@ -2551,7 +2846,7 @@ struct Ecriture {
     envois: Receiver<Envoi>,
     retour: Sender<Pixels>,
     en_file: Arc<AtomicUsize>,
-    fini: Sender<()>,
+    fini: Sender<Fini>,
 }
 
 /// `ecrire` ; une panique y devient `Echec("fil")` (F37), et la fermeture est dite (F35 :
@@ -2561,7 +2856,7 @@ fn ecrire_sans_panique(ecriture: Ecriture, fabrique: Fabrique) {
     let fini = ecriture.fini.clone();
     if !sans_panique(move || ecrire(ecriture, fabrique)) {
         let _ = rapport.send(Courrier::Echec("fil"));
-        let _ = fini.send(());
+        let _ = fini.send(None);
     }
 }
 
@@ -2586,13 +2881,13 @@ fn ecrire(e: Ecriture, fabrique: Fabrique) {
         Ok(c) => c,
         Err(_) => {
             let _ = rapport.send(Courrier::Echec("disque"));
-            let _ = fini.send(());
+            let _ = fini.send(None);
             return;
         }
     };
     if systeme::installation::espace_libre(&dossier_films).is_some_and(|p| p < film::PLACE_MIN) {
         let _ = rapport.send(Courrier::Echec("disque"));
-        let _ = fini.send(());
+        let _ = fini.send(None);
         return;
     }
     let mut ecrivain = match fabrique(&chemin) {
@@ -2600,7 +2895,7 @@ fn ecrire(e: Ecriture, fabrique: Fabrique) {
         Err(cause) => {
             sortie::effacer_film(&chemin);
             let _ = rapport.send(Courrier::Echec(cause));
-            let _ = fini.send(());
+            let _ = fini.send(None);
             return;
         }
     };
@@ -2610,6 +2905,8 @@ fn ecrire(e: Ecriture, fabrique: Fabrique) {
     });
     let mut ecriture = Mediane::default();
     let mut refuse = false;
+    // Le temps de la dernière image reçue (M8 : un fil `film` arrêté net finit le fichier).
+    let mut dernier: Option<Duration> = None;
     let noter = |r: Result<Duration, String>, ecriture: &mut Mediane, refuse: &mut bool| match r {
         Ok(d) => ecriture.ajouter(d),
         Err(e) => {
@@ -2621,6 +2918,7 @@ fn ecrire(e: Ecriture, fabrique: Fabrique) {
     loop {
         match envois.recv() {
             Ok(Envoi::Image { pixels, instant }) => {
+                dernier = Some(instant);
                 if !refuse {
                     let r = ecrivain.image(&pixels, instant);
                     noter(r, &mut ecriture, &mut refuse);
@@ -2629,6 +2927,7 @@ fn ecrire(e: Ecriture, fabrique: Fabrique) {
                 let _ = retour.send(pixels);
             }
             Ok(Envoi::Meme { instant }) => {
+                dernier = Some(instant);
                 if !refuse {
                     let r = ecrivain.meme(instant);
                     noter(r, &mut ecriture, &mut refuse);
@@ -2646,14 +2945,38 @@ fn ecrire(e: Ecriture, fabrique: Fabrique) {
                         Err("fichier")
                     }
                 };
-                let _ = fini.send(());
+                // Fermé et complet : noté à ranger (B1), jusqu'à ce que la sortie le range.
+                let ferme = issue.is_ok().then(|| {
+                    sortie::noter_film_ferme(&chemin);
+                    chemin.clone()
+                });
+                let _ = fini.send(ferme);
                 let _ = rapport.send(Courrier::Ferme(issue));
+                return;
+            }
+            // Le fil `film` arrêté net (panique) après des images : le fichier est fini à
+            // la dernière, gardé et noté à ranger (M8) ; sinon, comme un abandon.
+            Err(_) if dernier.is_some() && !refuse => {
+                let duree = dernier.unwrap_or_default() + sorte.pas();
+                let ferme = match ecrivain.finir(duree) {
+                    Ok(()) => {
+                        log::warn!("film: fil arrete, fichier garde");
+                        sortie::noter_film_ferme(&chemin);
+                        Some(chemin.clone())
+                    }
+                    Err(e) => {
+                        log::warn!("film: fermeture refusee ({e})");
+                        sortie::effacer_film(&chemin);
+                        None
+                    }
+                };
+                let _ = fini.send(ferme);
                 return;
             }
             Ok(Envoi::Abandonner) | Err(_) => {
                 ecrivain.abandonner();
                 sortie::effacer_film(&chemin);
-                let _ = fini.send(());
+                let _ = fini.send(None);
                 return;
             }
         }
