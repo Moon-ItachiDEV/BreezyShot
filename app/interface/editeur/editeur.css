@@ -370,7 +370,8 @@ input {
   box-shadow: 0 0 0 var(--editeur-trait-largeur)
     color-mix(in srgb, var(--text) var(--editeur-nuance-bord), transparent);
 }
-/* Encre très foncée ou très pâle, proche du fond de la barre : liseré plus marqué. */
+/* Encre très foncée ou très pâle : le liseré des instruments, marqué là où elle se confond
+   avec le fond de la barre (pâle en clair, foncée en sombre). */
 .ip[data-ton="f"]::after {
   box-shadow: 0 0 0 var(--editeur-trait-largeur) var(--editeur-inst-trait-fonce);
 }
@@ -1054,13 +1055,13 @@ input {
 }
 /* Anneau de focus : `all: unset` des boutons l'efface ; celui de toute la page, remis
    (« Copier » du haut garde son écart, .ok:focus-visible plus haut). Dans la barre
-   d'annotation, qui défile et coupe ce qui dépasse : en dedans ; l'instrument dessiné, en
-   ombre intérieure (son masque efface le bas). */
+   d'annotation, qui défile et coupe ce qui dépasse : en dedans ; l'instrument dessiné et
+   l'outil à pictogramme, en ombre intérieure (le masque de l'un efface le bas ; la nuance de
+   l'autre passe par-dessus l'anneau au lieu d'être barrée par lui). */
 .bt:focus-visible,
 .rb:focus-visible,
 .ok:focus-visible,
 .pb:focus-visible,
-.ip:focus-visible,
 .sz:focus-visible,
 .sw:focus-visible {
   outline: var(--editeur-focus) solid var(--accent);
@@ -1070,14 +1071,14 @@ input {
   outline-offset: var(--editeur-focus);
 }
 .pb:focus-visible,
-.ip:focus-visible,
 .sz:focus-visible {
   outline-offset: calc(0px - var(--editeur-focus));
 }
 .sw:focus-visible {
   outline-offset: var(--editeur-nuance-anneau-ecart);
 }
-.ib:focus-visible {
+.ib:focus-visible,
+.ip:focus-visible {
   outline: none;
   box-shadow: inset 0 0 0 var(--editeur-focus) var(--accent);
 }

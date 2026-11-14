@@ -1333,11 +1333,14 @@ remplace la v2 depuis le 12/11/2026)
   Stylo, Surligneur, Gomme, défait la sélection ; reprendre l'outil de l'objet choisi la
   garde. Un texte en saisie déplie l'outil Texte, quel que soit l'outil
   en main. Le focus ne se perd jamais dans un pli qui se replie : il revient au bouton de
-  l'outil. Fenêtre étroite (sous 1096 px) : seuls les outils défilent (molette comprise,
-  même sur Annuler ou Plus), estompés du côté caché ; Annuler, Rétablir et Plus restent en
-  entier, le fond et l'ombre de la barre aussi ; l'outil pris s'y montre en entier, ou son
-  début s'il est plus large que la place. Les préférences d'avant (variante « Courbe »,
-  emplacement) sont ignorées.
+  l'outil ; ni quand l'intensité du Flou part (Bloc noir rendu à la zone par Rétablir) : il
+  va à la variante prise. L'anneau de focus d'un outil, comme celui d'un instrument, est
+  une ombre intérieure, sous la nuance de sa couleur. Fenêtre étroite (sous 1096 px) :
+  seuls les outils défilent (molette comprise, même sur Annuler ou Plus), estompés du côté
+  caché ; Annuler, Rétablir et Plus restent en entier, le fond et l'ombre de la barre
+  aussi ; l'outil pris s'y montre en entier, ou son début s'il est plus large que la place,
+  même quand son pli s'élargit (Bloc noir puis Pixeliser). Les préférences d'avant
+  (variante « Courbe », emplacement) sont ignorées.
 - Gestes : un appui sur un objet le sélectionne et le déplace (sauf Stylo, Surligneur,
   Gomme) ; emmené puis ramené à sa place, aucun pas. Une flèche tracée reste choisie : sa
   poignée du milieu (pleine, à la couleur d'accent) la courbe, le trait passant par la
@@ -1836,18 +1839,20 @@ non envoye: <e>`, `surlignage sans fil (<e>): fin montree tout de suite`.
   autre contenu (G6),
   `changerVariante` (V) ; `ECHECS : 0` attendu. Étape du job `pages`.
 - `essais/pages/editeur.cjs` (0.4) : la page de l'éditeur dans Chromium, cœur simulé et
-  vrai modèle, 250 points : noms et rôles accessibles (contrat de l'essai 12), chaque
+  vrai modèle, 252 points : noms et rôles accessibles (contrat de l'essai 12), chaque
   outil, flèche choisie après le tracé et courbée à sa poignée, Gomme au pixel (ce qui
   est dessus décide, pile d'une encre sur un numéro sur une flèche, clic qui tremble),
   Projecteur, recadrage par chaque coin, sélection, la barre C (l'outil déplié, ce que
   chaque outil déplie, l'objet choisi qui déplie son outil, variante changée sur l'objet,
   instruments à la couleur de l'encre ; barre plus claire : aucun outil ne répète une de
-  ses variantes, choix en pastille claire, trait du pli, intensité en trois points, marge
-  du dernier groupe, nuance bordée des outils repliés, Bloc noir noir en clair comme en
-  sombre), couleurs, menu « Fermer » et ses issues,
+  ses variantes, filtre de la tache floue, choix en pastille claire en clair comme en
+  sombre, trait du pli, intensité en trois points, marge du dernier groupe, nuance bordée
+  des outils repliés, Bloc noir noir et bordé dans les deux thèmes, focus de l'intensité
+  qui part rendu à la variante), couleurs, menu « Fermer » et ses issues,
   « Copier » qui ferme, vignette de prise, règle de `fermer_demande`, un seul export à la
   fois, clair, sombre, largeur d'ouverture (chaque outil déplié tient), fenêtre étroite
-  (seuls les outils défilent, Annuler, Rétablir et Plus restent, l'outil pris se montre),
+  (seuls les outils défilent, Annuler, Rétablir et Plus restent, l'outil pris se montre,
+  même quand son pli s'élargit),
   texte en saisie qui déplie son outil, focus gardé quand un pli se replie, glissière
   aller-retour sans pas, aucune erreur ni violation de CSP. Étape du job `pages`.
 - **Tests de la 0.5** (`cargo test --locked` sous Linux : 641 tests de la bibliothèque

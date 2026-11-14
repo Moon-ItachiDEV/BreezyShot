@@ -1490,7 +1490,7 @@ const CHARGE = {
   {
     const p = await page();
     // Aucun outil ne répète le dessin d'une de ses variantes (la 0.5.4 montrait cinq grilles
-    // dans le pli du Flou) ; chaque pictogramme visé existe.
+    // dans le pli du Flou) ; chaque pictogramme visé existe, le filtre de la tache floue aussi.
     const dessins = await p.evaluate(() => {
       const ref = (e) => (e && e.querySelector('use') ? e.querySelector('use').getAttribute('href') : '');
       const r = {};
@@ -1502,22 +1502,28 @@ const CHARGE = {
     });
     const repetes = Object.entries(dessins).filter(([, [o, vs]]) => o && vs.includes(o));
     const manquants = await p.evaluate(() =>
-      [...new Set([...document.querySelectorAll('#palette use')].map((u) => u.getAttribute('href')))].filter(
-        (h) => !document.querySelector(h),
-      ),
+      [...new Set([...document.querySelectorAll('#palette use')].map((u) => u.getAttribute('href')))]
+        .concat([...document.querySelectorAll('svg.defs [filter]')].map((e) => e.getAttribute('filter').slice(4, -1)))
+        .filter((h) => !document.querySelector(h)),
+    );
+    const flouDoux = await p.evaluate(
+      () =>
+        document.querySelector('#i-doux [filter]')?.getAttribute('filter') === 'url(#i-flou-doux)' &&
+        !!document.querySelector('#i-flou-doux feGaussianBlur'),
     );
     verifier(
       repetes.length === 0 &&
         manquants.length === 0 &&
+        flouDoux &&
         JSON.stringify(dessins.flou) === '["#i-goutte",["#i-mosaique","#i-doux","#i-box"]]' &&
         JSON.stringify(dessins.projecteur) === '["#i-lampe",["#i-spot","#i-spotE"]]',
       '9 quater aucun outil ne répète une de ses variantes ; Flou : goutte, mosaïque, tache floue, bande ; Projecteur : lampe',
-      JSON.stringify({ dessins, manquants }),
+      JSON.stringify({ dessins, manquants, flouDoux }),
     );
     // Le choix d'un groupe : une pastille claire en relief (jeton editeur-choix-fond, ombre),
-    // le signe à la couleur du texte ; plus de carré plein. Un trait fin sépare les variantes
-    // de l'intensité, en trois points comme les épaisseurs ; le dernier groupe visible garde
-    // une marge au bord du pli.
+    // le signe à la couleur du texte ; plus de carré plein. Un trait fin (jetons
+    // editeur-trait-largeur, editeur-pli-separateur) sépare les variantes de l'intensité, en
+    // trois points comme les épaisseurs ; le dernier groupe visible garde une marge au bord.
     await outil(p, 'Flou');
     await calme(p);
     const lire = () =>
@@ -1526,21 +1532,32 @@ const CHARGE = {
         sonde.style.setProperty('background', 'var(--editeur-choix-fond)');
         sonde.style.setProperty('color', 'var(--text)');
         sonde.style.setProperty('padding-right', 'var(--editeur-pli-marge)');
-        document.body.appendChild(sonde);
+        // Le trait à part : la marge compterait dans sa largeur.
+        const sondeTrait = document.createElement('i');
+        sondeTrait.style.setProperty('display', 'block');
+        sondeTrait.style.setProperty('width', 'var(--editeur-trait-largeur)');
+        sondeTrait.style.setProperty('height', 'var(--editeur-pli-separateur)');
+        document.body.append(sonde, sondeTrait);
         const s = getComputedStyle(sonde);
-        const attendu = [s.backgroundColor, s.color, s.paddingRight];
+        const st = getComputedStyle(sondeTrait);
+        const attendu = [s.backgroundColor, s.color, s.paddingRight, st.width, st.height];
         sonde.remove();
+        sondeTrait.remove();
         const d = document.querySelector('#outils .pli[data-on]');
         const vs = d.querySelector('[data-variante]').closest('.grp');
         const g = d.querySelector('[data-cle="intensite"]');
         const sep = d.querySelector('.sep');
+        const ts = sep && getComputedStyle(sep);
         return {
           attendu,
           choix: [...d.querySelectorAll('.sz[aria-pressed="true"]')].map((b) => {
             const c = getComputedStyle(b);
             return [b.getAttribute('aria-label'), c.backgroundColor, c.boxShadow !== 'none', c.color];
           }),
-          trait: !!sep && !sep.hidden && sep.getBoundingClientRect().width > 0,
+          trait:
+            sep && !sep.hidden && sep.getClientRects().length
+              ? [ts.width, ts.height, ts.backgroundColor !== 'rgba(0, 0, 0, 0)']
+              : null,
           signes: g.hidden ? [] : [...g.querySelectorAll('[data-taille] b')].map((b) => getComputedStyle(b).width),
           marges: [vs, g].map((e) => (e.hidden ? '' : getComputedStyle(e).paddingRight)),
         };
@@ -1552,8 +1569,9 @@ const CHARGE = {
     await reglage(p, 'Bloc noir');
     await calme(p);
     const blo = await lire();
-    const [fond, texte, marge] = pix.attendu;
+    const [fond, texte, marge, traitL, traitH] = pix.attendu;
     const points = JSON.stringify(['4px', '7px', '11px']);
+    const trait = JSON.stringify([traitL, traitH, true]);
     verifier(
       JSON.stringify(pix.choix) ===
         JSON.stringify([
@@ -1562,12 +1580,13 @@ const CHARGE = {
         ]) &&
         fond !== texte &&
         marge === '4px' &&
-        pix.trait &&
+        traitH === '18px' &&
+        JSON.stringify(pix.trait) === trait &&
         JSON.stringify(pix.signes) === points &&
         JSON.stringify(pix.marges) === JSON.stringify(['0px', marge]) &&
-        flo.trait &&
+        JSON.stringify(flo.trait) === trait &&
         JSON.stringify(flo.signes) === points &&
-        !blo.trait &&
+        blo.trait === null &&
         JSON.stringify(blo.signes) === '[]' &&
         JSON.stringify(blo.marges) === JSON.stringify([marge, '']),
       '9 quater choix en pastille claire ; trait entre variantes et intensité en trois points ; cachés pour Bloc noir ; marge du dernier groupe',
@@ -1578,31 +1597,81 @@ const CHARGE = {
     const nuances = await p.evaluate(() =>
       ['texte', 'projecteur'].map((t) => {
         const a = getComputedStyle(document.querySelector(`#outils [data-outil="${t}"]`), '::after');
-        return [a.width, a.height, a.borderTopLeftRadius, a.backgroundColor, a.boxShadow !== 'none'];
+        return [a.width, a.height, a.bottom, a.borderTopLeftRadius, a.backgroundColor, a.boxShadow !== 'none'];
       }),
     );
     verifier(
       JSON.stringify(nuances) ===
         JSON.stringify([
-          ['8px', '8px', '2px', 'rgb(229, 72, 77)', true],
-          ['8px', '8px', '2px', 'rgba(0, 0, 0, 0)', false],
+          ['8px', '8px', '1px', '2px', 'rgb(229, 72, 77)', true],
+          ['8px', '8px', '1px', '2px', 'rgba(0, 0, 0, 0)', false],
         ]),
       '9 quater outil replié : une nuance bordée de sa couleur, rien sans couleur',
       JSON.stringify(nuances),
     );
+    // L'intensité qui part gardait le focus (Rétablir rend Bloc noir à la zone choisie) : il
+    // va à la variante prise, pas à la page.
+    await reglage(p, 'Pixeliser');
+    await glisser(p, [40, 40], [200, 110]);
+    await outil(p, 'Flèche');
+    await cliquer(p, 120, 75);
+    await reglage(p, 'Bloc noir');
+    await p.keyboard.press('Control+z');
+    await uneImage(p);
+    await pli(p).getByRole('button', { name: 'Moyen', exact: true }).focus();
+    const zone = () =>
+      p.evaluate(() => {
+        const o = window.__ed.h.doc.objets.find((x) => x.type === 'masque') || {};
+        return [o.sorte, JSON.stringify(window.__ed.selection) === JSON.stringify([o.id])];
+      });
+    const avant = [await p.evaluate(() => document.activeElement.getAttribute('aria-label')), ...(await zone())];
+    await p.keyboard.press('Control+y');
+    await uneImage(p);
+    const apres = [
+      ...(await p.evaluate(() => [
+        document.activeElement.getAttribute('aria-label'),
+        document.activeElement.getAttribute('aria-pressed'),
+      ])),
+      ...(await zone()),
+    ];
+    verifier(
+      JSON.stringify(avant) === '["Moyen","pixeliser",true]' &&
+        JSON.stringify(apres) === '["Bloc noir","true","bloc",true]',
+      '9 quater Rétablir rend Bloc noir à la zone : le focus de l\'intensité va à Bloc noir',
+      JSON.stringify([avant, apres]),
+    );
     await fin(p, '9 quater');
-    // Bloc noir : une bande toujours noire, dans les deux thèmes (le dessin cloné par <use>
-    // prend la règle de son original).
-    const noirs = [];
+    // Dans les deux thèmes : la pastille du choix à ses valeurs, et Bloc noir une bande noire
+    // bordée (le dessin cloné par <use> prend la règle de son original).
+    const themes = [];
     for (const theme of ['light', 'dark']) {
       const q = await page({ theme });
-      noirs.push(await q.evaluate(() => getComputedStyle(document.querySelector('#i-box .bloc-noir')).fill));
+      await outil(q, 'Flou');
+      await calme(q);
+      themes.push(
+        await q.evaluate(() => {
+          const sonde = document.createElement('i');
+          sonde.style.setProperty('background', 'var(--editeur-choix-fond)');
+          document.body.appendChild(sonde);
+          const fond = getComputedStyle(sonde).backgroundColor;
+          sonde.remove();
+          const choix = [...document.querySelectorAll('#outils .pli[data-on] .sz[aria-pressed="true"]')].map((b) => {
+            const c = getComputedStyle(b);
+            return c.backgroundColor === fond && c.boxShadow !== 'none';
+          });
+          const n = getComputedStyle(document.querySelector('#i-box .bloc-noir'));
+          return [fond, choix, [n.fill, n.strokeOpacity, n.strokeWidth]];
+        }),
+      );
       await fin(q, `9 quater ${theme}`);
     }
     verifier(
-      JSON.stringify(noirs) === '["rgb(20, 21, 24)","rgb(11, 12, 14)"]',
-      '9 quater Bloc noir : une bande noire en clair comme en sombre',
-      JSON.stringify(noirs),
+      themes[0][0] !== themes[1][0] &&
+        themes.every(([, choix]) => choix.length === 2 && choix.every(Boolean)) &&
+        JSON.stringify(themes.map(([, , n]) => n)) ===
+          '[["rgb(20, 21, 24)","0.55","1px"],["rgb(11, 12, 14)","0.55","1px"]]',
+      '9 quater en clair et en sombre : pastille du choix à ses valeurs ; Bloc noir, une bande noire bordée',
+      JSON.stringify(themes),
     );
   }
 
@@ -1648,7 +1717,7 @@ const CHARGE = {
     for (const t of ['texte', 'numero', 'gomme', 'flou']) autres[t] = (await outilVu(p, t)).ink;
     verifier(
       JSON.stringify(autres) === '{"texte":"#E5484D","numero":"#E5484D","gomme":"","flou":""}',
-      '10 les outils repliés gardent un trait de leur couleur (aucun sans couleur)',
+      '10 les outils repliés gardent une nuance de leur couleur (aucun sans couleur)',
       JSON.stringify(autres),
     );
     await glisser(p, [20, 20], [120, 40]);
@@ -2373,6 +2442,25 @@ const CHARGE = {
         (await p.evaluate(() => __ed.prefs.variantes.flou)) === 'bloc',
       '17 Flou pris : son pli se montre en entier parmi les outils ; Bloc noir choisi',
       JSON.stringify(vu),
+    );
+    // Bloc noir puis Pixeliser : le pli s'élargit (l'intensité et son trait reviennent) ; il
+    // se montre encore en entier et l'estompe suit le défilement.
+    await reglage(p, 'Pixeliser');
+    await calme();
+    const ve = await vuDans('flou');
+    const estompe = await p.evaluate(() => {
+      const o = document.querySelector('#outils');
+      const g = o.scrollLeft > 2;
+      const d = o.scrollLeft + o.clientWidth < o.scrollWidth - 2;
+      return [o.dataset.suite || '', g && d ? 'deux' : g ? 'debut' : d ? 'fin' : ''];
+    });
+    verifier(
+      ve.pli[0] >= ve.zone[0] &&
+        ve.pli[1] <= ve.zone[1] &&
+        estompe[0] === estompe[1] &&
+        (await p.evaluate(() => __ed.prefs.variantes.flou)) === 'pixeliser',
+      '17 Bloc noir puis Pixeliser : le pli élargi se montre encore en entier, l\'estompe suit',
+      JSON.stringify([ve, estompe]),
     );
     // Numéro (pli plus large que la zone à 640 px) : son début, le bouton de l'outil compris.
     await outil(p, 'Numéro');
@@ -3231,7 +3319,7 @@ const CHARGE = {
       await p.evaluate(() => __exports.at(-1).numero),
     );
     const anneaux = [];
-    for (const sel of ['#barre-haut [data-act="copier"]', '#outils .tl.ip', '#outils .sz']) {
+    for (const sel of ['#barre-haut [data-act="copier"]', '#outils .sz']) {
       await p.keyboard.press('Shift');
       await p.$eval(sel, (b) => b.focus());
       anneaux.push(
@@ -3241,19 +3329,24 @@ const CHARGE = {
         }),
       );
     }
-    // L'instrument dessiné : un anneau intérieur (son masque coupe ce qui dépasse).
-    await p.keyboard.press('Shift');
-    await p.$eval('#outils .tl.ib', (b) => b.focus());
-    const anneauInstrument = await p.$eval('#outils .tl.ib', (b) => {
-      const s = getComputedStyle(b);
-      return [b.matches(':focus-visible'), s.outlineStyle, /inset/.test(s.boxShadow)];
-    });
+    // L'instrument dessiné et l'outil à pictogramme : un anneau intérieur (le masque de l'un
+    // coupe ce qui dépasse ; la nuance de l'autre passe par-dessus l'anneau).
+    const anneauxDedans = [];
+    for (const sel of ['#outils .tl.ib', '#outils .tl.ip']) {
+      await p.keyboard.press('Shift');
+      await p.$eval(sel, (b) => b.focus());
+      anneauxDedans.push(
+        await p.$eval(sel, (b) => {
+          const s = getComputedStyle(b);
+          return [b.matches(':focus-visible'), s.outlineStyle, /inset/.test(s.boxShadow)];
+        }),
+      );
+    }
     verifier(
-      JSON.stringify(anneaux) ===
-        '[[true,"solid","2px"],[true,"solid","2px"],[true,"solid","2px"]]' &&
-        JSON.stringify(anneauInstrument) === '[true,"none",true]',
-      '21 anneau de focus sur « Copier » du haut, un outil, un réglage et un instrument',
-      JSON.stringify([anneaux, anneauInstrument]),
+      JSON.stringify(anneaux) === '[[true,"solid","2px"],[true,"solid","2px"]]' &&
+        JSON.stringify(anneauxDedans) === '[[true,"none",true],[true,"none",true]]',
+      '21 anneau de focus sur « Copier » du haut, un réglage, un instrument et un outil',
+      JSON.stringify([anneaux, anneauxDedans]),
     );
     await fin(p, '21 Alt, Espace, anneaux');
   }

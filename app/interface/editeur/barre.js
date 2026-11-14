@@ -609,9 +609,19 @@ export function installerBarre(ed) {
     if (r.taille) {
       const g = $("[data-cle]", dedans);
       // Flou : l'intensité ne vaut que pour Pixeliser et Flouter (son trait part avec elle).
-      g.hidden = t === "flou" && varianteDe(t) === "bloc";
-      const sep = $(".sep", dedans);
-      if (sep) sep.hidden = g.hidden;
+      const cache = t === "flou" && varianteDe(t) === "bloc";
+      if (cache !== g.hidden) {
+        // L'intensité qui part gardait le focus (Rétablir, Annuler) : il va à la variante
+        // prise, pas à la page.
+        const focus = cache && g.contains(document.activeElement);
+        g.hidden = cache;
+        const sep = $(".sep", dedans);
+        if (sep) sep.hidden = cache;
+        if (focus) $('[data-variante][aria-pressed="true"]', dedans)?.focus({ preventScroll: true });
+        // Le pli change de largeur : dans une barre qui défile, il se montre encore en entier.
+        const pli = dedans.closest(".pli");
+        if (pli.hasAttribute("data-on")) montrerPli(pli);
+      }
       const v = valeur(r.taille, t);
       for (const b of $$("[data-taille]", g)) {
         const i = Number(b.dataset.taille);
