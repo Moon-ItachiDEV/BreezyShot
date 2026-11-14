@@ -1601,7 +1601,13 @@ mod tests {
             for (tour, (echauffement, nombre)) in
                 [(300usize, 3000usize), (50, 1000)].into_iter().enumerate()
             {
-                let (attente, _) = attendre_carres_source(&mut source, &mut px).unwrap();
+                // La première image a une borne (m12) : 2 s, comme `attendre_carres_source`.
+                let (attente, _) = attendre_carres_source(&mut source, &mut px)
+                    .unwrap_or_else(|e| panic!("premiere image : {e}"));
+                assert!(
+                    attente < Duration::from_secs(2),
+                    "premiere image apres {attente:?}"
+                );
                 prendre_en_boucle(&mut source, &essai, &mut px, echauffement);
                 let pertes_avant = source::pertes_pour_essai(&source.interne).len();
                 let (poignees_avant, gdi_avant) = (poignees(), objets_gdi());
@@ -1642,6 +1648,17 @@ mod tests {
                     "series mal comptees"
                 );
                 assert!(pertes.len() <= 3, "trop de pertes : {pertes:?}");
+                // Seul l'accès perdu (la machine : changement de mode, bureau sécurisé) est
+                // admis ; une perte venue d'un échec de l'app (`texture differente`, `Map`,
+                // BitBlt) est une régression (m11).
+                let acces_perdu = format!(
+                    "0x{:08X}",
+                    ::windows::Win32::Graphics::Dxgi::DXGI_ERROR_ACCESS_LOST.0 as u32
+                );
+                assert!(
+                    pertes.iter().all(|code| *code == acces_perdu),
+                    "perte venue de l'app : {pertes:?}"
+                );
                 assert!(
                     series.len() <= pertes.len(),
                     "{} series de prises perdues pour {} pertes",

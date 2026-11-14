@@ -312,7 +312,7 @@ pub fn copier_film(
     }
     let nom = nom_fichier(&demande.modele_nom, demande.maintenant);
     let donne = match dossier_glisser(demande) {
-        Some(d) if de_travail(fichier) => {
+        Some(d) if de_travail(fichier, &d) => {
             fichier_a_glisser(fichier, &d, &nom).unwrap_or_else(|_| fichier.into())
         }
         _ => fichier.to_path_buf(),
@@ -327,6 +327,8 @@ pub fn copier_film(
 
 /// Le bouton « Enregistrer » de la vignette : une copie dans le dossier d'enregistrement,
 /// sous le nom du modèle (« (2) » si besoin), jamais rien d'écrasé.
+/// Fait, le film n'est plus à ranger au lancement suivant (`oublier_film`) : il serait
+/// sinon deux fois dans le dossier d'enregistrement (m1).
 pub fn enregistrer_film(fichier: &Path, sorte: SorteFilm, demande: &Demande) -> EtapeFichier {
     let resultat = preparer_dossier(fichier, demande).and_then(|nom| {
         copier_dans(
@@ -337,6 +339,9 @@ pub fn enregistrer_film(fichier: &Path, sorte: SorteFilm, demande: &Demande) -> 
             sorte.extension(),
         )
     });
+    if resultat.is_ok() {
+        oublier_film(fichier);
+    }
     etape_fichier(demande, resultat)
 }
 
@@ -395,7 +400,12 @@ fn ecrire_registre(dossier_films: &Path, noms: &[String]) {
     }
     let mut texte = noms.join("\n");
     texte.push('\n');
-    if let Err(e) = fs::write(&chemin, texte) {
+    // Écrit à côté puis renommé (m6) : une coupure pendant l'écriture laisse l'ancien
+    // registre entier, jamais un nom tronqué.
+    let temporaire = dossier_films.join(format!("{REGISTRE_A_RANGER}.tmp"));
+    let ecrit = fs::write(&temporaire, texte).and_then(|()| fs::rename(&temporaire, &chemin));
+    if let Err(e) = ecrit {
+        let _ = fs::remove_file(&temporaire);
         log::warn!("film: registre a ranger non ecrit ({})", e.kind());
     }
 }
@@ -455,23 +465,41 @@ fn nom_film(fichier: &Path) -> Option<String> {
 /// À l'arrêt (F35, choix U4) : le film déplacé dans le dossier d'enregistrement, sans
 /// jamais le copier (lien dur puis effacement, sinon renommage : même volume, immédiat).
 /// Sur un autre volume : `Err`, le film reste noté et il est rangé au lancement suivant.
-pub fn ranger_film(fichier: &Path, sorte: SorteFilm, demande: &Demande) -> Result<PathBuf, String> {
-    let nom = preparer_dossier(fichier, demande)?;
+/// L'erreur est un mot fixe pour le journal (`dossier`, `autre volume`), jamais un nom de
+/// dossier de l'utilisateur (§8, m4).
+pub fn ranger_film(
+    fichier: &Path,
+    sorte: SorteFilm,
+    demande: &Demande,
+) -> Result<PathBuf, &'static str> {
+    let nom = preparer_dossier(fichier, demande).map_err(|_| "dossier")?;
     deplacer_sans_copie(
         fichier,
         &demande.dossier_enregistrement,
         &nom,
         sorte.extension(),
     )
-    .ok_or_else(|| "autre volume".to_string())
+    .ok_or("autre volume")
 }
 
-/// Un fichier de travail de `<local>/Films` (pas encore rangé) ?
-fn de_travail(fichier: &Path) -> bool {
-    fichier
-        .parent()
-        .and_then(|d| d.file_name())
-        .is_some_and(|n| n == SOUS_DOSSIER_FILMS)
+/// Un fichier de travail (pas encore rangé) : au format exact (`cle_film`), dans le vrai
+/// `<local>/Films`, à côté de `dossier_glisser` (`<local>/Glisser`). Un dossier de
+/// l'utilisateur qui s'appelle aussi « Films » n'en est pas un (m2) : les dossiers sont
+/// comparés par leur chemin canonique.
+fn de_travail(fichier: &Path, dossier_glisser: &Path) -> bool {
+    let au_format = fichier
+        .file_name()
+        .and_then(|n| n.to_str())
+        .is_some_and(|n| cle_film(n).is_some());
+    let (Some(dossier), Some(local)) = (fichier.parent(), dossier_glisser.parent()) else {
+        return false;
+    };
+    let travail = local.join(SOUS_DOSSIER_FILMS);
+    let meme = match (fs::canonicalize(dossier), fs::canonicalize(&travail)) {
+        (Ok(a), Ok(b)) => a == b,
+        _ => dossier == travail,
+    };
+    au_format && meme
 }
 
 /// Le fichier qu'un glisser de la carte d'un film donne (F25), sans jamais rien copier :
@@ -487,7 +515,7 @@ pub fn film_a_glisser(
     if !fichier.is_file() {
         return Err("le fichier de la capture est introuvable".into());
     }
-    if !de_travail(fichier) {
+    if !de_travail(fichier, dossier_glisser) {
         return Ok(fichier.to_path_buf());
     }
     let ext = fichier

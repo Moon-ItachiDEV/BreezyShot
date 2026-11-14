@@ -209,10 +209,11 @@ impl Ouvert for micro::Micro {
 /// d'écriture, le micro ouvert par `film-micro`.
 enum Courrier {
     Ordre(Ordre),
-    /// Le fichier de travail et le codeur sont prêts (F9).
+    /// Le fichier de travail et le codeur sont prêts (F9) ; `son` : avec une piste son.
     Pret {
         fichier: PathBuf,
         a: Instant,
+        son: bool,
     },
     /// La préparation a échoué, ou le fil d'écriture s'est arrêté (`fil`).
     Echec(&'static str),
@@ -264,6 +265,9 @@ pub struct EnCours {
     page_prete: bool,
     /// Après le relâchement.
     lancee: Option<Lancee>,
+    /// Fin de session : le fichier est fermé, mais le reste n'a pas pu être reporté à un
+    /// tour suivant (aucun fil possible, m9). Rendu par le prochain signal ou geste.
+    arret_differe: Option<Arret>,
 }
 
 impl std::fmt::Debug for EnCours {
@@ -380,6 +384,7 @@ pub fn selection_montree(app: &AppHandle, id: u64) {
         creation: Instant::now(),
         page_prete: false,
         lancee: None,
+        arret_differe: None,
     });
     if let Some(a) = ancienne {
         // Ne devrait pas arriver (une seule capture à la fois).
@@ -731,6 +736,9 @@ pub(super) fn action(app: &AppHandle, id: u64, action: &str) {
 
 /// Ce que `vu` fait dans le cours du film `numero` (décision pure), puis les gestes.
 fn vu(app: &AppHandle, numero: u64, vu: Vu) {
+    if rendre_arret_differe(app) {
+        return;
+    }
     let gestes = {
         let mut g = super::film_en_cours(app);
         match g
@@ -1056,6 +1064,7 @@ pub fn raccourci(app: &AppHandle, mode: Mode) -> bool {
 
 /// Ce que les fils postent.
 pub fn traiter(app: &AppHandle, signal: Signal) {
+    rendre_arret_differe(app);
     match signal {
         Signal::Micro { numero, present } => {
             let connu = super::film_en_cours(app)
@@ -1353,8 +1362,10 @@ fn afficher_hors_decompte(app: &AppHandle, m: Message, essais: u32) {
 
 /// La recherche du codeur H.264 (F32, fil `film-codeurs`), une fois par lancement, et
 /// seulement si `film::recherche_voulue` : elle rend `Evenement::VideoDisponible`. Avant,
-/// aucune DLL de Media Foundation n'est chargée (F31). Le même fil nettoie d'abord
-/// `<local>/Films` (F22, au démarrage) : sans licence, rien n'y est touché.
+/// aucune DLL de Media Foundation n'est chargée (F31). Le même fil range ensuite les films
+/// notés d'un lancement précédent et nettoie `<local>/Films` (F22, au démarrage) : après la
+/// réponse, pour que « Vidéo » n'attende pas une copie vers un autre disque (I-1). Sans
+/// licence, rien n'y est touché.
 pub fn lancer_recherche(app: &AppHandle) {
     if !film::recherche_voulue(super::pro(app)) || RECHERCHE_LANCEE.swap(true, Ordering::SeqCst) {
         return;
@@ -1367,10 +1378,10 @@ pub fn lancer_recherche(app: &AppHandle) {
     let lance = std::thread::Builder::new()
         .name("film-codeurs".into())
         .spawn(move || {
-            ranger_les_restes(&films, &demande);
-            nettoyer(&films, &glisser, &proteges);
             let present = mp4::codeur_h264_present();
             super::traiter(&pour, Evenement::VideoDisponible(present));
+            ranger_les_restes(&films, &demande);
+            nettoyer(&films, &glisser, &proteges);
         });
     if let Err(e) = lance {
         log::warn!("codeur video non cherche: {e}");
@@ -1615,16 +1626,60 @@ pub fn fin_de_session(app: &AppHandle) {
     let Some(mut e) = pris else {
         return;
     };
-    log::info!("film: fin de session");
-    let arret = fermer_le_fichier(&mut e, demande_d_arret(app), film::DELAI_ARRET);
-    if !arret.ferme {
-        log::warn!("film: fichier non ferme a l'arret");
-    }
+    // Un premier appel n'a pas pu reporter la suite : le fichier est déjà fermé.
+    let arret = match e.arret_differe.take() {
+        Some(a) => a,
+        None => {
+            log::info!("film: fin de session");
+            let arret = fermer_le_fichier(&mut e, demande_d_arret(app), film::DELAI_ARRET);
+            if !arret.ferme {
+                log::warn!("film: fichier non ferme a l'arret");
+            }
+            arret
+        }
+    };
+    // Le film passe au fil du report par une case : s'il ne peut pas être lancé, le film
+    // n'est pas détruit ici (procédure de fenêtre) mais remis en place (m9).
+    let case: Arc<Mutex<Option<(EnCours, Arret)>>> = Arc::new(Mutex::new(None));
+    let pour = Arc::clone(&case);
     let poste = super::plus_tard_nomme(app, "film-session-poste", Duration::ZERO, move |app| {
-        rendre_apres_arret(app, e, arret);
+        let pris = pour.lock().unwrap_or_else(|p| p.into_inner()).take();
+        if let Some((e, arret)) = pris {
+            rendre_apres_arret(app, e, arret);
+        }
     });
-    if !poste {
+    if poste {
+        *case.lock().unwrap_or_else(|p| p.into_inner()) = Some((e, arret));
+    } else {
         log::warn!("film: fin de session non rendue");
+        e.arret_differe = Some(arret);
+        let remplace = etat
+            .film
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .replace(e);
+        if remplace.is_some() {
+            log::warn!("film: fin de session, autre film en place");
+        }
+    }
+}
+
+/// Le reste d'une fin de session qui n'a pas pu être reporté (m9) : rendu au premier
+/// signal ou geste qui arrive hors de la procédure de fenêtre. Vrai s'il y en avait un.
+fn rendre_arret_differe(app: &AppHandle) -> bool {
+    let pris = {
+        let mut g = super::film_en_cours(app);
+        match g.as_mut().and_then(|e| e.arret_differe.take()) {
+            Some(arret) => g.take().map(|e| (e, arret)),
+            None => None,
+        }
+    };
+    match pris {
+        Some((e, arret)) => {
+            rendre_apres_arret(app, e, arret);
+            true
+        }
+        None => false,
     }
 }
 
@@ -2585,9 +2640,14 @@ impl<P: Prise> Fil<P> {
     fn recevoir(&mut self, c: Courrier, a: Instant) {
         match c {
             Courrier::Ordre(o) => self.ordre(o, a),
-            Courrier::Pret { fichier, a: t } => {
+            Courrier::Pret { fichier, a: t, son } => {
                 self.pret = Some(t);
                 self.fichier = Some(fichier);
+                // Une vidéo sans piste son (codeur du son refusé, m3) : plus de micro.
+                if !son && self.l.sorte == Sorte::Video {
+                    self.couper_micro();
+                    self.dire(Vu::SansPiste);
+                }
                 self.dire_pret();
             }
             Courrier::Echec(cause) => match self.etape {
@@ -2824,6 +2884,10 @@ fn copier_dans(source: &Pixels, dest: &mut Pixels) {
 
 /// Ce qui écrit le fichier (le MP4 de `systeme::mp4`, le GIF de `film::gif`, ou un faux).
 trait Ecrivain {
+    /// Le fichier a une piste son (une vidéo dont le codeur du son est accepté).
+    fn piste_son(&self) -> bool {
+        false
+    }
     /// Rend le temps passé à écrire cette image.
     fn image(&mut self, pixels: &Pixels, instant: Duration) -> Result<Duration, String>;
     fn meme(&mut self, instant: Duration) -> Result<Duration, String>;
@@ -2902,6 +2966,7 @@ fn ecrire(e: Ecriture, fabrique: Fabrique) {
     let _ = rapport.send(Courrier::Pret {
         fichier: chemin.clone(),
         a: Instant::now(),
+        son: ecrivain.piste_son(),
     });
     let mut ecriture = Mediane::default();
     let mut refuse = false;
@@ -3010,6 +3075,10 @@ impl EcrivainVideo {
 }
 
 impl Ecrivain for EcrivainVideo {
+    fn piste_son(&self) -> bool {
+        self.son.is_some()
+    }
+
     fn image(&mut self, pixels: &Pixels, instant: Duration) -> Result<Duration, String> {
         let d = self.ecrivain.image(pixels, instant)?;
         self.nourrir_son(instant)?;
@@ -3054,6 +3123,8 @@ fn creer_video(
                 "{}",
                 film::ligne_codeur(ecrivain.codeur().nom(), (largeur, hauteur), p.debit_bit_s)
             );
+            // Le son demandé mais refusé par le codeur : le fichier n'a pas de piste (m3).
+            let son = son && ecrivain.piste_son();
             log::info!("{}", film::ligne_son(son));
             Ok(Box::new(EcrivainVideo {
                 ecrivain,

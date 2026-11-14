@@ -841,6 +841,10 @@ pub fn codeur(e: &Ecrivain) -> Codeur {
     e.codeur
 }
 
+pub fn piste_son(e: &Ecrivain) -> bool {
+    e.audio.is_some()
+}
+
 pub fn image(e: &mut Ecrivain, pixels: &Pixels, instant: Duration) -> Result<Duration, String> {
     let debut = Instant::now();
     e.ecrivain()?;
