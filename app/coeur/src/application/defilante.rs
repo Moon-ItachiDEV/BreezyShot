@@ -90,6 +90,11 @@ pub const LIBELLE_TERMINER: &str = "Terminer";
 /// Message « trop vite » (D10), montré en haut de l'écran.
 pub const TEXTE_TROP_VITE: &str = "Trop vite. Remontez un peu.";
 
+/// Message montré quand l'app ne peut plus suivre une page qui a changé de hauteur
+/// (relecture des correctifs, C1) : l'image s'arrête à la dernière image gardée, et la
+/// capture attend la molette ou « Terminer ». Même place et même forme que « Trop vite ».
+pub const TEXTE_PAGE_CHANGEE: &str = "La page a changé. L'image s'arrête ici.";
+
 /// Titre du bandeau quand la page de contrôle n'est pas prête à temps (R1, §18).
 pub const TITRE_LANCEMENT_IMPOSSIBLE: &str = "Impossible de lancer la capture défilante";
 
@@ -416,8 +421,14 @@ pub struct Course {
     /// Un cran de l'utilisateur dans la zone a été vu : « Trop vite » ne parle que de sa
     /// molette, jamais d'un passage en `Main` décidé par l'app (contrat §3, D10, U5).
     molette_vue: bool,
-    /// « Trop vite » est montré.
-    trop_vite_montre: bool,
+    /// Un message est montré (« Trop vite », ou « La page a changé »), caché quand la
+    /// dernière image gardée est retrouvée.
+    message_montre: bool,
+    /// Les positions de l'image gardée et de la dernière image d'un pas sont lues, mais le lu
+    /// est impossible entre les deux (la page ou la vue ont changé de hauteur, `attendu`) :
+    /// une image qui ne recolle pas ne se rattrapera pas, et ne conclut jamais au bas
+    /// (relecture des correctifs, C1). Réglé par le fil à chaque image d'un pas.
+    lu_perdu: bool,
     fin: Option<Fin>,
     debut: Instant,
     /// La dernière image qui a apporté des lignes (ou le passage en `Main`).
@@ -460,7 +471,8 @@ impl Course {
             conduite: Conduite::Attente,
             perdue: false,
             molette_vue: false,
-            trop_vite_montre: false,
+            message_montre: false,
+            lu_perdu: false,
             fin: None,
             debut,
             derniere_nouvelle: debut,
@@ -529,6 +541,12 @@ impl Course {
         }
         self.passer_main(maintenant);
         vec![Geste::Prendre(PRISE_MAIN)]
+    }
+
+    /// Dit si le lu est impossible entre l'image gardée et l'image du pas qui vient d'être
+    /// mesurée (`lu_perdu`), avant que celle-ci soit montrée à la course.
+    pub fn regler_lu_perdu(&mut self, perdu: bool) {
+        self.lu_perdu = perdu;
     }
 
     /// Le défileur est passé à un autre moyen de lui-même : ses deux premières commandes
@@ -729,7 +747,13 @@ fn suite_auto(
         course.derniere_position = lue;
     }
     if let Some(depuis) = course.en_bas_depuis {
-        if matches!(mesure, Mesure::Immobile | Mesure::Ambigue) && !bouge {
+        // Une image ambiguë sans lu possible ne recolle pas : elle ne confirme pas le bas.
+        let confirme = match mesure {
+            Mesure::Immobile => true,
+            Mesure::Ambigue => !course.lu_perdu,
+            _ => false,
+        };
+        if confirme && !bouge {
             let ecoule = maintenant.saturating_duration_since(depuis);
             if ecoule >= FIN_EN_BAS {
                 return finir(course, Fin::EnBas);
@@ -793,6 +817,10 @@ fn suite_auto(
             }
             immobile_auto(course, en_bas, maintenant)
         }
+        // Sans lu possible depuis l'image gardée (page ou vue changées), une image ambiguë
+        // ne recolle pas, et rien ne la rattrapera : ni descendre (tout ce qui est passé
+        // serait perdu), ni le bas (l'image serait tronquée en silence, C1).
+        Mesure::Ambigue if course.lu_perdu => sans_lu_ne_recolle_pas(course, maintenant),
         Mesure::Ambigue => {
             if en_bas {
                 course.ambigues = 0;
@@ -835,6 +863,10 @@ fn suite_auto(
                 return vec![course.descendre(-demi)];
             }
             course.perdues_auto += 1;
+            if course.perdues_auto > PERDUES_AUTO_MAX && course.lu_perdu {
+                // Trop loin sans lu possible : la page a changé, et l'app le dit.
+                return decrocher(course, maintenant);
+            }
             if course.perdues_auto > PERDUES_AUTO_MAX {
                 // La page saute trop loin même au plus petit pas : la molette de
                 // l'utilisateur.
@@ -850,6 +882,38 @@ fn suite_auto(
             vec![course.descendre(-demi)]
         }
     }
+}
+
+/// Une image `Ambigue` en `Auto` alors que le lu est impossible depuis l'image gardée
+/// (`lu_perdu`, C1) : d'abord réduire le pas et remonter de la moitié du dernier
+/// mouvement (la mesure sans lu peut recoller plus près de l'image gardée, sur du contenu) ;
+/// au plus petit pas, la capture s'arrête en le disant (`decrocher`). Jamais compté comme
+/// immobile : la fin `en_bas` ne vient pas d'ici.
+fn sans_lu_ne_recolle_pas(course: &mut Course, maintenant: Instant) -> Vec<Geste> {
+    course.immobiles = 0;
+    course.ambigues = 0;
+    if !course.au_plus_petit() {
+        course.reductions_ambigues += 1;
+        course.recalculer_pas();
+        let recul = (course.dernier_pas.abs() / 2).max(1);
+        return vec![course.descendre(-recul)];
+    }
+    decrocher(course, maintenant)
+}
+
+/// L'app ne peut plus suivre la page (elle a changé de hauteur, C1) : la main passe à la
+/// molette de l'utilisateur, la page est perdue et « La page a changé » est montré. Si la
+/// molette ramène la dernière image gardée, le message part et la capture reprend là
+/// (comme après « Trop vite ») ; sinon « Terminer » rend l'image jusque-là, l'utilisateur
+/// étant prévenu qu'elle s'arrête.
+fn decrocher(course: &mut Course, maintenant: Instant) -> Vec<Geste> {
+    course.passer_main(maintenant);
+    course.perdue = true;
+    course.message_montre = true;
+    vec![
+        Geste::Message(Some(TEXTE_PAGE_CHANGEE)),
+        Geste::Prendre(PRISE_MAIN),
+    ]
 }
 
 /// Une image immobile après un pas (ou comptée comme telle).
@@ -890,8 +954,8 @@ fn suite_main(
             Mesure::Avance(_) | Mesure::Immobile => {
                 // La dernière image gardée est retrouvée : la capture reprend là.
                 course.perdue = false;
-                if course.trop_vite_montre {
-                    course.trop_vite_montre = false;
+                if course.message_montre {
+                    course.message_montre = false;
                     gestes.push(Geste::Message(None));
                 }
             }
@@ -899,8 +963,8 @@ fn suite_main(
             // passage en `Main` décidé par l'app (la page était déjà hors de portée, sans
             // rien dire) ; il roule et la page reste trop loin : c'est le seul indice qu'il
             // faut remonter. Sans molette, rien.
-            Mesure::Perdue if course.molette_vue && !course.trop_vite_montre => {
-                course.trop_vite_montre = true;
+            Mesure::Perdue if course.molette_vue && !course.message_montre => {
+                course.message_montre = true;
                 return vec![
                     Geste::Message(Some(TEXTE_TROP_VITE)),
                     Geste::Prendre(PRISE_MAIN),
@@ -925,7 +989,7 @@ fn suite_main(
             // Seulement si la molette de l'utilisateur a conduit : un passage en `Main` décidé
             // par l'app reste silencieux (l'aperçu qui ne grandit pas suffit).
             if course.molette_vue {
-                course.trop_vite_montre = true;
+                course.message_montre = true;
                 gestes.push(Geste::Message(Some(TEXTE_TROP_VITE)));
             }
         }
@@ -947,9 +1011,10 @@ fn suite_main(
 /// maintenant, en pixels réels de la vue qui défile (`defiler::decalage_px`, B) ; une
 /// position inchangée donne `Lu(0)`. `Lu` seulement si les deux positions ont été lues ;
 /// sinon, ou si la vue ou la page ont changé de hauteur entre les deux (vue redimensionnée,
-/// image paresseuse, chargement à l'infini : les pour cent ne se comparent plus), `Aucun` :
-/// l'image est mesurée sans lu, et la position gardée repart juste à la prochaine image
-/// gardée. Les pixels commandés ne sont jamais
+/// image paresseuse, chargement à l'infini : les pour cent ne se comparent plus), `Aucun`,
+/// sauf depuis le haut de la page où le lu reste exact : l'image est mesurée sans lu, et la
+/// position gardée repart juste à la prochaine image gardée ; d'ici là, une image qui ne
+/// recolle pas ne conclut jamais au bas (`lu_perdu`, C1). Les pixels commandés ne sont jamais
 /// passés à la mesure (C, seconde reprise R1 et R3). Dans une vue unie, un `Lu(e)` non nul
 /// fait rendre `Avance(e)` (C, complément) : il ne vient donc que d'une vraie lecture.
 pub fn attendu(gardee: Option<Position>, maintenant: Option<Position>) -> Attendu {
@@ -957,6 +1022,13 @@ pub fn attendu(gardee: Option<Position>, maintenant: Option<Position>) -> Attend
         (Some(g), Some(m)) => defiler::decalage_px(&g, &m).map_or(Attendu::Aucun, Attendu::Lu),
         _ => Attendu::Aucun,
     }
+}
+
+/// Vrai si les deux positions sont lues mais que le lu est impossible entre elles (la page
+/// ou la vue ont changé de hauteur, `attendu` rend `Aucun`) : `Course::regler_lu_perdu`.
+/// Fonction pure.
+pub fn lu_perdu(gardee: Option<Position>, maintenant: Option<Position>) -> bool {
+    matches!((gardee, maintenant), (Some(g), Some(m)) if defiler::decalage_px(&g, &m).is_none())
 }
 
 /// Bornes du facteur d'étalonnage du lu (décision du responsable, relecture d'ensemble
@@ -1301,6 +1373,8 @@ pub const LIGNE_MAIN: &str = "defilante main (molette)";
 /// « Trop vite » montré, puis caché (D10).
 pub const LIGNE_TROP_VITE: &str = "defilante trop vite";
 pub const LIGNE_REPRIS: &str = "defilante repris";
+/// « La page a changé » montré (C1).
+pub const LIGNE_PAGE_CHANGEE: &str = "defilante page changee";
 
 /// `defilante fixes haut <n> bas <n>` (D11).
 pub fn ligne_fixes(fixes: Fixes) -> String {
@@ -1970,6 +2044,139 @@ mod tests {
             suite(&mut c, Vu::Image(Mesure::Immobile, pos(100.0)), t + ms(550)),
             vec![Geste::Finir(Fin::EnBas)]
         );
+    }
+
+    #[test]
+    fn sans_lu_une_image_ambigue_ne_conclut_jamais_au_bas() {
+        // Relecture des correctifs, C1 : la page a changé de hauteur depuis l'image gardée
+        // (`lu_perdu`), et l'image d'un pas est ambiguë, la position déjà lue au bas. Avant :
+        // fin `en_bas`, l'image tronquée sans rien dire. Maintenant : pas réduit et remontée
+        // jusqu'au plus petit pas, puis la main à la molette avec « La page a changé ».
+        let t0 = Instant::now();
+        let mut c = en_auto(t0);
+        let t = t0 + ms(600);
+        suite(&mut c, Vu::Image(Mesure::Avance(200), pos(80.0)), t);
+        c.regler_lu_perdu(true);
+        let mut gestes = Vec::new();
+        for i in 0..10 {
+            let g = suite(
+                &mut c,
+                Vu::Image(Mesure::Ambigue, pos(100.0)),
+                t + ms(50 * i),
+            );
+            assert!(!g.iter().any(|g| matches!(g, Geste::Finir(_))), "{g:?}");
+            assert!(!g.contains(&Geste::Prendre(FIN_EN_BAS)), "{g:?}");
+            let fini = c.conduite() == Conduite::Main;
+            gestes.push(g);
+            if fini {
+                break;
+            }
+        }
+        // 200 → 100 → 50 → 40 : trois remontées, puis le message.
+        assert_eq!(
+            gestes,
+            vec![
+                vec![Geste::Descendre(-100)],
+                vec![Geste::Descendre(-50)],
+                vec![Geste::Descendre(-25)],
+                vec![
+                    Geste::Message(Some(TEXTE_PAGE_CHANGEE)),
+                    Geste::Prendre(PRISE_MAIN)
+                ],
+            ]
+        );
+        assert!(c.perdue());
+        // En `Main`, encore perdue : rien d'autre, et jamais de fin seule.
+        assert_eq!(
+            suite(&mut c, Vu::Image(Mesure::Ambigue, pos(100.0)), t + ms(600)),
+            vec![Geste::Prendre(PRISE_MAIN)]
+        );
+        assert_eq!(
+            suite(
+                &mut c,
+                Vu::Image(Mesure::Immobile, pos(100.0)),
+                t + ms(2000)
+            ),
+            vec![Geste::Message(None), Geste::Prendre(PRISE_MAIN)],
+            "la dernière image gardée retrouvée : le message part"
+        );
+        assert_eq!(c.fin(), None);
+    }
+
+    #[test]
+    fn sans_lu_une_image_ambigue_ne_confirme_pas_l_arret_en_bas() {
+        let t0 = Instant::now();
+        let mut c = en_auto(t0);
+        let t = t0 + ms(600);
+        suite(&mut c, Vu::Image(Mesure::Avance(200), pos(80.0)), t);
+        assert_eq!(
+            suite(&mut c, Vu::Image(Mesure::Immobile, pos(100.0)), t),
+            vec![Geste::Prendre(FIN_EN_BAS)]
+        );
+        // Pendant l'arrêt, la page change et l'image ne recolle plus : pas de fin.
+        c.regler_lu_perdu(true);
+        let g = suite(&mut c, Vu::Image(Mesure::Ambigue, pos(100.0)), t + ms(400));
+        assert_eq!(g, vec![Geste::Descendre(-100)]);
+        assert_eq!(c.fin(), None);
+        // Le même arrêt avec le lu possible finit comme avant.
+        let mut c = en_auto(t0);
+        suite(&mut c, Vu::Image(Mesure::Avance(200), pos(80.0)), t);
+        suite(&mut c, Vu::Image(Mesure::Immobile, pos(100.0)), t);
+        assert_eq!(
+            suite(&mut c, Vu::Image(Mesure::Ambigue, pos(100.0)), t + ms(400)),
+            vec![Geste::Finir(Fin::EnBas)]
+        );
+    }
+
+    #[test]
+    fn sans_lu_les_images_perdues_le_disent() {
+        // Le cas voisin de C1 : sans lu possible, la suite est perdue même au plus petit pas.
+        // La main passe à la molette en le disant (sans le lu perdu : sans rien dire, D8).
+        let passe = |lu_perdu: bool| {
+            let t0 = Instant::now();
+            let mut c = en_auto(t0);
+            let t = t0 + ms(600);
+            suite(&mut c, Vu::Image(Mesure::Avance(200), pos(50.0)), t);
+            c.regler_lu_perdu(lu_perdu);
+            let mut n = 0;
+            loop {
+                let g = suite(&mut c, Vu::Image(Mesure::Perdue, pos(60.0)), t);
+                if c.conduite() == Conduite::Main {
+                    return (g, c.perdue());
+                }
+                n += 1;
+                assert!(n < 20);
+            }
+        };
+        assert_eq!(
+            passe(true),
+            (
+                vec![
+                    Geste::Message(Some(TEXTE_PAGE_CHANGEE)),
+                    Geste::Prendre(PRISE_MAIN)
+                ],
+                true
+            )
+        );
+        assert_eq!(passe(false), (vec![Geste::Prendre(PRISE_MAIN)], false));
+    }
+
+    #[test]
+    fn lu_perdu_seulement_si_les_deux_positions_sont_lues() {
+        let lecture = |pour_cent: f64, vue: f64| {
+            Some(Position {
+                pour_cent,
+                vue,
+                hauteur_vue: 300,
+            })
+        };
+        assert!(!lu_perdu(None, lecture(10.0, 10.0)));
+        assert!(!lu_perdu(lecture(10.0, 10.0), None));
+        assert!(!lu_perdu(lecture(10.0, 10.0), lecture(20.0, 10.0)));
+        // La page a changé de hauteur (10 % puis 9 % de vue).
+        assert!(lu_perdu(lecture(10.0, 10.0), lecture(20.0, 9.0)));
+        // Depuis le haut, le lu reste possible.
+        assert!(!lu_perdu(lecture(0.0, 10.0), lecture(20.0, 9.0)));
     }
 
     #[test]
@@ -2667,6 +2874,7 @@ mod tests {
         assert_eq!(LIGNE_MAIN, "defilante main (molette)");
         assert_eq!(LIGNE_TROP_VITE, "defilante trop vite");
         assert_eq!(LIGNE_REPRIS, "defilante repris");
+        assert_eq!(LIGNE_PAGE_CHANGEE, "defilante page changee");
         assert_eq!(
             ligne_fixes(Fixes { haut: 40, bas: 0 }),
             "defilante fixes haut 40 bas 0"

@@ -1098,9 +1098,10 @@ impl Selection {
     /// charge, même affichage, même numéro de charge (le repère ne change pas) ; la page
     /// garde son geste en cours. `Signal::Fenetre::indice` est alors un indice de `pages`
     /// (les `FENETRES_MAX` premières). Fil principal (posté sinon). Un `id` qui n'est pas
-    /// celui en cours, ou pas en mode défilante : rien. Une fois par affichage : un clic
-    /// sur une page d'une première liste, arrivé avec une seconde, serait décidé sur la
-    /// seconde.
+    /// celui en cours, ou pas en mode défilante : rien. Peut venir plusieurs fois par
+    /// affichage (pages d'UI Automation venues en retard) : chaque liste prolonge la
+    /// précédente sans changer ses indices, si bien qu'un clic décidé sur une liste vise
+    /// la même page dans la suivante.
     pub fn proposer(&self, id: u64, pages: Vec<FenetreProposee>) {
         self.interne.proposer(id, pages);
     }

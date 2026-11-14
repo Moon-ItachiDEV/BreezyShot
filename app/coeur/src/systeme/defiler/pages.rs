@@ -37,8 +37,9 @@ pub fn ecartee(classe: &str) -> bool {
 /// Types de contrôle d'UI Automation (`UIA_*ControlTypeId`, valeurs d'UIAutomationClient.h)
 /// dont les enfants ne sont jamais regardés : ce sont des feuilles, ou des éléments dont
 /// l'intérieur n'est jamais « la page » (une image, un texte, un bouton, une ligne de liste,
-/// une barre de défilement…). Un élément qui défile est gardé avant ce test.
-const SANS_ENFANTS_A_FOUILLER: [i32; 22] = [
+/// une barre de défilement…). Un élément qui défile est gardé avant ce test. `TabItem`
+/// n'y est pas : sous WPF, le contenu de l'onglet choisi est l'enfant de son `TabItem`.
+const SANS_ENFANTS_A_FOUILLER: [i32; 21] = [
     50000, // Button
     50002, // CheckBox
     50003, // ComboBox
@@ -52,7 +53,6 @@ const SANS_ENFANTS_A_FOUILLER: [i32; 22] = [
     50014, // ScrollBar
     50015, // Slider
     50016, // Spinner
-    50019, // TabItem
     50020, // Text
     50022, // ToolTip
     50024, // TreeItem
@@ -251,20 +251,37 @@ pub struct Lancement {
     pub liste: Duration,
     pub filles: Duration,
     pub automation: EtatAutomation,
-    /// Clients d'UI Automation ratés depuis la création du bassin, et le dernier code.
-    pub rates: Option<(u32, String)>,
+    /// Clients d'UI Automation ratés (leur création), s'il y en a eu.
+    pub rates: Option<Rates>,
 }
 
-/// `UIA_E_ELEMENTNOTAVAILABLE` : la fenêtre ou l'élément n'existe plus.
-const ELEMENT_DISPARU: u32 = 0x8004_0201;
+/// Les créations de client ratées : depuis la création du bassin (`total`), pendant cette
+/// recherche (`pendant`), et le dernier code (`client <étape> <code>`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Rates {
+    pub total: u32,
+    pub pendant: u32,
+    pub dernier: String,
+}
+
+/// Codes d'une fouille refusée qui parlent du client (ou de son apartment), pas de la
+/// fenêtre : `E_FAIL`, `RPC_E_DISCONNECTED`, `RPC_E_WRONG_THREAD`, `CO_E_NOTINITIALIZED`,
+/// `CO_E_OBJNOTCONNECTED`. Un délai dépassé (`UIA_E_TIMEOUT`, une app qui ne répond plus),
+/// un accès refusé ou une fenêtre partie (`UIA_E_ELEMENTNOTAVAILABLE`) n'en sont pas :
+/// refaire la fouille ne ferait qu'attendre encore.
+const CODES_DU_CLIENT: [u32; 5] = [
+    0x8000_4005,
+    0x8001_0108,
+    0x8001_010E,
+    0x8004_01F0,
+    0x8004_01FD,
+];
 
 /// Une fouille refusée par UI Automation (`code`) est-elle refaite une fois, avec un client
-/// neuf ? Oui, sauf si la fenêtre n'existe plus (`existe` faux, ou
-/// `UIA_E_ELEMENTNOTAVAILABLE`) ou si l'échéance est passée (`reste` faux) : un client
-/// devenu inutilisable rend `E_FAIL` ou une erreur de RPC tout de suite, pour chaque
-/// fenêtre.
+/// neuf ? Seulement pour un code du client (`CODES_DU_CLIENT`), la fenêtre encore là
+/// (`existe`) et l'échéance pas passée (`reste`).
 pub fn refaire_avec_un_client_neuf(code: u32, existe: bool, reste: bool) -> bool {
-    existe && reste && code != ELEMENT_DISPARU
+    existe && reste && CODES_DU_CLIENT.contains(&code)
 }
 
 fn ms(d: Duration) -> u128 {
@@ -351,6 +368,14 @@ fn texte_regard(r: &Regard) -> String {
     }
 }
 
+/// `, clients rates <total> (<pendant> pendant la recherche, dernier <code>)`.
+fn texte_rates(r: &Rates) -> String {
+    format!(
+        ", clients rates {} ({} pendant la recherche, dernier {})",
+        r.total, r.pendant, r.dernier
+    )
+}
+
 fn texte_vues(vues: &[Vue]) -> String {
     vues.iter()
         .enumerate()
@@ -370,8 +395,8 @@ pub fn ligne_detail(lancement: &Lancement, vues: &[Vue]) -> String {
         ms(lancement.filles),
         texte_automation(&lancement.automation)
     );
-    if let Some((n, dernier)) = &lancement.rates {
-        l.push_str(&format!(", clients rates {n} (dernier {dernier})"));
+    if let Some(r) = &lancement.rates {
+        l.push_str(&texte_rates(r));
     }
     if !vues.is_empty() {
         l.push_str(" ; ");
@@ -380,13 +405,15 @@ pub fn ligne_detail(lancement: &Lancement, vues: &[Vue]) -> String {
     l
 }
 
-/// `defiler pages fin: <n> (automation <a>, en retard <r>) en <ms> ms ; <rang> <classe>
-/// <regard> ; …` : la fin d'une recherche qui avait des fenêtres en retard au budget.
-pub fn ligne_fin(n: usize, vues: &[Vue], duree: Duration) -> String {
+/// `defiler pages fin: <n> (automation <a>, en retard <r>) en <ms> ms[, clients rates …] ;
+/// <rang> <classe> <regard> ; …` : la fin d'une recherche qui avait des fenêtres en retard
+/// au budget, ou des clients ratés depuis la première liste.
+pub fn ligne_fin(n: usize, vues: &[Vue], duree: Duration, rates: Option<&Rates>) -> String {
     let (_, automation, en_retard) = compter(vues);
     format!(
-        "defiler pages fin: {n} (automation {automation}, en retard {en_retard}) en {} ms ; {}",
+        "defiler pages fin: {n} (automation {automation}, en retard {en_retard}) en {} ms{} ; {}",
         ms(duree),
+        rates.map(texte_rates).unwrap_or_default(),
         texte_vues(vues)
     )
 }
@@ -527,12 +554,14 @@ mod tests {
 
     #[test]
     fn une_fouille_refusee_est_refaite_une_fois_avec_un_client_neuf() {
-        // E_FAIL, RPC coupé, objet déconnecté : refaite.
-        for code in [0x8000_4005, 0x8001_0108, 0x8007_06BA, 0x8001_0012] {
+        // E_FAIL, RPC coupé, mauvais fil, COM pas ouvert, objet déconnecté : refaite.
+        for code in CODES_DU_CLIENT {
             assert!(refaire_avec_un_client_neuf(code, true, true), "{code:#x}");
         }
-        // Fenêtre partie, ou plus de temps : non.
-        assert!(!refaire_avec_un_client_neuf(ELEMENT_DISPARU, true, true));
+        // Fenêtre partie, délai dépassé (app qui ne répond plus), accès refusé : non.
+        for code in [0x8004_0201, 0x8013_1505, 0x8007_0005] {
+            assert!(!refaire_avec_un_client_neuf(code, true, true), "{code:#x}");
+        }
         assert!(!refaire_avec_un_client_neuf(0x8000_4005, false, true));
         assert!(!refaire_avec_un_client_neuf(0x8000_4005, true, false));
     }
@@ -544,11 +573,11 @@ mod tests {
         assert!(!ecartee("HwndWrapper"));
         assert!(!ecartee("ConsoleWindowClass"));
         // Image, Text, Button, ScrollBar, ListItem : feuilles ; Pane, Window, Document,
-        // Group, List, Custom, inconnu : fouillés.
+        // Group, List, Custom, TabItem (le contenu de l'onglet sous WPF), inconnu : fouillés.
         for t in [50006, 50020, 50000, 50014, 50007] {
             assert!(!a_fouiller(t), "{t}");
         }
-        for t in [50033, 50032, 50030, 50026, 50008, 50025, 0] {
+        for t in [50033, 50032, 50030, 50026, 50008, 50025, 50019, 0] {
             assert!(a_fouiller(t), "{t}");
         }
     }
@@ -627,19 +656,28 @@ mod tests {
             ..lancement.clone()
         };
         assert!(ligne_detail(&sans, &[]).ends_with("automation en preparation depuis 20 ms"));
+        let r = Rates {
+            total: 3,
+            pendant: 1,
+            dernier: "client CoCreateInstance 0x80004005".into(),
+        };
         let ratee = Lancement {
-            rates: Some((3, "client CoCreateInstance 0x80004005".into())),
+            rates: Some(r.clone()),
             ..lancement.clone()
         };
         assert!(ligne_detail(&ratee, &[]).ends_with(
-            "client 35 ms), clients rates 3 (dernier client CoCreateInstance 0x80004005)"
+            "client 35 ms), clients rates 3 (1 pendant la recherche, dernier client \
+             CoCreateInstance 0x80004005)"
+        ));
+        assert!(ligne_fin(0, &[], ms(1500), Some(&r)).starts_with(
+            "defiler pages fin: 0 (automation 0, en retard 0) en 1500 ms, clients rates 3 "
         ));
         let impossible = Lancement {
             automation: EtatAutomation::Impossible("CoInitializeEx 0x80010106".into()),
             ..lancement
         };
         assert!(ligne_detail(&impossible, &[]).ends_with("impossible (CoInitializeEx 0x80010106)"));
-        assert!(ligne_fin(4, &v, ms(1500))
+        assert!(ligne_fin(4, &v, ms(1500), None)
             .starts_with("defiler pages fin: 4 (automation 1, en retard 2) en 1500 ms ; 1 "));
         // Coupée : dite.
         let coupee = [Vue {
@@ -653,7 +691,7 @@ mod tests {
                 coupee: true,
             },
         }];
-        assert!(ligne_fin(0, &coupee, ms(1500)).ends_with("0 pages coupee"));
+        assert!(ligne_fin(0, &coupee, ms(1500), None).ends_with("0 pages coupee"));
         // La forme lue par l'essai 14 : « en retard <n>) » et « en <ms> ms » en fin.
         let l = ligne_pages(0, &v, ms(300));
         assert!(l.contains("en retard 2)") && l.ends_with(" en 300 ms"));
