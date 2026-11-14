@@ -25,8 +25,9 @@
 //! `traiter_zone`, `abandonner`), Échap, la croix du disque, le bureau, le raccourci du
 //! film en cours (choix B1), `Evenement::Film`, la recherche du codeur
 //! (`Evenement::VideoDisponible`), la suite d'`ImagePrete` (`film_ferme`), les boutons de
-//! la carte d'un film, et `arreter` (`fermer_pour_arret`). Tant que `film::CONSTRUIT` est
-//! faux, aucune de ces accroches n'est jamais atteinte.
+//! la carte d'un film, `arreter` (`fermer_pour_arret`) et la fin de session Windows
+//! (`fin_de_session`, posée dans `demarrer`). Sans licence, aucune de ces accroches n'est
+//! jamais atteinte : ni « Vidéo » ni « GIF » ne sont des actions en vigueur.
 //!
 //! Retardateur (0.4) : `demarrer_capture` entre en Décompte (`commencer_decompte`), le fil
 //! `decompte` poste `DecompteFini`, puis la séquence du mode part (`apres_gel`) ;
@@ -1219,6 +1220,11 @@ fn preparer_capture(app: &AppHandle) {
     // Le rappel tourne dans la procédure de la fenêtre figée : il ne fait que poster.
     let pour_bureau = app.clone();
     gel::quand_bureau_change(move |c| poster_plus_tard(&pour_bureau, Evenement::Bureau(c)));
+    // Fin de session Windows (F35) : la fenêtre de l'écran figé est sur le fil principal ;
+    // le rappel ferme le fichier d'un film avant que Windows ait sa réponse (sans film,
+    // il ne fait rien).
+    let pour_session = app.clone();
+    gel::quand_session_finit(Box::new(move || geste_film::fin_de_session(&pour_session)));
     let pour_selection = app.clone();
     match Selection::creer(app, move |s| {
         traiter(&pour_selection, Evenement::Selection(s))
@@ -2841,6 +2847,7 @@ fn montrer_vignette(app: &AppHandle, fin: FinSortie, annonce: Annonce, apercu: A
         suppression: EtatSuppression::Aucune,
         copie: None,
         enregistrement: None,
+        enregistrer_attendu: false,
         glisser: false,
         reduites,
         partie: false,
@@ -2892,6 +2899,7 @@ pub(super) fn film_ferme(app: &AppHandle, fin: FinFilm) -> Declencheur {
         suppression: EtatSuppression::Aucune,
         copie: None,
         enregistrement: None,
+        enregistrer_attendu: false,
         glisser: false,
         reduites,
         partie: false,
@@ -3057,6 +3065,11 @@ fn action_vignette(app: &AppHandle, v: &Vignette, id: u64, action: &str) {
         vignette::Geste::DejaEnregistree => {
             log::info!("vignette enregistrement {id} deja fait");
             v.confirmer(id, vignette::ENREGISTRER, true);
+        }
+        vignette::Geste::AttendreEnregistrement => {
+            // La sortie du film confirme le bouton à son bilan (F25, F36).
+            avec_montree(app, id, |c| c.enregistrer_attendu = true);
+            log::info!("vignette enregistrement {id} attendu");
         }
         vignette::Geste::Supprimer => {
             avec_montree(app, id, |c| c.suppression = EtatSuppression::EnAttente);
@@ -3320,12 +3333,10 @@ pub(super) fn fermer_vignette(app: &AppHandle, raison: &str) -> bool {
 
 /// Appui sur l'image puis déplacement : le fichier à donner est posé, puis le glisser est
 /// reposté (jamais lancé dans le gestionnaire de la page).
+///
+/// La carte d'un film donne son fichier (F25) par le même chemin : `glisser_possible` rend
+/// le fichier du film, et `fichier_a_glisser` en garde l'extension.
 fn demander_glisser(app: &AppHandle, id: u64) {
-    // La carte d'un film donne son fichier (F25).
-    if avec_montree(app, id, |c| c.contenu.film().is_some()) == Some(true) {
-        geste_film::demander_glisser(app, id);
-        return;
-    }
     let Some(prete) = avec_montree(app, id, |c| {
         vignette::glisser_possible(c).map(|r| (r.to_path_buf(), c.maintenant))
     }) else {
@@ -4857,22 +4868,46 @@ mod tests {
         assert_eq!(mode_journal("gif"), "gif");
     }
 
-    /// Socle de la 0.7 : tant que `film::CONSTRUIT` est faux, ni la vidéo ni le GIF ne sont
-    /// des actions construites, avec ou sans licence, avec ou sans codeur ; et la recherche
-    /// du codeur n'est pas voulue.
+    /// 0.7 : le film construit, sans licence rien ne change. Ni « Vidéo » ni « GIF » parmi
+    /// les actions en vigueur, avec ou sans codeur : le menu, la table des raccourcis
+    /// (Ctrl+Maj+6 et 7 jamais pris) et Réglages › Raccourcis sont ceux de la 0.6.1 ; la
+    /// recherche du codeur n'est pas voulue (aucune DLL de Media Foundation chargée, F31,
+    /// `<local>/Films` jamais touché, F22). Avec une licence, elles suivent les images
+    /// vivantes et le codeur.
     #[test]
-    fn film_absent_tant_que_non_construit() {
-        for pro in [false, true] {
-            for texte in [false, true] {
-                for codeur in [false, true] {
-                    let a = actions_construites(pro, texte, codeur);
-                    let attendu = film::CONSTRUIT && systeme::vivant::disponible() && pro;
-                    assert_eq!(a.contains(&"gif"), attendu);
-                    assert_eq!(a.contains(&"video"), attendu && codeur);
+    fn film_construit_rien_ne_change_sans_licence() {
+        const { assert!(film::CONSTRUIT) };
+        let reglages = Reglages::par_defaut(Plateforme::Windows);
+        for texte in [false, true] {
+            let avant = actions_construites(false, texte, false);
+            for codeur in [false, true] {
+                let sans = actions_construites(false, texte, codeur);
+                assert_eq!(sans, avant);
+                assert!(!sans.contains(&"gif") && !sans.contains(&"video"));
+                assert_eq!(
+                    entrees_menu(&sans, |_| None),
+                    entrees_menu(&ACTIONS_DE_CAPTURE, |_| None)
+                );
+                let table = table_candidats(&reglages, &sans);
+                assert_eq!(
+                    table.keys().map(String::as_str).collect::<Vec<_>>(),
+                    table_candidats(&reglages, &ACTIONS_DE_CAPTURE)
+                        .keys()
+                        .map(String::as_str)
+                        .collect::<Vec<_>>()
+                );
+                let avec = actions_construites(true, texte, codeur);
+                let vivant = systeme::vivant::disponible();
+                assert_eq!(avec.contains(&"gif"), vivant);
+                assert_eq!(avec.contains(&"video"), vivant && codeur);
+                if vivant {
+                    let t = table_candidats(&reglages, &avec);
+                    assert!(t.contains_key("gif"));
                 }
             }
-            assert_eq!(film::recherche_voulue(pro), film::CONSTRUIT && pro);
         }
+        assert!(!film::recherche_voulue(false));
+        assert!(film::recherche_voulue(true));
     }
 
     /// Hors Windows, la capture défilante est absente, même avec une licence.

@@ -8,7 +8,8 @@
 //! l'écran : il évite « enregistrer », qui veut déjà dire « écrire le fichier dans le
 //! dossier ».
 //!
-//! Rien ne s'en sert tant que le film n'est pas construit (`application::film::CONSTRUIT`).
+//! Son seul utilisateur est `application::geste_film` (les fils `film`, `film-video`,
+//! `film-gif` et `film-son`).
 
 pub mod difference;
 pub mod gif;

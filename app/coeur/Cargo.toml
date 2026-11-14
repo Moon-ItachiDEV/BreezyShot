@@ -1,6 +1,6 @@
 [package]
 name = "breezyshot"
-version = "0.6.1"
+version = "0.7.0"
 description = "Outil de capture d'écran pour Windows 11, puis macOS"
 edition = "2021"
 license = "FSL-1.1-MIT"
@@ -36,7 +36,8 @@ base64 = "0.23"
 # Vidéo et GIF (0.7) : le GIF est écrit par la crate `gif` (MIT OR Apache-2.0), sa palette
 # par `color_quant` (MIT), qu'elle tire (`Frame::from_rgba_speed`, décision D13 de la sonde).
 # Pur Rust, aucune dépendance native ; le module `film` s'en sert sur tous les systèmes.
-gif = { version = "0.14.2", default-features = false, features = ["color_quant", "std"] }
+# `raii_no_panic` : détruire l'encodeur sur un disque plein ne panique pas (fil `film-gif`).
+gif = { version = "0.14.2", default-features = false, features = ["color_quant", "std", "raii_no_panic"] }
 
 [target.'cfg(windows)'.dependencies]
 # Copier le texte (0.5) : la lecture de Windows (Media.Ocr) et ce qu'elle demande pour

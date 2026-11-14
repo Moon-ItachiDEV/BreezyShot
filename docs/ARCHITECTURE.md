@@ -41,8 +41,8 @@ app/
                             defilante.rs : décisions de la capture défilante (pures,
                             0.6), geste_defilante.rs : ses gestes et ses fils,
                             fenetre_defilante.rs : les quatre commandes de sa page ;
-                            film.rs : décisions de la vidéo et du GIF (pures, 0.7 ;
-                            interrupteur `film::CONSTRUIT`), geste_film.rs : leurs gestes
+                            film.rs : décisions de la vidéo et du GIF (pures, 0.7,
+                            §3.11), geste_film.rs : leurs gestes
                             et leurs fils, fenetre_film.rs : les trois commandes de la
                             page de contrôle du film ;
                             veille.rs : veille de la boucle principale (journal)
@@ -219,9 +219,10 @@ l'icône, raccourcis, lignes de Réglages › Raccourcis, bouton « Texte » de 
   capture défilante y est absente, même avec une licence) ; `avec_gif` vaut
   `film::CONSTRUIT && systeme::vivant::disponible()`, `avec_video` de même et un codeur
   H.264 trouvé (`Evenement::VideoDisponible`, recherche lancée seulement si
-  `film::recherche_voulue(pro)`, fil `film-codeurs`). Tant que l'assemblage de la 0.7 n'a
-  pas ouvert `film::CONSTRUIT`, ni la vidéo ni le GIF ne paraissent, avec ou sans licence,
-  et la recherche du codeur ne part pas. Le menu,
+  `film::recherche_voulue(pro)`, fil `film-codeurs`). Sans licence, ni la vidéo ni le GIF
+  ne paraissent, avec ou sans codeur, et la recherche du codeur ne part pas : aucune DLL
+  de Media Foundation n'est chargée, `<local>/Films` n'est pas touché (test
+  `film_construit_rien_ne_change_sans_licence`). Le menu,
   les raccourcis, les lignes de Réglages › Raccourcis et le bouton « Texte » de l'éditeur
   (`texte_construit`) découlent de cette liste (`actions_en_vigueur`), jamais d'un second
   appel ; aucun `if pro` dispersé. Une fonction fermée est absente, comme Copier le texte
@@ -545,7 +546,7 @@ dans le dossier temporaire du système (`systeme::dossier_secours()`), sous le n
   `menu: capturer video|gif`, après `ATTENTE_MENU`, forment un **troisième groupe**, après
   celui de la dernière zone, avant « Historique » (`groupe_du_menu` : 1, 2 ou 3 ; un
   groupe vide n'a pas de séparateur). Seulement avec une licence, sous Windows, et pour la
-  vidéo un codeur H.264 ; tant que `film::CONSTRUIT` est faux (socle), jamais. Le menu est
+  vidéo un codeur H.264. Le menu est
   aussi refait à `VideoDisponible`. Un seul ordre pour le menu et pour Réglages ›
   Raccourcis (`page_reglages::ORDRE_RACCOURCIS`, test `ordre_des_raccourcis_comme_le_menu`).
   **Depuis la 0.5.2 (piste A « Liste », choisie le 13/11/2026)** : sous Windows et macOS, le
@@ -891,6 +892,66 @@ mesure-mediane <ms> fin-assemblee <ms>`, `defilante annulee (echap|ecrans|sessio
 `defilante impossible: (prise|page|fil|memoire)`, `menu ignore pendant la defilante`,
 `raccourci ignore pendant la defilante`. Ne doivent jamais paraître : `defilante <n>: fin
 deja rendue`, `defilante: fil arrete (panique)`.
+
+### 3.11 Vidéo et GIF (0.7)
+
+Décisions pures dans `application/film.rs` (cadrage F4, placement de la pilule, phases,
+`suite` : ce que fait chaque chose vue, lignes du journal) ; gestes, Finalisation, sortie et
+fils dans `application/geste_film.rs` ; les trois commandes de la page de contrôle
+(`film_pret`, `film_zone`, `film_action`) dans `application/fenetre_film.rs`. Modules
+utilisés : source à cadence fixe `systeme::vivant::Source` (A), Media Foundation
+`systeme::mp4` (B), micro `systeme::micro` (C), horloge, GIF et calage `film` (D), sortie
+`sortie::film` (E), fenêtre de contrôle `fenetres::film` (G), sélection en mode film (H),
+vignette d'un film (I).
+
+**Visée.** Comme la zone (Gel, photo, écran figé, Sélection en mode film, Échap réservé) ;
+la fenêtre de contrôle est créée cachée dans un tour de boucle à elle (`plus_tard_nomme`,
+trois essais à 150 ms). Au relâchement (`zone_choisie`) : `film::cadrer` (moins de 120 px
+logiques : agrandie autour du centre ; vidéo : côtés pairs, puis une fois réduite de
+moitié, côtés pairs, si le codeur refuse la taille ; GIF : côtés au plus 65 535), puis
+`EnregistrementChoisi` et le fil `film`. La première `film_zone` (pilule posée) montre la
+fenêtre et cache l'écran figé et la sélection ; sans pilule 2 s après le relâchement, le
+filet (tenu par le fil `film`) les cache et le film finit (`page`).
+
+**Fils** (F37). `film` : la cadence (`Fil<P: Prise>`, essayé sous Linux avec des faux) ;
+il prend l'image (amorce pendant l'attente et le décompte, jamais poussée), lit le
+pointeur, pousse dans la file bornée (2 à 4 images, 64 Mo ; pleine : pas sauté), relit
+session, veille, écrans (500 ms), place libre (5 s, marge `max(200 Mo, 10 s du débit)`),
+les limites (vidéo 60 min, GIF 60 s, pause 30 min) et fait l'aperçu. Aucune image avant
+`pret` (le fichier et le codeur prêts). `film-video` ou `film-gif` (`ecrire`) crée, nourrit
+et ferme le fichier ; lui seul touche Media Foundation (l'écrivain MP4 n'est pas `Send` :
+créé dans ce fil). `film-son` est celui de `systeme::micro`, ouvert par un petit fil
+`film-micro` ; `film-sortie` copie et enregistre après la vignette (F36). Une panique
+dans un fil rend une fin (`fil`). Une seule source de film à la fois : un jeton
+(`Jeton`) est pris avant `vivant::ouvrir_source` et rendu avec elle (à la fin du film, à
+l'annulation, ou à la fin du fil) ; un film qui suit de près attend la source précédente
+(2 s au plus), sans quoi Windows refuse la seconde duplication du même écran et le film
+passerait en BitBlt.
+
+**Fins** (F27, F28, F33 à F35). Gardées (Finalisation, puis vignette) : bouton
+« Arrêter », le même raccourci (choix B1), la limite, le disque, les écrans changés, la
+session verrouillée, la veille (annoncée, ou un saut de plus de 5 s entre deux tours), la
+source perdue 30 s puis 2 s après repli. Avant la première image, les mêmes causes et
+Échap, la croix du décompte, annulent (`film annule <phase> (<cause>)`). Arrêt de l'app et
+fin de session Windows (`gel::quand_session_finit`, posé dans `demarrer`) : `Finir(arret)`
+puis l'attente de la fermeture du fichier sur un canal, 3 s au plus ; le film reste dans
+`<local>/Films`. Le fichier pas fermé 10 s après la fin : `FinalisationImpossible`.
+
+**Sortie** (F21 à F26, F36 ; choix U4 provisoire). Un film va toujours dans Images ›
+BreezyShot, **déplacé** depuis `<local>/Films` ; la carte apprend le fichier enregistré
+(Copier, Lire et le glisser passent ensuite celui-là). La copie pose une liste de fichiers
+(`presse_papiers::copier_fichier`, l'objet `arboard` gardé, le seul du processus).
+« Enregistrer » cliqué pendant la sortie attend son bilan (`Geste::AttendreEnregistrement`)
+puis dit « Enregistrée », sans seconde copie. Sans vignette, le bandeau annonce au bilan.
+
+**Journal** (contrat §8) : `film <sorte> zone …`, `film page prete en <ms> ms`, `film
+decompte <s> s`, `film source <moyen>[ (<raison>)]`, `film source reprise apres <ms> ms`,
+`film codeur <codeur> <l>x<h> <k> kbit/s`, `film son oui|non`, `film micro
+ouvert|indisponible`, `film debut (…)`, `film fin <cause> duree <ms> ms images <n> sautees
+<n>`, `film fichier <sorte> <octets> octets en <ms> ms`, `chrono film …`, `film annule …`,
+`film impossible: <cause>`, `film arret: fichier ferme en <ms> ms`, `films nettoyes: …`.
+Ne doivent jamais paraître : `film: fil arrete (panique)`, `film: source precedente non
+rendue apres <ms> ms`.
 
 ## 4. Réglages (`reglages/`, étape 2)
 
