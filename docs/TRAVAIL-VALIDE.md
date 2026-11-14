@@ -864,3 +864,91 @@ hasard, surligneur gommé) et le journal du passage GitHub Windows.
   tourné que dans le passage GitHub de la demande de fusion.
 - Les pages de l'éditeur et de la sélection sont essayées dans Chromium sous Linux, pas
   dans WebView2.
+
+## MVP, version 0.6 « Capture défilante »
+
+Construite sur la branche `version-0.6` puis sur la branche du fil, la 0.6 porte la version
+à 0.6.0. Contrat : `contrat-0.6-capture-defilante.md`. Ses décisions viennent d'une sonde
+jouée deux fois sur la machine Windows de GitHub, qui n'est pas dans `main`.
+
+Ce qu'elle apporte (fonction Pro, ouverte par la licence) :
+
+- La capture défilante (piste C « Mixte », choisie par l'utilisateur) : Ctrl + Maj + 5 ou
+  le menu de l'icône, puis un clic sur la page ou un tracé. La page défile seule, l'aperçu
+  grandit à côté, et un cran de molette reprend la main. La capture finit seule en bas, à
+  16 384 px, ou par « Terminer » ou Entrée. Échap annule. L'en-tête collant n'est gardé
+  qu'une fois.
+- Sans licence, l'app se comporte comme la 0.5.4. Seule trace : les réglages passent en
+  version 5 (clé `raccourcis.defilante`). Une version plus ancienne les lit, mais ne les
+  écrit plus (dit dans les notes de version).
+
+Chaque chantier a été écrit par un agent sur le contrat, puis relu par un agent distinct
+(effort élevé). Les chantiers sont A (images vivantes), B (faire défiler une autre app),
+C (recollage), D (cœur), E (fenêtre de contrôle), F (sélection), G (réglages v5 et
+raccourci) et H (essai 14). Viennent ensuite :
+
+- une relecture d'ensemble (assemblage, fusion de `main` 0.5.2) ;
+- une relecture finale (fusions de `main` 0.5.3 et 0.5.4, derniers correctifs) ;
+- une relecture des correctifs de la CI.
+
+Toutes les relectures finales ont été faites par un agent distinct, en effort élevé.
+Rapports hors dépôt, un par chantier et par relecture.
+
+### Trouvé par les relectures, corrigé
+
+- C, bloquant : la première version du recollage pouvait rendre une image fausse sans le
+  dire. Il a été réécrit par un autre auteur, puis repris trois fois :
+  - page clairsemée, seuil d'encre 24, survol d'une ligne, cas WPF immobile ;
+  - vue unie jugée sur toute l'image ;
+  - listes zébrées.
+  Aucune image fausse n'a été trouvée sur du contenu depuis.
+- D, bloquant : une boucle d'attente sans retour bloquait la capture. Également corrigés :
+  - pas réduits après une mesure ambiguë ;
+  - un bas jamais conclu sur un seul grand pas ;
+  - l'étalonnage d'un décalage lu biaisé ;
+  - « Trop vite » seulement après une molette de l'utilisateur, y compris après un passage à
+    la main décidé par l'app.
+- B : touches tenues, premier plan, délais d'UI Automation. Pas de décalage lu quand la
+  hauteur de la page change pendant la capture (image paresseuse) : avant, la capture calait
+  et l'image était coupée.
+  Si la page change de hauteur loin du haut et que l'image gardée est unie, la capture
+  s'arrête et le dit (« La page a changé. L'image s'arrête ici. ») au lieu de finir en bas
+  avec une image coupée.
+- E : échelle, destruction, double fin, fenêtre retrouvée.
+- H : collision de casse `$M`/`$m` en PowerShell, pointeur, menu web.
+- Ensemble : surlignage de l'essai 13 perdu à une fusion, « Annoter » ignoré pendant une
+  défilante, menu de l'icône fermé au départ et exclu des captures.
+
+### Trouvé sur Windows, corrigé
+
+- Les exécutables de tests ne démarraient plus (`STATUS_ENTRYPOINT_NOT_FOUND`) :
+  `TaskDialogIndirect` manquait, faute de manifeste des contrôles communs v6. `comctl32` est
+  maintenant chargé à la demande. Le `.exe` publié garde son manifeste : il est sûr, d'après
+  la relecture et les essais 01 à 14.
+- Le test « mille prises sans fuite GDI » prenait 0 objet pour un échec. Défaut du test.
+- Les pages sous un clic n'étaient jamais trouvées à temps dans l'app réelle (0 page à
+  300 ms). Correction : un bassin durable de fils UI Automation, un parcours borné avec
+  cache, des pages tardives ajoutées jusqu'à 1,5 s, et un client raté recréé. L'essai 14
+  attend la page avant de cliquer.
+- `05-plein-ecran.ps1` : `$taille` masquait `$TAILLE` (casse ignorée), et le contrôle
+  passait toujours.
+
+Vérifications GitHub : tests du cœur (886) et d'architecture (2) ; douze essais de pages,
+`ECHECS : 0` ; essais Windows 01 à 14 sur le vrai `.exe`. Le passage 101 a été le premier
+entièrement vert ; c'est le dernier passage de la demande de fusion qui fait foi.
+
+### Limites acceptées
+
+- Haut de page blanc et décalage lu encore biaisé : l'image peut avoir de 30 à 60 lignes de
+  blanc en trop. Le texte n'est jamais coupé ni doublé.
+- Une page qui saute hors de portée avant le plus petit pas n'est pas retrouvée. La capture
+  s'arrête prudemment.
+- Edge et l'Explorateur sont joués par l'essai 14 et seulement notés : ils finissent seuls
+  en bas.
+
+### Non vérifié
+
+- Pavé tactile de précision, utilitaires de souris, Chrome, et un vrai PC à un écran 2K ou
+  à trois écrans : ces points sont dans la liste unique des tests à faire de l'utilisateur.
+- Une page réelle qui change de hauteur sous UI Automation, et un décalage lu biaisé
+  réel : simulés seulement.
