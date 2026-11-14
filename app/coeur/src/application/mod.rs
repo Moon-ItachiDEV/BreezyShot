@@ -49,6 +49,7 @@ pub mod journal;
 pub mod licence;
 pub mod page_reglages;
 pub mod texte;
+pub mod veille;
 pub mod vignette;
 pub mod zone;
 
@@ -775,6 +776,9 @@ fn demarrer(app: &AppHandle, commande: Commande, inconnus: &[String]) {
         .demarree
         .store(true, Ordering::SeqCst);
     log::info!("pret");
+    // Un raccourci qui « ne répond pas » : la veille dit au journal si la boucle principale
+    // (qui reçoit les appuis) est restée bloquée.
+    veille::lancer(app);
 
     // Capture demandée avant `pret` (`--capturer` au démarrage) : postée pour le tour
     // suivant, maintenant que tout est en place.
@@ -1659,6 +1663,10 @@ fn demarrer_capture(app: &AppHandle, mode: Mode) {
     let retardateur_s = reglages_lus(app).capture.retardateur_s;
     let declencheur = decompte::declencheur(mode, retardateur_s);
     if appliquer(app, declencheur).is_none() {
+        log::info!(
+            "{}",
+            veille::ligne_appui_ignore(mode.nom(), veille::etat_et_duree(app))
+        );
         log::info!("capture deja en cours: appui ignore");
         return;
     }

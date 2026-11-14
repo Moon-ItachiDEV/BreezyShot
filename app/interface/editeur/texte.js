@@ -69,7 +69,8 @@ export function installerTexte(ed, { appeler, message, reduites }) {
       s.textContent = "Texte";
       bTexte.append(picto("i-ocr"), s);
       bTexte.addEventListener("click", () => lancer());
-      enregistrer.before(bTexte);
+      // Avant « Glisser vers une appli », qui reste avec Enregistrer et Copier.
+      (document.getElementById("bouton-glisser") ?? enregistrer).before(bTexte);
     } else if (!voulu && bTexte) {
       bTexte.remove();
       bTexte = null;
@@ -80,6 +81,8 @@ export function installerTexte(ed, { appeler, message, reduites }) {
     if (bTexte) bTexte.disabled = ed.exportEnCours();
     enregistrer.disabled = !!l;
     bCopier.disabled = !!l;
+    const bGlisser = document.getElementById("bouton-glisser");
+    if (bGlisser) bGlisser.disabled = !!l;
   }
   // « Fermer » de la barre du haut pendant le calque : le calque se ferme d'abord, puis le
   // geste suit son cours (editeur.js).
