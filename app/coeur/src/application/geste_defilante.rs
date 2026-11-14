@@ -1122,6 +1122,13 @@ trait Atelier {
     fn finir(&mut self, derniere: &Pixels) -> Result<Pixels, String>;
 }
 
+/// La position lue, seulement si elle est utilisable (`Position::utilisable`) : une vue lue
+/// à 0 ou 100 % ne dit rien de la page, la capture fait comme sans position (dernière
+/// relecture, M1 : sinon « La page a changé » serait montré à tort et le repli sauté).
+fn lire_position<P: Pilote>(pilote: &P) -> Option<Position> {
+    pilote.position().filter(Position::utilisable)
+}
+
 /// L'assemblage de `defilement`.
 struct VraiAtelier(Option<Assemblage>);
 
@@ -1392,7 +1399,7 @@ impl<S: Source, P: Pilote, A: Atelier> Fil<S, P, A> {
                 }
             }
         }
-        let position_gardee = pilote.as_ref().and_then(|p| p.position());
+        let position_gardee = pilote.as_ref().and_then(|p| lire_position(p));
         Fil {
             numero: d.numero,
             zone: d.zone,
@@ -1732,12 +1739,18 @@ impl<S: Source, P: Pilote, A: Atelier> Fil<S, P, A> {
             return;
         }
         // Une seule lecture de la position par pas (elle peut être lente).
-        let position = self.pilote.as_ref().and_then(|p| p.position());
+        let position = self.pilote.as_ref().and_then(|p| lire_position(p));
         // Seulement le décalage lu, en pixels réels de la vue (B, defiler::decalage_px),
         // jamais le pas commandé (C), et seulement pour l'image de ce pas.
         let attendu =
             regles::lu_etalonne(regles::attendu(self.position_gardee, position), self.etalon);
-        let (mesure, attendu) = self.mesurer(attendu, position);
+        // La page a changé de hauteur depuis l'image gardée (un lu ne reste possible que
+        // depuis le haut) : ce lu ne passe qu'en second (F1).
+        let page_changee = matches!(
+            (self.position_gardee, position),
+            (Some(g), Some(m)) if defiler::page_changee(&g, &m)
+        );
+        let (mesure, attendu) = self.mesurer(attendu, position, page_changee);
         // Après la mesure : une image gardée rend la position gardée à jour, et le lu possible.
         self.course
             .regler_lu_perdu(regles::lu_perdu(self.position_gardee, position));
@@ -1830,9 +1843,11 @@ impl<S: Source, P: Pilote, A: Atelier> Fil<S, P, A> {
             self.demander_image(Instant::now() + regles::PRISE_POSEE);
             return;
         }
-        let (mesure, _) = self.mesurer(Attendu::Aucun, None);
+        let (mesure, _) = self.mesurer(Attendu::Aucun, None, false);
         let position = match mesure {
-            Mesure::Immobile | Mesure::Ambigue => self.pilote.as_ref().and_then(|p| p.position()),
+            Mesure::Immobile | Mesure::Ambigue => {
+                self.pilote.as_ref().and_then(|p| lire_position(p))
+            }
             _ => None,
         };
         self.vu_en_attente = Some(Vu::Image(mesure, position));
@@ -1840,19 +1855,46 @@ impl<S: Source, P: Pilote, A: Atelier> Fil<S, P, A> {
 
     /// Mesure `image` contre la dernière image gardée et l'ajoute (D10 à D13).
     /// Rend aussi l'attendu retenu : `Aucun` si la mesure a été refaite sans le lu.
-    fn mesurer(&mut self, attendu: Attendu, position: Option<Position>) -> (Mesure, Attendu) {
+    ///
+    /// `page_changee` : la page a changé de hauteur depuis l'image gardée, et le lu ne vient
+    /// que du haut de la page (`defiler::decalage_px`). Il est exact pour le défilement, pas
+    /// forcément pour le contenu (bandeau tardif, en-tête qui se replie : l'image a bougé de
+    /// lu ± dh). L'image décide d'abord, sans lui ; il ne sert que si elle ne peut pas
+    /// décider (`Ambigue` : une vue unie, que seul un lu traverse), et il n'étalonne jamais
+    /// (dernière relecture, F1).
+    fn mesurer(
+        &mut self,
+        attendu: Attendu,
+        position: Option<Position>,
+        page_changee: bool,
+    ) -> (Mesure, Attendu) {
         if self.fini {
             return (Mesure::Immobile, attendu);
         }
         let debut = Instant::now();
         let fixes = self.atelier.fixes();
         let mut attendu = attendu;
-        let mut mesure = self
-            .atelier
-            .mesurer(&self.reference, &self.image, fixes, attendu);
-        if let (Attendu::Lu(e), None) = (attendu, self.etalon) {
-            if e != 0 {
-                (mesure, attendu) = self.etalonner(e, mesure, fixes);
+        let mut mesure;
+        if let (Attendu::Lu(e), true) = (attendu, page_changee) {
+            mesure = self
+                .atelier
+                .mesurer(&self.reference, &self.image, fixes, Attendu::Aucun);
+            if mesure == Mesure::Ambigue {
+                log::info!("defilante: page changee, lu de {e} px seulement pour une vue unie");
+                mesure = self
+                    .atelier
+                    .mesurer(&self.reference, &self.image, fixes, attendu);
+            } else {
+                attendu = Attendu::Aucun;
+            }
+        } else {
+            mesure = self
+                .atelier
+                .mesurer(&self.reference, &self.image, fixes, attendu);
+            if let (Attendu::Lu(e), None) = (attendu, self.etalon) {
+                if e != 0 {
+                    (mesure, attendu) = self.etalonner(e, mesure, fixes);
+                }
             }
         }
         self.durees_mesure.push(debut.elapsed());
@@ -2975,20 +3017,41 @@ mod tests {
         x ^ (x >> 15)
     }
 
-    /// Les lignes `y..y + hauteur` de la page de texte, blanches au-dessus de `blanc`.
+    /// Un point d'encre de la page de texte, ligne `yp` (blanche au-dessus de `blanc`).
+    fn encre(x: u32, yp: u32, blanc: i32) -> bool {
+        let bande = yp / 20;
+        let fin = 30 + hachage(bande, 0, 3) % 120;
+        (yp as i32) >= blanc
+            && (3..15).contains(&(yp % 20))
+            && (10..10 + fin).contains(&x)
+            && !hachage(bande, x / 6, 1).is_multiple_of(3)
+            && !hachage(x, yp, 2).is_multiple_of(4)
+    }
+
+    /// Les lignes `y..y + hauteur` de la page de texte d'origine, blanches au-dessus de
+    /// `blanc`.
     fn lignes_de_texte(y: i32, hauteur: i32, blanc: i32) -> Pixels {
+        lignes_de_page(y, hauteur, blanc, None)
+    }
+
+    /// Les mêmes lignes, une bande `(ligne, dh)` insérée (`dh` > 0, un autre texte) ou
+    /// retirée (`dh` < 0).
+    fn lignes_de_page(y: i32, hauteur: i32, blanc: i32, insere: Option<(i32, i32)>) -> Pixels {
         let mut rgba = Vec::with_capacity((TEXTE_L * hauteur as u32 * 4) as usize);
         for r in 0..hauteur {
-            let yp = (y + r) as u32;
-            let bande = yp / 20;
-            let fin = 30 + hachage(bande, 0, 3) % 120;
+            let yp = y + r;
+            let (origine, inseree) = match insere {
+                Some((a, dh)) if yp >= a + dh.max(0) => (yp - dh, false),
+                Some((a, _)) if yp >= a => (yp - a, true),
+                _ => (yp, false),
+            };
             for x in 0..TEXTE_L {
-                let encre = (yp as i32) >= blanc
-                    && (3..15).contains(&(yp % 20))
-                    && (10..10 + fin).contains(&x)
-                    && !hachage(bande, x / 6, 1).is_multiple_of(3)
-                    && !hachage(x, yp, 2).is_multiple_of(4);
-                let c = if encre { 30 } else { 250 };
+                let e = if inseree {
+                    encre(x, origine as u32 + 1_000_000, 0)
+                } else {
+                    encre(x, origine as u32, blanc)
+                };
+                let c = if e { 30 } else { 250 };
                 rgba.extend_from_slice(&[c, c, c, 255]);
             }
         }
@@ -2999,15 +3062,48 @@ mod tests {
         }
     }
 
-    struct PageTexte {
-        y: i32,
+    /// La page de texte et ce qui lui arrive pendant la capture.
+    #[derive(Clone, Copy)]
+    struct Reglage {
         /// Hauteur de la page moins la vue.
         parcours: i32,
-        pas: u32,
-        /// (numéro du pas, pixels ajoutés au bas de la page pendant ce pas).
-        grossit: Option<(u32, i32)>,
         /// Lignes blanches en haut de la page.
         blanc: i32,
+        /// `hauteur_vue` annoncée / hauteur réelle de la vue.
+        biais: f64,
+        /// (numéro du pas, pixels ajoutés au bas de la page pendant ce pas).
+        grossit: Option<(u32, i32)>,
+        /// (numéro du pas, ligne, pixels insérés ou retirés si négatif, avant le défilement
+        /// du pas). Au-dessus de la vue, la bande ne la bouge pas (ancrage du défilement de
+        /// Chromium) ; insérée avant le défilement plus bas que le haut de la vue, elle
+        /// décale ce que la vue montre.
+        insertion: Option<(u32, i32, i32, bool)>,
+        /// `vue` annoncée telle quelle (inutilisable : 0 ou 100).
+        vue_fixe: Option<f64>,
+        /// Le premier moyen ne fait rien, le second marche.
+        premier_sans_effet: bool,
+    }
+
+    fn reglage(parcours: i32) -> Reglage {
+        Reglage {
+            parcours,
+            blanc: 0,
+            biais: 1.0,
+            grossit: None,
+            insertion: None,
+            vue_fixe: None,
+            premier_sans_effet: false,
+        }
+    }
+
+    struct PageTexte {
+        y: i32,
+        parcours: i32,
+        pas: u32,
+        insere: Option<(i32, i32)>,
+        /// Le moyen en cours : 0 `Message`, 1 `Automation`, plus aucun ensuite.
+        moyen: usize,
+        r: Reglage,
     }
 
     struct SourceTexte(Arc<Mutex<PageTexte>>);
@@ -3015,41 +3111,66 @@ mod tests {
     impl Source for SourceTexte {
         fn prendre(&mut self, dest: &mut Pixels) -> Result<Duration, String> {
             let p = self.0.lock().unwrap();
-            *dest = lignes_de_texte(p.y, TEXTE_V, p.blanc);
+            *dest = lignes_de_page(p.y, TEXTE_V, p.r.blanc, p.insere);
             Ok(Duration::from_millis(1))
         }
     }
 
-    struct PiloteTexte {
-        page: Arc<Mutex<PageTexte>>,
-        /// `hauteur_vue` annoncée / hauteur réelle de la vue.
-        biais: f64,
-    }
+    struct PiloteTexte(Arc<Mutex<PageTexte>>);
 
     impl Pilote for PiloteTexte {
         fn moyen(&self) -> Option<Moyen> {
-            Some(Moyen::Message)
+            match self.0.lock().unwrap().moyen {
+                0 => Some(Moyen::Message),
+                1 => Some(Moyen::Automation),
+                _ => None,
+            }
         }
         fn abandonner(&mut self) -> Option<Moyen> {
-            None
+            self.0.lock().unwrap().moyen += 1;
+            self.moyen()
         }
         fn descendre(&mut self, pixels: i32) -> Result<Envoi, String> {
-            let mut p = self.page.lock().unwrap();
+            let mut p = self.0.lock().unwrap();
             p.pas += 1;
-            if let Some((n, dh)) = p.grossit {
+            if p.r.premier_sans_effet && p.moyen == 0 {
+                return Ok(Envoi::Envoye);
+            }
+            if let Some((n, dh)) = p.r.grossit {
                 if p.pas == n {
                     p.parcours += dh;
                 }
             }
+            let inserer = |p: &mut PageTexte| {
+                if let Some((n, a, dh, _)) = p.r.insertion {
+                    if p.pas == n && p.insere.is_none() {
+                        p.insere = Some((a, dh));
+                        p.parcours += dh;
+                        if a <= p.y {
+                            p.y = (p.y + dh).clamp(0, p.parcours);
+                        }
+                    }
+                }
+            };
+            let avant = p.r.insertion.is_some_and(|i| i.3);
+            if avant {
+                inserer(&mut p);
+            }
             p.y = (p.y + pixels).clamp(0, p.parcours);
+            if !avant {
+                inserer(&mut p);
+            }
             Ok(Envoi::Envoye)
         }
         fn position(&self) -> Option<Position> {
-            let p = self.page.lock().unwrap();
+            let p = self.0.lock().unwrap();
             Some(Position {
                 pour_cent: f64::from(p.y) * 100.0 / f64::from(p.parcours),
-                vue: f64::from(TEXTE_V) * 100.0 / f64::from(p.parcours + TEXTE_V),
-                hauteur_vue: (f64::from(TEXTE_V) * self.biais).round() as i32,
+                vue: p
+                    .r
+                    .vue_fixe
+                    .unwrap_or(f64::from(TEXTE_V) * 100.0 / f64::from(p.parcours + TEXTE_V)),
+                hauteur_vue: (f64::from(TEXTE_V) * p.r.biais).round() as i32,
             })
         }
         fn constater(&mut self, _: u32) {}
@@ -3066,23 +3187,52 @@ mod tests {
         page: i32,
         y: i32,
         messages: Vec<Option<&'static str>>,
+        /// Le moyen à la fin (0 : le premier).
+        moyen: usize,
+    }
+
+    impl Bilan {
+        /// Fin seule, toute la page d'origine au pixel près, aucun message, aucun repli.
+        fn complete(&self, r: &Reglage) -> bool {
+            self.seule
+                && self.messages.is_empty()
+                && self.moyen == 0
+                && *self.image == lignes_de_texte(0, r.parcours + TEXTE_V, r.blanc)
+        }
+
+        fn resume(&self) -> String {
+            format!(
+                "seule={} image={} page={} y={} moyen={} messages={:?}",
+                self.seule, self.image.hauteur, self.page, self.y, self.moyen, self.messages
+            )
+        }
+    }
+
+    fn capturer_texte(parcours: i32, grossit: Option<(u32, i32)>, blanc: i32, biais: f64) -> Bilan {
+        capturer(Reglage {
+            blanc,
+            biais,
+            grossit,
+            ..reglage(parcours)
+        })
     }
 
     /// Une capture défilante de la page de texte, avec la vraie mesure et le vrai
     /// assemblage. Si plus aucun pas ne part pendant 3 s (la capture a calé), l'essai
     /// clique « Terminer ».
-    fn capturer_texte(parcours: i32, grossit: Option<(u32, i32)>, blanc: i32, biais: f64) -> Bilan {
+    fn capturer(r: Reglage) -> Bilan {
         let page = Arc::new(Mutex::new(PageTexte {
             y: 0,
-            parcours,
+            parcours: r.parcours,
             pas: 0,
-            grossit,
-            blanc,
+            insere: None,
+            moyen: 0,
+            r,
         }));
         let (envoi, reception) = mpsc::channel();
         let (vers_essai, signaux) = mpsc::channel();
         let arret = Arc::new(AtomicBool::new(false));
-        let premiere = lignes_de_texte(0, TEXTE_V, blanc);
+        let premiere = lignes_de_texte(0, TEXTE_V, r.blanc);
         let d = Depart {
             numero: 1,
             zone: Rect {
@@ -3108,10 +3258,7 @@ mod tests {
             }),
         };
         let source = SourceTexte(Arc::clone(&page));
-        let pilote = PiloteTexte {
-            page: Arc::clone(&page),
-            biais,
-        };
+        let pilote = PiloteTexte(Arc::clone(&page));
         let assemblage = Assemblage::nouveau(&premiere, regles::limite(TEXTE_L)).unwrap();
         let fil = std::thread::spawn(move || {
             Fil::nouveau(
@@ -3160,6 +3307,7 @@ mod tests {
             page: p.parcours + TEXTE_V,
             y: p.y,
             messages,
+            moyen: p.moyen,
         }
     }
 
@@ -3259,5 +3407,109 @@ mod tests {
             *b.image == lignes_de_texte(0, h, 450),
             "ce qui est rendu est exact"
         );
+    }
+
+    /// Les scénarios de la dernière relecture (F1) pour un parcours : depuis le haut, la page
+    /// change de hauteur pendant le premier pas, au-dessus de la vue (bande ancrée) ou dans
+    /// la première vue. Le lu depuis le haut est exact pour le défilement, faux de `dh` pour
+    /// le contenu : il ne doit ni décider ni étalonner. Rend les scénarios incomplets.
+    fn page_changee_au_premier_pas(parcours: i32) -> Vec<String> {
+        let mut rates = Vec::new();
+        for (dans_la_vue, dhs) in [(false, &[20, 40, 100, 200][..]), (true, &[20, 40, 100][..])] {
+            for &dh in dhs {
+                let r = Reglage {
+                    insertion: Some((1, 100, dh, dans_la_vue)),
+                    ..reglage(parcours)
+                };
+                let b = capturer(r);
+                if !b.complete(&r) {
+                    rates.push(format!(
+                        "parcours {parcours}, {} {dh} px : {}",
+                        if dans_la_vue {
+                            "dans la vue"
+                        } else {
+                            "ancrée"
+                        },
+                        b.resume()
+                    ));
+                }
+            }
+        }
+        rates
+    }
+
+    #[test]
+    fn fil_page_changee_au_premier_pas_parcours_450() {
+        let rates = page_changee_au_premier_pas(450);
+        assert!(rates.is_empty(), "{rates:#?}");
+    }
+
+    #[test]
+    fn fil_page_changee_au_premier_pas_parcours_600() {
+        let rates = page_changee_au_premier_pas(600);
+        assert!(rates.is_empty(), "{rates:#?}");
+    }
+
+    #[test]
+    fn fil_page_changee_au_premier_pas_parcours_900() {
+        let rates = page_changee_au_premier_pas(900);
+        assert!(rates.is_empty(), "{rates:#?}");
+    }
+
+    #[test]
+    fn fil_page_changee_au_premier_pas_parcours_2400() {
+        let rates = page_changee_au_premier_pas(2400);
+        assert!(rates.is_empty(), "{rates:#?}");
+    }
+
+    #[test]
+    fn fil_entete_qui_se_replie_au_premier_pas() {
+        // Dernière relecture, F1 : 60 puis 20 px du haut de la page disparaissent pendant le
+        // premier pas (en-tête qui se replie), l'ancrage garde la vue. Avant : étalon faux
+        // (1,364 ou 2,000), la capture calait en silence.
+        for dh in [-60, -20] {
+            let r = Reglage {
+                insertion: Some((1, 0, dh, false)),
+                ..reglage(2400)
+            };
+            let b = capturer(r);
+            assert!(b.complete(&r), "{dh} px : {}", b.resume());
+        }
+    }
+
+    #[test]
+    fn fil_vue_inutilisable_comme_sans_position() {
+        // Dernière relecture, M1 : la vue est lue à 100 % alors que la page défile. Ce n'est
+        // pas une page qui a changé : jamais « La page a changé », et le repli vers le moyen
+        // suivant est tenté quand le premier ne fait rien.
+        let texte = Reglage {
+            vue_fixe: Some(100.0),
+            ..reglage(2400)
+        };
+        let b = capturer(texte);
+        assert!(b.complete(&texte), "{}", b.resume());
+        for premier_sans_effet in [false, true] {
+            let r = Reglage {
+                vue_fixe: Some(100.0),
+                blanc: 450,
+                premier_sans_effet,
+                ..reglage(2400)
+            };
+            let b = capturer(r);
+            assert!(
+                !b.messages.contains(&Some(regles::TEXTE_PAGE_CHANGEE)),
+                "{}",
+                b.resume()
+            );
+            if premier_sans_effet {
+                assert!(b.moyen >= 1, "le moyen suivant est essayé : {}", b.resume());
+            }
+            let h = b.image.hauteur as i32;
+            assert!(
+                *b.image == lignes_de_texte(0, h, 450),
+                "ce qui est rendu est exact : {}",
+                b.resume()
+            );
+        }
     }
 }

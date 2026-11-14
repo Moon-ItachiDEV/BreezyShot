@@ -191,6 +191,35 @@ pub struct Position {
     pub hauteur_vue: i32,
 }
 
+impl Position {
+    /// Une position dont on peut tirer des pixels : pour cent dans [0, 100], `vue` dans
+    /// ]0, 100[ et une vue de hauteur positive. Une vue lue à 0 ou 100 % alors que la page
+    /// défile ne dit rien de la page : le cœur fait alors comme sans position (dernière
+    /// relecture, M1), plutôt que de croire que la page a changé.
+    pub fn utilisable(&self) -> bool {
+        (0.0..=100.0).contains(&self.pour_cent)
+            && hauteur_page(self.vue, self.hauteur_vue).is_some()
+    }
+}
+
+/// Vrai si la page a changé de hauteur entre deux positions utilisables, de plus de
+/// `PAGE_CHANGEE_PX` (avec la même hauteur de vue), y compris depuis le haut de la page,
+/// où `decalage_px` rend quand même un lu (dernière relecture, F1 : ce lu est exact pour
+/// le défilement, pas forcément pour le contenu, quand la page a bougé au-dessus de la vue
+/// ou dans la première vue).
+pub fn page_changee(avant: &Position, apres: &Position) -> bool {
+    if !(avant.utilisable() && apres.utilisable()) {
+        return false;
+    }
+    match (
+        hauteur_page(avant.vue, apres.hauteur_vue),
+        hauteur_page(apres.vue, apres.hauteur_vue),
+    ) {
+        (Some(a), Some(b)) => (a - b).abs() > PAGE_CHANGEE_PX,
+        _ => false,
+    }
+}
+
 /// Le décalage de la page entre deux positions lues, en pixels réels, positif quand la page
 /// est descendue : `(après − avant) / 100 × hauteur_vue × (100 / vue − 1)`, la page faisant
 /// `hauteur_vue × 100 / vue`. `None` si une vue est inutilisable (`vue` hors de ]0, 100[,
@@ -589,10 +618,12 @@ fn hauteur_page(vue: f64, hauteur_vue: i32) -> Option<f64> {
 ///
 /// Depuis le haut (`avant.pour_cent` nul), rien n'est au-dessus : la position d'avant vaut
 /// 0 px quelle que soit la hauteur de la page, et celle d'après se lit avec sa propre page,
-/// `pour_cent × (page − vue)`. Le lu y reste exact (une page qui charge au premier pas,
-/// relecture des correctifs C1 : sans lu, une image gardée unie perdait toute la suite).
-/// Une page qui grandit dans la vue gardée elle-même décale ce qu'elle montrait : sur du
-/// contenu, la mesure contredit le lu (`Ambigue`), elle n'invente rien.
+/// `pour_cent × (page − vue)`. Ce lu est exact pour le défilement (une page qui charge au
+/// premier pas, relecture des correctifs C1 : sans lu, une image gardée unie perdait toute
+/// la suite), mais pas pour le contenu si la page a bougé au-dessus de la vue ou dans la
+/// première vue (bandeau tardif, en-tête qui se replie) : l'image a bougé de lu ± dh. Le
+/// fil ne s'en sert donc qu'en second, quand la mesure sans lu ne peut pas décider, et
+/// jamais pour étalonner (`page_changee`, dernière relecture F1).
 #[cfg_attr(not(windows), allow(dead_code))]
 fn pixels_entre(avant: Position, apres: Position, hauteur_vue: i32) -> Option<f64> {
     if avant.pour_cent < 0.0 || apres.pour_cent < 0.0 {
@@ -1264,6 +1295,36 @@ mod tests {
         assert_eq!(decalage_px(&lecture(150.0, 2500.0), &haut), None);
         // La vue d'après doit rester lisible.
         assert_eq!(decalage_px(&haut, &pos(10.0, 100.0, 300)), None);
+    }
+
+    #[test]
+    fn page_changee_aussi_depuis_le_haut() {
+        let lecture =
+            |y: f64, parcours: f64| pos(y * 100.0 / parcours, 30_000.0 / (parcours + 300.0), 300);
+        let haut = lecture(0.0, 2400.0);
+        assert!(page_changee(&haut, &lecture(150.0, 2500.0)));
+        assert!(page_changee(
+            &lecture(150.0, 2400.0),
+            &lecture(300.0, 2340.0)
+        ));
+        assert!(!page_changee(&haut, &lecture(150.0, 2400.0)));
+        assert!(!page_changee(&haut, &lecture(150.0, 2401.0)), "à 2 px près");
+        // Une vue inutilisable ne dit pas que la page a changé.
+        assert!(!page_changee(&haut, &pos(10.0, 100.0, 300)));
+        assert!(!page_changee(&pos(0.0, 0.0, 300), &haut));
+        assert!(!page_changee(&haut, &pos(10.0, 10.0, 0)));
+    }
+
+    #[test]
+    fn position_utilisable() {
+        assert!(pos(0.0, 10.0, 300).utilisable());
+        assert!(pos(100.0, 99.0, 1).utilisable());
+        assert!(!pos(10.0, 100.0, 300).utilisable());
+        assert!(!pos(10.0, 0.0, 300).utilisable());
+        assert!(!pos(10.0, f64::NAN, 300).utilisable());
+        assert!(!pos(10.0, 10.0, 0).utilisable());
+        assert!(!pos(-1.0, 10.0, 300).utilisable());
+        assert!(!pos(f64::NAN, 10.0, 300).utilisable());
     }
 
     #[test]
