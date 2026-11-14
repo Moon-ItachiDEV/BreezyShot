@@ -91,10 +91,21 @@ fn est_reserve(nom: &str) -> bool {
 
 /// Premier chemin libre : `nom.png`, puis `nom (2).png`, `nom (3).png`…
 pub fn chemin_libre(dossier: &Path, nom: &str, existe: impl Fn(&Path) -> bool) -> PathBuf {
-    let mut chemin = dossier.join(format!("{nom}.png"));
+    chemin_libre_ext(dossier, nom, "png", existe)
+}
+
+/// Premier chemin libre avec l'extension donnee (0.7 : `mp4`, `gif`) : `nom.<ext>`, puis
+/// `nom (2).<ext>`, `nom (3).<ext>`…
+pub fn chemin_libre_ext(
+    dossier: &Path,
+    nom: &str,
+    extension: &str,
+    existe: impl Fn(&Path) -> bool,
+) -> PathBuf {
+    let mut chemin = dossier.join(format!("{nom}.{extension}"));
     let mut n = 2;
     while existe(&chemin) && n <= ESSAIS_MAX {
-        chemin = dossier.join(format!("{nom} ({n}).png"));
+        chemin = dossier.join(format!("{nom} ({n}).{extension}"));
         n += 1;
     }
     chemin
