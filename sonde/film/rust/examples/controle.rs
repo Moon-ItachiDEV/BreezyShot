@@ -1,7 +1,7 @@
 //! Fenêtre de contrôle du film (S1 (a) et (d), S5) et lecture d'un fichier dans une vue
 //! WebView2 (S2 point 9, S4). Windows seulement.
 //!
-//!   controle --genre film --etat E --commandes C [--animation 0|1] --zone x,y,l,h
+//!   controle --genre film --etat E --commandes C [--animation 0|1] [--calcul 1] --zone x,y,l,h
 //!            --pilule x,y,l,h
 //!   controle --genre lecture --etat E --fichier F --type video|gif [--temoin x,y]
 //!
@@ -131,7 +131,10 @@ mod windows_seul {
             )),
         });
         let r = match genre.as_str() {
-            "film" => film(a.get("animation").map(String::as_str) != Some("0")),
+            "film" => film(
+                a.get("animation").map(String::as_str) != Some("0"),
+                a.get("calcul").map(String::as_str) == Some("1"),
+            ),
             "lecture" => lecture(
                 a.get("fichier").cloned().unwrap_or_default(),
                 a.get("type").cloned().unwrap_or_else(|| "video".into()),
@@ -303,7 +306,9 @@ mod windows_seul {
     }
 
     /// La page du film : cadre de la zone, pilule (point qui respire, durée, deux boutons).
-    fn page_film(b: Rect, zone: Rect, pilule: Rect, animation: bool) -> String {
+    /// `calcul` : la page calcule exprès (10 ms toutes les 20 ms), pour contrôler que la
+    /// mesure du processeur des processus WebView2 voit bien le travail de la page.
+    fn page_film(b: Rect, zone: Rect, pilule: Rect, animation: bool, calcul: bool) -> String {
         format!(
             r#"<!doctype html><html><head><meta charset="utf-8"><style>
 html,body{{margin:0;height:100%;overflow:hidden;background:transparent;font:14px "Segoe UI",sans-serif}}
@@ -327,6 +332,7 @@ document.addEventListener('wheel',function(){{window.ipc.postMessage('molette');
 document.addEventListener('mousedown',function(){{window.ipc.postMessage('clic');}});
 document.addEventListener('keydown',function(){{window.ipc.postMessage('touche');}});
 window.ipc.postMessage('reduit '+(matchMedia('(prefers-reduced-motion: reduce)').matches?1:0));
+{calcul}
 window.ipc.postMessage('dom');
 </script></body></html>"#,
             zx = zone.x - b.x - 2,
@@ -339,10 +345,15 @@ window.ipc.postMessage('dom');
             ph = pilule.h,
             rr = pilule.h / 2,
             classe = if animation { "" } else { "sans" },
+            calcul = if calcul {
+                "var x=0;setInterval(function(){var f=performance.now()+10;while(performance.now()<f){x=(x*1103515245+12345)%2147483648;}},20);"
+            } else {
+                ""
+            },
         )
     }
 
-    fn film(animation: bool) -> Result<(), String> {
+    fn film(animation: bool, calcul: bool) -> Result<(), String> {
         let c = CONFIG.get().ok_or("config")?;
         let b = bureau();
         let boucle = EventLoopBuilder::<String>::with_user_event().build();
@@ -356,7 +367,7 @@ window.ipc.postMessage('dom');
         let v = WebViewBuilder::new_with_web_context(&mut contexte)
             .with_transparent(true)
             .with_focused(false)
-            .with_html(page_film(b, c.zone, c.pilule, animation))
+            .with_html(page_film(b, c.zone, c.pilule, animation, calcul))
             .with_ipc_handler(move |req| {
                 let _ = proxy.send_event(req.body().clone());
             })

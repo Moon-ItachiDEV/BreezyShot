@@ -350,6 +350,24 @@ mod windows_seul {
                         MFCreateSinkWriterFromMediaSink(&sink, &a),
                     )?;
                     (sw, 0)
+                } else if o.moov_debut {
+                    // L'index au début fait relire le fichier par Finalize : ouvert en
+                    // lecture et écriture (par l'URL seule, Finalize rendait 0x80070005).
+                    let flux = ctx(
+                        "MFCreateFile (lecture et écriture)",
+                        MFCreateFile(
+                            MF_ACCESSMODE_READWRITE,
+                            MF_OPENMODE_DELETE_IF_EXIST,
+                            MF_FILEFLAGS_NONE,
+                            &url,
+                        ),
+                    )?;
+                    let sw = ctx(
+                        "MFCreateSinkWriterFromURL (flux)",
+                        MFCreateSinkWriterFromURL(&url, &flux, &a),
+                    )?;
+                    let v = ctx("AddStream", sw.AddStream(&type_video(l, h, true, o)?))?;
+                    (sw, v)
                 } else {
                     let sw = ctx(
                         "MFCreateSinkWriterFromURL",
@@ -508,6 +526,9 @@ mod windows_seul {
     pub fn principal(a: &HashMap<String, String>) -> R<()> {
         let etape = a.get("etape").cloned().unwrap_or_default();
         println!("etape {etape}");
+        if let (Some(p), Ok(mut x)) = (a.get("png-relues"), PNG_RELUES.lock()) {
+            *x = Some((PathBuf::from(p), 0));
+        }
         match etape.as_str() {
             "micro" => return micro(),
             "preparation" => return preparation(a),
@@ -953,16 +974,108 @@ mod windows_seul {
         erreur: Option<String>,
     }
 
+    /// Préfixe des PNG des images relues 0, 1 et 150 (`--png-relues <préfixe>`), et le
+    /// nombre de relectures déjà faites dans ce processus (un fichier par relecture).
+    static PNG_RELUES: std::sync::Mutex<Option<(PathBuf, u32)>> = std::sync::Mutex::new(None);
+
+    /// Géométrie du type courant de la sortie du lecteur : taille du tampon, pas d'une
+    /// ligne (`MF_MT_DEFAULT_STRIDE`, négatif : de bas en haut) et zone d'affichage
+    /// (`MF_MT_MINIMUM_DISPLAY_APERTURE`, sinon l'image entière).
+    #[derive(Clone, Copy, PartialEq)]
+    struct Geometrie {
+        l: u32,
+        h: u32,
+        stride: Option<i32>,
+        ox: u32,
+        oy: u32,
+        al: u32,
+        ah: u32,
+        ouverture_lue: bool,
+    }
+
+    /// # Safety
+    /// `c` est un type de média vivant.
+    unsafe fn geometrie(c: &IMFMediaType) -> R<Geometrie> {
+        // SAFETY : lectures d'attributs d'un type vivant, tampon de la taille d'un
+        // MFVideoArea.
+        unsafe {
+            let fs = ctx("MF_MT_FRAME_SIZE", c.GetUINT64(&MF_MT_FRAME_SIZE))?;
+            let (l, h) = ((fs >> 32) as u32, (fs & 0xFFFF_FFFF) as u32);
+            let stride = c.GetUINT32(&MF_MT_DEFAULT_STRIDE).ok().map(|s| s as i32);
+            let mut g = Geometrie {
+                l,
+                h,
+                stride,
+                ox: 0,
+                oy: 0,
+                al: l,
+                ah: h,
+                ouverture_lue: false,
+            };
+            let mut zone = [0u8; std::mem::size_of::<MFVideoArea>()];
+            let mut n = 0u32;
+            if c.GetBlob(&MF_MT_MINIMUM_DISPLAY_APERTURE, &mut zone, Some(&mut n))
+                .is_ok()
+                && n as usize >= zone.len()
+            {
+                let v: MFVideoArea = std::ptr::read_unaligned(zone.as_ptr() as *const MFVideoArea);
+                let (ox, oy) = (v.OffsetX.value.max(0) as u32, v.OffsetY.value.max(0) as u32);
+                let (al, ah) = (v.Area.cx.max(0) as u32, v.Area.cy.max(0) as u32);
+                if al > 0 && ah > 0 && ox + al <= l && oy + ah <= h {
+                    g.ox = ox;
+                    g.oy = oy;
+                    g.al = al;
+                    g.ah = ah;
+                }
+                g.ouverture_lue = true;
+            }
+            Ok(g)
+        }
+    }
+
+    /// # Safety
+    /// `r` est un lecteur vivant ; `flux` son flux vidéo.
+    unsafe fn poser_rgb32(r: &IMFSourceReader, flux: u32) -> R<()> {
+        // SAFETY : type créé ici, donné au lecteur.
+        unsafe {
+            let t = ctx("MFCreateMediaType", MFCreateMediaType())?;
+            ctx(
+                "MF_MT_MAJOR_TYPE",
+                t.SetGUID(&MF_MT_MAJOR_TYPE, &MFMediaType_Video),
+            )?;
+            ctx(
+                "MF_MT_SUBTYPE",
+                t.SetGUID(&MF_MT_SUBTYPE, &MFVideoFormat_RGB32),
+            )?;
+            ctx(
+                "SetCurrentMediaType (RGB32)",
+                r.SetCurrentMediaType(flux, None, &t),
+            )
+        }
+    }
+
     /// Relit le fichier (RGB32 par le processeur vidéo du lecteur) et passe chaque image
-    /// gardée (`garder(i)`) à `voir(i, horodatage, image BGRA de haut en bas)` ; les
-    /// autres images sont comptées sans être copiées. Une erreur après l'ouverture
-    /// (fichier coupé) est rendue dans `erreur`, avec ce qui a été lu jusque-là.
+    /// gardée (`garder(i)`) à `voir(i, horodatage, image BGRA de haut en bas, largeur)` ;
+    /// les autres images sont comptées sans être copiées. La géométrie (taille, pas d'une
+    /// ligne, zone d'affichage) est relue au départ et à chaque changement de type signalé
+    /// par `ReadSample` ; chacune est écrite (`relu_geometrie`). L'image rendue est la zone
+    /// d'affichage, copiée ligne par ligne avec le pas réel du tampon. Sans
+    /// `MF_PD_DURATION` (MP4 fragmenté coupé), la durée vaut 0 et la lecture continue.
+    /// Une erreur après l'ouverture (fichier coupé) est rendue dans `erreur`, avec ce qui
+    /// a été lu jusque-là.
     fn relire_avec(
         chemin: &Path,
         garder: impl Fn(u64) -> bool,
         mut voir: impl FnMut(u64, i64, &[u8], usize),
     ) -> R<Lecture> {
-        // SAFETY : objets COM créés ici ; tampons verrouillés le temps de la copie.
+        let pngs = PNG_RELUES.lock().ok().and_then(|mut x| {
+            x.as_mut().map(|(p, n)| {
+                *n += 1;
+                (p.clone(), *n)
+            })
+        });
+        // SAFETY : objets COM créés ici ; tampons verrouillés le temps de la copie, chaque
+        // ligne copiée vérifiée contre la longueur du tampon.
         unsafe {
             let at = attributs(1)?;
             ctx(
@@ -977,33 +1090,47 @@ mod windows_seul {
             let flux = MF_SOURCE_READER_FIRST_VIDEO_STREAM.0 as u32;
             let _ = r.SetStreamSelection(MF_SOURCE_READER_ALL_STREAMS.0 as u32, false);
             ctx("SetStreamSelection", r.SetStreamSelection(flux, true))?;
-            let t = ctx("MFCreateMediaType", MFCreateMediaType())?;
-            ctx(
-                "MF_MT_MAJOR_TYPE",
-                t.SetGUID(&MF_MT_MAJOR_TYPE, &MFMediaType_Video),
-            )?;
-            ctx(
-                "MF_MT_SUBTYPE",
-                t.SetGUID(&MF_MT_SUBTYPE, &MFVideoFormat_RGB32),
-            )?;
-            ctx(
-                "SetCurrentMediaType (RGB32)",
-                r.SetCurrentMediaType(flux, None, &t),
-            )?;
+            poser_rgb32(&r, flux)?;
             let c = ctx("GetCurrentMediaType", r.GetCurrentMediaType(flux))?;
-            let fs = ctx("MF_MT_FRAME_SIZE", c.GetUINT64(&MF_MT_FRAME_SIZE))?;
-            let (l, h) = ((fs >> 32) as u32, (fs & 0xFFFF_FFFF) as u32);
-            let stride = c.GetUINT32(&MF_MT_DEFAULT_STRIDE).ok().map(|s| s as i32);
-            let mut pv: PROPVARIANT = ctx(
-                "MF_PD_DURATION",
-                r.GetPresentationAttribute(MF_SOURCE_READER_MEDIASOURCE.0 as u32, &MF_PD_DURATION),
-            )?;
-            let duree = pv.Anonymous.Anonymous.Anonymous.uhVal;
-            let _ = PropVariantClear(&mut pv);
+            let mut g = geometrie(&c)?;
+            let ecrire_geo = |quand: &str, g: &Geometrie, drapeaux: u32| {
+                println!(
+                    "relu_geometrie {quand} : tampon {}x{} ; stride {} ; zone d'affichage {},{},{}x{}{} ; drapeaux 0x{drapeaux:X}",
+                    g.l,
+                    g.h,
+                    g.stride
+                        .map(|s| s.to_string())
+                        .unwrap_or_else(|| "absent".into()),
+                    g.ox,
+                    g.oy,
+                    g.al,
+                    g.ah,
+                    if g.ouverture_lue {
+                        ""
+                    } else {
+                        " (MF_MT_MINIMUM_DISPLAY_APERTURE absent : image entière)"
+                    }
+                );
+            };
+            ecrire_geo("ouverture", &g, 0);
+            let duree = match r
+                .GetPresentationAttribute(MF_SOURCE_READER_MEDIASOURCE.0 as u32, &MF_PD_DURATION)
+            {
+                Ok(mut pv) => {
+                    let d = pv.Anonymous.Anonymous.Anonymous.uhVal;
+                    let _ = PropVariantClear(&mut pv);
+                    d
+                }
+                Err(e) => {
+                    println!("relu_duree_absente {}", hr(&e));
+                    0
+                }
+            };
             let mut i = 0u64;
             let mut erreur = None;
             let mut dernier_ts = 0i64;
             let mut img = Vec::new();
+            let mut changements = 0u32;
             loop {
                 let mut flags = 0u32;
                 let mut ts = 0i64;
@@ -1015,54 +1142,112 @@ mod windows_seul {
                     erreur = Some(e);
                     break;
                 }
+                if flags & MF_SOURCE_READERF_NATIVEMEDIATYPECHANGED.0 as u32 != 0 {
+                    // Le type d'origine a changé : la sortie RGB32 est redemandée.
+                    if let Err(e) = poser_rgb32(&r, flux) {
+                        erreur = Some(e);
+                        break;
+                    }
+                }
+                if flags
+                    & (MF_SOURCE_READERF_CURRENTMEDIATYPECHANGED.0
+                        | MF_SOURCE_READERF_NATIVEMEDIATYPECHANGED.0) as u32
+                    != 0
+                {
+                    match r
+                        .GetCurrentMediaType(flux)
+                        .map_err(|e| format!("GetCurrentMediaType: {}", hr(&e)))
+                        .and_then(|c| geometrie(&c))
+                    {
+                        Ok(n) => {
+                            changements += 1;
+                            g = n;
+                            ecrire_geo(&format!("avant l'image {i}"), &g, flags);
+                        }
+                        Err(e) => {
+                            erreur = Some(e);
+                            break;
+                        }
+                    }
+                }
                 if flags & MF_SOURCE_READERF_ENDOFSTREAM.0 as u32 != 0 {
                     break;
                 }
                 let Some(s) = s else { continue };
-                let ligne = (l * 4) as usize;
                 dernier_ts = ts;
-                if garder(i) {
+                let png = pngs.as_ref().filter(|_| i == 0 || i == 1 || i == 150);
+                if garder(i) || png.is_some() {
+                    let ligne = (g.al * 4) as usize;
                     let b = ctx("ConvertToContiguousBuffer", s.ConvertToContiguousBuffer())?;
-                    img.resize(ligne * h as usize, 0);
-                    if let Ok(b2) = b.cast::<IMF2DBuffer>() {
-                        let mut p: *mut u8 = std::ptr::null_mut();
+                    img.resize(ligne * g.ah as usize, 0);
+                    // (premier octet de la ligne 0 du tampon, pas d'une ligne, longueur).
+                    let mut p: *mut u8 = std::ptr::null_mut();
+                    let (debut, pas, long, deux_d) = if let Ok(b2) = b.cast::<IMF2DBuffer>() {
                         let mut pas = 0i32;
                         ctx("Lock2D", b2.Lock2D(&mut p, &mut pas))?;
-                        for y in 0..h as usize {
-                            std::ptr::copy_nonoverlapping(
-                                p.offset(y as isize * pas as isize),
-                                img.as_mut_ptr().add(y * ligne),
-                                ligne,
-                            );
-                        }
-                        let _ = b2.Unlock2D();
+                        (p, pas as isize, usize::MAX, Some(b2))
                     } else {
-                        let mut p: *mut u8 = std::ptr::null_mut();
-                        ctx("Lock", b.Lock(&mut p, None, None))?;
-                        let pas = stride.unwrap_or(ligne as i32);
-                        for y in 0..h as usize {
-                            let src = if pas >= 0 {
-                                y * pas as usize
-                            } else {
-                                (h as usize - 1 - y) * ligne
-                            };
-                            std::ptr::copy_nonoverlapping(
-                                p.add(src),
-                                img.as_mut_ptr().add(y * ligne),
-                                ligne,
-                            );
+                        let mut n = 0u32;
+                        ctx("Lock", b.Lock(&mut p, None, Some(&mut n)))?;
+                        let pas = g.stride.unwrap_or((g.l * 4) as i32) as isize;
+                        // De bas en haut : la ligne 0 est la dernière du tampon.
+                        let debut = if pas < 0 {
+                            p.offset((g.h as isize - 1) * -pas)
+                        } else {
+                            p
+                        };
+                        (debut, pas, n as usize, None)
+                    };
+                    let mut hors = false;
+                    for y in 0..g.ah as usize {
+                        let dy = (g.oy as isize + y as isize) * pas + g.ox as isize * 4;
+                        let depuis = debut.offset(dy);
+                        let fin = (depuis as usize).wrapping_add(ligne);
+                        if long != usize::MAX && (depuis < p || fin > p as usize + long) {
+                            hors = true;
+                            break;
                         }
-                        let _ = b.Unlock();
+                        std::ptr::copy_nonoverlapping(
+                            depuis,
+                            img.as_mut_ptr().add(y * ligne),
+                            ligne,
+                        );
                     }
-                    voir(i, ts, &img, l as usize);
+                    match deux_d {
+                        Some(b2) => {
+                            let _ = b2.Unlock2D();
+                        }
+                        None => {
+                            let _ = b.Unlock();
+                        }
+                    }
+                    if hors {
+                        erreur = Some(format!(
+                            "image {i} : tampon de {long} octets plus petit que la géométrie {}x{} pas {pas}",
+                            g.l, g.h
+                        ));
+                        break;
+                    }
+                    if let Some((prefixe, n)) = png {
+                        let f = PathBuf::from(format!("{}-{n}-{i}.png", prefixe.display()));
+                        match enregistrer_png_bgra(&f, &img, g.al, g.ah) {
+                            Ok(()) => println!("relu_png {}", f.display()),
+                            Err(e) => println!("relu_png erreur {e}"),
+                        }
+                    }
+                    if garder(i) {
+                        voir(i, ts, &img, g.al as usize);
+                    }
                 }
                 i += 1;
             }
+            println!("relu_changements_de_type {changements}");
             Ok(Lecture {
                 duree_100ns: duree,
-                l,
-                h,
-                stride_lu: stride
+                l: g.al,
+                h: g.ah,
+                stride_lu: g
+                    .stride
                     .map(|s| s.to_string())
                     .unwrap_or_else(|| "absent".into()),
                 images: i,
@@ -1124,11 +1309,13 @@ mod windows_seul {
                 "RGB32"
             }
         );
+        let (lw, hw) = taille(a.get("taille").map(String::as_str).unwrap_or("600x450"))?;
+        println!("taille_ecrite {lw}x{hw}");
         let n = 10 * FPS as u64;
         let e = Ecrivain::ouvrir(
             &chemin,
-            600,
-            450,
+            lw,
+            hw,
             &Options {
                 stride_positif: stride,
                 nv12,
@@ -1136,14 +1323,16 @@ mod windows_seul {
             },
         )?;
         e.commencer()?;
-        let mut g = Generateur::nouveau(600, 450, Genre::Simple, None);
+        let mut g = Generateur::nouveau(lw, hw, Genre::Simple, None);
+        let (tx, ty) = (g.ox, g.oy);
+        println!("temoin_dans_l_image {tx},{ty}");
         let (mut conv, mut ws) = (Vec::new(), Vec::new());
         let mut tampon = Vec::new();
         for i in 0..n {
             let img = g.image(k_de(i));
             let (_, w) = if nv12 {
                 let c = Instant::now();
-                vers_nv12(img, 600, 450, &mut tampon);
+                vers_nv12(img, lw as usize, hw as usize, &mut tampon);
                 conv.push(c.elapsed().as_secs_f64() * 1000.0);
                 e.image(&tampon, i)?
             } else {
@@ -1167,6 +1356,64 @@ mod windows_seul {
         println!("relu_duree_s {:.3}", r.duree_100ns as f64 / 1e7);
         println!("relu_images {}", r.images.len());
         let (l, h) = (r.l as usize, r.h as usize);
+        println!("relu_geometrie_egale {}", (r.l == lw && r.h == hw) as u8);
+        // Comparaison au pixel près avec l'image écrite (même k), sur les images 0, 1, 150
+        // et une sur 30 : écart moyen et maximal par canal, pixels à plus de 24 ; décalage
+        // de -2 à +2 px qui rend l'écart le plus petit (image 150).
+        let mut source = Generateur::nouveau(lw, hw, Genre::Simple, None);
+        let ecart_a = |relue: &[u8], src: &[u8], dx: i32, dy: i32| -> (f64, u8, u64) {
+            let (mut somme, mut max, mut gros, mut n) = (0u64, 0u8, 0u64, 0u64);
+            for y in 2..h.saturating_sub(2) {
+                for x in 2..l.saturating_sub(2) {
+                    let (sx, sy) = (x as i32 + dx, y as i32 + dy);
+                    if sx < 0 || sy < 0 || sx as usize >= lw as usize || sy as usize >= hw as usize
+                    {
+                        continue;
+                    }
+                    let i = (y * l + x) * 4;
+                    let k = (sy as usize * lw as usize + sx as usize) * 4;
+                    let mut pire = 0u8;
+                    for c in 0..3 {
+                        let d = relue[i + c].abs_diff(src[k + c]);
+                        somme += d as u64;
+                        pire = pire.max(d);
+                    }
+                    n += 3;
+                    max = max.max(pire);
+                    if pire > 24 {
+                        gros += 1;
+                    }
+                }
+            }
+            (somme as f64 / n.max(1) as f64, max, gros)
+        };
+        if r.l == lw && r.h == hw {
+            for (i, (_, img)) in r.images.iter().enumerate() {
+                if !(i == 0 || i == 1 || i == 150 || i % 30 == 0) {
+                    continue;
+                }
+                let src = source.image(k_de(i as u64)).to_vec();
+                let (m, x, gros) = ecart_a(img, &src, 0, 0);
+                println!(
+                    "pixels_image_{i} écart moyen {m:.2}, max {x}, pixels à plus de 24 : {gros}"
+                );
+                if i == 150 {
+                    let mut mieux = (f64::MAX, 0, 0);
+                    for dy in -2..=2 {
+                        for dx in -2..=2 {
+                            let (m, _, _) = ecart_a(img, &src, dx, dy);
+                            if m < mieux.0 {
+                                mieux = (m, dx, dy);
+                            }
+                        }
+                    }
+                    println!(
+                        "pixels_decalage_meilleur {},{} (écart moyen {:.2})",
+                        mieux.1, mieux.2, mieux.0
+                    );
+                }
+            }
+        }
         let mut a_l_endroit = 0;
         let mut a_l_envers = 0;
         let mut illisibles = 0;
@@ -1178,14 +1425,14 @@ mod windows_seul {
         let mut premier_ts = None;
         for (i, (ts, img)) in r.images.iter().enumerate() {
             premier_ts.get_or_insert(*ts);
-            let (img, k) = match temoin::lire_k(img, l, 0, 0) {
+            let (img, k) = match temoin::lire_k(img, l, tx, ty) {
                 Some(k) => {
                     a_l_endroit += 1;
                     (img.clone(), Some(k))
                 }
                 None => {
                     let v = retourner(img, l, h);
-                    match temoin::lire_k(&v, l, 0, 0) {
+                    match temoin::lire_k(&v, l, tx, ty) {
                         Some(k) => {
                             a_l_envers += 1;
                             (v, Some(k))
@@ -1210,10 +1457,10 @@ mod windows_seul {
                 }
             }
             prec = Some(k);
-            if let Some(e) = temoin::ecarts_pastilles(&img, l, 0, 0) {
+            if let Some(e) = temoin::ecarts_pastilles(&img, l, tx, ty) {
                 ecarts.push(e.iter().cloned().fold(0.0, f64::max));
             }
-            if let Some(e) = temoin::ecart_bande(&img, l, 0, 0, k) {
+            if let Some(e) = temoin::ecart_bande(&img, l, tx, ty, k) {
                 ecarts_bande.push(e);
             }
             if i == 150 {
@@ -1604,6 +1851,9 @@ mod windows_seul {
                 .join()
                 .map_err(|_| "le fil codeur a paniqué".to_string())??;
         } else {
+            // Un seul fil : COM et Media Foundation sont posés ici (sans eux,
+            // l'écrivain refuse de s'ouvrir : 0x800401F0).
+            demarrer()?;
             let e = Ecrivain::ouvrir(&chemin, l, h, &o)?;
             e.commencer()?;
             let mut c = Codeur::default();
@@ -1653,6 +1903,9 @@ mod windows_seul {
         );
         let (mut vus, mut illisibles, mut reculs) = (BTreeSet::new(), 0u64, 0u64);
         let mut prec: Option<u32> = None;
+        if fils >= 2 {
+            demarrer()?;
+        }
         match relire_avec(
             &chemin,
             |_| true,
