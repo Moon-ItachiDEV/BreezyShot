@@ -1,4 +1,4 @@
-//! Les neuf états d'une capture et la table unique de leurs passages.
+//! Les onze états d'une capture et la table unique de leurs passages.
 //!
 //! La table suit le tableau « États » du document de workflow. Ajouter un état ou un
 //! passage, c'est ajouter des lignes à `PASSAGES` ; `suivant` ne change pas.
@@ -21,6 +21,11 @@ pub enum Etat {
     /// Capture défilante (0.6) : la page défile et s'assemble ; toute demande de capture
     /// est ignorée.
     Defilement,
+    /// Vidéo et GIF (0.7) : du relâchement de la zone à « Arrêter » (attente, décompte,
+    /// marche et pause sont des phases, `film.rs`) ; toute demande de capture est ignorée.
+    Enregistrement,
+    /// Vidéo et GIF (0.7) : le fichier se ferme ; toute demande de capture est ignorée.
+    Finalisation,
 }
 
 /// Modes de capture. Ce sont aussi les noms d'action des raccourcis.
@@ -35,20 +40,26 @@ pub enum Mode {
     Texte,
     /// Capture défilante (0.6) : une page plus haute que l'écran, assemblée en une image.
     Defilante,
+    /// Vidéo (0.7) : une zone enregistrée en MP4.
+    Video,
+    /// GIF (0.7) : une zone enregistrée en GIF.
+    Gif,
 }
 
 impl Mode {
-    pub const TOUS: [Mode; 6] = [
+    pub const TOUS: [Mode; 8] = [
         Mode::Zone,
         Mode::PleinEcran,
         Mode::Fenetre,
         Mode::DerniereZone,
         Mode::Texte,
         Mode::Defilante,
+        Mode::Video,
+        Mode::Gif,
     ];
 
     /// Nom d'action (`zone`, `plein_ecran`, `fenetre`, `derniere_zone`, `texte`,
-    /// `defilante`).
+    /// `defilante`, `video`, `gif`).
     pub fn nom(self) -> &'static str {
         match self {
             Mode::Zone => "zone",
@@ -57,7 +68,14 @@ impl Mode {
             Mode::DerniereZone => "derniere_zone",
             Mode::Texte => "texte",
             Mode::Defilante => "defilante",
+            Mode::Video => "video",
+            Mode::Gif => "gif",
         }
+    }
+
+    /// Vrai pour les deux modes d'un film (vidéo et GIF).
+    pub fn film(self) -> bool {
+        matches!(self, Mode::Video | Mode::Gif)
     }
 
     pub fn depuis_nom(nom: &str) -> Option<Mode> {
@@ -128,6 +146,18 @@ pub enum Declencheur {
     DefilementAnnule,
     /// Première image impossible, prises en échec, page de contrôle muette, fil, mémoire.
     DefilementImpossible,
+    /// Vidéo et GIF : la zone est choisie et cadrée, la fenêtre de contrôle part (0.7).
+    EnregistrementChoisi,
+    /// « Arrêter », limite, disque, écrans, session, veille, arrêt de l'app ou source
+    /// perdue en marche ou en pause : ce qui est enregistré est gardé.
+    EnregistrementArrete,
+    /// Échap, croix, « Arrêter », écrans, session, veille ou arrêt pendant l'attente ou le
+    /// décompte : rien n'est gardé.
+    EnregistrementAnnule,
+    /// Page muette, source, codeur, fil, disque, préparation, ou aucune image écrite.
+    EnregistrementImpossible,
+    /// Le fichier n'a pas pu être fermé dans son délai.
+    FinalisationImpossible,
 }
 
 impl Declencheur {
@@ -234,6 +264,23 @@ pub const PASSAGES: &[(Etat, Declencheur, Etat)] = &[
     (E::Defilement, D::DefilementFini, E::Decoupe),
     (E::Defilement, D::DefilementAnnule, E::Repos),
     (E::Defilement, D::DefilementImpossible, E::Repos),
+    // 0.7 : vidéo et GIF, sans retardateur avant la photo (aucune ligne `DemandeDecompte` :
+    // le décompte d'un film est une phase de l'Enregistrement). Les sorties de la Sélection
+    // servent telles quelles (un cadrage refusé sort par `SelectionImpossible`) ; une fois
+    // le fichier fermé, les lignes du Souffle et de la Vignette font le reste.
+    (E::Repos, D::DemandeCapture(Mode::Video), E::Gel),
+    (E::Repos, D::DemandeCapture(Mode::Gif), E::Gel),
+    (E::Vignette, D::DemandeCapture(Mode::Video), E::Gel),
+    (E::Vignette, D::DemandeCapture(Mode::Gif), E::Gel),
+    (E::Gel, D::PhotoPrise(Mode::Video), E::Selection),
+    (E::Gel, D::PhotoPrise(Mode::Gif), E::Selection),
+    (E::Selection, D::EnregistrementChoisi, E::Enregistrement),
+    (E::Enregistrement, D::EnregistrementArrete, E::Finalisation),
+    (E::Enregistrement, D::EnregistrementAnnule, E::Repos),
+    (E::Enregistrement, D::EnregistrementImpossible, E::Repos),
+    (E::Finalisation, D::ImagePrete, E::Souffle),
+    (E::Finalisation, D::ImagePreteSansVignette, E::Repos),
+    (E::Finalisation, D::FinalisationImpossible, E::Repos),
 ];
 
 /// Fonction pure : l'état suivant, ou `None` si le déclencheur est ignoré dans cet état.
@@ -302,7 +349,22 @@ impl Automate {
 mod tests {
     use super::*;
 
-    const TOUS_LES_ETATS: [Etat; 9] = [
+    const TOUS_LES_ETATS: [Etat; 11] = [
+        E::Repos,
+        E::Gel,
+        E::Selection,
+        E::Decoupe,
+        E::Souffle,
+        E::Vignette,
+        E::Decompte,
+        E::Lecture,
+        E::Defilement,
+        E::Enregistrement,
+        E::Finalisation,
+    ];
+
+    /// Les neuf états de la 0.6.
+    const ETATS_0_6: [Etat; 9] = [
         E::Repos,
         E::Gel,
         E::Selection,
@@ -426,10 +488,67 @@ mod tests {
         (E::Defilement, D::DefilementImpossible, E::Repos),
     ];
 
+    /// Les treize lignes de la 0.7 (contrat 0.7, §4.1).
+    const LIGNES_0_7: &[(Etat, Declencheur, Etat)] = &[
+        (E::Repos, D::DemandeCapture(Mode::Video), E::Gel),
+        (E::Repos, D::DemandeCapture(Mode::Gif), E::Gel),
+        (E::Vignette, D::DemandeCapture(Mode::Video), E::Gel),
+        (E::Vignette, D::DemandeCapture(Mode::Gif), E::Gel),
+        (E::Gel, D::PhotoPrise(Mode::Video), E::Selection),
+        (E::Gel, D::PhotoPrise(Mode::Gif), E::Selection),
+        (E::Selection, D::EnregistrementChoisi, E::Enregistrement),
+        (E::Enregistrement, D::EnregistrementArrete, E::Finalisation),
+        (E::Enregistrement, D::EnregistrementAnnule, E::Repos),
+        (E::Enregistrement, D::EnregistrementImpossible, E::Repos),
+        (E::Finalisation, D::ImagePrete, E::Souffle),
+        (E::Finalisation, D::ImagePreteSansVignette, E::Repos),
+        (E::Finalisation, D::FinalisationImpossible, E::Repos),
+    ];
+
+    /// Les déclencheurs propres au film (0.7), modes compris.
+    const DECLENCHEURS_0_7: [Declencheur; 13] = [
+        D::DemandeCapture(Mode::Video),
+        D::DemandeCapture(Mode::Gif),
+        D::PhotoPrise(Mode::Video),
+        D::PhotoPrise(Mode::Gif),
+        D::DemandeDecompte(Mode::Video),
+        D::DemandeDecompte(Mode::Gif),
+        D::DecompteFini(Mode::Video),
+        D::DecompteFini(Mode::Gif),
+        D::EnregistrementChoisi,
+        D::EnregistrementArrete,
+        D::EnregistrementAnnule,
+        D::EnregistrementImpossible,
+        D::FinalisationImpossible,
+    ];
+
     /// La table de la 0.5 (50 lignes), copie littérale : celle de la 0.4 puis ses six
     /// lignes. Elle ne doit jamais changer.
     fn passages_0_5() -> Vec<(Etat, Declencheur, Etat)> {
         PASSAGES_0_4.iter().chain(LIGNES_0_5).copied().collect()
+    }
+
+    /// La table de la 0.6 (57 lignes), copie littérale : celle de la 0.5 puis ses sept
+    /// lignes. Elle ne doit jamais changer.
+    fn passages_0_6() -> Vec<(Etat, Declencheur, Etat)> {
+        passages_0_5()
+            .into_iter()
+            .chain(LIGNES_0_6.iter().copied())
+            .collect()
+    }
+
+    /// Tous les déclencheurs de la 0.6 : ceux de la 0.5 et ceux de la défilante.
+    fn declencheurs_0_6() -> Vec<Declencheur> {
+        let mut v = declencheurs_0_5();
+        v.extend(DECLENCHEURS_0_6);
+        v
+    }
+
+    /// Tous les déclencheurs de la 0.7.
+    fn declencheurs_0_7() -> Vec<Declencheur> {
+        let mut v = declencheurs_0_6();
+        v.extend(DECLENCHEURS_0_7);
+        v
     }
 
     /// Tous les déclencheurs de la 0.5 : ceux de la 0.4, ceux du texte et son mode.
@@ -636,12 +755,14 @@ mod tests {
         }
     }
 
-    /// La 0.6 n'ajoute que ses sept lignes : aucune retirée, aucune changée.
+    /// La 0.6 n'a ajouté que ses sept lignes à la table de la 0.5 : aucune retirée,
+    /// aucune changée.
     #[test]
-    fn seulement_des_lignes_nouvelles() {
+    fn lignes_de_la_0_6_sur_la_0_5() {
         let t = passages_0_5();
-        assert_eq!(PASSAGES.len(), t.len() + LIGNES_0_6.len());
-        for ligne in PASSAGES {
+        let t6 = passages_0_6();
+        assert_eq!(t6.len(), t.len() + LIGNES_0_6.len());
+        for ligne in &t6 {
             assert!(
                 t.contains(ligne) || LIGNES_0_6.contains(ligne),
                 "ligne inattendue : {ligne:?}"
@@ -674,6 +795,224 @@ mod tests {
                 assert_eq!(suivant(etat, d), attendu, "{etat:?} {d:?}");
             }
         }
+    }
+
+    #[test]
+    fn table_0_6_incluse() {
+        let t = passages_0_6();
+        assert_eq!(t.len(), 57);
+        for ligne in &t {
+            assert!(
+                PASSAGES.contains(ligne),
+                "ligne de la 0.6 perdue : {ligne:?}"
+            );
+        }
+    }
+
+    /// La 0.7 n'ajoute que ses treize lignes : aucune retirée, aucune changée.
+    #[test]
+    fn seulement_des_lignes_nouvelles() {
+        let t = passages_0_6();
+        assert_eq!(LIGNES_0_7.len(), 13);
+        assert_eq!(PASSAGES.len(), t.len() + LIGNES_0_7.len());
+        for ligne in PASSAGES {
+            assert!(
+                t.contains(ligne) || LIGNES_0_7.contains(ligne),
+                "ligne inattendue : {ligne:?}"
+            );
+        }
+        for ligne in LIGNES_0_7 {
+            assert!(
+                PASSAGES.contains(ligne),
+                "ligne de la 0.7 absente : {ligne:?}"
+            );
+        }
+        // Les neuf états de la 0.6 font ce qu'ils faisaient pour chaque déclencheur de la
+        // 0.6.
+        for etat in ETATS_0_6 {
+            for d in declencheurs_0_6() {
+                let avant = t
+                    .iter()
+                    .find(|(e, x, _)| *e == etat && *x == d)
+                    .map(|(_, _, a)| *a);
+                assert_eq!(suivant(etat, d), avant, "{etat:?} {d:?}");
+            }
+        }
+        // Et les déclencheurs du film ne valent qu'aux lignes de la 0.7.
+        for etat in TOUS_LES_ETATS {
+            for d in DECLENCHEURS_0_7 {
+                let attendu = LIGNES_0_7
+                    .iter()
+                    .find(|(e, x, _)| *e == etat && *x == d)
+                    .map(|(_, _, a)| *a);
+                assert_eq!(suivant(etat, d), attendu, "{etat:?} {d:?}");
+            }
+        }
+    }
+
+    /// En Sélection, le seul déclencheur propre au film est le choix de la zone : un refus
+    /// au relâchement sort par la ligne existante `SelectionImpossible`.
+    #[test]
+    fn aucun_declencheur_du_film_en_selection_sauf_le_choix() {
+        for d in [
+            D::EnregistrementArrete,
+            D::EnregistrementAnnule,
+            D::EnregistrementImpossible,
+            D::FinalisationImpossible,
+        ] {
+            assert_eq!(suivant(E::Selection, d), None, "{d:?}");
+        }
+        assert_eq!(
+            suivant(E::Selection, D::EnregistrementChoisi),
+            Some(E::Enregistrement)
+        );
+        assert_eq!(
+            suivant(E::Selection, D::SelectionImpossible),
+            Some(E::Repos)
+        );
+        // Le choix du film n'a de sens qu'en Sélection.
+        for etat in TOUS_LES_ETATS {
+            if etat != E::Selection {
+                assert_eq!(suivant(etat, D::EnregistrementChoisi), None, "{etat:?}");
+            }
+        }
+        // Les sorties de la Sélection valent en mode vidéo comme en mode GIF.
+        for m in [Mode::Video, Mode::Gif] {
+            let mut a = Automate::default();
+            assert_eq!(a.traiter(D::DemandeCapture(m)), Some(E::Gel));
+            assert_eq!(a.traiter(D::PhotoPrise(m)), Some(E::Selection));
+            assert_eq!(a.traiter(D::SelectionAnnulee), Some(E::Repos));
+        }
+    }
+
+    /// Pendant l'enregistrement, toute demande de capture (et de décompte) est ignorée ;
+    /// seules ses trois fins passent.
+    #[test]
+    fn enregistrement_ignore_les_captures() {
+        for m in Mode::TOUS {
+            for d in [
+                D::DemandeCapture(m),
+                D::DemandeDecompte(m),
+                D::PhotoPrise(m),
+                D::DecompteFini(m),
+            ] {
+                assert_eq!(suivant(E::Enregistrement, d), None, "{d:?}");
+            }
+        }
+        for d in declencheurs_0_6() {
+            assert_eq!(suivant(E::Enregistrement, d), None, "{d:?}");
+        }
+        for m in [Mode::Video, Mode::Gif] {
+            let mut a = Automate::default();
+            for d in [
+                D::DemandeCapture(m),
+                D::PhotoPrise(m),
+                D::EnregistrementChoisi,
+            ] {
+                assert!(a.traiter(d).is_some(), "{d:?}");
+            }
+            assert_eq!(a.etat(), E::Enregistrement);
+            assert_eq!(a.traiter(D::DemandeCapture(Mode::Zone)), None);
+            assert_eq!(a.traiter(D::DemandeCapture(m)), None);
+            assert_eq!(a.traiter(D::EnregistrementChoisi), None);
+            assert_eq!(a.traiter(D::EnregistrementArrete), Some(E::Finalisation));
+        }
+        for fin in [D::EnregistrementAnnule, D::EnregistrementImpossible] {
+            let mut a = Automate::dans(E::Enregistrement);
+            assert_eq!(a.traiter(fin), Some(E::Repos), "{fin:?}");
+        }
+    }
+
+    /// Pendant la finalisation, toute demande de capture est ignorée ; le fichier fermé
+    /// suit la sortie commune (souffle et vignette, ou bandeau).
+    #[test]
+    fn finalisation_ignore_les_captures() {
+        for m in Mode::TOUS {
+            for d in [
+                D::DemandeCapture(m),
+                D::DemandeDecompte(m),
+                D::PhotoPrise(m),
+                D::DecompteFini(m),
+            ] {
+                assert_eq!(suivant(E::Finalisation, d), None, "{d:?}");
+            }
+        }
+        for d in declencheurs_0_7() {
+            let attendu = match d {
+                D::ImagePrete => Some(E::Souffle),
+                D::ImagePreteSansVignette | D::FinalisationImpossible => Some(E::Repos),
+                _ => None,
+            };
+            assert_eq!(suivant(E::Finalisation, d), attendu, "{d:?}");
+        }
+        let mut a = Automate::dans(E::Finalisation);
+        assert_eq!(a.traiter(D::ImagePrete), Some(E::Souffle));
+        assert_eq!(a.traiter(D::SouffleTermine), Some(E::Vignette));
+        // Depuis la vignette d'un film, un film la ferme et repart.
+        assert_eq!(a.traiter(D::DemandeCapture(Mode::Gif)), Some(E::Gel));
+        // Les fins de la Découpe n'existent pas en Finalisation.
+        assert_eq!(suivant(E::Finalisation, D::SortieSansBilan), None);
+        assert_eq!(suivant(E::Finalisation, D::DecoupeImpossible), None);
+    }
+
+    /// Un film n'a jamais de décompte avant la photo (son décompte est une phase).
+    #[test]
+    fn film_sans_decompte_avant_la_photo() {
+        for m in [Mode::Video, Mode::Gif] {
+            for etat in TOUS_LES_ETATS {
+                assert_eq!(suivant(etat, D::DemandeDecompte(m)), None, "{etat:?}");
+                assert_eq!(suivant(etat, D::DecompteFini(m)), None, "{etat:?}");
+            }
+            assert!(m.film());
+        }
+        assert_eq!(
+            D::DemandeCapture(Mode::Video).libelle(),
+            "DemandeCapture video"
+        );
+        assert_eq!(D::PhotoPrise(Mode::Gif).libelle(), "PhotoPrise gif");
+        assert_eq!(Mode::depuis_nom("video"), Some(Mode::Video));
+        assert_eq!(Mode::depuis_nom("gif"), Some(Mode::Gif));
+        for (d, libelle) in [
+            (D::EnregistrementChoisi, "EnregistrementChoisi"),
+            (D::EnregistrementArrete, "EnregistrementArrete"),
+            (D::EnregistrementAnnule, "EnregistrementAnnule"),
+            (D::EnregistrementImpossible, "EnregistrementImpossible"),
+            (D::FinalisationImpossible, "FinalisationImpossible"),
+        ] {
+            assert_eq!(d.libelle(), libelle);
+        }
+        for m in Mode::TOUS {
+            assert_eq!(m.film(), matches!(m, Mode::Video | Mode::Gif), "{m:?}");
+        }
+    }
+
+    /// Onze états, chacun nommé une fois.
+    #[test]
+    fn onze_etats() {
+        assert_eq!(TOUS_LES_ETATS.len(), 11);
+        for (i, a) in TOUS_LES_ETATS.iter().enumerate() {
+            for b in &TOUS_LES_ETATS[i + 1..] {
+                assert_ne!(a, b);
+            }
+        }
+        for e in ETATS_0_6 {
+            assert!(TOUS_LES_ETATS.contains(&e));
+        }
+        assert!(TOUS_LES_ETATS.contains(&E::Enregistrement));
+        assert!(TOUS_LES_ETATS.contains(&E::Finalisation));
+    }
+
+    /// Huit modes, chacun nommé une fois.
+    #[test]
+    fn huit_modes() {
+        assert_eq!(Mode::TOUS.len(), 8);
+        for (i, a) in Mode::TOUS.iter().enumerate() {
+            for b in &Mode::TOUS[i + 1..] {
+                assert_ne!(a, b);
+                assert_ne!(a.nom(), b.nom());
+            }
+        }
+        assert_eq!(&Mode::TOUS[6..], &[Mode::Video, Mode::Gif]);
     }
 
     /// Pendant le défilement, toute demande de capture (et de décompte) est ignorée ;
@@ -763,16 +1102,16 @@ mod tests {
         }
     }
 
-    /// Neuf états, chacun nommé une fois.
+    /// Neuf états en 0.6, chacun nommé une fois.
     #[test]
     fn neuf_etats() {
-        assert_eq!(TOUS_LES_ETATS.len(), 9);
-        for (i, a) in TOUS_LES_ETATS.iter().enumerate() {
-            for b in &TOUS_LES_ETATS[i + 1..] {
+        assert_eq!(ETATS_0_6.len(), 9);
+        for (i, a) in ETATS_0_6.iter().enumerate() {
+            for b in &ETATS_0_6[i + 1..] {
                 assert_ne!(a, b);
             }
         }
-        assert!(TOUS_LES_ETATS.contains(&E::Defilement));
+        assert!(ETATS_0_6.contains(&E::Defilement));
     }
 
     /// Pendant la lecture, toute demande de capture (et de décompte) est ignorée ; seules
@@ -879,8 +1218,8 @@ mod tests {
                     Mode::PleinEcran | Mode::DerniereZone => {
                         assert_eq!(a.traiter(D::PhotoPrise(m)), Some(E::Decoupe));
                     }
-                    Mode::Texte | Mode::Defilante => {
-                        unreachable!("pas de retardateur pour le texte ni la defilante")
+                    Mode::Texte | Mode::Defilante | Mode::Video | Mode::Gif => {
+                        unreachable!("pas de retardateur pour le texte, la defilante ni un film")
                     }
                 }
                 assert_eq!(a.traiter(D::ImagePreteSansVignette), Some(E::Repos));

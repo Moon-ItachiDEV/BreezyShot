@@ -17,6 +17,8 @@ mod dossier;
 pub mod gel;
 pub mod glisser;
 pub mod installation;
+pub mod micro;
+pub mod mp4;
 pub mod presse_papiers;
 pub mod texte;
 pub mod vivant;
@@ -339,6 +341,16 @@ pub fn rendre_premier_plan(identifiant: isize) -> bool {
 /// demande est partie ; faux hors Windows.
 pub fn cacher_fenetre_async(identifiant: isize) -> bool {
     plateforme::cacher_fenetre_async(identifiant)
+}
+
+/// Ouvre `fichier` dans l'application que Windows lui associe (un film dans le lecteur
+/// vidéo, contrat 0.7, choix B2). Peut attendre l'Explorateur : jamais sur le fil
+/// principal. Erreur : fichier absent, aucune application associée, ou hors Windows.
+pub fn ouvrir_fichier(fichier: &Path) -> Result<(), String> {
+    if !fichier.is_file() {
+        return Err("fichier introuvable".into());
+    }
+    plateforme::ouvrir_fichier(fichier)
 }
 
 /// Variable d'essai : le bandeau reste capturable (pour prouver qu'il est peint).

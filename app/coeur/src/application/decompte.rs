@@ -17,8 +17,9 @@ pub const RETARDATEURS_PROPOSES: [u32; 4] = [0, 3, 5, 10];
 /// Le déclencheur d'une demande de capture : directe sans retardateur, sinon le décompte.
 pub fn declencheur(mode: Mode, retardateur_s: u32) -> Declencheur {
     // Copier le texte n'est pas une capture : jamais de retardateur (§5.4). La capture
-    // défilante non plus (contrat 0.6, R6).
-    if retardateur_s == 0 || mode == Mode::Texte || mode == Mode::Defilante {
+    // défilante non plus (contrat 0.6, R6). Un film non plus avant la photo : son décompte
+    // vient après la sélection (contrat 0.7, §4.1, F7).
+    if retardateur_s == 0 || mode == Mode::Texte || mode == Mode::Defilante || mode.film() {
         Declencheur::DemandeCapture(mode)
     } else {
         Declencheur::DemandeDecompte(mode)
@@ -193,6 +194,10 @@ mod tests {
                 declencheur(Mode::Defilante, s),
                 Declencheur::DemandeCapture(Mode::Defilante)
             );
+            // Un film non plus (contrat 0.7, F1).
+            for m in [Mode::Video, Mode::Gif] {
+                assert_eq!(declencheur(m, s), Declencheur::DemandeCapture(m));
+            }
         }
         assert!(fin_a_jour(Some(2), 2));
         assert!(!fin_a_jour(Some(2), 1));

@@ -12,6 +12,7 @@
 
 mod annonce;
 mod fichier;
+mod film;
 mod glisser;
 mod historique;
 mod licence;
@@ -33,6 +34,11 @@ use crate::systeme::gel::Pixels;
 
 pub use annonce::{annonce, Annonce};
 pub use fichier::enregistrer_a;
+pub use film::{
+    annonce_film, chemin_film, copier_film, effacer_film, enregistrer_film, films_a_retirer,
+    nettoyer_films, sortir_film, BilanFilm, FilmGarde, SorteFilm, FILMS_AGE_MAX, FILMS_GARDES,
+    FILMS_OCTETS_MAX, FILM_JEUNE, SOUS_DOSSIER_FILMS,
+};
 pub use glisser::{
     a_effacer, fichier_a_glisser, liens_a_supprimer, supprimer, Suppression, GLISSER_GARDES,
 };

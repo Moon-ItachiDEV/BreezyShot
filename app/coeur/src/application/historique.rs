@@ -696,11 +696,11 @@ mod tests {
         // Licence retirée, fenêtre encore ouverte : l'aperçu est fait.
         assert!(apercu_a_la_sortie(&sans, true));
         assert!(apercu_a_la_sortie(
-            &crate::application::actions_construites(true, false),
+            &crate::application::actions_construites(true, false, false),
             false
         ));
         assert!(!apercu_a_la_sortie(
-            &crate::application::actions_construites(false, true),
+            &crate::application::actions_construites(false, true, false),
             false
         ));
     }

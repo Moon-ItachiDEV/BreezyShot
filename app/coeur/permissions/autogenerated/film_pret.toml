@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-film-pret"
+description = "Enables the film_pret command without any pre-configured scope."
+commands.allow = ["film_pret"]
+
+[[permission]]
+identifier = "deny-film-pret"
+description = "Denies the film_pret command without any pre-configured scope."
+commands.deny = ["film_pret"]

@@ -61,6 +61,12 @@ pub fn verrouillages_de_session() -> u64 {
     0
 }
 
+pub fn mises_en_veille() -> u64 {
+    0
+}
+
+pub fn quand_session_finit(_rappel: Box<dyn Fn() + Send + Sync>) {}
+
 pub fn poignee_ecran_fige() -> Option<isize> {
     None
 }
@@ -75,4 +81,19 @@ pub fn bureau_virtuel() -> Result<Rect, String> {
 
 pub fn lire_pointeur() -> Result<Option<Pointeur>, String> {
     Ok(None)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Hors Windows : aucune veille comptée, et le rappel de fin de session n'est jamais
+    /// appelé (contrat 0.7, §13.1).
+    #[test]
+    fn veille_et_fin_de_session_absentes() {
+        assert_eq!(mises_en_veille(), 0);
+        quand_session_finit(Box::new(|| panic!("jamais appele hors de Windows")));
+        quand_session_finit(Box::new(|| {}));
+        assert_eq!(mises_en_veille(), 0);
+    }
 }
