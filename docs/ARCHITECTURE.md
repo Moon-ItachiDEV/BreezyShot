@@ -1462,14 +1462,14 @@ formule ; pour un secret, l'outil sûr est Bloc noir.
 remplace la v2 depuis le 12/11/2026)
 
 - La barre du haut (52 px) est la barre de la fenêtre sans cadre : `data-tauri-drag-region`
-  partout sauf sur les boutons. À gauche « Fermer » ; à droite « Enregistrer » et « Copier »
-  (copier PUIS fermer : coche, puis le chemin « copier et fermer » ; en échec la fenêtre
+  partout sauf sur les boutons. À gauche « Fermer » ; à droite « Glisser vers une appli »,
+  « Enregistrer » et « Copier » (copier PUIS fermer : coche, puis le chemin « copier et fermer » ; en échec la fenêtre
   reste). `Ctrl + C` copie sans fermer.
 - Barre d'annotation du bas (barre C et instruments B, choisis le 13/11/2026 :
   `design/annotation-pistes`, `design/annotation-instruments`) : « Annuler », « Rétablir »,
   les neuf outils (« Flèche », « Stylo », « Surligneur », « Gomme » dessinés, un
   séparateur, « Texte », « Forme », « Numéro », « Flou », « Projecteur »), « Plus »
-  (« Enregistrer sous », « Glisser vers une appli »). L'outil en main se déplie dans la
+  (« Enregistrer sous »). L'outil en main se déplie dans la
   barre : ses variantes (Forme : Rectangle, Ellipse, Ligne ; Flou : Pixeliser, Flouter,
   Bloc noir ; Projecteur : Rectangle, Ovale), ses trois tailles, ses six couleurs et
   « Autre couleur », son opacité (20 à 100 % par 5 ; une glissière tirée = un pas) ; rien
@@ -1507,8 +1507,10 @@ remplace la v2 depuis le 12/11/2026)
 - Fermeture : `editeur:fermer_demande` valide le texte en saisie, envoie `editeur_etat`,
   puis répond ; « demander » ouvre le menu « Fermer » (« Copier et fermer », « Fermer sans
   copier » = `force`) ; le refermer vaut `editeur_garder`.
-- « Glisser vers une appli » montre une vignette de prise d'où part le glisser natif
-  (appui puis 4 px) ; aucun `draggable` HTML.
+- « Glisser vers une appli » est un bouton de la barre du haut, avant « Enregistrer »
+  (`design/glisser-appli`, piste A, choisie le 13/11/2026) : le glisser natif part de lui
+  (appui puis 4 px) ; un simple clic le secoue et dit quoi faire ; grisé pendant le calque
+  de Copier le texte ; aucun `draggable` HTML.
 - Absents en 0.4, pas grisés : Copier le texte, Fond, Épingler. Zoom au clavier et à la
   molette seulement. Couleurs et mesures par les jetons `editeur-*` ; un seul export à la
   fois ; aucune ligne de journal nouvelle.
@@ -1954,8 +1956,8 @@ non envoye: <e>`, `surlignage sans fil (<e>): fin montree tout de suite`.
   <b>` dans la même fenêtre, puis modifié et Annoter : `fermeture demandee (remplacer)`,
   Échap : `capture <c> abandonnee` ; (12) capture éditeur ouvert : rien ne bouge ; (13)
   `Ctrl+Maj+S` : dialogue `#32770` possédé par l'éditeur (30 s au plus), IDCANCEL :
-  `dialogue annule`, rien d'écrit ; « Plus », « Glisser vers une appli », glisser réel
-  depuis la vignette de prise vers `cible-glisser.ps1` : `debut`, `depose`, un fichier au
+  `dialogue annule`, rien d'écrit ; glisser réel depuis le bouton « Glisser vers une
+  appli » de la barre du haut vers `cible-glisser.ps1` : `debut`, `depose`, un fichier au
   modèle, mêmes octets que « Récents » ; (14) premier plan rendu (SetForegroundWindow ou
   clic dans la barre du haut de la page), `--quitter` modifié : `ferme (arret)`, `arret
   propre`. Cas B : (15) ouvert ≤ repos + 90 Mo ; 20 ouvertures et fermetures ; 10 s après :

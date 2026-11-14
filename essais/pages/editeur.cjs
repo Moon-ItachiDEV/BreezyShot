@@ -394,8 +394,8 @@ const CHARGE = {
       .allTextContents();
     verifier(
       JSON.stringify(itemsP.map((t) => t.trim())) ===
-        '["Enregistrer sous","Glisser vers une appli"]',
-      '2 menu « Plus » : Enregistrer sous, Glisser vers une appli',
+        '["Enregistrer sous"]',
+      '2 menu « Plus » : Enregistrer sous',
       JSON.stringify(itemsP),
     );
     await p.keyboard.press('Escape');
@@ -1917,29 +1917,25 @@ const CHARGE = {
     await fin(p, '12 image en échec');
   }
 
-  // ---------- 13. « Glisser vers une appli » : vignette de prise, 4 px ----------
+  // ---------- 13. « Glisser vers une appli » : bouton de la barre du haut, 4 px ----------
+  // (design/glisser-appli, piste A).
   {
     const p = await page();
-    await bouton(p, 'Plus').click();
-    await p.getByRole('menuitem', { name: 'Glisser vers une appli' }).click();
     await uneImage(p);
     await calme(p);
     const v = p.getByRole('button', { name: 'Glisser vers une appli', exact: true });
     const r = await p.evaluate(() => {
-      const g = document.querySelector('#vignette-prise');
-      const b = g.getBoundingClientRect();
-      const pal = document.querySelector('#palette').getBoundingClientRect();
+      const g = document.querySelector('#bouton-glisser');
+      const e = document.querySelector('[data-act="enregistrer"]');
       return {
-        vu: !g.hidden,
-        focus: document.activeElement === g,
-        dessus: b.bottom < pal.top,
-        menu: document.querySelector('#menu-plus').classList.contains('ouvert'),
+        haut: g.parentElement.id === 'barre-haut',
+        avant: g.nextElementSibling === e,
         draggable: document.querySelectorAll('[draggable="true"]').length,
       };
     });
     verifier(
-      (await v.count()) === 1 && r.vu && r.focus && r.dessus && !r.menu && r.draggable === 0,
-      '13 vignette de prise au-dessus de la palette, focus, aucun draggable',
+      (await v.count()) === 1 && r.haut && r.avant && r.draggable === 0,
+      '13 bouton Glisser dans la barre du haut, avant Enregistrer, aucun draggable',
       JSON.stringify(r),
     );
     const b = await v.boundingBox();
@@ -1947,35 +1943,37 @@ const CHARGE = {
     const cy = b.y + b.height / 2;
     await p.mouse.move(cx, cy);
     await p.mouse.down();
-    await p.mouse.move(cx + 3, cy);
+    await p.mouse.move(cx - 3, cy);
     await uneImage(p);
     const n3 = await p.evaluate(() => window.__exports.length);
-    await p.mouse.move(cx + 4, cy);
+    await p.mouse.move(cx - 4, cy);
     await p
       .waitForFunction(() => window.__exports.length === 1, null, { timeout: 3000 })
       .catch(() => {});
     await p.mouse.up();
     const r2 = await p.evaluate(() => [
       window.__exports.map((e) => e.entetes['x-editeur-but']).join(','),
-      document.querySelector('#vignette-prise').hidden,
+      document.querySelector('#message').classList.contains('on'),
     ]);
     verifier(
-      n3 === 0 && JSON.stringify(r2) === '["glisser",true]',
-      '13 3 px : rien ; 4 px : export « glisser », la vignette disparaît',
+      n3 === 0 && JSON.stringify(r2) === '["glisser",false]',
+      '13 3 px : rien ; 4 px : export « glisser », pas de message',
       JSON.stringify([n3, r2]),
     );
     await p.evaluate(() =>
       __emettre('editeur:resultat', { id: 7, numero: 1, but: 'glisser', etat: 'fait' }),
     );
-    await bouton(p, 'Plus').click();
-    await p.getByRole('menuitem', { name: 'Glisser vers une appli' }).click();
-    await p.keyboard.press('Escape');
-    const h1 = await p.$eval('#vignette-prise', (g) => g.hidden);
-    await bouton(p, 'Plus').click();
-    await p.getByRole('menuitem', { name: 'Glisser vers une appli' }).click();
-    await p.mouse.click(600, 300);
-    const h2 = await p.$eval('#vignette-prise', (g) => g.hidden);
-    verifier(h1 && h2, '13 Échap ou un clic ailleurs : la vignette part');
+    await v.click();
+    const r3 = await p.evaluate(() => [
+      window.__exports.length,
+      document.querySelector('#message').classList.contains('on'),
+      document.querySelector('#message span').textContent,
+    ]);
+    verifier(
+      JSON.stringify(r3) === '[1,true,"Fais-le glisser vers une appli"]',
+      '13 simple clic : aucun export, le message dit quoi faire',
+      JSON.stringify(r3),
+    );
     await fin(p, '13');
   }
 
@@ -2487,9 +2485,9 @@ const CHARGE = {
     );
     verifier(
       JSON.stringify(haut) ===
-        '[["Fermer","Fermer"],["Texte","Copier le texte"],["Enregistrer","Enregistrer"],["Copier","Copier"]]' &&
+        '[["Fermer","Fermer"],["Texte","Copier le texte"],["Glisser vers une appli","Glisser vers une appli"],["Enregistrer","Enregistrer"],["Copier","Copier"]]' &&
         (await texteHaut(p).count()) === 1,
-      '21 « Texte » (infobulle « Copier le texte ») entre Fermer et Enregistrer',
+      '21 « Texte » (infobulle « Copier le texte ») entre Fermer et Glisser',
       JSON.stringify(haut),
     );
     // R7 : un Bloc noir posé ; l'image lue est l'image composée, la vue du document.
@@ -2831,11 +2829,12 @@ const CHARGE = {
         return [r.left + r.width / 2, r.top + r.height / 2];
       });
     await lireTexte(p);
-    const grises = await p.evaluate(() =>
-      ['enregistrer', 'copier', 'fermer'].map(
+    const grises = await p.evaluate(() => [
+      ...['enregistrer', 'copier', 'fermer'].map(
         (a) => document.querySelector(`#barre-haut [data-act="${a}"]`).disabled,
       ),
-    );
+      document.querySelector('#bouton-glisser').disabled,
+    ]);
     await vider(p);
     // Clic sur « Enregistrer » et « Copier » grisés : rien n'est exporté.
     await p.mouse.click(...(await centre('#barre-haut [data-act="enregistrer"]')));
@@ -2851,21 +2850,23 @@ const CHARGE = {
     await uneImage(p);
     const e1 = [await calque(p), (await appels(p, 'editeur_fermer')).length];
     verifier(
-      JSON.stringify(grises) === '[true,true,false]' &&
+      JSON.stringify(grises) === '[true,true,false,true]' &&
         sansExport === 0 &&
         hors &&
         e1[0] === null &&
         e1[1] === 0,
-      '21 choix : « Enregistrer » et « Copier » du haut grisés (clic sans export) ; Échap, ' +
+      '21 choix : « Glisser », « Enregistrer » et « Copier » du haut grisés (clic sans export) ; ' +
+        'Échap, ' +
         'focus hors du calque, ne ferme que le calque',
       JSON.stringify([grises, sansExport, hors, e1]),
     );
-    const apres = await p.evaluate(() =>
-      ['enregistrer', 'copier'].map(
+    const apres = await p.evaluate(() => [
+      ...['enregistrer', 'copier'].map(
         (a) => document.querySelector(`#barre-haut [data-act="${a}"]`).disabled,
       ),
-    );
-    verifier(JSON.stringify(apres) === '[false,false]', '21 calque fermé : barre du haut rendue');
+      document.querySelector('#bouton-glisser').disabled,
+    ]);
+    verifier(JSON.stringify(apres) === '[false,false,false]', '21 calque fermé : barre du haut rendue');
     // Ctrl + A puis focus hors du calque : Ctrl + C copie le texte, jamais l'image ; une
     // touche d'outil (P) est sans effet ; Tab reste dans le calque et sa barre.
     await vider(p);
@@ -3193,8 +3194,8 @@ const CHARGE = {
       };
     });
     verifier(
-      r.n === 4 && r.rangee && r.ordre && r.dedans && r.lib && !r.deborde,
-      '21 barre du haut à 640 px : quatre boutons sur une rangée, rien ne déborde',
+      r.n === 5 && r.rangee && r.ordre && r.dedans && r.lib && !r.deborde,
+      '21 barre du haut à 640 px : cinq boutons sur une rangée, rien ne déborde',
       JSON.stringify(r),
     );
     const t0 = await p.evaluate(() => performance.now());

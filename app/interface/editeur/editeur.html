@@ -46,7 +46,6 @@
       <path d="M7 4.5v3.5h5V4.5M7 16.5v-4h6v4"/></symbol>
     <symbol id="i-drag" viewBox="0 0 20 20"><rect x="3" y="5" width="9" height="9" rx="1.5"/>
       <path d="M10 10h7M14 7l3 3-3 3"/></symbol>
-    <symbol id="i-grip" viewBox="0 0 20 20"><path d="M6 8h8M6 12h8"/></symbol>
     <symbol id="i-undo" viewBox="0 0 20 20"><path d="M7.5 5 4 8.5 7.5 12"/>
       <path d="M4 8.5h8a4 4 0 0 1 0 8H9"/></symbol>
     <symbol id="i-redo" viewBox="0 0 20 20"><path d="M12.5 5 16 8.5 12.5 12"/>
@@ -102,6 +101,8 @@
       aria-haspopup="menu" aria-expanded="false"><svg class="ico"><use href="#i-x"/></svg>
     </button>
     <div class="sp" data-tauri-drag-region></div>
+    <button class="rb prise" type="button" id="bouton-glisser" aria-label="Glisser vers une appli"
+      title="Glisser vers une appli"><svg class="ico"><use href="#i-drag"/></svg></button>
     <button class="rb" type="button" data-act="enregistrer" aria-label="Enregistrer"
       title="Enregistrer"><svg class="ico"><use href="#i-save"/></svg></button>
     <button class="ok" type="button" data-act="copier" aria-label="Copier" title="Copier"><svg
@@ -136,8 +137,6 @@
   <div class="pop" id="menu-plus" role="menu" aria-label="Plus">
     <button class="mi" type="button" role="menuitem" data-act="enregistrer_sous"><svg
       class="ico"><use href="#i-saveas"/></svg>Enregistrer sous</button>
-    <button class="mi" type="button" role="menuitem" data-act="glisser"><svg class="ico"><use
-      href="#i-drag"/></svg>Glisser vers une appli</button>
   </div>
   <div class="pop" id="menu-fermer" role="menu" aria-label="Fermer">
     <button class="mi" type="button" role="menuitem" data-act="copier_fermer"><svg
@@ -156,9 +155,6 @@
       class="ico"><use href="#i-del"/></svg>Supprimer</button>
   </div>
 
-  <div class="ghost" id="vignette-prise" role="button" tabindex="-1"
-    aria-label="Glisser vers une appli" title="Glisser vers une appli" hidden><img alt=""
-    id="vignette-image"><svg class="ico" aria-hidden="true"><use href="#i-grip"/></svg></div>
   <div class="etiquette-zoom" id="etiquette-zoom" aria-live="polite"></div>
   <div class="msg" id="message" role="status"><i aria-hidden="true"><svg viewBox="0 0 12 12"><path
     d="M2.5 6.3l2.3 2.3 4.7-5"/></svg></i><span></span></div>
