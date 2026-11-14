@@ -579,7 +579,7 @@ mod tests {
             let neuf = plein(l, h, n as u32);
             // Une case sur trois change : les autres restent (transparentes).
             for (i, px) in p.rgba.chunks_exact_mut(4).enumerate() {
-                if (i + n as usize) % 3 == 0 {
+                if (i + n as usize).is_multiple_of(3) {
                     px.copy_from_slice(&neuf.rgba[i * 4..i * 4 + 4]);
                 }
             }

@@ -6,7 +6,8 @@ use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
 use super::fichier::existe;
-use super::nom::chemin_libre;
+use super::film::{cle_film, SorteFilm};
+use super::nom::chemin_libre_ext;
 use super::recents::{cle_recent, RECENTS_GARDES};
 
 /// Nombre de fichiers gardes dans `<local>/Glisser` (borne comme « Recents »).
@@ -27,7 +28,11 @@ pub struct Suppression {
 /// Le fichier a donner au glisser : `<dossier>/<nom>.png` (« (2) » si besoin), lien dur
 /// vers le fichier de « Recents » (aucune donnee copiee) ; si le lien est impossible, une
 /// copie ; si la copie l'est aussi, le fichier de « Recents » lui-meme. Le dossier garde au
-/// plus `GLISSER_GARDES` fichiers, jamais celui qu'on vient d'y mettre.
+/// plus `GLISSER_GARDES` fichiers `.png`, jamais celui qu'on vient d'y mettre.
+///
+/// 0.7 (F23) : l'extension est celle du fichier donne (`.mp4` ou `.gif` pour un film, `.png`
+/// sans extension) ; les liens de films ne sont pas comptes ici, ils suivent
+/// `films_a_retirer` (`nettoyer_films`).
 pub fn fichier_a_glisser(recent: &Path, dossier: &Path, nom: &str) -> Result<PathBuf, String> {
     if !recent.is_file() {
         return Err("le fichier de la capture est introuvable".into());
@@ -35,7 +40,12 @@ pub fn fichier_a_glisser(recent: &Path, dossier: &Path, nom: &str) -> Result<Pat
     if fs::create_dir_all(dossier).is_err() {
         return Ok(recent.to_path_buf());
     }
-    let chemin = chemin_libre(dossier, nom, existe);
+    let extension = recent
+        .extension()
+        .and_then(|e| e.to_str())
+        .filter(|e| !e.is_empty())
+        .unwrap_or("png");
+    let chemin = chemin_libre_ext(dossier, nom, extension, existe);
     let fait = fs::hard_link(recent, &chemin).or_else(|_| fs::copy(recent, &chemin).map(|_| ()));
     if fait.is_err() {
         return Ok(recent.to_path_buf());
@@ -82,11 +92,28 @@ pub fn liens_a_supprimer(
         .collect()
 }
 
-fn est_png(chemin: &Path) -> bool {
+fn a_l_extension(chemin: &Path, voulue: &str) -> bool {
     chemin
         .extension()
         .and_then(|e| e.to_str())
-        .is_some_and(|e| e.eq_ignore_ascii_case("png"))
+        .is_some_and(|e| e.eq_ignore_ascii_case(voulue))
+}
+
+fn est_png(chemin: &Path) -> bool {
+    a_l_extension(chemin, "png")
+}
+
+/// Vrai pour un fichier que Supprimer peut effacer hors des dossiers de l'app : une image
+/// `.png`, ou un film `.mp4` ou `.gif` (0.7).
+fn est_capture(chemin: &Path) -> bool {
+    est_png(chemin) || est_film(chemin)
+}
+
+/// Vrai pour un fichier de film : `.mp4` ou `.gif`.
+pub(super) fn est_film(chemin: &Path) -> bool {
+    [SorteFilm::Video, SorteFilm::Gif]
+        .iter()
+        .any(|s| a_l_extension(chemin, s.extension()))
 }
 
 /// Ce que Supprimer efface (fonction pure) : le fichier de « Recents » s'il est dans
@@ -94,15 +121,16 @@ fn est_png(chemin: &Path) -> bool {
 /// est un chemin absolu `.png` ; les fichiers de glisser s'ils sont dans `dossier_glisser`
 /// et en `.png`. Rien d'autre, sans doublon.
 ///
-/// `dossier_films` (0.7) : `<local>/Films`, où le fichier de travail d'un film doit être
-/// pour être effacé. Socle : le film n'est pas encore pris en compte (chantier E, F25).
+/// Pour un film (0.7, F25) : son fichier de travail s'il est dans `dossier_films` et au
+/// format exact `AAAAMMJJ-HHMMSS-mmm.mp4` ou `.gif` (`cle_film`) ; le fichier enregistre
+/// s'il est un chemin absolu `.mp4` ou `.gif` ; les liens de `dossier_glisser` en `.mp4` ou
+/// `.gif`.
 pub fn a_effacer(
     s: &Suppression,
     dossier_recents: &Path,
     dossier_glisser: &Path,
     dossier_films: &Path,
 ) -> Vec<PathBuf> {
-    let _ = (dossier_films, &s.film);
     let mut liste: Vec<PathBuf> = Vec::new();
     let mut ajouter = |p: &Path| {
         if !liste.iter().any(|q| q == p) {
@@ -121,15 +149,24 @@ pub fn a_effacer(
             ajouter(r);
         }
     }
+    if let Some(f) = &s.film {
+        let au_format = f
+            .file_name()
+            .and_then(|n| n.to_str())
+            .is_some_and(|n| cle_film(n).is_some());
+        if !dossier_films.as_os_str().is_empty() && f.parent() == Some(dossier_films) && au_format {
+            ajouter(f);
+        }
+    }
     if let Some(e) = &s.enregistre {
-        if e.is_absolute() && est_png(e) {
+        if e.is_absolute() && est_capture(e) {
             ajouter(e);
         }
     }
     for l in &s.liens {
         if !dossier_glisser.as_os_str().is_empty()
             && l.parent() == Some(dossier_glisser)
-            && est_png(l)
+            && est_capture(l)
         {
             ajouter(l);
         }

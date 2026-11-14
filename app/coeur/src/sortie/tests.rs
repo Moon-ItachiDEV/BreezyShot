@@ -2503,3 +2503,740 @@ fn horloge_reculee_la_capture_neuve_reste_avec_son_apercu() {
     assert!(!neuf.exists());
     assert!(!d.apercus.join(&nom_neuf).exists());
 }
+
+// ---------- Films (0.7, chantier E) ----------
+
+mod films {
+    use super::*;
+    use crate::sortie::film::{cle_film, relire_fichiers, sonder_fichiers};
+    use crate::sortie::nom::chemin_libre_ext;
+    use crate::sortie::{
+        a_effacer, annonce_film, chemin_film, copier_film, effacer_film, enregistrer_film,
+        fichier_a_glisser, films_a_retirer, nettoyer_films, sortir_film, supprimer, BilanFilm,
+        FilmGarde, SorteFilm, Suppression, FILMS_AGE_MAX, FILMS_GARDES, FILMS_OCTETS_MAX,
+        FILM_JEUNE, GLISSER_GARDES, SOUS_DOSSIER_FILMS,
+    };
+
+    const MO: u64 = 1024 * 1024;
+
+    /// Le dossier local d'essai : `Films`, `Glisser`, `Recents` dessous, et une demande
+    /// qui enregistre dans `<racine>/Images/BreezyShot`, sans copie.
+    struct Local {
+        _racine: tempfile::TempDir,
+        racine: PathBuf,
+        films: PathBuf,
+        glisser: PathBuf,
+        demande: Demande,
+    }
+
+    fn local() -> Local {
+        let racine = tempfile::tempdir().expect("dossier");
+        let chemin = racine.path().to_path_buf();
+        let mut d = demande(&chemin);
+        d.ranger_recents = false;
+        Local {
+            films: chemin.join("local").join(SOUS_DOSSIER_FILMS),
+            glisser: chemin.join("local").join("Glisser"),
+            racine: chemin,
+            _racine: racine,
+            demande: d,
+        }
+    }
+
+    /// Un film de travail de `octets` octets reconnaissables.
+    fn film(l: &Local, sorte: SorteFilm, octets: usize) -> PathBuf {
+        let chemin = chemin_film(&l.films, instant(), sorte).expect("chemin");
+        let contenu: Vec<u8> = (0..octets).map(|i| (i % 251) as u8).collect();
+        fs::write(&chemin, contenu).expect("film");
+        chemin
+    }
+
+    fn date(age: Duration) -> SystemTime {
+        maintenant() - age
+    }
+
+    fn maintenant() -> SystemTime {
+        SystemTime::UNIX_EPOCH + Duration::from_secs(1_800_000_000)
+    }
+
+    fn garde(nom: &str, octets: u64, age: Duration) -> FilmGarde {
+        FilmGarde {
+            nom: nom.to_string(),
+            octets,
+            date: date(age),
+        }
+    }
+
+    fn heures(n: u64) -> Duration {
+        Duration::from_secs(n * 3600)
+    }
+
+    #[test]
+    fn nom_et_extension_du_fichier_de_travail() {
+        let l = local();
+        let base = base_recent(instant());
+        let v = chemin_film(&l.films, instant(), SorteFilm::Video).expect("vidéo");
+        assert!(l.films.is_dir(), "dossier créé");
+        assert_eq!(v, l.films.join(format!("{base}.mp4")));
+        assert!(!v.exists(), "le fichier n'est pas créé");
+        let g = chemin_film(&l.films, instant(), SorteFilm::Gif).expect("gif");
+        assert_eq!(g, l.films.join(format!("{base}.gif")));
+        // Pris : « _2 », comme « Récents ».
+        fs::write(&v, b"x").unwrap();
+        let v2 = chemin_film(&l.films, instant(), SorteFilm::Video).expect("vidéo 2");
+        assert_eq!(v2, l.films.join(format!("{base}_2.mp4")));
+        // La forme exacte (la base UTC de « Récents »).
+        assert_eq!(cle_film(&format!("{base}.mp4")), Some(SorteFilm::Video));
+        assert_eq!(cle_film(&format!("{base}_2.gif")), Some(SorteFilm::Gif));
+        for faux in [
+            format!("{base}.png"),
+            format!("{base}.MP4"),
+            format!("{base}_1.mp4"),
+            format!("{base}x.mp4"),
+            "film.mp4".to_string(),
+            format!("{base}mp4"),
+            format!("{base}..gif"),
+        ] {
+            assert_eq!(cle_film(&faux), None, "{faux}");
+        }
+        // Un dossier relatif ou vide est refusé, sans rien créer.
+        assert!(chemin_film(Path::new("Films"), instant(), SorteFilm::Gif).is_err());
+        assert!(chemin_film(Path::new(""), instant(), SorteFilm::Gif).is_err());
+        assert!(!Path::new("Films").exists());
+        assert_eq!(SorteFilm::Video.extension(), "mp4");
+        assert_eq!(SorteFilm::Gif.extension(), "gif");
+    }
+
+    #[test]
+    fn chemin_libre_ext_et_png_inchange() {
+        let d = Path::new("/d");
+        let pris = |p: &Path| {
+            p == Path::new("/d/BreezyShot.mp4") || p == Path::new("/d/BreezyShot (2).mp4")
+        };
+        assert_eq!(
+            chemin_libre_ext(d, "BreezyShot", "mp4", pris),
+            PathBuf::from("/d/BreezyShot (3).mp4")
+        );
+        assert_eq!(
+            chemin_libre_ext(d, "BreezyShot", "gif", pris),
+            PathBuf::from("/d/BreezyShot.gif")
+        );
+        assert_eq!(
+            chemin_libre(d, "BreezyShot", pris),
+            PathBuf::from("/d/BreezyShot.png")
+        );
+        assert_eq!(
+            chemin_libre_ext(d, "a", "png", |_| false),
+            chemin_libre(d, "a", |_| false)
+        );
+    }
+
+    #[test]
+    fn films_a_retirer_dix_films() {
+        // Douze petits films, de 2 h à 13 h.
+        let films: Vec<FilmGarde> = (0..12)
+            .map(|i| garde(&format!("f{i:02}"), MO, heures(2 + i)))
+            .collect();
+        // Les dix plus récents restent.
+        assert_eq!(films_a_retirer(&films, maintenant(), &[]), ["f10", "f11"]);
+        // L'ordre donné ne compte pas.
+        let mut inverse = films.clone();
+        inverse.reverse();
+        assert_eq!(films_a_retirer(&inverse, maintenant(), &[]), ["f10", "f11"]);
+        // Un protégé ancien reste et compte : un autre part à sa place.
+        let r = films_a_retirer(&films, maintenant(), &["f11".to_string()]);
+        assert_eq!(r, ["f09", "f10"]);
+        assert_eq!(FILMS_GARDES, 10);
+        assert!(films_a_retirer(&films[..10], maintenant(), &[]).is_empty());
+    }
+
+    #[test]
+    fn films_a_retirer_deux_go() {
+        // Trois films de 900 Mo : 2 700 Mo ; le plus ancien part.
+        let films = vec![
+            garde("a", 900 * MO, heures(2)),
+            garde("b", 900 * MO, heures(3)),
+            garde("c", 900 * MO, heures(4)),
+        ];
+        assert_eq!(films_a_retirer(&films, maintenant(), &[]), ["c"]);
+        // Juste 2 Go : tout reste.
+        let juste = vec![
+            garde("a", FILMS_OCTETS_MAX / 2, heures(2)),
+            garde("b", FILMS_OCTETS_MAX / 2, heures(3)),
+        ];
+        assert!(films_a_retirer(&juste, maintenant(), &[]).is_empty());
+        // Un seul film de 5 Go : le plus récent reste toujours.
+        let gros = vec![garde("g", 5 * FILMS_OCTETS_MAX, heures(30))];
+        assert!(films_a_retirer(&gros, maintenant(), &[]).is_empty());
+        // Un gros plus récent, puis un petit : le petit tient encore s'il reste de la place.
+        let films = vec![
+            garde("gros", FILMS_OCTETS_MAX - 10 * MO, heures(2)),
+            garde("moyen", 20 * MO, heures(3)),
+            garde("petit", 5 * MO, heures(4)),
+        ];
+        assert_eq!(films_a_retirer(&films, maintenant(), &[]), ["moyen"]);
+    }
+
+    #[test]
+    fn films_a_retirer_sept_jours_et_exceptions() {
+        let films = vec![
+            garde("neuf", MO, heures(24 * 8)),
+            garde("vieux", MO, heures(24 * 8 + 1)),
+            garde("tres_vieux", MO, heures(24 * 30)),
+        ];
+        // Le plus récent reste même au-delà de sept jours ; les autres partent.
+        assert_eq!(
+            films_a_retirer(&films, maintenant(), &[]),
+            ["vieux", "tres_vieux"]
+        );
+        // Sept jours tout juste : gardé.
+        let films = vec![garde("a", MO, heures(1)), garde("b", MO, FILMS_AGE_MAX)];
+        assert!(films_a_retirer(&films, maintenant(), &[]).is_empty());
+        // Moins d'une heure : jamais retiré, même au-delà des bornes de nombre et de taille.
+        let jeunes: Vec<FilmGarde> = (0..12)
+            .map(|i| {
+                garde(
+                    &format!("j{i:02}"),
+                    FILMS_OCTETS_MAX / 4,
+                    Duration::from_secs(60 * i),
+                )
+            })
+            .collect();
+        assert!(films_a_retirer(&jeunes, maintenant(), &[]).is_empty());
+        assert_eq!(FILM_JEUNE, heures(1));
+        // Ils comptent pourtant : un vieux de plus part.
+        let mut tous = jeunes.clone();
+        tous.push(garde("ancien", MO, heures(5)));
+        assert_eq!(films_a_retirer(&tous, maintenant(), &[]), ["ancien"]);
+        // Protégés : le film en cours, celui de la vignette, une sortie qui tourne.
+        let films = vec![
+            garde("recent", MO, heures(2)),
+            garde("vignette", 3 * FILMS_OCTETS_MAX, heures(24 * 9)),
+        ];
+        assert!(films_a_retirer(&films, maintenant(), &["vignette".into()]).is_empty());
+        assert_eq!(films_a_retirer(&films, maintenant(), &[]), ["vignette"]);
+        // Une date dans le futur (horloge reculée) compte comme maintenant.
+        let futur = vec![
+            garde("a", MO, heures(3)),
+            FilmGarde {
+                nom: "futur".into(),
+                octets: MO,
+                date: maintenant() + heures(48),
+            },
+        ];
+        assert!(films_a_retirer(&futur, maintenant(), &[]).is_empty());
+        assert!(films_a_retirer(&[], maintenant(), &[]).is_empty());
+    }
+
+    fn dater(chemin: &Path, quand: SystemTime) {
+        fs::File::options()
+            .write(true)
+            .open(chemin)
+            .expect("ouvert")
+            .set_modified(quand)
+            .expect("date");
+    }
+
+    #[test]
+    fn nettoyage_du_dossier_cache_sur_le_disque() {
+        let l = local();
+        fs::create_dir_all(&l.films).unwrap();
+        fs::create_dir_all(&l.glisser).unwrap();
+        let ici = SystemTime::now();
+        // Douze films de 2 à 13 h, un film de huit jours protégé, un étranger.
+        let mut noms = Vec::new();
+        for i in 0..12u64 {
+            let nom = format!(
+                "20261101-{:02}0000-000.{}",
+                i,
+                ["mp4", "gif"][i as usize % 2]
+            );
+            assert!(cle_film(&nom).is_some(), "{nom}");
+            fs::write(l.films.join(&nom), vec![0u8; 1000]).unwrap();
+            dater(&l.films.join(&nom), ici - heures(2 + i));
+            noms.push(nom);
+        }
+        let protege = "20261101-200000-000.mp4".to_string();
+        fs::write(l.films.join(&protege), vec![0u8; 10]).unwrap();
+        dater(&l.films.join(&protege), ici - heures(24 * 8));
+        let etranger = l.films.join("mon film.mp4");
+        fs::write(&etranger, b"x").unwrap();
+        dater(&etranger, ici - heures(24 * 30));
+        let vieux_temp = l.films.join("20261101-000000-000.mp4.part");
+        fs::write(&vieux_temp, b"x").unwrap();
+        dater(&vieux_temp, ici - heures(24 * 30));
+        // Glisser : des liens de films (vieux et récents) et des images.
+        let lien_vieux = l.glisser.join("BreezyShot vieux.gif");
+        let lien_neuf = l.glisser.join("BreezyShot neuf.mp4");
+        let image_vieille = l.glisser.join("BreezyShot vieux.png");
+        for (p, age) in [
+            (&lien_vieux, heures(24 * 9)),
+            (&lien_neuf, Duration::from_secs(60)),
+            (&image_vieille, heures(24 * 9)),
+        ] {
+            fs::write(p, b"x").unwrap();
+            dater(p, ici - age);
+        }
+        let (n, octets) = nettoyer_films(&l.films, &l.glisser, ici, std::slice::from_ref(&protege));
+        // Onze films gardés (dix plus le protégé, qui compte) : les deux plus anciens et
+        // un troisième partent.
+        assert_eq!((n, octets), (3, 3000));
+        for (i, nom) in noms.iter().enumerate() {
+            assert_eq!(l.films.join(nom).exists(), i < 9, "{nom}");
+        }
+        assert!(l.films.join(&protege).exists());
+        assert!(
+            etranger.exists() && vieux_temp.exists(),
+            "étrangers intacts"
+        );
+        assert!(!lien_vieux.exists(), "lien de film de neuf jours parti");
+        assert!(lien_neuf.exists());
+        assert!(
+            image_vieille.exists(),
+            "les images de Glisser ne sont pas à lui"
+        );
+        // Une seconde fois : rien de plus.
+        assert_eq!(
+            nettoyer_films(&l.films, &l.glisser, ici, &[protege]),
+            (0, 0)
+        );
+        // Dossiers absents ou vides : rien, sans panique.
+        assert_eq!(
+            nettoyer_films(&l.racine.join("absent"), Path::new(""), ici, &[]),
+            (0, 0)
+        );
+    }
+
+    #[test]
+    fn enregistrer_copie_sous_le_nom_du_modele() {
+        let l = local();
+        let f = film(&l, SorteFilm::Video, 300_000);
+        let dossier = &l.demande.dossier_enregistrement;
+        let e = enregistrer_film(&f, SorteFilm::Video, &l.demande);
+        let attendu = dossier.join("BreezyShot 2026-11-11 à 19.40.12.mp4");
+        assert_eq!(e, EtapeFichier::Fait(attendu.clone()));
+        assert_eq!(fs::read(&attendu).unwrap(), fs::read(&f).unwrap());
+        assert!(f.exists(), "une copie : le fichier de travail reste");
+        // Une seconde fois : « (2) », rien d'écrasé, aucun temporaire laissé.
+        let e = enregistrer_film(&f, SorteFilm::Video, &l.demande);
+        assert_eq!(
+            e,
+            EtapeFichier::Fait(dossier.join("BreezyShot 2026-11-11 à 19.40.12 (2).mp4"))
+        );
+        sans_temporaire(dossier);
+        // Un GIF prend son extension.
+        let g = film(&l, SorteFilm::Gif, 10);
+        assert_eq!(
+            enregistrer_film(&g, SorteFilm::Gif, &l.demande),
+            EtapeFichier::Fait(dossier.join("BreezyShot 2026-11-11 à 19.40.12.gif"))
+        );
+    }
+
+    #[test]
+    fn sortir_selon_la_demande() {
+        let l = local();
+        let f = film(&l, SorteFilm::Gif, 5000);
+        let mut d = l.demande.clone();
+        // Ni copie ni enregistrement : rien.
+        d.enregistrer = false;
+        let b = sortir_film(&f, SorteFilm::Gif, &d, false);
+        assert_eq!(
+            b,
+            BilanFilm {
+                copie: Etape::NonDemandee,
+                enregistrement: EtapeFichier::NonDemande,
+                lien: None,
+            }
+        );
+        assert!(f.exists());
+        assert!(!d.dossier_enregistrement.exists());
+        // Enregistrer sans déplacer : une copie.
+        d.enregistrer = true;
+        let b = sortir_film(&f, SorteFilm::Gif, &d, false);
+        let EtapeFichier::Fait(copie) = &b.enregistrement else {
+            panic!("{b:?}");
+        };
+        assert!(f.exists() && copie.exists());
+        // Jamais « Récents » (F24).
+        assert!(!d.dossier_recents.exists());
+    }
+
+    #[test]
+    fn deplacer_le_film_dans_le_dossier_choix_u4() {
+        let l = local();
+        let f = film(&l, SorteFilm::Video, 70_000);
+        let contenu = fs::read(&f).unwrap();
+        let b = sortir_film(&f, SorteFilm::Video, &l.demande, true);
+        let attendu = l
+            .demande
+            .dossier_enregistrement
+            .join("BreezyShot 2026-11-11 à 19.40.12.mp4");
+        assert_eq!(b.enregistrement, EtapeFichier::Fait(attendu.clone()));
+        assert!(!f.exists(), "déplacé : le dossier caché ne garde rien");
+        assert_eq!(fs::read(&attendu).unwrap(), contenu);
+        sans_temporaire(&l.demande.dossier_enregistrement);
+        // Le même nom est pris : « (2) », rien d'écrasé.
+        let f = film(&l, SorteFilm::Video, 10);
+        let b = sortir_film(&f, SorteFilm::Video, &l.demande, true);
+        assert_eq!(
+            b.enregistrement,
+            EtapeFichier::Fait(
+                l.demande
+                    .dossier_enregistrement
+                    .join("BreezyShot 2026-11-11 à 19.40.12 (2).mp4")
+            )
+        );
+        assert_eq!(fs::read(&attendu).unwrap(), contenu);
+    }
+
+    #[test]
+    fn deplacer_vers_un_autre_volume_copie_puis_efface() {
+        // Un autre système de fichiers que le dossier temporaire, s'il y en a un ici
+        // (`/dev/shm` sous Linux) : ni lien dur ni renommage n'y passent.
+        let Some(ailleurs) = ["/dev/shm"]
+            .iter()
+            .map(Path::new)
+            .find(|p| p.is_dir())
+            .and_then(|p| tempfile::tempdir_in(p).ok())
+        else {
+            println!("pas d'autre volume ici : saute.");
+            return;
+        };
+        let l = local();
+        let f = film(&l, SorteFilm::Gif, 123_456);
+        let contenu = fs::read(&f).unwrap();
+        let mut d = l.demande.clone();
+        d.dossier_enregistrement = ailleurs.path().join("Images");
+        let b = sortir_film(&f, SorteFilm::Gif, &d, true);
+        let EtapeFichier::Fait(chemin) = &b.enregistrement else {
+            panic!("{b:?}");
+        };
+        assert_eq!(fs::read(chemin).unwrap(), contenu);
+        assert!(!f.exists());
+        sans_temporaire(&d.dossier_enregistrement);
+    }
+
+    #[test]
+    fn dossier_d_enregistrement_refuse() {
+        let l = local();
+        let f = film(&l, SorteFilm::Video, 100);
+        // Relatif : refusé sans rien écrire ; le film reste dans Films (même en déplaçant).
+        let mut d = l.demande.clone();
+        d.dossier_enregistrement = PathBuf::from("Images/BreezyShot");
+        for deplacer in [false, true] {
+            let b = sortir_film(&f, SorteFilm::Video, &d, deplacer);
+            assert_eq!(
+                b.enregistrement,
+                EtapeFichier::Echec {
+                    dossier: d.dossier_enregistrement.clone(),
+                    cause: "Le dossier Images › BreezyShot est introuvable.".into(),
+                }
+            );
+            assert!(f.exists());
+        }
+        assert!(!Path::new("Images").exists());
+        // Un fichier à la place du dossier.
+        let mut d = l.demande.clone();
+        fs::write(l.racine.join("bloque"), b"x").unwrap();
+        d.dossier_enregistrement = l.racine.join("bloque").join("BreezyShot");
+        let b = sortir_film(&f, SorteFilm::Video, &d, true);
+        assert!(
+            matches!(b.enregistrement, EtapeFichier::Echec { .. }),
+            "{b:?}"
+        );
+        assert!(f.exists());
+        // Le film a disparu : échec dit, sans panique.
+        let absent = l.films.join("20261111-000000-000.mp4");
+        let mut d = l.demande.clone();
+        d.copier = true;
+        let b = sortir_film(&absent, SorteFilm::Video, &d, true);
+        assert_eq!(
+            b.copie,
+            Etape::Echec("Le fichier du film est introuvable.".into())
+        );
+        assert!(matches!(b.enregistrement, EtapeFichier::Echec { .. }));
+        assert_eq!(b.lien, None);
+    }
+
+    #[test]
+    fn copier_pose_un_lien_au_nom_du_modele() {
+        let _seul = PRESSE_PAPIERS_TESTS
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let l = local();
+        let f = film(&l, SorteFilm::Gif, 4000);
+        let (etape, lien) = copier_film(&f, SorteFilm::Gif, &l.demande);
+        let lien = lien.expect("lien dans Glisser");
+        assert_eq!(lien, l.glisser.join("BreezyShot 2026-11-11 à 19.40.12.gif"));
+        assert_eq!(fs::read(&lien).unwrap(), fs::read(&f).unwrap());
+        // Ici, le presse-papiers peut manquer : l'étape le dit, le lien est là quand même.
+        // Comme les images : obligatoire avec `BREEZYSHOT_PRESSE_PAPIERS_OBLIGATOIRE=1`.
+        match sonder_fichiers() {
+            Ok(()) => {
+                assert_eq!(etape, Etape::Faite);
+                assert_eq!(
+                    relire_fichiers().expect("relu"),
+                    std::slice::from_ref(&lien)
+                );
+            }
+            Err(e) => {
+                let obligatoire =
+                    std::env::var("BREEZYSHOT_PRESSE_PAPIERS_OBLIGATOIRE").as_deref() == Ok("1");
+                assert!(!obligatoire, "presse-papiers obligatoire mais absent ({e})");
+                assert!(matches!(etape, Etape::Echec(_)), "{etape:?}");
+                println!("copier_pose_un_lien_au_nom_du_modele : pas de presse-papiers ici.");
+            }
+        }
+        // Le lien garde les octets après le déplacement du film (choix U4).
+        let mut d = l.demande.clone();
+        d.copier = true;
+        let b = sortir_film(&f, SorteFilm::Gif, &d, true);
+        let second = b.lien.expect("lien");
+        assert_eq!(
+            second,
+            l.glisser.join("BreezyShot 2026-11-11 à 19.40.12 (2).gif")
+        );
+        assert!(!f.exists());
+        assert_eq!(fs::read(&second).unwrap().len(), 4000);
+        // Sans « Recents » utilisable, pas de Glisser : le fichier lui-même est donné.
+        let mut d = l.demande.clone();
+        d.dossier_recents = PathBuf::new();
+        let g = film(&l, SorteFilm::Video, 10);
+        let (_, lien) = copier_film(&g, SorteFilm::Video, &d);
+        assert_eq!(lien, None);
+    }
+
+    #[test]
+    fn glisser_garde_l_extension_et_ne_compte_pas_les_films() {
+        let l = local();
+        let f = film(&l, SorteFilm::Video, 10);
+        let a = fichier_a_glisser(&f, &l.glisser, "Film").expect("lien");
+        assert_eq!(a, l.glisser.join("Film.mp4"));
+        let b = fichier_a_glisser(&f, &l.glisser, "Film").expect("lien");
+        assert_eq!(b, l.glisser.join("Film (2).mp4"));
+        // Beaucoup d'images ensuite : la borne des .png ne retire aucun lien de film.
+        let rec = l.racine.join("local").join("Recents");
+        fs::create_dir_all(&rec).unwrap();
+        let r = rec.join("20261111-194012-123.png");
+        fs::write(&r, b"png").unwrap();
+        for i in 0..(GLISSER_GARDES + 3) {
+            fichier_a_glisser(&r, &l.glisser, &format!("img{i}")).expect("png");
+        }
+        assert!(a.exists() && b.exists());
+        // Sans extension : `.png`, comme avant.
+        let sans = l.racine.join("sans");
+        fs::write(&sans, b"x").unwrap();
+        assert_eq!(
+            fichier_a_glisser(&sans, &l.glisser, "s").unwrap(),
+            l.glisser.join("s.png")
+        );
+    }
+
+    #[test]
+    fn supprimer_un_film_efface_ses_fichiers() {
+        let rec = Path::new("/l/Recents");
+        let gli = Path::new("/l/Glisser");
+        let fil = Path::new("/l/Films");
+        let enregistre = std::env::temp_dir()
+            .join("BreezyShot")
+            .join("BreezyShot 2026-11-11 à 19.40.12.mp4");
+        let s = Suppression {
+            recent: None,
+            enregistre: Some(enregistre.clone()),
+            liens: vec![
+                gli.join("BreezyShot 2026-11-11 à 19.40.12.mp4"),
+                gli.join("BreezyShot 2026-11-11 à 19.40.12.gif"),
+                gli.join("x.txt"),
+                PathBuf::from("/ailleurs/x.mp4"),
+            ],
+            film: Some(fil.join("20261111-184012-123.mp4")),
+        };
+        assert_eq!(
+            a_effacer(&s, rec, gli, fil),
+            [
+                fil.join("20261111-184012-123.mp4"),
+                enregistre.clone(),
+                gli.join("BreezyShot 2026-11-11 à 19.40.12.mp4"),
+                gli.join("BreezyShot 2026-11-11 à 19.40.12.gif"),
+            ]
+        );
+        // Un .mp4 hors de Films, ou mal nommé, ou un enregistré relatif : rien.
+        for film in [
+            PathBuf::from("/ailleurs/20261111-184012-123.mp4"),
+            fil.join("mon film.mp4"),
+            fil.join("20261111-184012-123.png"),
+            fil.join("20261111-184012-123.mov"),
+        ] {
+            let s = Suppression {
+                film: Some(film.clone()),
+                enregistre: Some(PathBuf::from("relatif.mp4")),
+                ..Suppression::default()
+            };
+            assert!(a_effacer(&s, rec, gli, fil).is_empty(), "{film:?}");
+        }
+        // Sans dossier des films : le fichier de travail n'est jamais effacé.
+        let s = Suppression {
+            film: Some(PathBuf::from("20261111-184012-123.mp4")),
+            ..Suppression::default()
+        };
+        assert!(a_effacer(&s, rec, gli, Path::new("")).is_empty());
+        // Un enregistré d'une autre sorte n'est pas pris.
+        let s = Suppression {
+            enregistre: Some(enregistre.with_extension("mov")),
+            ..Suppression::default()
+        };
+        assert!(a_effacer(&s, rec, gli, fil).is_empty());
+    }
+
+    #[test]
+    fn supprimer_un_film_sur_le_disque() {
+        let l = local();
+        let mut d = l.demande.clone();
+        d.copier = true;
+        let f = film(&l, SorteFilm::Gif, 100);
+        // Lien de glisser posé avant (comme la copie), puis enregistrement sans déplacer.
+        let lien = fichier_a_glisser(&f, &l.glisser, "BreezyShot").expect("lien");
+        let EtapeFichier::Fait(enregistre) = enregistrer_film(&f, SorteFilm::Gif, &d) else {
+            panic!("enregistrement");
+        };
+        let autre = l.glisser.join("autre.png");
+        fs::write(&autre, b"x").unwrap();
+        let s = Suppression {
+            recent: None,
+            enregistre: Some(enregistre.clone()),
+            liens: vec![lien.clone()],
+            film: Some(f.clone()),
+        };
+        let rec = l.racine.join("local").join("Recents");
+        let r = supprimer(&s, &rec, &l.glisser, &l.films);
+        assert_eq!(r.len(), 3);
+        assert!(r.iter().all(|(_, r)| r.is_ok()));
+        assert!(!f.exists() && !lien.exists() && !enregistre.exists());
+        assert!(autre.exists());
+        // Choix U4 : le fichier de travail déplacé n'est plus là ; compté comme effacé.
+        assert!(supprimer(&s, &rec, &l.glisser, &l.films)
+            .iter()
+            .all(|(_, r)| r.is_ok()));
+    }
+
+    #[test]
+    fn effacer_le_film_annule() {
+        let l = local();
+        let f = film(&l, SorteFilm::Video, 10);
+        // Hors de Films, ou mal nommé : jamais effacé.
+        let ailleurs = l.racine.join("20261111-184012-123.mp4");
+        fs::write(&ailleurs, b"x").unwrap();
+        effacer_film(&ailleurs);
+        assert!(ailleurs.exists());
+        let etranger = l.films.join("garder.mp4");
+        fs::write(&etranger, b"x").unwrap();
+        effacer_film(&etranger);
+        assert!(etranger.exists());
+        effacer_film(Path::new("Films/20261111-184012-123.mp4"));
+        effacer_film(&f);
+        assert!(!f.exists());
+        // Déjà absent : rien, sans panique.
+        effacer_film(&f);
+    }
+
+    fn bilan_film(copie: Etape, enregistrement: EtapeFichier) -> BilanFilm {
+        BilanFilm {
+            copie,
+            enregistrement,
+            lien: None,
+        }
+    }
+
+    #[test]
+    fn annonces_accordees() {
+        let d = demande_annonce();
+        let v = SorteFilm::Video;
+        let g = SorteFilm::Gif;
+        let f = || EtapeFichier::Fait(PathBuf::from("f.mp4"));
+        let cas = [
+            (
+                Etape::Faite,
+                f(),
+                "Copiée et enregistrée",
+                "Copié et enregistré",
+            ),
+            (
+                Etape::Faite,
+                EtapeFichier::NonDemande,
+                "Copiée dans le presse-papiers",
+                "Copié dans le presse-papiers",
+            ),
+            (
+                Etape::NonDemandee,
+                f(),
+                "Enregistrée dans Images › BreezyShot",
+                "Enregistré dans Images › BreezyShot",
+            ),
+            (
+                Etape::NonDemandee,
+                EtapeFichier::NonDemande,
+                "Enregistrement terminé",
+                "Enregistrement terminé",
+            ),
+        ];
+        for (copie, fichier, video, gif) in cas {
+            let b = bilan_film(copie, fichier);
+            assert_eq!(annonce_film(&b, &d, v), reussite(video));
+            assert_eq!(annonce_film(&b, &d, g), reussite(gif));
+        }
+        // Les erreurs gardent leurs textes, pour les deux sortes.
+        let cause = "Le presse-papiers est occupé par une autre application.";
+        for s in [v, g] {
+            let b = bilan_film(Etape::Faite, echec_fichier());
+            assert_eq!(
+                annonce_film(&b, &d, s),
+                erreur(
+                    "Impossible d'enregistrer",
+                    "Le dossier Images › BreezyShot est introuvable."
+                )
+            );
+            let b = bilan_film(Etape::Echec(cause.into()), EtapeFichier::NonDemande);
+            assert_eq!(
+                annonce_film(&b, &d, s),
+                erreur("Impossible de copier", cause)
+            );
+            let b = bilan_film(Etape::Echec(cause.into()), f());
+            assert_eq!(
+                annonce_film(&b, &d, s),
+                annonce(
+                    &Bilan {
+                        copie: Etape::Echec(cause.into()),
+                        recent: None,
+                        enregistrement: f(),
+                    },
+                    &d
+                )
+            );
+        }
+    }
+
+    #[test]
+    fn grand_film_copie_sans_tout_lire_en_memoire() {
+        // 64 Mo copiés : la plus grosse allocation reste celle d'un tampon de copie.
+        let l = local();
+        let f = chemin_film(&l.films, instant(), SorteFilm::Video).unwrap();
+        {
+            use std::io::Write;
+            let mut w = fs::File::create(&f).unwrap();
+            let bloc = vec![7u8; MO as usize];
+            for _ in 0..64 {
+                w.write_all(&bloc).unwrap();
+            }
+        }
+        let (e, plus_grosse) =
+            plus_grosse_allocation(|| enregistrer_film(&f, SorteFilm::Video, &l.demande));
+        let EtapeFichier::Fait(chemin) = e else {
+            panic!("{e:?}");
+        };
+        assert_eq!(fs::metadata(&chemin).unwrap().len(), 64 * MO);
+        assert!(
+            plus_grosse < MO as usize,
+            "plus grosse allocation {plus_grosse}"
+        );
+    }
+}
