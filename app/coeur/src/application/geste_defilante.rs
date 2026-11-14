@@ -1584,7 +1584,8 @@ impl<S: Source, P: Pilote, A: Atelier> Fil<S, P, A> {
             if matches!(vu, Vu::Molette { .. }) {
                 log::info!("{}", regles::LIGNE_MAIN);
             } else {
-                // La page saute trop loin même à petit pas : la molette, sans rien dire.
+                // La page saute trop loin même à petit pas : la molette, sans rien dire (ou
+                // en le disant si la page a changé, ligne suivante).
                 log::info!("{}", regles::ligne_repli(None, None, Raison::SansEffet));
             }
         }
@@ -1602,10 +1603,10 @@ impl<S: Source, P: Pilote, A: Atelier> Fil<S, P, A> {
                 Geste::Message(texte) => {
                     log::info!(
                         "{}",
-                        if texte.is_some() {
-                            regles::LIGNE_TROP_VITE
-                        } else {
-                            regles::LIGNE_REPRIS
+                        match texte {
+                            Some(regles::TEXTE_PAGE_CHANGEE) => regles::LIGNE_PAGE_CHANGEE,
+                            Some(_) => regles::LIGNE_TROP_VITE,
+                            None => regles::LIGNE_REPRIS,
                         }
                     );
                     self.sortie.envoyer(Signal::Message {
@@ -1714,6 +1715,9 @@ impl<S: Source, P: Pilote, A: Atelier> Fil<S, P, A> {
         let attendu =
             regles::lu_etalonne(regles::attendu(self.position_gardee, position), self.etalon);
         let (mesure, attendu) = self.mesurer(attendu, position);
+        // Après la mesure : une image gardée rend la position gardée à jour, et le lu possible.
+        self.course
+            .regler_lu_perdu(regles::lu_perdu(self.position_gardee, position));
         let vu = regles::vu_image(mesure, attendu, position);
         if let (Vu::ImmobileLu(_), Attendu::Lu(e)) = (vu, attendu) {
             // Grille répétitive, lu multiple de la période (C, N4) : pas le bas, et l'image
@@ -3164,5 +3168,50 @@ mod tests {
             "au-dessus, seulement du blanc"
         );
         assert!(b.messages.is_empty(), "{:?}", b.messages);
+    }
+
+    #[test]
+    fn fil_haut_blanc_la_page_grandit_au_premier_pas() {
+        // Relecture des correctifs, C1 : l'image gardée est le haut blanc de la page (y = 0),
+        // et la page grandit de 100 px pendant le premier pas. Sans lu, plus rien ne recollait
+        // au blanc : la capture filait au bas et rendait 300 px sur 2 800, fin `en_bas`, sans
+        // rien dire. Depuis le haut, le lu reste exact : toute la page, au pixel près.
+        let b = capturer_texte(2400, Some((1, 100)), 450, 1.0);
+        assert!(b.seule, "la capture doit finir seule en bas");
+        assert_eq!(b.page, 2800);
+        assert_eq!(b.y, 2500, "la page est allée au bas");
+        assert_eq!(b.image.hauteur as i32, b.page);
+        assert!(
+            *b.image == lignes_de_texte(0, b.page, 450),
+            "toute la page, au pixel près"
+        );
+        assert!(b.messages.is_empty(), "{:?}", b.messages);
+    }
+
+    #[test]
+    fn fil_haut_blanc_la_page_grandit_au_deuxieme_pas() {
+        // Relecture des correctifs, C1 : l'image gardée est blanche à y = 150, et la page
+        // grandit pendant le deuxième pas. Le lu est impossible (la page a changé, l'image
+        // gardée n'est pas en haut) et la mesure sans lu ne recolle rien au blanc. Avant :
+        // fin seule `en_bas`, 450 px sur 2 800, sans rien dire. Maintenant : jamais de fin
+        // seule, « La page a changé » est montré, et « Terminer » rend une image exacte
+        // jusqu'à la dernière image gardée.
+        let b = capturer_texte(2400, Some((2, 100)), 450, 1.0);
+        assert!(
+            !b.seule,
+            "jamais de fin seule en bas avec une image tronquée"
+        );
+        assert_eq!(
+            b.messages.first(),
+            Some(&Some(regles::TEXTE_PAGE_CHANGEE)),
+            "{:?}",
+            b.messages
+        );
+        let h = b.image.hauteur as i32;
+        assert!(h < b.page, "{h}");
+        assert!(
+            *b.image == lignes_de_texte(0, h, 450),
+            "ce qui est rendu est exact"
+        );
     }
 }
