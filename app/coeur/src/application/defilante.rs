@@ -1024,11 +1024,16 @@ pub fn attendu(gardee: Option<Position>, maintenant: Option<Position>) -> Attend
     }
 }
 
-/// Vrai si les deux positions sont lues mais que le lu est impossible entre elles (la page
-/// ou la vue ont changé de hauteur, `attendu` rend `Aucun`) : `Course::regler_lu_perdu`.
-/// Fonction pure.
+/// Vrai si les deux positions sont lues et utilisables mais que le lu est impossible entre
+/// elles (la page ou la vue ont changé de hauteur, `attendu` rend `Aucun`) :
+/// `Course::regler_lu_perdu`. Une vue inutilisable (0 ou 100 %, hauteur nulle) ne dit pas
+/// que la page a changé (dernière relecture, M1). Fonction pure.
 pub fn lu_perdu(gardee: Option<Position>, maintenant: Option<Position>) -> bool {
-    matches!((gardee, maintenant), (Some(g), Some(m)) if defiler::decalage_px(&g, &m).is_none())
+    matches!(
+        (gardee, maintenant),
+        (Some(g), Some(m))
+            if g.utilisable() && m.utilisable() && defiler::decalage_px(&g, &m).is_none()
+    )
 }
 
 /// Bornes du facteur d'étalonnage du lu (décision du responsable, relecture d'ensemble
@@ -2177,6 +2182,26 @@ mod tests {
         assert!(lu_perdu(lecture(10.0, 10.0), lecture(20.0, 9.0)));
         // Depuis le haut, le lu reste possible.
         assert!(!lu_perdu(lecture(0.0, 10.0), lecture(20.0, 9.0)));
+        // Une vue inutilisable ne dit pas que la page a changé (M1).
+        assert!(!lu_perdu(lecture(10.0, 10.0), lecture(20.0, 100.0)));
+        assert!(!lu_perdu(lecture(10.0, 0.0), lecture(20.0, 10.0)));
+        assert!(!lu_perdu(
+            lecture(10.0, 10.0),
+            Some(Position {
+                pour_cent: 20.0,
+                vue: 10.0,
+                hauteur_vue: 0
+            })
+        ));
+        // Une vue redimensionnée, elle, rend le lu impossible.
+        assert!(lu_perdu(
+            lecture(10.0, 10.0),
+            Some(Position {
+                pour_cent: 20.0,
+                vue: 10.0,
+                hauteur_vue: 200
+            })
+        ));
     }
 
     #[test]
