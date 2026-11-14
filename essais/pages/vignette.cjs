@@ -283,6 +283,131 @@ const charge = (o = {}) => ({ id: 5, coin: 'bas_gauche', retrait: { haut: 0, bas
   verifier(await p.evaluate(() => !document.querySelector('[data-action=epingler]')), '13 jamais Épingler');
   await p.context().close();
 
+  // 14. La carte d'un film (0.7, F25, §12) : nom « Enregistrement terminé », rond de
+  // lecture au centre (34 px ; choix B2 : bouton « Lire »), durée en bas à droite effacée au
+  // survol, libellés accordés, jamais Annoter ; sans `film`, la carte d'une image.
+  const actionsFilm = (gif, lire = true) => [
+    { id: 'copier', libelle: 'Copier', libelle_fait: gif ? 'Copié' : 'Copiée', place: 'principale', picto: 'copier' },
+    { id: 'enregistrer', libelle: 'Enregistrer', libelle_fait: gif ? 'Enregistré' : 'Enregistrée', place: 'principale', picto: 'enregistrer' },
+    ...(lire ? [{ id: 'lire', libelle: 'Lire', libelle_fait: null, place: 'lecture', picto: 'lire' }] : []),
+    ...ACTIONS.slice(2),
+  ];
+  const chargeFilm = (gif, o = {}) => charge({ actions: actionsFilm(gif, o.lire !== false), film: { duree: gif ? 'GIF · 0:07' : '0:07', nom: 'Enregistrement terminé' }, ...o.charge });
+  const etatFilm = (p) => p.evaluate(() => {
+    const f = carte.querySelector('.film'), rond = f?.querySelector('.lecture'), d = f?.querySelector('.duree');
+    const r = (e) => { const b = e.getBoundingClientRect(); return [b.x, b.y, b.width, b.height]; };
+    const a = document.getElementById('apercu').getBoundingClientRect();
+    return {
+      nom: carte.getAttribute('aria-label'), role: carte.getAttribute('role'),
+      rond: rond && { balise: rond.tagName, nom: rond.getAttribute('aria-label'), cache: rond.getAttribute('aria-hidden'), r: r(rond), fond: getComputedStyle(rond).backgroundColor, couleur: getComputedStyle(rond).color, opacite: getComputedStyle(f).opacity },
+      duree: d && { texte: d.textContent, r: r(d), opacite: getComputedStyle(d).opacity, fond: getComputedStyle(d).backgroundColor, police: [getComputedStyle(d).fontSize, getComputedStyle(d).fontWeight, getComputedStyle(d).lineHeight] },
+      apercu: [a.x, a.y, a.width, a.height],
+    };
+  });
+  {
+    for (const theme of ['light', 'dark']) {
+      p = await page({ theme });
+      await prete(p, chargeFilm(false));
+      z = (await appels(p, 'vignette_zone'))[0]?.[1];
+      verifier(JSON.stringify(z?.boutons.map(b => b.action)) === JSON.stringify(['lire', 'copier', 'enregistrer', 'supprimer', 'fermer']),
+        `14 ${theme} vidéo : boutons de la carte, le rond (« lire ») compris, ni Annoter`, JSON.stringify(z?.boutons.map(b => b.action)));
+      const lire = z.boutons.find(b => b.action === 'lire');
+      verifier(Math.abs(lire.largeur - 34) < 0.5 && Math.abs(lire.hauteur - 34) < 0.5 && Math.abs(lire.x + 17 - (z.x + z.largeur / 2)) < 1,
+        `14 ${theme} rond de 34 px, centré`, JSON.stringify(lire));
+      await emettre(p, 'vignette:entrer', { id: 5 });
+      await p.waitForTimeout(400);
+      let e = await etatFilm(p);
+      const [ax, ay, al, ah] = e.apercu, [dx, dy, dl, dh] = e.duree.r, [rx, ry, rl, rh] = e.rond.r;
+      verifier(e.nom === 'Enregistrement terminé' && e.role === 'group' && e.rond.balise === 'BUTTON' && e.rond.nom === 'Lire' && e.rond.cache === null
+        && e.rond.fond === 'rgba(18, 18, 18, 0.48)' && e.rond.couleur === 'rgb(255, 255, 255)'
+        && Math.abs(rx + rl / 2 - (ax + al / 2)) < 0.5 && Math.abs(ry + rh / 2 - (ay + ah / 2)) < 0.5,
+      `14 ${theme} vidéo : carte « Enregistrement terminé », rond « Lire » au centre de l'aperçu (fond sombre, triangle blanc)`, JSON.stringify(e));
+      verifier(e.duree.texte === '0:07' && e.duree.opacite === '1' && Math.abs(ax + al - dx - dl - 6) < 0.5 && Math.abs(ay + ah - dy - dh - 6) < 0.5
+        && dh === 18 && e.duree.fond === 'rgba(18, 18, 18, 0.6)' && JSON.stringify(e.duree.police) === '["11px","600","16px"]',
+      `14 ${theme} vidéo : « 0:07 » en bas à droite à 6 px, 11 px gras`, JSON.stringify(e.duree));
+      await p.addStyleTag({ content: `html{background:${FONDS[theme]} !important}` });
+      const nomTheme = theme === 'light' ? 'clair' : 'sombre';
+      await p.screenshot({ path: `${SORTIE}/vignette-film-${nomTheme}.png` });
+      await emettre(p, 'vignette:survol', { id: 5, dedans: true });
+      await p.waitForTimeout(450);
+      e = await etatFilm(p);
+      verifier(e.duree.opacite === '0' && e.rond.opacite === '1' && JSON.stringify(await visibles(p)) === JSON.stringify(['lire', 'copier', 'enregistrer', 'supprimer', 'fermer']),
+        `14 ${theme} survol : la durée s'efface, le rond reste, Copier, Enregistrer, Supprimer, Fermer`, JSON.stringify([e.duree, await visibles(p)]));
+      await p.screenshot({ path: `${SORTIE}/vignette-film-survol-${nomTheme}.png` });
+      // Clic sur le rond : vignette_action lire, pas de glisser.
+      const [cx, cy] = [rx + rl / 2, ry + rh / 2];
+      await p.mouse.move(cx, cy); await p.mouse.down(); await p.mouse.move(cx + 1, cy); await p.mouse.up();
+      await p.mouse.move(cx, cy); await p.mouse.down(); await p.mouse.move(cx + 20, cy, { steps: 4 }); await p.mouse.up();
+      verifier(JSON.stringify((await appels(p, 'vignette_action')).map(a => a[1])) === JSON.stringify([{ id: 5, action: 'lire' }]) && (await appels(p, 'vignette_glisser')).length === 0,
+        `14 ${theme} clic sur le rond → vignette_action lire, une fois ; appui sur le rond : pas de glisser`);
+      // Glisser depuis l'image, hors du rond (et depuis la durée) : la carte donne son fichier.
+      await emettre(p, 'vignette:survol', { id: 5, dedans: false });
+      await p.waitForTimeout(300);
+      await p.mouse.move(ax + 20, ay + 20); await p.mouse.down(); await p.mouse.move(ax + 40, ay + 20, { steps: 4 }); await p.mouse.up();
+      await p.mouse.move(dx + 5, dy + 5); await p.mouse.down(); await p.mouse.move(dx - 20, dy + 5, { steps: 4 }); await p.mouse.up();
+      verifier((await appels(p, 'vignette_glisser')).length === 2, `14 ${theme} glisser depuis l'image et depuis la durée : vignette_glisser`);
+      // « Copiée » (accordé).
+      await emettre(p, 'vignette:survol', { id: 5, dedans: true });
+      await emettre(p, 'vignette:confirmer', { id: 5, action: 'copier', reussi: true });
+      await p.waitForTimeout(400);
+      verifier(await p.evaluate(() => document.querySelector('[data-action=copier] .apres').textContent) === 'Copiée', `14 ${theme} « Copiée » pour une vidéo`);
+      // Supprimée : le rond et la durée partent, seul Annuler.
+      await emettre(p, 'vignette:supprimee', { id: 5, oui: true });
+      await p.waitForTimeout(450);
+      e = await etatFilm(p);
+      const restent = (await visibles(p)).filter(x => x !== 'lire'); // le rond : calque à 0
+      verifier(e.rond.opacite === '0' && JSON.stringify(restent) === JSON.stringify(['annuler']), `14 ${theme} supprimée : ni rond ni durée, seul Annuler`, JSON.stringify([e.rond, restent]));
+      await p.mouse.click(cx, cy);
+      verifier((await appels(p, 'vignette_action')).filter(a => a[1].action === 'lire').length === 1, `14 ${theme} supprimée : le rond ne répond plus`);
+      await p.context().close();
+    }
+    // GIF : « GIF · 0:07 », « Enregistré ».
+    p = await page();
+    await prete(p, chargeFilm(true));
+    await emettre(p, 'vignette:entrer', { id: 5 });
+    await p.waitForTimeout(400);
+    let e = await etatFilm(p);
+    await p.addStyleTag({ content: `html{background:${FONDS.light} !important}` });
+    await p.screenshot({ path: `${SORTIE}/vignette-gif-clair.png` });
+    await emettre(p, 'vignette:confirmer', { id: 5, action: 'enregistrer', reussi: true });
+    await p.waitForTimeout(400);
+    const fait = await p.evaluate(() => document.querySelector('[data-action=enregistrer] .apres').textContent);
+    verifier(e.duree.texte === 'GIF · 0:07' && fait === 'Enregistré', '14 GIF : « GIF · 0:07 », « Enregistré »', JSON.stringify([e.duree.texte, fait]));
+    // Puis la carte d'une image : celle de la 0.6.1 (ni rond, ni durée, nom « Capture »).
+    await emettre(p, 'vignette:cachee', { id: 5 });
+    await prete(p, charge({ id: 6 }));
+    e = await etatFilm(p);
+    verifier(e.nom === 'Capture' && e.rond === undefined && e.duree === undefined && await p.evaluate(() => !document.querySelector('.film')),
+      '14 carte d\'une image ensuite : nom « Capture », ni rond ni durée', JSON.stringify(e));
+    await p.context().close();
+    // Sans le choix B2 (aucune action « lecture ») : le rond n'est qu'un signe.
+    p = await page();
+    await prete(p, chargeFilm(false, { lire: false }));
+    z = (await appels(p, 'vignette_zone'))[0]?.[1];
+    e = await etatFilm(p);
+    verifier(e.rond.balise === 'SPAN' && e.rond.cache === 'true' && !z.boutons.some(b => b.action === 'lire'),
+      '14 sans « lecture » : le rond est un signe caché aux lecteurs d\'écran, pas un bouton', JSON.stringify(e.rond));
+    await p.context().close();
+    // Charges invalides : « lecture » sans film rejetée ; film mal formé : carte rejetée.
+    p = await page();
+    await prete(p, charge({ actions: actionsFilm(false) }));
+    const sansFilm = await p.evaluate(() => [!!document.querySelector('[data-action=lire]'), !!document.querySelector('.film'), carte.getAttribute('aria-label')]);
+    const avert = p.avert.length;
+    for (const film of [{ duree: '', nom: 'x' }, { duree: '0:07' }, 'x', 3]) await emettre(p, 'vignette:preparer', charge({ id: 9, actions: actionsFilm(false), film }));
+    await p.waitForTimeout(200);
+    const images = (await appels(p, 'vignette_image')).map(a => a[1].id);
+    verifier(JSON.stringify(sansFilm) === JSON.stringify([false, false, 'Capture']) && avert === 1 && p.avert.length === 5 && !images.includes(9),
+      '14 « lecture » sans film : action rejetée (console.warn) ; film mal formé : carte rejetée', JSON.stringify({ sansFilm, avert, n: p.avert.length, images }));
+    await p.context().close();
+    // CSP de l'app, sombre : aucun refus avec la carte d'un film.
+    p = await page({ theme: 'dark', csp: true });
+    await prete(p, chargeFilm(true));
+    await emettre(p, 'vignette:entrer', { id: 5 });
+    await p.waitForTimeout(400);
+    verifier((await p.evaluate(() => window.__refus)).length === 0, '14 CSP respectée avec la carte d\'un film');
+    await p.context().close();
+  }
+
   console.log('ECHECS :', echecs);
   console.log('ERREURS PAGE :', JSON.stringify(erreurs));
   if (erreurs.length) echecs++;

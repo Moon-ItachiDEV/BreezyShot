@@ -1,0 +1,167 @@
+/* Page de contrôle d'un film, vidéo ou GIF (contrat 0.7, §10 à §12 ; design/capture,
+   « vidéo et GIF »). Toutes les valeurs viennent de ../commun/jetons.css. */
+
+html,
+body {
+  height: 100%;
+  margin: 0;
+  background: transparent;
+  overflow: hidden;
+}
+
+body {
+  font-family: var(--police-ui);
+  -webkit-font-smoothing: antialiased;
+  -webkit-user-select: none;
+  user-select: none;
+  /* Clics, molette et clavier traversent la fenêtre ; seule la pilule les reçoit. */
+  pointer-events: none;
+}
+
+[hidden] {
+  display: none !important;
+}
+
+.scene {
+  position: fixed;
+  inset: 0;
+}
+
+/* Le cadre est tracé dehors (écart E6) : depuis la zone, un liseré sombre de 1 px, le
+   cadre blanc de 2 px, un liseré sombre de 1 px, puis le voile léger sur le reste de
+   l'écran. La zone elle-même reste claire. La page pose sa boîte de bordure 3 px autour de
+   la zone. */
+.cadre {
+  position: absolute;
+  box-sizing: content-box;
+  padding: 0;
+  border: var(--film-cadre-epaisseur) solid var(--film-cadre);
+  border-radius: var(--film-cadre-rayon);
+  box-shadow:
+    0 0 0 var(--film-cadre-lisere) var(--film-cadre-lisere-dehors),
+    inset 0 0 0 var(--film-cadre-lisere) var(--film-cadre-lisere-dedans),
+    0 0 0 200vmax var(--film-voile);
+}
+
+/* Pilule à fond plein (écart E13 : une fenêtre transparente ne peut pas flouter l'écran
+   dessous). */
+.pilule {
+  position: absolute;
+  display: flex;
+  align-items: center;
+  gap: var(--film-pilule-ecart);
+  padding: var(--film-pilule-marge);
+  border-radius: var(--radius-pill);
+  background: var(--acrylic-solid);
+  border: 1px solid var(--acrylic-stroke);
+  box-shadow: var(--shadow-16);
+  color: var(--text);
+  font-family: var(--police-ui);
+  font-size: var(--texte-caption-taille);
+  pointer-events: auto;
+  cursor: default;
+  white-space: nowrap;
+}
+
+.duree {
+  display: flex;
+  align-items: center;
+  gap: var(--film-duree-ecart);
+  min-width: var(--film-duree-largeur);
+  padding: 0 var(--film-duree-marge-droite) 0 var(--film-duree-marge-gauche);
+  font-size: var(--film-duree-taille);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Le point : gris et fixe pendant le décompte et la pause, rouge et qui respire pendant
+   l'enregistrement. */
+.point {
+  flex: none;
+  width: var(--film-point);
+  height: var(--film-point);
+  border-radius: 50%;
+  background: var(--text-3);
+}
+.pilule[data-phase="marche"] .point {
+  background: var(--rec);
+  animation: respire var(--duree-film-point) ease-in-out infinite;
+}
+.pilule[data-phase="pause"] .duree {
+  color: var(--text-2);
+}
+@keyframes respire {
+  50% {
+    opacity: var(--film-point-respire);
+  }
+}
+
+.bouton {
+  all: unset;
+  box-sizing: border-box;
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: var(--film-bouton);
+  height: var(--film-bouton);
+  border-radius: 50%;
+  color: var(--text);
+  transition:
+    background-color var(--duree-survol) linear,
+    transform var(--duree-ressort) var(--courbe-ressort);
+}
+.bouton:hover {
+  background: var(--subtle-hover);
+}
+.bouton:active {
+  transform: scale(var(--film-appui-echelle));
+  transition-duration: var(--duree-survol), var(--duree-appui);
+}
+.bouton:disabled {
+  opacity: var(--film-bouton-inactif);
+  pointer-events: none;
+}
+.bouton[aria-pressed="true"] {
+  color: var(--accent-text);
+}
+.bouton svg {
+  width: var(--film-icone);
+  height: var(--film-icone);
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.bouton svg .plein {
+  fill: currentColor;
+  stroke: none;
+}
+
+.trait {
+  flex: none;
+  width: 1px;
+  height: var(--film-trait-hauteur);
+  margin: 0 var(--film-trait-marge);
+  background: var(--divider);
+}
+
+/* Animations réduites (système ou réglage du cœur) : aucune. */
+:root[data-reduites] .point,
+:root[data-reduites] .pilule[data-phase="marche"] .point {
+  animation: none;
+}
+:root[data-reduites] .bouton,
+:root[data-reduites] .bouton:active {
+  transform: none;
+  transition: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .pilule[data-phase="marche"] .point {
+    animation: none;
+  }
+  .bouton,
+  .bouton:active {
+    transform: none;
+    transition: none;
+  }
+}

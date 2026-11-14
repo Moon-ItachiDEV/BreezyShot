@@ -4,7 +4,7 @@
 // Contrat avec le cœur (pixels réels pour le cœur, convertis ici par devicePixelRatio) :
 // - `vignette:preparer` { id, coin, retrait: { haut, bas, gauche, droite }, actions: [{ id,
 //   libelle, libelle_fait, place, picto }], duree_ms | null, glisser, reduites, apercu:
-//   { largeur, hauteur } } : la page lit l'aperçu (`vignette_image`), pose la carte
+//   { largeur, hauteur }, film? : { duree, nom } } : la page lit l'aperçu (`vignette_image`), pose la carte
 //   invisible, puis répond `vignette_zone` { id, x, y, largeur, hauteur, boutons: [{ action,
 //   x, y, largeur, hauteur }] } (pixels CSS, sans transformation). Charge invalide :
 //   console.warn, rien.
@@ -19,6 +19,12 @@
 //   l'image et 4 px de déplacement, une fois par appui.
 // - `vignette_pret` {} une fois l'écoute en place (événements de la carte et thème,
 //   `interface:theme`, voir commun/theme.js).
+// - La carte d'un film (0.7, `film` présent) : nommée `film.nom` (« Enregistrement
+//   terminé ») ; un rond de lecture au centre de l'aperçu et, en bas à droite, la durée
+//   `film.duree` (« 0:07 », « GIF · 0:07 »), effacée au survol. Le rond est le bouton de
+//   l'action de place « lecture » s'il y en a une (choix B2 : il ouvre le film, nom de
+//   l'action), sinon un signe caché aux lecteurs d'écran. Une action « lecture » sans
+//   `film` est rejetée. Sans `film`, la page est celle de la 0.6.1.
 // Sans window.__TAURI__ (aperçu dans un navigateur) : ?demo=bas_gauche|haut_droite…
 //
 // Aucune donnée de la charge ne passe par innerHTML : textes par textContent, pictogrammes
@@ -38,7 +44,8 @@ const remplissage = barre.querySelector("i");
 const infobulle = document.getElementById("infobulle");
 
 const COINS = ["bas_gauche", "bas_droite", "haut_gauche", "haut_droite"];
-const PLACES = ["principale", "secondaire", "fermer", "annulation"];
+const PLACES = ["principale", "secondaire", "fermer", "annulation", "lecture"];
+const NOM_CARTE = carte.getAttribute("aria-label");
 const SEUIL_GLISSER = 4; // pixels CSS
 const SVG = "http://www.w3.org/2000/svg";
 
@@ -79,6 +86,11 @@ const PICTOS = {
     ],
   ],
   fermer: ["0 0 10 10", [["path", { d: "M1.5 1.5l7 7M8.5 1.5l-7 7" }]]],
+  // Le rond de lecture d'un film (design/capture, .play).
+  lire: [
+    "0 0 20 20",
+    [["path", { d: "M5 3.3v13.4a1 1 0 0 0 1.5.8l10.4-6.7a1 1 0 0 0 0-1.6L6.5 2.5A1 1 0 0 0 5 3.3z" }]],
+  ],
   annoter: [
     "0 0 20 20",
     [
@@ -170,14 +182,21 @@ function valider(c) {
     gauche: entier(r.gauche),
     droite: entier(r.droite),
   };
+  const texte = (v) => typeof v === "string" && v.trim() !== "";
+  let film = null;
+  if (c.film !== undefined && c.film !== null) {
+    const f = c.film;
+    if (!f || typeof f !== "object" || !texte(f.duree) || !texte(f.nom)) return rejeter("film");
+    film = { duree: f.duree, nom: f.nom };
+  }
   const actions = [];
   for (const a of Array.isArray(c.actions) ? c.actions : []) {
-    const texte = (v) => typeof v === "string" && v.trim() !== "";
     if (
       !a ||
       !texte(a.id) ||
       !texte(a.libelle) ||
       !PLACES.includes(a.place) ||
+      (a.place === "lecture" && (!film || actions.some((b) => b.place === "lecture"))) ||
       actions.some((b) => b.id === a.id)
     ) {
       console.warn("vignette : action rejetée");
@@ -206,6 +225,7 @@ function valider(c) {
     dureeMs,
     glisser: c.glisser === true,
     reduites: c.reduites === true,
+    film,
   };
 }
 
@@ -235,6 +255,8 @@ function vider() {
   secondaires.replaceChildren();
   annulation.replaceChildren();
   carte.querySelector(".croix")?.remove();
+  carte.querySelector(".film")?.remove();
+  carte.setAttribute("aria-label", NOM_CARTE);
   barre.hidden = true;
 }
 
@@ -260,6 +282,9 @@ function creerBouton(action) {
       libelles.append(apres);
     }
     b.append(libelles);
+  } else if (action.place === "lecture") {
+    b.className = "lecture";
+    b.append(picto(action.picto ?? "lire"));
   } else if (action.place === "annulation") {
     b.className = "annuler";
     if (action.picto) b.append(picto(action.picto));
@@ -288,6 +313,29 @@ function rectPage(el) {
     largeur: el.offsetWidth,
     hauteur: el.offsetHeight,
   };
+}
+
+/** La carte d'un film : son nom, le rond de lecture (bouton de l'action « lecture », ou
+ *  signe) et la durée, sur l'aperçu, sous les boutons. */
+function poserFilm(lui) {
+  carte.setAttribute("aria-label", lui.film.nom);
+  const calque = document.createElement("div");
+  calque.className = "film";
+  const action = lui.actions.find((a) => a.place === "lecture");
+  let rond;
+  if (action) {
+    rond = creerBouton(action);
+  } else {
+    rond = document.createElement("span");
+    rond.className = "lecture";
+    rond.setAttribute("aria-hidden", "true");
+    rond.append(picto("lire"));
+  }
+  const pastille = document.createElement("span");
+  pastille.className = "duree";
+  pastille.textContent = lui.film.duree; // texte seulement
+  calque.append(rond, pastille);
+  carte.querySelector(".voile").after(calque);
 }
 
 function poserCarte(c) {
@@ -332,7 +380,9 @@ export async function preparer(brut) {
   courant = lui;
   carte.classList.toggle("reduites", reduites());
   carte.classList.toggle("glissable", lui.glisser);
+  if (lui.film) poserFilm(lui);
   for (const a of lui.actions) {
+    if (a.place === "lecture") continue;
     const b = creerBouton(a);
     if (a.place === "principale") principales.append(b);
     else if (a.place === "secondaire") secondaires.append(b);
