@@ -1,0 +1,4 @@
+# Bibliothèque C liée dans l'exécutable : l'exemple `images` (S1 point 7) tourne tel quel
+# sur un PC sous Windows 11, sans installer le Visual C++ Redistributable.
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]

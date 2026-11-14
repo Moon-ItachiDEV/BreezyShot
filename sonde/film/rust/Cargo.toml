@@ -1,0 +1,66 @@
+# Exemples Rust de la sonde du film (contrat 0.7, partie I). Windows seulement, hors de
+# l'app : rien ici n'entre dans app/ et rien ne lie les crates de l'app (les moyens de l'app
+# qu'on mesure, BitBlt de systeme::vivant, lire_pointeur et ecrans de systeme::gel, sont
+# recopiés dans src/prise.rs ; la duplication et WGC viennent de l'exemple vivant de la
+# sonde 0.6). Versions figées sur celles de app/coeur/Cargo.lock ; gif et color_quant sont
+# nouveaux (MIT OR Apache-2.0, MIT). À jouer avec --locked :
+#   cargo build --release --locked --examples --bins
+# build.rs lie les exemples avec /DELAYLOAD (S2 point 8), pas le binaire charge-temoin.
+# .cargo/config.toml lie la bibliothèque C dans l'exécutable (crt-static).
+[package]
+name = "sonde-film"
+version = "0.0.0"
+edition = "2021"
+publish = false
+build = "build.rs"
+
+[workspace]
+
+[lib]
+path = "src/lib.rs"
+
+[target.'cfg(windows)'.dependencies]
+tao = "=0.37.2"
+wry = "=0.57.2"
+png = { version = "=0.18.1", default-features = false }
+arboard = { version = "=3.7.0", default-features = false, features = ["image-data"] }
+gif = { version = "=0.14.2", default-features = false, features = ["color_quant", "std"] }
+color_quant = "=1.1.0"
+windows = { version = "=0.62.2", features = [
+  "Foundation",
+  "Graphics",
+  "Graphics_Capture",
+  "Graphics_DirectX",
+  "Graphics_DirectX_Direct3D11",
+  "Security_Authorization_AppCapabilityAccess",
+  "Win32_Devices_FunctionDiscovery",
+  "Win32_Foundation",
+  "Win32_Graphics_Direct3D",
+  "Win32_Graphics_Direct3D11",
+  "Win32_Graphics_Dwm",
+  "Win32_Graphics_Dxgi",
+  "Win32_Graphics_Dxgi_Common",
+  "Win32_Graphics_Gdi",
+  "Win32_Media",
+  "Win32_Media_Audio",
+  "Win32_Media_MediaFoundation",
+  "Win32_System_Com",
+  "Win32_System_Com_StructuredStorage",
+  "Win32_System_LibraryLoader",
+  "Win32_System_Ole",
+  "Win32_System_ProcessStatus",
+  "Win32_System_Registry",
+  "Win32_Storage_FileSystem",
+  "Win32_System_Threading",
+  "Win32_System_Variant",
+  "Win32_System_WinRT",
+  "Win32_System_WinRT_Direct3D11",
+  "Win32_System_WinRT_Graphics_Capture",
+  "Win32_UI_HiDpi",
+  "Win32_UI_Shell_PropertiesSystem",
+  "Win32_UI_WindowsAndMessaging",
+] }
+
+[profile.release]
+opt-level = 3
+debug = false
