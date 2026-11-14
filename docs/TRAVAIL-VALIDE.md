@@ -957,3 +957,79 @@ entièrement vert ; c'est le dernier passage de la demande de fusion qui fait fo
   à trois écrans : ces points sont dans la liste unique des tests à faire de l'utilisateur.
 - Une page réelle qui change de hauteur sous UI Automation, et un décalage lu biaisé
   réel : simulés seulement.
+
+## Une barre d'annotation plus lisible (version 0.6.2)
+
+Branche `claude/project-thread-9qu6yx`, partie de main après la 0.5.4 ; main y est repris
+ensuite (la 0.6, capture défilante, la 0.6.1, « Glisser vers une appli », puis le journal
+d'un raccourci qui fige). Demandé par
+l'utilisateur le 13/11, sur une capture de la barre avec le Flou déplié : « un peu
+brouillon ici ». Trois pistes à essayer sur la vraie barre (`design/barre-claire`, dans
+les fichiers du projet, construite à partir des fichiers de la 0.5.4) ; choix de
+l'utilisateur le 14/11 : piste A « Calme ».
+
+Ce qu'elle apporte :
+
+- Le choix d'un groupe du pli (variante, taille, intensité) est une pastille claire en
+  relief, plus un carré plein : deux choix différents ne se ressemblent plus.
+- Aucun outil ne répète le dessin d'une de ses variantes. Le Flou est une goutte ; ses
+  variantes, une mosaïque, une tache floue et une bande toujours noire, dans les deux
+  thèmes. Le Projecteur est une lampe ; ses variantes gardent la forme de sa lumière.
+- L'intensité du Flou se règle en trois points, comme les épaisseurs.
+- Un trait fin sépare les variantes des réglages ; avec Bloc noir, il part avec
+  l'intensité. Le dernier groupe ne touche plus le bord du pli.
+- Un outil replié garde une petite nuance bordée de sa couleur sous son pictogramme, à la
+  place du trait rouge qui se lisait comme une faute ; rien pour le Projecteur, qui n'a
+  pas de couleur. L'anneau de focus d'un outil passe sous cette nuance.
+- L'éditeur s'ouvre à 1096 px logiques au moins quand l'écran le permet (Forme dépliée
+  avec son trait : 1078 px, plus le retrait de 16 px).
+- Les jetons `editeur-vignette-*` et `editeur-picto-vignette`, inutiles depuis que la
+  vignette de prise a laissé place au bouton Glisser (0.6.1), sont retirés.
+- Fenêtre étroite : le pli du Flou qui s'élargit (Bloc noir puis Pixeliser) se montre
+  encore en entier. L'intensité qui part (Rétablir rend Bloc noir à la zone choisie) rend
+  le focus à la variante prise, plus à la page.
+
+Vérifications, ici sous Linux :
+
+- `editeur.cjs` 252 points, `ECHECS : 0` ; `jetons.css` à jour. Sur l'arbre
+  fusionné avec main (0.6, 0.6.1, puis le journal) : `cargo test --locked`, 896 tests du
+  cœur réussis, 3 ignorés, et les 2 tests d'architecture ; les douze essais de pages,
+  `ECHECS : 0`
+  (`selection.cjs` 267, `reglages.cjs` 124, `historique.cjs` 122, `defilante.cjs` 85,
+  `editeur-modele.cjs` 69, `vignette.cjs` 43, `bandeau.cjs` 25, `decompte.cjs` 24,
+  `installateur.cjs` 23, `menu.cjs` 22, `souffle.cjs` 12).
+- Essais par mutation, chacun fait échouer son essai : la lampe du Projecteur retirée, la
+  marge du dernier groupe, `data-encre`, la règle `.bloc-noir` (avec un ancêtre, elle ne
+  touche plus le dessin cloné), la hauteur du trait, le filtre de la tache floue, le
+  liseré du Bloc noir, la pastille sombre égale à la claire, le bas de la nuance, le focus
+  rendu à la variante, `montrerPli` après le changement de largeur et l'anneau d'un outil.
+- Passages GitHub de la branche, avant les fusions de main : verts (Windows, dont les essais
+  sur le vrai `.exe` ; macOS ; pages). Le passage de la demande de fusion fait foi.
+
+Relecture : la maquette, avant d'être montrée, par un agent distinct de l'auteur (Fable 5.2,
+effort élevé), qui a cliqué chaque piste en clair, en sombre et à 400 px ; le code, par un
+autre agent distinct (Fable 5.2, effort élevé) : le diff et le code autour, la vraie barre
+comparée à la maquette en clair et en sombre, la largeur de Forme aux échelles 1 à 2,25,
+les jetons, l'ordre du clavier dans le pli, l'objet choisi, Annuler et Rétablir, les encres
+très pâles ou très foncées et « Autre couleur », la CSP.
+
+### Trouvé par les relectures, corrigé
+
+- Maquette : l'intensité changeait de dessin avec la variante (trois points neutres
+  maintenant) ; le Projecteur répétait une de ses variantes (lampe) ; la couleur des
+  outils repliés restait un trait (petite nuance bordée) ; Bloc noir devenait clair en
+  sombre (toujours noir, bordé) ; la pastille du choix manquait de contraste (liseré plus
+  net) ; la piste C « Aperçus », la plus faible, est remplacée par C « Teinte » ; la page
+  lisait l'arbre de travail au lieu des fichiers de la 0.5.4.
+- Code : l'anneau de focus d'un outil barrait le bas de sa nuance (ombre intérieure,
+  comme pour un instrument) ; en fenêtre étroite, le bout du pli du Flou restait caché
+  quand il s'élargissait (déjà en 0.5.4, 7 px de pire) ; le focus tombait sur la page
+  quand Rétablir cachait l'intensité qu'il tenait (déjà en 0.5.4) ; plusieurs essais
+  passaient avec la fonction cassée (trait, filtre, liseré, thème sombre, bas de la
+  nuance) ; un libellé d'essai et un commentaire étaient périmés.
+
+### Non vérifié
+
+- Rien n'a été essayé sur un vrai Windows par une personne : à l'utilisateur, d'après la
+  liste unique des tests à faire.
+- Les pages sont essayées dans Chromium sous Linux, pas dans WebView2.

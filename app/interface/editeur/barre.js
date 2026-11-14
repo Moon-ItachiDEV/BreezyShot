@@ -1,11 +1,13 @@
 // Barre du haut et barre d'annotation de l'éditeur. Barre C et instruments B, choisis le
 // 13/11 (design/annotation-pistes, design/annotation-instruments) : l'outil en main se déplie
 // dans la barre avec ses variantes, ses tailles, ses couleurs et son opacité, et rien ne
-// s'ouvre par-dessus l'image ; les autres outils gardent un trait de leur couleur. Un objet
-// choisi déplie l'outil qui l'a fait, à ses valeurs : ce qu'on y règle s'applique à lui (et
-// à la préférence de son outil). Les quatre instruments (flèche, stylo, surligneur, gomme)
-// sont dessinés, le corps à la couleur de l'encre, et sautent quand leur couleur ou leur
-// taille change. Menus « Plus », « Fermer » et de l'objet, bouton Glisser, message,
+// s'ouvre par-dessus l'image ; les autres outils gardent une petite nuance de leur couleur.
+// Dans le pli, le choix est une pastille claire en relief et un trait fin sépare les
+// variantes des réglages (barre plus claire, piste A « Calme », design/barre-claire). Un
+// objet choisi déplie l'outil qui l'a fait, à ses valeurs : ce qu'on y règle s'applique à
+// lui (et à la préférence de son outil). Les quatre instruments (flèche, stylo, surligneur,
+// gomme) sont dessinés, le corps à la couleur de l'encre, et sautent quand leur couleur ou
+// leur taille change. Menus « Plus », « Fermer » et de l'objet, bouton Glisser, message,
 // clavier. Textes posés en texte, jamais en HTML ; les instruments sont des constantes de la
 // maquette, sans texte de l'utilisateur.
 
@@ -33,18 +35,22 @@ export const OUTILS = {
     ],
   },
   numero: { nom: "Numéro", touche: "N", picto: "num" },
+  // Barre plus claire, piste A « Calme » (design/barre-claire) : aucun outil ne répète le
+  // dessin d'une de ses variantes. Le Flou est une goutte ; Pixeliser, une mosaïque pleine ;
+  // Flouter, une tache floue ; Bloc noir, une bande toujours noire. Le Projecteur est une
+  // lampe ; ses variantes dessinent la forme de sa lumière.
   flou: {
     nom: "Flou",
-    picto: "pixel",
+    picto: "goutte",
     variantes: [
-      ["pixeliser", "Pixeliser", "pixel", "B"],
-      ["flouter", "Flouter", "smooth"],
+      ["pixeliser", "Pixeliser", "mosaique", "B"],
+      ["flouter", "Flouter", "doux"],
       ["bloc", "Bloc noir", "box"],
     ],
   },
   projecteur: {
     nom: "Projecteur",
-    picto: "spot",
+    picto: "lampe",
     variantes: [
       ["rectangle", "Rectangle", "spot"],
       ["ovale", "Ovale", "spotE"],
@@ -241,10 +247,10 @@ function groupe(classe, nom) {
   g.setAttribute("aria-label", nom);
   return g;
 }
-// Le signe d'une taille : un point (trait, numéro, gomme), un A (texte), une grille (flou).
+// Le signe d'une taille : un point (trait, numéro, gomme, et l'intensité du Flou, en trois
+// points comme les épaisseurs), un A (texte).
 function signeTaille(t, cle, i) {
   if (cle === "tailleTexte") return el("span", `a a${i}`, "A");
-  if (cle === "intensite") return picto("pixel", `ico f${i}`);
   const lettre = { gomme: "g", numero: "n" }[cle] ?? (t === "surligneur" ? "s" : "t");
   return el("b", `${lettre}${i}`);
 }
@@ -337,6 +343,8 @@ export function installerBarre(ed) {
       dedans = el("div", "in");
       const d = el("div");
       if (def.variantes) d.appendChild(groupeVariantes(t));
+      // Un trait fin sépare les variantes des réglages (piste A « Calme »).
+      if (def.variantes && r.taille) d.appendChild(el("i", "sep"));
       if (r.taille) d.appendChild(groupeTailles(t));
       if (r.couleur) d.appendChild(groupeCouleurs(t));
       if (r.opacite) d.appendChild(glissiereOpacite(t));
@@ -600,8 +608,20 @@ export function installerBarre(ed) {
     }
     if (r.taille) {
       const g = $("[data-cle]", dedans);
-      // Flou : l'intensité ne vaut que pour Pixeliser et Flouter.
-      g.hidden = t === "flou" && varianteDe(t) === "bloc";
+      // Flou : l'intensité ne vaut que pour Pixeliser et Flouter (son trait part avec elle).
+      const cache = t === "flou" && varianteDe(t) === "bloc";
+      if (cache !== g.hidden) {
+        // L'intensité qui part gardait le focus (Rétablir, Annuler) : il va à la variante
+        // prise, pas à la page.
+        const focus = cache && g.contains(document.activeElement);
+        g.hidden = cache;
+        const sep = $(".sep", dedans);
+        if (sep) sep.hidden = cache;
+        if (focus) $('[data-variante][aria-pressed="true"]', dedans)?.focus({ preventScroll: true });
+        // Le pli change de largeur : dans une barre qui défile, il se montre encore en entier.
+        const pli = dedans.closest(".pli");
+        if (pli.hasAttribute("data-on")) montrerPli(pli);
+      }
       const v = valeur(r.taille, t);
       for (const b of $$("[data-taille]", g)) {
         const i = Number(b.dataset.taille);
@@ -639,6 +659,8 @@ export function installerBarre(ed) {
       const tn = ton(c);
       if (c) b.style.setProperty("--ink", c);
       else b.style.removeProperty("--ink");
+      // La nuance sous le pictogramme n'a un liseré que pour un outil qui a une couleur.
+      b.toggleAttribute("data-encre", !!c);
       if (tn) b.dataset.ton = tn;
       else delete b.dataset.ton;
       const inst = $(".inst", b);

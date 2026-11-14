@@ -1,7 +1,7 @@
 {
   "name": "breezyshot",
   "private": true,
-  "version": "0.6.1",
+  "version": "0.6.2",
   "description": "Fige la version de l'outil Tauri et de Playwright (essai de la page du bandeau). Aucun bundler.",
   "license": "FSL-1.1-MIT",
   "scripts": {

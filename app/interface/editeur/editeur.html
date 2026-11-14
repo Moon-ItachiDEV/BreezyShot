@@ -16,7 +16,8 @@
   leurs réglages dépliés sont posés par barre.js), les menus. Le comportement (editeur.js,
   barre.js, outils.js) ne vise que les identifiants, les data-*, les rôles et les noms ;
   l'habillage est dans editeur.css (jetons seulement). Pictogrammes : ceux de
-  design/editeur-epure/index.html (`i-ocr` : design/historique). Le bouton « Texte » et le
+  design/editeur-epure/index.html (`i-ocr` : design/historique ; ceux du Flou et la lampe
+  du Projecteur : design/barre-claire, piste A « Calme »). Le bouton « Texte » et le
   calque « Choisir le texte » sont créés par texte.js, seulement si la charge le permet.
 -->
 <svg width="0" height="0" class="defs" aria-hidden="true">
@@ -63,14 +64,31 @@
       <circle cx="12.5" cy="7.5" r="4.5"/></symbol>
     <symbol id="i-num" viewBox="0 0 20 20"><circle cx="10" cy="10" r="7"/>
       <path d="M8.6 7.6 10.4 6.5v7M8.6 13.5h3.6"/></symbol>
-    <symbol id="i-pixel" viewBox="0 0 20 20">
-      <rect x="3.5" y="3.5" width="13" height="13" rx="1.5"/>
-      <path d="M3.5 8h13M3.5 12h13M8 3.5v13M12 3.5v13"/></symbol>
-    <symbol id="i-smooth" viewBox="0 0 20 20">
-      <circle cx="10" cy="10" r="6.5" stroke-dasharray="1.5 2.2"/>
-      <circle cx="10" cy="10" r="3" opacity=".6"/></symbol>
+    <!-- Flou et Projecteur (barre plus claire, piste A « Calme », design/barre-claire) :
+         aucun outil ne répète le dessin d'une de ses variantes. Le Flou est une goutte ; ses
+         variantes, une mosaïque pleine, une tache floue, une bande toujours noire (.bloc-noir,
+         editeur.css). Le Projecteur est une lampe ; ses variantes, la forme de sa lumière. -->
+    <filter id="i-flou-doux" x="-60%" y="-60%" width="220%" height="220%">
+      <feGaussianBlur stdDeviation="1.5"/></filter>
+    <symbol id="i-goutte" viewBox="0 0 20 20"><path d="M10 3.2C7.1 6.8 5.4 9.5 5.4 11.8a4.6 4.6 0 0 0
+      9.2 0c0-2.3-1.7-5-4.6-8.6Z"/><path d="M7.9 12.3a2.3 2.3 0 0 0 1.8 2.1" opacity=".55"/></symbol>
+    <symbol id="i-mosaique" viewBox="0 0 20 20"><g fill="currentColor" stroke="none">
+      <rect x="3.4" y="3.4" width="3.9" height="3.9" rx=".7" fill-opacity=".95"/>
+      <rect x="8.05" y="3.4" width="3.9" height="3.9" rx=".7" fill-opacity=".35"/>
+      <rect x="12.7" y="3.4" width="3.9" height="3.9" rx=".7" fill-opacity=".7"/>
+      <rect x="3.4" y="8.05" width="3.9" height="3.9" rx=".7" fill-opacity=".45"/>
+      <rect x="8.05" y="8.05" width="3.9" height="3.9" rx=".7" fill-opacity=".85"/>
+      <rect x="12.7" y="8.05" width="3.9" height="3.9" rx=".7" fill-opacity=".3"/>
+      <rect x="3.4" y="12.7" width="3.9" height="3.9" rx=".7" fill-opacity=".75"/>
+      <rect x="8.05" y="12.7" width="3.9" height="3.9" rx=".7" fill-opacity=".25"/>
+      <rect x="12.7" y="12.7" width="3.9" height="3.9" rx=".7" fill-opacity=".9"/></g></symbol>
+    <symbol id="i-doux" viewBox="0 0 20 20"><circle cx="10" cy="10" r="4.6" fill="currentColor"
+      stroke="none" filter="url(#i-flou-doux)"/></symbol>
     <symbol id="i-box" viewBox="0 0 20 20">
-      <rect x="3.5" y="6" width="13" height="8" rx="1.5" fill="currentColor"/></symbol>
+      <rect class="bloc-noir" x="3.5" y="6" width="13" height="8" rx="1.5"/></symbol>
+    <symbol id="i-lampe" viewBox="0 0 20 20"><path d="M7.2 6.6 3.8 15.4h12.4L12.8 6.6Z"
+      fill="currentColor" fill-opacity=".2" stroke="none"/><path d="M6.4 6.6a3.6 3.6 0 0 1 7.2 0Z"/>
+      <ellipse cx="10" cy="15.4" rx="6.2" ry="1.8"/></symbol>
     <symbol id="i-spot" viewBox="0 0 20 20">
       <rect x="2.5" y="3.5" width="15" height="13" rx="1.5" opacity=".45"/>
       <rect x="6" y="7" width="8" height="6" rx="1"/></symbol>

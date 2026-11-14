@@ -675,6 +675,33 @@
     "origine": "design/annotation-instruments/index.html, dessin B « Couleur » choisi le 13/11 (--i-ombre)."
    },
    {
+    "name": "editeur-choix-fond",
+    "value": {
+     "light": "#FFFFFF",
+     "dark": "rgba(255,255,255,0.15)"
+    },
+    "usage": "Pastille du choix d'un groupe du pli (variante, taille, intensité) : claire, en relief, à la place du carré plein.",
+    "origine": "design/barre-claire/index.html, piste A « Calme » (barre plus claire, retour du 13/11 sur la 0.5.4) (.sz[aria-pressed])."
+   },
+   {
+    "name": "editeur-choix-ombre",
+    "value": {
+     "light": "0 0 0 1px rgba(0,0,0,0.14), 0 1px 2px rgba(0,0,0,0.18)",
+     "dark": "0 0 0 1px rgba(255,255,255,0.06), 0 1px 2px rgba(0,0,0,0.5)"
+    },
+    "usage": "Liseré et ombre de la pastille du choix.",
+    "origine": "design/barre-claire/index.html, piste A « Calme » (barre plus claire, retour du 13/11 sur la 0.5.4) (.sz[aria-pressed])."
+   },
+   {
+    "name": "editeur-bloc-noir",
+    "value": {
+     "light": "#141518",
+     "dark": "#0B0C0E"
+    },
+    "usage": "Pictogramme de Bloc noir (variante du Flou) : une bande toujours noire, dans les deux thèmes, comme l'objet qu'il pose.",
+    "origine": "design/barre-claire/index.html, piste A « Calme » (barre plus claire, retour du 13/11 sur la 0.5.4) (.bloc-noir)."
+   },
+   {
     "name": "defilante-apercu-ombre",
     "value": "0 0 0 1px rgba(255,255,255,0.55), 0 8px 16px rgba(0,0,0,0.35)",
     "usage": "Liseré clair et ombre de l'aperçu en direct de la capture défilante (les mêmes dans les deux thèmes, comme tout ce qui est posé sur l'écran).",
@@ -2040,12 +2067,6 @@
     "origine": "design/editeur-epure/index.html, piste B (.rng .ico)."
    },
    {
-    "name": "editeur-picto-vignette",
-    "value": "16px",
-    "usage": "Picto de prise de la vignette.",
-    "origine": "design/editeur-epure/index.html, piste B (.ghost svg)."
-   },
-   {
     "name": "editeur-barre-hauteur",
     "value": "52px",
     "usage": "Barre du haut (et de la fenêtre).",
@@ -2386,36 +2407,6 @@
     "value": "12px",
     "usage": "Message : coche.",
     "origine": "design/editeur-epure/index.html, piste B (.msg i svg)."
-   },
-   {
-    "name": "editeur-vignette-droite",
-    "value": "20px",
-    "usage": "Vignette de prise : écart au bord droit.",
-    "origine": "design/editeur-epure/index.html, piste B (.ghost)."
-   },
-   {
-    "name": "editeur-vignette-ecart",
-    "value": "30px",
-    "usage": "Vignette de prise : au-dessus de la palette.",
-    "origine": "design/editeur-epure/index.html, piste B (dragOut())."
-   },
-   {
-    "name": "editeur-vignette-largeur",
-    "value": "150px",
-    "usage": "Vignette de prise : largeur.",
-    "origine": "design/editeur-epure/index.html, piste B (.ghost)."
-   },
-   {
-    "name": "editeur-vignette-rayon",
-    "value": "12px",
-    "usage": "Vignette de prise : rayon.",
-    "origine": "design/editeur-epure/index.html, piste B (.ghost)."
-   },
-   {
-    "name": "editeur-vignette-ecart-interne",
-    "value": "4px",
-    "usage": "Vignette de prise : écart image-picto.",
-    "origine": "design/editeur-epure/index.html, piste B (.ghost)."
    },
    {
     "name": "editeur-saisie-trait",
@@ -3223,9 +3214,9 @@
    },
    {
     "name": "editeur-ouverture-largeur",
-    "value": "1088px",
+    "value": "1096px",
     "usage": "Fenêtre de l'éditeur : largeur à l'ouverture, au moins, quand la zone utile le permet (LARGEUR_OUVERTURE du cœur) : la barre y tient sans défiler, quel que soit l'outil déplié.",
-    "origine": "Relecture du 13/11 (éditeur) : la barre la plus large, Forme dépliée, fait 1071 px, plus le retrait de 16 px."
+    "origine": "Relecture du 13/11 (éditeur) puis barre plus claire, piste A : la barre la plus large, Forme dépliée avec le trait du pli, fait 1078 px, plus le retrait de 16 px."
    },
    {
     "name": "editeur-outils-ecart-v",
@@ -3258,22 +3249,22 @@
     "origine": "design/annotation-pistes/index.html, barre C « Souffle » gardée le 13/11 (.pli)."
    },
    {
-    "name": "editeur-encre-largeur",
-    "value": "14px",
-    "usage": "Trait de la couleur de l'outil sous son pictogramme, largeur.",
-    "origine": "design/annotation-pistes/index.html, barre C « Souffle » gardée le 13/11 (.pli .b::after)."
+    "name": "editeur-encre-nuance",
+    "value": "8px",
+    "usage": "Nuance de la couleur de l'outil sous son pictogramme (outil replié), côté.",
+    "origine": "design/barre-claire/index.html, piste A « Calme » (barre plus claire, retour du 13/11 sur la 0.5.4) (.ip::after)."
    },
    {
-    "name": "editeur-encre-hauteur",
-    "value": "3px",
-    "usage": "Trait de la couleur de l'outil sous son pictogramme, hauteur.",
-    "origine": "design/annotation-pistes/index.html, barre C « Souffle » gardée le 13/11 (.pli .b::after)."
+    "name": "editeur-encre-nuance-rayon",
+    "value": "2px",
+    "usage": "Rayon de la nuance de la couleur de l'outil.",
+    "origine": "design/barre-claire/index.html, piste A « Calme » (barre plus claire, retour du 13/11 sur la 0.5.4) (.ip::after)."
    },
    {
     "name": "editeur-encre-bas",
-    "value": "3px",
-    "usage": "Trait de la couleur de l'outil, écart au bas du bouton.",
-    "origine": "design/annotation-pistes/index.html, barre C « Souffle » gardée le 13/11 (.pli .b::after)."
+    "value": "1px",
+    "usage": "Nuance de la couleur de l'outil, écart au bas du bouton.",
+    "origine": "design/barre-claire/index.html, piste A « Calme » (barre plus claire, retour du 13/11 sur la 0.5.4) (.ip::after)."
    },
    {
     "name": "editeur-inst-boite",
@@ -3388,6 +3379,12 @@
     "value": "4px",
     "usage": "Rayon d'un bouton de taille.",
     "origine": "design/annotation-instruments/index.html, dessin B « Couleur » choisi le 13/11 (.sz)."
+   },
+   {
+    "name": "editeur-pli-separateur",
+    "value": "18px",
+    "usage": "Trait qui sépare, dans le pli, les variantes des réglages : hauteur.",
+    "origine": "design/barre-claire/index.html, piste A « Calme » (barre plus claire, retour du 13/11 sur la 0.5.4) (.sep)."
    },
    {
     "name": "editeur-pli-marge",
