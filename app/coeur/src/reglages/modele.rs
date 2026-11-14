@@ -88,13 +88,17 @@ pub struct Raccourcis {
     pub texte: Vec<String>,
     /// La capture défilante (version 5).
     pub defilante: Vec<String>,
+    /// La vidéo (version 6).
+    pub video: Vec<String>,
+    /// Le GIF (version 6).
+    pub gif: Vec<String>,
     /// Actions que cette version ne connaît pas, gardées telles quelles pour la réécriture.
     pub(in crate::reglages) autres: Map<String, Value>,
 }
 
 impl Raccourcis {
     /// Les noms d'action connus, dans l'ordre où ils sont écrits.
-    pub const ACTIONS: [&'static str; 7] = [
+    pub const ACTIONS: [&'static str; 9] = [
         "zone",
         "plein_ecran",
         "fenetre",
@@ -102,6 +106,8 @@ impl Raccourcis {
         "historique",
         "texte",
         "defilante",
+        "video",
+        "gif",
     ];
 
     /// Les candidats d'une action connue, `None` pour une action inconnue.
@@ -114,6 +120,8 @@ impl Raccourcis {
             "historique" => Some(&self.historique),
             "texte" => Some(&self.texte),
             "defilante" => Some(&self.defilante),
+            "video" => Some(&self.video),
+            "gif" => Some(&self.gif),
             _ => None,
         }
     }
@@ -127,6 +135,8 @@ impl Raccourcis {
             "historique" => Some(&mut self.historique),
             "texte" => Some(&mut self.texte),
             "defilante" => Some(&mut self.defilante),
+            "video" => Some(&mut self.video),
+            "gif" => Some(&mut self.gif),
             _ => None,
         }
     }
@@ -143,11 +153,14 @@ impl Raccourcis {
                 historique: liste(&["Ctrl+Maj+H"]),
                 texte: liste(&["Ctrl+Maj+T"]),
                 defilante: liste(&["Ctrl+Maj+5"]),
+                video: liste(&["Ctrl+Maj+6"]),
+                gif: liste(&["Ctrl+Maj+7"]),
                 autres: Map::new(),
             },
             // Provisoire : les raccourcis du Mac restent à choisir (Cmd+Maj+3, 4 et 5 sont
             // ceux de macOS lui-même, on les évite ; Cmd+Maj+0 pour la défilante, contrat 0.6
-            // §7.1).
+            // §7.1). Vidéo et GIF : aucun (la fonction est absente du Mac, et ses chiffres
+            // libres sont pris ; contrat 0.7, §7.1).
             Plateforme::Mac => Raccourcis {
                 zone: liste(&["Cmd+Maj+1"]),
                 plein_ecran: liste(&["Cmd+Maj+2"]),
@@ -156,6 +169,8 @@ impl Raccourcis {
                 historique: liste(&["Cmd+Maj+8"]),
                 texte: liste(&["Cmd+Maj+9"]),
                 defilante: liste(&["Cmd+Maj+0"]),
+                video: Vec::new(),
+                gif: Vec::new(),
                 autres: Map::new(),
             },
         }

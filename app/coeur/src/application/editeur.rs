@@ -2009,8 +2009,8 @@ mod tests {
             (E::Decompte, D::DecompteFini(Mode::DerniereZone), E::Gel),
             (E::Decompte, D::DecompteAnnule, E::Repos),
         ];
-        // 0.5 et 0.6 : la table de la 0.4 en tête, puis les seules lignes de Copier le texte
-        // et de la capture défilante.
+        // 0.5, 0.6 et 0.7 : la table de la 0.4 en tête, puis les seules lignes de Copier le
+        // texte, de la capture défilante et du film.
         assert_eq!(&PASSAGES[..confort.len()], confort);
         for (depart, d, arrivee) in &PASSAGES[confort.len()..] {
             let texte = matches!(
@@ -2023,7 +2023,12 @@ mod tests {
                 D::DemandeCapture(Mode::Defilante) | D::PhotoPrise(Mode::Defilante)
             ) || *depart == E::Defilement
                 || *arrivee == E::Defilement;
-            assert!(texte || defilante, "{depart:?} {d:?}");
+            let film = matches!(
+                d,
+                D::DemandeCapture(Mode::Video | Mode::Gif) | D::PhotoPrise(Mode::Video | Mode::Gif)
+            ) || matches!(depart, E::Enregistrement | E::Finalisation)
+                || matches!(arrivee, E::Enregistrement | E::Finalisation);
+            assert!(texte || defilante || film, "{depart:?} {d:?}");
         }
         // Tous les déclencheurs, sans exception (un nouveau ne compile pas sans être vu
         // ici) : aucun ne concerne l'éditeur.
@@ -2058,7 +2063,12 @@ mod tests {
                 | D::DefilementChoisi
                 | D::DefilementFini
                 | D::DefilementAnnule
-                | D::DefilementImpossible => false,
+                | D::DefilementImpossible
+                | D::EnregistrementChoisi
+                | D::EnregistrementArrete
+                | D::EnregistrementAnnule
+                | D::EnregistrementImpossible
+                | D::FinalisationImpossible => false,
             };
             assert!(!editeur);
         }

@@ -33,6 +33,10 @@ png = { version = "0.18", default-features = false }
 # déjà tirée par les dépendances de Tauri.
 ed25519-compact = { version = "2", default-features = false, features = ["std"] }
 base64 = "0.23"
+# Vidéo et GIF (0.7) : le GIF est écrit par la crate `gif` (MIT OR Apache-2.0), sa palette
+# par `color_quant` (MIT), qu'elle tire (`Frame::from_rgba_speed`, décision D13 de la sonde).
+# Pur Rust, aucune dépendance native ; le module `film` s'en sert sur tous les systèmes.
+gif = { version = "0.14.2", default-features = false, features = ["color_quant", "std"] }
 
 [target.'cfg(windows)'.dependencies]
 # Copier le texte (0.5) : la lecture de Windows (Media.Ocr) et ce qu'elle demande pour
@@ -43,6 +47,11 @@ base64 = "0.23"
 # reste (BitBlt, WM_MOUSEWHEEL posté, fenêtres filles, SendInput, crochet WH_MOUSE_LL) est
 # dans les fonctionnalités déjà là (Graphics_Gdi, UI_WindowsAndMessaging,
 # UI_Input_KeyboardAndMouse).
+# Vidéo et GIF (0.7) : la duplication de bureau (Direct3D 11, DXGI), Media Foundation
+# (codeur H.264 et AAC, `IMFSinkWriter`), le micro (WASAPI : Media_Audio, propriétés des
+# appareils), pris dans `sonde/film/rust/Cargo.toml` de la sonde, sans ceux de
+# Windows.Graphics.Capture (non codé en 0.7, D2) ni ceux qui ne servaient qu'aux mesures.
+# Les DLL de Media Foundation, de DXGI et de Direct3D sont chargées à la demande (build.rs).
 windows = { version = "0.62", features = [
   "Foundation",
   "Foundation_Collections",
@@ -51,12 +60,21 @@ windows = { version = "0.62", features = [
   "Media_Ocr",
   "Security_Cryptography",
   "Storage_Streams",
+  "Win32_Devices_FunctionDiscovery",
   "Win32_Foundation",
+  "Win32_Graphics_Direct3D",
+  "Win32_Graphics_Direct3D11",
   "Win32_Graphics_Dwm",
+  "Win32_Graphics_Dxgi",
+  "Win32_Graphics_Dxgi_Common",
   "Win32_Graphics_Gdi",
+  "Win32_Media",
+  "Win32_Media_Audio",
+  "Win32_Media_MediaFoundation",
   "Win32_Security",
   "Win32_Storage_FileSystem",
   "Win32_System_Com",
+  "Win32_System_Com_StructuredStorage",
   "Win32_System_DataExchange",
   "Win32_System_LibraryLoader",
   "Win32_System_Memory",
@@ -71,6 +89,7 @@ windows = { version = "0.62", features = [
   "Win32_UI_Input_KeyboardAndMouse",
   "Win32_UI_Shell",
   "Win32_UI_Shell_Common",
+  "Win32_UI_Shell_PropertiesSystem",
   "Win32_UI_WindowsAndMessaging",
 ] }
 # Savoir si WebView2 est là avant de montrer l'installateur (déjà tiré par wry).

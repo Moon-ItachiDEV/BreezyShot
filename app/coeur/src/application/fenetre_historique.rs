@@ -96,6 +96,10 @@ pub fn historique_action(app: AppHandle, nom: String, action: String) {
         Some(ActionCase::Annoter) if super::geste_defilante::fenetres_bloquees(&app) => {
             log::info!("historique: annoter ignore pendant la defilante");
         }
+        // Pendant un film non plus (F30).
+        Some(ActionCase::Annoter) if super::geste_film::fenetres_bloquees(&app) => {
+            log::info!("historique: annoter ignore pendant le film");
+        }
         Some(a) if geste::connue(&app, &nom) => geste::action(&app, nom, a),
         _ => refusee("action"),
     }

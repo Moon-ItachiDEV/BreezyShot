@@ -84,6 +84,9 @@ pub enum Place {
     Fermer,
     /// Montré seulement quand la carte est « supprimée ».
     Annulation,
+    /// Le rond de lecture d'un film (0.7, choix B2) : le rond lui-même est ce bouton ; sans
+    /// lui, le rond n'est qu'un signe.
+    Lecture,
 }
 
 /// Un bouton de la carte, fourni par l'Application.
@@ -94,6 +97,16 @@ pub struct ActionVignette {
     pub libelle_fait: Option<String>,
     pub place: Place,
     pub picto: String,
+}
+
+/// La carte d'un film (vidéo ou GIF, contrat 0.7, §11) : le rond de lecture et la durée en
+/// bas à droite.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct CarteFilm {
+    /// « 0:07 » pour une vidéo, « GIF · 0:07 » pour un GIF (`application::film`).
+    pub duree: String,
+    /// Nom accessible de la carte : « Enregistrement terminé ».
+    pub nom: String,
 }
 
 /// Ce que l'Application demande de montrer.
@@ -114,6 +127,8 @@ pub struct Demande {
     /// L'aperçu en PNG et sa taille.
     pub apercu: Arc<Vec<u8>>,
     pub apercu_taille: (u32, u32),
+    /// La carte d'un film (0.7) ; `None` : une image, et la page est celle de la 0.6.1.
+    pub film: Option<CarteFilm>,
 }
 
 /// Ce que le module signale à l'Application.
@@ -302,6 +317,9 @@ struct ChargeVignette<'a> {
     glisser: bool,
     reduites: bool,
     apercu: Taille,
+    /// Absent pour une image : la charge est alors celle de la 0.6.1, champ pour champ.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    film: Option<&'a CarteFilm>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize)]
@@ -570,6 +588,7 @@ impl Vignette {
                 largeur: demande.apercu_taille.0,
                 hauteur: demande.apercu_taille.1,
             },
+            film: demande.film.as_ref(),
         };
         if let Err(e) = self
             .app

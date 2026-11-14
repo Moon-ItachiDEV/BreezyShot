@@ -19,6 +19,15 @@
 //! `traiter_zone`, `abandonner`, `proposer_pages`), Échap, Entrée et le bureau en
 //! Défilement, `Evenement::Defilante`, `arreter`, et `lancer_sortie(…, apercu_du_haut)`.
 //!
+//! 0.7 : Vidéo et GIF (`geste_film`, `fenetre_film`, décisions dans `film.rs`, horloge,
+//! GIF et calage dans `crate::film`) ne touchent ce fichier que par leurs points
+//! d'accroche : `apres_gel`, la Sélection en mode film (`montrer_selection`,
+//! `traiter_zone`, `abandonner`), Échap, la croix du disque, le bureau, le raccourci du
+//! film en cours (choix B1), `Evenement::Film`, la recherche du codeur
+//! (`Evenement::VideoDisponible`), la suite d'`ImagePrete` (`film_ferme`), les boutons de
+//! la carte d'un film, et `arreter` (`fermer_pour_arret`). Tant que `film::CONSTRUIT` est
+//! faux, aucune de ces accroches n'est jamais atteinte.
+//!
 //! Retardateur (0.4) : `demarrer_capture` entre en Décompte (`commencer_decompte`), le fil
 //! `decompte` poste `DecompteFini`, puis la séquence du mode part (`apres_gel`) ;
 //! `decompte.rs` décide (fonctions pures). Dernière zone : `capturer_derniere_zone`.
@@ -36,10 +45,13 @@ pub mod etat;
 pub mod etats;
 pub mod fenetre_defilante;
 pub mod fenetre_editeur;
+pub mod fenetre_film;
 pub mod fenetre_historique;
 pub mod fenetre_menu;
 pub mod fenetre_reglages;
+pub mod film;
 pub mod geste_defilante;
+pub mod geste_film;
 pub mod geste_historique;
 pub mod geste_texte;
 pub mod historique;
@@ -77,7 +89,7 @@ use arguments::Commande;
 use decompte::{ArriveeDecompte, Cause};
 use etats::{Automate, Declencheur, Etat, Mode};
 use icone::EntreeMenu;
-use vignette::{CaptureMontree, EtatSuppression};
+use vignette::{CaptureMontree, Contenu, EtatSuppression};
 use zone::{Arrivee, DerniereZone, Geste, Probleme, Refaire, Vue};
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -119,24 +131,36 @@ pub const MENU_HISTORIQUE: &str = "historique";
 /// `historique` si l'historique est construit et ouvert (`droits`) ; `texte` si Copier le
 /// texte est construit, ouvert, et si une langue de lecture existe (R10) ; `defilante` si
 /// la capture défilante est construite, ouverte, et si le système prend des images
-/// vivantes (contrat 0.6, §6 : hors Windows, jamais).
-pub fn actions_construites(pro: bool, texte_disponible: bool) -> Vec<&'static str> {
+/// vivantes (contrat 0.6, §6 : hors Windows, jamais) ; `gif` si le film est construit,
+/// ouvert, et si le système prend des images vivantes ; `video` de même, et si un codeur
+/// H.264 a été trouvé (`video_disponible`, `Evenement::VideoDisponible`, contrat 0.7, §6).
+pub fn actions_construites(
+    pro: bool,
+    texte_disponible: bool,
+    video_disponible: bool,
+) -> Vec<&'static str> {
+    let film = film::CONSTRUIT && systeme::vivant::disponible();
     actions_selon(
         pro,
         historique::CONSTRUIT,
         texte::CONSTRUIT && texte_disponible,
         defilante::CONSTRUITE && systeme::vivant::disponible(),
+        film && video_disponible,
+        film,
     )
 }
 
-/// Règle pure de `actions_construites` : `avec_historique`, `avec_texte`, `avec_defilante`
-/// disent ce qui est construit (et la langue, et le système), `pro` qu'une licence valide
-/// est en place ; les droits sont lus ici et nulle part ailleurs.
+/// Règle pure de `actions_construites` : `avec_historique`, `avec_texte`, `avec_defilante`,
+/// `avec_video`, `avec_gif` disent ce qui est construit (et la langue, le codeur, le
+/// système), `pro` qu'une licence valide est en place ; les droits sont lus ici et nulle
+/// part ailleurs.
 pub fn actions_selon(
     pro: bool,
     avec_historique: bool,
     avec_texte: bool,
     avec_defilante: bool,
+    avec_video: bool,
+    avec_gif: bool,
 ) -> Vec<&'static str> {
     let mut actions = ACTIONS_DE_CAPTURE.to_vec();
     if avec_historique && droits::ouverte(Fonction::Historique, pro) {
@@ -148,18 +172,27 @@ pub fn actions_selon(
     if avec_defilante && droits::ouverte(Fonction::Defilante, pro) {
         actions.push(Mode::Defilante.nom());
     }
+    if avec_video && droits::ouverte(Fonction::Video, pro) {
+        actions.push(Mode::Video.nom());
+    }
+    if avec_gif && droits::ouverte(Fonction::Gif, pro) {
+        actions.push(Mode::Gif.nom());
+    }
     actions
 }
 
 /// L'ordre des entrées de capture dans le menu de l'icône (celui des raccourcis 1 à 4,
-/// la capture défilante, puis Copier le texte). Seuls les modes construits y paraissent.
-pub const ORDRE_MENU: [Mode; 6] = [
+/// la capture défilante, Copier le texte, puis la vidéo et le GIF). Seuls les modes
+/// construits y paraissent.
+pub const ORDRE_MENU: [Mode; 8] = [
     Mode::Zone,
     Mode::PleinEcran,
     Mode::Fenetre,
     Mode::DerniereZone,
     Mode::Defilante,
     Mode::Texte,
+    Mode::Video,
+    Mode::Gif,
 ];
 
 /// Tout ce qui arrive à l'Application : signaux des modules, du système, du menu.
@@ -228,6 +261,10 @@ pub enum Evenement {
     LicenceChangee,
     /// Signal d'un fil de la capture défilante (0.6), traité par `geste_defilante::traiter`.
     Defilante(geste_defilante::Signal),
+    /// Signal d'un fil du film (0.7), traité par `geste_film::traiter`.
+    Film(geste_film::Signal),
+    /// Résultat de la recherche du codeur H.264 (fil `film-codeurs`, F32).
+    VideoDisponible(bool),
 }
 
 /// Ce que le fil d'une action de la vignette rend au fil principal.
@@ -260,6 +297,29 @@ pub struct FinSortie {
     /// pu être fait, ou pas voulu).
     pub vignette: bool,
     pub apercu: Option<Apercu>,
+}
+
+/// Un film fermé (F29), rendu par `geste_film` au fil principal : la suite d'`ImagePrete`
+/// (`film_ferme`). La sortie (copie, enregistrement) se fait ensuite (F36).
+#[derive(Debug, Clone)]
+pub struct FinFilm {
+    /// Numéro de la carte (pris dans la suite des sorties).
+    pub numero: u64,
+    /// Le fichier de travail fermé, dans `<local>/Films/`.
+    pub fichier: PathBuf,
+    pub sorte: film::Sorte,
+    /// La durée du film (`film::texte_vignette`).
+    pub duree: Duration,
+    /// La zone filmée, pixels réels du bureau (le souffle en part).
+    pub zone: systeme::Rect,
+    /// La dernière image brute, sans le pointeur.
+    pub derniere: Arc<gel::Pixels>,
+    /// L'aperçu de la vignette (`None` s'il n'a pas pu être fait).
+    pub apercu: Option<Apercu>,
+    /// La demande de sortie du film (`film::demande_film`), à l'heure de la fin.
+    pub demande: sortie::Demande,
+    /// Le relâchement de la zone (chrono).
+    pub relache: Instant,
 }
 
 /// Une capture de zone en cours, de `montrer_ecran_fige` jusqu'au découpage ou à
@@ -420,6 +480,10 @@ pub struct Application {
     actions_suivies: Mutex<Vec<&'static str>>,
     /// La capture défilante en cours (0.6, `geste_defilante`), de la visée à sa fin.
     defilante: Mutex<Option<geste_defilante::EnCours>>,
+    /// Un codeur H.264 a été trouvé (`Evenement::VideoDisponible`) ; faux jusque-là.
+    video_disponible: AtomicBool,
+    /// Le film en cours (0.7, `geste_film`), de la visée à la fin de la Finalisation.
+    film: Mutex<Option<geste_film::EnCours>>,
 }
 
 /// Une annonce envoyée au bandeau, dont la situation attend d'être retenue.
@@ -537,6 +601,9 @@ fn lancer_app(contexte: tauri::Context, commande: Commande, inconnus: Vec<String
             fenetre_defilante::defilante_zone,
             fenetre_defilante::defilante_terminer,
             fenetre_defilante::defilante_apercu,
+            fenetre_film::film_pret,
+            fenetre_film::film_zone,
+            fenetre_film::film_action,
             fenetre_menu::menu_pret,
             fenetre_menu::menu_choisi,
             fenetre_menu::menu_fermer
@@ -658,13 +725,14 @@ fn demarrer(app: &AppHandle, commande: Commande, inconnus: &[String]) {
         None => Reglages::par_defaut(plateforme),
     };
     // La licence d'abord : les actions Pro en dépendent. Les langues de lecture ne sont pas
-    // encore connues : `texte` attend `Evenement::TexteDisponible`.
+    // encore connues : `texte` attend `Evenement::TexteDisponible`, `video`
+    // `Evenement::VideoDisponible`.
     licence::charger(app);
     let pro = pro(app);
     if let Ok(mut suivies) = app.state::<Application>().actions_suivies.lock() {
-        *suivies = actions_construites(pro, false);
+        *suivies = actions_construites(pro, false, false);
     }
-    let candidats = table_candidats(&reglages, &actions_construites(pro, false));
+    let candidats = table_candidats(&reglages, &actions_construites(pro, false, false));
     fenetre_reglages::retenir_theme(&reglages);
     log::info!("theme interface: {}", reglages.theme.texte());
     if systeme::demarrage::cle_d_essai() {
@@ -727,7 +795,9 @@ fn demarrer(app: &AppHandle, commande: Commande, inconnus: &[String]) {
         app,
         theme,
         taille,
-        &entrees_menu(&actions_construites(pro, false), |a| bilan.libelle_menu(a)),
+        &entrees_menu(&actions_construites(pro, false, false), |a| {
+            bilan.libelle_menu(a)
+        }),
         |app, id| traiter(app, Evenement::Menu(id)),
         |app, rect| traiter(app, Evenement::ClicIcone(rect)),
     ) {
@@ -760,6 +830,8 @@ fn demarrer(app: &AppHandle, commande: Commande, inconnus: &[String]) {
 
     // Langues de lecture (Copier le texte), dans un petit fil : `pret` n'attend pas.
     geste_texte::lancer_sonde(app);
+    // Codeur H.264 (vidéo), dans un petit fil, seulement si `film::recherche_voulue` (F32).
+    geste_film::lancer_recherche(app);
 
     if let (false, Some(d)) = (differee, &dossiers) {
         poster_plus_tard(
@@ -850,6 +922,25 @@ pub(super) fn defilante_en_cours(
         .unwrap_or_else(|e| e.into_inner())
 }
 
+/// Le film en cours, sous son verrou (repris s'il est empoisonné). Fil principal ; verrou
+/// jamais tenu pendant un appel à Tauri ou à un module.
+pub(super) fn film_en_cours(
+    app: &AppHandle,
+) -> std::sync::MutexGuard<'_, Option<geste_film::EnCours>> {
+    app.state::<Application>()
+        .inner()
+        .film
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+}
+
+/// Vrai si un codeur H.264 a été trouvé (`Evenement::VideoDisponible`).
+fn video_disponible(app: &AppHandle) -> bool {
+    app.state::<Application>()
+        .video_disponible
+        .load(Ordering::SeqCst)
+}
+
 /// Vrai si une langue de lecture existe (`Evenement::TexteDisponible`).
 fn texte_disponible(app: &AppHandle) -> bool {
     app.state::<Application>()
@@ -873,9 +964,9 @@ pub(super) fn licence_en_vigueur(
         .unwrap_or_else(|e| e.into_inner())
 }
 
-/// Les actions construites en ce moment (licence et langues de lecture comprises).
+/// Les actions construites en ce moment (licence, langues de lecture et codeur compris).
 pub(super) fn actions_en_vigueur(app: &AppHandle) -> Vec<&'static str> {
-    actions_construites(pro(app), texte_disponible(app))
+    actions_construites(pro(app), texte_disponible(app), video_disponible(app))
 }
 
 /// Vrai si le mode `mode` est une action construite en ce moment.
@@ -897,8 +988,8 @@ pub(super) fn menu_actuel(app: &AppHandle) -> Option<Vec<EntreeMenu>> {
     }))
 }
 
-/// Le menu pendant une capture défilante : rien qui ouvre une fenêtre, seulement
-/// « Quitter BreezyShot » (§3.10, R2).
+/// Le menu pendant une capture défilante ou un film : rien qui ouvre une fenêtre,
+/// seulement « Quitter BreezyShot » (§3.10, R2 ; contrat 0.7, F30).
 pub fn entrees_pendant_defilante() -> Vec<EntreeMenu> {
     vec![EntreeMenu::Action {
         id: MENU_QUITTER.into(),
@@ -921,6 +1012,21 @@ pub(super) fn refaire_menu(app: &AppHandle) {
 fn texte_devenu_disponible(app: &AppHandle, disponible: bool) {
     app.state::<Application>()
         .texte_disponible
+        .store(disponible, Ordering::SeqCst);
+    let apparues = suivre_les_actions(app);
+    lacher_annonce(app, &apparues, false);
+}
+
+/// Résultat de la recherche du codeur H.264 (F32) : retenu (`video disponible: oui|non`) ;
+/// si la vidéo devient une action construite, son raccourci est réservé et le menu refait,
+/// comme pour le texte.
+fn video_devenue_disponible(app: &AppHandle, disponible: bool) {
+    log::info!(
+        "video disponible: {}",
+        if disponible { "oui" } else { "non" }
+    );
+    app.state::<Application>()
+        .video_disponible
         .store(disponible, Ordering::SeqCst);
     let apparues = suivre_les_actions(app);
     lacher_annonce(app, &apparues, false);
@@ -981,7 +1087,7 @@ fn suivre_les_actions(app: &AppHandle) -> Vec<raccourcis::ChoixAction> {
 /// si une langue existe (licence en place) : son raccourci n'est connu qu'à
 /// `Evenement::TexteDisponible`.
 pub fn annonce_attend_texte(pro: bool) -> bool {
-    actions_construites(pro, true).contains(&Mode::Texte.nom())
+    actions_construites(pro, true, false).contains(&Mode::Texte.nom())
 }
 
 /// Le bilan du démarrage complété des actions réservées après lui (`texte`) : la ligne de
@@ -1288,6 +1394,8 @@ pub fn libelle_menu(mode: Mode) -> &'static str {
         Mode::DerniereZone => "Refaire la dernière zone",
         Mode::Texte => "Copier le texte",
         Mode::Defilante => "Capture défilante",
+        Mode::Video => "Vidéo",
+        Mode::Gif => "GIF",
     }
 }
 
@@ -1305,16 +1413,21 @@ fn avec_raccourci(libelle: &str, raccourci: Option<&str>) -> String {
     }
 }
 
-/// Vrai pour les modes du premier groupe du menu (les captures) ; les autres (refaire la
-/// dernière zone, Copier le texte) forment le second groupe.
-fn mode_du_premier_groupe(mode: Mode) -> bool {
-    matches!(mode, Mode::Zone | Mode::PleinEcran | Mode::Fenetre)
+/// Le groupe du menu d'un mode : 1, les captures ; 2, refaire la dernière zone, la capture
+/// défilante, Copier le texte ; 3, la vidéo et le GIF (contrat 0.7, §7.3).
+pub fn groupe_du_menu(mode: Mode) -> u8 {
+    match mode {
+        Mode::Zone | Mode::PleinEcran | Mode::Fenetre => 1,
+        Mode::DerniereZone | Mode::Defilante | Mode::Texte => 2,
+        Mode::Video | Mode::Gif => 3,
+    }
 }
 
 /// Les entrées du menu de l'icône (piste A « Liste »), par groupes séparés : les captures
 /// construites parmi `actions` (`raccourci` donne le raccourci actif d'une action) ;
-/// « Refaire la dernière zone » et « Copier le texte » ; « Historique » s'il est construit
-/// et « Réglages » ; « Quitter BreezyShot ». Seulement ce qui marche.
+/// « Refaire la dernière zone », « Capture défilante » et « Copier le texte » ; « Vidéo »
+/// et « GIF » ; « Historique » s'il est construit et « Réglages » ; « Quitter
+/// BreezyShot ». Seulement ce qui marche : un groupe vide n'a pas de séparateur.
 pub fn entrees_menu(
     actions: &[&str],
     raccourci: impl Fn(&str) -> Option<String>,
@@ -1323,13 +1436,21 @@ pub fn entrees_menu(
         id: id_menu(mode),
         texte: texte_capturer(mode, raccourci(mode.nom()).as_deref()),
     };
-    let (premier, second): (Vec<Mode>, Vec<Mode>) = modes_au_menu(actions)
-        .into_iter()
-        .partition(|m| mode_du_premier_groupe(*m));
-    let mut entrees: Vec<EntreeMenu> = premier.into_iter().map(entree).collect();
-    if !second.is_empty() {
-        entrees.push(EntreeMenu::Separateur);
-        entrees.extend(second.into_iter().map(entree));
+    let modes = modes_au_menu(actions);
+    let mut entrees: Vec<EntreeMenu> = Vec::new();
+    for groupe in 1..=3 {
+        let du_groupe: Vec<Mode> = modes
+            .iter()
+            .copied()
+            .filter(|m| groupe_du_menu(*m) == groupe)
+            .collect();
+        if du_groupe.is_empty() {
+            continue;
+        }
+        if !entrees.is_empty() {
+            entrees.push(EntreeMenu::Separateur);
+        }
+        entrees.extend(du_groupe.into_iter().map(entree));
     }
     entrees.push(EntreeMenu::Separateur);
     if actions.contains(&ACTION_HISTORIQUE) {
@@ -1362,6 +1483,8 @@ pub fn traiter(app: &AppHandle, evenement: Evenement) {
             | Evenement::Raccourci(raccourcis::Signal::Echap)
             | Evenement::Raccourci(raccourcis::Signal::Entree)
             | Evenement::Defilante(_)
+            | Evenement::Film(_)
+            | Evenement::VideoDisponible(_)
             | Evenement::Vignette(_)
             | Evenement::ActionFaite(_)
             | Evenement::SuppressionFaite { .. }
@@ -1441,6 +1564,10 @@ pub fn traiter(app: &AppHandle, evenement: Evenement) {
             (_, _) if geste_defilante::fenetres_bloquees(app) => {
                 log::info!("menu ignore pendant la defilante");
             }
+            // Pendant un film, de même (F30).
+            (_, _) if geste_film::fenetres_bloquees(app) => {
+                log::info!("menu ignore pendant le film");
+            }
             (MENU_REGLAGES, _) => {
                 log::info!("menu: reglages");
                 fenetre_reglages::ouvrir(app);
@@ -1458,8 +1585,12 @@ pub fn traiter(app: &AppHandle, evenement: Evenement) {
         },
         Evenement::Raccourci(raccourcis::Signal::Echap) => {
             log::info!("echap global presse");
-            // En Défilement, Échap annule la défilante ; sinon le décompte ou la Sélection.
-            if !geste_defilante::echap(app) && !annuler_si_decompte(app, ArriveeDecompte::Echap) {
+            // Pendant un film, Échap l'annule (visée exceptée) ; en Défilement, il annule la
+            // défilante ; sinon le décompte ou la Sélection.
+            if !geste_film::echap(app)
+                && !geste_defilante::echap(app)
+                && !annuler_si_decompte(app, ArriveeDecompte::Echap)
+            {
                 traiter_zone(app, Arrivee::Echap);
             }
         }
@@ -1468,13 +1599,18 @@ pub fn traiter(app: &AppHandle, evenement: Evenement) {
             geste_defilante::entree(app);
         }
         Evenement::Selection(signal) => {
-            if !geste_defilante::signal_selection(app, &signal) {
+            if !geste_film::signal_selection(app, &signal)
+                && !geste_defilante::signal_selection(app, &signal)
+            {
                 traiter_zone(app, Arrivee::Selection(&signal));
             }
         }
         Evenement::Bureau(changement) => {
             log::info!("bureau change pendant la capture: {changement:?}");
-            if geste_texte::bureau_change(app) || geste_defilante::bureau_change(app, changement) {
+            if geste_texte::bureau_change(app)
+                || geste_defilante::bureau_change(app, changement)
+                || geste_film::bureau_change(app, changement)
+            {
                 return;
             }
             if !annuler_si_decompte(app, ArriveeDecompte::Bureau(changement)) {
@@ -1508,6 +1644,17 @@ pub fn traiter(app: &AppHandle, evenement: Evenement) {
                 log::info!("raccourci ignore pendant la defilante");
                 return;
             }
+            // Pendant un film : son propre raccourci l'arrête (choix B1) ; ceux qui
+            // ouvriraient une fenêtre sont ignorés (F30) ; ceux de capture vont à la table,
+            // qui les ignore.
+            let mode = Mode::depuis_nom(&action);
+            if mode.is_some_and(|m| geste_film::raccourci(app, m)) {
+                return;
+            }
+            if mode.is_none() && geste_film::fenetres_bloquees(app) {
+                log::info!("raccourci ignore pendant le film");
+                return;
+            }
             let construite = actions_en_vigueur(app).contains(&action.as_str());
             match Mode::depuis_nom(&action) {
                 Some(mode) if construite => lancer_capture(app, mode),
@@ -1528,6 +1675,10 @@ pub fn traiter(app: &AppHandle, evenement: Evenement) {
         Evenement::Fenetres(fenetres::Signal::ActionBandeau { id, action }) => {
             // La page ferme un message elle-même ; seule la croix du décompte agit.
             log::info!("bandeau action {id} {action}");
+            // La croix du disque du décompte d'un film (F8).
+            if geste_film::action_bandeau(app, id, &action) {
+                return;
+            }
             let decompte = annuler_si_decompte(
                 app,
                 ArriveeDecompte::Action {
@@ -1559,10 +1710,14 @@ pub fn traiter(app: &AppHandle, evenement: Evenement) {
         // Aucune annonce à l'activation ni au retrait de la licence.
         Evenement::LicenceChangee => {
             suivre_les_actions(app);
-            // Première activation : les langues de lecture (une fois par lancement).
+            // Première activation : les langues de lecture et le codeur H.264 (une fois
+            // par lancement chacun).
             geste_texte::lancer_sonde(app);
+            geste_film::lancer_recherche(app);
         }
         Evenement::Defilante(signal) => geste_defilante::traiter(app, signal),
+        Evenement::Film(signal) => geste_film::traiter(app, signal),
+        Evenement::VideoDisponible(oui) => video_devenue_disponible(app, oui),
     }
 }
 
@@ -1691,6 +1846,7 @@ fn apres_gel(app: &AppHandle, mode: Mode, recu_a: Instant, bandeau_cache: bool) 
         Mode::DerniereZone => capturer_derniere_zone(app, recu_a, bandeau_cache),
         Mode::Texte => capturer_avec_selection(app, recu_a, Mode::Texte, bandeau_cache),
         Mode::Defilante => geste_defilante::capturer(app, recu_a, bandeau_cache),
+        Mode::Video | Mode::Gif => geste_film::capturer(app, mode, recu_a, bandeau_cache),
     }
 }
 
@@ -1880,9 +2036,12 @@ fn annuler_decompte(app: &AppHandle, cause: Cause) {
 /// `GelImpossible` (Repos) et bandeau d'erreur ; rend `None`.
 pub(super) fn photographier(app: &AppHandle, deja_cache: bool, mode: Mode) -> Option<capture::Gel> {
     // Lu avant l'attente du compositeur : rien entre l'attente et la photo. Copier le
-    // texte et la capture défilante ne prennent jamais le pointeur (D1).
-    let avec_pointeur =
-        reglages_lus(app).capture.pointeur && mode != Mode::Texte && mode != Mode::Defilante;
+    // texte, la capture défilante (D1) et le film (F1 : l'écran figé ne sert qu'à viser)
+    // ne prennent jamais le pointeur.
+    let avec_pointeur = reglages_lus(app).capture.pointeur
+        && mode != Mode::Texte
+        && mode != Mode::Defilante
+        && !mode.film();
     let vignette_cachee = fermer_vignette(app, "capture");
     let bandeau_cache = app.try_state::<Bandeau>().is_some_and(|b| b.cacher());
     if (bandeau_cache || vignette_cachee || deja_cache)
@@ -2076,6 +2235,9 @@ fn montrer_selection(app: &AppHandle, recu_a: Instant, mode: Mode, gel_pris: cap
     } else if mode == Mode::Defilante {
         // Les pages sont proposées après, sans être attendues (D2, `proposer_pages`).
         (selection::Mode::Defilante, Vec::new())
+    } else if mode.film() {
+        // Une zone seulement, aucune fenêtre proposée (F2).
+        (selection::Mode::Film, Vec::new())
     } else {
         (selection::Mode::Zone, Vec::new())
     };
@@ -2133,6 +2295,9 @@ fn montrer_selection(app: &AppHandle, recu_a: Instant, mode: Mode, gel_pris: cap
     reserver_echap(app);
     if mode_selection == selection::Mode::Defilante {
         geste_defilante::selection_montree(app, id);
+    }
+    if mode_selection == selection::Mode::Film {
+        geste_film::selection_montree(app, id);
     }
 }
 
@@ -2237,23 +2402,27 @@ pub(super) fn abandonner(app: &AppHandle, declencheur: Declencheur, probleme: Op
         return;
     };
     let defilante = capture.mode == selection::Mode::Defilante;
+    let film = capture.mode == selection::Mode::Film;
     capture.garde.cacher_tout();
     drop(capture);
     appliquer(app, declencheur);
     if defilante {
         geste_defilante::visee_abandonnee(app);
     }
+    if film {
+        geste_film::visee_abandonnee(app);
+    }
     if let Some(p) = probleme {
         afficher_probleme(app, p);
     }
 }
 
-/// Une zone (ou une page) choisie sans capture pour la recevoir, hors défilante : la
-/// Sélection qui la garde à l'écran doit être cachée (`traiter_zone`, `Geste::Rien`).
-/// Fonction pure.
-fn cacher_selection_gardee(sans_capture: bool, arrivee: &Arrivee<'_>, defilante: bool) -> bool {
+/// Une zone (ou une page) choisie sans capture pour la recevoir, hors défilante et hors
+/// film (`bloquees` : l'un d'eux tient les fenêtres) : la Sélection qui la garde à l'écran
+/// doit être cachée (`traiter_zone`, `Geste::Rien`). Fonction pure.
+fn cacher_selection_gardee(sans_capture: bool, arrivee: &Arrivee<'_>, bloquees: bool) -> bool {
     sans_capture
-        && !defilante
+        && !bloquees
         && matches!(
             arrivee,
             Arrivee::Selection(selection::Signal::Zone { .. } | selection::Signal::Fenetre { .. })
@@ -2262,13 +2431,14 @@ fn cacher_selection_gardee(sans_capture: bool, arrivee: &Arrivee<'_>, defilante:
 
 /// Un signal pendant une capture de zone (fil principal) : décision pure, puis gestes.
 fn traiter_zone(app: &AppHandle, arrivee: Arrivee<'_>) {
-    let (geste, texte, defilante, sans_capture) = {
+    let (geste, texte, defilante, film, sans_capture) = {
         let c = capture_en_cours(app);
         let sans_capture = c.is_none();
         let texte = c.as_ref().is_some_and(|c| c.mode == selection::Mode::Texte);
         let defilante = c
             .as_ref()
             .is_some_and(|c| c.mode == selection::Mode::Defilante);
+        let film = c.as_ref().is_some_and(|c| c.mode == selection::Mode::Film);
         let geste = zone::decider(
             c.as_ref().map(|c| Vue {
                 selection: c.selection,
@@ -2278,7 +2448,7 @@ fn traiter_zone(app: &AppHandle, arrivee: Arrivee<'_>) {
             }),
             arrivee,
         );
-        (geste, texte, defilante, sans_capture)
+        (geste, texte, defilante, film, sans_capture)
     };
     // Capture défilante : la page cliquée, par son indice dans la liste proposée.
     let page = match arrivee {
@@ -2286,14 +2456,14 @@ fn traiter_zone(app: &AppHandle, arrivee: Arrivee<'_>) {
         _ => None,
     };
     match geste {
-        // Une zone choisie en mode texte ou défilante est gardée à l'écran par la Sélection
-        // jusqu'à ce que le cœur la cache : sans capture (ni défilante) pour la recevoir,
-        // personne ne le ferait.
+        // Une zone choisie en mode texte, défilante ou film est gardée à l'écran par la
+        // Sélection jusqu'à ce que le cœur la cache : sans capture (ni défilante, ni film)
+        // pour la recevoir, personne ne le ferait.
         Geste::Rien
             if cacher_selection_gardee(
                 sans_capture,
                 &arrivee,
-                geste_defilante::fenetres_bloquees(app),
+                geste_defilante::fenetres_bloquees(app) || geste_film::fenetres_bloquees(app),
             ) =>
         {
             log::warn!("selection gardee sans capture: cachee");
@@ -2313,6 +2483,8 @@ fn traiter_zone(app: &AppHandle, arrivee: Arrivee<'_>) {
         Geste::DecouperFenetre { zone, .. } if defilante => {
             geste_defilante::zone_choisie(app, zone, page)
         }
+        // Film : la zone est filmée, jamais découpée ici (F4).
+        Geste::Decouper(zone) if film => geste_film::zone_choisie(app, zone),
         Geste::Decouper(zone) => decouper(app, zone, None),
         Geste::DecouperFenetre { zone, rayon, coins } => decouper(app, zone, Some((rayon, coins))),
     }
@@ -2656,10 +2828,11 @@ fn montrer_vignette(app: &AppHandle, fin: FinSortie, annonce: Annonce, apercu: A
         reduites,
         apercu: apercu.0,
         apercu_taille: apercu.1,
+        film: None,
     };
     let ancienne = montree(app).replace(CaptureMontree {
         id: fin.numero,
-        pixels: fin.pixels,
+        contenu: Contenu::Image(fin.pixels),
         transparence: fin.demande.transparence,
         maintenant: fin.demande.maintenant,
         recent,
@@ -2682,6 +2855,76 @@ fn montrer_vignette(app: &AppHandle, fin: FinSortie, annonce: Annonce, apercu: A
     if let Some(v) = app.try_state::<Vignette>() {
         v.preparer(demande);
     }
+}
+
+/// La suite d'`ImagePrete` pour un film (F29, F25, F26), sur le fil principal, en
+/// Finalisation : `ImagePrete` et la carte du film (souffle depuis la zone), ou
+/// `ImagePreteSansVignette` (réglage, vignette absente, aperçu impossible). Rend le
+/// déclencheur appliqué ; la sortie du film (F36) part ensuite, par `geste_film`.
+pub(super) fn film_ferme(app: &AppHandle, fin: FinFilm) -> Declencheur {
+    let reglages = reglages_lus(app);
+    let voulue = vignette::doit_montrer(
+        reglages.vignette.afficher,
+        app.try_state::<Vignette>().is_some(),
+    );
+    if voulue && fin.apercu.is_none() {
+        log::warn!("vignette: apercu impossible");
+    }
+    let declencheur = vignette::issue(voulue, fin.apercu.is_some());
+    appliquer(app, declencheur);
+    let (Declencheur::ImagePrete, Some(apercu)) = (declencheur, fin.apercu.clone()) else {
+        return declencheur;
+    };
+    let reduites =
+        vignette::animations_reduites(reglages.animations, systeme::animations_reduites());
+    let capture = CaptureMontree {
+        id: fin.numero,
+        contenu: Contenu::Film {
+            fichier: fin.fichier,
+            sorte: fin.sorte,
+            apercu: fin.derniere,
+        },
+        transparence: false,
+        maintenant: fin.demande.maintenant,
+        recent: None,
+        enregistre: None,
+        liens: Vec::new(),
+        suppression: EtatSuppression::Aucune,
+        copie: None,
+        enregistrement: None,
+        glisser: false,
+        reduites,
+        partie: false,
+        annonce: Annonce::Reussite {
+            titre: film::TITRE_CARTE.into(),
+        },
+        relache: fin.relache,
+        souffle_a: None,
+    };
+    let demande = carte::Demande {
+        id: fin.numero,
+        capture: vignette::rect_fenetres(fin.zone),
+        coin: vignette::coin(reglages.vignette.coin),
+        actions: vignette::actions_film(fin.sorte),
+        duree: vignette::duree_affichage(reglages.vignette.duree_s),
+        duree_annulation: vignette::DELAI_ANNULATION,
+        glisser: vignette::glisser_possible(&capture).is_some(),
+        reduites,
+        apercu: apercu.0,
+        apercu_taille: apercu.1,
+        film: Some(carte::CarteFilm {
+            duree: film::texte_vignette(fin.sorte, fin.duree),
+            nom: film::TITRE_CARTE.into(),
+        }),
+    };
+    if let Some(a) = montree(app).replace(capture) {
+        // Jamais attendu (la photo ferme la vignette) : la suppression en attente est faite.
+        quitter(app, a, false);
+    }
+    if let Some(v) = app.try_state::<Vignette>() {
+        v.preparer(demande);
+    }
+    declencheur
 }
 
 /// La capture montrée, sous son verrou (repris s'il est empoisonné).
@@ -2832,6 +3075,7 @@ fn action_vignette(app: &AppHandle, v: &Vignette, id: u64, action: &str) {
             v.partir(id, true);
         }
         vignette::Geste::Annoter => annoter(app, id),
+        vignette::Geste::Lire => geste_film::lire(app, id),
         vignette::Geste::Ignorer => {}
     }
 }
@@ -2839,6 +3083,11 @@ fn action_vignette(app: &AppHandle, v: &Vignette, id: u64, action: &str) {
 /// Copier (`copier`) ou Enregistrer depuis la vignette : `sortir` dans un fil, sur les
 /// pixels gardés, puis `ActionFaite`.
 fn lancer_action(app: &AppHandle, id: u64, copier: bool) {
+    // La carte d'un film : son fichier, pas des pixels (F25).
+    if avec_montree(app, id, |c| c.contenu.film().is_some()) == Some(true) {
+        geste_film::lancer_action_vignette(app, id, copier);
+        return;
+    }
     let base = demande_sortie(app, false);
     let Some((pixels, demande)) = avec_montree(app, id, |c| {
         let maintenant = Some(Instant::now());
@@ -2848,7 +3097,7 @@ fn lancer_action(app: &AppHandle, id: u64, copier: bool) {
             c.enregistrement = maintenant;
         }
         (
-            Arc::clone(&c.pixels),
+            Arc::clone(c.contenu.pixels()),
             vignette::demande_action(&base, copier, c),
         )
     }) else {
@@ -2946,13 +3195,14 @@ const ATTENTE_SUPPRESSIONS: Duration = Duration::from_secs(2);
 /// d'échec. Le fil est compté : l'arrêt l'attend.
 fn lancer_suppression(app: &AppHandle, id: u64, suppression: sortie::Suppression, tardive: bool) {
     let (recents, glisser) = dossiers_vignette(app);
+    let films = dossier_films(app);
     let pour_fil = app.clone();
     let copie = suppression.clone();
     compter_suppression(app, true);
     let lance = std::thread::Builder::new()
         .name("suppression".into())
         .spawn(move || {
-            let resultats = sortie::supprimer(&suppression, &recents, &glisser);
+            let resultats = sortie::supprimer(&suppression, &recents, &glisser, &films);
             let (ligne, message) =
                 vignette::bilan_suppression(id, &suppression, &resultats, tardive);
             log::info!("{ligne}");
@@ -3006,7 +3256,7 @@ fn supprimer_tout_de_suite(
     tardive: bool,
 ) {
     let (recents, glisser) = dossiers_vignette(app);
-    let resultats = sortie::supprimer(suppression, &recents, &glisser);
+    let resultats = sortie::supprimer(suppression, &recents, &glisser, &dossier_films(app));
     let (ligne, _) = vignette::bilan_suppression(id, suppression, &resultats, tardive);
     log::info!("{ligne}");
 }
@@ -3044,6 +3294,13 @@ pub(super) fn dossiers_vignette(app: &AppHandle) -> (PathBuf, PathBuf) {
     }
 }
 
+/// `<local>/Films` (0.7, F22) ; vide sans dossier local (rien n'y est alors effacé).
+pub(super) fn dossier_films(app: &AppHandle) -> PathBuf {
+    dossiers_lus(app)
+        .map(|d| d.local.join(sortie::SOUS_DOSSIER_FILMS))
+        .unwrap_or_default()
+}
+
 /// Retire la vignette sans animation (nouvelle capture, arrêt) : une suppression en
 /// attente est faite tout de suite (sur ce fil à l'arrêt). Rend vrai si une carte était là.
 /// La raison de fermeture de l'arrêt de l'app.
@@ -3064,6 +3321,11 @@ pub(super) fn fermer_vignette(app: &AppHandle, raison: &str) -> bool {
 /// Appui sur l'image puis déplacement : le fichier à donner est posé, puis le glisser est
 /// reposté (jamais lancé dans le gestionnaire de la page).
 fn demander_glisser(app: &AppHandle, id: u64) {
+    // La carte d'un film donne son fichier (F25).
+    if avec_montree(app, id, |c| c.contenu.film().is_some()) == Some(true) {
+        geste_film::demander_glisser(app, id);
+        return;
+    }
     let Some(prete) = avec_montree(app, id, |c| {
         vignette::glisser_possible(c).map(|r| (r.to_path_buf(), c.maintenant))
     }) else {
@@ -3243,15 +3505,17 @@ fn rendre_document(id: u64, document: editeur::EtatEditeur) {
 /// copie), la vignette se ferme sans animation et sans rien effacer.
 fn annoter(app: &AppHandle, id: u64) {
     let demande_a = Instant::now();
-    let Some(c) = retirer_montree(app, id) else {
+    // Un film ne s'ouvre jamais dans l'éditeur (F24).
+    let Some(c) = montree(app).take_if(|c| c.id == id && c.contenu.film().is_none()) else {
         return;
     };
     let CaptureMontree {
-        pixels,
+        contenu,
         transparence,
         maintenant,
         ..
     } = c;
+    let pixels = Arc::clone(contenu.pixels());
     appliquer(app, Declencheur::VignetteFermee);
     if let Some(v) = app.try_state::<Vignette>() {
         v.cacher();
@@ -4054,6 +4318,10 @@ fn arreter(app: &AppHandle) {
     geste_texte::arreter(app);
     // Capture défilante en cours : annulée (`defilante annulee arret`), sa fenêtre détruite.
     geste_defilante::arreter(app);
+    // Film en cours : une seule chose, fermer le fichier (F35), attendu sur un canal.
+    if !geste_film::fermer_pour_arret(app, film::DELAI_ARRET) {
+        log::warn!("film: fichier non ferme a l'arret");
+    }
     // Capture en cours : la garde cache tout et libère Échap. Puis la sélection est
     // fermée avant la destruction de l'écran figé, et l'image du bureau rendue.
     let capture = ranger_capture(app, None);
@@ -4255,7 +4523,7 @@ mod tests {
             ]
         );
         assert_eq!(
-            modes_au_menu(&actions_selon(true, true, true, true)),
+            modes_au_menu(&actions_selon(true, true, true, true, true, true)),
             ORDRE_MENU
         );
         assert_eq!(id_menu(Mode::Texte), "capturer_texte");
@@ -4267,9 +4535,9 @@ mod tests {
     fn liste_des_actions_construites() {
         let base = ["zone", "plein_ecran", "fenetre", "derniere_zone"];
         assert_eq!(ACTIONS_DE_CAPTURE, base);
-        assert_eq!(actions_selon(true, false, false, false), base);
+        assert_eq!(actions_selon(true, false, false, false, false, false), base);
         assert_eq!(
-            actions_selon(true, true, false, false),
+            actions_selon(true, true, false, false, false, false),
             [
                 "zone",
                 "plein_ecran",
@@ -4279,11 +4547,11 @@ mod tests {
             ]
         );
         assert_eq!(
-            actions_selon(true, false, true, false),
+            actions_selon(true, false, true, false, false, false),
             ["zone", "plein_ecran", "fenetre", "derniere_zone", "texte"]
         );
         assert_eq!(
-            actions_selon(true, true, true, false),
+            actions_selon(true, true, true, false, false, false),
             [
                 "zone",
                 "plein_ecran",
@@ -4294,23 +4562,23 @@ mod tests {
             ]
         );
         // Sans langue de lecture, jamais `texte` ; `historique` suit sa construction.
-        assert!(!actions_construites(true, false).contains(&"texte"));
+        assert!(!actions_construites(true, false, false).contains(&"texte"));
         assert_eq!(
-            actions_construites(true, false).contains(&"historique"),
+            actions_construites(true, false, false).contains(&"historique"),
             historique::CONSTRUIT
         );
         assert_eq!(
-            actions_construites(true, true).contains(&"texte"),
+            actions_construites(true, true, false).contains(&"texte"),
             texte::CONSTRUIT
         );
         // Sans licence : les quatre captures seulement, quoi qu'il soit construit.
-        assert_eq!(actions_selon(false, true, true, false), base);
-        assert_eq!(actions_construites(false, true), base);
+        assert_eq!(actions_selon(false, true, true, false, false, false), base);
+        assert_eq!(actions_construites(false, true, false), base);
         assert_eq!(
-            entrees_menu(&actions_construites(false, true), |_| None),
+            entrees_menu(&actions_construites(false, true, false), |_| None),
             entrees_menu(&ACTIONS_DE_CAPTURE, |_| None)
         );
-        for a in actions_selon(true, true, true, false) {
+        for a in actions_selon(true, true, true, false, false, false) {
             assert!(
                 Mode::depuis_nom(a).is_some() || a == ACTION_HISTORIQUE,
                 "{a}"
@@ -4410,7 +4678,10 @@ mod tests {
             "texte" => Some("Ctrl + Maj + T".to_string()),
             _ => None,
         };
-        let m = entrees_menu(&actions_selon(true, true, true, false), raccourci);
+        let m = entrees_menu(
+            &actions_selon(true, true, true, false, false, false),
+            raccourci,
+        );
         assert_eq!(
             m,
             [
@@ -4427,7 +4698,10 @@ mod tests {
                 action(MENU_QUITTER, "Quitter BreezyShot"),
             ]
         );
-        let sans_texte = entrees_menu(&actions_selon(true, true, false, false), raccourci);
+        let sans_texte = entrees_menu(
+            &actions_selon(true, true, false, false, false, false),
+            raccourci,
+        );
         assert_eq!(sans_texte.len(), m.len() - 1);
         assert!(!sans_texte.contains(&action("capturer_texte", "Copier le texte\tCtrl + Maj + T")));
         assert_eq!(
@@ -4436,7 +4710,10 @@ mod tests {
         );
         // Sans historique ni texte : le menu de la 0.4.
         assert_eq!(
-            entrees_menu(&actions_selon(true, false, false, false), raccourci),
+            entrees_menu(
+                &actions_selon(true, false, false, false, false, false),
+                raccourci
+            ),
             entrees_menu(&ACTIONS_DE_CAPTURE, |_| None)
         );
         assert_eq!(mode_du_menu(MENU_HISTORIQUE), None);
@@ -4451,7 +4728,7 @@ mod tests {
             "texte" => Some("Ctrl + Maj + T".to_string()),
             _ => None,
         };
-        let tout = actions_selon(true, true, true, true);
+        let tout = actions_selon(true, true, true, true, false, false);
         assert_eq!(
             tout,
             [
@@ -4483,22 +4760,31 @@ mod tests {
         );
         assert_eq!(m[7], EntreeMenu::Separateur);
         // Sans langue de lecture : la défilante reste cinquième, suivie du séparateur.
-        let sans_texte = entrees_menu(&actions_selon(true, true, false, true), raccourci);
+        let sans_texte = entrees_menu(
+            &actions_selon(true, true, false, true, false, false),
+            raccourci,
+        );
         assert_eq!(
             sans_texte[5],
             action("capturer_defilante", "Capture défilante\tCtrl + Maj + 5")
         );
         assert_eq!(sans_texte[6], EntreeMenu::Separateur);
         // Sans licence : ni la défilante, ni rien de Pro, quoi qu'il soit construit.
-        assert_eq!(actions_selon(false, true, true, true), ACTIONS_DE_CAPTURE);
         assert_eq!(
-            entrees_menu(&actions_selon(false, true, true, true), raccourci),
+            actions_selon(false, true, true, true, false, false),
+            ACTIONS_DE_CAPTURE
+        );
+        assert_eq!(
+            entrees_menu(
+                &actions_selon(false, true, true, true, false, false),
+                raccourci
+            ),
             entrees_menu(&ACTIONS_DE_CAPTURE, |_| None)
         );
         // Non construite (ou sans images vivantes) : absente, même avec une licence.
-        assert!(!actions_selon(true, true, true, false).contains(&"defilante"));
+        assert!(!actions_selon(true, true, true, false, false, false).contains(&"defilante"));
         assert_eq!(
-            actions_construites(true, true).contains(&"defilante"),
+            actions_construites(true, true, false).contains(&"defilante"),
             defilante::CONSTRUITE && systeme::vivant::disponible()
         );
         assert_eq!(id_menu(Mode::Defilante), "capturer_defilante");
@@ -4515,13 +4801,87 @@ mod tests {
         );
     }
 
+    /// Menu de la 0.7 (§7.3) : « Vidéo » et « GIF » forment un troisième groupe, après celui
+    /// de la dernière zone, avant « Historique » ; la vidéo seulement avec un codeur ; sans
+    /// licence, rien de plus.
+    #[test]
+    fn menu_avec_la_video_et_le_gif() {
+        let raccourci = |a: &str| match a {
+            "video" => Some("Ctrl + Maj + 6".to_string()),
+            "gif" => Some("Ctrl + Maj + 7".to_string()),
+            _ => None,
+        };
+        let tout = actions_selon(true, true, true, true, true, true);
+        assert_eq!(&tout[7..], ["video", "gif"]);
+        assert_eq!(modes_au_menu(&tout), ORDRE_MENU);
+        let m = entrees_menu(&tout, raccourci);
+        assert_eq!(m[7], EntreeMenu::Separateur);
+        assert_eq!(m[8], action("capturer_video", "Vidéo\tCtrl + Maj + 6"));
+        assert_eq!(m[9], action("capturer_gif", "GIF\tCtrl + Maj + 7"));
+        assert_eq!(m[10], EntreeMenu::Separateur);
+        assert_eq!(m[11], action(MENU_HISTORIQUE, "Historique"));
+        // Sans codeur : « GIF » seul dans son groupe.
+        let sans_codeur = actions_selon(true, true, true, true, false, true);
+        assert!(!sans_codeur.contains(&"video"));
+        let m = entrees_menu(&sans_codeur, raccourci);
+        assert_eq!(m[8], action("capturer_gif", "GIF\tCtrl + Maj + 7"));
+        assert_eq!(m[9], EntreeMenu::Separateur);
+        // Le seul troisième groupe, sans le deuxième : un séparateur, pas deux.
+        let seul = ["zone", "plein_ecran", "fenetre", "video"];
+        let m = entrees_menu(&seul, raccourci);
+        assert_eq!(m[3], EntreeMenu::Separateur);
+        assert_eq!(m[4], action("capturer_video", "Vidéo\tCtrl + Maj + 6"));
+        assert_eq!(m[5], EntreeMenu::Separateur);
+        // Sans licence : ni l'une ni l'autre.
+        assert_eq!(
+            actions_selon(false, true, true, true, true, true),
+            ACTIONS_DE_CAPTURE
+        );
+        for (mode, groupe) in [
+            (Mode::Zone, 1),
+            (Mode::PleinEcran, 1),
+            (Mode::Fenetre, 1),
+            (Mode::DerniereZone, 2),
+            (Mode::Defilante, 2),
+            (Mode::Texte, 2),
+            (Mode::Video, 3),
+            (Mode::Gif, 3),
+        ] {
+            assert_eq!(groupe_du_menu(mode), groupe, "{mode:?}");
+        }
+        assert_eq!(libelle_menu(Mode::Video), "Vidéo");
+        assert_eq!(libelle_menu(Mode::Gif), "GIF");
+        assert_eq!(mode_du_menu("capturer_video"), Some(Mode::Video));
+        assert_eq!(mode_du_menu("capturer_gif"), Some(Mode::Gif));
+        assert_eq!(mode_journal("video"), "video");
+        assert_eq!(mode_journal("gif"), "gif");
+    }
+
+    /// Socle de la 0.7 : tant que `film::CONSTRUIT` est faux, ni la vidéo ni le GIF ne sont
+    /// des actions construites, avec ou sans licence, avec ou sans codeur ; et la recherche
+    /// du codeur n'est pas voulue.
+    #[test]
+    fn film_absent_tant_que_non_construit() {
+        for pro in [false, true] {
+            for texte in [false, true] {
+                for codeur in [false, true] {
+                    let a = actions_construites(pro, texte, codeur);
+                    let attendu = film::CONSTRUIT && systeme::vivant::disponible() && pro;
+                    assert_eq!(a.contains(&"gif"), attendu);
+                    assert_eq!(a.contains(&"video"), attendu && codeur);
+                }
+            }
+            assert_eq!(film::recherche_voulue(pro), film::CONSTRUIT && pro);
+        }
+    }
+
     /// Hors Windows, la capture défilante est absente, même avec une licence.
     #[test]
     fn defilante_absente_sans_images_vivantes() {
         if !systeme::vivant::disponible() {
             for pro in [false, true] {
                 for texte in [false, true] {
-                    assert!(!actions_construites(pro, texte).contains(&"defilante"));
+                    assert!(!actions_construites(pro, texte, false).contains(&"defilante"));
                 }
             }
         }
@@ -4592,8 +4952,8 @@ mod tests {
         assert!(annonce_attend_texte(true));
         assert!(!annonce_attend_texte(false));
         // Avec la licence, l'historique est dans le bilan du démarrage.
-        assert!(actions_construites(true, false).contains(&ACTION_HISTORIQUE));
-        assert!(!actions_construites(false, false).contains(&ACTION_HISTORIQUE));
+        assert!(actions_construites(true, false, false).contains(&ACTION_HISTORIQUE));
+        assert!(!actions_construites(false, false, false).contains(&ACTION_HISTORIQUE));
     }
 
     #[test]
@@ -4647,7 +5007,7 @@ mod tests {
     #[test]
     fn licence_retiree_pendant_l_attente_le_bilan_perd_le_pro() {
         let texte = choix("texte", &["Ctrl+Maj+T"], None);
-        let sans = actions_construites(false, true);
+        let sans = actions_construites(false, true, false);
         let b = bilan_au_depart(bilan_du_demarrage(), std::slice::from_ref(&texte), &sans);
         assert_eq!(
             b.actions
@@ -4661,7 +5021,7 @@ mod tests {
         let b = bilan_au_depart(
             bilan_du_demarrage(),
             &[texte],
-            &actions_construites(true, true),
+            &actions_construites(true, true, false),
         );
         assert_eq!(b.actions.len(), 3);
     }

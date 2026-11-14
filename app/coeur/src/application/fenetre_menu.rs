@@ -14,7 +14,10 @@
 use tauri::AppHandle;
 
 use super::icone::{self, EntreeMenu};
-use super::{entrees_pendant_defilante, geste_defilante, menu_actuel, poster_plus_tard, Evenement};
+use super::{
+    entrees_pendant_defilante, geste_defilante, geste_film, menu_actuel, poster_plus_tard,
+    Evenement,
+};
 use crate::fenetres::menu::{self, Ligne, Ouverture};
 use crate::fenetres::{theme, Rect};
 
@@ -58,10 +61,15 @@ pub fn clic_icone(app: &AppHandle, rect: Rect) {
         return;
     }
     let pendant_defilante = geste_defilante::fenetres_bloquees(app);
+    let pendant_film = geste_film::fenetres_bloquees(app);
     let entrees = if pendant_defilante {
         // Pendant une défilante, aucune entrée qui ouvrirait une fenêtre : Quitter seul. Le
         // menu est aussi exclu des captures : ouvert sur la zone, il entrerait dans une image.
         log::info!("menu pendant la defilante: quitter seulement");
+        entrees_pendant_defilante()
+    } else if pendant_film {
+        // De même pendant un film, de la visée à la fin de la Finalisation (F30).
+        log::info!("menu pendant le film: quitter seulement");
         entrees_pendant_defilante()
     } else {
         let Some(entrees) = menu_actuel(app) else {
@@ -70,7 +78,12 @@ pub fn clic_icone(app: &AppHandle, rect: Rect) {
         };
         entrees
     };
-    if menu::ouvrir(app, Some(rect), lignes(&entrees), pendant_defilante) {
+    if menu::ouvrir(
+        app,
+        Some(rect),
+        lignes(&entrees),
+        pendant_defilante || pendant_film,
+    ) {
         icone::tourner(app);
     }
 }

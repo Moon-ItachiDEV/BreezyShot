@@ -855,6 +855,17 @@ pub fn verrouillages_de_session() -> u64 {
     VERROUILLAGES.load(Ordering::SeqCst)
 }
 
+/// Socle de la 0.7 : aucune mise en veille comptée encore (chantier A, F34).
+pub fn mises_en_veille() -> u64 {
+    0
+}
+
+/// Socle de la 0.7 : le rappel n'est pas encore posé sur `WM_QUERYENDSESSION` (chantier A,
+/// F35).
+pub fn quand_session_finit(rappel: Box<dyn Fn() + Send + Sync>) {
+    drop(rappel);
+}
+
 pub fn quand_bureau_change(rappel: RappelChangement) {
     let ancien = verrouiller(&RAPPEL_CHANGEMENT).replace(rappel);
     drop(ancien);

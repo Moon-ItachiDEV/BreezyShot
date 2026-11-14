@@ -61,6 +61,12 @@ pub fn verrouillages_de_session() -> u64 {
     0
 }
 
+pub fn mises_en_veille() -> u64 {
+    0
+}
+
+pub fn quand_session_finit(_rappel: Box<dyn Fn() + Send + Sync>) {}
+
 pub fn poignee_ecran_fige() -> Option<isize> {
     None
 }

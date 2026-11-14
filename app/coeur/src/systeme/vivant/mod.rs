@@ -58,6 +58,91 @@ impl Prise {
     }
 }
 
+// ---------------------------------------------------------------------------------------
+// Vidéo et GIF (contrat 0.7, §13.1, F12, F33) : une source à cadence fixe, qui s'ajoute à
+// `Prise` (inchangée : la capture défilante s'en sert). Le moyen est caché ici : la
+// duplication de bureau de l'écran de la zone d'abord, `BitBlt` en repli (D1).
+//
+// Socle : signatures ; la source ne s'ouvre pas encore (chantier A).
+
+/// Le moyen d'une source.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Moyen {
+    /// La duplication de bureau DXGI de l'écran de la zone.
+    Duplication,
+    /// Le `BitBlt` de la zone (celui de `Prise`).
+    BitBlt,
+}
+
+impl Moyen {
+    /// Nom au journal : `duplication`, `bitblt`.
+    pub fn nom(self) -> &'static str {
+        match self {
+            Moyen::Duplication => "duplication",
+            Moyen::BitBlt => "bitblt",
+        }
+    }
+}
+
+/// Ce qu'une prise de la source a rendu.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Image {
+    /// Une image neuve est dans la destination.
+    Nouvelle,
+    /// Rien n'a changé dans la zone depuis la dernière prise : destination intacte.
+    Inchangee,
+    /// Pas d'image pour l'instant (accès perdu) : destination intacte ; la source se
+    /// recrée d'elle-même, au plus toutes les 500 ms (F33).
+    Perdue,
+}
+
+/// Une source d'images à cadence fixe sur une zone de l'écran, pour un film. Vit dans un
+/// seul fil (le fil `film`) ; tout est rendu à la destruction.
+#[derive(Debug)]
+pub struct Source {
+    interne: plateforme::Source,
+}
+
+/// Ouvre une source sur `zone` (pixels réels du bureau). `ecran` : le rectangle de l'écran
+/// qui contient `zone` ; le périphérique Direct3D est créé sur la carte graphique qui porte
+/// cet écran (F12). La duplication d'abord ; en repli (refusée, écran tourné), `BitBlt`.
+/// Erreur : zone vide ou hors du bureau, système sans images vivantes.
+pub fn ouvrir_source(zone: Rect, ecran: Rect) -> Result<Source, String> {
+    plateforme::ouvrir_source(zone, ecran).map(|interne| Source { interne })
+}
+
+impl Source {
+    /// Le moyen en service.
+    pub fn moyen(&self) -> Moyen {
+        plateforme::moyen_source(&self.interne)
+    }
+
+    /// Le rectangle pris, en pixels réels du bureau.
+    pub fn zone(&self) -> Rect {
+        plateforme::zone_source(&self.interne)
+    }
+
+    /// Une image RGBA (alpha 255) de la zone dans `dest`, réutilisé ; rend aussi la durée
+    /// de la prise. `Inchangee` : aucun rectangle sale ne touche la zone depuis la dernière
+    /// prise, `dest` n'est pas touché. `Perdue` : pas d'image pour l'instant (accès perdu),
+    /// `dest` n'est pas touché ; la source se recrée d'elle-même, au plus toutes les 500 ms
+    /// (F33). Refuse tant que l'écran figé est montré (la garde de `Prise`).
+    pub fn prendre(&mut self, dest: &mut Pixels) -> Result<(Image, Duration), String> {
+        plateforme::prendre_source(&mut self.interne, dest)
+    }
+
+    /// Passe à `BitBlt` pour le reste du film (F33, après `SOURCE_PERDUE_MAX`).
+    pub fn replier(&mut self) -> Result<(), String> {
+        plateforme::replier_source(&mut self.interne)
+    }
+
+    /// Un changement de moyen a eu lieu depuis le dernier appel : le moyen et la raison
+    /// (journal `film source <moyen> (<raison>)`).
+    pub fn repli(&mut self) -> Option<(Moyen, String)> {
+        plateforme::repli_source(&mut self.interne)
+    }
+}
+
 /// La zone prise : `zone` coupée au bureau virtuel. Erreur si rien n'en reste.
 #[cfg_attr(not(windows), allow(dead_code))]
 fn couper_au_bureau(zone: Rect, bureau: Rect) -> Result<Rect, String> {

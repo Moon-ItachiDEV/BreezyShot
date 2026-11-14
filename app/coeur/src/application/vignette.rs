@@ -1,6 +1,10 @@
 //! Décisions de la vignette (fonctions pures, ARCHITECTURE §11) : ce qu'elle montre, ce
 //! que fait chaque bouton, ce que Supprimer efface, ce qu'on dit au bandeau et au journal.
 //! Les gestes sont dans `application/mod.rs`, les fenêtres dans `fenetres/vignette.rs`.
+//!
+//! 0.7 (contrat « Vidéo et GIF », F25) : une carte peut tenir un film (`Contenu::Film`) ;
+//! ses boutons sont ceux d'`actions_film`, jamais Annoter ; le rond de lecture ouvre le
+//! film (`Geste::Lire`, choix B2). Socle : types posés, corps inertes (chantier I).
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -10,6 +14,7 @@ use chrono::{DateTime, Local};
 
 use super::editeur::annotable;
 use super::etats::{Declencheur, Etat};
+use super::film::Sorte;
 use super::zone::{message_annonce, DELAI_SORTIE};
 use crate::fenetres::vignette::{ActionVignette, Coin, Place};
 use crate::fenetres::{self, Genre, Message};
@@ -31,6 +36,13 @@ pub const ANNOTER: &str = "annoter";
 pub const SUPPRIMER: &str = "supprimer";
 pub const FERMER: &str = "fermer";
 pub const ANNULER: &str = "annuler";
+/// Le rond de lecture d'un film (0.7, choix B2).
+pub const LIRE: &str = "lire";
+
+/// Choix B2 (provisoire) : le rond de lecture de la carte d'un film est un bouton qui
+/// ouvre le film dans le lecteur de Windows (`systeme::ouvrir_fichier`). Faux : le rond
+/// n'est qu'un signe, comme dans le design, et `lire` est ignoré.
+pub const LECTURE_PAR_LE_ROND: bool = true;
 
 /// La vignette se montre si le réglage le veut et si ses fenêtres existent.
 pub fn doit_montrer(afficher: bool, vignette_creee: bool) -> bool {
@@ -105,6 +117,15 @@ pub fn actions(annoter: bool) -> Vec<ActionVignette> {
     a
 }
 
+/// Les boutons de la carte d'un film (F25) : Copier, Enregistrer (libellés « fait »
+/// accordés : « Copiée », « Enregistrée » pour une vidéo), le rond de lecture si
+/// `LECTURE_PAR_LE_ROND`, Supprimer, Fermer, Annuler ; jamais Annoter. Socle : vide
+/// (chantier I).
+pub fn actions_film(sorte: Sorte) -> Vec<ActionVignette> {
+    let _ = (sorte, LECTURE_PAR_LE_ROND, Place::Lecture);
+    Vec::new()
+}
+
 /// Le message du bandeau après la sortie : avec la vignette, seulement une erreur (la
 /// vignette confirme les réussites) ; sans, comme en 0.2.
 pub fn message_bandeau(annonce: &Annonce, avec_vignette: bool) -> Option<Message> {
@@ -134,13 +155,45 @@ pub enum EtatSuppression {
     Lancee,
 }
 
+/// Ce que tient une carte : une image, ou un film (0.7, F25).
+#[derive(Debug, Clone)]
+pub enum Contenu {
+    /// Pixels pleine taille, gardés tant que la vignette est là.
+    Image(Arc<Pixels>),
+    /// Un film fermé : son fichier de travail (`<local>/Films/`), sa sorte, et la dernière
+    /// image brute (celle de l'aperçu).
+    Film {
+        fichier: PathBuf,
+        sorte: Sorte,
+        apercu: Arc<Pixels>,
+    },
+}
+
+impl Contenu {
+    /// Les pixels de l'image, ou la dernière image du film.
+    pub fn pixels(&self) -> &Arc<Pixels> {
+        match self {
+            Contenu::Image(p) => p,
+            Contenu::Film { apercu, .. } => apercu,
+        }
+    }
+
+    /// Le fichier et la sorte d'un film ; `None` pour une image.
+    pub fn film(&self) -> Option<(&Path, Sorte)> {
+        match self {
+            Contenu::Image(_) => None,
+            Contenu::Film { fichier, sorte, .. } => Some((fichier, *sorte)),
+        }
+    }
+}
+
 /// La capture que montre la vignette, tenue par l'Application (une seule à la fois).
 #[derive(Debug, Clone)]
 pub struct CaptureMontree {
     /// Le numéro de la sortie, aussi celui de la carte.
     pub id: u64,
-    /// Pixels pleine taille, gardés tant que la vignette est là.
-    pub pixels: Arc<Pixels>,
+    /// L'image (ou le film), gardée tant que la vignette est là.
+    pub contenu: Contenu,
     pub transparence: bool,
     /// L'heure de la capture (nom du fichier enregistré).
     pub maintenant: DateTime<Local>,
@@ -173,6 +226,8 @@ pub enum Geste {
     DejaEnregistree,
     /// Ouvrir l'éditeur sur cette capture (contrat 0.4 « Éditeur », §4.2).
     Annoter,
+    /// Ouvrir le film dans le lecteur de Windows (0.7, rond de lecture, choix B2).
+    Lire,
     Supprimer,
     Annuler,
     Fermer,
@@ -204,7 +259,11 @@ pub fn decider(capture: &CaptureMontree, action: &str, maintenant: Instant) -> G
             if en_cours(capture.copie, maintenant)
                 || en_cours(capture.enregistrement, maintenant)
                 || capture.glisser
-                || !annotable(capture.pixels.largeur, capture.pixels.hauteur) =>
+                || capture.contenu.film().is_some()
+                || !annotable(
+                    capture.contenu.pixels().largeur,
+                    capture.contenu.pixels().hauteur,
+                ) =>
         {
             Geste::Ignorer
         }
@@ -212,6 +271,8 @@ pub fn decider(capture: &CaptureMontree, action: &str, maintenant: Instant) -> G
         SUPPRIMER if capture.glisser => Geste::Ignorer,
         SUPPRIMER => Geste::Supprimer,
         FERMER => Geste::Fermer,
+        // Le rond d'un film (choix B2). Socle : ignoré (chantier I).
+        LIRE => Geste::Ignorer,
         _ => Geste::Ignorer,
     }
 }
@@ -265,6 +326,7 @@ pub fn a_supprimer(capture: &CaptureMontree) -> Suppression {
         recent: capture.recent.clone(),
         enregistre: capture.enregistre.clone(),
         liens: capture.liens.clone(),
+        film: capture.contenu.film().map(|(f, _)| f.to_path_buf()),
     }
 }
 
@@ -310,6 +372,7 @@ pub fn enregistrement_tardif(
         recent: None,
         enregistre: Some(fichier.to_path_buf()),
         liens: Vec::new(),
+        film: None,
     })
 }
 
@@ -466,11 +529,11 @@ mod tests {
     fn capture() -> CaptureMontree {
         CaptureMontree {
             id: 7,
-            pixels: Arc::new(Pixels {
+            contenu: Contenu::Image(Arc::new(Pixels {
                 largeur: 1,
                 hauteur: 1,
                 rgba: vec![0, 0, 0, 255],
-            }),
+            })),
             transparence: false,
             maintenant: Local::now(),
             recent: Some(PathBuf::from("/l/Recents/20261111-194012-123.png")),
@@ -582,7 +645,7 @@ mod tests {
             (5_000, 5_001, Geste::Ignorer),
             (0, 10, Geste::Ignorer),
         ] {
-            c.pixels = taille(l, h);
+            c.contenu = Contenu::Image(taille(l, h));
             assert_eq!(decider(&c, ANNOTER, t), attendu, "{l}x{h}");
         }
     }
@@ -720,6 +783,7 @@ mod tests {
             recent: Some(PathBuf::from("/l/Recents/x.png")),
             enregistre: Some(PathBuf::from("/i/a.png")),
             liens: vec![],
+            film: None,
         };
         let (l, m) = bilan_suppression(
             3,
@@ -779,7 +843,13 @@ mod tests {
         );
         // Mêmes gardes que Supprimer : un chemin relatif ou pas PNG n'est pas effacé.
         let relatif = enregistrement_tardif(None, true, Some(Path::new("a.png"))).unwrap();
-        assert!(sortie::a_effacer(&relatif, Path::new("/l/R"), Path::new("/l/G")).is_empty());
+        assert!(sortie::a_effacer(
+            &relatif,
+            Path::new("/l/R"),
+            Path::new("/l/G"),
+            Path::new("/l/Films")
+        )
+        .is_empty());
         // Retenues bornées, sans doublon.
         let mut r = Vec::new();
         for i in 0..(RETENUES_MAX as u64 + 3) {
@@ -882,5 +952,39 @@ mod tests {
             hauteur: -1,
         });
         assert_eq!((r.x, r.y, r.largeur, r.hauteur), (-5, 2, 10, 0));
+    }
+
+    /// Une carte qui tient un film (socle 0.7) : jamais Annoter, le rond ignoré tant que
+    /// la vignette d'un film n'est pas faite, Supprimer emporte le fichier de travail.
+    #[test]
+    fn carte_d_un_film() {
+        let t = Instant::now();
+        let mut c = capture();
+        assert!(c.contenu.film().is_none());
+        assert_eq!(
+            decider(&c, LIRE, t),
+            Geste::Ignorer,
+            "une image n'a pas de rond"
+        );
+        assert_eq!(a_supprimer(&c).film, None);
+        let apercu = Arc::clone(c.contenu.pixels());
+        c.contenu = Contenu::Film {
+            fichier: PathBuf::from("/l/Films/f.mp4"),
+            sorte: Sorte::Video,
+            apercu,
+        };
+        assert_eq!(
+            c.contenu.film(),
+            Some((Path::new("/l/Films/f.mp4"), Sorte::Video))
+        );
+        assert_eq!(c.contenu.pixels().largeur, 1);
+        assert_eq!(decider(&c, ANNOTER, t), Geste::Ignorer);
+        assert_eq!(decider(&c, LIRE, t), Geste::Ignorer);
+        assert_eq!(decider(&c, COPIER, t), Geste::Copier);
+        assert_eq!(
+            a_supprimer(&c).film.as_deref(),
+            Some(Path::new("/l/Films/f.mp4"))
+        );
+        assert!(actions_film(Sorte::Gif).is_empty());
     }
 }

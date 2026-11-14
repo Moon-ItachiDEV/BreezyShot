@@ -53,6 +53,10 @@
 //!   charge (le repère ne change pas : un geste compté avant reste valable), et la page les
 //!   prend sans perdre son geste. L'une ou l'autre fin laisse la fenêtre montrée, comme le
 //!   mode texte (`garder_si_defilante`), jusqu'à `cacher`.
+//! - Mode film (0.7, vidéo et GIF) : exactement le mode zone (seul `selection_terminee`
+//!   est permis, aucune fenêtre proposée), avec son nom accessible ; la zone choisie laisse
+//!   la fenêtre montrée (`garder_si_film`) jusqu'à `cacher`, le temps que la fenêtre de
+//!   contrôle du film paraisse.
 //! - Aucun verrou n'est tenu pendant un appel à Tauri, un `emit` ou le rappel.
 //! - Sous Windows la fenêtre est montrée et cachée par `systeme`, jamais par tao : `show()`
 //!   de tao réécrit les styles étendus (window_state.rs, `apply_diff`) et remettrait la
@@ -107,6 +111,9 @@ pub enum Mode {
     /// Capture défilante (0.6) : tracer une zone, comme `Zone`, **ou** cliquer sur une page
     /// proposée en retard (`Selection::proposer`), comme `Fenetre`.
     Defilante,
+    /// Vidéo et GIF (0.7) : une zone, comme `Zone`, avec le nom « Enregistrer l'écran :
+    /// sélectionnez une zone » ; la zone choisie reste montrée jusqu'à `cacher`.
+    Film,
 }
 
 impl Mode {
@@ -117,6 +124,7 @@ impl Mode {
             Mode::Fenetre => "fenetre",
             Mode::Texte => "texte",
             Mode::Defilante => "defilante",
+            Mode::Film => "film",
         }
     }
 }
@@ -154,7 +162,7 @@ pub struct Demande {
 fn fenetres_de(demande: &Demande) -> Vec<FenetreProposee> {
     match demande.mode {
         // Défilante : les pages arrivent après, par `Selection::proposer`.
-        Mode::Zone | Mode::Texte | Mode::Defilante => Vec::new(),
+        Mode::Zone | Mode::Texte | Mode::Defilante | Mode::Film => Vec::new(),
         Mode::Fenetre => demande
             .fenetres
             .iter()
@@ -459,6 +467,7 @@ fn garde_mode(mode: Mode, attendu: Mode) -> Result<(), String> {
         (Mode::Zone, Mode::Fenetre) => Err("clic en mode zone".into()),
         (Mode::Fenetre, Mode::Zone) => Err("zone en mode fenetre".into()),
         (Mode::Texte, Mode::Fenetre) => Err("clic en mode texte".into()),
+        (Mode::Film, Mode::Fenetre) => Err("clic en mode film".into()),
         _ => Ok(()),
     }
 }
@@ -839,6 +848,18 @@ impl Etat {
     fn garder_si_defilante(&mut self, affichage: &Affichage, signal: &Signal) -> bool {
         let garder = affichage.mode == Mode::Defilante
             && matches!(signal, Signal::Zone { .. } | Signal::Fenetre { .. });
+        if garder {
+            self.garder(affichage);
+        }
+        garder
+    }
+
+    /// Fin d'un affichage (déjà retiré par `terminer`) : vrai s'il reste montré, gardé
+    /// jusqu'à `cacher` (mode film, zone choisie : F2, la sélection reste le temps que la
+    /// fenêtre de contrôle paraisse) ; sinon il est à cacher tout de suite. Une annulation
+    /// n'est jamais gardée.
+    fn garder_si_film(&mut self, affichage: &Affichage, signal: &Signal) -> bool {
+        let garder = affichage.mode == Mode::Film && matches!(signal, Signal::Zone { .. });
         if garder {
             self.garder(affichage);
         }
@@ -1320,11 +1341,13 @@ impl Interne {
             return;
         };
         // Mode texte, zone choisie : la fenêtre reste pour le balayage ; mode défilante, zone
-        // ou page choisie : elle reste jusqu'à la fenêtre de contrôle. `cacher` la cache.
+        // ou page choisie, et mode film, zone choisie : elle reste jusqu'à la fenêtre de
+        // contrôle. `cacher` la cache.
         let gardee = {
             let mut etat = self.etat();
             etat.garder_si_texte(&affichage, &signal)
                 || etat.garder_si_defilante(&affichage, &signal)
+                || etat.garder_si_film(&affichage, &signal)
         };
         if !gardee {
             self.masquer(affichage.avant);
@@ -2868,7 +2891,7 @@ mod tests {
 
     #[test]
     fn proposer_hors_mode_defilante_ne_change_rien() {
-        for mode in [Mode::Zone, Mode::Fenetre, Mode::Texte] {
+        for mode in [Mode::Zone, Mode::Fenetre, Mode::Texte, Mode::Film] {
             let mut d = demande();
             d.mode = mode;
             d.fenetres = vec![fp(10, 10, 500, 500, 8)];
@@ -2956,7 +2979,7 @@ mod tests {
             assert!(!e.garder_si_defilante(&a, &s), "{s:?}");
         }
         assert_eq!(e.tout_oublier(), None);
-        for mode in [Mode::Zone, Mode::Fenetre, Mode::Texte] {
+        for mode in [Mode::Zone, Mode::Fenetre, Mode::Texte, Mode::Film] {
             let mut e = Etat::default();
             let mut d = demande();
             d.mode = mode;
@@ -2977,6 +3000,94 @@ mod tests {
                 assert!(!e.garder_si_defilante(&a, &s), "{mode:?} {s:?}");
             }
             assert_eq!(e.tout_oublier(), None, "{mode:?}");
+        }
+    }
+
+    /// Mode film (0.7) : le mode zone, seul `selection_terminee` permis (un clic est un
+    /// garde-fou `Impossible`), aucune fenêtre proposée, son nom au journal et à la page.
+    #[test]
+    fn mode_film_comme_la_zone() {
+        assert_eq!(garde_mode(Mode::Film, Mode::Zone), Ok(()));
+        assert_eq!(
+            garde_mode(Mode::Film, Mode::Fenetre),
+            Err("clic en mode film".into())
+        );
+        // Les autres modes ne changent pas.
+        assert!(garde_mode(Mode::Zone, Mode::Fenetre).is_err());
+        assert!(garde_mode(Mode::Fenetre, Mode::Zone).is_err());
+        assert_eq!(garde_mode(Mode::Defilante, Mode::Fenetre), Ok(()));
+        assert_eq!(Mode::Film.nom(), "film");
+        assert_eq!(serde_json::to_string(&Mode::Film).unwrap(), r#""film""#);
+        let mut d = demande();
+        d.mode = Mode::Film;
+        d.fenetres = vec![fp(0, 0, 500, 500, 0)];
+        assert!(fenetres_de(&d).is_empty());
+        let mut e = Etat::default();
+        let (id, _) = e.commencer(&d, None, None, Instant::now());
+        let c = e.nouvelle_charge(id, d.bureau).expect("charge");
+        assert_eq!(c.mode, Mode::Film);
+        assert!(c.fenetres.is_empty());
+    }
+
+    /// Mode film : la zone choisie garde l'affichage jusqu'à `cacher` ; une annulation,
+    /// une page muette ou impossible ne le gardent pas ; ni balayage ni surlignage.
+    #[test]
+    fn garder_si_film_zone_seulement() {
+        let mut e = Etat::default();
+        let mut d = demande();
+        d.bureau = r(-1920, 0, 3840, 1080);
+        d.mode = Mode::Film;
+        let (id, _) = e.commencer(&d, Some(77), Some(5), Instant::now());
+        let a = e.terminer(id).expect("affichage");
+        let zone = Signal::Zone {
+            id,
+            depart: (-100, 10),
+            arrivee: (299, 259),
+        };
+        assert!(!e.garder_si_texte(&a, &zone), "pas le mode texte");
+        assert!(!e.garder_si_defilante(&a, &zone), "pas le mode defilante");
+        assert!(e.garder_si_film(&a, &zone));
+        assert_eq!(e.charge_balayer(r(0, 0, 10, 10), false), None);
+        let deroule = Surlignage {
+            trace: 1,
+            pas: 1,
+            tenue: 1,
+            sortie: 1,
+        };
+        assert_eq!(e.charge_surligner(&[r(0, 0, 9, 9)], false, deroule), None);
+        // `cacher` l'oublie et rend le premier plan à celle d'avant.
+        assert_eq!(e.tout_oublier(), Some(77));
+        assert_eq!(e.tout_oublier(), None);
+        // Les fins sans zone ne gardent rien.
+        let (id, _) = e.commencer(&d, None, None, Instant::now());
+        let a = e.terminer(id).expect("affichage");
+        for s in [
+            Signal::Annulee {
+                id,
+                cause: Cause::Echap,
+            },
+            Signal::Muette { id },
+            Signal::Impossible {
+                id,
+                cause: "x".into(),
+            },
+        ] {
+            assert!(!e.garder_si_film(&a, &s), "{s:?}");
+        }
+        assert_eq!(e.tout_oublier(), None);
+        // Les autres modes ne sont jamais gardés comme un film.
+        for mode in [Mode::Zone, Mode::Fenetre, Mode::Texte, Mode::Defilante] {
+            let mut e = Etat::default();
+            let mut d = demande();
+            d.mode = mode;
+            let (id, _) = e.commencer(&d, Some(3), None, Instant::now());
+            let a = e.terminer(id).expect("affichage");
+            let zone = Signal::Zone {
+                id,
+                depart: (0, 0),
+                arrivee: (9, 9),
+            };
+            assert!(!e.garder_si_film(&a, &zone), "{mode:?}");
         }
     }
 }
