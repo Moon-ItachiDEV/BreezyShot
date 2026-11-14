@@ -1047,38 +1047,1198 @@ mod tests {
             "fuite a l'ouverture : {avant} -> {apres}"
         );
     }
+
+    // --- Source d'un film (0.7, chantier A) ---
+
+    /// Tests Windows de `Source` : même verrou, mêmes fenêtres d'essai que ceux de `Prise`.
+    /// Chaque moyen disponible sur la machine est joué ; un test propre à la duplication le
+    /// dit et ne fait rien si elle est refusée (repli pris à l'ouverture).
+    mod source_film {
+        use super::*;
+        use crate::systeme::vivant::{Image, Moyen, Source};
+        use ::windows::Win32::Graphics::Gdi::{
+            ChangeDisplaySettingsExW, EnumDisplaySettingsW, InvalidateRect, CDS_TYPE, DEVMODEW,
+            DM_PELSHEIGHT, DM_PELSWIDTH, ENUM_CURRENT_SETTINGS,
+        };
+        use ::windows::Win32::System::Threading::GetProcessHandleCount;
+        use ::windows::Win32::UI::WindowsAndMessaging::{GetCursorPos, SetCursorPos};
+
+        fn ecran_principal() -> Rect {
+            gel::ecrans()
+                .into_iter()
+                .find(|e| e.principal)
+                .expect("un ecran principal")
+                .rect
+        }
+
+        fn ouvrir_sur(zone: Rect) -> Source {
+            let mut source = facade::ouvrir_source(zone, ecran_principal()).unwrap();
+            eprintln!(
+                "vivant: source {:?} ouverte, moyen {} ({:?})",
+                source.zone(),
+                source.moyen().nom(),
+                source.repli()
+            );
+            source
+        }
+
+        /// Prend jusqu'à voir les quatre carrés exacts (au plus 2 s). Rend le temps
+        /// d'attente et ce que la dernière prise a rendu.
+        fn attendre_carres_source(
+            source: &mut Source,
+            dest: &mut Pixels,
+        ) -> Result<(Duration, Image), String> {
+            let debut = Instant::now();
+            let mut dernier = String::new();
+            while debut.elapsed() < Duration::from_secs(2) {
+                match source.prendre(dest) {
+                    Ok((Image::Perdue, _)) => dernier = "perdue".into(),
+                    Ok((image, _)) => match ecarts_aux_carres(dest, source.zone()) {
+                        Ok((0, _)) => return Ok((debut.elapsed(), image)),
+                        Ok((n, premier)) => {
+                            dernier = format!("{n} pixels faux, premier {}", premier.unwrap())
+                        }
+                        Err(e) => dernier = e,
+                    },
+                    Err(e) => dernier = e,
+                }
+                laisser_composer();
+            }
+            Err(format!("carres jamais vus en 2 s : {dernier}"))
+        }
+
+        /// Au pixel près ; `Inchangee` sur un écran immobile, sans toucher la destination ;
+        /// le pointeur qui bouge sur la zone ne fait aucune image neuve ; la fenêtre cachée
+        /// se voit. Durées notées.
+        fn verifier_moyen(source: &mut Source, essai: &FenetreEssai) {
+            let nom = source.moyen().nom();
+            let mut px = vide();
+            let (attente, _) = attendre_carres_source(source, &mut px).unwrap();
+            eprintln!(
+                "vivant: {nom} : carres vus apres {:.0} ms",
+                attente.as_secs_f64() * 1000.0
+            );
+            let adresse = px.rgba.as_ptr();
+            let mut durees = Vec::new();
+            let mut inchangees = 0;
+            let mut nouvelles = 0;
+            for _ in 0..32 {
+                let (image, duree) = source.prendre(&mut px).unwrap();
+                durees.push(duree);
+                match image {
+                    Image::Inchangee => inchangees += 1,
+                    Image::Nouvelle => nouvelles += 1,
+                    Image::Perdue => panic!("{nom} : perdue sur un ecran immobile"),
+                }
+                assert_eq!(px.rgba.as_ptr(), adresse, "destination reallouee");
+                laisser_composer();
+            }
+            let (n, premier) = ecarts_aux_carres(&px, source.zone()).unwrap();
+            assert_eq!(n, 0, "{nom} : {n} pixels faux, premier {premier:?}");
+            eprintln!(
+                "vivant: {nom} : ecran immobile, {inchangees} inchangees et {nouvelles} \
+                 nouvelles sur 32 ; prise mediane {:.2} ms (construction de test)",
+                mediane(durees)
+            );
+            // Une image identique n'est jamais « nouvelle » : rien ne bouge dans la zone.
+            assert!(
+                inchangees >= 28,
+                "{nom} : seulement {inchangees} inchangees sur 32"
+            );
+
+            // Le pointeur posé et bougé sur la zone : noté (D5 : la duplication et BitBlt ne
+            // le posent pas ; sur la machine GitHub il est caché faute de souris).
+            let mut avant = ::windows::Win32::Foundation::POINT::default();
+            // SAFETY : un POINT en sortie ; le pointeur est remis à sa place ensuite.
+            let pointeur = unsafe { GetCursorPos(&mut avant) }.is_ok();
+            if pointeur {
+                let mut pixels_du_pointeur = 0usize;
+                for i in 0..8 {
+                    // SAFETY : position dans la zone, en pixels réels.
+                    unsafe {
+                        let _ =
+                            SetCursorPos(essai.rect.x + 20 + i * 15, essai.rect.y + 30 + i * 10);
+                    }
+                    laisser_composer();
+                    if let Ok((image, _)) = source.prendre(&mut px) {
+                        if image != Image::Perdue {
+                            let (n, _) = ecarts_aux_carres(&px, source.zone()).unwrap();
+                            pixels_du_pointeur = pixels_du_pointeur.max(n);
+                        }
+                    }
+                }
+                // SAFETY : retour à la position lue.
+                unsafe {
+                    let _ = SetCursorPos(avant.x, avant.y);
+                }
+                laisser_composer();
+                eprintln!(
+                    "vivant: {nom} : pointeur bouge sur la zone : au plus {pixels_du_pointeur} \
+                     pixels differents des carres"
+                );
+            }
+
+            // La source suit l'écran : fenêtre cachée, une image neuve sans les carrés.
+            essai.cacher();
+            let debut = Instant::now();
+            let partie = loop {
+                let (image, _) = source.prendre(&mut px).unwrap();
+                let (n, _) = ecarts_aux_carres(&px, source.zone()).unwrap();
+                if image == Image::Nouvelle && n > 0 {
+                    break true;
+                }
+                if debut.elapsed() > Duration::from_secs(2) {
+                    break false;
+                }
+                laisser_composer();
+            };
+            assert!(
+                partie,
+                "{nom} : image figee, les carres restent apres la fenetre"
+            );
+        }
+
+        /// Chaque moyen : la duplication (si la machine l'accepte), puis `BitBlt` par
+        /// `replier`, qui le dit une fois.
+        #[test]
+        fn source_au_pixel_pres_par_chaque_moyen() {
+            let _s = Seance::ouvrir();
+            let essai = FenetreEssai::carres();
+            let mut source = ouvrir_sur(essai.rect);
+            assert_eq!(source.zone(), essai.rect);
+            verifier_moyen(&mut source, &essai);
+            drop(essai);
+
+            let premier = source.moyen();
+            source.replier().unwrap();
+            assert_eq!(source.moyen(), Moyen::BitBlt);
+            if premier == Moyen::Duplication {
+                assert_eq!(
+                    source.repli(),
+                    Some((Moyen::BitBlt, "acces perdu".to_string()))
+                );
+            }
+            assert_eq!(source.repli(), None);
+            // Un second repli ne change rien et ne dit rien.
+            source.replier().unwrap();
+            assert_eq!(source.repli(), None);
+            let essai = FenetreEssai::carres();
+            verifier_moyen(&mut source, &essai);
+        }
+
+        /// Une zone coupée au bureau ; une zone vide ou dehors refusée ; une zone à cheval
+        /// sur le bord ouvre quand même (repli si la duplication ne la voit pas entière).
+        #[test]
+        fn ouverture_bornee() {
+            let _s = Seance::ouvrir();
+            let bureau = gel::bureau_virtuel().unwrap();
+            let cheval = Rect {
+                x: bureau.x - 5,
+                y: bureau.y - 4,
+                largeur: 10,
+                hauteur: 10,
+            };
+            let mut source = ouvrir_sur(cheval);
+            assert_eq!(
+                source.zone(),
+                Rect {
+                    x: bureau.x,
+                    y: bureau.y,
+                    largeur: 5,
+                    hauteur: 6
+                }
+            );
+            let mut px = vide();
+            let debut = Instant::now();
+            while let Ok((Image::Perdue, _)) | Err(_) = source.prendre(&mut px) {
+                assert!(debut.elapsed() < Duration::from_secs(2), "aucune image");
+                laisser_composer();
+            }
+            assert_eq!((px.largeur, px.hauteur), (5, 6));
+            assert!(px.rgba.chunks_exact(4).all(|p| p[3] == 255), "alpha 255");
+            let ecran = ecran_principal();
+            assert!(facade::ouvrir_source(
+                Rect {
+                    x: bureau.x - 50,
+                    ..cheval
+                },
+                ecran
+            )
+            .is_err());
+            assert!(facade::ouvrir_source(
+                Rect {
+                    largeur: 0,
+                    ..cheval
+                },
+                ecran
+            )
+            .is_err());
+        }
+
+        /// F6, S1 (a) : une fenêtre exclue des captures posée sur la zone n'est pas dans
+        /// l'image de la duplication (exigé), ni dans celle de `BitBlt` (noté : une fenêtre
+        /// NATIVE exclue y reste, une WebView2 exclue non, R2 de la 0.6).
+        #[test]
+        fn fenetre_exclue_absente() {
+            let _s = Seance::ouvrir();
+            let essai = FenetreEssai::carres();
+            let mut source = ouvrir_sur(essai.rect);
+            let mut px = vide();
+            attendre_carres_source(&mut source, &mut px).unwrap();
+            let voile = Rect {
+                x: essai.rect.x + COTE / 2,
+                y: essai.rect.y + COTE / 2,
+                largeur: COTE,
+                hauteur: COTE,
+            };
+            for (nom, style) in [
+                ("opaque", WINDOW_EX_STYLE(0)),
+                ("calque traversant", WS_EX_LAYERED | WS_EX_TRANSPARENT),
+            ] {
+                let fenetre = FenetreEssai::creer(
+                    w!("BreezyShot essai vivant voile"),
+                    CLASSE_VOILE,
+                    procedure_voile,
+                    style,
+                    voile,
+                );
+                // SAFETY : fenêtre de premier niveau de ce processus.
+                unsafe { SetWindowDisplayAffinity(fenetre.hwnd, WDA_EXCLUDEFROMCAPTURE) }.unwrap();
+                // Le plus d'écarts vu en une demi-seconde : la fenêtre ne doit jamais paraître.
+                let debut = Instant::now();
+                let mut plus = 0usize;
+                while debut.elapsed() < Duration::from_millis(500) {
+                    laisser_composer();
+                    if let Ok((image, _)) = source.prendre(&mut px) {
+                        if image != Image::Perdue {
+                            let (n, _) = ecarts_aux_carres(&px, source.zone()).unwrap();
+                            plus = plus.max(n);
+                        }
+                    }
+                }
+                eprintln!(
+                    "vivant: {} : fenetre native exclue {nom} : au plus {plus} pixels differents",
+                    source.moyen().nom()
+                );
+                if source.moyen() == Moyen::Duplication {
+                    assert_eq!(
+                        plus, 0,
+                        "fenetre exclue {nom} dans l'image de la duplication"
+                    );
+                }
+                drop(fenetre);
+            }
+            attendre_carres_source(&mut source, &mut px).unwrap();
+        }
+
+        /// La garde de l'écran figé, lue après la copie, écarte l'image sans toucher la
+        /// destination ; la prise suivante rend de nouveau les carrés.
+        #[test]
+        fn seconde_lecture_de_la_garde_source() {
+            let _s = Seance::ouvrir();
+            let essai = FenetreEssai::carres();
+            let mut source = ouvrir_sur(essai.rect);
+            let mut px = vide();
+            attendre_carres_source(&mut source, &mut px).unwrap();
+            let gardee = px.rgba.clone();
+            // Fait repeindre la fenêtre : la duplication a une image neuve à copier.
+            // SAFETY : fenêtre de ce fil.
+            unsafe {
+                let _ = InvalidateRect(Some(essai.hwnd), None, true);
+            }
+            laisser_composer();
+            let mut lectures = 0;
+            let mut apres_la_copie = || {
+                lectures += 1;
+                lectures == 2
+            };
+            let r = source::prendre_source_garde(&mut source.interne, &mut px, &mut apres_la_copie);
+            eprintln!(
+                "vivant: {} : garde apres la copie : {r:?} ({lectures} lectures)",
+                source.moyen().nom()
+            );
+            if lectures == 2 {
+                assert!(r.unwrap_err().contains("ecran fige"));
+            }
+            assert_eq!(px.rgba, gardee, "destination touchee");
+            // Montré dès la première lecture : refus sans rien prendre.
+            let mut lectures = 0;
+            let mut avant = || {
+                lectures += 1;
+                true
+            };
+            assert!(
+                source::prendre_source_garde(&mut source.interne, &mut px, &mut avant).is_err()
+            );
+            assert_eq!(lectures, 1);
+            // Jamais montré : les carrés.
+            let (_, image) = attendre_carres_source(&mut source, &mut px).unwrap();
+            assert_ne!(image, Image::Perdue);
+        }
+
+        /// F33 : une perte simulée (la duplication rendue, comme après
+        /// `DXGI_ERROR_ACCESS_LOST`) est refaite tout de suite, sans changer de moyen, et
+        /// la première image de la duplication refaite arrive sur un écran immobile.
+        #[test]
+        fn perte_simulee_puis_reprise() {
+            let _s = Seance::ouvrir();
+            let essai = FenetreEssai::carres();
+            let mut source = ouvrir_sur(essai.rect);
+            if source.moyen() != Moyen::Duplication {
+                eprintln!("vivant: duplication refusee sur cette machine : perte non jouee");
+                return;
+            }
+            let mut px = vide();
+            attendre_carres_source(&mut source, &mut px).unwrap();
+            let gardee = px.rgba.clone();
+            for essai_n in 0..3 {
+                source::perdre_pour_essai(&mut source.interne);
+                let debut = Instant::now();
+                let mut perdues = 0;
+                let image = loop {
+                    let (image, _) = source.prendre(&mut px).unwrap();
+                    if image != Image::Perdue {
+                        break image;
+                    }
+                    perdues += 1;
+                    assert_eq!(px.rgba, gardee, "destination touchee pendant la perte");
+                    assert!(
+                        debut.elapsed() < Duration::from_millis(600),
+                        "pas reprise en 600 ms"
+                    );
+                    std::thread::sleep(Duration::from_millis(5));
+                };
+                eprintln!(
+                    "vivant: perte simulee {essai_n} : reprise apres {:.1} ms ({perdues} prises perdues), {image:?}",
+                    debut.elapsed().as_secs_f64() * 1000.0
+                );
+                let (n, premier) = ecarts_aux_carres(&px, source.zone()).unwrap();
+                assert_eq!(
+                    n, 0,
+                    "{n} pixels faux apres la reprise, premier {premier:?}"
+                );
+                assert_eq!(source.moyen(), Moyen::Duplication);
+                assert_eq!(source.repli(), None);
+            }
+        }
+
+        /// Le mode d'affichage du moment, remis à la fin même si le test échoue.
+        struct ModeRemis;
+
+        impl Drop for ModeRemis {
+            fn drop(&mut self) {
+                // SAFETY : sans mode : retour au mode enregistré.
+                let code = unsafe { ChangeDisplaySettingsExW(None, None, None, CDS_TYPE(0), None) };
+                eprintln!("vivant: mode remis (code {})", code.0);
+                laisser_composer();
+            }
+        }
+
+        fn changer_mode(largeur: u32, hauteur: u32) -> i32 {
+            // SAFETY : DEVMODEW dont la taille est renseignée ; écran principal ; mode posé
+            // sans l'écrire au registre.
+            unsafe {
+                let mut d = DEVMODEW {
+                    dmSize: std::mem::size_of::<DEVMODEW>() as u16,
+                    ..Default::default()
+                };
+                if !EnumDisplaySettingsW(None, ENUM_CURRENT_SETTINGS, &mut d).as_bool() {
+                    return -100;
+                }
+                d.dmPelsWidth = largeur;
+                d.dmPelsHeight = hauteur;
+                d.dmFields = DM_PELSWIDTH | DM_PELSHEIGHT;
+                ChangeDisplaySettingsExW(None, Some(&d), None, CDS_TYPE(0), None).0
+            }
+        }
+
+        /// F33, S1 point 6 : un changement de mode (800 × 600 puis retour) fait perdre
+        /// l'accès ; la source rend `Perdue` sans toucher la destination, se refait
+        /// d'elle-même et reprend, sans changer de moyen.
+        #[test]
+        fn perdue_puis_reprise_apres_un_changement_de_mode() {
+            let _s = Seance::ouvrir();
+            let essai = FenetreEssai::carres();
+            let mut source = ouvrir_sur(essai.rect);
+            if source.moyen() != Moyen::Duplication {
+                eprintln!("vivant: duplication refusee sur cette machine : perte non jouee");
+                return;
+            }
+            let mut px = vide();
+            attendre_carres_source(&mut source, &mut px).unwrap();
+            let mut gardee = px.rgba.clone();
+            let code = changer_mode(800, 600);
+            if code != 0 {
+                eprintln!("vivant: mode 800x600 refuse (code {code}) : perte non jouee");
+                return;
+            }
+            let remis = ModeRemis;
+            let debut = Instant::now();
+            let mut perdue_a = None;
+            let mut prises = 0u32;
+            while debut.elapsed() < Duration::from_secs(2) {
+                if let Ok((image, _)) = source.prendre(&mut px) {
+                    prises += 1;
+                    if image == Image::Perdue {
+                        perdue_a.get_or_insert(debut.elapsed());
+                        assert_eq!(px.rgba, gardee, "destination touchee pendant la perte");
+                    } else {
+                        // Refaite pendant le mode 800 × 600 : l'image peut changer.
+                        gardee.clone_from(&px.rgba);
+                    }
+                }
+                laisser_composer();
+            }
+            drop(remis);
+            let remis_a = Instant::now();
+            let reprise = loop {
+                if let Ok((image, _)) = source.prendre(&mut px) {
+                    if image != Image::Perdue
+                        && ecarts_aux_carres(&px, source.zone()).is_ok_and(|(n, _)| n == 0)
+                    {
+                        break remis_a.elapsed();
+                    }
+                }
+                assert!(
+                    remis_a.elapsed() < Duration::from_secs(3),
+                    "pas reprise 3 s apres le mode remis"
+                );
+                laisser_composer();
+            };
+            eprintln!(
+                "vivant: changement de mode : perdue apres {perdue_a:?} ({prises} prises), \
+                 carres revus {:.0} ms apres le mode remis",
+                reprise.as_secs_f64() * 1000.0
+            );
+            assert!(
+                perdue_a.is_some(),
+                "acces jamais perdu pendant le changement de mode"
+            );
+            assert_eq!(source.moyen(), Moyen::Duplication);
+            assert_eq!(source.repli(), None);
+        }
+
+        #[test]
+        fn refus_pendant_l_ecran_fige_source() {
+            let _s = Seance::ouvrir();
+            dans_un_processus_a_part("source_film::refus_pendant_l_ecran_fige_source_enfant");
+        }
+
+        #[test]
+        #[ignore = "joue dans un processus a part par refus_pendant_l_ecran_fige_source"]
+        fn refus_pendant_l_ecran_fige_source_enfant() {
+            if !dans_l_enfant() {
+                return;
+            }
+            let _s = Seance::ouvrir();
+            let _rendu = EcranFigeRendu;
+            let essai = FenetreEssai::carres();
+            let mut source = ouvrir_sur(essai.rect);
+            let mut px = vide();
+            attendre_carres_source(&mut source, &mut px).unwrap();
+            gel::preparer_ecran_fige().unwrap();
+            let image = gel::figer_bureau().unwrap();
+            gel::montrer_ecran_fige(&image).unwrap();
+            pomper();
+            let e = source.prendre(&mut px).unwrap_err();
+            assert!(e.contains("ecran fige"), "{e}");
+            // Une source ouverte pendant l'écran figé (le cas d'un film) refuse aussi.
+            let mut autre = ouvrir_sur(essai.rect);
+            assert!(autre.prendre(&mut px).is_err());
+            gel::cacher_ecran_fige();
+            laisser_composer();
+            attendre_carres_source(&mut source, &mut px).unwrap();
+            // Celle ouverte pendant l'écran figé rend l'écran, pas l'image figée.
+            attendre_carres_source(&mut autre, &mut px).unwrap();
+        }
+
+        fn poignees() -> u32 {
+            let mut n = 0u32;
+            // SAFETY : pseudo-poignée du processus courant ; un u32 en sortie.
+            unsafe { GetProcessHandleCount(GetCurrentProcess(), &mut n) }.unwrap();
+            n
+        }
+
+        /// 3 000 prises par la duplication (la fenêtre repeinte à chaque fois : la zone est
+        /// copiée), puis 1 000 par `BitBlt`, puis 20 ouvertures, sans poignée ni objet GDI
+        /// de plus. Dans un processus à part, comme `mille_prises_sans_fuite_gdi`.
+        #[test]
+        fn trois_mille_prises_sans_fuite() {
+            let _s = Seance::ouvrir();
+            dans_un_processus_a_part("source_film::trois_mille_prises_sans_fuite_enfant");
+        }
+
+        #[test]
+        #[ignore = "joue dans un processus a part par trois_mille_prises_sans_fuite"]
+        fn trois_mille_prises_sans_fuite_enfant() {
+            if !dans_l_enfant() {
+                return;
+            }
+            let _s = Seance::ouvrir();
+            let essai = FenetreEssai::carres();
+            let mut px = vide();
+            // Mise en train : les premiers appels chargent DXGI et Direct3D.
+            for _ in 0..3 {
+                let mut s = ouvrir_sur(essai.rect);
+                let _ = attendre_carres_source(&mut s, &mut px);
+            }
+            let (poignees_avant, gdi_avant) = (poignees(), objets_gdi());
+            let mut source = ouvrir_sur(essai.rect);
+            let moyen = source.moyen();
+            // 3 000 prises par le premier moyen, puis 1 000 par `BitBlt` (25 à 30 ms chacune
+            // sur la machine GitHub ; `mille_prises_sans_fuite_gdi` le prouve déjà pour
+            // `Prise`).
+            for (tour, nombre) in [3000usize, 1000].into_iter().enumerate() {
+                let mut durees = Vec::with_capacity(nombre);
+                let (mut nouvelles, mut inchangees, mut perdues) = (0, 0, 0);
+                for _ in 0..nombre {
+                    // SAFETY : fenêtre de ce fil.
+                    unsafe {
+                        let _ = InvalidateRect(Some(essai.hwnd), None, false);
+                    }
+                    pomper();
+                    let (image, duree) = source.prendre(&mut px).unwrap();
+                    durees.push(duree);
+                    match image {
+                        Image::Nouvelle => nouvelles += 1,
+                        Image::Inchangee => inchangees += 1,
+                        Image::Perdue => perdues += 1,
+                    }
+                }
+                eprintln!(
+                    "vivant: {} : {nombre} prises, {nouvelles} nouvelles, {inchangees} \
+                     inchangees, {perdues} perdues ; mediane {:.2} ms ; poignees {} -> {}, \
+                     objets GDI {} -> {}",
+                    source.moyen().nom(),
+                    mediane(durees),
+                    poignees_avant,
+                    poignees(),
+                    gdi_avant,
+                    objets_gdi()
+                );
+                assert!(perdues <= 3, "{perdues} prises perdues sur un ecran stable");
+                assert!(poignees() <= poignees_avant + 16, "fuite de poignees");
+                assert!(objets_gdi() <= gdi_avant + 4, "fuite d'objets GDI");
+                if tour == 0 {
+                    source.replier().unwrap();
+                }
+            }
+            drop(source);
+            for _ in 0..20 {
+                let mut s = ouvrir_sur(essai.rect);
+                let _ = s.prendre(&mut px);
+            }
+            let (poignees_apres, gdi_apres) = (poignees(), objets_gdi());
+            eprintln!(
+                "vivant: {} puis bitblt : apres 20 ouvertures, poignees {poignees_avant} -> \
+                 {poignees_apres}, objets GDI {gdi_avant} -> {gdi_apres}",
+                moyen.nom()
+            );
+            assert!(
+                poignees_apres <= poignees_avant + 16,
+                "fuite a l'ouverture : {poignees_avant} -> {poignees_apres}"
+            );
+            assert!(
+                gdi_apres <= gdi_avant + 2,
+                "fuite GDI a l'ouverture : {gdi_avant} -> {gdi_apres}"
+            );
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------------------
-// Source d'un film (0.7). Socle : pas encore construite (chantier A).
+// Source d'un film (0.7, F12, F13, F33) : la duplication de bureau de l'écran de la zone,
+// `BitBlt` en repli. La logique (choix de la sortie, rectangles, copie, reprise) est pure,
+// dans `vivant/mod.rs` ; ici, seulement les appels à DXGI, Direct3D 11 et GDI.
+//
+// Duplication : le périphérique Direct3D est créé sur la carte qui porte la sortie de la
+// zone (on parcourt les cartes et leurs sorties) ; `AcquireNextFrame` à délai nul ; seule
+// la zone est copiée (`CopySubresourceRegion` vers une texture lisible de sa taille), et
+// seulement si un rectangle sale ou déplacé la touche ; la copie vers `dest` dit encore si
+// un pixel a changé. Le pointeur n'est jamais dans l'image de la duplication (Windows le
+// donne à part) : une image où seul le pointeur a bougé ne coûte rien. Un accès perdu
+// (changement de mode, bureau sécurisé, plein écran exclusif) rend `Perdue`, et la
+// duplication est refaite à la prise suivante, puis au plus toutes les 500 ms (F33).
+//
+// `dxgi.dll` et `d3d11.dll` sont chargées à la demande (`build.rs`) : la première
+// ouverture d'une source les charge ; elles existent sur tout Windows 11 (F31, sans garde).
 
-/// Aucune source ne peut exister ici : le type n'a aucune valeur.
-#[derive(Debug)]
-pub enum Source {}
+pub use source::{
+    moyen_source, ouvrir_source, prendre_source, repli_source, replier_source, zone_source, Source,
+};
 
-pub fn ouvrir_source(_zone: Rect, _ecran: Rect) -> Result<Source, String> {
-    Err("source du film non construite".into())
-}
+mod source {
+    use std::time::{Duration, Instant};
 
-pub fn moyen_source(source: &Source) -> super::Moyen {
-    match *source {}
-}
+    use ::windows::core::Interface;
+    use ::windows::Win32::Foundation::{HMODULE, RECT};
+    use ::windows::Win32::Graphics::Direct3D::D3D_DRIVER_TYPE_UNKNOWN;
+    use ::windows::Win32::Graphics::Direct3D11::{
+        D3D11CreateDevice, ID3D11Device, ID3D11DeviceContext, ID3D11Texture2D, D3D11_BOX,
+        D3D11_CPU_ACCESS_READ, D3D11_CREATE_DEVICE_BGRA_SUPPORT, D3D11_MAPPED_SUBRESOURCE,
+        D3D11_MAP_READ, D3D11_SDK_VERSION, D3D11_TEXTURE2D_DESC, D3D11_USAGE_STAGING,
+    };
+    use ::windows::Win32::Graphics::Dxgi::Common::{
+        DXGI_FORMAT_B8G8R8A8_UNORM, DXGI_MODE_ROTATION_IDENTITY, DXGI_MODE_ROTATION_UNSPECIFIED,
+        DXGI_SAMPLE_DESC,
+    };
+    use ::windows::Win32::Graphics::Dxgi::{
+        CreateDXGIFactory1, IDXGIAdapter, IDXGIFactory1, IDXGIOutput1, IDXGIOutputDuplication,
+        IDXGIResource, DXGI_ERROR_ACCESS_LOST, DXGI_ERROR_WAIT_TIMEOUT, DXGI_OUTDUPL_FRAME_INFO,
+        DXGI_OUTDUPL_MOVE_RECT,
+    };
+    use ::windows::Win32::Graphics::Gdi::{BitBlt, GdiFlush, SRCCOPY};
 
-pub fn zone_source(source: &Source) -> Rect {
-    match *source {}
-}
+    use super::{couper_au_bureau, DcEcran, Dib, Pixels, Rect};
+    use crate::systeme::gel;
+    use crate::systeme::vivant::{
+        choisir_sortie, code_hex, copier_bgra, zone_dans_la_sortie, zone_touchee, ChoixSortie,
+        Etape, Image, Moyen, Serie, SortieVue, Suivi, RAISON_ACCES_PERDU,
+    };
 
-pub fn prendre_source(
-    source: &mut Source,
-    _dest: &mut Pixels,
-) -> Result<(super::Image, Duration), String> {
-    match *source {}
-}
+    fn rect_de(r: RECT) -> Rect {
+        Rect::depuis_bords(r.left, r.top, r.right, r.bottom)
+    }
 
-pub fn replier_source(source: &mut Source) -> Result<(), String> {
-    match *source {}
-}
+    /// Ce qui a empêché d'ouvrir la duplication : la raison au journal (`film source
+    /// bitblt (<raison>)`), sans accent ni chemin.
+    type Refus = String;
 
-pub fn repli_source(source: &mut Source) -> Option<(super::Moyen, String)> {
-    match *source {}
+    /// Une étape refusée par le système : « <étape> 0x887A0004 ».
+    fn refus(etape: &str, e: &::windows::core::Error) -> Refus {
+        format!("{etape} {}", code_hex(e.code().0))
+    }
+
+    // --- La duplication d'une sortie ---
+
+    /// La duplication de la sortie qui porte la zone, et la texture lisible de la taille
+    /// de la zone. Champs détruits dans l'ordre : la duplication avant le périphérique.
+    struct Duplication {
+        dupl: IDXGIOutputDuplication,
+        lisible: ID3D11Texture2D,
+        contexte: ID3D11DeviceContext,
+        _appareil: ID3D11Device,
+        /// La zone, en coordonnées de la sortie.
+        dans_sortie: Rect,
+    }
+
+    /// Parcourt les cartes et leurs sorties (fabrique neuve : à jour après un changement de
+    /// mode), choisit celle qui porte la zone (`choisir_sortie`), crée le périphérique sur
+    /// sa carte et la duplication. Rien n'est acquis ici : à l'ouverture d'un film, l'écran
+    /// figé peut encore être montré.
+    fn ouvrir_duplication(zone: Rect, ecran: Rect) -> Result<Duplication, Refus> {
+        // SAFETY : énumération DXGI ; chaque objet COM est rendu par son compte de
+        // références ; les descriptions sont copiées.
+        let (carte, sortie, bureau) = unsafe {
+            let fabrique: IDXGIFactory1 = CreateDXGIFactory1().map_err(|e| refus("dxgi", &e))?;
+            let mut vues = Vec::new();
+            let mut objets = Vec::new();
+            let mut i = 0;
+            while let Ok(carte) = fabrique.EnumAdapters1(i) {
+                let mut j = 0;
+                while let Ok(sortie) = carte.EnumOutputs(j) {
+                    if let Ok(d) = sortie.GetDesc() {
+                        if d.AttachedToDesktop.as_bool() {
+                            vues.push(SortieVue {
+                                bureau: rect_de(d.DesktopCoordinates),
+                                tournee: d.Rotation != DXGI_MODE_ROTATION_IDENTITY
+                                    && d.Rotation != DXGI_MODE_ROTATION_UNSPECIFIED,
+                            });
+                            objets.push((carte.clone(), sortie));
+                        }
+                    }
+                    j += 1;
+                }
+                i += 1;
+            }
+            match choisir_sortie(zone, ecran, &vues) {
+                ChoixSortie::Sortie(k) => {
+                    let (carte, sortie) = objets.swap_remove(k);
+                    (carte, sortie, vues[k].bureau)
+                }
+                autre => return Err(autre.raison().unwrap_or("sortie").to_string()),
+            }
+        };
+        let dans_sortie = zone_dans_la_sortie(zone, bureau).ok_or("zone hors des sorties")?;
+        let carte: IDXGIAdapter = carte.cast().map_err(|e| refus("carte", &e))?;
+        let sortie: IDXGIOutput1 = sortie.cast().map_err(|e| refus("sortie", &e))?;
+        let mut appareil = None;
+        let mut contexte = None;
+        // SAFETY : création d'un périphérique sur la carte de la sortie ; les sorties sont
+        // des `Option` remplies par l'appel.
+        unsafe {
+            D3D11CreateDevice(
+                &carte,
+                D3D_DRIVER_TYPE_UNKNOWN,
+                HMODULE::default(),
+                D3D11_CREATE_DEVICE_BGRA_SUPPORT,
+                None,
+                D3D11_SDK_VERSION,
+                Some(&mut appareil),
+                None,
+                Some(&mut contexte),
+            )
+        }
+        .map_err(|e| refus("d3d11", &e))?;
+        let appareil = appareil.ok_or("d3d11 sans peripherique")?;
+        let contexte = contexte.ok_or("d3d11 sans contexte")?;
+        // SAFETY : sortie et périphérique vivants, de la même carte.
+        let dupl = unsafe { sortie.DuplicateOutput(&appareil) }
+            .map_err(|e| refus("duplication refusee", &e))?;
+        let desc = D3D11_TEXTURE2D_DESC {
+            Width: dans_sortie.largeur as u32,
+            Height: dans_sortie.hauteur as u32,
+            MipLevels: 1,
+            ArraySize: 1,
+            // `DuplicateOutput` rend toujours ce format, quel que soit le mode.
+            Format: DXGI_FORMAT_B8G8R8A8_UNORM,
+            SampleDesc: DXGI_SAMPLE_DESC {
+                Count: 1,
+                Quality: 0,
+            },
+            Usage: D3D11_USAGE_STAGING,
+            BindFlags: 0,
+            CPUAccessFlags: D3D11_CPU_ACCESS_READ.0 as u32,
+            MiscFlags: 0,
+        };
+        let mut lisible = None;
+        // SAFETY : description valide ; la texture est rendue par son compte de références.
+        unsafe { appareil.CreateTexture2D(&desc, None, Some(&mut lisible)) }
+            .map_err(|e| refus("texture", &e))?;
+        Ok(Duplication {
+            dupl,
+            lisible: lisible.ok_or("texture absente")?,
+            contexte,
+            _appareil: appareil,
+            dans_sortie,
+        })
+    }
+
+    /// Une image acquise, rendue par `ReleaseFrame` quoi qu'il arrive.
+    struct ImageAcquise<'a>(&'a IDXGIOutputDuplication);
+
+    impl Drop for ImageAcquise<'_> {
+        fn drop(&mut self) {
+            // SAFETY : une image a été acquise par cette duplication et pas encore rendue.
+            unsafe {
+                let _ = self.0.ReleaseFrame();
+            }
+        }
+    }
+
+    /// La texture lisible ouverte en lecture, refermée par `Unmap` quoi qu'il arrive.
+    struct Lecture<'a> {
+        contexte: &'a ID3D11DeviceContext,
+        texture: &'a ID3D11Texture2D,
+        carte: D3D11_MAPPED_SUBRESOURCE,
+    }
+
+    impl Drop for Lecture<'_> {
+        fn drop(&mut self) {
+            // SAFETY : la sous-ressource 0 a été ouverte par `Map` et pas encore refermée.
+            unsafe {
+                self.contexte.Unmap(self.texture, 0);
+            }
+        }
+    }
+
+    /// Tampons des rectangles d'une image, gardés d'une prise à l'autre.
+    #[derive(Default)]
+    struct Rectangles {
+        deplaces_dxgi: Vec<DXGI_OUTDUPL_MOVE_RECT>,
+        sales_dxgi: Vec<RECT>,
+        deplaces: Vec<(Rect, Rect)>,
+        sales: Vec<Rect>,
+    }
+
+    impl Rectangles {
+        /// Un rectangle sale ou déplacé de l'image acquise touche-t-il la zone ? `None` :
+        /// non lus (pas de métadonnées, ou lecture refusée) : l'image est alors copiée.
+        fn zone_touchee(
+            &mut self,
+            dupl: &IDXGIOutputDuplication,
+            info: &DXGI_OUTDUPL_FRAME_INFO,
+            zone: Rect,
+        ) -> Option<bool> {
+            let taille = info.TotalMetadataBufferSize as usize;
+            if taille == 0 {
+                return None;
+            }
+            let n = taille / std::mem::size_of::<DXGI_OUTDUPL_MOVE_RECT>() + 1;
+            self.deplaces_dxgi
+                .resize(n, DXGI_OUTDUPL_MOVE_RECT::default());
+            let mut requis = 0u32;
+            // SAFETY : tampon de `n` rectangles dont la taille en octets est passée ; image
+            // acquise et pas encore rendue.
+            unsafe {
+                dupl.GetFrameMoveRects(
+                    (n * std::mem::size_of::<DXGI_OUTDUPL_MOVE_RECT>()) as u32,
+                    self.deplaces_dxgi.as_mut_ptr(),
+                    &mut requis,
+                )
+            }
+            .ok()?;
+            let lus = (requis as usize / std::mem::size_of::<DXGI_OUTDUPL_MOVE_RECT>()).min(n);
+            self.deplaces.clear();
+            self.deplaces
+                .extend(self.deplaces_dxgi[..lus].iter().map(|m| {
+                    let d = rect_de(m.DestinationRect);
+                    let source = Rect {
+                        x: m.SourcePoint.x,
+                        y: m.SourcePoint.y,
+                        ..d
+                    };
+                    (source, d)
+                }));
+            let n = taille / std::mem::size_of::<RECT>() + 1;
+            self.sales_dxgi.resize(n, RECT::default());
+            // SAFETY : idem.
+            unsafe {
+                dupl.GetFrameDirtyRects(
+                    (n * std::mem::size_of::<RECT>()) as u32,
+                    self.sales_dxgi.as_mut_ptr(),
+                    &mut requis,
+                )
+            }
+            .ok()?;
+            let lus = (requis as usize / std::mem::size_of::<RECT>()).min(n);
+            self.sales.clear();
+            self.sales
+                .extend(self.sales_dxgi[..lus].iter().map(|r| rect_de(*r)));
+            Some(zone_touchee(zone, &self.deplaces, &self.sales))
+        }
+    }
+
+    /// Ce qu'a donné une acquisition.
+    enum Acquis {
+        /// Délai dépassé : rien de neuf sur l'écran.
+        Rien,
+        /// Une image, mais rien à copier (pointeur seul, zone intacte).
+        PasACopier,
+        /// L'image de la zone a été copiée ; vrai si un pixel a changé.
+        Copiee(bool),
+        /// L'écran figé est montré : l'image est écartée.
+        Garde,
+        /// Échec : la duplication est à refaire. Le code au journal ; vrai pour un accès
+        /// perdu (attendu : changement de mode, bureau sécurisé), qui n'est pas écrit.
+        Perte(String, bool),
+    }
+
+    /// Acquiert une image (délai nul) et copie la zone si `suivi` le demande.
+    fn acquerir(
+        d: &Duplication,
+        suivi: &Suivi,
+        rectangles: &mut Rectangles,
+        dest: &mut Pixels,
+        ecran_fige_montre: &mut dyn FnMut() -> bool,
+    ) -> Acquis {
+        let mut info = DXGI_OUTDUPL_FRAME_INFO::default();
+        let mut ressource: Option<IDXGIResource> = None;
+        // SAFETY : duplication vivante ; l'image acquise est rendue par `ImageAcquise`.
+        let acquise = unsafe { d.dupl.AcquireNextFrame(0, &mut info, &mut ressource) };
+        match acquise {
+            Ok(()) => {}
+            Err(e) if e.code() == DXGI_ERROR_WAIT_TIMEOUT => return Acquis::Rien,
+            Err(e) => {
+                let perdu = e.code() == DXGI_ERROR_ACCESS_LOST;
+                return Acquis::Perte(code_hex(e.code().0), perdu);
+            }
+        }
+        let _rendue = ImageAcquise(&d.dupl);
+        let ecran_neuf = info.LastPresentTime != 0;
+        let touchee = if ecran_neuf && !suivi.forcer {
+            rectangles.zone_touchee(&d.dupl, &info, d.dans_sortie)
+        } else {
+            None
+        };
+        if !suivi.a_copier(ecran_neuf, touchee) {
+            return Acquis::PasACopier;
+        }
+        let Some(ressource) = ressource else {
+            return Acquis::Perte("image absente".into(), false);
+        };
+        let texture: ID3D11Texture2D = match ressource.cast() {
+            Ok(t) => t,
+            Err(e) => return Acquis::Perte(code_hex(e.code().0), false),
+        };
+        let z = d.dans_sortie;
+        let boite = D3D11_BOX {
+            left: z.x as u32,
+            top: z.y as u32,
+            front: 0,
+            right: (z.x + z.largeur) as u32,
+            bottom: (z.y + z.hauteur) as u32,
+            back: 1,
+        };
+        let mut carte = D3D11_MAPPED_SUBRESOURCE::default();
+        // SAFETY : textures du même périphérique, de même format ; la boîte est dans
+        // l'image de la sortie (`zone_dans_la_sortie`) et a la taille de la texture
+        // lisible. `Map` attend la fin de la copie.
+        let ouverte = unsafe {
+            d.contexte
+                .CopySubresourceRegion(&d.lisible, 0, 0, 0, 0, &texture, 0, Some(&boite));
+            d.contexte
+                .Map(&d.lisible, 0, D3D11_MAP_READ, 0, Some(&mut carte))
+        };
+        if let Err(e) = ouverte {
+            return Acquis::Perte(code_hex(e.code().0), false);
+        }
+        let lecture = Lecture {
+            contexte: &d.contexte,
+            texture: &d.lisible,
+            carte,
+        };
+        // L'écran figé a pu paraître pendant la copie : l'image serait la sienne.
+        if ecran_fige_montre() {
+            return Acquis::Garde;
+        }
+        let (largeur, hauteur) = (z.largeur as u32, z.hauteur as u32);
+        let pas = lecture.carte.RowPitch as usize;
+        let octets = pas * (hauteur as usize - 1) + largeur as usize * 4;
+        if lecture.carte.pData.is_null() {
+            return Acquis::Perte("lecture vide".into(), false);
+        }
+        // SAFETY : `Map` rend `hauteur` lignes de `RowPitch` octets, la dernière au moins
+        // de la largeur de la texture ; lues pendant que la texture est ouverte.
+        let source =
+            unsafe { std::slice::from_raw_parts(lecture.carte.pData as *const u8, octets) };
+        match copier_bgra(source, pas, largeur, hauteur, dest) {
+            Ok(change) => Acquis::Copiee(change),
+            Err(e) => Acquis::Perte(e, false),
+        }
+    }
+
+    // --- La source ---
+
+    /// Le moyen en service et son état.
+    enum Interne {
+        Duplication {
+            duplication: Option<Duplication>,
+            suivi: Suivi,
+            rectangles: Rectangles,
+        },
+        BitBlt {
+            dib: Dib,
+        },
+    }
+
+    /// La source d'un film.
+    pub struct Source {
+        zone: Rect,
+        ecran: Rect,
+        interne: Interne,
+        /// Changement de moyen pas encore lu par `repli`.
+        changement: Option<(Moyen, String)>,
+        /// Échecs de prise (autres que l'accès perdu) en série : un WARN par série.
+        serie: Serie,
+    }
+
+    // SAFETY : le périphérique Direct3D 11 et la duplication peuvent servir depuis
+    // n'importe quel fil ; le contexte immédiat, la section DIB et son DC ne servent qu'à
+    // un fil à la fois, ce que garantit `&mut self` sur toutes les méthodes qui y touchent.
+    // `Source` n'est pas `Sync`.
+    unsafe impl Send for Source {}
+
+    impl std::fmt::Debug for Source {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.debug_struct("Source")
+                .field("zone", &self.zone)
+                .field("moyen", &moyen_source(self))
+                .finish()
+        }
+    }
+
+    pub fn ouvrir_source(zone: Rect, ecran: Rect) -> Result<Source, String> {
+        let zone = couper_au_bureau(zone, gel::bureau_virtuel()?)?;
+        let (interne, changement) = match ouvrir_duplication(zone, ecran) {
+            Ok(duplication) => (
+                Interne::Duplication {
+                    duplication: Some(duplication),
+                    suivi: Suivi::nouveau(),
+                    rectangles: Rectangles::default(),
+                },
+                None,
+            ),
+            Err(raison) => (
+                Interne::BitBlt {
+                    dib: Dib::nouvelle(zone.largeur, zone.hauteur)?,
+                },
+                Some((Moyen::BitBlt, raison)),
+            ),
+        };
+        Ok(Source {
+            zone,
+            ecran,
+            interne,
+            changement,
+            serie: Serie::default(),
+        })
+    }
+
+    pub fn moyen_source(source: &Source) -> Moyen {
+        match source.interne {
+            Interne::Duplication { .. } => Moyen::Duplication,
+            Interne::BitBlt { .. } => Moyen::BitBlt,
+        }
+    }
+
+    pub fn zone_source(source: &Source) -> Rect {
+        source.zone
+    }
+
+    pub fn prendre_source(
+        source: &mut Source,
+        dest: &mut Pixels,
+    ) -> Result<(Image, Duration), String> {
+        prendre_source_garde(source, dest, &mut gel::ecran_fige_montre)
+    }
+
+    /// Écrit le premier échec d'une série (§8 : une ligne par série, pas par image).
+    fn noter_echec(serie: &mut Serie, code: &str) {
+        if serie.echec() {
+            log::warn!("film: prise en echec ({code})");
+        }
+    }
+
+    /// `prendre_source`, la garde de l'écran figé donnée par l'appelant (les tests la
+    /// simulent). Lue avant la prise et après la copie en mémoire, avant d'écrire `dest`.
+    pub(super) fn prendre_source_garde(
+        source: &mut Source,
+        dest: &mut Pixels,
+        ecran_fige_montre: &mut dyn FnMut() -> bool,
+    ) -> Result<(Image, Duration), String> {
+        if ecran_fige_montre() {
+            return Err("ecran fige montre".into());
+        }
+        let debut = Instant::now();
+        let image = match &mut source.interne {
+            Interne::Duplication {
+                duplication,
+                suivi,
+                rectangles,
+            } => {
+                match suivi.etape(duplication.is_some(), debut) {
+                    Etape::Acquerir => {}
+                    Etape::Attendre => return Ok((suivi.sans_copie(), debut.elapsed())),
+                    Etape::Refaire => match ouvrir_duplication(source.zone, source.ecran) {
+                        Ok(d) => {
+                            *duplication = Some(d);
+                            suivi.refaite(true, debut);
+                        }
+                        Err(_) => {
+                            // Attendu tant que le mode change ou que le bureau sécurisé est
+                            // montré : pas écrit (le film écrit `film source perdue`).
+                            suivi.refaite(false, debut);
+                            return Ok((suivi.sans_copie(), debut.elapsed()));
+                        }
+                    },
+                }
+                let acquis = match duplication.as_ref() {
+                    Some(d) => acquerir(d, suivi, rectangles, dest, ecran_fige_montre),
+                    None => Acquis::Rien,
+                };
+                match acquis {
+                    Acquis::Rien => suivi.sans_copie(),
+                    Acquis::PasACopier => {
+                        source.serie.succes();
+                        suivi.sans_copie()
+                    }
+                    Acquis::Copiee(change) => {
+                        source.serie.succes();
+                        suivi.copiee(change, Instant::now()).0
+                    }
+                    Acquis::Garde => {
+                        suivi.ecartee();
+                        return Err("ecran fige montre".into());
+                    }
+                    Acquis::Perte(code, acces_perdu) => {
+                        if !acces_perdu {
+                            noter_echec(&mut source.serie, &code);
+                        }
+                        // La duplication (et l'image acquise) sont rendues ici.
+                        *duplication = None;
+                        suivi.perdue(Instant::now());
+                        Image::Perdue
+                    }
+                }
+            }
+            Interne::BitBlt { dib } => {
+                match bitblt(dib, source.zone) {
+                    Ok(()) => {}
+                    Err(code) => {
+                        noter_echec(&mut source.serie, &code);
+                        return Ok((Image::Perdue, debut.elapsed()));
+                    }
+                }
+                if ecran_fige_montre() {
+                    return Err("ecran fige montre".into());
+                }
+                let (largeur, hauteur) = (source.zone.largeur as u32, source.zone.hauteur as u32);
+                let change =
+                    copier_bgra(dib.octets(), largeur as usize * 4, largeur, hauteur, dest)?;
+                source.serie.succes();
+                if change {
+                    Image::Nouvelle
+                } else {
+                    Image::Inchangee
+                }
+            }
+        };
+        Ok((image, debut.elapsed()))
+    }
+
+    /// Le `BitBlt` de la zone dans la section DIB (celui de `Prise`). Erreur : le code.
+    fn bitblt(dib: &Dib, zone: Rect) -> Result<(), String> {
+        let ecran = DcEcran::prendre().map_err(|_| "GetDC".to_string())?;
+        // SAFETY : les deux DC sont valides ; la copie tient dans la section DIB (même
+        // taille que la zone). Pas de `CAPTUREBLT` (R2).
+        unsafe {
+            BitBlt(
+                dib.dc.0,
+                0,
+                0,
+                zone.largeur,
+                zone.hauteur,
+                Some(ecran.0),
+                zone.x,
+                zone.y,
+                SRCCOPY,
+            )
+        }
+        .map_err(|e| code_hex(e.code().0))?;
+        // La copie est faite avant de rendre le DC de l'écran et avant la seconde lecture
+        // de la garde. SAFETY : sans paramètre ; vide le lot de ce fil.
+        unsafe {
+            let _ = GdiFlush();
+        }
+        Ok(())
+    }
+
+    pub fn replier_source(source: &mut Source) -> Result<(), String> {
+        if matches!(source.interne, Interne::BitBlt { .. }) {
+            return Ok(());
+        }
+        let dib = Dib::nouvelle(source.zone.largeur, source.zone.hauteur)?;
+        // La duplication est rendue ici.
+        source.interne = Interne::BitBlt { dib };
+        source.changement = Some((Moyen::BitBlt, RAISON_ACCES_PERDU.to_string()));
+        source.serie.succes();
+        Ok(())
+    }
+
+    pub fn repli_source(source: &mut Source) -> Option<(Moyen, String)> {
+        source.changement.take()
+    }
+
+    /// Pour les tests : une perte simulée (comme `DXGI_ERROR_ACCESS_LOST`).
+    #[cfg(test)]
+    pub(super) fn perdre_pour_essai(source: &mut Source) {
+        if let Interne::Duplication {
+            duplication, suivi, ..
+        } = &mut source.interne
+        {
+            *duplication = None;
+            suivi.perdue(Instant::now());
+        }
+    }
 }

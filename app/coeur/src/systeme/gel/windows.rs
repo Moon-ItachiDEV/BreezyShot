@@ -37,12 +37,12 @@ use ::windows::Win32::UI::WindowsAndMessaging::{
     GetWindowThreadProcessId, IsIconic, IsWindow, IsWindowVisible, IsZoomed, LoadCursorW,
     PostMessageW, RegisterClassW, SendMessageTimeoutW, SetWindowPos, ShowWindow, ShowWindowAsync,
     CURSORINFO, DI_NORMAL, GWL_EXSTYLE, GWL_STYLE, HICON, HWND_TOPMOST, ICONINFO, IDC_CROSS,
-    MA_NOACTIVATE, MONITORINFOF_PRIMARY, SMTO_ABORTIFHUNG, SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN,
-    SM_XVIRTUALSCREEN, SM_YVIRTUALSCREEN, SWP_NOACTIVATE, SWP_SHOWWINDOW, SW_HIDE, WM_CLOSE,
-    WM_DESTROY, WM_DISPLAYCHANGE, WM_DPICHANGED, WM_ERASEBKGND, WM_MOUSEACTIVATE, WM_NULL,
-    WM_PAINT, WM_WTSSESSION_CHANGE, WNDCLASSW, WNDPROC, WS_CAPTION, WS_EX_LAYERED,
-    WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_EX_TRANSPARENT, WS_POPUP, WS_THICKFRAME,
-    WTS_SESSION_LOCK,
+    MA_NOACTIVATE, MONITORINFOF_PRIMARY, PBT_APMSUSPEND, SMTO_ABORTIFHUNG, SM_CXVIRTUALSCREEN,
+    SM_CYVIRTUALSCREEN, SM_XVIRTUALSCREEN, SM_YVIRTUALSCREEN, SWP_NOACTIVATE, SWP_SHOWWINDOW,
+    SW_HIDE, WM_CLOSE, WM_DESTROY, WM_DISPLAYCHANGE, WM_DPICHANGED, WM_ENDSESSION, WM_ERASEBKGND,
+    WM_MOUSEACTIVATE, WM_NULL, WM_PAINT, WM_POWERBROADCAST, WM_QUERYENDSESSION,
+    WM_WTSSESSION_CHANGE, WNDCLASSW, WNDPROC, WS_CAPTION, WS_EX_LAYERED, WS_EX_NOACTIVATE,
+    WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_EX_TRANSPARENT, WS_POPUP, WS_THICKFRAME, WTS_SESSION_LOCK,
 };
 
 use super::{
@@ -802,6 +802,30 @@ unsafe extern "system" fn procedure_ecran_fige(
             }
             LRESULT(0)
         }
+        // Mise en veille annoncée (F34) : comptée, que l'écran figé soit montré ou caché ;
+        // le fil `film` relit le compte. Rien d'autre : l'écran figé n'est jamais montré
+        // pendant un film, et la veille hors d'un film ne change rien à l'app.
+        WM_POWERBROADCAST => {
+            if wparam.0 == PBT_APMSUSPEND as usize {
+                VEILLES.fetch_add(1, Ordering::SeqCst);
+            }
+            LRESULT(1)
+        }
+        // Fin de session Windows (F35) : le fichier d'un film est fermé avant de répondre.
+        // Toujours « oui » : l'app ne retient jamais la fin de session (R18).
+        WM_QUERYENDSESSION => {
+            appeler_fin_de_session();
+            LRESULT(1)
+        }
+        // La session finit vraiment (`wparam` vrai) : si `WM_QUERYENDSESSION` n'est pas
+        // venu (arrêt forcé), c'est la dernière occasion de fermer le fichier. Le rappel
+        // ne fait rien s'il n'y a plus de film.
+        WM_ENDSESSION => {
+            if wparam.0 != 0 {
+                appeler_fin_de_session();
+            }
+            LRESULT(0)
+        }
         WM_DESTROY => {
             // SAFETY : notre fenêtre, sur son fil ; sans effet si elle n'était pas inscrite.
             unsafe {
@@ -855,15 +879,34 @@ pub fn verrouillages_de_session() -> u64 {
     VERROUILLAGES.load(Ordering::SeqCst)
 }
 
-/// Socle de la 0.7 : aucune mise en veille comptée encore (chantier A, F34).
+/// Mises en veille annoncées (`PBT_APMSUSPEND`) vues par la fenêtre de l'écran figé,
+/// montrée ou cachée (F34).
+static VEILLES: AtomicU64 = AtomicU64::new(0);
+
 pub fn mises_en_veille() -> u64 {
-    0
+    VEILLES.load(Ordering::SeqCst)
 }
 
-/// Socle de la 0.7 : le rappel n'est pas encore posé sur `WM_QUERYENDSESSION` (chantier A,
-/// F35).
+type RappelFinDeSession = Arc<dyn Fn() + Send + Sync>;
+
+/// Le rappel de la fin de session (F35) ; `None` : aucun.
+static FIN_DE_SESSION: Mutex<Option<RappelFinDeSession>> = Mutex::new(None);
+
 pub fn quand_session_finit(rappel: Box<dyn Fn() + Send + Sync>) {
-    drop(rappel);
+    let ancien = verrouiller(&FIN_DE_SESSION).replace(Arc::from(rappel));
+    drop(ancien);
+}
+
+/// Appelle le rappel de la fin de session, sans verrou tenu, sur le fil de la fenêtre. Une
+/// panique du rappel est arrêtée ici : elle ne doit jamais sortir d'une procédure de
+/// fenêtre (elle arrêterait le processus sans que Windows ait sa réponse).
+fn appeler_fin_de_session() {
+    let rappel = verrouiller(&FIN_DE_SESSION).clone();
+    if let Some(rappel) = rappel {
+        if std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| rappel())).is_err() {
+            log::warn!("ecran fige: rappel de fin de session arrete (panique)");
+        }
+    }
 }
 
 pub fn quand_bureau_change(rappel: RappelChangement) {
@@ -2360,5 +2403,123 @@ mod tests {
         println!("objets GDI : avant {avant}, apres 200 pointeurs {apres}");
         assert!(avant > 0, "GetGuiResources a echoue");
         assert!(apres <= avant + 4, "fuite GDI : {avant} -> {apres}");
+    }
+
+    // --- Veille et fin de session (0.7, F34, F35) ---
+
+    /// `WM_POWERBROADCAST` posté à la fenêtre de l'écran figé, cachée puis montrée : seul
+    /// `PBT_APMSUSPEND` compte, une fois par message ; l'écran figé n'en est pas touché.
+    #[test]
+    fn mises_en_veille_comptees() {
+        use ::windows::Win32::UI::WindowsAndMessaging::{
+            PBT_APMRESUMEAUTOMATIC, PBT_APMRESUMESUSPEND, PBT_POWERSETTINGCHANGE,
+        };
+        let _s = Seance::ouvrir();
+        preparer_ecran_fige().unwrap();
+        let (hwnd, _) = fenetre_figee().unwrap();
+        let envoyer = |hwnd: HWND, evenement: u32| {
+            // SAFETY : message envoyé à notre fenêtre, sur son fil.
+            unsafe {
+                SendMessageW(
+                    hwnd,
+                    WM_POWERBROADCAST,
+                    Some(WPARAM(evenement as usize)),
+                    Some(LPARAM(0)),
+                )
+            }
+        };
+        let avant = facade::mises_en_veille();
+        // Cachée : comptée quand même.
+        assert_eq!(envoyer(hwnd, PBT_APMSUSPEND), LRESULT(1));
+        assert_eq!(facade::mises_en_veille(), avant + 1);
+        for autre in [
+            PBT_APMRESUMESUSPEND,
+            PBT_APMRESUMEAUTOMATIC,
+            PBT_POWERSETTINGCHANGE,
+        ] {
+            envoyer(hwnd, autre);
+        }
+        assert_eq!(facade::mises_en_veille(), avant + 1, "reveil compte");
+        // Montrée : comptée, et l'écran figé reste montré.
+        let (hwnd, _image) = montrer_un_ecran_fige();
+        envoyer(hwnd, PBT_APMSUSPEND);
+        envoyer(hwnd, PBT_APMSUSPEND);
+        assert_eq!(facade::mises_en_veille(), avant + 3);
+        // SAFETY : lecture sur notre fenêtre.
+        assert!(unsafe { IsWindowVisible(hwnd) }.as_bool());
+        // Posté depuis un autre fil (comme le fait Windows), distribué par ce fil.
+        let poignee = hwnd.0 as isize;
+        std::thread::spawn(move || {
+            // SAFETY : message posté à une fenêtre vivante de ce processus.
+            unsafe {
+                PostMessageW(
+                    Some(HWND(poignee as *mut core::ffi::c_void)),
+                    WM_POWERBROADCAST,
+                    WPARAM(PBT_APMSUSPEND as usize),
+                    LPARAM(0),
+                )
+            }
+            .unwrap();
+        })
+        .join()
+        .unwrap();
+        pomper();
+        assert_eq!(facade::mises_en_veille(), avant + 4);
+    }
+
+    /// `WM_QUERYENDSESSION` et `WM_ENDSESSION` envoyés à la fenêtre de l'écran figé : le
+    /// rappel est appelé sur ce fil avant la réponse, qui est toujours « oui » ; un second
+    /// `quand_session_finit` remplace le rappel ; une panique du rappel ne sort pas.
+    #[test]
+    fn fin_de_session_rappelee() {
+        let _s = Seance::ouvrir();
+        preparer_ecran_fige().unwrap();
+        let (hwnd, fil) = fenetre_figee().unwrap();
+        let envoyer = |message: u32, wparam: usize| {
+            // SAFETY : message envoyé à notre fenêtre, sur son fil.
+            unsafe { SendMessageW(hwnd, message, Some(WPARAM(wparam)), Some(LPARAM(0))) }
+        };
+        let appels = Arc::new(AtomicUsize::new(0));
+        let fils = Arc::new(Mutex::new(Vec::new()));
+        let (a, f) = (Arc::clone(&appels), Arc::clone(&fils));
+        facade::quand_session_finit(Box::new(move || {
+            // Comme la fermeture d'un film : un peu de travail avant de rendre la main.
+            std::thread::sleep(Duration::from_millis(50));
+            // SAFETY : sans paramètre.
+            verrouiller(&f).push(unsafe { GetCurrentThreadId() });
+            a.fetch_add(1, Ordering::SeqCst);
+        }));
+        let debut = Instant::now();
+        assert_eq!(envoyer(WM_QUERYENDSESSION, 0), LRESULT(1));
+        assert_eq!(appels.load(Ordering::SeqCst), 1, "rappel pas encore fini");
+        assert!(debut.elapsed() >= Duration::from_millis(50));
+        assert_eq!(
+            *verrouiller(&fils),
+            vec![fil],
+            "rappel hors du fil de la fenetre"
+        );
+        // Fin de session vraie : rappelé ; annulée (un autre programme a refusé) : non.
+        assert_eq!(envoyer(WM_ENDSESSION, 1), LRESULT(0));
+        assert_eq!(appels.load(Ordering::SeqCst), 2);
+        envoyer(WM_ENDSESSION, 0);
+        assert_eq!(appels.load(Ordering::SeqCst), 2);
+
+        // Un second appel remplace le rappel.
+        let autres = Arc::new(AtomicUsize::new(0));
+        let b = Arc::clone(&autres);
+        facade::quand_session_finit(Box::new(move || {
+            b.fetch_add(1, Ordering::SeqCst);
+        }));
+        envoyer(WM_QUERYENDSESSION, 0);
+        assert_eq!(
+            (appels.load(Ordering::SeqCst), autres.load(Ordering::SeqCst)),
+            (2, 1)
+        );
+
+        // Un rappel qui panique : la fenêtre répond quand même, et le processus vit.
+        facade::quand_session_finit(Box::new(|| panic!("rappel d'essai qui panique")));
+        assert_eq!(envoyer(WM_QUERYENDSESSION, 0), LRESULT(1));
+        facade::quand_session_finit(Box::new(|| {}));
+        assert_eq!(envoyer(WM_QUERYENDSESSION, 0), LRESULT(1));
     }
 }
