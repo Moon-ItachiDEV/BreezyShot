@@ -40,16 +40,16 @@ function Relire-Gif([string]$Chemin, [int]$Ox, [int]$Oy) {
                 try { [System.Runtime.InteropServices.Marshal]::Copy($dd.Scan0, $oct, 0, $oct.Length) } finally { $b.UnlockBits($dd) }
             }
             finally { $b.Dispose() }
-            $k = $script:T::LireK($oct, $img.Width, $Ox, $Oy)
+            $k = $script:Temoin::LireK($oct, $img.Width, $Ox, $Oy)
             if ($k -lt 0) { $o.KIllisibles++ } else {
                 if ($o.KPremier -lt 0) { $o.KPremier = $k }
                 if ($prec -ge 0 -and $k -lt $prec) { $o.KReculs++ }
                 $prec = $k; $o.KDernier = $k
             }
-            $p = $script:T::PastillesExactes($oct, $img.Width, $Ox, $Oy)
+            $p = $script:Temoin::PastillesExactes($oct, $img.Width, $Ox, $Oy)
             if ($i -eq 1) { $o.Composees = OuiNon ($p -ge 9000) }
             $pmin = [math]::Min($pmin, $p)
-            $o.Transparents += $script:T::Transparents($oct)
+            $o.Transparents += $script:Temoin::Transparents($oct)
         }
         $o.PastillesMin = $pmin
     }
@@ -108,7 +108,7 @@ if (Demarrer-Sonde -Nom '04-s4-gif' -Titre 'S4 : le GIF (gif 0.14.2, color_quant
         Gif '1024x768' 'fixe' 15 10
 
         Section 'S4 (3) : vitesses 30 et 20'
-        foreach ($t in '600x450', '1024x768') { foreach ($g in 'simple', 'plein') { Gif $t $g 15 30 } }
+        foreach ($taille in '600x450', '1024x768') { foreach ($genre in 'simple', 'plein') { Gif $taille $genre 15 30 } }
         Gif '1024x768' 'simple' 15 20
         Gif '600x450' 'plein' 15 20
 

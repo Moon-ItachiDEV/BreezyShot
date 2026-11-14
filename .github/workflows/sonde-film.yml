@@ -14,6 +14,10 @@
 # Chaque mesure est une étape à part (continue-on-error, délai propre) : une étape qui échoue
 # ou dépasse son délai n'empêche pas les suivantes, et chaque script écrit ses résultats
 # (NON MESURÉ et sa raison plutôt qu'un silence).
+#
+# Passe « seconde » (par défaut, contrat §1.10) : seulement ce qui restait à mesurer après la
+# première course : 00, 01, 02 -Passe2 (pointeur), 03 -Passe2 (10, 13, 6, 9), 04, 06,
+# 09 -Passe2 (pointeur de WGC), 10 moov, 11. Passe « complete » (à la main) : tout.
 
 name: Sonde film
 
@@ -25,6 +29,12 @@ on:
       - 'sonde/film/**'
       - '.github/workflows/sonde-film.yml'
   workflow_dispatch:
+    inputs:
+      passe:
+        description: 'seconde : ce qui restait à mesurer (§1.10) ; complete : toute la sonde'
+        type: choice
+        options: [seconde, complete]
+        default: seconde
 
 permissions:
   contents: read
@@ -36,6 +46,9 @@ concurrency:
 defaults:
   run:
     shell: pwsh
+
+env:
+  SONDE_PASSE: ${{ inputs.passe || 'seconde' }}
 
 jobs:
   construire:
@@ -119,7 +132,7 @@ jobs:
       - name: 02 S1 points 1, 2, 4 (BitBlt, duplication DXGI, ouverture)
         continue-on-error: true
         timeout-minutes: 20
-        run: ./sonde/film/02-s1-images.ps1
+        run: ./sonde/film/02-s1-images.ps1 -Passe2:$($env:SONDE_PASSE -ne 'complete')
 
       - name: Envoyer les résultats
         if: always()
@@ -160,7 +173,7 @@ jobs:
       - name: 03 S2 points 10, 11, 13, puis 3 à 6 et 9 (chaîne, préparation, MP4 fragmenté)
         continue-on-error: true
         timeout-minutes: 22
-        run: ./sonde/film/03-s2-chaine-mp4.ps1
+        run: ./sonde/film/03-s2-chaine-mp4.ps1 -Passe2:$($env:SONDE_PASSE -ne 'complete')
 
       - name: 04 S4 (GIF)
         continue-on-error: true
@@ -168,6 +181,7 @@ jobs:
         run: ./sonde/film/04-s4-gif.ps1
 
       - name: 05 S3 (micro, piste son AAC)
+        if: env.SONDE_PASSE == 'complete'
         continue-on-error: true
         timeout-minutes: 5
         run: ./sonde/film/05-s3-micro.ps1
@@ -214,11 +228,13 @@ jobs:
         run: ./sonde/film/06-s5-controle.ps1
 
       - name: 07 S6 (un fichier dans le presse-papiers)
+        if: env.SONDE_PASSE == 'complete'
         continue-on-error: true
         timeout-minutes: 5
         run: ./sonde/film/07-s6-presse-papiers.ps1
 
       - name: 08 S7 et S1 point 6 (écrans, échelle, accès perdu, disque plein)
+        if: env.SONDE_PASSE == 'complete'
         continue-on-error: true
         timeout-minutes: 8
         run: ./sonde/film/08-s7-ecrans.ps1
@@ -233,7 +249,7 @@ jobs:
       - name: 09 S1 points 3, 5, 7 (Windows.Graphics.Capture, l'exemple pour un PC)
         continue-on-error: true
         timeout-minutes: 15
-        run: ./sonde/film/09-s1-wgc-pc.ps1
+        run: ./sonde/film/09-s1-wgc-pc.ps1 -Passe2:$($env:SONDE_PASSE -ne 'complete')
 
       - name: Envoyer les résultats
         if: always()
@@ -252,7 +268,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        cas: [ordinaire, moov, fragmente]
+        # Seconde passe : l'index au début seulement (S2 point 7, Finalize refusé la première fois).
+        cas: ${{ fromJSON((inputs.passe || 'seconde') == 'complete' && '["ordinaire","moov","fragmente"]' || '["moov"]') }}
     env:
       SONDE_CIBLE: ${{ github.workspace }}\sonde-exe
       SONDE_RESULTATS: ${{ github.workspace }}\sonde-resultats

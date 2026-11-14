@@ -32,36 +32,36 @@ if (Demarrer-Sonde -Nom '08-s7-ecrans' -Titre 'S7 et S1 point 6 : écrans, éche
     $t = $null
     try {
         Section 'S7 (1) : l''écran de la machine'
-        $script:ModeDepart = $script:N::ModeCourant()
-        $script:Sonde.Restaurer.Add({ if ($script:N::ModeCourant() -ne $script:ModeDepart) { [void]$script:N::RemettreMode() } })
+        $script:ModeDepart = $script:Natif::ModeCourant()
+        $script:Sonde.Restaurer.Add({ if ($script:Natif::ModeCourant() -ne $script:ModeDepart) { [void]$script:Natif::RemettreMode() } })
         Resultat 'Mode courant (EnumDisplaySettings)' $script:ModeDepart '1024x768 attendu' 'à lire'
-        $modes = @($script:N::Modes())
+        $modes = @($script:Natif::Modes())
         Resultat 'Modes offerts' "$($modes.Count) : $($modes -join ', ')" 'à lire (800x600 en fait-il partie ?)' (OuiNon ($modes -contains '800x600'))
         $ecrans = @([System.Windows.Forms.Screen]::AllScreens)
         Resultat 'Écrans (Screen.AllScreens)' "$($ecrans.Count) : $(($ecrans | ForEach-Object { "$($_.DeviceName) $($_.Bounds.X),$($_.Bounds.Y),$($_.Bounds.Width),$($_.Bounds.Height)$(if ($_.Primary) { ' principal' })" }) -join ' ; ')" '1 attendu' 'à lire'
         $r = Jouer-Exemple 'images' @('--methode', 'ecrans') 30
         $l = @($r.Keys | Where-Object { $_ -like 'ecran_*' } | Sort-Object | ForEach-Object { $r[$_] })
         Resultat 'Écrans comme gel::ecrans (EnumDisplayMonitors, GetMonitorInfoW, GetDpiForMonitor)' $(if ($l.Count) { $l -join ' ; ' } else { "NON MESURÉ : $($r['erreur'])" }) 'à lire'
-        $dpi = $script:N::DpiEcran(1, 1)
+        $dpi = $script:Natif::DpiEcran(1, 1)
         Resultat 'DPI de l''écran principal (GetDpiForMonitor)' "$dpi ($([math]::Round($dpi / 96 * 100)) %)" '96 (100 %) attendu' 'à lire'
-        $er = @($script:N::EchelleRelative())
+        $er = @($script:Natif::EchelleRelative())
         Resultat 'Échelle relative (DisplayConfigGetDeviceInfo, pas relatifs à la recommandée)' "code $($er[0]) ; min $($er[1]) ; actuelle $($er[2]) ; max $($er[3])" 'à lire' 'à lire'
         if ($er[0] -eq 0 -and $er[3] -gt $er[2]) {
             $script:EchelleDepart = $er[2]
-            $script:Sonde.Restaurer.Add({ $x = @($script:N::EchelleRelative()); if ($x[0] -eq 0 -and $x[2] -ne $script:EchelleDepart) { [void]$script:N::FixerEchelleRelative($script:EchelleDepart) } })
-            $c = $script:N::FixerEchelleRelative($er[2] + 1)
+            $script:Sonde.Restaurer.Add({ $x = @($script:Natif::EchelleRelative()); if ($x[0] -eq 0 -and $x[2] -ne $script:EchelleDepart) { [void]$script:Natif::FixerEchelleRelative($script:EchelleDepart) } })
+            $c = $script:Natif::FixerEchelleRelative($er[2] + 1)
             Start-Sleep -Seconds 2
-            $d2 = $script:N::DpiEcran(1, 1)
-            $c2 = $script:N::FixerEchelleRelative($er[2])
+            $d2 = $script:Natif::DpiEcran(1, 1)
+            $c2 = $script:Natif::FixerEchelleRelative($er[2])
             Start-Sleep -Seconds 2
-            $d3 = $script:N::DpiEcran(1, 1)
+            $d3 = $script:Natif::DpiEcran(1, 1)
             Resultat 'Échelle changée d''un pas sans personne (DisplayConfigSetDeviceInfo), puis remise' "code $c : DPI $dpi → $d2 ; remise code $c2 : DPI $d3" 'à lire : changée puis revenue' (OuiNon ($c -eq 0 -and $d2 -ne $dpi -and $d3 -eq $dpi))
         }
         else { Resultat 'Échelle changée sans personne' 'non faisable : la machine n''offre aucun pas au-dessus de l''échelle actuelle (ou la lecture a échoué, code ci-dessus)' 'supposition du contrat : non faisable' 'NON' }
         Note 'Ajouter un écran sans personne n''est pas faisable ici (une seule sortie d''affichage virtuelle) : restent les tests purs (§15.1) et la liste de l''utilisateur (maison : un écran 2K ; travail : trois écrans 1080p).'
 
         Section 'S1 (6) et S7 (2) : mode 800 × 600 puis retour, sur le témoin -Rapide'
-        $ok = $script:N::ChangerMode(800, 600, $true)
+        $ok = $script:Natif::ChangerMode(800, 600, $true)
         Resultat 'ChangeDisplaySettingsEx(800 × 600, CDS_TEST)' "$ok (0 : DISP_CHANGE_SUCCESSFUL)" 'à lire' (OuiNon ($ok -eq 0))
         $t = Ouvrir-Temoin -Genre simple -X 100 -Y 100 -Rapide
         $z = $t.Zone
@@ -81,8 +81,8 @@ if (Demarrer-Sonde -Nom '08-s7-ecrans' -Titre 'S7 et S1 point 6 : écrans, éche
             Resultat 'S7 (2) : elle revient proprement' "après : $ap" 'égale à celle d''avant' (OuiNon ($ap -eq $av))
         }
         Start-Sleep -Seconds 1
-        $m = $script:N::ModeCourant()
-        if ($m -ne $script:ModeDepart) { $c = $script:N::RemettreMode(); Start-Sleep -Seconds 1; $m2 = $script:N::ModeCourant() } else { $c = 'inutile'; $m2 = $m }
+        $m = $script:Natif::ModeCourant()
+        if ($m -ne $script:ModeDepart) { $c = $script:Natif::RemettreMode(); Start-Sleep -Seconds 1; $m2 = $script:Natif::ModeCourant() } else { $c = 'inutile'; $m2 = $m }
         Resultat 'Mode à la fin, vu par la sonde' "$m (remise : $c → $m2)" "le mode de départ ($script:ModeDepart)" (OuiNon ($m2 -eq $script:ModeDepart))
 
         Section 'S7 (3) : disque virtuel de 64 Mo monté sur un dossier, puis plein'
@@ -107,7 +107,7 @@ if (Demarrer-Sonde -Nom '08-s7-ecrans' -Titre 'S7 et S1 point 6 : écrans, éche
             'format fs=ntfs quick label=FILMS64',
             "assign mount=`"$script:Montage`""
         ) 180
-        $libre = @($script:N::Disque("$script:Montage\"))
+        $libre = @($script:Natif::Disque("$script:Montage\"))
         $ok = $x.Code -eq 0 -and $libre[0] -gt 0 -and $libre[1] -lt 80MB
         Resultat 'diskpart : create vdisk 64 Mo, attach, partition, format NTFS, assign mount=<dossier>' "code $($x.Code) en $($x.Ms) ms$(if (-not $x.Fini) { ' (pas fini en 180 s)' }) ; volume vu au dossier : libre $(Mo $libre[0]), total $(Mo $libre[1])" 'faisable : monté, total vers 64 Mo' (OuiNon $ok)
         if (-not $ok) { Note "Sortie de diskpart : $($x.Texte)" }
@@ -123,12 +123,12 @@ if (Demarrer-Sonde -Nom '08-s7-ecrans' -Titre 'S7 et S1 point 6 : écrans, éche
             Remove-Item -LiteralPath $f -Force -ErrorAction SilentlyContinue
             Resultat 'Fichier plus grand que la place libre (FileStream.SetLength)' $e 'refus net (0x80070070 ERROR_DISK_FULL attendu)' (OuiNon ($e -match '80070070|disk|espace|space'))
             # Disque rempli à 512 Ko près, puis l'écrivain MP4 (60 s à 30 i/s).
-            $libre = @($script:N::Disque("$script:Montage\"))
+            $libre = @($script:Natif::Disque("$script:Montage\"))
             $rempli = Join-Path $script:Montage 'remplissage.bin'
             try {
                 $fs = [System.IO.File]::Open($rempli, 'Create', 'Write', 'None')
                 try { $fs.SetLength([math]::Max(0, $libre[0] - 512KB)) } finally { $fs.Dispose() }
-                $l2 = @($script:N::Disque("$script:Montage\"))
+                $l2 = @($script:Natif::Disque("$script:Montage\"))
                 Resultat 'Disque rempli' "libre $(Mo $l2[0])" 'environ 0,5 Mo' 'à lire'
                 $film = Join-Path $script:Montage 'film.mp4'
                 $r = Jouer-Exemple 'mf' @('--etape', 'finaliser', '--secondes', '60', '--sortie', "`"$film`"") 240

@@ -111,8 +111,8 @@ if (`$null -eq `$d) { 'namespace introuvable'; exit 1 }
             else {
                 $hw = $script:hwExp
                 Start-Sleep -Milliseconds 800
-                $pp = $script:N::PremierPlan($hw)
-                $n = $script:N::Raccourci(0x56)
+                $pp = $script:Natif::PremierPlan($hw)
+                $n = $script:Natif::Raccourci(0x56)
                 $cible2 = Join-Path $d2 'film-essai.mp4'
                 $ok = Attendre -DelaiS 15 -PasMs 100 -Condition { (Test-Path -LiteralPath $cible2) -and (Get-Item -LiteralPath $cible2).Length -eq $o.Length }
                 Resultat 'Ctrl+V dans la fenêtre de l''Explorateur ouverte sur le dossier' "fenêtre au premier plan $(OuiNon $pp) ; SendInput $n sur 4 ; fichier créé : $(OuiNon $ok)" 'le fichier apparaît' (OuiNon $ok)

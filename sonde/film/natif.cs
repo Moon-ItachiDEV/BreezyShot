@@ -290,6 +290,33 @@ namespace BreezyShotFilm
             return GetForegroundWindow() == h;
         }
 
+        [StructLayout(LayoutKind.Sequential)]
+        struct MOUSEKEYS { public uint cbSize; public uint flags; public uint maxSpeed; public uint timeToMax; public uint ctrlSpeed; public uint r1; public uint r2; }
+        [DllImport("user32.dll", SetLastError = true, EntryPoint = "SystemParametersInfoW")] static extern bool SpiMouseKeys(uint action, uint param, ref MOUSEKEYS v, uint winIni);
+        static bool mouseKeysLu = false;
+        static MOUSEKEYS mouseKeysOrigine;
+
+        /// Allume les touches souris (MKF_MOUSEKEYSON | MKF_AVAILABLE), comme l'essai 11 : sans
+        /// souris branchée, Windows montre alors le pointeur. Le réglage d'origine est gardé.
+        public static bool AllumerMouseKeys()
+        {
+            var m = new MOUSEKEYS(); m.cbSize = (uint)Marshal.SizeOf(typeof(MOUSEKEYS));
+            if (!SpiMouseKeys(0x36, m.cbSize, ref m, 0)) return false;
+            if (!mouseKeysLu) { mouseKeysOrigine = m; mouseKeysLu = true; }
+            m.flags |= 0x3;
+            return SpiMouseKeys(0x37, m.cbSize, ref m, 0);
+        }
+
+        /// Remet les touches souris comme avant AllumerMouseKeys (rien si jamais allumées).
+        public static bool RemettreMouseKeys()
+        {
+            if (!mouseKeysLu) return true;
+            var m = mouseKeysOrigine;
+            bool ok = SpiMouseKeys(0x37, m.cbSize, ref m, 0);
+            if (ok) mouseKeysLu = false;
+            return ok;
+        }
+
         public static bool PointeurMontre()
         {
             CURSORINFO c = new CURSORINFO(); c.cbSize = Marshal.SizeOf(typeof(CURSORINFO));

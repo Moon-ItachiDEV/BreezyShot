@@ -18,7 +18,7 @@ $md = [System.Collections.Generic.List[string]]::new()
 $md.Add('# Sonde du film (BreezyShot 0.7 « Vidéo et GIF », contrat partie I) : résultats bruts')
 $md.Add('')
 $run = if ($env:GITHUB_SERVER_URL -and $env:GITHUB_RUN_ID) { "$env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID" } else { 'hors GitHub' }
-$md.Add("Commit $(if ($env:GITHUB_SHA) { $env:GITHUB_SHA } else { '?' }) ; run $run ; rassemblé le $([DateTime]::UtcNow.ToString('yyyy-MM-dd HH:mm')) UTC.")
+$md.Add("Commit $(if ($env:GITHUB_SHA) { $env:GITHUB_SHA } else { '?' }) ; run $run ; passe $(if ($env:SONDE_PASSE -eq 'seconde') { 'seconde (contrat §1.10 : seulement ce qui restait à mesurer)' } else { 'complète' }) ; rassemblé le $([DateTime]::UtcNow.ToString('yyyy-MM-dd HH:mm')) UTC.")
 $md.Add('')
 $md.Add('Verdicts : « passe » / « échoue » pour un critère du contrat, OUI / NON pour une question, « à lire » pour un chiffre sans seuil, « non mesuré » avec sa raison.')
 
@@ -33,7 +33,13 @@ $md.Add('## Verdicts par script')
 $md.Add('')
 $md.Add('| Script | passe | échoue | OUI | NON | à lire | non mesuré |')
 $md.Add('| --- | --- | --- | --- | --- | --- | --- |')
-$attendus = '00-inventaire', '01-s2-codeur-charge', '02-s1-images', '03-s2-chaine-mp4', '04-s4-gif', '05-s3-micro', '06-s5-controle', '07-s6-presse-papiers', '08-s7-ecrans', '09-s1-wgc-pc', '10-s2-finalize-ordinaire', '10-s2-finalize-moov', '10-s2-finalize-fragmente', '11-s2-modules-061'
+# SONDE_PASSE=seconde (contrat §1.10) : seuls les scripts de la seconde passe sont attendus.
+$attendus = if ($env:SONDE_PASSE -eq 'seconde') {
+    '00-inventaire', '01-s2-codeur-charge', '02-s1-images', '03-s2-chaine-mp4', '04-s4-gif', '06-s5-controle', '09-s1-wgc-pc', '10-s2-finalize-moov', '11-s2-modules-061'
+}
+else {
+    '00-inventaire', '01-s2-codeur-charge', '02-s1-images', '03-s2-chaine-mp4', '04-s4-gif', '05-s3-micro', '06-s5-controle', '07-s6-presse-papiers', '08-s7-ecrans', '09-s1-wgc-pc', '10-s2-finalize-ordinaire', '10-s2-finalize-moov', '10-s2-finalize-fragmente', '11-s2-modules-061'
+}
 foreach ($f in $fichiers) {
     $c = @{ 'passe' = 0; 'échoue' = 0; 'OUI' = 0; 'NON' = 0; 'à lire' = 0; 'non mesuré' = 0 }
     foreach ($l in (Get-Content -LiteralPath $f.FullName -Encoding utf8)) {
@@ -85,6 +91,20 @@ else {
     $autres = @($charge | Where-Object { -not $reference.Contains($_) })
     $md.Add("| Autres modules de charge absents de la référence (pour lire) | $(if ($autres.Count) { $autres -join ', ' } else { 'aucun' }) | | à lire |")
 }
+
+# La liste complète des modules de la 0.6.1, un nom par ligne (S2 point 12 a), entre deux
+# lignes repères : elle se recopie du journal sans télécharger d'artefact.
+$md.Add('')
+$md.Add('## S2 (12a) : modules de l''app 0.6.1 au repos, liste complète')
+$md.Add('')
+if ($ref.Count) {
+    $md.Add('```')
+    $md.Add('----- DEBUT sonde-film-modules-0.6.1.txt -----')
+    foreach ($l in (Get-Content -LiteralPath $ref[0].FullName -Encoding utf8)) { $md.Add($l) }
+    $md.Add('----- FIN sonde-film-modules-0.6.1.txt -----')
+    $md.Add('```')
+}
+else { $md.Add('NON MESURÉ : référence 0.6.1 absente (job app061).') }
 
 foreach ($f in $fichiers) {
     $md.Add('')

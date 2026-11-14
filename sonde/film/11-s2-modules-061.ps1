@@ -104,6 +104,10 @@ if (Demarrer-Sonde -Nom '11-s2-modules-061' -Titre 'S2 point 12 (a) : modules de
             }
             $f = Join-Path $script:Sonde.Sortie 'sonde-film-modules-0.6.1.txt'
             [System.IO.File]::WriteAllLines($f, $sortie, [System.Text.UTF8Encoding]::new($false))
+            # En clair dans le journal, entre deux lignes repères, pour se recopier sans artefact.
+            Write-Host '----- DEBUT sonde-film-modules-0.6.1.txt -----'
+            foreach ($l in $sortie) { Write-Host $l }
+            Write-Host '----- FIN sonde-film-modules-0.6.1.txt -----'
             Note "Référence écrite : $f (à ranger dans docs/sonde-film-modules-0.6.1.txt ; la comparaison 12 (b) est faite par 12-resultats.ps1)."
         }
     }

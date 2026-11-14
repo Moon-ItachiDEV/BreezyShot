@@ -89,33 +89,49 @@ if (Demarrer-Sonde -Nom '06-s5-controle' -Titre 'S5 : la fenêtre de contrôle d
     try {
         $e = Ecran
         $zone = [int[]]@(($e[0] + 100), ($e[1] + 100), 600, 450)
-        $script:Anim0 = $script:N::AnimationsClient()
-        $anim0 = $script:Anim0
-        Resultat 'SPI_GETCLIENTAREAANIMATION au départ' "$anim0" '1 (animations permises)' 'à lire'
-        $script:Sonde.Restaurer.Add({ if ($script:Anim0 -ge 0) { [void]$script:N::FixerAnimationsClient([bool]$script:Anim0) } })
+        $script:Anim0 = $script:Natif::AnimationsClient()
+
+        Resultat 'SPI_GETCLIENTAREAANIMATION au départ' "$script:Anim0" '1 (animations permises)' 'à lire'
+        $script:Sonde.Restaurer.Add({ if ($script:Anim0 -ge 0) { [void]$script:Natif::FixerAnimationsClient([bool]$script:Anim0) } })
 
         # Le processus de la cible est fermé par Terminer-Sonde (Lancer-Pwsh le garde).
         $cible = Ouvrir-Cible
 
+        Section 'S5 : contrôle de la mesure du processeur (page qui calcule exprès 10 ms toutes les 20 ms, 30 s)'
+        $c = Ouvrir-Controle -Zone $zone -Calcul
+        $s = Suivre-Controle $c 30 10
+        $ok = $s.Page -ge 10
+        Resultat 'Processeur des processus WebView2 d''une page qui calcule' ('{0:0.0} % d''un cœur (hôte {1:0.0} %, {2} processus suivis)' -f $s.Page, $s.Hote, $s.Processus) 'au moins 10 % (attendu vers 50 %) : sinon la mesure ne voit pas la page' (OuiNon $ok)
+        $script:MesureCpuSure = $ok
+        Fermer-Controle $c; $c = $null
+
         Section 'S5 : avec l''animation (point qui respire), 5 min'
+        # La machine démarre avec les animations coupées : elles sont permises pour cette passe.
+        $v = $script:Natif::FixerAnimationsClient($true)
+        Resultat 'SPI_SETCLIENTAREAANIMATION 1, relu' "$v" '1' (OuiNon ($v -eq 1))
         $c = Ouvrir-Controle -Zone $zone
         $ec = Lire-Etat $c.Etat
-        Resultat 'Fenêtre prête' "DOM en $($ec['dom_ms']) ms ; affinité $($ec['affinite']) (17 : WDA_EXCLUDEFROMCAPTURE) ; style étendu $($ec['exstyle']) ; traversée $($ec['traverse']) ; prefers-reduced-motion $($ec['reduit'])" 'affinité 17, traversée 1, reduced-motion 0' (OuiNon ("$($ec['affinite'])" -eq '17' -and "$($ec['traverse'])" -eq '1' -and "$($ec['reduit'])" -eq '0'))
+        $anime = "$($ec['reduit'])" -eq '0'
+        Resultat 'Fenêtre prête' "DOM en $($ec['dom_ms']) ms ; affinité $($ec['affinite']) (17 : WDA_EXCLUDEFROMCAPTURE) ; style étendu $($ec['exstyle']) ; traversée $($ec['traverse']) ; prefers-reduced-motion $($ec['reduit'])" 'affinité 17, traversée 1, reduced-motion 0' (OuiNon ("$($ec['affinite'])" -eq '17' -and "$($ec['traverse'])" -eq '1' -and $anime))
         $s = Suivre-Controle $c 300
-        Montrer-Suivi 'avec l''animation' $s -Critere
+        if ($anime -and $script:MesureCpuSure) { Montrer-Suivi 'avec l''animation' $s -Critere }
+        else {
+            Montrer-Suivi 'avec l''animation (chiffres seulement)' $s
+            NonMesurable 'critère des 3 % avec l''animation' "$(if (-not $anime) { "la page voit prefers-reduced-motion à $($ec['reduit']) : le point ne respire pas" } else { 'la mesure du processeur n''a pas vu la page qui calcule' })" 'au plus 3 % d''un cœur en moyenne'
+        }
         $ec = Lire-Etat $c.Etat
         Resultat 'Durée affichée par la page (secondes comptées par la page)' "$($ec['secondes_page']) s pour $([math]::Round((Nombre $ec['depuis_ms']) / 1000)) s de vie" 'à 2 s près' (OuiNon ([math]::Abs((Nombre $ec['secondes_page']) - (Nombre $ec['depuis_ms']) / 1000) -le 3))
         if ($s.Page -gt 3) { Note 'Au-delà de 3 % : le point reste rouge sans respirer (contrat §1.5), ce qui change ce que l''utilisateur voit ; à lui dire.' }
 
         Section 'S5 : entrées vers la fenêtre du dessous (fenêtre de contrôle avec l''animation montrée)'
-        $pp = $script:N::PremierPlan($cible.Hwnd)
+        $pp = $script:Natif::PremierPlan($cible.Hwnd)
         Resultat 'Cible au premier plan (SetForegroundWindow)' (OuiNon $pp) 'OUI' (OuiNon $pp)
         $x = $e[0] + 400; $y = $e[1] + 300
         $a0 = Lire-Etat $cible.Fichier; $k0 = Lire-Etat $c.Etat
-        $n1 = $script:N::Clic($x, $y); Start-Sleep -Milliseconds 400
-        $n2 = 0; foreach ($i in 1..3) { $n2 += $script:N::Molette(-1); Start-Sleep -Milliseconds 120 }
+        $n1 = $script:Natif::Clic($x, $y); Start-Sleep -Milliseconds 400
+        $n2 = 0; foreach ($i in 1..3) { $n2 += $script:Natif::Molette(-1); Start-Sleep -Milliseconds 120 }
         Start-Sleep -Milliseconds 300
-        $n3 = $script:N::Touche(0x41); Start-Sleep -Milliseconds 500
+        $n3 = $script:Natif::Touche(0x41); Start-Sleep -Milliseconds 500
         $a1 = Lire-Etat $cible.Fichier; $k1 = Lire-Etat $c.Etat
         $d = { param($A, $B, $Cle) (Nombre $B[$Cle]) - (Nombre $A[$Cle]) }
         Resultat "Clic gauche en ($x, $y), loin de la pilule (SendInput : $n1 sur 2)" "cible +$(& $d $a0 $a1 'clics') ; page +$(& $d $k0 $k1 'clics')" 'cible +1, page +0' (OuiNon ((& $d $a0 $a1 'clics') -eq 1 -and (& $d $k0 $k1 'clics') -eq 0))
@@ -124,15 +140,15 @@ if (Demarrer-Sonde -Nom '06-s5-controle' -Titre 'S5 : la fenêtre de contrôle d
         Resultat 'Cible encore au premier plan après les trois' "$($a1['premier_plan'])" '1' (OuiNon ("$($a1['premier_plan'])" -eq '1'))
         # Sur la pilule (position par défaut de l'exemple : centrée, 120 px au-dessus du bas).
         $px = $e[0] + [int]($e[2] / 2); $py = $e[1] + $e[3] - 120 + 24
-        $script:N::Poser($px, $py)
+        $script:Natif::Poser($px, $py)
         $ok = Attendre -DelaiS 2 -PasMs 50 -Condition { "$((Lire-Etat $c.Etat)['traverse'])" -eq '0' }
         Resultat "Pointeur sur la pilule ($px, $py) : la fenêtre cesse d'être traversée" "$(OuiNon $ok) (traverse $((Lire-Etat $c.Etat)['traverse']))" 'OUI en moins de 2 s' (OuiNon $ok)
         $b0 = Lire-Etat $cible.Fichier; $m0 = Lire-Etat $c.Etat
-        $n4 = $script:N::Clic($px, $py); Start-Sleep -Milliseconds 500
+        $n4 = $script:Natif::Clic($px, $py); Start-Sleep -Milliseconds 500
         $b1 = Lire-Etat $cible.Fichier; $m1 = Lire-Etat $c.Etat
         Resultat "Clic sur la pilule (SendInput : $n4 sur 2)" "page +$(& $d $m0 $m1 'clics') ; cible +$(& $d $b0 $b1 'clics')" 'page +1, cible +0' (OuiNon ((& $d $m0 $m1 'clics') -eq 1 -and (& $d $b0 $b1 'clics') -eq 0))
-        Resultat 'Premier plan après le clic sur la pilule' "cible au premier plan : $($b1['premier_plan']) ; fenêtre au premier plan : $($script:N::Decrire($script:N::GetForegroundWindow()))" 'à lire (la pilule ne devrait pas prendre le focus)' 'à lire'
-        $script:N::Poser(($e[0] + $e[2] - 8), ($e[1] + 8))
+        Resultat 'Premier plan après le clic sur la pilule' "cible au premier plan : $($b1['premier_plan']) ; fenêtre au premier plan : $($script:Natif::Decrire($script:Natif::GetForegroundWindow()))" 'à lire (la pilule ne devrait pas prendre le focus)' 'à lire'
+        $script:Natif::Poser(($e[0] + $e[2] - 8), ($e[1] + 8))
         $ok = Attendre -DelaiS 2 -PasMs 50 -Condition { "$((Lire-Etat $c.Etat)['traverse'])" -eq '1' }
         Resultat 'Pointeur reparti : la fenêtre est de nouveau traversée' (OuiNon $ok) 'OUI' (OuiNon $ok)
         Fermer-Controle $c; $c = $null
@@ -144,7 +160,7 @@ if (Demarrer-Sonde -Nom '06-s5-controle' -Titre 'S5 : la fenêtre de contrôle d
         Fermer-Controle $c; $c = $null
 
         Section 'S5 : avec « Réduire les animations » (SPI_SETCLIENTAREAANIMATION 0), 2 min'
-        $v = $script:N::FixerAnimationsClient($false)
+        $v = $script:Natif::FixerAnimationsClient($false)
         Resultat 'SPI_SETCLIENTAREAANIMATION 0, relu' "$v" '0' (OuiNon ($v -eq 0))
         $c = Ouvrir-Controle -Zone $zone
         $ec = Lire-Etat $c.Etat
@@ -152,7 +168,7 @@ if (Demarrer-Sonde -Nom '06-s5-controle' -Titre 'S5 : la fenêtre de contrôle d
         $s = Suivre-Controle $c 120
         Montrer-Suivi 'avec « Réduire les animations »' $s
         Fermer-Controle $c; $c = $null
-        if ($anim0 -ge 0) { [void]$script:N::FixerAnimationsClient([bool]$anim0) }
+        if ($script:Anim0 -ge 0) { [void]$script:Natif::FixerAnimationsClient([bool]$script:Anim0) }
         Note 'La page « avec l''animation » est mesurée 5 min comme le contrat le dit ; les deux autres 2 min chacune, pour tenir le job sous 40 min : la comparaison se lit sur la moyenne et les tranches de 30 s.'
         Note 'La cadence de S1 avec et sans la fenêtre montrée : 02-s1-images.ps1, section (d).'
     }

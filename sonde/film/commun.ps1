@@ -23,8 +23,9 @@ $ErrorActionPreference = 'Stop'
 $script:Ici = $PSScriptRoot
 $script:Sonde = $null
 $script:Pwsh = (Get-Process -Id $PID).Path
-$script:N = $null
-$script:T = $null
+$script:Natif = $null
+$script:Temoin = $null
+$script:MouseKeysRemis = $false
 # Plafond des fichiers gardés en artefact (MP4, GIF, PNG), tous scripts confondus.
 $script:BUDGET_FICHIERS = 150MB
 
@@ -60,9 +61,9 @@ function Demarrer-Sonde {
     if (-not ('BreezyShotFilm.Natif' -as [type])) {
         Add-Type -TypeDefinition (Get-Content -LiteralPath (Join-Path $script:Ici 'natif.cs') -Raw)
     }
-    $script:N = [BreezyShotFilm.Natif]
-    $script:T = [BreezyShotFilm.Temoin]
-    try { [void]$script:N::SetProcessDpiAwarenessContext([IntPtr]::new(-4)) } catch { }
+    $script:Natif = [BreezyShotFilm.Natif]
+    $script:Temoin = [BreezyShotFilm.Temoin]
+    try { [void]$script:Natif::SetProcessDpiAwarenessContext([IntPtr]::new(-4)) } catch { }
     Add-Type -AssemblyName System.Drawing, System.Windows.Forms
     $script:Sonde.Machine = Machine
     Write-Host "machine : $($script:Sonde.Machine)"
@@ -386,10 +387,10 @@ function Fermer-Temoin($T) {
 # Fenêtre de contrôle (exemple controle --genre film)
 
 function Ouvrir-Controle {
-    param([int[]]$Zone, [switch]$SansAnimation)
+    param([int[]]$Zone, [switch]$SansAnimation, [switch]$Calcul)
     $etat = Fichier-Temp "controle-$([guid]::NewGuid().ToString('N').Substring(0, 6)).txt"
     $cmd = "$etat.cmd"
-    $a = @('--genre', 'film', '--etat', "`"$etat`"", '--commandes', "`"$cmd`"", '--zone', (Rect-Texte $Zone), '--animation', $(if ($SansAnimation) { '0' } else { '1' }))
+    $a = @('--genre', 'film', '--etat', "`"$etat`"", '--commandes', "`"$cmd`"", '--zone', (Rect-Texte $Zone), '--animation', $(if ($SansAnimation) { '0' } else { '1' }), '--calcul', $(if ($Calcul) { '1' } else { '0' }))
     $p = Lancer-Exemple 'controle' $a
     if ($null -eq $p) { throw 'exemple controle absent (étape de construction échouée ?)' }
     $o = [pscustomobject]@{ P = $p; Etat = $etat; Cmd = $cmd }
@@ -429,6 +430,28 @@ function Mesure-Processus([int[]]$Pids) {
         try { $q = [System.Diagnostics.Process]::GetProcessById($i); $cpu += $q.TotalProcessorTime.TotalSeconds; $prive += $q.PrivateMemorySize64; $vivants++ } catch { }
     }
     return [pscustomobject]@{ Cpu = $cpu; Prive = $prive; Vivants = $vivants }
+}
+
+# Montre le pointeur avant une mesure qui le cherche dans l'image (S1 (b), WGC) : un vrai
+# mouvement (SendInput) ; s'il reste caché (session sans souris), les touches souris sont
+# allumées, comme dans l'essai 11, et remises à la fin du script. Rend { Montre, Detail }.
+function Montrer-Pointeur([int]$X, [int]$Y) {
+    $script:Natif::Poser(($X + 3), ($Y + 3)); Start-Sleep -Milliseconds 80
+    $script:Natif::Poser($X, $Y); Start-Sleep -Milliseconds 150
+    $detail = 'après SetCursorPos et SendInput'
+    if (-not $script:Natif::PointeurMontre()) {
+        $a = $script:Natif::AllumerMouseKeys()
+        if (-not $script:MouseKeysRemis) {
+            $script:MouseKeysRemis = $true
+            $script:Sonde.Restaurer.Add({ [void]$script:Natif::RemettreMouseKeys() })
+        }
+        Start-Sleep -Milliseconds 300
+        $script:Natif::Poser(($X + 3), ($Y + 3)); Start-Sleep -Milliseconds 80
+        $script:Natif::Poser($X, $Y); Start-Sleep -Milliseconds 150
+        $detail += " ; touches souris allumées : $a"
+    }
+    $m = $script:Natif::PointeurMontre()
+    return [pscustomobject]@{ Montre = $m; Detail = "$detail ; montré : $(OuiNon $m)" }
 }
 
 # PNG (ou toute image que System.Drawing lit) → { L, H, Octets } en BGRA, rangé de haut en bas.

@@ -39,7 +39,7 @@ function Liste-Codeurs([string]$Quand) {
 
 function Garde-PS([string]$Quand) {
     foreach ($d in 'mfplat.dll', 'mfreadwrite.dll', 'mf.dll') {
-        $g = $script:N::Garde($d)
+        $g = $script:Natif::Garde($d)
         Resultat "8b : garde LoadLibraryExW($d, LOAD_LIBRARY_SEARCH_SYSTEM32) ($Quand, depuis PowerShell)" $g 'à lire : 1 si Media Foundation est là' (OuiNon ($g -eq '1'))
     }
 }
@@ -126,9 +126,9 @@ if (Demarrer-Sonde -Nom '01-s2-codeur-charge' -Titre 'S2 points 1, 2, 8 et 12 : 
     try {
         Section 'S2 (1) : codeurs et décodeurs (MFTEnumEx)'
         $r = Liste-Codeurs 'avant toute installation'
-        $n = [int]("$($r['codeur_h264_nombre'])" -as [int])
+        $nbCodeurs = [int]("$($r['codeur_h264_nombre'])" -as [int])
         Garde-PS 'avant toute installation'
-        if ($r['ok'] -ne '1' -or $n -eq 0) {
+        if ($r['ok'] -ne '1' -or $nbCodeurs -eq 0) {
             Section 'S2 (1) : Install-WindowsFeature Server-Media-Foundation'
             $ps = Get-Command powershell.exe -ErrorAction SilentlyContinue
             if (-not $ps) { NonMesurable 'installation' 'powershell.exe (5.1, module ServerManager) absent' }

@@ -45,10 +45,10 @@ if (Demarrer-Sonde -Nom '00-inventaire' -Titre 'Inventaire de la machine') {
         foreach ($e in [System.Windows.Forms.Screen]::AllScreens) {
             Resultat "Écran $($e.DeviceName)" "$($e.Bounds.Width) × $($e.Bounds.Height) en ($($e.Bounds.X), $($e.Bounds.Y)), utile $($e.WorkingArea.Width) × $($e.WorkingArea.Height), principal $($e.Primary)"
         }
-        $dpi = $script:N::GetDpiForSystem()
+        $dpi = $script:Natif::GetDpiForSystem()
         Resultat 'Échelle du système' ("{0} ppp ({1:P0})" -f $dpi, ($dpi / 96))
-        Resultat 'Mode d''affichage courant' ($script:N::ModeCourant())
-        Resultat 'Modes d''affichage proposés' (($script:N::Modes()) -join ', ') 'à lire (1920x1080 présent : S7 peut essayer le 1080p)'
+        Resultat 'Mode d''affichage courant' ($script:Natif::ModeCourant())
+        Resultat 'Modes d''affichage proposés' (($script:Natif::Modes()) -join ', ') 'à lire (1920x1080 présent : S7 peut essayer le 1080p)'
         foreach ($v in @(Get-CimInstance Win32_VideoController)) {
             Resultat 'Carte graphique' "$($v.Name), pilote $($v.DriverVersion), $($v.CurrentHorizontalResolution) × $($v.CurrentVerticalResolution) à $($v.CurrentRefreshRate) Hz, état $($v.Status)"
         }
@@ -71,8 +71,8 @@ if (Demarrer-Sonde -Nom '00-inventaire' -Titre 'Inventaire de la machine') {
             try { $wv = (Get-ItemProperty $k -ErrorAction Stop).pv; break } catch { }
         }
         Resultat 'WebView2 (runtime)' $(if ($wv) { $wv } else { 'absent du registre' })
-        Resultat 'Animations des fenêtres (SPI_GETCLIENTAREAANIMATION)' ($script:N::AnimationsClient()) '1 : animations ; 0 : « Réduire les animations » (prefers-reduced-motion)'
-        Resultat 'Pointeur montré' (OuiNon ($script:N::PointeurMontre())) 'à lire (sans souris, Windows le cache : S1 (b) le dit)'
+        Resultat 'Animations des fenêtres (SPI_GETCLIENTAREAANIMATION)' ($script:Natif::AnimationsClient()) '1 : animations ; 0 : « Réduire les animations » (prefers-reduced-motion)'
+        Resultat 'Pointeur montré' (OuiNon ($script:Natif::PointeurMontre())) 'à lire (sans souris, Windows le cache : S1 (b) le dit)'
 
         Section 'Outils'
         Resultat 'PowerShell' $PSVersionTable.PSVersion.ToString()
