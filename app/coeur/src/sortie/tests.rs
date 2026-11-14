@@ -2958,6 +2958,37 @@ mod films {
         assert_eq!(b.lien, None);
     }
 
+    /// Le même fichier, écrit autrement par le système : le presse-papiers rend le chemin
+    /// sous sa forme à lui (Windows : noms longs au lieu des noms courts 8.3 du dossier
+    /// temporaire, `RUNNER~1` ; macOS : `/private/var` au lieu du lien `/var`, et les noms
+    /// en Unicode décomposé, « a » suivi de l'accent grave). Les dossiers sont comparés
+    /// canoniques, les noms sous la même forme, et le fichier doit exister.
+    fn meme_fichier(a: &Path, b: &Path) -> bool {
+        let dossier = |p: &Path| p.parent().and_then(|d| fs::canonicalize(d).ok());
+        // Le seul caractère composé des noms d'essai : « à ».
+        let nom = |p: &Path| {
+            p.file_name()
+                .map(|n| n.to_string_lossy().replace("a\u{300}", "à"))
+        };
+        a.is_file() && dossier(a).is_some() && dossier(a) == dossier(b) && nom(a) == nom(b)
+    }
+
+    #[test]
+    fn meme_fichier_sous_deux_formes() {
+        let l = local();
+        let f = film(&l, SorteFilm::Gif, 10);
+        let lien = fichier_a_glisser(&f, &l.glisser, "à").expect("lien");
+        // Le dossier par un chemin détourné (`..`) et le nom décomposé : le même fichier.
+        let detour = l.glisser.join("..").join("Glisser").join("a\u{300}.gif");
+        assert!(meme_fichier(&lien, &detour));
+        assert!(meme_fichier(&lien, &lien));
+        assert!(!meme_fichier(&lien, &l.glisser.join("b.gif")));
+        assert!(!meme_fichier(
+            &l.glisser.join("absent.gif"),
+            &l.glisser.join("absent.gif")
+        ));
+    }
+
     #[test]
     fn copier_pose_un_lien_au_nom_du_modele() {
         let _seul = PRESSE_PAPIERS_TESTS
@@ -2974,10 +3005,9 @@ mod films {
         match sonder_fichiers() {
             Ok(()) => {
                 assert_eq!(etape, Etape::Faite);
-                assert_eq!(
-                    relire_fichiers().expect("relu"),
-                    std::slice::from_ref(&lien)
-                );
+                let relu = relire_fichiers().expect("relu");
+                assert_eq!(relu.len(), 1, "{relu:?}");
+                assert!(meme_fichier(&relu[0], &lien), "{relu:?} contre {lien:?}");
             }
             Err(e) => {
                 let obligatoire =
