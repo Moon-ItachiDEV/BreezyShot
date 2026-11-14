@@ -1187,10 +1187,10 @@ redimensionnement ; le haut est pris par `WM_NCHITTEST` (`HTTOP`), et tauri-runt
 ajoute son propre gestionnaire de bords (`undecorated_resizing`) au-dessus de la webview.
 `placer` (pure) : l'image à la taille réelle plus `MARGES` 72 × 180 px logiques (36 de
 chaque côté ; barre 52, réserve 14, barre d'annotation 80 et sa réserve 34), au moins
-`LARGEUR_OUVERTURE` 1088 px logiques de large (jeton `editeur-ouverture-largeur`, essai
+`LARGEUR_OUVERTURE` 1096 px logiques de large (jeton `editeur-ouverture-largeur`, essai
 d'égalité : la barre d'annotation y tient sans défiler quel que soit l'outil déplié, la
-plus large, Forme, faisant 1071 px plus 16 de retrait) et 440 de haut, au plus `PART_MAX`
-(90 %) de la zone utile de l'écran sous la souris, centrée ; `ouvrir`
+plus large, Forme avec le trait de son pli, faisant 1078 px plus 16 de retrait) et 440 de
+haut, au plus `PART_MAX` (90 %) de la zone utile de l'écran sous la souris, centrée ; `ouvrir`
 pose la position, puis la taille, puis décale la fenêtre de l'écart entre position
 intérieure et extérieure : la zone cliente tombe exactement sur la place. La barre du haut
 de la page déplace la fenêtre par `data-tauri-drag-region` : `capabilities/editeur.json`
@@ -1314,9 +1314,18 @@ remplace la v2 depuis le 12/11/2026)
   barre : ses variantes (Forme : Rectangle, Ellipse, Ligne ; Flou : Pixeliser, Flouter,
   Bloc noir ; Projecteur : Rectangle, Ovale), ses trois tailles, ses six couleurs et
   « Autre couleur », son opacité (20 à 100 % par 5 ; une glissière tirée = un pas) ; rien
-  ne s'ouvre par-dessus l'image. Les outils repliés gardent un trait de leur couleur ; un
-  instrument a le corps à la couleur de son encre (liseré marqué pour une encre très
-  foncée ou très pâle) et saute quand elle ou sa taille change. Un objet choisi déplie
+  ne s'ouvre par-dessus l'image. Barre plus claire (piste A « Calme », `design/barre-claire`,
+  retour du 13/11 sur la 0.5.4) : le choix d'un groupe est une pastille claire en relief
+  (jetons `editeur-choix-*`), un trait fin sépare les variantes des réglages (caché avec
+  l'intensité pour Bloc noir), le dernier groupe visible garde une marge au bord du pli,
+  aucun outil ne répète le dessin d'une de ses variantes (Flou : une goutte ; Pixeliser :
+  une mosaïque ; Flouter : une tache floue ; Bloc noir : une bande toujours noire, jeton
+  `editeur-bloc-noir` ; Projecteur : une lampe, ses variantes gardant la forme de sa
+  lumière) et l'intensité se règle en trois points, comme les épaisseurs. Les outils
+  repliés gardent une petite nuance bordée de leur couleur sous leur pictogramme
+  (`data-encre` ; rien pour le Projecteur, sans couleur) ; un instrument a le corps à la
+  couleur de son encre (liseré marqué pour une encre très foncée ou très pâle) et saute
+  quand elle ou sa taille change. Un objet choisi déplie
   l'outil qui l'a fait, à ses valeurs : ce qu'on y règle va à lui et à la préférence de
   son outil, pas à l'outil en main (un pas, aucun si rien ne change) ; une variante prise
   dans son pli le change (`changerVariante`). Prendre un autre outil, la touche d'une
@@ -1324,7 +1333,7 @@ remplace la v2 depuis le 12/11/2026)
   Stylo, Surligneur, Gomme, défait la sélection ; reprendre l'outil de l'objet choisi la
   garde. Un texte en saisie déplie l'outil Texte, quel que soit l'outil
   en main. Le focus ne se perd jamais dans un pli qui se replie : il revient au bouton de
-  l'outil. Fenêtre étroite (sous 1088 px) : seuls les outils défilent (molette comprise,
+  l'outil. Fenêtre étroite (sous 1096 px) : seuls les outils défilent (molette comprise,
   même sur Annuler ou Plus), estompés du côté caché ; Annuler, Rétablir et Plus restent en
   entier, le fond et l'ombre de la barre aussi ; l'outil pris s'y montre en entier, ou son
   début s'il est plus large que la place. Les préférences d'avant (variante « Courbe »,
@@ -1827,12 +1836,15 @@ non envoye: <e>`, `surlignage sans fil (<e>): fin montree tout de suite`.
   autre contenu (G6),
   `changerVariante` (V) ; `ECHECS : 0` attendu. Étape du job `pages`.
 - `essais/pages/editeur.cjs` (0.4) : la page de l'éditeur dans Chromium, cœur simulé et
-  vrai modèle, 243 points : noms et rôles accessibles (contrat de l'essai 12), chaque
+  vrai modèle, 250 points : noms et rôles accessibles (contrat de l'essai 12), chaque
   outil, flèche choisie après le tracé et courbée à sa poignée, Gomme au pixel (ce qui
   est dessus décide, pile d'une encre sur un numéro sur une flèche, clic qui tremble),
   Projecteur, recadrage par chaque coin, sélection, la barre C (l'outil déplié, ce que
   chaque outil déplie, l'objet choisi qui déplie son outil, variante changée sur l'objet,
-  instruments à la couleur de l'encre), couleurs, menu « Fermer » et ses issues,
+  instruments à la couleur de l'encre ; barre plus claire : aucun outil ne répète une de
+  ses variantes, choix en pastille claire, trait du pli, intensité en trois points, marge
+  du dernier groupe, nuance bordée des outils repliés, Bloc noir noir en clair comme en
+  sombre), couleurs, menu « Fermer » et ses issues,
   « Copier » qui ferme, vignette de prise, règle de `fermer_demande`, un seul export à la
   fois, clair, sombre, largeur d'ouverture (chaque outil déplié tient), fenêtre étroite
   (seuls les outils défilent, Annuler, Rétablir et Plus restent, l'outil pris se montre),

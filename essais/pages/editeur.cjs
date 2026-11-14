@@ -1486,6 +1486,126 @@ const CHARGE = {
     await fin(p, '9 ter');
   }
 
+  // ---------- 9 quater. barre plus claire (piste A « Calme », design/barre-claire) ----------
+  {
+    const p = await page();
+    // Aucun outil ne répète le dessin d'une de ses variantes (la 0.5.4 montrait cinq grilles
+    // dans le pli du Flou) ; chaque pictogramme visé existe.
+    const dessins = await p.evaluate(() => {
+      const ref = (e) => (e && e.querySelector('use') ? e.querySelector('use').getAttribute('href') : '');
+      const r = {};
+      for (const b of document.querySelectorAll('#outils [data-outil]')) {
+        const variantes = [...b.closest('.pli').querySelectorAll('[data-variante]')];
+        r[b.dataset.outil] = [ref(b), variantes.map(ref)];
+      }
+      return r;
+    });
+    const repetes = Object.entries(dessins).filter(([, [o, vs]]) => o && vs.includes(o));
+    const manquants = await p.evaluate(() =>
+      [...new Set([...document.querySelectorAll('#palette use')].map((u) => u.getAttribute('href')))].filter(
+        (h) => !document.querySelector(h),
+      ),
+    );
+    verifier(
+      repetes.length === 0 &&
+        manquants.length === 0 &&
+        JSON.stringify(dessins.flou) === '["#i-goutte",["#i-mosaique","#i-doux","#i-box"]]' &&
+        JSON.stringify(dessins.projecteur) === '["#i-lampe",["#i-spot","#i-spotE"]]',
+      '9 quater aucun outil ne répète une de ses variantes ; Flou : goutte, mosaïque, tache floue, bande ; Projecteur : lampe',
+      JSON.stringify({ dessins, manquants }),
+    );
+    // Le choix d'un groupe : une pastille claire en relief (jeton editeur-choix-fond, ombre),
+    // le signe à la couleur du texte ; plus de carré plein. Un trait fin sépare les variantes
+    // de l'intensité, en trois points comme les épaisseurs ; le dernier groupe visible garde
+    // une marge au bord du pli.
+    await outil(p, 'Flou');
+    await calme(p);
+    const lire = () =>
+      p.evaluate(() => {
+        const sonde = document.createElement('i');
+        sonde.style.setProperty('background', 'var(--editeur-choix-fond)');
+        sonde.style.setProperty('color', 'var(--text)');
+        sonde.style.setProperty('padding-right', 'var(--editeur-pli-marge)');
+        document.body.appendChild(sonde);
+        const s = getComputedStyle(sonde);
+        const attendu = [s.backgroundColor, s.color, s.paddingRight];
+        sonde.remove();
+        const d = document.querySelector('#outils .pli[data-on]');
+        const vs = d.querySelector('[data-variante]').closest('.grp');
+        const g = d.querySelector('[data-cle="intensite"]');
+        const sep = d.querySelector('.sep');
+        return {
+          attendu,
+          choix: [...d.querySelectorAll('.sz[aria-pressed="true"]')].map((b) => {
+            const c = getComputedStyle(b);
+            return [b.getAttribute('aria-label'), c.backgroundColor, c.boxShadow !== 'none', c.color];
+          }),
+          trait: !!sep && !sep.hidden && sep.getBoundingClientRect().width > 0,
+          signes: g.hidden ? [] : [...g.querySelectorAll('[data-taille] b')].map((b) => getComputedStyle(b).width),
+          marges: [vs, g].map((e) => (e.hidden ? '' : getComputedStyle(e).paddingRight)),
+        };
+      });
+    const pix = await lire();
+    await reglage(p, 'Flouter');
+    await calme(p);
+    const flo = await lire();
+    await reglage(p, 'Bloc noir');
+    await calme(p);
+    const blo = await lire();
+    const [fond, texte, marge] = pix.attendu;
+    const points = JSON.stringify(['4px', '7px', '11px']);
+    verifier(
+      JSON.stringify(pix.choix) ===
+        JSON.stringify([
+          ['Pixeliser', fond, true, texte],
+          ['Moyen', fond, true, texte],
+        ]) &&
+        fond !== texte &&
+        marge === '4px' &&
+        pix.trait &&
+        JSON.stringify(pix.signes) === points &&
+        JSON.stringify(pix.marges) === JSON.stringify(['0px', marge]) &&
+        flo.trait &&
+        JSON.stringify(flo.signes) === points &&
+        !blo.trait &&
+        JSON.stringify(blo.signes) === '[]' &&
+        JSON.stringify(blo.marges) === JSON.stringify([marge, '']),
+      '9 quater choix en pastille claire ; trait entre variantes et intensité en trois points ; cachés pour Bloc noir ; marge du dernier groupe',
+      JSON.stringify({ pix, flo, blo }),
+    );
+    // Un outil replié garde une petite nuance bordée de sa couleur sous son pictogramme, pas
+    // un trait ; un outil sans couleur (Projecteur) n'en a pas.
+    const nuances = await p.evaluate(() =>
+      ['texte', 'projecteur'].map((t) => {
+        const a = getComputedStyle(document.querySelector(`#outils [data-outil="${t}"]`), '::after');
+        return [a.width, a.height, a.borderTopLeftRadius, a.backgroundColor, a.boxShadow !== 'none'];
+      }),
+    );
+    verifier(
+      JSON.stringify(nuances) ===
+        JSON.stringify([
+          ['8px', '8px', '2px', 'rgb(229, 72, 77)', true],
+          ['8px', '8px', '2px', 'rgba(0, 0, 0, 0)', false],
+        ]),
+      '9 quater outil replié : une nuance bordée de sa couleur, rien sans couleur',
+      JSON.stringify(nuances),
+    );
+    await fin(p, '9 quater');
+    // Bloc noir : une bande toujours noire, dans les deux thèmes (le dessin cloné par <use>
+    // prend la règle de son original).
+    const noirs = [];
+    for (const theme of ['light', 'dark']) {
+      const q = await page({ theme });
+      noirs.push(await q.evaluate(() => getComputedStyle(document.querySelector('#i-box .bloc-noir')).fill));
+      await fin(q, `9 quater ${theme}`);
+    }
+    verifier(
+      JSON.stringify(noirs) === '["rgb(20, 21, 24)","rgb(11, 12, 14)"]',
+      '9 quater Bloc noir : une bande noire en clair comme en sombre',
+      JSON.stringify(noirs),
+    );
+  }
+
   // ---------- 10. couleurs : le changement se voit sur l'instrument ----------
   {
     const p = await page();
@@ -2141,7 +2261,7 @@ const CHARGE = {
       tiennent.push([n, m.defile <= 0 && m.g >= 0 && m.d <= largeur && m.suite === '']);
     }
     verifier(
-      largeur === 1088 && tiennent.every(([, ok]) => ok),
+      largeur === 1096 && tiennent.every(([, ok]) => ok),
       `17 ${largeur} px (largeur d'ouverture) : chaque outil déplié tient dans la barre sans défiler`,
       JSON.stringify(tiennent),
     );

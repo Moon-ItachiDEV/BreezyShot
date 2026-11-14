@@ -476,15 +476,15 @@
   --editeur-dock-min: 784px;
   --editeur-dock-retrait: 16px;
   --editeur-dock-fondu: 44px;
-  --editeur-ouverture-largeur: 1088px;
+  --editeur-ouverture-largeur: 1096px;
   --editeur-outils-ecart-v: 5px;
   --editeur-outil-largeur: 38px;
   --editeur-outil-hauteur: 36px;
   --editeur-outil-rayon: 4px;
   --editeur-pli-rayon: 6px;
-  --editeur-encre-largeur: 14px;
-  --editeur-encre-hauteur: 3px;
-  --editeur-encre-bas: 3px;
+  --editeur-encre-nuance: 8px;
+  --editeur-encre-nuance-rayon: 2px;
+  --editeur-encre-bas: 1px;
   --editeur-inst-boite: 40px;
   --editeur-inst-largeur: 30px;
   --editeur-inst-hauteur: 90px;
@@ -504,6 +504,7 @@
   --editeur-nuance-bord: 34%;
   --editeur-cran: 30px;
   --editeur-cran-rayon: 4px;
+  --editeur-pli-separateur: 18px;
   --editeur-pli-marge: 4px;
   --editeur-pli-marge-couleurs: 10px;
   --editeur-opacite-largeur: 72px;
@@ -630,6 +631,9 @@
   --editeur-inst-gomme: #FCFCFD;
   --editeur-inst-bague: #F5F6F8;
   --editeur-inst-ombre: rgba(0,0,0,0.22);
+  --editeur-choix-fond: #FFFFFF;
+  --editeur-choix-ombre: 0 0 0 1px rgba(0,0,0,0.14), 0 1px 2px rgba(0,0,0,0.18);
+  --editeur-bloc-noir: #141518;
   --shadow-2: 0 0 2px rgba(0,0,0,0.12), 0 1px 2px rgba(0,0,0,0.14);
   --shadow-8: 0 0 2px rgba(0,0,0,0.12), 0 4px 8px rgba(0,0,0,0.14);
   --shadow-16: 0 0 2px rgba(0,0,0,0.12), 0 8px 16px rgba(0,0,0,0.14);
@@ -710,6 +714,9 @@
     --editeur-inst-gomme: #E9EBEF;
     --editeur-inst-bague: #D3D7DD;
     --editeur-inst-ombre: rgba(0,0,0,0.45);
+    --editeur-choix-fond: rgba(255,255,255,0.15);
+    --editeur-choix-ombre: 0 0 0 1px rgba(255,255,255,0.06), 0 1px 2px rgba(0,0,0,0.5);
+    --editeur-bloc-noir: #0B0C0E;
     --shadow-2: 0 0 2px rgba(0,0,0,0.24), 0 1px 2px rgba(0,0,0,0.28);
     --shadow-8: 0 0 2px rgba(0,0,0,0.24), 0 4px 8px rgba(0,0,0,0.28);
     --shadow-16: 0 0 2px rgba(0,0,0,0.24), 0 8px 16px rgba(0,0,0,0.28);
@@ -790,6 +797,9 @@
   --editeur-inst-gomme: #E9EBEF;
   --editeur-inst-bague: #D3D7DD;
   --editeur-inst-ombre: rgba(0,0,0,0.45);
+  --editeur-choix-fond: rgba(255,255,255,0.15);
+  --editeur-choix-ombre: 0 0 0 1px rgba(255,255,255,0.06), 0 1px 2px rgba(0,0,0,0.5);
+  --editeur-bloc-noir: #0B0C0E;
   --shadow-2: 0 0 2px rgba(0,0,0,0.24), 0 1px 2px rgba(0,0,0,0.28);
   --shadow-8: 0 0 2px rgba(0,0,0,0.24), 0 4px 8px rgba(0,0,0,0.28);
   --shadow-16: 0 0 2px rgba(0,0,0,0.24), 0 8px 16px rgba(0,0,0,0.28);

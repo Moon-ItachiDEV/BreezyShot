@@ -31,9 +31,10 @@ pub const PAGE: &str = "editeur/editeur.html";
 pub const TAILLE_MIN: (f64, f64) = (640.0, 440.0);
 /// Largeur intérieure à l'ouverture, au moins, pixels logiques, quand la zone utile le
 /// permet (jeton `editeur-ouverture-largeur`) : la barre d'annotation y tient sans défiler,
-/// quel que soit l'outil déplié (la plus large, Forme dépliée, fait 1071 px, plus le retrait
-/// de 16 px). Réduite ensuite jusqu'à `TAILLE_MIN`, la fenêtre fait défiler les outils.
-pub const LARGEUR_OUVERTURE: f64 = 1088.0;
+/// quel que soit l'outil déplié (la plus large, Forme dépliée avec le trait qui sépare ses
+/// variantes de ses réglages, fait 1078 px, plus le retrait de 16 px). Réduite ensuite
+/// jusqu'à `TAILLE_MIN`, la fenêtre fait défiler les outils.
+pub const LARGEUR_OUVERTURE: f64 = 1096.0;
 /// Ce que la page garde autour de l'image, pixels logiques (avenant §3, barre C) : 36 px de
 /// chaque côté ; barre du haut 52, réserve haute 14, barre d'annotation 80 et sa réserve 34
 /// en bas.
@@ -294,8 +295,8 @@ mod tests {
         // Petite : la largeur d'ouverture (la barre dépliée tient) et la hauteur minimale,
         // centrées.
         let r = placer((100, 80), &e);
-        assert_eq!((r.largeur, r.hauteur), (1088, 440));
-        assert_eq!((r.x, r.y), (416, 296));
+        assert_eq!((r.largeur, r.hauteur), (1096, 440));
+        assert_eq!((r.x, r.y), (412, 296));
         // Juste : l'image à la taille réelle, plus les réserves de la page.
         let r = placer((1100, 600), &e);
         assert_eq!((r.largeur, r.hauteur), (1172, 780));
@@ -319,12 +320,12 @@ mod tests {
             assert_eq!((r.largeur, r.hauteur), attendu, "{echelle}");
             assert!(dans(&r, &e.zone_utile));
         }
-        // Petite image : la largeur d'ouverture suit l'échelle (1088 px logiques).
-        for (echelle, largeur) in [(1.0, 1088), (1.25, 1360), (1.5, 1632), (2.0, 2176)] {
+        // Petite image : la largeur d'ouverture suit l'échelle (1096 px logiques).
+        for (echelle, largeur) in [(1.0, 1096), (1.25, 1370), (1.5, 1644), (2.0, 2192)] {
             let e = ecran(0, 0, 3840, 2160, echelle);
             assert_eq!(placer((300, 200), &e).largeur, largeur, "{echelle}");
         }
-        // 1366 × 768 à 125 % : 1360 ne tient pas dans 90 % de la zone utile, 1229 oui.
+        // 1366 × 768 à 125 % : 1370 ne tient pas dans 90 % de la zone utile, 1229 oui.
         let e = ecran(0, 0, 1366, 768, 1.25);
         let r = placer((300, 200), &e);
         assert_eq!(r.largeur, 1229);
@@ -342,8 +343,8 @@ mod tests {
         let r = placer((400, 300), &e);
         assert!(dans(&r, &e.zone_utile));
         // 400 + 72 sous la largeur d'ouverture ; 300 + 180 = 480 de haut.
-        assert_eq!((r.largeur, r.hauteur), (1088, 480));
-        assert_eq!((r.x, r.y), (-1920 + 416, -200 + 276));
+        assert_eq!((r.largeur, r.hauteur), (1096, 480));
+        assert_eq!((r.x, r.y), (-1920 + 412, -200 + 276));
         // Barre des tâches à gauche : la zone utile commence à 48.
         let gauche = Ecran {
             rect: Rect {
