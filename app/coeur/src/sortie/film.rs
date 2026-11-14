@@ -21,6 +21,7 @@ use std::fs::{self, File, OpenOptions};
 use std::io::{self, ErrorKind};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Mutex;
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -72,11 +73,18 @@ const ESSAIS_MAX: u32 = 10_000;
 const TENTATIVES: usize = 64;
 
 /// Cause quand le fichier du film a disparu avant sa sortie.
-const CAUSE_INTROUVABLE: &str = "Le fichier du film est introuvable.";
+const CAUSE_INTROUVABLE: &str = "Le fichier est introuvable.";
 
 /// Le nom de la carte d'un film, dit aussi quand il n'y a ni copie ni enregistrement (F26 ;
 /// le même texte que `application::film::TITRE_CARTE`).
 const TITRE_TERMINE: &str = "Enregistrement terminé";
+
+/// Le registre des films fermés pas encore rangés dans le dossier d'enregistrement, dans
+/// `Films` : un nom de fichier par ligne (B1 de la relecture, choix U4).
+pub const REGISTRE_A_RANGER: &str = "a-ranger.txt";
+
+/// Un seul accès au registre à la fois (fils d'écriture, fil principal, fil du lancement).
+static REGISTRE: Mutex<()> = Mutex::new(());
 
 /// La sorte d'un nom de fichier de travail au format exact `AAAAMMJJ-HHMMSS-mmm[_n].mp4`
 /// ou `.gif` (sur le modèle de `cle_recent`) ; `None` pour tout autre nom.
@@ -182,8 +190,14 @@ pub fn nettoyer_films(
     proteges: &[String],
 ) -> (usize, u64) {
     let films = lister(dossier_films, |n| cle_film(n).is_some());
+    // Un film fermé pas encore rangé n'est jamais retiré (B1).
+    let mut proteges = proteges.to_vec();
+    proteges.extend({
+        let _g = REGISTRE.lock().unwrap_or_else(|e| e.into_inner());
+        lire_registre(dossier_films)
+    });
     let (mut nombre, mut octets) = (0usize, 0u64);
-    for nom in films_a_retirer(&films, maintenant, proteges) {
+    for nom in films_a_retirer(&films, maintenant, &proteges) {
         let taille = films.iter().find(|f| f.nom == nom).map_or(0, |f| f.octets);
         if fs::remove_file(dossier_films.join(&nom)).is_ok() {
             nombre += 1;
@@ -238,15 +252,31 @@ pub struct BilanFilm {
 /// d'enregistrement au lieu d'y être copié (copié puis effacé s'il est sur un autre
 /// volume). Bloquant, peut durer : fil `film-sortie` (F36).
 ///
-/// La copie passe d'abord (son lien est fait sur le fichier de travail), l'enregistrement
-/// ensuite ; un échec de l'une n'empêche pas l'autre. « Récents » n'est jamais touché
-/// (F24).
+/// Sans déplacement, la copie passe d'abord (son lien est fait sur le fichier de travail),
+/// l'enregistrement ensuite ; avec, le film est rangé d'abord et la copie donne le fichier
+/// rangé. Un échec de l'une n'empêche pas l'autre. « Récents » n'est jamais touché (F24).
 pub fn sortir_film(
     fichier: &Path,
     sorte: SorteFilm,
     demande: &Demande,
     deplacer: bool,
 ) -> BilanFilm {
+    // Déplacé d'abord : la copie donne alors le fichier du dossier d'enregistrement
+    // lui-même, sans lien dans `Glisser` qui garderait ses octets après qu'on l'a effacé
+    // d'Images (M1, M2 de la relecture).
+    if deplacer && demande.enregistrer {
+        let enregistrement = etape_fichier(demande, deplacer_dans(fichier, sorte, demande));
+        let (copie, lien) = match (&enregistrement, demande.copier) {
+            (_, false) => (Etape::NonDemandee, None),
+            (EtapeFichier::Fait(range), true) => copier_film(range, sorte, demande),
+            (_, true) => copier_film(fichier, sorte, demande),
+        };
+        return BilanFilm {
+            copie,
+            enregistrement,
+            lien,
+        };
+    }
     let (copie, lien) = if demande.copier {
         copier_film(fichier, sorte, demande)
     } else {
@@ -268,7 +298,9 @@ pub fn sortir_film(
 
 /// Le bouton « Copier » de la vignette : le fichier dans le presse-papiers ; rend l'étape
 /// et le lien posé dans `<local>/Glisser` (à effacer avec le film). Sans `Glisser`
-/// utilisable, c'est le fichier lui-même qui est posé.
+/// utilisable, c'est le fichier lui-même qui est posé ; un film déjà rangé hors de
+/// `<local>/Films` (il porte le nom du modèle) aussi : jamais de copie vers un autre
+/// disque (I3).
 pub fn copier_film(
     fichier: &Path,
     sorte: SorteFilm,
@@ -280,8 +312,10 @@ pub fn copier_film(
     }
     let nom = nom_fichier(&demande.modele_nom, demande.maintenant);
     let donne = match dossier_glisser(demande) {
-        Some(d) => fichier_a_glisser(fichier, &d, &nom).unwrap_or_else(|_| fichier.into()),
-        None => fichier.to_path_buf(),
+        Some(d) if de_travail(fichier) => {
+            fichier_a_glisser(fichier, &d, &nom).unwrap_or_else(|_| fichier.into())
+        }
+        _ => fichier.to_path_buf(),
     };
     let lien = (donne != fichier).then(|| donne.clone());
     let etape = match presse_papiers::copier_fichier(&donne) {
@@ -338,6 +372,143 @@ pub fn annonce_film(bilan: &BilanFilm, demande: &Demande, sorte: SorteFilm) -> A
             annonce(&image, demande)
         }
     }
+}
+
+/// Les noms du registre de `dossier_films` (lignes au format de `cle_film` seulement).
+fn lire_registre(dossier_films: &Path) -> Vec<String> {
+    fs::read_to_string(dossier_films.join(REGISTRE_A_RANGER))
+        .map(|t| {
+            t.lines()
+                .map(str::trim)
+                .filter(|n| cle_film(n).is_some())
+                .map(String::from)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn ecrire_registre(dossier_films: &Path, noms: &[String]) {
+    let chemin = dossier_films.join(REGISTRE_A_RANGER);
+    if noms.is_empty() {
+        let _ = fs::remove_file(chemin);
+        return;
+    }
+    let mut texte = noms.join("\n");
+    texte.push('\n');
+    if let Err(e) = fs::write(&chemin, texte) {
+        log::warn!("film: registre a ranger non ecrit ({})", e.kind());
+    }
+}
+
+/// Le fichier de travail `fichier` est fermé et complet : noté pour être rangé dans le
+/// dossier d'enregistrement s'il ne l'est pas tout de suite (arrêt, fermeture tardive,
+/// sortie coupée) ; il l'est alors au lancement suivant (`films_a_ranger`). Jamais pour un
+/// fichier resté ouvert : un MP4 non fermé est illisible.
+pub fn noter_film_ferme(fichier: &Path) {
+    let (Some(dossier), Some(nom)) = (fichier.parent(), nom_film(fichier)) else {
+        return;
+    };
+    let _g = REGISTRE.lock().unwrap_or_else(|e| e.into_inner());
+    let mut noms = lire_registre(dossier);
+    if !noms.contains(&nom) {
+        noms.push(nom);
+        ecrire_registre(dossier, &noms);
+    }
+}
+
+/// `fichier` n'est plus à ranger (rangé, ou effacé).
+pub fn oublier_film(fichier: &Path) {
+    let (Some(dossier), Some(nom)) = (fichier.parent(), nom_film(fichier)) else {
+        return;
+    };
+    let _g = REGISTRE.lock().unwrap_or_else(|e| e.into_inner());
+    let mut noms = lire_registre(dossier);
+    let avant = noms.len();
+    noms.retain(|n| *n != nom);
+    if noms.len() != avant {
+        ecrire_registre(dossier, &noms);
+    }
+}
+
+/// Les films fermés de `dossier_films` encore à ranger, du plus ancien au plus récent ;
+/// les noms dont le fichier n'existe plus sont retirés du registre.
+pub fn films_a_ranger(dossier_films: &Path) -> Vec<PathBuf> {
+    let _g = REGISTRE.lock().unwrap_or_else(|e| e.into_inner());
+    let noms = lire_registre(dossier_films);
+    let presents: Vec<String> = noms
+        .iter()
+        .filter(|n| dossier_films.join(n).is_file())
+        .cloned()
+        .collect();
+    if presents.len() != noms.len() {
+        ecrire_registre(dossier_films, &presents);
+    }
+    presents.iter().map(|n| dossier_films.join(n)).collect()
+}
+
+/// Le nom d'un fichier de travail au format exact (`cle_film`).
+fn nom_film(fichier: &Path) -> Option<String> {
+    let nom = fichier.file_name()?.to_str()?;
+    cle_film(nom).map(|_| nom.to_string())
+}
+
+/// À l'arrêt (F35, choix U4) : le film déplacé dans le dossier d'enregistrement, sans
+/// jamais le copier (lien dur puis effacement, sinon renommage : même volume, immédiat).
+/// Sur un autre volume : `Err`, le film reste noté et il est rangé au lancement suivant.
+pub fn ranger_film(fichier: &Path, sorte: SorteFilm, demande: &Demande) -> Result<PathBuf, String> {
+    let nom = preparer_dossier(fichier, demande)?;
+    deplacer_sans_copie(
+        fichier,
+        &demande.dossier_enregistrement,
+        &nom,
+        sorte.extension(),
+    )
+    .ok_or_else(|| "autre volume".to_string())
+}
+
+/// Un fichier de travail de `<local>/Films` (pas encore rangé) ?
+fn de_travail(fichier: &Path) -> bool {
+    fichier
+        .parent()
+        .and_then(|d| d.file_name())
+        .is_some_and(|n| n == SOUS_DOSSIER_FILMS)
+}
+
+/// Le fichier qu'un glisser de la carte d'un film donne (F25), sans jamais rien copier :
+/// c'est le fil principal (I3, M1). Un film rangé : lui-même (il porte le nom du modèle).
+/// Un fichier de travail : un lien déjà posé pour la carte (`liens`), sinon un lien dur
+/// neuf dans `dossier_glisser` au nom `nom`, sinon le fichier de travail lui-même.
+pub fn film_a_glisser(
+    fichier: &Path,
+    dossier_glisser: &Path,
+    nom: &str,
+    liens: &[PathBuf],
+) -> Result<PathBuf, String> {
+    if !fichier.is_file() {
+        return Err("le fichier de la capture est introuvable".into());
+    }
+    if !de_travail(fichier) {
+        return Ok(fichier.to_path_buf());
+    }
+    let ext = fichier
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("mp4");
+    let deja = liens.iter().rev().find(|l| {
+        l.parent() == Some(dossier_glisser)
+            && l.extension().and_then(|e| e.to_str()) == Some(ext)
+            && l.is_file()
+    });
+    if let Some(l) = deja {
+        return Ok(l.clone());
+    }
+    if fs::create_dir_all(dossier_glisser).is_ok() {
+        let chemin = chemin_libre_ext(dossier_glisser, nom, ext, existe);
+        if fs::hard_link(fichier, &chemin).is_ok() {
+            return Ok(chemin);
+        }
+    }
+    Ok(fichier.to_path_buf())
 }
 
 /// Efface le fichier de travail d'un film annulé ou sans image (seulement dans
@@ -401,7 +572,18 @@ fn deplacer_dans(fichier: &Path, sorte: SorteFilm, demande: &Demande) -> Result<
     let nom = preparer_dossier(fichier, demande)?;
     let dossier = &demande.dossier_enregistrement;
     let ext = sorte.extension();
-    let choisir = |d: &Path| chemin_libre_ext(d, &nom, ext, existe);
+    if let Some(chemin) = deplacer_sans_copie(fichier, dossier, &nom, ext) {
+        return Ok(chemin);
+    }
+    let chemin = copier_dans(fichier, dossier, &demande.dossier_affiche, &nom, ext)?;
+    let _ = fs::remove_file(fichier);
+    Ok(chemin)
+}
+
+/// Le déplacement sur le même volume : lien dur puis effacement, sinon renommage sur une
+/// réservation ; `None` si aucun ne se fait (autre volume).
+fn deplacer_sans_copie(fichier: &Path, dossier: &Path, nom: &str, ext: &str) -> Option<PathBuf> {
+    let choisir = |d: &Path| chemin_libre_ext(d, nom, ext, existe);
     let lie = placer_avec(
         dossier,
         &choisir,
@@ -411,14 +593,9 @@ fn deplacer_dans(fichier: &Path, sorte: SorteFilm, demande: &Demande) -> Result<
     );
     if let Ok(chemin) = lie {
         let _ = fs::remove_file(fichier);
-        return Ok(chemin);
+        return Some(chemin);
     }
-    if let Ok(chemin) = reserver_puis_renommer(dossier, fichier, &choisir) {
-        return Ok(chemin);
-    }
-    let chemin = copier_dans(fichier, dossier, &demande.dossier_affiche, &nom, ext)?;
-    let _ = fs::remove_file(fichier);
-    Ok(chemin)
+    reserver_puis_renommer(dossier, fichier, &choisir).ok()
 }
 
 /// Réserve le premier nom libre (création exclusive d'un fichier vide), puis renomme
@@ -497,6 +674,9 @@ fn copier_dans(
         return Err(cause_disque(ErrorKind::NotFound, affiche));
     }
     fs::create_dir_all(dossier).map_err(|e| cause_disque(e.kind(), affiche))?;
+    // Un temporaire laissé par une copie coupée (l'app quittée pendant une copie vers un
+    // autre disque) est retiré ici aussi (M12).
+    super::fichier::nettoyer_temporaires(dossier);
     let (temporaire, mut sortie) =
         creer_temporaire(dossier).map_err(|e| cause_disque(e.kind(), affiche))?;
     let ecrit = io::copy(&mut entree, &mut sortie).and_then(|_| sync_tolere(sortie.sync_all()));

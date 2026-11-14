@@ -533,17 +533,58 @@ fn source_perdue_trente_secondes() {
     assert_eq!(b.script.lock().unwrap().replis, 1);
 }
 
-/// Une source perdue avant la première image ne compte pas (l'écran figé est encore là).
+/// Une source perdue avant la première image ne compte pas comme une perte (l'écran figé
+/// est encore là) ; mais sans aucune image, le film n'est jamais dit prêt (I2) : à
+/// l'échéance du prêt, il finit en `SourceFinie` au lieu de filmer du vide.
 #[test]
 fn source_perdue_avant_la_premiere_image() {
     let mut b = banc(Sorte::Video);
     b.script.lock().unwrap().defaut = Some(Rendu::Perdue);
     b.tour(0);
-    b.en_marche(0);
-    b.tours(0, 40_000, 100);
+    b.pret(0);
+    assert!(b.sans_vu(), "pas prêt sans image");
+    b.ordre(Ordre::Decompter(b.a(3000)), 0);
+    b.tours(100, 5900, 100);
+    assert_eq!(b.vus(), vec![Vu::DecompteFini]);
+    b.tours(6000, 40_000, 100);
+    assert_eq!(b.vus(), vec![Vu::SourceFinie]);
     assert!(b.fil.perdue.is_none());
     assert_eq!(b.envoyees(), 0);
     assert_eq!(b.script.lock().unwrap().replis, 0);
+}
+
+/// I2 : le fichier prêt avant la première image : `Pret` attend l'image, puis est dit.
+#[test]
+fn pret_attend_la_premiere_image() {
+    let mut b = banc(Sorte::Video);
+    b.script.lock().unwrap().defaut = Some(Rendu::Perdue);
+    b.tour(0);
+    b.pret(0);
+    b.tours(30, 300, 30);
+    assert!(b.sans_vu());
+    b.script.lock().unwrap().defaut = Some(Rendu::Nouvelle);
+    b.tour(330);
+    assert_eq!(b.vus(), vec![Vu::Pret]);
+    b.tours(360, 600, 30);
+    assert!(b.sans_vu(), "dit une fois");
+}
+
+/// I1 : à `Finir`, le film entre en Fermeture avant de couper le micro et de rendre la
+/// source : un Finir de plus pendant la fermeture ne refait rien.
+#[test]
+fn finir_entre_en_fermeture_d_abord() {
+    let mut b = banc(Sorte::Video);
+    b.tour(0);
+    b.en_marche(0);
+    b.tours(0, 300, 100);
+    b.ordre(Ordre::Finir(Fin::Bouton, b.a(300)), 300);
+    assert!(matches!(b.fil.etape, Moment::Fermeture { .. }));
+    assert!(b.fil.source.is_none());
+    assert!(b.fil.micro.is_none());
+    assert_eq!(b.vider_file().last(), Some(&Vu2::Finir(ms(300))));
+    b.ordre(Ordre::Finir(Fin::Bouton, b.a(310)), 310);
+    assert!(b.vider_file().is_empty());
+    assert!(b.signaux().is_empty());
 }
 
 /// F10, F34 : la session verrouillée ou la mise en veille comptée, pendant l'attente comme
@@ -589,6 +630,12 @@ fn ecrans_changes() {
     b.bureau.lock().unwrap().ecrans = vec![];
     b.tours(100, 2000, 100);
     assert!(b.sans_vu());
+    // M7 : une barre ancrée change la zone utile seule : rien n'a changé pour le film.
+    let mut ancre = ecran();
+    ancre.zone_utile.hauteur = 900;
+    b.bureau.lock().unwrap().ecrans = vec![ancre];
+    b.tours(2000, 2000, 100);
+    assert!(b.sans_vu(), "zone utile seule");
     let mut autre = ecran();
     autre.echelle = 1.5;
     b.bureau.lock().unwrap().ecrans = vec![autre];
@@ -796,6 +843,45 @@ fn micro() {
     assert!(b.fil.micro.is_none());
 }
 
+/// M3 : ouvrir, couper, rouvrir vite : deux ouvertures en cours ; seule la dernière
+/// demandée compte. Elle échoue après une réussite : le micro est coupé, pas gardé.
+#[test]
+fn micro_ouvertures_croisees() {
+    for premiere_ok in [true, false] {
+        let mut b = banc(Sorte::Video);
+        b.tour(0);
+        b.en_marche(0);
+        b.ordre(Ordre::Micro(true), 10);
+        b.ordre(Ordre::Micro(false), 20);
+        b.ordre(Ordre::Micro(true), 30);
+        assert_eq!(b.bureau.lock().unwrap().micros, 2);
+        let ok = || -> Result<Box<dyn Ouvert>, micro::Erreur> {
+            Ok(Box::new(FauxMicro(Arc::new(AtomicBool::new(false)))))
+        };
+        let refus = || -> Result<Box<dyn Ouvert>, micro::Erreur> {
+            Err(micro::Erreur::Autre("refus".into()))
+        };
+        let (r1, r2) = if premiere_ok {
+            (ok(), refus())
+        } else {
+            (refus(), ok())
+        };
+        b.fil.recevoir(Courrier::Micro(r1), b.a(40));
+        assert!(b.sans_vu(), "la première réponse est dépassée");
+        assert!(b.fil.micro.is_none());
+        b.fil.recevoir(Courrier::Micro(r2), b.a(50));
+        if premiere_ok {
+            assert_eq!(b.vus(), vec![Vu::MicroPerdu]);
+            assert!(b.fil.micro.is_none());
+            assert!(!b.fil.liens.ouvert.load(Ordering::SeqCst));
+        } else {
+            assert!(b.sans_vu());
+            assert!(b.fil.micro.is_some());
+            assert!(b.fil.liens.ouvert.load(Ordering::SeqCst));
+        }
+    }
+}
+
 /// F27, F29 : Finir (le temps du film arrêté là, pauses exclues), puis le fichier fermé :
 /// `Ferme` avec le fichier, la durée et la dernière image brute.
 #[test]
@@ -838,18 +924,24 @@ fn finir_puis_fermer() {
     assert!(b.signaux().is_empty());
 }
 
-/// Finir hors marche (attente, décompte) : rien ; c'est le fil principal qui annule.
+/// Finir hors marche (attente, décompte) : le fichier est abandonné, la source rendue, et
+/// `Ferme` en échec est dit tout de suite (le fil principal n'attend pas 10 s pour rien).
 #[test]
 fn finir_hors_marche() {
     let mut b = banc(Sorte::Video);
     b.tour(0);
     b.ordre(Ordre::Finir(Fin::Bouton, b.a(10)), 10);
-    assert!(b.vider_file().is_empty());
-    assert!(b.fil.source.is_some());
-    b.ordre(Ordre::Annuler, 20);
     assert_eq!(b.vider_file(), vec![Vu2::Abandonner]);
     assert!(b.fil.source.is_none());
+    assert!(b.signaux().contains(&Signal::Ferme {
+        numero: 5,
+        issue: Err("fichier")
+    }));
     assert_eq!(b.tour(30), None);
+    // Un Annuler ensuite : rien de plus.
+    b.ordre(Ordre::Annuler, 40);
+    assert!(b.vider_file().is_empty());
+    assert!(b.signaux().is_empty());
 }
 
 /// F29 : le fichier pas fermé 10 s après la fin : `Ferme` en échec (`delai`), une fois ;
@@ -914,18 +1006,21 @@ fn panique() {
 /// parti.
 #[test]
 fn fermeture_sur_le_canal() {
-    let (envoi, fermeture) = mpsc::channel();
+    let (envoi, fermeture) = mpsc::channel::<Fini>();
     let fil = std::thread::spawn(move || {
         std::thread::sleep(ms(30));
-        let _ = envoi.send(());
+        let _ = envoi.send(Some(PathBuf::from("/l/Films/f.mp4")));
     });
-    assert!(attendre_fermeture(&fermeture, Duration::from_secs(5)));
+    assert_eq!(
+        attendre_fermeture(&fermeture, Duration::from_secs(5)),
+        Some(Some(PathBuf::from("/l/Films/f.mp4")))
+    );
     fil.join().unwrap();
-    let (_envoi, fermeture) = mpsc::channel::<()>();
-    assert!(!attendre_fermeture(&fermeture, ms(20)));
-    let (envoi, fermeture) = mpsc::channel::<()>();
+    let (_envoi, fermeture) = mpsc::channel::<Fini>();
+    assert_eq!(attendre_fermeture(&fermeture, ms(20)), None);
+    let (envoi, fermeture) = mpsc::channel::<Fini>();
     drop(envoi);
-    assert!(attendre_fermeture(&fermeture, ms(20)));
+    assert_eq!(attendre_fermeture(&fermeture, ms(20)), Some(None));
 }
 
 /// Une seule source de film à la fois (Windows refuse une seconde duplication du même
@@ -1040,7 +1135,7 @@ struct Atelier {
     envoi: Sender<Envoi>,
     rapport: Receiver<Courrier>,
     retours: Receiver<Pixels>,
-    fini: Receiver<()>,
+    fini: Receiver<Fini>,
     en_file: Arc<AtomicUsize>,
     journal: Arc<Mutex<Journal>>,
     fil: std::thread::JoinHandle<()>,
@@ -1133,7 +1228,13 @@ fn ecriture_jusqu_a_la_fin() {
     let Courrier::Ferme(Ok(ecrit)) = a.courrier() else {
         panic!("ferme attendu");
     };
-    assert!(a.fini.try_recv().is_ok(), "fermeture dite avant le compte");
+    assert_eq!(
+        a.fini.try_recv(),
+        Ok(Some(fichier.clone())),
+        "fermeture dite avant le compte"
+    );
+    // B1 : le fichier fermé est noté, pour être rangé au prochain lancement.
+    assert_eq!(sortie::films_a_ranger(&a.films), vec![fichier.clone()]);
     assert_eq!(ecrit.octets, 4);
     assert_eq!(ecrit.ecriture, Some(1.0));
     assert_eq!(a.en_file.load(Ordering::SeqCst), 0);
@@ -1161,11 +1262,38 @@ fn ecriture_abandonnee() {
         } else {
             a.envoi.send(Envoi::Abandonner).unwrap();
         }
-        a.fini.recv_timeout(Duration::from_secs(10)).unwrap();
+        assert_eq!(a.fini.recv_timeout(Duration::from_secs(10)), Ok(None));
         a.fil.join().unwrap();
         assert!(!fichier.exists());
         assert!(a.journal.lock().unwrap().abandonne);
+        assert!(sortie::films_a_ranger(&a.films).is_empty());
     }
+}
+
+/// M8 : le fil `film` arrêté net après des images (canal coupé) : le fichier est fini au
+/// temps de la dernière image plus un pas, gardé et noté pour le prochain lancement.
+#[test]
+fn ecriture_coupee_apres_des_images() {
+    let a = atelier(Sorte::Video, None, false, false);
+    let Courrier::Pret { fichier, .. } = a.courrier() else {
+        panic!("pret attendu");
+    };
+    a.pousser(Envoi::Image {
+        pixels: pixels(4, 4),
+        instant: ms(100),
+    });
+    drop(a.envoi);
+    assert_eq!(
+        a.fini.recv_timeout(Duration::from_secs(10)),
+        Ok(Some(fichier.clone()))
+    );
+    a.fil.join().unwrap();
+    assert!(fichier.is_file());
+    let j = a.journal.lock().unwrap();
+    assert_eq!(j.fini, Some(ms(100) + Sorte::Video.pas()));
+    assert!(!j.abandonne);
+    drop(j);
+    assert_eq!(sortie::films_a_ranger(&a.films), vec![fichier]);
 }
 
 /// F28 : une écriture refusée est dite une fois (`Refus`), plus rien n'est écrit ; la fin
@@ -1199,7 +1327,7 @@ fn ecriture_qui_panique() {
         instant: Duration::ZERO,
     });
     assert!(matches!(a.courrier(), Courrier::Echec("fil")));
-    a.fini.recv_timeout(Duration::from_secs(10)).unwrap();
+    assert_eq!(a.fini.recv_timeout(Duration::from_secs(10)), Ok(None));
     a.fil.join().unwrap();
 }
 
@@ -1227,7 +1355,7 @@ fn ecriture_sans_dossier() {
     };
     ecrire_sans_panique(e, Box::new(|_: &Path| Err("codeur")));
     assert!(matches!(rapport.try_recv(), Ok(Courrier::Echec("disque"))));
-    assert!(fini.try_recv().is_ok());
+    assert_eq!(fini.try_recv(), Ok(None));
 }
 
 /// Le codeur refusé à la création : film impossible (`codeur`), rien ne reste.
@@ -1259,7 +1387,7 @@ fn ecriture_codeur_refuse() {
         }),
     );
     assert!(matches!(rapport.try_recv(), Ok(Courrier::Echec("codeur"))));
-    assert!(fini.try_recv().is_ok());
+    assert_eq!(fini.try_recv(), Ok(None));
     assert_eq!(std::fs::read_dir(&films).unwrap().count(), 0);
 }
 
