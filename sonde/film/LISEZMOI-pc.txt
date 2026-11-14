@@ -1,0 +1,34 @@
+Sonde du film de BreezyShot 0.7 : S1 sur un PC sous Windows 11 (contrat 0.7, §1.1, point 7)
+============================================================================================
+
+Ce dossier contient un seul programme, images.exe. Rien à installer : il ne touche ni au
+registre ni aux réglages, et n'écrit qu'un fichier texte de résultats (plus deux petites
+images dans le dossier temporaire).
+
+Lancer
+------
+1. Ouvrir PowerShell dans ce dossier (clic droit dans le dossier, « Ouvrir dans le
+   Terminal »).
+2. Taper :
+
+       .\images.exe --methode pc
+
+3. Ne pas toucher la souris ni le clavier pendant environ 3 minutes. Une fenêtre de
+   600 × 450 qui clignote s'ouvre en haut à gauche de l'écran principal : c'est le témoin
+   dont les images sont prises. Un cadre jaune peut apparaître un instant autour de
+   l'écran : c'est la mesure du cadre de Windows.Graphics.Capture.
+4. À la fin, le fichier sonde-film-pc-resultats.txt est écrit dans ce dossier. L'envoyer tel
+   quel.
+
+Ce qui est mesuré
+-----------------
+- La version de Windows, les cartes graphiques et les écrans.
+- Trois moyens de prendre les images (BitBlt, duplication de bureau DXGI,
+  Windows.Graphics.Capture), sur la zone du témoin et sur l'écran entier, à 30 puis à 15
+  images par seconde, 10 s chacun : temps par image, images par seconde, nombre de valeurs
+  différentes du compteur du témoin vues par seconde.
+- L'ouverture de la duplication et de BitBlt, cinq fois.
+- Le cadre jaune de Windows.Graphics.Capture, et le pointeur de la souris dans ses images.
+
+Options : --sortie <fichier> pour un autre nom de fichier, --duree <s> pour une autre durée
+par mesure (10 s par défaut).
