@@ -40,7 +40,8 @@ app/
                             licence en vigueur et ses trois commandes (0.5) ;
                             defilante.rs : décisions de la capture défilante (pures,
                             0.6), geste_defilante.rs : ses gestes et ses fils,
-                            fenetre_defilante.rs : les quatre commandes de sa page
+                            fenetre_defilante.rs : les quatre commandes de sa page ;
+                            veille.rs : veille de la boucle principale (journal)
       raccourcis/           raccourcis globaux (étape 3), Échap global de la sélection,
                             Entrée globale du défilement (0.6)
       capture/              figer (appelle systeme::gel), géométrie de la sélection, découpe
@@ -277,6 +278,14 @@ une **table constante unique** `(Etat, Declencheur) -> Etat` et une fonction pur
 Ajouter un état, c'est ajouter des lignes. La table suit le tableau « États » du workflow :
 un raccourci de capture ne lance une capture que depuis `Repos` (et depuis `Vignette`, où il
 ferme la vignette puis relance) ; il est ignoré ailleurs.
+
+Un appui ignoré écrit d'abord `appui zone ignore: etat Lecture depuis 1200 ms` (l'automate
+note depuis quand il est dans son état), puis la ligne habituelle `capture deja en cours:
+appui ignore`. La veille de la boucle (`application/veille.rs`, depuis le 13/11/2026) pose
+une tâche vide sur le fil principal chaque seconde : si elle n'a pas tourné après 2 s, le
+journal dit `boucle principale bloquee depuis 2000 ms (etat … depuis … ms)`, puis
+`boucle principale reprise apres … ms`. Elle ne change rien : elle sert à lire après coup
+un raccourci qui « ne répond pas » (boucle bloquée, ou appui refusé par l'automate).
 
 Chaque changement d'état écrit une ligne de journal `etat Repos -> Gel (DemandeCapture
 zone)`. La capture d'une zone suit `Repos -> Gel -> Selection -> Decoupe -> Repos` (§3.6).
