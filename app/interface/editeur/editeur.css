@@ -829,39 +829,29 @@ input {
   stroke-linejoin: round;
 }
 
-/* Vignette de prise (« Glisser vers une appli ») */
-.ghost {
-  position: absolute;
-  z-index: 9;
-  right: var(--editeur-vignette-droite);
-  bottom: calc(var(--editeur-dock-hauteur) + var(--editeur-vignette-ecart));
-  width: var(--editeur-vignette-largeur);
-  padding: var(--editeur-pop-marge);
-  border-radius: var(--editeur-vignette-rayon);
-  background: var(--editeur-pop);
-  border: var(--editeur-trait-largeur) solid var(--editeur-verre-bord);
-  box-shadow: var(--shadow-28);
+/* Bouton « Glisser vers une appli » (design/glisser-appli, piste A) : on l'attrape et on
+   glisse ; un simple clic le secoue et dit quoi faire. */
+.rb.prise {
   cursor: grab;
-  animation: entre var(--duree-editeur-vignette) var(--courbe-ressort);
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: var(--editeur-vignette-ecart-interne);
   touch-action: none;
 }
-.ghost[hidden] {
-  display: none;
+.rb.prise.glisse {
+  cursor: grabbing;
+  background: var(--editeur-survol);
 }
-.ghost img {
-  width: 100%;
-  border-radius: var(--editeur-pop-marge);
-  display: block;
-  pointer-events: none;
+.rb.prise.secoue {
+  animation: secoue var(--duree-editeur-vignette) ease-out;
 }
-.ghost svg {
-  width: var(--editeur-picto-vignette);
-  height: var(--editeur-picto-vignette);
-  color: var(--text-3);
+@keyframes secoue {
+  25% {
+    transform: translateX(-2px);
+  }
+  50% {
+    transform: translateX(2px);
+  }
+  75% {
+    transform: translateX(-1px);
+  }
 }
 
 /* Saisie du texte en place */
