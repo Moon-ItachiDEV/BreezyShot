@@ -71,6 +71,7 @@ fn nom_dans_annonce(action: &str) -> String {
         "derniere_zone" => "la dernière zone".into(),
         "historique" => "l'historique".into(),
         "texte" => "le texte".into(),
+        "defilante" => "la capture défilante".into(),
         autre => autre.into(),
     }
 }
@@ -323,6 +324,20 @@ mod tests {
         let a = choisir(&t, false, |_| false).annonce().unwrap();
         assert!(a.erreur);
         assert_eq!(a.titre, "Aucun raccourci disponible");
+    }
+
+    /// Contrat 0.6, §7.2 : `Ctrl + Maj + 5` pris par une autre app, le repli existant.
+    #[test]
+    fn defilante_sans_raccourci_nommee() {
+        let t = table(&[("zone", &["Ctrl+Maj+1"]), ("defilante", &["Ctrl+Maj+5"])]);
+        let b = choisir(&t, false, |r| r.canonique() != "Ctrl+Maj+5");
+        let a = b.annonce().unwrap();
+        assert!(!a.erreur);
+        assert_eq!(a.titre, "Aucun raccourci pour la capture défilante");
+        assert_eq!(
+            decider_annonce(None, &b).a_retenir.unwrap().action,
+            "defilante"
+        );
     }
 
     /// D'« une action sans raccourci » à « plus aucune » : situation différente, l'erreur

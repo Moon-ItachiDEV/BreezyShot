@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-defilante-apercu"
+description = "Enables the defilante_apercu command without any pre-configured scope."
+commands.allow = ["defilante_apercu"]
+
+[[permission]]
+identifier = "deny-defilante-apercu"
+description = "Denies the defilante_apercu command without any pre-configured scope."
+commands.deny = ["defilante_apercu"]

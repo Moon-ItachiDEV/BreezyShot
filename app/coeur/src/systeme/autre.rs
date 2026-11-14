@@ -55,6 +55,10 @@ pub fn exclure_des_captures(_fenetre: &tauri::WebviewWindow) -> bool {
     false
 }
 
+pub fn inclure_dans_les_captures(_fenetre: &tauri::WebviewWindow) -> bool {
+    true
+}
+
 pub fn cacher_sans_tao(_fenetre: &tauri::WebviewWindow) -> Result<bool, String> {
     Ok(false)
 }

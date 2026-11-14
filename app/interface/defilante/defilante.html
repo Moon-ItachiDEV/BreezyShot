@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Capture défilante BreezyShot</title>
+<link rel="stylesheet" href="../commun/jetons.css">
+<link rel="stylesheet" href="defilante.css">
+<script type="module" src="defilante.js"></script>
+</head>
+<body>
+  <!-- La fenêtre couvre l'écran de la zone, transparente, traversée par les clics et la
+       molette : seule la pilule « Terminer » les reçoit, quand la souris y est. -->
+  <div class="scene" id="scene" hidden>
+    <div class="zone" id="zone"></div>
+    <div class="apercu" id="apercu" aria-hidden="true" hidden></div>
+    <div class="pilule" id="pilule">
+      <button class="terminer" id="terminer" type="button" tabindex="-1"></button>
+    </div>
+  </div>
+  <div class="message" id="message" role="status" aria-live="polite" hidden></div>
+</body>
+</html>

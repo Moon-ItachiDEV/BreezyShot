@@ -121,6 +121,7 @@ const DEMO = {
     { id: "capturer_fenetre", libelle: "Capturer une fenêtre", raccourci: "Ctrl + Maj + 3" },
     { separateur: true },
     { id: "capturer_derniere_zone", libelle: "Refaire la dernière zone", raccourci: "Ctrl + Maj + 4" },
+    { id: "capturer_defilante", libelle: "Capture défilante", raccourci: "Ctrl + Maj + 5" },
     { id: "capturer_texte", libelle: "Copier le texte", raccourci: "Ctrl + Maj + T" },
     { separateur: true },
     { id: "historique", libelle: "Historique", raccourci: "Ctrl + Maj + H" },
