@@ -926,7 +926,11 @@ dans un fil rend une fin (`fil`). Une seule source de film à la fois : un jeton
 (`Jeton`) est pris avant `vivant::ouvrir_source` et rendu avec elle (à la fin du film, à
 l'annulation, ou à la fin du fil) ; un film qui suit de près attend la source précédente
 (2 s au plus), sans quoi Windows refuse la seconde duplication du même écran et le film
-passerait en BitBlt.
+passerait en BitBlt. La capture défilante prend le même jeton avant `vivant::ouvrir`
+(`geste_defilante::defiler_et_assembler`, `film::SOURCE_RENDUE_MAX` au plus, puis
+`defilante: source precedente non rendue apres … ms` en WARN si le film ne l'a pas rendu) :
+elle ne lit qu'en BitBlt, mais ne commence jamais ses copies pendant que le fil d'un film
+tient encore l'écran.
 
 **Fins** (F27, F28, F33 à F35). Gardées (Finalisation, puis vignette) : bouton
 « Arrêter », le même raccourci (choix B1), la limite, le disque, les écrans changés, la
@@ -2235,14 +2239,38 @@ non envoye: <e>`, `surlignage sans fil (<e>): fin montree tout de suite`.
   l'Explorateur sont joués et notés seulement ; les suites d'images pour l'assemblage
   (résumés de lignes `resume …`, paires `suite … paire`) et les lignes `vivant:` des tests
   sont dans la sortie.
+- Essai Windows 15 (`15-video-gif.ps1`, 0.7, 1 200 s au plus, quatorze à seize minutes
+  s'il réussit) : la vidéo et le GIF de bout en bout (contrat 0.7, §15.3), sur un témoin
+  WPF animé (`temoin-anime.ps1`, dessin et aides natives dans `film-natif.cs`) dont chaque
+  image écrit son compteur k en 16 carrés et dont chaque pas est noté sur l'horloge de
+  performance ; chaque MP4 est relu image par image par l'exemple `lire_film`
+  (`BREEZYSHOT_LIRE_FILM`, construit par la CI), chaque GIF par System.Drawing. L0 sans
+  licence (rien du film, modules comparés à `docs/sonde-film-modules-0.6.1.txt`, réglages
+  passés en v6) ; L1 (raccourcis, menu, Réglages, modules hors des onze de F32) ; A vidéo de
+  6 s (visée, décompte, styles et premier plan, duplication, pilule, Échap libéré, durée
+  lue, pointeur, « Arrêter », vignette, fichier relu au pas de 100 ms, presse-papiers,
+  `Films` vide), A7 fraîcheur sur le témoin `-Rapide`, A9 capturable (cadre, voile, pilule) ;
+  B GIF (raccourci, menu, témoin fixe) ; C pause ; D annulations (Échap, croix, Arrêter,
+  session, visée) ; E gardes (Ctrl+Maj+2 et 7 ignorés pendant une vidéo, Ctrl+Maj+6 qui
+  l'arrête, Ctrl+Maj+6 ignoré pendant un GIF, menu « Quitter » seul, `--quitter`) ; F zones
+  (80 × 60, 601 × 451, GIF à la limite de 60 s), F125 si la session suit l'échelle ; G sans
+  vignette ; H copie éteinte (Copier, Supprimer, Annuler) ; I processeur et mémoire (vidéo de
+  30 s, GIF), cinq films de suite ; J sans Media Foundation ; K session, veille, écrans
+  800 × 600, disque virtuel de 300 Mo (diskpart) laissé à 2 Mo de la marge ; L app tuée
+  pendant une vidéo puis relancée. Budgets du §9 sur `film debut` et `chrono film`. Non
+  vérifiable sur la machine GitHub (un écran 1024 × 768 à 100 %, sans carte graphique ni
+  micro) : le micro et le son, le codeur matériel, la duplication sur une vraie carte,
+  l'écran 2K et 150 %, plusieurs écrans, la vraie veille et la reprise, UAC, l'arrêt de
+  Windows, OneDrive, le collage dans d'autres applications et la lecture dans les lecteurs
+  du système ; ces points sont dans la liste de tests de l'utilisateur.
 - `essais/` : un script par étape (`01-socle.ps1`, `02-reglages.ps1`, `03-raccourci.ps1`,
   `04-zone.ps1`, `05-plein-ecran.ps1`, `06-fenetre.ps1`, `07-vignette.ps1`,
   `08-reglages-fenetre.ps1`, `09-installateur.ps1`, `10-confort.ps1`,
   `11-pointeur.ps1`, `12-editeur.ps1`, `13-historique-texte.ps1`,
-  `14-defilante.ps1`), tous les `NN-*.ps1`
+  `14-defilante.ps1`, `15-video-gif.ps1`), tous les `NN-*.ps1`
   pris dans l'ordre sans liste écrite (les essais 01 à 12 tournent sans licence), lancés
   par `essais/lancer.ps1` sur le .exe de release (un essai pas fini en 600 s, 900 s pour
-  les essais 13 et 14, est arrêté, avec ce qu'il a lancé, et compte comme échoué, les journaux de
+  les essais 13 et 14, 1 200 s pour l'essai 15, est arrêté, avec ce qu'il a lancé, et compte comme échoué, les journaux de
   l'app qu'il laisse rangés avec les autres ; un bilan resté d'un passage d'avant est effacé avant
   l'essai ; après chaque essai, une app ou une aide restée ouverte est arrêtée et nommée,
   sinon elle retient la sortie de l'étape jusqu'à sa limite de temps, et de WebView2

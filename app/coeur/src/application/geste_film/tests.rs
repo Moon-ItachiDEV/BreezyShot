@@ -933,6 +933,9 @@ fn fermeture_sur_le_canal() {
 /// à la fin du film, à l'annulation, ou à sa fin. Un seul essai le prend (il est global).
 #[test]
 fn une_seule_source_a_la_fois() {
+    let _verrou = VERROU_SOURCE_ESSAIS
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
     let j = Jeton::prendre(Duration::ZERO).expect("libre");
     assert!(Jeton::prendre(ms(20)).is_none());
     let rendu = std::thread::spawn(move || {

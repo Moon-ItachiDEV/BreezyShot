@@ -70,20 +70,27 @@ use crate::sortie::{self, BilanFilm, Etape, EtapeFichier};
 use crate::systeme::gel::{self, Changement, EcranInfo, Pixels, Pointeur};
 use crate::systeme::{self, micro, mp4, vivant, Rect};
 
-/// Une source de film est-elle ouverte ? Une seule à la fois (`Jeton`).
+/// Une source d'images vivantes est-elle ouverte (film ou défilante) ? Une seule à la fois
+/// (`Jeton`).
 static SOURCE: (Mutex<bool>, Condvar) = (Mutex::new(false), Condvar::new());
 
-/// Le droit d'ouvrir la source d'un film : pris avant `vivant::ouvrir_source`, rendu avec
-/// elle (dès la fin du film, avant la fermeture du fichier, ou à la fin du fil). Windows
-/// refuse une seconde duplication du même écran (`0x80070057`) : sans ce jeton, le film
-/// qui suit de près un film annulé partirait en BitBlt.
+/// Les tests qui prennent le jeton (il est global) passent l'un après l'autre.
+#[cfg(test)]
+pub(super) static VERROU_SOURCE_ESSAIS: Mutex<()> = Mutex::new(());
+
+/// Le droit d'ouvrir une source d'images vivantes : pris avant `vivant::ouvrir_source`
+/// (film) ou `vivant::ouvrir` (défilante, `geste_defilante`), rendu avec elle (pour un film
+/// dès sa fin, avant la fermeture du fichier, ou à la fin du fil ; pour une défilante à la
+/// fin de son fil). Windows refuse une seconde duplication du même écran (`0x80070057`) :
+/// sans ce jeton, le film qui suit de près un film annulé partirait en BitBlt, et une
+/// source ouverte juste après un film pourrait trouver la sienne encore là.
 #[derive(Debug)]
-struct Jeton(());
+pub(super) struct Jeton(());
 
 impl Jeton {
     /// Attend au plus `delai` que la source précédente soit rendue ; `None` si elle ne
-    /// l'est pas (le film part quand même, sans jeton).
-    fn prendre(delai: Duration) -> Option<Jeton> {
+    /// l'est pas (le film ou la défilante part quand même, sans jeton).
+    pub(super) fn prendre(delai: Duration) -> Option<Jeton> {
         let (tenue, rendue) = &SOURCE;
         let g = tenue.lock().unwrap_or_else(|e| e.into_inner());
         let (mut g, _) = rendue
