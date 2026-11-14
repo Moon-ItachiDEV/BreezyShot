@@ -8,18 +8,14 @@
 //! l'écran : il évite « enregistrer », qui veut déjà dire « écrire le fichier dans le
 //! dossier ».
 //!
-//! Socle : signatures, corps inertes (chantier D). Rien ne s'en sert tant que le film
-//! n'est pas construit (`application::film::CONSTRUIT`).
+//! Rien ne s'en sert tant que le film n'est pas construit (`application::film::CONSTRUIT`).
 
 pub mod difference;
 pub mod gif;
 pub mod horloge;
 pub mod son;
 
-pub use difference::{moitie, rectangle_change, sous_image};
+pub use difference::{moitie, rectangle_change, sous_image, sous_image_dans};
 pub use gif::{delai_cs, opaques_hors_du_transparent, Gif};
 pub use horloge::{Horloge, Pas};
 pub use son::Calage;
-
-/// Réponse des corps du socle (chantier D) : rien n'est encore fait.
-pub(crate) const NON_CONSTRUIT: &str = "film non construit";
