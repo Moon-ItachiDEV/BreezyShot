@@ -277,8 +277,6 @@ pub fn verrouillages_de_session() -> u64 {
 /// par la fenêtre de l'écran figé depuis le lancement, qu'il soit montré ou caché : le fil
 /// `film` le relit à chacun de ses tours (contrat 0.7, F34, sur le modèle de
 /// `verrouillages_de_session`). N'importe quel fil. Hors Windows : 0.
-///
-/// Socle : toujours 0 (chantier A).
 pub fn mises_en_veille() -> u64 {
     plateforme::mises_en_veille()
 }
@@ -287,8 +285,6 @@ pub fn mises_en_veille() -> u64 {
 /// de l'écran figé : déconnexion, arrêt ou redémarrage) : il est appelé sur le fil de la
 /// fenêtre et doit rendre la main en 3 s au plus (il ferme le fichier d'un film, F35). Un
 /// second appel remplace le rappel. Hors Windows : ne fait rien.
-///
-/// Socle : sans effet, le rappel n'est jamais appelé (chantier A).
 pub fn quand_session_finit(rappel: Box<dyn Fn() + Send + Sync>) {
     plateforme::quand_session_finit(rappel)
 }

@@ -32,7 +32,7 @@ au lieu de l'Outil Capture de Windows. Tout s'applique tout de suite.
 Licence (0.5) : Réglages › Général, dernière ligne « Licence » : coller la licence, puis
 « Activer ». La licence d'essai est dans le fichier `essais/licence-essai.txt`. La ligne dit
 alors « Pro activé » ; « Retirer » l'enlève. Sans redémarrer. Sans licence : ni historique,
-ni Copier le texte, ni capture défilante.
+ni Copier le texte, ni capture défilante, ni vidéo, ni GIF.
 
 Avec la licence :
 
@@ -47,6 +47,10 @@ Avec la licence :
   une zone : la page défile seule, l'aperçu grandit à côté. Un cran de molette reprend la
   main. Fin seule en bas de la page (ou à 16 384 px), par « Terminer » ou Entrée ; Échap
   annule. L'image est dans le presse-papiers, comme une capture de zone.
+- Vidéo et GIF : Ctrl + Maj + 6 (vidéo) ou Ctrl + Maj + 7 (GIF), ou le menu de l'icône,
+  puis tracer une zone : l'enregistrement part. « Pause » et « Arrêter » sous la zone ; le
+  même raccourci arrête aussi. Le fichier va dans Images › BreezyShot ; la vignette le
+  copie ou l'ouvre.
 
 Revenir à une version d'avant la 0.6 : les réglages ne s'enregistrent plus. Supprimer
 `%APPDATA%\BreezyShot\reglages.json` pour repartir.

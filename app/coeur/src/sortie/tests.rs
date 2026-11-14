@@ -2508,8 +2508,9 @@ fn horloge_reculee_la_capture_neuve_reste_avec_son_apercu() {
 
 mod films {
     use super::*;
-    use crate::sortie::film::{cle_film, relire_fichiers, sonder_fichiers};
+    use crate::sortie::film::cle_film;
     use crate::sortie::nom::chemin_libre_ext;
+    use crate::sortie::presse_papiers::{relire_fichiers, sonder as sonder_fichiers};
     use crate::sortie::{
         a_effacer, annonce_film, chemin_film, copier_film, effacer_film, enregistrer_film,
         fichier_a_glisser, films_a_retirer, nettoyer_films, sortir_film, supprimer, BilanFilm,

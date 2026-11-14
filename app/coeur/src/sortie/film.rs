@@ -21,17 +21,15 @@ use std::fs::{self, File, OpenOptions};
 use std::io::{self, ErrorKind};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Mutex;
 use std::thread;
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use arboard::Clipboard;
 use chrono::{DateTime, Local};
 
 use super::fichier::{cause_disque, dossier_utilisable, existe, placer_avec, sync_tolere};
 use super::glisser::{est_film, fichier_a_glisser};
 use super::nom::{chemin_libre_ext, nom_fichier};
-use super::presse_papiers::{avec_echeance, cause, vaut_reessai, ECHEANCE};
+use super::presse_papiers;
 use super::recents::{base_recent, cle_recent};
 use super::{annonce, Annonce, Bilan, Demande, Etape, EtapeFichier};
 
@@ -286,7 +284,7 @@ pub fn copier_film(
         None => fichier.to_path_buf(),
     };
     let lien = (donne != fichier).then(|| donne.clone());
-    let etape = match poser_fichier(&donne) {
+    let etape = match presse_papiers::copier_fichier(&donne) {
         Ok(()) => Etape::Faite,
         Err(cause) => Etape::Echec(cause),
     };
@@ -518,50 +516,4 @@ fn copier_dans(
     // Après un lien dur, le temporaire est en trop ; après un renommage, il n'existe plus.
     let _ = fs::remove_file(&temporaire);
     place.map_err(|e| cause_disque(e.kind(), affiche))
-}
-
-// ---------- Presse-papiers ----------
-
-/// Le presse-papiers des fichiers, ouvert une fois et gardé jusqu'à la fin du processus,
-/// comme celui des images (`presse_papiers::OUVERT`) : sous X11 c'est notre processus qui
-/// sert la liste aux autres applications.
-static FICHIERS: Mutex<Option<Clipboard>> = Mutex::new(None);
-
-fn ouvrir(garde: &mut Option<Clipboard>) -> Result<&mut Clipboard, arboard::Error> {
-    match garde {
-        Some(presse) => Ok(presse),
-        None => Ok(garde.insert(Clipboard::new()?)),
-    }
-}
-
-/// Pose `chemin` dans le presse-papiers, en liste de fichiers (F23, prouvé par S6), avec
-/// les essais et l'échéance d'une image.
-fn poser_fichier(chemin: &Path) -> Result<(), String> {
-    let mut garde = FICHIERS.lock().unwrap_or_else(|e| e.into_inner());
-    let resultat = avec_echeance(ECHEANCE, Instant::now, thread::sleep, || {
-        ouvrir(&mut garde)?.set().file_list(&[chemin])
-    });
-    match resultat {
-        Ok(()) => Ok(()),
-        Err(e) => {
-            if !vaut_reessai(&e) {
-                *garde = None;
-            }
-            Err(cause(&e))
-        }
-    }
-}
-
-/// Pour les tests : ouvre le presse-papiers des fichiers.
-#[cfg(test)]
-pub(super) fn sonder_fichiers() -> Result<(), arboard::Error> {
-    let mut garde = FICHIERS.lock().unwrap_or_else(|e| e.into_inner());
-    ouvrir(&mut garde).map(|_| ())
-}
-
-/// Pour les tests : relit la liste de fichiers du presse-papiers.
-#[cfg(test)]
-pub(super) fn relire_fichiers() -> Result<Vec<PathBuf>, arboard::Error> {
-    let mut garde = FICHIERS.lock().unwrap_or_else(|e| e.into_inner());
-    ouvrir(&mut garde)?.get().file_list()
 }

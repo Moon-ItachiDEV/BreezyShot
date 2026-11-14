@@ -229,6 +229,9 @@ pub struct CaptureMontree {
     /// Copie et enregistrement lancés, depuis quand.
     pub copie: Option<Instant>,
     pub enregistrement: Option<Instant>,
+    /// « Enregistrer » cliqué pendant la sortie d'un film (F25, F36) : le bouton attend son
+    /// bilan, puis dit « Enregistrée » (ou l'échec), sans seconde copie.
+    pub enregistrer_attendu: bool,
     pub glisser: bool,
     pub reduites: bool,
     /// La carte est partie (sa fermeture est déjà au journal).
@@ -246,6 +249,9 @@ pub enum Geste {
     Copier,
     Enregistrer,
     DejaEnregistree,
+    /// L'enregistrement d'un film tourne encore (F25, F36) : attendre son bilan, puis
+    /// confirmer, sans seconde copie.
+    AttendreEnregistrement,
     /// Ouvrir l'éditeur sur cette capture (contrat 0.4 « Éditeur », §4.2).
     Annoter,
     /// Ouvrir le film dans le lecteur de Windows (0.7, rond de lecture, choix B2).
@@ -273,8 +279,8 @@ fn action_en_cours(capture: &CaptureMontree, depuis: Option<Instant>, maintenant
 
 /// Ce que fait l'action `action` sur `capture` : pendant l'état « supprimée », seul
 /// Annuler compte ; une action qui tourne encore (moins de `DELAI_SORTIE`, ou pour un film
-/// jusqu'à son bilan) est ignorée : Enregistrer d'un film dont l'enregistrement tourne
-/// encore ne lance pas de seconde copie ; Annoter est ignoré pendant une copie, un
+/// jusqu'à son bilan) est ignorée ; Enregistrer d'un film dont l'enregistrement tourne
+/// encore attend son bilan, sans seconde copie (F25) ; Annoter est ignoré pendant une copie, un
 /// enregistrement, un glisser, pour un film, ou si la capture n'est pas annotable (R14,
 /// R11) ; Lire (le rond d'un film, choix B2) n'existe que pour un film, hors glisser.
 pub fn decider(capture: &CaptureMontree, action: &str, maintenant: Instant) -> Geste {
@@ -288,9 +294,10 @@ pub fn decider(capture: &CaptureMontree, action: &str, maintenant: Instant) -> G
         COPIER if action_en_cours(capture, capture.copie, maintenant) => Geste::Ignorer,
         COPIER => Geste::Copier,
         ENREGISTRER if capture.enregistre.is_some() => Geste::DejaEnregistree,
-        ENREGISTRER if action_en_cours(capture, capture.enregistrement, maintenant) => {
-            Geste::Ignorer
+        ENREGISTRER if capture.contenu.film().is_some() && capture.enregistrement.is_some() => {
+            Geste::AttendreEnregistrement
         }
+        ENREGISTRER if en_cours(capture.enregistrement, maintenant) => Geste::Ignorer,
         ENREGISTRER => Geste::Enregistrer,
         ANNOTER
             if en_cours(capture.copie, maintenant)
@@ -584,6 +591,7 @@ mod tests {
             suppression: EtatSuppression::Aucune,
             copie: None,
             enregistrement: None,
+            enregistrer_attendu: false,
             glisser: false,
             reduites: false,
             partie: false,
@@ -686,12 +694,20 @@ mod tests {
                 Geste::Ignorer
             };
             assert_eq!(decider(&c, LIRE, t), lire);
-            // Copie et enregistrement qui tournent : ignorés jusqu'à leur bilan, même long
-            // (aucune échéance, F36) : pas de seconde copie.
+            // Copie et enregistrement qui tournent, même longtemps (aucune échéance, F36) :
+            // Copier est ignoré ; Enregistrer attend le bilan (puis « Enregistrée »), sans
+            // seconde copie (F25).
             c.copie = Some(t);
             c.enregistrement = Some(t);
             assert_eq!(decider(&c, COPIER, loin), Geste::Ignorer);
-            assert_eq!(decider(&c, ENREGISTRER, loin), Geste::Ignorer);
+            assert_eq!(decider(&c, ENREGISTRER, t), Geste::AttendreEnregistrement);
+            assert_eq!(
+                decider(&c, ENREGISTRER, loin),
+                Geste::AttendreEnregistrement
+            );
+            c.enregistrement = None;
+            assert_eq!(decider(&c, ENREGISTRER, loin), Geste::Enregistrer);
+            c.enregistrement = Some(t);
             assert_eq!(decider(&c, LIRE, loin), lire);
             // Le bilan rendu (champs remis à `None`, fichier enregistré noté).
             c.copie = None;
