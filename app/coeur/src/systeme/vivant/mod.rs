@@ -383,10 +383,10 @@ enum Etape {
 #[cfg_attr(not(windows), allow(dead_code))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct Suivi {
-    /// La prochaine image acquise est copiée quels que soient ses rectangles : rien n'a
-    /// été copié depuis l'ouverture ou depuis que la duplication a été refaite (ses
-    /// premiers rectangles ne disent pas ce que tient la destination), ou la dernière image
-    /// acquise a été écartée (ses rectangles sont perdus avec elle).
+    /// La prochaine image acquise où le bureau a été recomposé est copiée quels que soient
+    /// ses rectangles : rien n'a été copié depuis l'ouverture ou depuis que la duplication
+    /// a été refaite (ses premiers rectangles ne disent pas ce que tient la destination),
+    /// ou la dernière image acquise a été écartée (ses rectangles sont perdus avec elle).
     forcer: bool,
     /// Une image a été rendue depuis l'ouverture : la destination en tient une.
     deja_rendue: bool,
@@ -430,10 +430,14 @@ impl Suivi {
     }
 
     /// Une image a été acquise : vrai s'il faut la copier. `ecran_neuf` : le bureau a été
-    /// recomposé (sinon seul le pointeur a bougé, et il n'est jamais dans l'image : F14) ;
-    /// `touchee` : un rectangle sale ou déplacé touche la zone (`None` : non lu).
+    /// recomposé (`LastPresentTime` non nul) ; `touchee` : un rectangle sale ou déplacé
+    /// touche la zone (`None` : non lu). Une image où le bureau n'a pas été recomposé n'est
+    /// jamais copiée, même forcée : seul le pointeur a bougé (il n'est jamais dans l'image,
+    /// F14), et la texture d'une duplication qui vient d'être créée n'y tient encore rien
+    /// (noire : mesuré sur la machine GitHub, la première image d'une duplication refaite
+    /// arrive en 5 ms sans le bureau). `forcer` ne fait qu'ignorer les rectangles.
     fn a_copier(&self, ecran_neuf: bool, touchee: Option<bool>) -> bool {
-        self.forcer || (ecran_neuf && touchee != Some(false))
+        ecran_neuf && (self.forcer || touchee != Some(false))
     }
 
     /// L'image acquise a été écartée sans être rendue (garde de l'écran figé).
@@ -801,8 +805,11 @@ mod tests {
         assert_eq!(suivi.etape(true, ms(0)), Etape::Acquerir);
         // Rien encore acquis : pas d'image (la destination est vide).
         assert_eq!(suivi.sans_copie(), Image::Perdue);
-        // La première image est copiée même si ses rectangles ne touchent pas la zone.
-        assert!(suivi.a_copier(false, Some(false)));
+        // La première image est copiée même si ses rectangles ne touchent pas la zone,
+        // mais pas une image sans le bureau (pointeur seul, ou texture encore vide).
+        assert!(!suivi.a_copier(false, None));
+        assert!(!suivi.a_copier(false, Some(false)));
+        assert!(suivi.a_copier(true, Some(false)));
         assert_eq!(suivi.copiee(true, ms(33)), (Image::Nouvelle, None));
         // Écran immobile, pointeur seul, rectangles hors de la zone : rien à copier.
         assert!(!suivi.a_copier(false, None));
@@ -827,7 +834,10 @@ mod tests {
         // Refaite mais pas encore d'image : toujours perdue.
         assert_eq!(suivi.sans_copie(), Image::Perdue);
         // La première image de la duplication refaite est copiée entière ; 566 ms sans image.
-        assert!(suivi.a_copier(false, Some(false)));
+        // Sa première image sans le bureau ne l'est pas, et ne finit pas la perte.
+        assert!(!suivi.a_copier(false, None));
+        assert_eq!(suivi.sans_copie(), Image::Perdue);
+        assert!(suivi.a_copier(true, Some(false)));
         assert_eq!(
             suivi.copiee(false, ms(666)),
             (Image::Inchangee, Some(Duration::from_millis(566)))
@@ -838,7 +848,8 @@ mod tests {
         // Une image écartée par la garde : la suivante est copiée entière, mais la
         // destination garde la précédente, qui reste juste.
         suivi.ecartee();
-        assert!(suivi.a_copier(false, Some(false)));
+        assert!(suivi.a_copier(true, Some(false)));
+        assert!(!suivi.a_copier(false, None));
         assert_eq!(suivi.sans_copie(), Image::Inchangee);
         assert_eq!(suivi.copiee(true, ms(700)), (Image::Nouvelle, None));
         assert!(!suivi.a_copier(false, None));

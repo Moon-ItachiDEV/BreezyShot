@@ -1582,66 +1582,109 @@ mod tests {
                 let mut s = ouvrir_sur(essai.rect);
                 let _ = attendre_carres_source(&mut s, &mut px);
             }
-            let (poignees_avant, gdi_avant) = (poignees(), objets_gdi());
             let mut source = ouvrir_sur(essai.rect);
             let moyen = source.moyen();
-            // 3 000 prises par le premier moyen, puis 1 000 par `BitBlt` (25 à 30 ms chacune
-            // sur la machine GitHub ; `mille_prises_sans_fuite_gdi` le prouve déjà pour
-            // `Prise`).
-            for (tour, nombre) in [3000usize, 1000].into_iter().enumerate() {
-                let mut durees = Vec::with_capacity(nombre);
-                let (mut nouvelles, mut inchangees, mut perdues) = (0, 0, 0);
-                for _ in 0..nombre {
-                    // SAFETY : fenêtre de ce fil.
-                    unsafe {
-                        let _ = InvalidateRect(Some(essai.hwnd), None, false);
-                    }
-                    pomper();
-                    let (image, duree) = source.prendre(&mut px).unwrap();
-                    durees.push(duree);
-                    match image {
-                        Image::Nouvelle => nouvelles += 1,
-                        Image::Inchangee => inchangees += 1,
-                        Image::Perdue => perdues += 1,
-                    }
-                }
+            // Le premier moyen, puis `BitBlt` (25 à 30 ms par prise sur la machine GitHub ;
+            // `mille_prises_sans_fuite_gdi` le prouve déjà pour `Prise`). Chaque tour
+            // commence par des prises d'échauffement : Direct3D, DXGI et le rendu logiciel
+            // prennent des poignées une fois, aux premières images copiées (27 de plus en
+            // 3 000 prises sans échauffement, à la première course sur GitHub, sans dire si
+            // elles grandissaient). La référence est prise après lui ; le compte est relu au
+            // tiers et à la fin : une fuite par prise, même d'une poignée pour cent prises,
+            // passerait la marge et grandirait entre les deux relevés.
+            for (tour, (echauffement, nombre)) in
+                [(300usize, 3000usize), (50, 1000)].into_iter().enumerate()
+            {
+                prendre_en_boucle(&mut source, &essai, &mut px, echauffement);
+                let (poignees_avant, gdi_avant) = (poignees(), objets_gdi());
+                let premier_tiers = prendre_en_boucle(&mut source, &essai, &mut px, nombre / 3);
+                let poignees_tiers = poignees();
+                let reste = prendre_en_boucle(&mut source, &essai, &mut px, nombre - nombre / 3);
+                let (poignees_fin, gdi_fin) = (poignees(), objets_gdi());
+                let (nouvelles, inchangees, perdues) = (
+                    premier_tiers.0 + reste.0,
+                    premier_tiers.1 + reste.1,
+                    premier_tiers.2 + reste.2,
+                );
                 eprintln!(
-                    "vivant: {} : {nombre} prises, {nouvelles} nouvelles, {inchangees} \
-                     inchangees, {perdues} perdues ; mediane {:.2} ms ; poignees {} -> {}, \
-                     objets GDI {} -> {}",
+                    "vivant: {} : {echauffement} prises d'echauffement puis {nombre} prises, \
+                     {nouvelles} nouvelles, {inchangees} inchangees, {perdues} perdues ; \
+                     mediane {:.2} ms ; poignees {poignees_avant} -> {poignees_tiers} (tiers) \
+                     -> {poignees_fin}, objets GDI {gdi_avant} -> {gdi_fin}",
                     source.moyen().nom(),
-                    mediane(durees),
-                    poignees_avant,
-                    poignees(),
-                    gdi_avant,
-                    objets_gdi()
+                    mediane([premier_tiers.3, reste.3].concat()),
                 );
                 assert!(perdues <= 3, "{perdues} prises perdues sur un ecran stable");
-                assert!(poignees() <= poignees_avant + 16, "fuite de poignees");
-                assert!(objets_gdi() <= gdi_avant + 4, "fuite d'objets GDI");
+                assert!(
+                    poignees_fin <= poignees_avant + 8,
+                    "fuite de poignees : {poignees_avant} -> {poignees_fin}"
+                );
+                assert!(
+                    poignees_fin <= poignees_tiers + 4,
+                    "poignees qui grandissent avec les prises : {poignees_tiers} -> {poignees_fin}"
+                );
+                assert!(
+                    gdi_fin <= gdi_avant + 4,
+                    "fuite d'objets GDI : {gdi_avant} -> {gdi_fin}"
+                );
                 if tour == 0 {
                     source.replier().unwrap();
                 }
             }
             drop(source);
+            // Ouvertures : la référence après trois ouvertures d'échauffement.
+            for _ in 0..3 {
+                let mut s = ouvrir_sur(essai.rect);
+                let _ = s.prendre(&mut px);
+            }
+            let (poignees_avant, gdi_avant) = (poignees(), objets_gdi());
             for _ in 0..20 {
                 let mut s = ouvrir_sur(essai.rect);
                 let _ = s.prendre(&mut px);
             }
             let (poignees_apres, gdi_apres) = (poignees(), objets_gdi());
             eprintln!(
-                "vivant: {} puis bitblt : apres 20 ouvertures, poignees {poignees_avant} -> \
+                "vivant: {} puis bitblt : 20 ouvertures, poignees {poignees_avant} -> \
                  {poignees_apres}, objets GDI {gdi_avant} -> {gdi_apres}",
                 moyen.nom()
             );
+            // Une poignée perdue par ouverture en donnerait 20.
             assert!(
-                poignees_apres <= poignees_avant + 16,
+                poignees_apres <= poignees_avant + 8,
                 "fuite a l'ouverture : {poignees_avant} -> {poignees_apres}"
             );
             assert!(
                 gdi_apres <= gdi_avant + 2,
                 "fuite GDI a l'ouverture : {gdi_avant} -> {gdi_apres}"
             );
+        }
+
+        /// `nombre` prises, la fenêtre d'essai repeinte avant chacune (la duplication a
+        /// alors un rectangle sale dans la zone : l'image est copiée). Rend les nouvelles,
+        /// les inchangées, les perdues et les durées.
+        fn prendre_en_boucle(
+            source: &mut Source,
+            essai: &FenetreEssai,
+            px: &mut Pixels,
+            nombre: usize,
+        ) -> (usize, usize, usize, Vec<Duration>) {
+            let mut durees = Vec::with_capacity(nombre);
+            let (mut nouvelles, mut inchangees, mut perdues) = (0, 0, 0);
+            for _ in 0..nombre {
+                // SAFETY : fenêtre de ce fil.
+                unsafe {
+                    let _ = InvalidateRect(Some(essai.hwnd), None, false);
+                }
+                pomper();
+                let (image, duree) = source.prendre(px).unwrap();
+                durees.push(duree);
+                match image {
+                    Image::Nouvelle => nouvelles += 1,
+                    Image::Inchangee => inchangees += 1,
+                    Image::Perdue => perdues += 1,
+                }
+            }
+            (nouvelles, inchangees, perdues, durees)
         }
     }
 }
