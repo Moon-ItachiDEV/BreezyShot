@@ -112,7 +112,8 @@ pub fn chercher_pages(
 }
 
 /// La première liste de `chercher_pages` (sans les pages tardives) : rend au plus tard à
-/// `BUDGET_PAGES`.
+/// `BUDGET_PAGES`. Pour les tests seulement (un fil détaché par appel).
+#[cfg(test)]
 pub fn pages(fenetres: &[FenetreInfo], max: usize) -> Vec<PageTrouvee> {
     let (tx, rx) = std::sync::mpsc::channel();
     let mut premiere = Some(tx);

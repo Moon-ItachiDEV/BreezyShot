@@ -392,13 +392,15 @@ fn pages_trouvees(
     pages: Vec<(Rect, isize)>,
     duree: Duration,
 ) {
-    log::info!("{}", regles::ligne_pages(pages.len(), duree));
     let visee = super::defilante_en_cours(app)
         .as_ref()
         .is_some_and(|e| e.numero == numero && !e.etat.lancee);
     if !visee {
+        // Une liste venue après la visée (lancée, finie) : rien n'est proposé.
+        log::debug!("{} (visee passee)", regles::ligne_pages(pages.len(), duree));
         return;
     }
+    log::info!("{}", regles::ligne_pages(pages.len(), duree));
     let proposees = pages
         .iter()
         .map(|(rect, _)| FenetreProposee {
@@ -407,6 +409,7 @@ fn pages_trouvees(
         })
         .collect();
     if super::proposer_pages(app, selection_id, proposees) {
+        log::info!("{}", ligne_pages_proposees(&pages, duree));
         if let Some(e) = super::defilante_en_cours(app)
             .as_mut()
             .filter(|e| e.numero == numero)
@@ -414,6 +417,26 @@ fn pages_trouvees(
             e.pages = pages.iter().map(|(_, f)| *f).collect();
         }
     }
+}
+
+/// `defilante pages proposees <n> en <ms> ms: <x>,<y> <l>x<h> ; …|aucune` : les rectangles
+/// proposés à la Sélection, dans l'ordre (l'indice de chaque page), en pixels réels du
+/// bureau. L'essai 14 y attend la page qu'il va cliquer.
+fn ligne_pages_proposees(pages: &[(Rect, isize)], duree: Duration) -> String {
+    let rects: Vec<String> = pages
+        .iter()
+        .map(|(r, _)| format!("{},{} {}x{}", r.x, r.y, r.largeur, r.hauteur))
+        .collect();
+    format!(
+        "defilante pages proposees {} en {} ms: {}",
+        pages.len(),
+        duree.as_millis(),
+        if rects.is_empty() {
+            "aucune".to_owned()
+        } else {
+            rects.join(" ; ")
+        }
+    )
 }
 
 /// Abandon de la visée au relâchement (rien de valide) : tout est caché, Repos, rien dit.
@@ -2011,6 +2034,29 @@ mod tests {
         assert!(m.detail.is_empty());
         assert!(m.actions.is_empty());
         assert_eq!(m.duree_ms, None);
+    }
+
+    #[test]
+    fn ligne_des_pages_proposees_avec_leurs_rectangles() {
+        let r = |x, y, largeur, hauteur| Rect {
+            x,
+            y,
+            largeur,
+            hauteur,
+        };
+        let pages = [(r(-1200, 80, 600, 450), 7), (r(760, 80, 300, 200), 9)];
+        let l = ligne_pages_proposees(&pages, Duration::from_millis(164));
+        assert_eq!(
+            l,
+            "defilante pages proposees 2 en 164 ms: -1200,80 600x450 ; 760,80 300x200"
+        );
+        assert_eq!(
+            ligne_pages_proposees(&[], Duration::from_millis(300)),
+            "defilante pages proposees 0 en 300 ms: aucune"
+        );
+        // Pas confondue avec `defilante pages <n> en <ms> ms` (motif DPages de l'essai 14).
+        assert!(!l.starts_with("defilante pages 2"));
+        assert!(!l.ends_with(" ms"));
     }
 
     #[test]
