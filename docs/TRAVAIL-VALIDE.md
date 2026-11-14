@@ -933,7 +933,7 @@ Rapports hors dépôt, un par chantier et par relecture.
 - `05-plein-ecran.ps1` : `$taille` masquait `$TAILLE` (casse ignorée), et le contrôle
   passait toujours.
 
-Vérifications GitHub : tests du cœur (886) et d'architecture (2) ; douze essais de pages,
+Vérifications GitHub : tests du cœur (894) et d'architecture (2) ; douze essais de pages,
 `ECHECS : 0` ; essais Windows 01 à 14 sur le vrai `.exe`. Le passage 101 a été le premier
 entièrement vert ; c'est le dernier passage de la demande de fusion qui fait foi.
 
@@ -941,6 +941,11 @@ entièrement vert ; c'est le dernier passage de la demande de fusion qui fait fo
 
 - Haut de page blanc et décalage lu encore biaisé : l'image peut avoir de 30 à 60 lignes de
   blanc en trop. Le texte n'est jamais coupé ni doublé.
+- Haut de page blanc et bande insérée au-dessus de la vue pendant le premier pas : l'image
+  peut avoir la hauteur de la bande en blanc en trop. Refuser le lu dans ce cas arrêterait
+  aussi la page qui grandit par le bas, qui est complète.
+- Bande de 200 px insérée dans la première vue : la capture passe à la molette sans
+  message ; l'image rendue est exacte, mais courte.
 - Une page qui saute hors de portée avant le plus petit pas n'est pas retrouvée. La capture
   s'arrête prudemment.
 - Edge et l'Explorateur sont joués par l'essai 14 et seulement notés : ils finissent seuls
