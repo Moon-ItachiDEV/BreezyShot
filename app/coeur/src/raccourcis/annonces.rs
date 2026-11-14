@@ -72,6 +72,8 @@ fn nom_dans_annonce(action: &str) -> String {
         "historique" => "l'historique".into(),
         "texte" => "le texte".into(),
         "defilante" => "la capture défilante".into(),
+        "video" => "la vidéo".into(),
+        "gif" => "le GIF".into(),
         autre => autre.into(),
     }
 }
@@ -338,6 +340,24 @@ mod tests {
             decider_annonce(None, &b).a_retenir.unwrap().action,
             "defilante"
         );
+    }
+
+    /// Contrat 0.7, §7.2 : `Ctrl + Maj + 6` ou `7` réservé par une autre app pour tout le
+    /// système, le repli existant nomme la vidéo ou le GIF.
+    #[test]
+    fn video_et_gif_sans_raccourci_nommes() {
+        for (action, touche, titre) in [
+            ("video", "Ctrl+Maj+6", "Aucun raccourci pour la vidéo"),
+            ("gif", "Ctrl+Maj+7", "Aucun raccourci pour le GIF"),
+        ] {
+            let t = table(&[("zone", &["Ctrl+Maj+1"]), (action, &[touche])]);
+            let b = choisir(&t, false, |r| r.canonique() != touche);
+            let a = b.annonce().unwrap();
+            assert!(!a.erreur);
+            assert_eq!(a.titre, titre);
+            assert_eq!(a.detail, "");
+            assert_eq!(decider_annonce(None, &b).a_retenir.unwrap().action, action);
+        }
     }
 
     /// D'« une action sans raccourci » à « plus aucune » : situation différente, l'erreur

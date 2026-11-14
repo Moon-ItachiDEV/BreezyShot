@@ -33,6 +33,17 @@ const VUE = {
 };
 // Avec licence : la vue du cœur après « Activer » (défilante, historique, texte, une langue).
 const VUE_PRO = REEL.vue_pro;
+// Avec licence et le film construit (0.7, §7.2) : la vue du cœur porte « Vidéo » et « GIF »
+// après « Copier le texte », avant « Historique » (l'ordre du menu). La vue réelle écrite par
+// le cœur n'a pas encore ces lignes (le film n'est pas construit avant l'assemblage) : elles
+// sont posées ici à la main, dans la forme des autres.
+const VUE_FILM = {
+  ...VUE_PRO,
+  raccourcis: VUE_PRO.raccourcis.flatMap(r => (r.action === 'texte' ? [r,
+    { action: 'video', libelle: 'Vidéo', touches: ['Ctrl', 'Maj', '6'], modifie: false, refus: null },
+    { action: 'gif', libelle: 'GIF', touches: ['Ctrl', 'Maj', '7'], modifie: false, refus: null },
+  ] : [r])),
+};
 // La licence d'essai publique (avenant 0.5 « Licence », §2) : le cœur simulé l'accepte, il
 // refuse tout autre texte avec le code `signature`, comme le vrai.
 const LICENCE = fs.readFileSync(path.join(__dirname, '..', 'licence-essai.txt'), 'utf8').trim();
@@ -739,6 +750,53 @@ const SANS_VIGNETTE = { ...VUE, lignes: ['copier', 'dossier', 'modele_nom', 'the
     const carte = await p.$eval('[data-reglage="impr_ecran"]', e => getComputedStyle(e.closest('.carte')).display);
     verifier(allumee === 'true' && cachee && carte === 'none', '14 Impr. écran : suit la vue ; hors Windows, ni ligne ni carte', json([allumee, cachee, carte]));
     verifier(p.erreurs.length === 0, '14 aucune erreur de console', json(p.erreurs));
+    await p.context().close();
+  }
+
+  // 15. Vidéo et GIF (0.7, §7.2) : deux lignes de plus avec licence, après « Copier le
+  // texte » et avant « Historique » (l'ordre du menu de l'icône), avec les pictogrammes du
+  // menu ; saisie, « Aucun raccourci » et Rétablir comme les autres ; parties avec la
+  // licence.
+  for (const theme of ['light', 'dark']) {
+    const p = await page({ theme, vue: VUE_FILM, largeur: 780, hauteur: 520, echelle: 2 });
+    await onglet(p, 'Raccourcis'); await p.waitForTimeout(450);
+    const neuf = json(JSON.parse(sept).slice(0, 6).concat([
+      ['video', 'Vidéo', 'Ctrl+Maj+6', true], ['gif', 'GIF', 'Ctrl+Maj+7', true],
+    ], JSON.parse(sept).slice(6)));
+    let montres = await raccourcisMontres(p);
+    verifier(json(montres) === neuf, `15 ${theme} neuf lignes : « Vidéo » et « GIF » entre « Copier le texte » et « Historique »`, json(montres));
+    const pictos = await p.$$eval('[data-reglage="raccourci"]', ls => ls.map(l => [l.dataset.action, [...l.querySelectorAll('[data-picto] svg > *')].map(e => e.tagName).join(',')]));
+    verifier(pictos.length === 9 && pictos.every(x => x[1] !== '') && json(pictos.slice(6, 8)) === json([['video', 'rect,path'], ['gif', 'rect,path']]),
+      `15 ${theme} un pictogramme sur chaque ligne, ceux du menu pour la vidéo et le GIF`, json(pictos));
+    await p.screenshot({ path: `${SORTIE}/reglages-raccourcis-film-${theme}.png` });
+    await vider(p);
+    await p.getByRole('button', { name: 'Vidéo', exact: true }).click(); await p.waitForTimeout(30);
+    await p.keyboard.press('Control+Alt+Digit8'); await p.waitForTimeout(50);
+    const a = await appels(p);
+    const touche = a.find(x => x[0] === 'reglages_raccourci')?.[1];
+    verifier(json(a[0]) === json(['reglages_saisie', { action: 'video', active: true }])
+      && touche?.action === 'video' && touche?.saisie?.code === 'Digit8' && touche?.saisie?.ctrl && touche?.saisie?.alt,
+    `15 ${theme} « Vidéo » : saisie puis touche envoyée pour \`video\``, json(a));
+    await p.evaluate(() => __emettre('reglages:etat', {
+      ...__vue,
+      raccourcis: __vue.raccourcis.map(r => (r.action === 'gif' ? { ...r, touches: [], modifie: true, refus: 'Aucun raccourci' } : r)),
+    }));
+    await p.waitForTimeout(30);
+    const ligneG = await p.$eval('[data-reglage="raccourci"][data-action="gif"]', l => [
+      l.querySelectorAll('kbd').length, l.querySelector('[data-refus]').textContent,
+      !l.querySelector('[data-controle="retablir"]').hidden, [...l.parentElement.children].indexOf(l)]);
+    verifier(json(ligneG) === json([0, 'Aucun raccourci', true, 7]), `15 ${theme} « GIF » sans raccourci : « Aucun raccourci », Rétablir, huitième`, json(ligneG));
+    await vider(p);
+    await p.getByRole('button', { name: 'Rétablir' }).click(); await p.waitForTimeout(30);
+    verifier(json((await dernier(p, 'reglages_retablir'))?.[1]) === json({ action: 'gif' }), `15 ${theme} Rétablir de « GIF » → reglages_retablir gif`);
+    await p.screenshot({ path: `${SORTIE}/reglages-raccourcis-film-refus-${theme}.png` });
+    // Licence retirée : les deux lignes partent avec les autres.
+    await p.evaluate((v) => { __vue = v; __emettre('reglages:etat', v); }, REEL.vue);
+    await p.waitForTimeout(30);
+    montres = await raccourcisMontres(p);
+    verifier(json(montres) === quatre && await p.getByRole('button', { name: 'GIF', exact: true }).count() === 0,
+      `15 ${theme} sans licence : ni « Vidéo » ni « GIF »`, json(montres));
+    verifier(p.erreurs.length === 0 && (await p.evaluate(() => window.__csp || [])).length === 0, `15 ${theme} aucune erreur de console, aucune violation de CSP`, json(p.erreurs));
     await p.context().close();
   }
 

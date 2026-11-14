@@ -35,6 +35,8 @@ const PICTO_ACTION = {
   derniere_zone: "capturer_derniere_zone",
   defilante: "capturer_defilante",
   texte: "capturer_texte",
+  video: "capturer_video",
+  gif: "capturer_gif",
   historique: "historique",
 };
 
