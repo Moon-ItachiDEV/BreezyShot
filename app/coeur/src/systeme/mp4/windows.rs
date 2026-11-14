@@ -191,8 +191,9 @@ fn codeurs_h264() -> u32 {
 // ---------------------------------------------------------------------------------------
 // Types de média
 
-/// La sortie : H.264, profil « High » (`haut`), débit moyen, BT.709 en plage réduite.
-fn type_sortie(p: &Parametres, haut: bool) -> Result<IMFMediaType, String> {
+/// La sortie : H.264 au profil par défaut du codeur (voir `Reglage`), débit moyen, BT.709
+/// en plage réduite.
+fn type_sortie(p: &Parametres) -> Result<IMFMediaType, String> {
     // SAFETY : objet COM créé ici ; attributs posés par clés connues.
     unsafe {
         let t = ctx("MFCreateMediaType", MFCreateMediaType())?;
@@ -208,12 +209,6 @@ fn type_sortie(p: &Parametres, haut: bool) -> Result<IMFMediaType, String> {
             "MF_MT_AVG_BITRATE",
             t.SetUINT32(&MF_MT_AVG_BITRATE, p.debit_bit_s),
         )?;
-        if haut {
-            ctx(
-                "MF_MT_MPEG2_PROFILE",
-                t.SetUINT32(&MF_MT_MPEG2_PROFILE, eAVEncH264VProfile_High.0 as u32),
-            )?;
-        }
         ctx(
             "MF_MT_VIDEO_PRIMARIES",
             t.SetUINT32(&MF_MT_VIDEO_PRIMARIES, MFVideoPrimaries_BT709.0 as u32),
@@ -327,6 +322,22 @@ fn type_son(aac: bool) -> Result<IMFMediaType, String> {
     }
 }
 
+/// Les réglages du codeur, essayés dans cet ordre (le premier accepté est pris). Le profil
+/// est celui du codeur par défaut, comme dans la sonde : avec le profil « High », le
+/// fichier relu par `IMFSourceReader` sur GitHub rendait chaque image à l'instant de la
+/// suivante (réordonnancement des images), alors que le profil par défaut se relit à
+/// l'instant juste (sonde, seconde passe : image 287 à 9,567 s).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Reglage {
+    /// Mode qualité et image clé toutes les 2 s : les réglages prouvés par la sonde (S2
+    /// point 5).
+    Qualite,
+    /// Débit moyen seul (codeur qui refuse les paramètres, F15).
+    Debit,
+}
+
+const REGLAGES: [Reglage; 2] = [Reglage::Qualite, Reglage::Debit];
+
 /// Les paramètres du codeur passés à `SetInputMediaType` (clés `CODECAPI_*`).
 fn parametres_codeur(p: &Parametres) -> Result<IMFAttributes, String> {
     let a = attributs(3)?;
@@ -395,6 +406,7 @@ struct Ouvert {
     video: u32,
     audio: Option<u32>,
     codeur: Codeur,
+    reglage: Reglage,
 }
 
 /// Arrête le récepteur du fichier (le MP4) tout de suite : le fichier est relâché, les
@@ -420,8 +432,14 @@ fn arreter_recepteur(sw: &IMFSinkWriter) {
 }
 
 /// Ouvre un écrivain sur `chemin` (le fichier est d'abord effacé), codeur matériel permis
-/// ou non, profil « High » et paramètres du codeur (`complet`) ou débit moyen seul.
-fn ouvrir(chemin: &Path, p: &Parametres, materiel: bool, complet: bool) -> Result<Ouvert, String> {
+/// ou non, avec `reglage`. Un réglage refusé est une erreur (le suivant est essayé par
+/// `ouvrir_au_mieux`).
+fn ouvrir(
+    chemin: &Path,
+    p: &Parametres,
+    materiel: bool,
+    reglage: Reglage,
+) -> Result<Ouvert, String> {
     let _ = std::fs::remove_file(chemin);
     let a = attributs(2)?;
     let url = HSTRING::from(chemin.as_os_str());
@@ -446,25 +464,18 @@ fn ouvrir(chemin: &Path, p: &Parametres, materiel: bool, complet: bool) -> Resul
     let pose = (|| -> Result<Ouvert, String> {
         // SAFETY : écrivain vivant, types créés ici.
         unsafe {
-            let video = ctx("AddStream", sw.AddStream(&type_sortie(p, complet)?))?;
+            let video = ctx("AddStream", sw.AddStream(&type_sortie(p)?))?;
             let entree = type_entree(p)?;
             #[cfg(test)]
             panne_simulee(materiel, Panne::Type, "SetInputMediaType")?;
-            if complet {
-                let parametres = parametres_codeur(p)?;
-                if sw.SetInputMediaType(video, &entree, &parametres).is_err() {
-                    // Paramètres refusés par ce codeur : le débit moyen seul (F15).
-                    ctx(
-                        "SetInputMediaType",
-                        sw.SetInputMediaType(video, &entree, None),
-                    )?;
-                }
-            } else {
-                ctx(
-                    "SetInputMediaType",
-                    sw.SetInputMediaType(video, &entree, None),
-                )?;
-            }
+            let parametres = match reglage {
+                Reglage::Qualite => Some(parametres_codeur(p)?),
+                Reglage::Debit => None,
+            };
+            ctx(
+                "SetInputMediaType",
+                sw.SetInputMediaType(video, &entree, parametres.as_ref()),
+            )?;
             let audio = if p.son {
                 let s = ctx("AddStream (son)", sw.AddStream(&type_son(true)?))?;
                 ctx(
@@ -484,6 +495,7 @@ fn ouvrir(chemin: &Path, p: &Parametres, materiel: bool, complet: bool) -> Resul
                 video,
                 audio,
                 codeur,
+                reglage,
             })
         }
     })();
@@ -538,9 +550,18 @@ fn codeur_pris(sw: &IMFSinkWriter, video: u32, materiel: bool) -> Codeur {
     Codeur::Materiel
 }
 
-/// Ouvre avec le profil et les paramètres, puis, refusé, avec le débit moyen seul.
+/// Ouvre avec le premier réglage accepté (`REGLAGES`) ; tous refusés : la première erreur.
 fn ouvrir_au_mieux(chemin: &Path, p: &Parametres, materiel: bool) -> Result<Ouvert, String> {
-    ouvrir(chemin, p, materiel, true).or_else(|e| ouvrir(chemin, p, materiel, false).map_err(|_| e))
+    let mut premiere = None;
+    for reglage in REGLAGES {
+        match ouvrir(chemin, p, materiel, reglage) {
+            Ok(o) => return Ok(o),
+            Err(e) => {
+                premiere.get_or_insert(e);
+            }
+        }
+    }
+    Err(premiere.unwrap_or_else(|| "aucun reglage".into()))
 }
 
 #[derive(Debug)]
@@ -549,6 +570,9 @@ pub struct Ecrivain {
     video: u32,
     audio: Option<u32>,
     codeur: Codeur,
+    /// Le réglage du codeur pris (noté par les tests).
+    #[cfg_attr(not(test), allow(dead_code))]
+    reglage: Reglage,
     p: Parametres,
     chemin: PathBuf,
     horodatage: Horodatage,
@@ -592,6 +616,7 @@ pub fn creer(chemin: &Path, p: &Parametres) -> Result<Ecrivain, String> {
         video: ouvert.video,
         audio: ouvert.audio,
         codeur: ouvert.codeur,
+        reglage: ouvert.reglage,
         p: *p,
         chemin: chemin.to_path_buf(),
         horodatage: Horodatage::nouveau(p.cadence),
@@ -697,6 +722,7 @@ impl Ecrivain {
         self.video = o.video;
         self.audio = o.audio;
         self.codeur = o.codeur;
+        self.reglage = o.reglage;
         self.ecrites = 0;
         self.horodatage.repartir();
         if let Some(flux) = self.audio {
@@ -1280,7 +1306,12 @@ mod tests {
         let d = tempfile::tempdir().unwrap();
         let f = d.path().join("film.mp4");
         let mut e = mp4::creer(&f, &params(l, h, false)).unwrap();
-        eprintln!("{l}x{h} : codeur {}", e.codeur().nom());
+        eprintln!(
+            "{l}x{h} : codeur {}, reglage {:?}",
+            e.codeur().nom(),
+            e.interne.reglage
+        );
+        assert_ne!(e.interne.reglage, Reglage::Debit, "mode qualité refusé");
         let mut ecriture = Vec::new();
         let mut conversion = Vec::new();
         let mut nv12 = vec![0u8; taille_nv12(l, h).unwrap()];
@@ -1317,8 +1348,12 @@ mod tests {
         assert_eq!(r.numeros.first(), Some(&0));
         assert_eq!(r.numeros.last(), Some(&89));
         assert!(r.numeros.windows(2).all(|w| w[0] < w[1]), "{:?}", r.numeros);
+        // Chaque image relue à son instant (une image B décalerait tout d'une image).
+        for (n, t) in r.numeros.iter().zip(&r.instants) {
+            assert!(proche(*t, instant(*n), 10), "image {n} à {t:?}");
+        }
         let dernier = r.lecture.dernier_instant.unwrap();
-        assert!(proche(dernier, instant(89), 40), "{dernier:?}");
+        assert!(proche(dernier, instant(89), 10), "{dernier:?}");
     }
 
     #[test]

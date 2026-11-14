@@ -1,8 +1,8 @@
 //! Le fichier MP4 d'une vidéo (contrat 0.7, §13.1, F15, F16, F31, F32) : Media Foundation,
-//! et rien d'autre. Une piste vidéo H.264 (profil « High », 4:2:0, 8 bits, BT.709) écrite
-//! par un `IMFSinkWriter`, nourrie d'images NV12 converties ici depuis les pixels RGBA du
-//! cœur (BT.709, plage réduite) ; une piste AAC (48 kHz, mono, 96 kbit/s) si le PC a un
-//! micro. MP4 ordinaire, sans index au début (R15, R17).
+//! et rien d'autre. Une piste vidéo H.264 (profil par défaut du codeur, sans réordonnancement
+//! des images ; 4:2:0, 8 bits, BT.709) écrite par un `IMFSinkWriter`, nourrie d'images NV12
+//! converties ici depuis les pixels RGBA du cœur (BT.709, plage réduite) ; une piste AAC
+//! (48 kHz, mono, 96 kbit/s) si le PC a un micro. MP4 ordinaire, sans index au début (R15, R17).
 //!
 //! **Garde (F31)** : les DLL de Media Foundation sont chargées à la demande (`build.rs`) ;
 //! avant tout appel, `bibliotheques` les charge par `LoadLibraryExW` (système 32 seulement)
