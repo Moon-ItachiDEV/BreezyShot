@@ -35,9 +35,10 @@ use crate::systeme::gel::Pixels;
 pub use annonce::{annonce, Annonce};
 pub use fichier::enregistrer_a;
 pub use film::{
-    annonce_film, chemin_film, copier_film, effacer_film, enregistrer_film, films_a_retirer,
-    nettoyer_films, sortir_film, BilanFilm, FilmGarde, SorteFilm, FILMS_AGE_MAX, FILMS_GARDES,
-    FILMS_OCTETS_MAX, FILM_JEUNE, SOUS_DOSSIER_FILMS,
+    annonce_film, chemin_film, copier_film, effacer_film, enregistrer_film, film_a_glisser,
+    films_a_ranger, films_a_retirer, nettoyer_films, noter_film_ferme, oublier_film, ranger_film,
+    sortir_film, BilanFilm, FilmGarde, SorteFilm, FILMS_AGE_MAX, FILMS_GARDES, FILMS_OCTETS_MAX,
+    FILM_JEUNE, REGISTRE_A_RANGER, SOUS_DOSSIER_FILMS,
 };
 pub use glisser::{
     a_effacer, fichier_a_glisser, liens_a_supprimer, supprimer, Suppression, GLISSER_GARDES,

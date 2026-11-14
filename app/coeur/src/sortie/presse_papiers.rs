@@ -68,6 +68,16 @@ pub(super) fn cause(erreur: &Error) -> String {
     }
 }
 
+/// Cause en clair d'une erreur du presse-papiers pour un fichier (un film) : les memes
+/// textes, sans le mot « image » (M9 de la relecture).
+pub(super) fn cause_fichier(erreur: &Error) -> String {
+    match erreur {
+        Error::ClipboardOccupied => CAUSE_OCCUPE.to_string(),
+        Error::ClipboardNotSupported => CAUSE_NON_DISPONIBLE.to_string(),
+        _ => "Le presse-papiers a refusé le fichier.".to_string(),
+    }
+}
+
 /// Cause en clair d'une erreur du presse-papiers natif, avec les memes textes.
 pub(super) fn cause_native(erreur: ErreurPressePapiers) -> String {
     match erreur {
@@ -175,7 +185,7 @@ pub(super) fn copier_fichier(chemin: &std::path::Path) -> Result<(), String> {
             if !vaut_reessai(&e) {
                 *garde = None;
             }
-            Err(cause(&e))
+            Err(cause_fichier(&e))
         }
     }
 }

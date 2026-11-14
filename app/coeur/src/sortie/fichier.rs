@@ -334,7 +334,7 @@ fn est_temporaire_du_processus(nom: &str, pid: u32) -> bool {
 
 /// Supprime nos propres temporaires perimes du dossier. Les erreurs sont
 /// ignorees : ce menage n'est jamais une raison d'echouer.
-fn nettoyer_temporaires(dossier: &Path) {
+pub(super) fn nettoyer_temporaires(dossier: &Path) {
     let Ok(entrees) = fs::read_dir(dossier) else {
         return;
     };

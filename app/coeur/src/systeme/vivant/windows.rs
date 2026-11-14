@@ -1704,16 +1704,18 @@ mod tests {
 // duplication est refaite à la prise suivante, puis au plus toutes les 500 ms (F33).
 //
 // `dxgi.dll` et `d3d11.dll` sont chargées à la demande (`build.rs`) : la première
-// ouverture d'une source les charge ; elles existent sur tout Windows 11 (F31, sans garde).
+// ouverture d'une source les charge, depuis le dossier système (`dll_du_systeme`) et non
+// depuis celui de l'exécutable ; elles existent sur tout Windows 11 (F31).
 
 pub use source::{
     moyen_source, ouvrir_source, prendre_source, repli_source, replier_source, zone_source, Source,
 };
 
 mod source {
+    use std::sync::OnceLock;
     use std::time::{Duration, Instant};
 
-    use ::windows::core::Interface;
+    use ::windows::core::{Interface, HSTRING};
     use ::windows::Win32::Foundation::{HMODULE, RECT};
     use ::windows::Win32::Graphics::Direct3D::D3D_DRIVER_TYPE_UNKNOWN;
     use ::windows::Win32::Graphics::Direct3D11::{
@@ -1731,6 +1733,7 @@ mod source {
         DXGI_OUTDUPL_MOVE_RECT,
     };
     use ::windows::Win32::Graphics::Gdi::{BitBlt, GdiFlush, SRCCOPY};
+    use ::windows::Win32::System::LibraryLoader::{LoadLibraryExW, LOAD_LIBRARY_SEARCH_SYSTEM32};
 
     use super::{couper_au_bureau, DcEcran, Dib, Pixels, Rect};
     use crate::systeme::gel;
@@ -1765,11 +1768,29 @@ mod source {
         dans_sortie: Rect,
     }
 
+    /// Charge `dxgi.dll` et `d3d11.dll` depuis le dossier système, une fois. Les appels
+    /// chargés à la demande trouvent ensuite ces modules : une DLL du même nom posée à
+    /// côté de l'exécutable n'est jamais prise.
+    fn dll_du_systeme() -> bool {
+        static CHARGEES: OnceLock<bool> = OnceLock::new();
+        *CHARGEES.get_or_init(|| {
+            ["dxgi.dll", "d3d11.dll"].iter().all(|nom| {
+                let n = HSTRING::from(*nom);
+                // SAFETY : nom terminé par zéro, tenu pendant l'appel ; aucune fonction de
+                // la DLL n'est appelée ici, et le module reste chargé.
+                unsafe { LoadLibraryExW(&n, None, LOAD_LIBRARY_SEARCH_SYSTEM32) }.is_ok()
+            })
+        })
+    }
+
     /// Parcourt les cartes et leurs sorties (fabrique neuve : à jour après un changement de
     /// mode), choisit celle qui porte la zone (`choisir_sortie`), crée le périphérique sur
     /// sa carte et la duplication. Rien n'est acquis ici : à l'ouverture d'un film, l'écran
     /// figé peut encore être montré.
     fn ouvrir_duplication(zone: Rect, ecran: Rect) -> Result<Duplication, Refus> {
+        if !dll_du_systeme() {
+            return Err("dll systeme".into());
+        }
         // SAFETY : énumération DXGI ; chaque objet COM est rendu par son compte de
         // références ; les descriptions sont copiées.
         let (carte, sortie, bureau) = unsafe {
@@ -2005,6 +2026,17 @@ mod source {
             Err(e) => return Acquis::Perte(code_hex(e.code().0), false),
         };
         let z = d.dans_sortie;
+        // Une boîte hors de la texture ou un autre format ne rendrait aucune erreur : la
+        // copie serait ignorée et l'image précédente rendue comme si rien n'avait changé.
+        let mut desc = D3D11_TEXTURE2D_DESC::default();
+        // SAFETY : texture vivante ; la description est copiée.
+        unsafe { texture.GetDesc(&mut desc) };
+        if desc.Format != DXGI_FORMAT_B8G8R8A8_UNORM
+            || (z.x + z.largeur) as u32 > desc.Width
+            || (z.y + z.hauteur) as u32 > desc.Height
+        {
+            return Acquis::Perte("texture differente".into(), false);
+        }
         let boite = D3D11_BOX {
             left: z.x as u32,
             top: z.y as u32,
