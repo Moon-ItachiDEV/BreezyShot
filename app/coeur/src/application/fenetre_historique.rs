@@ -91,6 +91,11 @@ fn chemin_apercu(app: &AppHandle, nom: &str) -> Option<std::path::PathBuf> {
 #[tauri::command]
 pub fn historique_action(app: AppHandle, nom: String, action: String) {
     match ActionCase::depuis_nom(&action) {
+        // Pendant une défilante, aucune fenêtre ne s'ouvre sur la zone (R2), comme le menu
+        // et les raccourcis : l'éditeur non plus.
+        Some(ActionCase::Annoter) if super::geste_defilante::fenetres_bloquees(&app) => {
+            log::info!("historique: annoter ignore pendant la defilante");
+        }
         Some(a) if geste::connue(&app, &nom) => geste::action(&app, nom, a),
         _ => refusee("action"),
     }

@@ -1,0 +1,14 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "defilante",
+  "description": "Droits de la page de contrôle de la capture défilante : écouter ses événements et appeler ses quatre commandes, rien d'autre.",
+  "windows": ["defilante"],
+  "permissions": [
+    "core:event:allow-listen",
+    "core:event:allow-unlisten",
+    "allow-defilante-pret",
+    "allow-defilante-zone",
+    "allow-defilante-terminer",
+    "allow-defilante-apercu"
+  ]
+}

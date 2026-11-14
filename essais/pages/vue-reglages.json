@@ -188,6 +188,17 @@
         "refus": null
       },
       {
+        "action": "defilante",
+        "libelle": "Capture défilante",
+        "touches": [
+          "Ctrl",
+          "Maj",
+          "5"
+        ],
+        "modifie": false,
+        "refus": null
+      },
+      {
         "action": "texte",
         "libelle": "Copier le texte",
         "touches": [

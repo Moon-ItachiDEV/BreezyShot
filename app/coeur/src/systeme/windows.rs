@@ -22,8 +22,8 @@ use ::windows::Win32::UI::WindowsAndMessaging::{
     SetWindowDisplayAffinity, SetWindowLongW, SetWindowPos, ShowWindow, SystemParametersInfoW,
     GWL_EXSTYLE, HWND_TOPMOST, SPI_GETCLIENTAREAANIMATION, SWP_FRAMECHANGED, SWP_NOACTIVATE,
     SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SWP_SHOWWINDOW, SW_HIDE, SW_SHOWNOACTIVATE,
-    SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS, WDA_EXCLUDEFROMCAPTURE, WS_EX_APPWINDOW, WS_EX_LAYERED,
-    WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TRANSPARENT,
+    SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS, WDA_EXCLUDEFROMCAPTURE, WDA_NONE, WS_EX_APPWINDOW,
+    WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TRANSPARENT,
 };
 use ::windows::Win32::UI::WindowsAndMessaging::{
     SendMessageTimeoutW, HWND_BROADCAST, SMTO_ABORTIFHUNG, WM_SETTINGCHANGE,
@@ -316,6 +316,23 @@ pub fn exclure_des_captures(fenetre: &tauri::WebviewWindow) -> bool {
         }
     }
     affinite == WDA_EXCLUDEFROMCAPTURE.0
+}
+
+/// `SetWindowDisplayAffinity(WDA_NONE)` : la fenêtre redevient visible dans les captures,
+/// relu par `GetWindowDisplayAffinity`.
+pub fn inclure_dans_les_captures(fenetre: &tauri::WebviewWindow) -> bool {
+    let Ok(h) = hwnd(fenetre) else {
+        return false;
+    };
+    let mut affinite = 0u32;
+    // SAFETY : handle valide ; `affinite` reçoit un DWORD.
+    unsafe {
+        let _ = SetWindowDisplayAffinity(h, WDA_NONE);
+        if GetWindowDisplayAffinity(h, &mut affinite).is_err() {
+            return false;
+        }
+    }
+    affinite == WDA_NONE.0
 }
 
 /// Cache par `ShowWindow(SW_HIDE)`, symétrique de `montrer_sans_activer`.

@@ -33,6 +33,7 @@ const PICTO_ACTION = {
   plein_ecran: "capturer_plein_ecran",
   fenetre: "capturer_fenetre",
   derniere_zone: "capturer_derniere_zone",
+  defilante: "capturer_defilante",
   texte: "capturer_texte",
   historique: "historique",
 };

@@ -169,9 +169,15 @@ pub fn ligne_zone_texte(zone: Rect) -> String {
 /// Vrai si le signal de choix (`Zone` ou `Fenetre`) est celui du mode montré.
 fn signal_du_mode(signal: &SignalSelection, mode: ModeSelection) -> bool {
     match signal {
-        // Copier le texte trace une zone comme le mode zone.
-        SignalSelection::Zone { .. } => mode == ModeSelection::Zone || mode == ModeSelection::Texte,
-        SignalSelection::Fenetre { .. } => mode == ModeSelection::Fenetre,
+        // Copier le texte trace une zone comme le mode zone ; la capture défilante (0.6)
+        // trace une zone ou clique sur une page proposée.
+        SignalSelection::Zone { .. } => matches!(
+            mode,
+            ModeSelection::Zone | ModeSelection::Texte | ModeSelection::Defilante
+        ),
+        SignalSelection::Fenetre { .. } => {
+            matches!(mode, ModeSelection::Fenetre | ModeSelection::Defilante)
+        }
         _ => true,
     }
 }
@@ -593,6 +599,49 @@ mod tests {
         }
     }
 
+    /// Capture défilante (0.6) : la zone tracée et la page cliquée passent toutes deux ;
+    /// la page est un indice de la liste proposée (coupée à l'écran du point, coins droits).
+    #[test]
+    fn mode_defilante_trace_ou_clique() {
+        let e = ecrans();
+        let pages = [FenetreProposee {
+            rect: r(100, 100, 400, 300),
+            rayon: 0,
+        }];
+        let defilante = Vue {
+            mode: ModeSelection::Defilante,
+            fenetres: &pages,
+            ..vue(Some(1), &e)
+        };
+        let zone = SignalSelection::Zone {
+            id: 1,
+            depart: (10, 20),
+            arrivee: (209, 69),
+        };
+        assert_eq!(
+            decider(Some(defilante), Arrivee::Selection(&zone)),
+            Geste::Decouper(r(10, 20, 200, 50))
+        );
+        let clic = SignalSelection::Fenetre {
+            id: 1,
+            indice: 0,
+            point: (150, 150),
+        };
+        assert!(matches!(
+            decider(Some(defilante), Arrivee::Selection(&clic)),
+            Geste::DecouperFenetre { zone, rayon: 0, .. } if zone == r(100, 100, 400, 300)
+        ));
+        // Aucune page proposée encore : un clic ne désigne rien de connu.
+        let sans_page = Vue {
+            fenetres: &[],
+            ..defilante
+        };
+        assert_eq!(
+            decider(Some(sans_page), Arrivee::Selection(&clic)),
+            abandon(Declencheur::SelectionImpossible, Some(Probleme::Selection))
+        );
+    }
+
     #[test]
     fn mode_texte_trace_une_zone() {
         let e = ecrans();
@@ -812,6 +861,7 @@ mod tests {
             rect,
             titre: "secret".into(),
             coins,
+            fenetre: 0,
         };
         let liste = [
             info(r(100, 100, 400, 300), Coins::Arrondis),

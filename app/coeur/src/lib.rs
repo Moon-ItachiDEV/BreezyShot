@@ -4,6 +4,7 @@
 
 pub mod application;
 pub mod capture;
+pub mod defilement;
 pub mod droits;
 pub mod fenetres;
 pub mod installation;

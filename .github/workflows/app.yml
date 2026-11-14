@@ -18,7 +18,7 @@ jobs:
   windows:
     name: Windows (tests, .exe, essais)
     runs-on: windows-latest
-    timeout-minutes: 60
+    timeout-minutes: 80
     defaults:
       run:
         shell: pwsh
@@ -62,15 +62,42 @@ jobs:
         env:
           # Sur cette machine le presse-papiers existe : son test ne doit pas pouvoir sauter.
           BREEZYSHOT_PRESSE_PAPIERS_OBLIGATOIRE: "1"
-        run: cargo test --locked -- --show-output
+          # Les tests UI Automation de B ne peuvent pas se replier sur la molette ici.
+          BREEZYSHOT_AUTOMATION_OBLIGATOIRE: "1"
+        # La sortie est gardée : l'essai 14 en recopie les lignes `vivant: …` (mesures du
+        # chantier A, faites ici en construction de test).
+        run: |
+          cargo test --locked -- --show-output | Tee-Object -FilePath "$env:RUNNER_TEMP/tests-sortie.txt"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Diagnostic d'un test qui ne se charge pas
+        # Seulement si les tests échouent : liste les fonctions importées par l'exécutable
+        # de tests que Windows ne trouve pas (cause d'un STATUS_ENTRYPOINT_NOT_FOUND).
+        if: failure()
+        working-directory: app/coeur
+        run: |
+          $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -property installationPath
+          $dumpbin = Get-ChildItem -Recurse -Filter dumpbin.exe "$vs\VC\Tools\MSVC" | Where-Object { $_.FullName -match 'Hostx64\\x64' } | Select-Object -First 1
+          Add-Type -Name N -Namespace D -MemberDefinition '[DllImport("kernel32", SetLastError=true, CharSet=CharSet.Unicode)] public static extern IntPtr LoadLibraryExW(string n, IntPtr h, uint f); [DllImport("kernel32", CharSet=CharSet.Ansi)] public static extern IntPtr GetProcAddress(IntPtr m, string p);'
+          foreach ($exe in Get-ChildItem target\debug\deps\breezyshot-*.exe) {
+            "== $($exe.Name)"
+            $dll = $null; $manque = 0
+            foreach ($l in & $dumpbin.FullName /nologo /imports $exe.FullName) {
+              if ($l -match '^\s{4}(\S+\.dll)\s*$') { $dll = $Matches[1]; $h = [D.N]::LoadLibraryExW($dll, [IntPtr]::Zero, 0x800); if ($h -eq [IntPtr]::Zero) { "DLL introuvable : $dll" }; continue }
+              if ($dll -and $l -match '^\s+[0-9A-F]+\s+(\S+)\s*$') { if ($h -ne [IntPtr]::Zero -and [D.N]::GetProcAddress($h, $Matches[1]) -eq [IntPtr]::Zero) { "MANQUE : $dll!$($Matches[1])"; $manque++ } }
+            }
+            "fonctions manquantes : $manque"
+          }
 
       - name: Construire breezyshot.exe (release)
         working-directory: app
         run: npx tauri build --no-bundle -- --locked
 
       - name: Essais
-        # 01 à 13 ; une étape bloquée ne doit pas manger tout le job.
-        timeout-minutes: 45
+        # 01 à 14 ; une étape bloquée ne doit pas manger tout le job.
+        timeout-minutes: 60
+        env:
+          BREEZYSHOT_SORTIE_TESTS: ${{ runner.temp }}/tests-sortie.txt
         run: ./essais/lancer.ps1 -Exe app/coeur/target/release/breezyshot.exe -Sortie essais-resultats
 
       - name: Envoyer le .exe
@@ -167,6 +194,12 @@ jobs:
           NODE_PATH: ${{ github.workspace }}/app/node_modules
           SORTIE: ${{ github.workspace }}/essais-resultats/pages
         run: node essais/pages/historique.cjs
+
+      - name: Essai de la page de la capture défilante
+        env:
+          NODE_PATH: ${{ github.workspace }}/app/node_modules
+          SORTIE: ${{ github.workspace }}/essais-resultats/pages
+        run: node essais/pages/defilante.cjs
 
       - name: Essai de la page du menu de l'icône
         env:

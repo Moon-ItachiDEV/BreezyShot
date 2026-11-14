@@ -279,6 +279,35 @@ pub fn liberer_echap<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
         .map_err(|e| e.to_string())
 }
 
+/// Entrée seule, dans les types du système (la touche principale, pas celle du pavé).
+fn entree() -> Shortcut {
+    Shortcut::new(None, Code::Enter)
+}
+
+/// Réserve Entrée en global, le temps d'un défilement (0.6, = « Terminer ») : `rappel`
+/// reçoit `Signal::Entree` à chaque appui. Rend l'erreur du système si une autre
+/// application la tient déjà. Même forme que `reserver_echap`.
+pub fn reserver_entree<R, F>(app: &AppHandle<R>, rappel: F) -> Result<(), String>
+where
+    R: Runtime,
+    F: Fn(Signal) + Send + Sync + 'static,
+{
+    app.global_shortcut()
+        .on_shortcut(entree(), move |_app, _s, evenement| {
+            if evenement.state == ShortcutState::Pressed {
+                rappel(Signal::Entree);
+            }
+        })
+        .map_err(|e| e.to_string())
+}
+
+/// Libère Entrée (réservée par `reserver_entree`).
+pub fn liberer_entree<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
+    app.global_shortcut()
+        .unregister(entree())
+        .map_err(|e| e.to_string())
+}
+
 /// Libère tous les raccourcis réservés.
 pub fn liberer<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
     app.global_shortcut()

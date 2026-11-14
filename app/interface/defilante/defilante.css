@@ -1,0 +1,129 @@
+/* Page de contrôle de la capture défilante (contrat 0.6, §10 à §12 ; design/defilante,
+   piste C « Mixte »). Toutes les valeurs viennent de ../commun/jetons.css. */
+
+html,
+body {
+  height: 100%;
+  margin: 0;
+  background: transparent;
+  overflow: hidden;
+}
+
+body {
+  font-family: var(--police-ui);
+  -webkit-font-smoothing: antialiased;
+  -webkit-user-select: none;
+  user-select: none;
+  /* Clics et molette traversent la fenêtre ; seule la pilule les reçoit (defilante_zone). */
+  pointer-events: none;
+}
+
+[hidden] {
+  display: none !important;
+}
+
+.scene {
+  position: fixed;
+  inset: 0;
+}
+
+/* La zone reste claire ; le voile couvre le reste de l'écran (ombre portée sans flou) et
+   le trait blanc est tracé dehors (écart E8) : l'image ne peut pas le contenir. */
+.zone {
+  position: absolute;
+  box-sizing: border-box;
+  box-shadow: 0 0 0 200vmax var(--scrim);
+  outline: var(--defilante-trait) solid var(--selection-stroke);
+  outline-offset: 0;
+}
+
+/* Aperçu en direct : le bas de l'image assemblée, collé en bas de la bande. */
+.apercu {
+  position: absolute;
+  width: var(--defilante-apercu-largeur);
+  overflow: hidden;
+  border-radius: var(--radius-sm);
+  background: var(--page);
+  box-shadow: var(--defilante-apercu-ombre);
+}
+
+.apercu img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center bottom;
+}
+
+/* Pilule « Terminer » (bouton accent). Fond plein : une fenêtre transparente ne peut pas
+   flouter l'écran dessous (comme le bandeau). */
+.pilule {
+  position: absolute;
+  display: flex;
+  padding: var(--defilante-pilule-marge);
+  border-radius: var(--radius-md);
+  background: var(--acrylic-solid);
+  border: 1px solid var(--acrylic-stroke);
+  box-shadow: var(--shadow-16);
+  pointer-events: auto;
+}
+
+.terminer {
+  all: unset;
+  box-sizing: border-box;
+  height: var(--defilante-bouton-hauteur);
+  min-width: var(--defilante-bouton-largeur);
+  padding: 0 var(--defilante-bouton-marge);
+  border-radius: var(--radius-sm);
+  background: var(--accent);
+  color: var(--on-accent);
+  font-family: var(--police-ui);
+  font-size: var(--texte-body-strong-taille);
+  font-weight: var(--texte-body-strong-graisse);
+  line-height: var(--defilante-bouton-hauteur);
+  text-align: center;
+  white-space: nowrap;
+  transition:
+    background-color var(--duree-couleur) linear,
+    transform var(--duree-ressort) var(--courbe-ressort);
+}
+
+.terminer:hover {
+  background: var(--accent-hover);
+}
+
+.terminer:active {
+  transform: scale(var(--defilante-appui-echelle));
+  transition-duration: var(--duree-couleur), var(--duree-appui);
+}
+
+/* Animations réduites (système ou réglage du cœur) : aucun mouvement. */
+:root[data-reduites] .terminer,
+:root[data-reduites] .terminer:active {
+  transform: none;
+  transition: background-color var(--duree-couleur) linear;
+}
+@media (prefers-reduced-motion: reduce) {
+  .terminer,
+  .terminer:active {
+    transform: none;
+    transition: background-color var(--duree-couleur) linear;
+  }
+}
+
+/* « Trop vite. Remontez un peu. » : forme hud, en haut de l'écran, sans animation. */
+.message {
+  position: fixed;
+  left: 50%;
+  top: var(--defilante-message-haut);
+  transform: translateX(-50%);
+  padding: var(--defilante-message-marge-haut) var(--defilante-message-marge-cote);
+  border-radius: var(--radius-pill);
+  background: var(--hud);
+  color: var(--hud-text);
+  font-family: var(--police-ui);
+  font-size: var(--texte-caption-taille);
+  font-weight: var(--texte-body-strong-graisse);
+  line-height: var(--texte-caption-interligne);
+  white-space: nowrap;
+}
