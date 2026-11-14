@@ -86,19 +86,22 @@ pub struct Raccourcis {
     pub historique: Vec<String>,
     /// Copier le texte (version 4).
     pub texte: Vec<String>,
+    /// La capture défilante (version 5).
+    pub defilante: Vec<String>,
     /// Actions que cette version ne connaît pas, gardées telles quelles pour la réécriture.
     pub(in crate::reglages) autres: Map<String, Value>,
 }
 
 impl Raccourcis {
     /// Les noms d'action connus, dans l'ordre où ils sont écrits.
-    pub const ACTIONS: [&'static str; 6] = [
+    pub const ACTIONS: [&'static str; 7] = [
         "zone",
         "plein_ecran",
         "fenetre",
         "derniere_zone",
         "historique",
         "texte",
+        "defilante",
     ];
 
     /// Les candidats d'une action connue, `None` pour une action inconnue.
@@ -110,6 +113,7 @@ impl Raccourcis {
             "derniere_zone" => Some(&self.derniere_zone),
             "historique" => Some(&self.historique),
             "texte" => Some(&self.texte),
+            "defilante" => Some(&self.defilante),
             _ => None,
         }
     }
@@ -122,6 +126,7 @@ impl Raccourcis {
             "derniere_zone" => Some(&mut self.derniere_zone),
             "historique" => Some(&mut self.historique),
             "texte" => Some(&mut self.texte),
+            "defilante" => Some(&mut self.defilante),
             _ => None,
         }
     }
@@ -137,10 +142,12 @@ impl Raccourcis {
                 derniere_zone: liste(&["Ctrl+Maj+4"]),
                 historique: liste(&["Ctrl+Maj+H"]),
                 texte: liste(&["Ctrl+Maj+T"]),
+                defilante: liste(&["Ctrl+Maj+5"]),
                 autres: Map::new(),
             },
             // Provisoire : les raccourcis du Mac restent à choisir (Cmd+Maj+3, 4 et 5 sont
-            // ceux de macOS lui-même, on les évite).
+            // ceux de macOS lui-même, on les évite ; Cmd+Maj+0 pour la défilante, contrat 0.6
+            // §7.1).
             Plateforme::Mac => Raccourcis {
                 zone: liste(&["Cmd+Maj+1"]),
                 plein_ecran: liste(&["Cmd+Maj+2"]),
@@ -148,6 +155,7 @@ impl Raccourcis {
                 derniere_zone: liste(&["Cmd+Maj+7"]),
                 historique: liste(&["Cmd+Maj+8"]),
                 texte: liste(&["Cmd+Maj+9"]),
+                defilante: liste(&["Cmd+Maj+0"]),
                 autres: Map::new(),
             },
         }

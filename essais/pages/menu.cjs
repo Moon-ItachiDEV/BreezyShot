@@ -28,6 +28,7 @@ const LIGNES = [
   { id: 'capturer_fenetre', libelle: 'Capturer une fenêtre', raccourci: 'Ctrl + Maj + 3', separateur: false },
   { id: '', libelle: '', raccourci: null, separateur: true },
   { id: 'capturer_derniere_zone', libelle: 'Refaire la dernière zone', raccourci: 'Ctrl + Maj + 4', separateur: false },
+  { id: 'capturer_defilante', libelle: 'Capture défilante', raccourci: 'Ctrl + Maj + 5', separateur: false },
   { id: 'capturer_texte', libelle: 'Copier le texte', raccourci: 'Ctrl + Maj + T', separateur: false },
   { id: '', libelle: '', raccourci: null, separateur: true },
   { id: 'historique', libelle: 'Historique', raccourci: 'Ctrl + Maj + H', separateur: false },
@@ -84,10 +85,12 @@ const HAUTEUR = CADRE + (LIGNES.length - seps) * LIGNE + seps * SEP;
       hauteurs: [...new Set(l.map(b => b.getBoundingClientRect().height))],
       raccourciAligne: [...new Set(l.filter(b => b.querySelector('.raccourci')).map(b => Math.round(b.querySelector('.raccourci').getBoundingClientRect().right)))],
       engrenage: document.body.innerHTML.includes('gear'),
+      defilantePointillee: !!m.querySelector('[data-id=capturer_defilante] svg path[stroke-dasharray]'),
     };
   });
-  verifier(vu.lignes.length === 8 && vu.seps === 3, '8 lignes, 3 séparateurs', JSON.stringify(vu.lignes.map(x => x[0])));
+  verifier(vu.lignes.length === 9 && vu.seps === 3, '9 lignes, 3 séparateurs', JSON.stringify(vu.lignes.map(x => x[0])));
   verifier(vu.lignes.every(x => x[3] === 'menuitem' && x[4]), 'chaque ligne : role menuitem et pictogramme');
+  verifier(vu.lignes[4][0] === 'capturer_defilante' && vu.defilantePointillee, 'Capture défilante : cinquième, pictogramme au bas pointillé', JSON.stringify(vu.lignes.map(x => x[0])));
   verifier(JSON.stringify(vu.lignes.map(x => [x[1], x[2]])) === JSON.stringify(LIGNES.filter(l => !l.separateur).map(l => [l.libelle, l.raccourci])), 'libellés et raccourcis reçus, tels quels');
   verifier(vu.carte[0] === MARGE && vu.carte[1] === MARGE && vu.carte[2] === LARGEUR, `carte à ${MARGE} px du bord, ${LARGEUR} px de large`, JSON.stringify(vu.carte));
   verifier(Math.abs(vu.contenu - HAUTEUR) < 0.5, `hauteur du contenu = celle du cœur (${HAUTEUR} px)`, String(vu.contenu));
@@ -137,6 +140,9 @@ const HAUTEUR = CADRE + (LIGNES.length - seps) * LIGNE + seps * SEP;
   await p.keyboard.press('Escape');
   await p.waitForTimeout(50);
   verifier((await appels(p, 'menu_fermer')).length === 1 && (await appels(p, 'menu_choisi')).length === 2, 'Échap : menu_fermer, rien de choisi');
+  // Pendant une défilante, le cœur n'envoie que Quitter : une seule ligne.
+  await p.evaluate(() => __emettre('menu:ouvrir', { lignes: [{ id: 'quitter', libelle: 'Quitter BreezyShot', raccourci: null, separateur: false }] }));
+  verifier(JSON.stringify(await p.evaluate(() => [...document.querySelectorAll('.ligne')].map(b => b.dataset.id))) === '["quitter"]', 'pendant une défilante : Quitter seul');
   // Ligne mal formée : ignorée sans casser la page.
   await p.evaluate(() => __emettre('menu:ouvrir', { lignes: [{ id: 3 }, { id: 'reglages', libelle: 'Réglages', raccourci: null, separateur: false }] }));
   verifier((await p.evaluate(() => document.querySelectorAll('.ligne').length)) === 1, 'ligne mal formée ignorée');
@@ -148,7 +154,7 @@ const HAUTEUR = CADRE + (LIGNES.length - seps) * LIGNE + seps * SEP;
     await q.waitForTimeout(400);
     const n = (await appels(q, 'menu_pret')).length;
     const l = await q.evaluate(() => document.querySelectorAll('.ligne').length);
-    verifier(n === 3 && l === 8, 'menu_pret rejeté deux fois : retenté, lignes au troisième', `${n} appel(s), ${l} ligne(s)`);
+    verifier(n === 3 && l === 9, 'menu_pret rejeté deux fois : retenté, lignes au troisième', `${n} appel(s), ${l} ligne(s)`);
     await q.context().close();
   }
 

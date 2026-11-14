@@ -1,4 +1,5 @@
-/* Sélection d'une zone (étape 5), d'une fenêtre (étape 8) ou du texte à lire (0.5). Toutes
+/* Sélection d'une zone (étape 5), d'une fenêtre (étape 8), du texte à lire (0.5) ou, en
+   capture défilante (0.6), d'une zone ou d'une page (le tracé et le contour). Toutes
    les couleurs viennent de ../commun/jetons.css ;
    la page force le thème clair (le voile ne dépend pas du thème). */
 
@@ -80,7 +81,8 @@ body.glisse #plein {
   display: none;
 }
 
-/* Mode fenêtre : la flèche normale, pas la croix. */
+/* Mode fenêtre : la flèche normale, pas la croix (le mode défilante garde la croix : il
+   trace aussi). */
 html.mode-fenetre,
 html.mode-fenetre body {
   cursor: default;

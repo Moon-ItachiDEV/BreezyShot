@@ -5,7 +5,8 @@
 //!   tous peuvent utiliser `systeme`, qui ne connaît aucun module. `texte` (0.5) n'utilise
 //!   que `systeme` ; `droits` n'utilise rien, et `droits::ouverte` n'est appelé que depuis
 //!   `application` (avenant 0.5, §2.2). `licence` (avenant « Licence ») n'utilise rien, et
-//!   `licence::verifier` n'est appelé que depuis `application`.
+//!   `licence::verifier` n'est appelé que depuis `application`. `defilement` (0.6, assemblage
+//!   de la capture défilante) n'utilise que `systeme`.
 //!   `crate as …` et `super::super` sont interdits partout (ils contourneraient le contrôle).
 //! - Règle 3 : hors de `systeme/`, aucun `cfg` (attribut, `cfg_attr` ou
 //!   `cfg!`) qui parle du système, et aucune crate `windows`, sous quelque nom que ce soit.
@@ -28,6 +29,7 @@ const MODULES: &[&str] = &[
     "texte",
     "droits",
     "licence",
+    "defilement",
 ];
 
 /// Dossiers où le code propre à un système est permis.
@@ -399,6 +401,15 @@ fn le_controle_repere_les_pieges() {
         (Some("sortie"), "fn f(){ crate::licence::verifier(t); }"),
         (Some("reglages"), "use crate::licence::verifier;"),
         (Some("licence"), "use crate::systeme;"),
+        (Some("defilement"), "use crate::capture::reduire;"),
+        (
+            Some("defilement"),
+            "fn f(){ crate::application::lancer(); }",
+        ),
+        (Some("defilement"), "#[cfg(windows)] fn f(){}"),
+        (Some("systeme"), "use crate::defilement::Mesure;"),
+        (Some("capture"), "use crate::defilement::Assemblage;"),
+        (Some("defilement"), "fn f(){ crate::droits::ouverte(x); }"),
     ];
     for (module, source) in fautes {
         assert!(
@@ -433,6 +444,12 @@ fn le_controle_repere_les_pieges() {
         (Some("droits"), "fn f(){ ouverte(Fonction::Texte, true); }"),
         (Some("application"), "fn f(){ let _ = crate::licence::verifier(t); }"),
         (Some("licence"), "fn f(){ let _ = verifier(t); }"),
+        (Some("defilement"), "use crate::systeme::gel::Pixels;"),
+        (Some("application"), "use crate::defilement::{self, Mesure};"),
+        (
+            Some("application"),
+            "fn f(){ droits::ouverte(Fonction::Defilante, true); }",
+        ),
     ];
     for (module, source) in permis {
         let f = controler(*module, source);

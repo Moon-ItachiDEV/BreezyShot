@@ -16,8 +16,9 @@ pub const RETARDATEURS_PROPOSES: [u32; 4] = [0, 3, 5, 10];
 
 /// Le déclencheur d'une demande de capture : directe sans retardateur, sinon le décompte.
 pub fn declencheur(mode: Mode, retardateur_s: u32) -> Declencheur {
-    // Copier le texte n'est pas une capture : jamais de retardateur (§5.4).
-    if retardateur_s == 0 || mode == Mode::Texte {
+    // Copier le texte n'est pas une capture : jamais de retardateur (§5.4). La capture
+    // défilante non plus (contrat 0.6, R6).
+    if retardateur_s == 0 || mode == Mode::Texte || mode == Mode::Defilante {
         Declencheur::DemandeCapture(mode)
     } else {
         Declencheur::DemandeDecompte(mode)
@@ -186,6 +187,11 @@ mod tests {
             assert_eq!(
                 declencheur(Mode::Texte, s),
                 Declencheur::DemandeCapture(Mode::Texte)
+            );
+            // La capture défilante non plus (R6).
+            assert_eq!(
+                declencheur(Mode::Defilante, s),
+                Declencheur::DemandeCapture(Mode::Defilante)
             );
         }
         assert!(fin_a_jour(Some(2), 2));

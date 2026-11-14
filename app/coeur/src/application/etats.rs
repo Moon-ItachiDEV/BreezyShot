@@ -1,4 +1,4 @@
-//! Les huit états d'une capture et la table unique de leurs passages.
+//! Les neuf états d'une capture et la table unique de leurs passages.
 //!
 //! La table suit le tableau « États » du document de workflow. Ajouter un état ou un
 //! passage, c'est ajouter des lignes à `PASSAGES` ; `suivant` ne change pas.
@@ -18,6 +18,9 @@ pub enum Etat {
     Decompte,
     /// Copier le texte (0.5) : la zone est lue ; toute demande de capture est ignorée.
     Lecture,
+    /// Capture défilante (0.6) : la page défile et s'assemble ; toute demande de capture
+    /// est ignorée.
+    Defilement,
 }
 
 /// Modes de capture. Ce sont aussi les noms d'action des raccourcis.
@@ -30,18 +33,22 @@ pub enum Mode {
     DerniereZone,
     /// Copier le texte (0.5) : une zone lue, jamais rangée comme une capture.
     Texte,
+    /// Capture défilante (0.6) : une page plus haute que l'écran, assemblée en une image.
+    Defilante,
 }
 
 impl Mode {
-    pub const TOUS: [Mode; 5] = [
+    pub const TOUS: [Mode; 6] = [
         Mode::Zone,
         Mode::PleinEcran,
         Mode::Fenetre,
         Mode::DerniereZone,
         Mode::Texte,
+        Mode::Defilante,
     ];
 
-    /// Nom d'action (`zone`, `plein_ecran`, `fenetre`, `derniere_zone`, `texte`).
+    /// Nom d'action (`zone`, `plein_ecran`, `fenetre`, `derniere_zone`, `texte`,
+    /// `defilante`).
     pub fn nom(self) -> &'static str {
         match self {
             Mode::Zone => "zone",
@@ -49,6 +56,7 @@ impl Mode {
             Mode::Fenetre => "fenetre",
             Mode::DerniereZone => "derniere_zone",
             Mode::Texte => "texte",
+            Mode::Defilante => "defilante",
         }
     }
 
@@ -112,6 +120,14 @@ pub enum Declencheur {
     TexteLu,
     /// Plus de langue, moteur en échec ou échéance de la lecture.
     LectureImpossible,
+    /// Capture défilante : la zone ou la page est choisie, le défilement part (0.6).
+    DefilementChoisi,
+    /// L'image est assemblée (bouton, Entrée, bas de la page, limite) : la sortie commune.
+    DefilementFini,
+    /// Échap, écrans changés, session verrouillée ou arrêt pendant le défilement.
+    DefilementAnnule,
+    /// Première image impossible, prises en échec, page de contrôle muette, fil, mémoire.
+    DefilementImpossible,
 }
 
 impl Declencheur {
@@ -208,6 +224,16 @@ pub const PASSAGES: &[(Etat, Declencheur, Etat)] = &[
     (E::Selection, D::TexteChoisi, E::Lecture),
     (E::Lecture, D::TexteLu, E::Repos),
     (E::Lecture, D::LectureImpossible, E::Repos),
+    // 0.6 : la capture défilante, sans retardateur (aucune ligne `DemandeDecompte`). Les
+    // sorties de la Sélection servent telles quelles ; une fois l'image assemblée, les
+    // lignes de la Découpe font le reste (sortie, souffle, vignette).
+    (E::Repos, D::DemandeCapture(Mode::Defilante), E::Gel),
+    (E::Vignette, D::DemandeCapture(Mode::Defilante), E::Gel),
+    (E::Gel, D::PhotoPrise(Mode::Defilante), E::Selection),
+    (E::Selection, D::DefilementChoisi, E::Defilement),
+    (E::Defilement, D::DefilementFini, E::Decoupe),
+    (E::Defilement, D::DefilementAnnule, E::Repos),
+    (E::Defilement, D::DefilementImpossible, E::Repos),
 ];
 
 /// Fonction pure : l'état suivant, ou `None` si le déclencheur est ignoré dans cet état.
@@ -276,7 +302,20 @@ impl Automate {
 mod tests {
     use super::*;
 
-    const TOUS_LES_ETATS: [Etat; 8] = [
+    const TOUS_LES_ETATS: [Etat; 9] = [
+        E::Repos,
+        E::Gel,
+        E::Selection,
+        E::Decoupe,
+        E::Souffle,
+        E::Vignette,
+        E::Decompte,
+        E::Lecture,
+        E::Defilement,
+    ];
+
+    /// Les huit états de la 0.5.
+    const ETATS_0_5: [Etat; 8] = [
         E::Repos,
         E::Gel,
         E::Selection,
@@ -374,6 +413,50 @@ mod tests {
         (E::Selection, D::TexteChoisi, E::Lecture),
         (E::Lecture, D::TexteLu, E::Repos),
         (E::Lecture, D::LectureImpossible, E::Repos),
+    ];
+
+    /// Les sept lignes de la 0.6.
+    const LIGNES_0_6: &[(Etat, Declencheur, Etat)] = &[
+        (E::Repos, D::DemandeCapture(Mode::Defilante), E::Gel),
+        (E::Vignette, D::DemandeCapture(Mode::Defilante), E::Gel),
+        (E::Gel, D::PhotoPrise(Mode::Defilante), E::Selection),
+        (E::Selection, D::DefilementChoisi, E::Defilement),
+        (E::Defilement, D::DefilementFini, E::Decoupe),
+        (E::Defilement, D::DefilementAnnule, E::Repos),
+        (E::Defilement, D::DefilementImpossible, E::Repos),
+    ];
+
+    /// La table de la 0.5 (50 lignes), copie littérale : celle de la 0.4 puis ses six
+    /// lignes. Elle ne doit jamais changer.
+    fn passages_0_5() -> Vec<(Etat, Declencheur, Etat)> {
+        PASSAGES_0_4.iter().chain(LIGNES_0_5).copied().collect()
+    }
+
+    /// Tous les déclencheurs de la 0.5 : ceux de la 0.4, ceux du texte et son mode.
+    fn declencheurs_0_5() -> Vec<Declencheur> {
+        let mut v = tous_les_declencheurs();
+        v.extend([
+            D::TexteChoisi,
+            D::TexteLu,
+            D::LectureImpossible,
+            D::DemandeCapture(Mode::Texte),
+            D::PhotoPrise(Mode::Texte),
+            D::DemandeDecompte(Mode::Texte),
+            D::DecompteFini(Mode::Texte),
+        ]);
+        v
+    }
+
+    /// Les déclencheurs de la défilante (0.6).
+    const DECLENCHEURS_0_6: [Declencheur; 8] = [
+        D::DemandeCapture(Mode::Defilante),
+        D::PhotoPrise(Mode::Defilante),
+        D::DemandeDecompte(Mode::Defilante),
+        D::DecompteFini(Mode::Defilante),
+        D::DefilementChoisi,
+        D::DefilementFini,
+        D::DefilementAnnule,
+        D::DefilementImpossible,
     ];
 
     /// Les six états de la 0.3.
@@ -529,32 +612,167 @@ mod tests {
         }
     }
 
-    /// La 0.5 n'ajoute que ses six lignes : aucune retirée, aucune changée.
+    /// La 0.5 n'a ajouté que ses six lignes à la table de la 0.4.
+    #[test]
+    fn lignes_de_la_0_5_sur_la_0_4() {
+        let t = passages_0_5();
+        assert_eq!(t.len(), PASSAGES_0_4.len() + LIGNES_0_5.len());
+        for ligne in &t {
+            if !PASSAGES_0_4.contains(ligne) {
+                assert!(LIGNES_0_5.contains(ligne), "ligne inattendue : {ligne:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn table_0_5_incluse() {
+        let t = passages_0_5();
+        assert_eq!(t.len(), 50);
+        for ligne in &t {
+            assert!(
+                PASSAGES.contains(ligne),
+                "ligne de la 0.5 perdue : {ligne:?}"
+            );
+        }
+    }
+
+    /// La 0.6 n'ajoute que ses sept lignes : aucune retirée, aucune changée.
     #[test]
     fn seulement_des_lignes_nouvelles() {
-        assert_eq!(PASSAGES.len(), PASSAGES_0_4.len() + LIGNES_0_5.len());
+        let t = passages_0_5();
+        assert_eq!(PASSAGES.len(), t.len() + LIGNES_0_6.len());
         for ligne in PASSAGES {
             assert!(
-                PASSAGES_0_4.contains(ligne) || LIGNES_0_5.contains(ligne),
+                t.contains(ligne) || LIGNES_0_6.contains(ligne),
                 "ligne inattendue : {ligne:?}"
             );
         }
-        for ligne in LIGNES_0_5 {
+        for ligne in LIGNES_0_6 {
             assert!(
                 PASSAGES.contains(ligne),
-                "ligne de la 0.5 absente : {ligne:?}"
+                "ligne de la 0.6 absente : {ligne:?}"
             );
         }
-        // Les sept états de la 0.4 font ce qu'ils faisaient pour chaque déclencheur de la 0.4.
-        for etat in ETATS_0_4 {
-            for d in tous_les_declencheurs() {
-                let avant = PASSAGES_0_4
+        // Les huit états de la 0.5 font ce qu'ils faisaient pour chaque déclencheur de la
+        // 0.5.
+        for etat in ETATS_0_5 {
+            for d in declencheurs_0_5() {
+                let avant = t
                     .iter()
                     .find(|(e, x, _)| *e == etat && *x == d)
                     .map(|(_, _, a)| *a);
                 assert_eq!(suivant(etat, d), avant, "{etat:?} {d:?}");
             }
         }
+        // Et les déclencheurs de la défilante ne valent qu'aux lignes de la 0.6.
+        for etat in TOUS_LES_ETATS {
+            for d in DECLENCHEURS_0_6 {
+                let attendu = LIGNES_0_6
+                    .iter()
+                    .find(|(e, x, _)| *e == etat && *x == d)
+                    .map(|(_, _, a)| *a);
+                assert_eq!(suivant(etat, d), attendu, "{etat:?} {d:?}");
+            }
+        }
+    }
+
+    /// Pendant le défilement, toute demande de capture (et de décompte) est ignorée ;
+    /// seules ses trois fins passent.
+    #[test]
+    fn defilement_ignore_les_captures() {
+        for m in Mode::TOUS {
+            for d in [
+                D::DemandeCapture(m),
+                D::DemandeDecompte(m),
+                D::PhotoPrise(m),
+                D::DecompteFini(m),
+            ] {
+                assert_eq!(suivant(E::Defilement, d), None, "{d:?}");
+            }
+        }
+        for d in declencheurs_0_5() {
+            assert_eq!(suivant(E::Defilement, d), None, "{d:?}");
+        }
+        assert_eq!(suivant(E::Defilement, D::DefilementChoisi), None);
+        let mut a = Automate::default();
+        for d in [
+            D::DemandeCapture(Mode::Defilante),
+            D::PhotoPrise(Mode::Defilante),
+            D::DefilementChoisi,
+        ] {
+            assert!(a.traiter(d).is_some(), "{d:?}");
+        }
+        assert_eq!(a.etat(), E::Defilement);
+        assert_eq!(a.traiter(D::DemandeCapture(Mode::PleinEcran)), None);
+        assert_eq!(a.traiter(D::DemandeCapture(Mode::Defilante)), None);
+        // L'image assemblée suit la sortie commune.
+        assert_eq!(a.traiter(D::DefilementFini), Some(E::Decoupe));
+        assert_eq!(a.traiter(D::ImagePrete), Some(E::Souffle));
+        assert_eq!(a.traiter(D::SouffleTermine), Some(E::Vignette));
+        // Depuis la vignette, une défilante la ferme et repart.
+        assert_eq!(a.traiter(D::DemandeCapture(Mode::Defilante)), Some(E::Gel));
+        a.traiter(D::PhotoPrise(Mode::Defilante));
+        // Les sorties de la Sélection valent aussi en mode défilante.
+        assert_eq!(a.traiter(D::SelectionAnnulee), Some(E::Repos));
+        for fin in [D::DefilementAnnule, D::DefilementImpossible] {
+            let mut a = Automate::default();
+            a.traiter(D::DemandeCapture(Mode::Defilante));
+            a.traiter(D::PhotoPrise(Mode::Defilante));
+            a.traiter(D::DefilementChoisi);
+            assert_eq!(a.traiter(fin), Some(E::Repos), "{fin:?}");
+        }
+        // Hors de la Sélection et du Défilement, les déclencheurs de la défilante sont
+        // ignorés.
+        for etat in ETATS_0_5 {
+            for d in [
+                D::DefilementChoisi,
+                D::DefilementFini,
+                D::DefilementAnnule,
+                D::DefilementImpossible,
+            ] {
+                let attendu =
+                    (etat == E::Selection && d == D::DefilementChoisi).then_some(E::Defilement);
+                assert_eq!(suivant(etat, d), attendu, "{etat:?} {d:?}");
+            }
+        }
+    }
+
+    /// La capture défilante n'a jamais de retardateur.
+    #[test]
+    fn defilante_sans_decompte() {
+        for etat in TOUS_LES_ETATS {
+            assert_eq!(suivant(etat, D::DemandeDecompte(Mode::Defilante)), None);
+            assert_eq!(suivant(etat, D::DecompteFini(Mode::Defilante)), None);
+        }
+        assert_eq!(
+            D::DemandeCapture(Mode::Defilante).libelle(),
+            "DemandeCapture defilante"
+        );
+        assert_eq!(
+            D::PhotoPrise(Mode::Defilante).libelle(),
+            "PhotoPrise defilante"
+        );
+        assert_eq!(Mode::depuis_nom("defilante"), Some(Mode::Defilante));
+        for (d, libelle) in [
+            (D::DefilementChoisi, "DefilementChoisi"),
+            (D::DefilementFini, "DefilementFini"),
+            (D::DefilementAnnule, "DefilementAnnule"),
+            (D::DefilementImpossible, "DefilementImpossible"),
+        ] {
+            assert_eq!(d.libelle(), libelle);
+        }
+    }
+
+    /// Neuf états, chacun nommé une fois.
+    #[test]
+    fn neuf_etats() {
+        assert_eq!(TOUS_LES_ETATS.len(), 9);
+        for (i, a) in TOUS_LES_ETATS.iter().enumerate() {
+            for b in &TOUS_LES_ETATS[i + 1..] {
+                assert_ne!(a, b);
+            }
+        }
+        assert!(TOUS_LES_ETATS.contains(&E::Defilement));
     }
 
     /// Pendant la lecture, toute demande de capture (et de décompte) est ignorée ; seules
@@ -661,7 +879,9 @@ mod tests {
                     Mode::PleinEcran | Mode::DerniereZone => {
                         assert_eq!(a.traiter(D::PhotoPrise(m)), Some(E::Decoupe));
                     }
-                    Mode::Texte => unreachable!("pas de retardateur pour le texte"),
+                    Mode::Texte | Mode::Defilante => {
+                        unreachable!("pas de retardateur pour le texte ni la defilante")
+                    }
                 }
                 assert_eq!(a.traiter(D::ImagePreteSansVignette), Some(E::Repos));
             }

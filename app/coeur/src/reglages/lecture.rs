@@ -14,9 +14,10 @@ use super::modele::{
 /// le numéro de version est tenu par `interpreter`, pas par elle.
 pub(super) type MiseANiveau = fn(&mut Map<String, Value>, Plateforme);
 
-/// `MISES_A_NIVEAU[n]` fait passer de la version `n` à `n + 1`. Pour une version 5 un jour :
-/// ajouter `v4_vers_v5` à la fin, et `VERSION_ACTUELLE` passe à 5 tout seul.
-pub(super) const MISES_A_NIVEAU: &[MiseANiveau] = &[v0_vers_v1, v1_vers_v2, v2_vers_v3, v3_vers_v4];
+/// `MISES_A_NIVEAU[n]` fait passer de la version `n` à `n + 1`. Pour une version 6 un jour :
+/// ajouter `v5_vers_v6` à la fin, et `VERSION_ACTUELLE` passe à 6 tout seul.
+pub(super) const MISES_A_NIVEAU: &[MiseANiveau] =
+    &[v0_vers_v1, v1_vers_v2, v2_vers_v3, v3_vers_v4, v4_vers_v5];
 
 /// Version 0 (aucun champ `version`) vers 1 : ajoute les champs de la version 1 qui manquent,
 /// y compris dans les sous-objets, sans toucher à ceux qui sont là (même invalides : la
@@ -73,13 +74,30 @@ fn v3_vers_v4(objet: &mut Map<String, Value>, plateforme: Plateforme) {
     };
     let r = Raccourcis::par_defaut(plateforme);
     for (action, defaut) in [("historique", &r.historique), ("texte", &r.texte)] {
-        if raccourcis.contains_key(action) {
-            continue;
-        }
-        let pris = defaut.iter().any(|d| deja_donne(raccourcis, d));
-        let liste = if pris { Vec::new() } else { defaut.clone() };
-        raccourcis.insert(action.into(), json!(liste));
+        ajouter_action(raccourcis, action, defaut);
     }
+}
+
+/// Version 4 vers 5 (0.6) : le raccourci de la capture défilante, avec la même règle que
+/// `v3_vers_v4` (défaut seulement s'il n'est pas déjà donné, action déjà là gardée, objet
+/// `raccourcis` absent non créé). Écrit aussi sans licence : invisible.
+fn v4_vers_v5(objet: &mut Map<String, Value>, plateforme: Plateforme) {
+    let Some(Value::Object(raccourcis)) = objet.get_mut("raccourcis") else {
+        return;
+    };
+    let r = Raccourcis::par_defaut(plateforme);
+    ajouter_action(raccourcis, "defilante", &r.defilante);
+}
+
+/// Ajoute `action` si elle manque : son défaut, ou une liste vide si l'un de ses candidats
+/// est déjà donné à une autre action.
+fn ajouter_action(raccourcis: &mut Map<String, Value>, action: &str, defaut: &[String]) {
+    if raccourcis.contains_key(action) {
+        return;
+    }
+    let pris = defaut.iter().any(|d| deja_donne(raccourcis, d));
+    let liste = if pris { Vec::new() } else { defaut.to_vec() };
+    raccourcis.insert(action.into(), json!(liste));
 }
 
 /// Vrai si une action de `raccourcis` (connue ou non) a `notation` parmi ses candidats.
