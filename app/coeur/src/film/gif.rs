@@ -416,6 +416,33 @@ mod tests {
         }
     }
 
+    /// Une page qui défile de 7 pixels par pas : des dégradés, bien plus de 256 couleurs,
+    /// et tout change à chaque pas.
+    fn defile(l: u32, h: u32, n: u32) -> Pixels {
+        let mut rgba = Vec::with_capacity((l * h * 4) as usize);
+        for y in 0..h {
+            let v = y + 7 * n;
+            for x in 0..l {
+                let ligne = if (v / 18).is_multiple_of(3) && x % 90 < 70 {
+                    40
+                } else {
+                    0
+                };
+                rgba.extend_from_slice(&[
+                    (x * 255 / l) as u8,
+                    (v % 256) as u8,
+                    ((x + v) % 200) as u8 + ligne,
+                    255,
+                ]);
+            }
+        }
+        Pixels {
+            largeur: l,
+            hauteur: h,
+            rgba,
+        }
+    }
+
     /// Ce que la relecture d'un GIF rend : la boucle, les images (indices, palette,
     /// rectangle, délai, transparence, mode).
     struct Relu {
@@ -749,7 +776,9 @@ mod tests {
     #[test]
     #[ignore = "mesure : à lancer en release"]
     fn mesure_600x450_10_s() {
-        for (nom, genre) in [("simple", 0u8), ("plein", 1), ("fixe", 2)] {
+        // `defile` : tout change à chaque pas, mais une image d'écran (dégradés qui
+        // défilent) ; `bruit` : tout change, du bruit (le pire cas pour la palette et LZW).
+        for (nom, genre) in [("simple", 0u8), ("defile", 3), ("bruit", 1), ("fixe", 2)] {
             let suite: Vec<(Pixels, Duration)> = (0..150u64)
                 .map(|n| {
                     let t = t15(n);
@@ -757,6 +786,7 @@ mod tests {
                     let p = match genre {
                         0 => simple(L, H, k),
                         1 => plein(L, H, n as u32),
+                        3 => defile(L, H, n as u32),
                         _ => simple(L, H, 0),
                     };
                     (p, t)
