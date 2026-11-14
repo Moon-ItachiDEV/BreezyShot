@@ -196,7 +196,8 @@ pub struct Position {
 /// `hauteur_vue × 100 / vue`. `None` si une vue est inutilisable (`vue` hors de ]0, 100[,
 /// hauteur nulle), si la hauteur de la vue a changé de plus de 2 px entre les deux (vue
 /// redimensionnée), ou si la hauteur de la page a changé de plus de `PAGE_CHANGEE_PX`
-/// (image paresseuse, chargement à l'infini : voir `pixels_entre`).
+/// (image paresseuse, chargement à l'infini : voir `pixels_entre`) ailleurs qu'en partant
+/// du haut de la page.
 pub fn decalage_px(avant: &Position, apres: &Position) -> Option<i32> {
     if avant.hauteur_vue <= 0 || (avant.hauteur_vue - apres.hauteur_vue).abs() > 2 {
         return None;
@@ -577,7 +578,7 @@ fn hauteur_page(vue: f64, hauteur_vue: i32) -> Option<f64> {
 /// Pixels parcourus entre deux positions lues, pour une vue de `hauteur_vue` pixels : la
 /// page fait `hauteur_vue × 100 / vue`, la partie qui défile `hauteur_vue × (100 / vue −
 /// 1)`. `None` sans vue utilisable (avant comme après), ou si la page a changé de hauteur
-/// entre les deux lectures (plus de `PAGE_CHANGEE_PX`).
+/// entre les deux lectures (plus de `PAGE_CHANGEE_PX`), sauf depuis le haut de la page.
 ///
 /// Une page qui change de hauteur n'est pas corrigée : les pour cent ne disent pas où elle a
 /// grandi. Grandie au-dessous de la vue (chargement à l'infini), la position en pixels
@@ -585,14 +586,21 @@ fn hauteur_page(vue: f64, hauteur_vue: i32) -> Option<f64> {
 /// avec l'ancrage du défilement de Chromium), la position change sans que rien ne bouge
 /// dans la vue. Le lu serait juste dans un cas et faux de toute la croissance dans l'autre :
 /// sans lu, la mesure décide sur les images seules, comme pour une app sans position.
+///
+/// Depuis le haut (`avant.pour_cent` nul), rien n'est au-dessus : la position d'avant vaut
+/// 0 px quelle que soit la hauteur de la page, et celle d'après se lit avec sa propre page,
+/// `pour_cent × (page − vue)`. Le lu y reste exact (une page qui charge au premier pas,
+/// relecture des correctifs C1 : sans lu, une image gardée unie perdait toute la suite).
+/// Une page qui grandit dans la vue gardée elle-même décale ce qu'elle montrait : sur du
+/// contenu, la mesure contredit le lu (`Ambigue`), elle n'invente rien.
 #[cfg_attr(not(windows), allow(dead_code))]
 fn pixels_entre(avant: Position, apres: Position, hauteur_vue: i32) -> Option<f64> {
-    let page_avant = hauteur_page(avant.vue, hauteur_vue)?;
-    let page_apres = hauteur_page(apres.vue, hauteur_vue)?;
-    if (page_apres - page_avant).abs() > PAGE_CHANGEE_PX {
+    if avant.pour_cent < 0.0 || apres.pour_cent < 0.0 {
         return None;
     }
-    if avant.pour_cent < 0.0 || apres.pour_cent < 0.0 {
+    let page_avant = hauteur_page(avant.vue, hauteur_vue)?;
+    let page_apres = hauteur_page(apres.vue, hauteur_vue)?;
+    if avant.pour_cent > 0.0 && (page_apres - page_avant).abs() > PAGE_CHANGEE_PX {
         return None;
     }
     let vue = apres.vue;
@@ -1230,6 +1238,32 @@ mod tests {
             decalage_px(&pos(0.0, 1e-320, 600), &pos(1.0, 1e-320, 600)),
             None
         );
+    }
+
+    #[test]
+    fn depuis_le_haut_le_decalage_reste_lu_quand_la_page_change() {
+        // Relecture des correctifs, C1 : image gardée en haut de la page (0 %), la page
+        // grandit de 100 px pendant le pas, qui la descend de 150 px. En haut, rien n'est
+        // au-dessus : la position d'après, lue avec sa propre page, est exacte.
+        let lecture =
+            |y: f64, parcours: f64| pos(y * 100.0 / parcours, 30_000.0 / (parcours + 300.0), 300);
+        let haut = lecture(0.0, 2400.0);
+        assert_eq!(decalage_px(&haut, &lecture(150.0, 2500.0)), Some(150));
+        assert_eq!(
+            decalage_px(&haut, &lecture(150.0, 2300.0)),
+            Some(150),
+            "plus courte"
+        );
+        assert_eq!(decalage_px(&haut, &lecture(0.0, 2500.0)), Some(0));
+        // Ailleurs qu'en haut, toujours rien.
+        assert_eq!(
+            decalage_px(&lecture(150.0, 2400.0), &lecture(300.0, 2500.0)),
+            None
+        );
+        // Vers le haut depuis une page changée : rien non plus (l'avant n'est pas en haut).
+        assert_eq!(decalage_px(&lecture(150.0, 2500.0), &haut), None);
+        // La vue d'après doit rester lisible.
+        assert_eq!(decalage_px(&haut, &pos(10.0, 100.0, 300)), None);
     }
 
     #[test]
