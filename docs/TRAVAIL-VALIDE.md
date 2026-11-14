@@ -961,7 +961,8 @@ entièrement vert ; c'est le dernier passage de la demande de fusion qui fait fo
 ## Une barre d'annotation plus lisible (version 0.6.2)
 
 Branche `claude/project-thread-9qu6yx`, partie de main après la 0.5.4 ; main y est repris
-ensuite (la 0.6, capture défilante, puis la 0.6.1, « Glisser vers une appli »). Demandé par
+ensuite (la 0.6, capture défilante, la 0.6.1, « Glisser vers une appli », puis le journal
+d'un raccourci qui fige). Demandé par
 l'utilisateur le 13/11, sur une capture de la barre avec le Flou déplié : « un peu
 brouillon ici ». Trois pistes à essayer sur la vraie barre (`design/barre-claire`, dans
 les fichiers du projet, construite à partir des fichiers de la 0.5.4) ; choix de
@@ -991,8 +992,9 @@ Ce qu'elle apporte :
 Vérifications, ici sous Linux :
 
 - `editeur.cjs` 252 points, `ECHECS : 0` ; `jetons.css` à jour. Sur l'arbre
-  fusionné avec main (0.6, puis 0.6.1) : `cargo test --locked`, 894 tests du cœur réussis,
-  3 ignorés, et les 2 tests d'architecture ; les douze essais de pages, `ECHECS : 0`
+  fusionné avec main (0.6, 0.6.1, puis le journal) : `cargo test --locked`, 896 tests du
+  cœur réussis, 3 ignorés, et les 2 tests d'architecture ; les douze essais de pages,
+  `ECHECS : 0`
   (`selection.cjs` 267, `reglages.cjs` 124, `historique.cjs` 122, `defilante.cjs` 85,
   `editeur-modele.cjs` 69, `vignette.cjs` 43, `bandeau.cjs` 25, `decompte.cjs` 24,
   `installateur.cjs` 23, `menu.cjs` 22, `souffle.cjs` 12).
