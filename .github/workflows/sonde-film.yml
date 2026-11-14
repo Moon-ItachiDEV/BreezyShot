@@ -1,0 +1,379 @@
+# Sonde du film (BreezyShot 0.7 « Vidéo et GIF », contrat partie I, S1 à S7).
+# Ne touche pas à l'app : le code est sous sonde/film/. Se lance seulement quand ses propres
+# fichiers changent sur la branche de travail, ou à la main.
+#
+# Jobs (en parallèle après « construire », chacun sur sa machine) :
+#   construire  les exemples Rust de sonde/film/rust (release, --locked) ; artefacts
+#               sonde-exe (pour les mesures) et sonde-film-pc (images.exe + LISEZMOI, S1 point 7)
+#   mesures-a   00 inventaire ; 01 S2 points 1, 2, 8, 12 (b, c) ; 02 S1 points 1, 2, 4 (§1.8, rang 1)
+#   mesures-b   03 S2 points 10, 11, 13, 3 à 6, 9 ; 04 S4 ; 05 S3 (§1.8, rang 2, et S3)
+#   mesures-c   06 S5 ; 07 S6 ; 08 S7 et S1 point 6 ; 09 S1 points 3, 5, 7 (§1.8, rang 3)
+#   longues     10 S2 points 7 et 13 : Finalize sur 10 s à 60 min, un cas par machine
+#   app061      l'app 0.6.1 de main construite, puis 11 S2 point 12 (a) (la référence)
+#   resultats   12 : sonde-film-resultats.md (artefact, et recopié en clair dans le journal)
+# Chaque mesure est une étape à part (continue-on-error, délai propre) : une étape qui échoue
+# ou dépasse son délai n'empêche pas les suivantes, et chaque script écrit ses résultats
+# (NON MESURÉ et sa raison plutôt qu'un silence).
+
+name: Sonde film
+
+on:
+  push:
+    branches:
+      - claude/project-thread-tkz3qd
+    paths:
+      - 'sonde/film/**'
+      - '.github/workflows/sonde-film.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sonde-film-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: pwsh
+
+jobs:
+  construire:
+    name: Construire les exemples de la sonde
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Rust
+        uses: dtolnay/rust-toolchain@1.97.0
+        with:
+          components: clippy
+
+      - name: Cache Rust
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: sonde/film/rust
+
+      - name: Construire (release)
+        working-directory: sonde/film/rust
+        run: cargo build --release --locked --examples --bins
+
+      - name: Tests de la bibliothèque (témoin, conversions)
+        continue-on-error: true
+        working-directory: sonde/film/rust
+        run: cargo test --release --locked --lib
+
+      - name: Rassembler les exécutables
+        run: |
+          $r = 'sonde/film/rust/target/release'
+          New-Item -ItemType Directory -Force -Path sonde-exe/examples, sonde-film-pc | Out-Null
+          Get-ChildItem "$r/examples" -Filter *.exe | Where-Object { $_.Name -notmatch '-[0-9a-f]{16}\.exe$' } | Copy-Item -Destination sonde-exe/examples
+          Get-ChildItem $r -Filter *.exe | Copy-Item -Destination sonde-exe
+          Copy-Item sonde-exe/examples/images.exe sonde-film-pc/
+          Copy-Item sonde/film/LISEZMOI-pc.txt sonde-film-pc/LISEZMOI.txt
+          Get-ChildItem -Recurse -File sonde-exe, sonde-film-pc | ForEach-Object { '{0} {1:N0} octets' -f $_.FullName, $_.Length }
+
+      - name: Envoyer les exécutables de la sonde
+        uses: actions/upload-artifact@v4
+        with:
+          name: sonde-exe
+          path: sonde-exe/
+          retention-days: 7
+
+      - name: Envoyer l'exemple pour un PC (S1 point 7)
+        uses: actions/upload-artifact@v4
+        with:
+          name: sonde-film-pc
+          path: sonde-film-pc/
+
+  mesures-a:
+    name: 'Mesures A (00, 01, 02 : codeur, chargement, S1 BitBlt et DXGI)'
+    needs: construire
+    if: ${{ always() && !cancelled() }}
+    runs-on: windows-latest
+    timeout-minutes: 50
+    env:
+      SONDE_CIBLE: ${{ github.workspace }}\sonde-exe
+      SONDE_RESULTATS: ${{ github.workspace }}\sonde-resultats
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Exécutables de la sonde
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: sonde-exe
+          path: sonde-exe
+
+      - name: 00 inventaire de la machine
+        continue-on-error: true
+        timeout-minutes: 5
+        run: ./sonde/film/00-inventaire.ps1
+
+      - name: 01 S2 points 1, 2, 8, 12 (codeur, DLL à la demande, garde, modules)
+        continue-on-error: true
+        timeout-minutes: 15
+        run: ./sonde/film/01-s2-codeur-charge.ps1
+
+      - name: 02 S1 points 1, 2, 4 (BitBlt, duplication DXGI, ouverture)
+        continue-on-error: true
+        timeout-minutes: 20
+        run: ./sonde/film/02-s1-images.ps1
+
+      - name: Envoyer les résultats
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sonde-resultats-a
+          path: sonde-resultats/
+          if-no-files-found: warn
+
+  mesures-b:
+    name: 'Mesures B (03, 04, 05 : chaîne et MP4, GIF, micro)'
+    needs: construire
+    if: ${{ always() && !cancelled() }}
+    runs-on: windows-latest
+    timeout-minutes: 50
+    env:
+      SONDE_CIBLE: ${{ github.workspace }}\sonde-exe
+      SONDE_RESULTATS: ${{ github.workspace }}\sonde-resultats
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Exécutables de la sonde
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: sonde-exe
+          path: sonde-exe
+
+      - name: Media Foundation (posée si absente ; mesurée par 01 sur la machine A)
+        continue-on-error: true
+        timeout-minutes: 10
+        shell: powershell
+        run: |
+          $f = Get-WindowsFeature -Name Server-Media-Foundation -ErrorAction SilentlyContinue
+          if ($f -and -not $f.Installed) { Install-WindowsFeature -Name Server-Media-Foundation | Format-List }
+          else { "Server-Media-Foundation : $(if ($f) { 'déjà posée' } else { 'inconnue de Get-WindowsFeature' })" }
+
+      - name: 03 S2 points 10, 11, 13, puis 3 à 6 et 9 (chaîne, préparation, MP4 fragmenté)
+        continue-on-error: true
+        timeout-minutes: 22
+        run: ./sonde/film/03-s2-chaine-mp4.ps1
+
+      - name: 04 S4 (GIF)
+        continue-on-error: true
+        timeout-minutes: 15
+        run: ./sonde/film/04-s4-gif.ps1
+
+      - name: 05 S3 (micro, piste son AAC)
+        continue-on-error: true
+        timeout-minutes: 5
+        run: ./sonde/film/05-s3-micro.ps1
+
+      - name: Envoyer les résultats
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sonde-resultats-b
+          path: sonde-resultats/
+          if-no-files-found: warn
+
+  mesures-c:
+    name: 'Mesures C (06, 07, 08, 09 : contrôle, presse-papiers, écrans, WGC et PC)'
+    needs: construire
+    if: ${{ always() && !cancelled() }}
+    runs-on: windows-latest
+    timeout-minutes: 50
+    env:
+      SONDE_CIBLE: ${{ github.workspace }}\sonde-exe
+      SONDE_RESULTATS: ${{ github.workspace }}\sonde-resultats
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Exécutables de la sonde
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: sonde-exe
+          path: sonde-exe
+
+      - name: Media Foundation (posée si absente ; pour le disque plein de 08)
+        continue-on-error: true
+        timeout-minutes: 10
+        shell: powershell
+        run: |
+          $f = Get-WindowsFeature -Name Server-Media-Foundation -ErrorAction SilentlyContinue
+          if ($f -and -not $f.Installed) { Install-WindowsFeature -Name Server-Media-Foundation | Format-List }
+          else { "Server-Media-Foundation : $(if ($f) { 'déjà posée' } else { 'inconnue de Get-WindowsFeature' })" }
+
+      - name: 06 S5 (fenêtre de contrôle pendant plusieurs minutes)
+        continue-on-error: true
+        timeout-minutes: 16
+        run: ./sonde/film/06-s5-controle.ps1
+
+      - name: 07 S6 (un fichier dans le presse-papiers)
+        continue-on-error: true
+        timeout-minutes: 5
+        run: ./sonde/film/07-s6-presse-papiers.ps1
+
+      - name: 08 S7 et S1 point 6 (écrans, échelle, accès perdu, disque plein)
+        continue-on-error: true
+        timeout-minutes: 8
+        run: ./sonde/film/08-s7-ecrans.ps1
+
+      - name: Mode d'affichage remis (au cas où 08 aurait été coupé)
+        if: always()
+        continue-on-error: true
+        run: |
+          Add-Type -TypeDefinition (Get-Content -LiteralPath sonde/film/natif.cs -Raw)
+          "mode : $([BreezyShotFilm.Natif]::ModeCourant()) ; remise : $([BreezyShotFilm.Natif]::RemettreMode()) ; mode : $([BreezyShotFilm.Natif]::ModeCourant())"
+
+      - name: 09 S1 points 3, 5, 7 (Windows.Graphics.Capture, l'exemple pour un PC)
+        continue-on-error: true
+        timeout-minutes: 15
+        run: ./sonde/film/09-s1-wgc-pc.ps1
+
+      - name: Envoyer les résultats
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sonde-resultats-c
+          path: sonde-resultats/
+          if-no-files-found: warn
+
+  longues:
+    name: Finalize sur de longs films (${{ matrix.cas }})
+    needs: construire
+    if: ${{ always() && !cancelled() }}
+    runs-on: windows-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        cas: [ordinaire, moov, fragmente]
+    env:
+      SONDE_CIBLE: ${{ github.workspace }}\sonde-exe
+      SONDE_RESULTATS: ${{ github.workspace }}\sonde-resultats
+      # Budget du script pour toutes ses durées : au-delà, 60 min passent à 20 min (dit).
+      SONDE_BUDGET_LONG_S: '1500'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Exécutables de la sonde
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: sonde-exe
+          path: sonde-exe
+
+      - name: Media Foundation (posée si absente)
+        continue-on-error: true
+        timeout-minutes: 10
+        shell: powershell
+        run: |
+          $f = Get-WindowsFeature -Name Server-Media-Foundation -ErrorAction SilentlyContinue
+          if ($f -and -not $f.Installed) { Install-WindowsFeature -Name Server-Media-Foundation | Format-List }
+          else { "Server-Media-Foundation : $(if ($f) { 'déjà posée' } else { 'inconnue de Get-WindowsFeature' })" }
+
+      - name: 10 S2 points 7 et 13 (${{ matrix.cas }})
+        continue-on-error: true
+        timeout-minutes: 32
+        run: ./sonde/film/10-s2-finalize.ps1 -Cas ${{ matrix.cas }}
+
+      - name: Envoyer les résultats
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sonde-resultats-longues-${{ matrix.cas }}
+          path: sonde-resultats/
+          if-no-files-found: warn
+
+  app061:
+    name: App 0.6.1 (main) et ses modules au repos
+    runs-on: windows-latest
+    timeout-minutes: 45
+    env:
+      SONDE_RESULTATS: ${{ github.workspace }}\sonde-resultats
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: main, à côté
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          path: principal
+
+      - name: Commit de main
+        id: main
+        run: '"sha=$(git -C principal rev-parse HEAD)" >> $env:GITHUB_OUTPUT'
+
+      - name: Rust
+        uses: dtolnay/rust-toolchain@1.97.0
+
+      - name: Cache Rust
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: principal/app/coeur
+
+      - name: Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: principal/app/package-lock.json
+
+      - name: Outil Tauri (version figée)
+        working-directory: principal/app
+        run: npm ci
+
+      - name: Construire breezyshot.exe 0.6.1 (release)
+        continue-on-error: true
+        timeout-minutes: 35
+        working-directory: principal/app
+        run: npx tauri build --no-bundle -- --locked
+
+      - name: 11 S2 point 12 (a) (modules au repos, sans puis avec licence)
+        continue-on-error: true
+        timeout-minutes: 6
+        env:
+          SONDE_MAIN_SHA: ${{ steps.main.outputs.sha }}
+        run: ./sonde/film/11-s2-modules-061.ps1 -Exe principal/app/coeur/target/release/breezyshot.exe -Licence principal/essais/licence-essai.txt
+
+      - name: Envoyer les résultats
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sonde-resultats-app061
+          path: sonde-resultats/
+          if-no-files-found: warn
+
+  resultats:
+    name: Résultats (sonde-film-resultats.md)
+    needs: [mesures-a, mesures-b, mesures-c, longues, app061]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Résultats de tous les jobs
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          pattern: sonde-resultats-*
+          path: tout
+
+      - name: Rassembler, et recopier en clair dans le journal
+        run: ./sonde/film/12-resultats.ps1 -Entree tout -Sortie sonde-film-resultats.md
+
+      - name: Envoyer sonde-film-resultats.md
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sonde-film-resultats
+          path: |
+            sonde-film-resultats.md
+            tout/**/sonde-film-modules-0.6.1.txt
+          if-no-files-found: warn
