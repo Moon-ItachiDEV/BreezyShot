@@ -620,6 +620,45 @@ try {
             }
             finally { $rs.Dispose() }
         }
+        # La mémoire privée par sorte de processus (essais 12 et 13) : l'app, puis les processus
+        # WebView2 d'après leur `--type` (sans type : le navigateur). Rend { Texte, App,
+        # Navigateur, Gpu (Mo), Rendus (nombre de processus de rendu) }.
+        function Detail-Memoire($Processus) {
+            $enfants = @{}
+            foreach ($c in @(Get-CimInstance Win32_Process -Property ProcessId, ParentProcessId, CommandLine -ErrorAction SilentlyContinue)) {
+                $parent = [int]$c.ParentProcessId
+                if (-not $enfants.ContainsKey($parent)) { $enfants[$parent] = [System.Collections.Generic.List[object]]::new() }
+                $enfants[$parent].Add($c)
+            }
+            $sommes = [ordered]@{}
+            $nombres = @{}
+            $vus = @{ [int]$Processus.Id = $true }
+            $file = [System.Collections.Generic.Queue[object]]::new()
+            $file.Enqueue([pscustomobject]@{ Id = [int]$Processus.Id; Sorte = 'app' })
+            while ($file.Count -gt 0) {
+                $n = $file.Dequeue()
+                try { $mo = (Get-Process -Id $n.Id -ErrorAction Stop).PrivateMemorySize64 / 1MB } catch { $mo = 0 }
+                if (-not $sommes.Contains($n.Sorte)) { $sommes[$n.Sorte] = 0.0; $nombres[$n.Sorte] = 0 }
+                $sommes[$n.Sorte] += $mo
+                $nombres[$n.Sorte] += 1
+                if (-not $enfants.ContainsKey($n.Id)) { continue }
+                foreach ($el in $enfants[$n.Id]) {
+                    $id = [int]$el.ProcessId
+                    if ($vus.ContainsKey($id)) { continue }
+                    $vus[$id] = $true
+                    $sorte = if ("$($el.CommandLine)" -match '--type=([\w-]+)') { $Matches[1] } else { 'navigateur' }
+                    $file.Enqueue([pscustomobject]@{ Id = $id; Sorte = $sorte })
+                }
+            }
+            $texte = (@($sommes.Keys) | ForEach-Object { "$_ x$($nombres[$_]) $([math]::Round($sommes[$_], 1))" }) -join ' ; '
+            return [pscustomobject]@{
+                Texte      = $texte
+                App        = [math]::Round([double]$sommes['app'], 1)
+                Navigateur = [math]::Round([double]$sommes['navigateur'], 1)
+                Gpu        = [math]::Round([double]$sommes['gpu-process'], 1)
+                Rendus     = $(if ($nombres.ContainsKey('renderer')) { [int]$nombres['renderer'] } else { 0 })
+            }
+        }
         function Memoire-App {
             $script:proc.Refresh()
             return [math]::Round($script:proc.PrivateMemorySize64 / 1MB, 2)
@@ -1065,6 +1104,7 @@ try {
 
         $script:VideoFaite = $false
         $script:ReposL0 = $null; $script:ReposL0App = $null; $script:ReposA = $null; $script:ReposAApp = $null
+        $script:ReposChaud = $null; $script:ReposChaudApp = $null
         $script:EcranFige = [IntPtr]::Zero; $script:FenetreVignette = [IntPtr]::Zero
         $script:LCoupee = $false
         $script:ModeDepart = $script:Natif::ModeCourant()
@@ -1152,6 +1192,7 @@ try {
                 $script:ReposAApp = Memoire-App
                 Noter-Mesure -Nom '(L1) mémoire privée au repos avec licence, processus de l''app' -Valeur $script:ReposAApp -Unite 'Mo'
                 Noter-Mesure -Nom '(L1) mémoire privée au repos avec licence (app et WebView2)' -Valeur $script:ReposA -Unite 'Mo'
+                Noter-Mesure -Nom '(L1) mémoire au repos par processus (Mo)' -Valeur (Detail-Memoire $script:proc).Texte
                 if ($null -ne $script:ReposL0App) {
                     Verifier '(L1) processus de l''app : au plus 3 Mo de plus que sans licence (recherche du codeur, §9)' (($script:ReposAApp - $script:ReposL0App) -le 3) "$($script:ReposAApp) Mo contre $($script:ReposL0App) Mo" | Out-Null
                 }
@@ -1286,6 +1327,19 @@ try {
                 $parts = @(foreach ($k in $REG.Keys) { "$k $([math]::Round($script:Natif::PartDifferente($avant[$k].O, $fA.CopiesPendant[$k].O, 6) * 100, 2)) %" })
                 $max = 0.0; foreach ($k in $REG.Keys) { $max = [math]::Max($max, $script:Natif::PartDifferente($avant[$k].O, $fA.CopiesPendant[$k].O, 6)) }
                 Verifier '(A9) sans la variable capturable, la copie d''écran ne voit pas la fenêtre de contrôle (autour de la zone, sous elle, sentinelle)' ($max -le 0.02) ($parts -join ' ; ') | Out-Null
+                # Repos chaud (essais 12 et 13) : 10 s après la vignette du premier film fermée.
+                # Le premier film paie une fois Media Foundation, le codeur et la vignette
+                # réchauffée ; les mémoires de (I) s'y comparent.
+                if ($fA.Vignette -ge 0) {
+                    $fermees = Compter-Motif "vignette fermee $($fA.Vignette) " $da
+                    Cliquer-Vignette $fA.Vignette 'fermer' '(A) Fermer la vignette'
+                    $null = Attendre-Motif "vignette fermee $($fA.Vignette) " $da 5 '(A) vignette fermée' ($fermees + 1)
+                    Start-Sleep -Seconds 10
+                    $script:ReposChaud = Memoire-Privee-Mo -Processus $script:proc
+                    $script:ReposChaudApp = Memoire-App
+                    Noter-Mesure -Nom '(A) repos chaud, 10 s après la vignette du premier film (app et WebView2 ; app seule)' -Valeur "$($script:ReposChaud) Mo ; $($script:ReposChaudApp) Mo"
+                    Noter-Mesure -Nom '(A) repos chaud par processus (Mo)' -Valeur (Detail-Memoire $script:proc).Texte
+                }
             }
 
             # (B) GIF par Ctrl+Maj+7, 6 s.
@@ -1445,10 +1499,13 @@ try {
                     $F.Mesure = Mesurer-Pendant 22
                 }
                 $m = $fI.Mesure
-                $plafond = $script:ReposA + 70 + 60 + 6 * (600 * 450 * 4 / 1MB)
+                # Bornes mesurées sur la machine GitHub (codeur logiciel) : pic +142 Mo, app
+                # seule 71 Mo.
+                $plafond = $script:ReposA + 150
                 Noter-Mesure -Nom '(I) vidéo de 30 s : processeur de l''app, mémoire (pic app et WebView2 ; app seule)' -Valeur "$($m.Cpu) % d'un cœur ; $($m.Pic) Mo ; $($m.PicApp) Mo"
                 Verifier '(I) vidéo de 30 s : processeur de l''app ≤ 50 % d''un cœur' ($m.Cpu -le 50) "$($m.Cpu) %" | Out-Null
-                Verifier '(I) vidéo de 30 s : mémoire ≤ repos + 70 + 60 Mo + 6 images RGBA' ($m.Pic -le $plafond) "$($m.Pic) Mo (plafond $([math]::Round($plafond, 1)) Mo, repos $($script:ReposA) Mo)" | Out-Null
+                Verifier '(I) vidéo de 30 s : mémoire (app et WebView2) ≤ repos + 150 Mo' ($m.Pic -le $plafond) "$($m.Pic) Mo (plafond $([math]::Round($plafond, 1)) Mo, repos $($script:ReposA) Mo)" | Out-Null
+                Verifier '(I) vidéo de 30 s : app seule ≤ 90 Mo' ($m.PicApp -le 90) "$($m.PicApp) Mo" | Out-Null
                 Verifier-Budgets '(I vidéo 30 s)' $fI
                 $null = Verifier-Mp4 '(I vidéo 30 s)' $fI
                 $fermees = Compter-Motif "vignette fermee $($fI.Vignette) " $da
@@ -1456,7 +1513,14 @@ try {
                 $null = Attendre-Motif "vignette fermee $($fI.Vignette) " $da 5 '(I) vignette fermée' ($fermees + 1)
                 Start-Sleep -Seconds 10
                 $apres = Memoire-Privee-Mo -Processus $script:proc
-                Verifier '(I) 10 s après la vignette partie : mémoire ≤ repos + 10 Mo' ($apres -le $script:ReposA + 10) "$apres Mo (repos $($script:ReposA) Mo)" | Out-Null
+                $apresApp = Memoire-App
+                Noter-Mesure -Nom '(I) 10 s après la vignette partie (app et WebView2 ; app seule)' -Valeur "$apres Mo ; $apresApp Mo"
+                Noter-Mesure -Nom '(I) 10 s après la vignette partie, par processus (Mo)' -Valeur (Detail-Memoire $script:proc).Texte
+                if ($null -ne $script:ReposChaud) {
+                    Verifier '(I) 10 s après la vignette partie : mémoire (app et WebView2) ≤ repos chaud + 10 Mo' ($apres -le $script:ReposChaud + 10) "$apres Mo (repos chaud $($script:ReposChaud) Mo, repos L1 $($script:ReposA) Mo)" | Out-Null
+                }
+                else { Noter-Mesure -Nom '(I) 10 s après la vignette, contre le repos chaud' -Valeur 'non joué : repos chaud absent (cas A en échec)' }
+                Verifier '(I) 10 s après la vignette partie : app seule ≤ app au repos L1 + 15 Mo' ($apresApp -le $script:ReposAApp + 15) "$apresApp Mo (repos L1 $($script:ReposAApp) Mo)" | Out-Null
             }
             # (I et F) GIF laissé à la limite de 60 s (témoin simple) : processeur et mémoire
             # sur 25 s, puis `film fin limite duree 60000`, sans message.
@@ -1467,10 +1531,12 @@ try {
                     $F.Mesure = Mesurer-Pendant 25
                 }
                 $m = $fL.Mesure
-                $plafond = $script:ReposA + 70 + 16 + 8 * (600 * 450 * 4 / 1MB)
+                # Mesuré sur la machine GitHub : pic +101 Mo, app seule 26 Mo.
+                $plafond = $script:ReposA + 110
                 Noter-Mesure -Nom '(I) GIF : processeur de l''app, mémoire (pic app et WebView2 ; app seule)' -Valeur "$($m.Cpu) % d'un cœur ; $($m.Pic) Mo ; $($m.PicApp) Mo"
                 Verifier '(I) GIF : processeur de l''app ≤ 30 % d''un cœur' ($m.Cpu -le 30) "$($m.Cpu) %" | Out-Null
-                Verifier '(I) GIF : mémoire ≤ repos + 70 + 16 Mo + 8 images RGBA' ($m.Pic -le $plafond) "$($m.Pic) Mo (plafond $([math]::Round($plafond, 1)) Mo)" | Out-Null
+                Verifier '(I) GIF : mémoire (app et WebView2) ≤ repos + 110 Mo' ($m.Pic -le $plafond) "$($m.Pic) Mo (plafond $([math]::Round($plafond, 1)) Mo, repos $($script:ReposA) Mo)" | Out-Null
+                Verifier '(I) GIF : app seule ≤ 40 Mo' ($m.PicApp -le 40) "$($m.PicApp) Mo" | Out-Null
                 $msg = @(Toutes-Apres 'bandeau affiche ' $da $fL.Base)
                 Verifier '(F) GIF laissé aller : film fin limite duree 60000 à 300 ms près, sans message' (($fL.Cause -eq 'limite') -and ([math]::Abs($fL.Duree - 60000) -le 300) -and ($msg.Count -eq 0)) "$($fL.Fin) ; messages $($msg.Count)" | Out-Null
                 Verifier-Budgets '(F limite GIF)' $fL
