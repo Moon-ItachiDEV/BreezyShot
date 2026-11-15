@@ -1863,9 +1863,8 @@ mod tests {
     }
 
     /// Les poignées une fois le processus reposé : le plus petit compte relevé toutes les
-    /// 100 ms pendant 2 s. Les fils de travail que Windows et Media Foundation retirent
-    /// d'eux-mêmes (réservoir de fils, fils du codeur qui finissent) n'y comptent plus ;
-    /// une poignée perdue, elle, ne s'en va jamais et y reste.
+    /// 100 ms pendant 2 s (les fils du dernier codeur ont fini ; le réservoir de fils de
+    /// Media Foundation, lui, garde une bande d'une quinzaine de poignées de va-et-vient).
     fn poignees_au_repos() -> u32 {
         let mut plus_petit = poignees();
         for _ in 0..20 {
@@ -1923,36 +1922,30 @@ mod tests {
             }
         };
         // Échauffement : le réservoir de fils de Media Foundation (rtworkq) et les fils du
-        // codeur grandissent aux premiers films puis plafonnent (à la CI : 390 puis 391 à
-        // une course, 376 puis 391 à une autre, sur le même code : la fin au même
-        // plafond, la référence prise plus bas). La référence est donc prise après dix
-        // écrivains (cinq tours d'un abandon et d'une fin), au repos ; le compte est relu,
-        // au repos aussi, après vingt écrivains de plus puis vingt encore. Une fuite d'une
-        // poignée par film (+20 par moitié) passerait largement les deux marges.
+        // codeur grandissent aux premiers films ; ensuite, même au repos, le compte va et
+        // vient dans une bande d'une quinzaine de poignées (CI : 390 puis 391 ; 376 puis
+        // 391 ; 392 puis 376 puis 391). La référence est prise après dix écrivains, puis
+        // trois relevés après chaque lot de vingt écrivains ; `poignees_stables` juge la
+        // suite (une fuite d'une poignée par film donnerait +20 à chaque lot).
         for i in 0..5 {
             cycle(i);
         }
-        let avant = poignees_au_repos();
-        for i in 5..15 {
-            cycle(i);
+        let mut releves = [0u32; 4];
+        releves[0] = poignees_au_repos();
+        for lot in 1..4u32 {
+            for i in 5 + (lot - 1) * 10..5 + lot * 10 {
+                cycle(i);
+            }
+            releves[lot as usize] = poignees_au_repos();
         }
-        let milieu = poignees_au_repos();
-        for i in 15..25 {
-            cycle(i);
-        }
-        let apres = poignees_au_repos();
         println!(
-            "poignées au repos {avant}, puis {milieu} après vingt écrivains, puis {apres} \
-             après quarante ; effacé en {pire:?} au pire"
+            "poignées au repos {} (référence), puis {} {} {} après chaque lot de vingt \
+             écrivains ; effacé en {pire:?} au pire",
+            releves[0], releves[1], releves[2], releves[3]
         );
-        assert!(
-            apres <= avant + 10,
-            "fuite de poignées : {avant} puis {milieu} puis {apres}"
-        );
-        assert!(
-            apres <= milieu + 5,
-            "poignées qui grandissent avec les films : {avant} puis {milieu} puis {apres}"
-        );
+        if let Err(e) = crate::systeme::mp4::tests::poignees_stables(releves) {
+            panic!("{e}");
+        }
         println!("enfant_fermeture: ok");
     }
 }

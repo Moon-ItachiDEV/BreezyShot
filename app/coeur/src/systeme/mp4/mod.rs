@@ -514,6 +514,50 @@ mod tests {
     use std::ffi::OsString;
     use std::time::Instant;
 
+    /// Le jugement du test Windows `fermer_sans_fuite` sur quatre relevés de poignées au
+    /// repos : la référence, puis après chacun de trois lots de vingt écrivains. Le
+    /// réservoir de fils de Media Foundation va et vient d'une quinzaine de poignées : un
+    /// relevé seul peut être un creux. Faux si :
+    /// - la fin dépasse la référence de plus de 10 et le plus haut relevé d'avant de plus
+    ///   de 5 (une fin plus haute que tout ce qu'on a vu, et nettement au-dessus du départ) ;
+    /// - les trois relevés montent chacun de plus de 3 sur le précédent (une fuite lente).
+    ///
+    /// Une poignée perdue par film donne +20 par lot : les deux règles la voient.
+    pub(super) fn poignees_stables(r: [u32; 4]) -> Result<(), String> {
+        let plus_haut_avant = r[0].max(r[1]).max(r[2]);
+        if r[3] > r[0] + 10 && r[3] > plus_haut_avant + 5 {
+            return Err(format!("fuite de poignées : {r:?}"));
+        }
+        if r.windows(2).all(|w| w[1] > w[0] + 3) {
+            return Err(format!("poignées qui grandissent avec les films : {r:?}"));
+        }
+        Ok(())
+    }
+
+    /// Les suites vues à la CI passent ; une fuite d'une poignée par film, ou plus lente,
+    /// ne passe pas.
+    #[test]
+    fn jugement_des_poignees() {
+        for ok in [
+            [390, 391, 391, 391],
+            [376, 391, 391, 391],
+            [392, 376, 391, 391],
+            [376, 392, 376, 391],
+            [376, 380, 383, 385],
+            [376, 376, 376, 376],
+        ] {
+            assert_eq!(poignees_stables(ok), Ok(()), "{ok:?}");
+        }
+        for fuite in [
+            [376, 396, 416, 436],
+            [392, 376 + 20, 376 + 40, 376 + 60],
+            [376, 381, 386, 391],
+            [376, 391, 376, 410],
+        ] {
+            assert!(poignees_stables(fuite).is_err(), "{fuite:?}");
+        }
+    }
+
     // --- Copie d'une image relue ---
 
     /// Un tampon BGRX de `l` × `h` dont le pixel (x, y) vaut (b = x, g = y, r = 7, x = 0),
