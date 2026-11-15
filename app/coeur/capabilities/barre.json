@@ -1,0 +1,15 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "barre",
+  "description": "Droits de la page de la barre de capture : écouter ses événements et appeler ses cinq commandes, rien d'autre (ni fichiers, ni dialogues, ni shell).",
+  "windows": ["barre"],
+  "permissions": [
+    "core:event:allow-listen",
+    "core:event:allow-unlisten",
+    "allow-barre-pret",
+    "allow-barre-taille",
+    "allow-barre-choisi",
+    "allow-barre-retardateur",
+    "allow-barre-fermer"
+  ]
+}

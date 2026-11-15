@@ -1112,6 +1112,15 @@ Retours de l'utilisateur le 15/11/2026, sur la 0.7.1 :
 - « Je fais comment une vidéo ? », et Vidéo absente de Réglages › Raccourcis : la licence
   d'essai n'était pas activée ; sans elle, les fonctions Pro sont cachées partout. Rien
   ne change dans l'app ; la licence lui a été redonnée.
+- « Clic sur l'icône épinglée : toujours pas la barre en haut avec le choix du type de
+  capture. » Depuis la 0.5.3, relancer l'app n'ouvrait que la sélection de zone. Relancer
+  l'app déjà ouverte ouvre maintenant la barre de capture du design validé le 12/11 : en
+  haut de l'écran sous la souris, Zone, Plein écran, Fenêtre | Capture défilante, Vidéo ou
+  GIF, Retardateur | Réglages (icône « Curseurs »). Ses boutons sont ceux du menu de
+  l'icône (rien de Pro sans licence). Un choix lance l'action comme le menu ; le
+  retardateur change le réglage de Réglages › Capture et la barre reste ouverte. Elle se
+  ferme sur Échap, au clic ailleurs, au choix et quand une capture démarre ; relancée
+  ouverte, elle reste ouverte. Impr. écran, les raccourcis et le menu ne changent pas.
 
 ### Vérifié
 
@@ -1119,8 +1128,17 @@ Retours de l'utilisateur le 15/11/2026, sur la 0.7.1 :
   haut, bords gauche et droit, panneau des icônes cachées, échelle 150 %, écran à gauche,
   pointeur loin de l'icône.
 - Page de l'éditeur : l'entrée « Enregistrer sous… » du menu « … ».
+- Barre de capture : tests de sa place (`barre::placer` : échelles, barre des tâches en
+  haut et à gauche, écran à coordonnées négatives, zone plus étroite que la barre), de
+  ses boutons tirés du menu (sans licence, avec, sans Media Foundation, sans images
+  vivantes, pendant une défilante) et des états où elle ne s'ouvre pas ; page
+  `essais/pages/barre.cjs` (boutons selon la charge, taille rendue, choix, menus Vidéo/GIF
+  et Retardateur, clavier, Échap, clic dans la marge, thèmes, mouvement réduit, CSP).
 
 ### Non vérifié
 
 - Le menu dans le vrai panneau des icônes cachées : à l'utilisateur.
+- La barre dans WebView2 : premier plan à la relance, redimensionnement à la mesure de la
+  page, menus volants, sur plusieurs écrans et à 150 % ; l'essai `01-socle.ps1` (barre
+  montrée, clic sur « Zone », sélection ouverte, Échap) n'a pas été joué ici.
 

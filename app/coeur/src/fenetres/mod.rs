@@ -1,12 +1,13 @@
 //! Fenêtres de l'interface (§6) : le bandeau de messages, la sélection, la vignette et
-//! son souffle, `reglages` (fenêtre des Réglages), `editeur` (éditeur d'annotation, 0.4) et
-//! `theme` (thème des pages). Le bandeau, la vignette et le souffle naissent par
-//! `creer_fenetre_outil`.
+//! son souffle, `reglages` (fenêtre des Réglages), `editeur` (éditeur d'annotation, 0.4),
+//! `theme` (thème des pages), `menu` (menu de l'icône) et `barre` (barre de capture,
+//! 0.7.2). Le bandeau, la vignette et le souffle naissent par `creer_fenetre_outil`.
 //!
 //! Le module crée, place, montre et cache ; il ne décide d'aucun message. Ce qu'il reçoit
 //! de la page remonte à l'Application par `Signal`. La fenêtre du bandeau montre une seule
 //! chose à la fois (`Contenu`) : un message, ou le décompte du retardateur (`decompte`).
 
+pub mod barre;
 pub mod decompte;
 pub mod defilante;
 pub mod editeur;

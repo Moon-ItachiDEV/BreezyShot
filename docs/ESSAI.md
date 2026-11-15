@@ -20,7 +20,8 @@ vers une appli ; « … » : Enregistrer sous… (Ctrl + Maj + S) demande le dos
 
 Échap ou clic droit annule. L'icône près de l'horloge (clic gauche ou droit) ouvre le menu au
 pointeur, d'où Réglages et Quitter. Relancer BreezyShot (icône épinglée à la barre des tâches) ouvre la
-capture de zone, comme Impr. écran.
+barre de capture en haut de l'écran : Zone, Plein écran, Fenêtre, Retardateur, Réglages (et, avec
+la licence, Capture défilante, Vidéo et GIF).
 
 Réglages › Capture : retardateur (3, 5 ou 10 s ; Échap ou la croix l'annule), Inclure le
 pointeur dans l'image.

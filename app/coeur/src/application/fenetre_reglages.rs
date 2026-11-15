@@ -368,6 +368,13 @@ pub fn reglages_lire(app: AppHandle) -> Reponse {
 /// Un changement de la page.
 #[tauri::command]
 pub fn reglages_changer(app: AppHandle, changement: Changement) -> Reponse {
+    changer(&app, changement)
+}
+
+/// Un changement des réglages : celui de la page, ou le retardateur de la barre de capture
+/// (0.7.2), par le même chemin (relire, valider, écrire, garder, effets).
+pub(super) fn changer(app: &AppHandle, changement: Changement) -> Reponse {
+    let app = app.clone();
     let base = relire(&app);
     let nouveau = match page::appliquer(&base, &changement) {
         Ok(n) => n,

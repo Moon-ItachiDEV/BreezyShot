@@ -527,3 +527,61 @@ function Fermer-Menu-Icone($Menu, [string]$Quoi) {
     if ($M::IsWindowVisible($Menu.Fenetre)) { throw "$Quoi : le menu ne se ferme pas" }
     Start-Sleep -Milliseconds 200
 }
+
+# --- Barre de capture (0.7.2) -----------------------------------------------------------
+# Relancer l'app ouvre la barre de capture, une page lue par UI Automation (role toolbar).
+# `Attendre-Barre` attend la $Fois-ième ligne « barre ouverte » et rend { Fenetre, Boutons,
+# Noms } : `Boutons`, les boutons par nom (« Zone », « Plein écran », « Fenêtre », puis le nom
+# seul des boutons à pictogramme) ; `Noms`, ces noms dans l'ordre.
+function Attendre-Barre([string]$Dossier, [string]$Quoi, [int]$Fois = 1) {
+    Initialiser-Menu-Icone
+    $AE = [System.Windows.Automation.AutomationElement]
+    $CT = [System.Windows.Automation.ControlType]
+    if (-not (Attendre-Ligne -Texte 'barre ouverte' -FinDeLigne -Fois $Fois -DelaiS 5 -Dossier $Dossier)) {
+        throw "$Quoi : la barre de capture ne s'ouvre pas en 5 s"
+    }
+    $fen = [IntPtr]::Zero
+    foreach ($l in ((Lire-Journal -Dossier $Dossier) -split "`n")) {
+        if ($l.TrimEnd("`r") -match 'barre fenetre (\d+)$') { $fen = [IntPtr][long]$Matches[1] }
+    }
+    if ($fen -eq [IntPtr]::Zero) { throw "$Quoi : fenêtre de la barre absente du journal" }
+    $condBarre = [System.Windows.Automation.PropertyCondition]::new($AE::ControlTypeProperty, $CT::ToolBar)
+    $condBouton = [System.Windows.Automation.PropertyCondition]::new($AE::ControlTypeProperty, $CT::Button)
+    # La page reçoit ses boutons à l'ouverture (la première fois, une fois chargée).
+    $boutons = @{}; $noms = @(); $vu = 'barre introuvable'
+    $limite = [DateTime]::UtcNow.AddSeconds(5)
+    do {
+        try {
+            $barre = $AE::FromHandle($fen).FindFirst([System.Windows.Automation.TreeScope]::Descendants, $condBarre)
+            if ($null -ne $barre) {
+                $ici = @{}; $nomsIci = @()
+                foreach ($b in $barre.FindAll([System.Windows.Automation.TreeScope]::Descendants, $condBouton)) {
+                    $n = $b.Current.Name
+                    if ($n -ne '') { $ici[$n] = $b; $nomsIci += $n }
+                }
+                $vu = "$($nomsIci.Count) boutons"
+                if ($ici.Count -gt 0) { $boutons = $ici; $noms = $nomsIci; break }
+            }
+        } catch { $vu = "UI Automation : $($_.Exception.Message)" }
+        Start-Sleep -Milliseconds 100
+    } while ([DateTime]::UtcNow -lt $limite)
+    if ($boutons.Count -eq 0) { throw "$Quoi : boutons de la barre illisibles ($vu)" }
+    # Fondu d'ouverture fini.
+    Start-Sleep -Milliseconds 250
+    return [pscustomobject]@{ Fenetre = $fen; Boutons = $boutons; Noms = $noms }
+}
+
+# Clic réel au centre du bouton $Nom de la barre, seulement si la barre est montrée et sous
+# ce point (jamais de clic hors des fenêtres de l'app).
+function Cliquer-Bouton-Barre($Barre, [string]$Nom, [string]$Quoi) {
+    $M = [BreezyShotEssai.MenuIcone]
+    $e = $Barre.Boutons[$Nom]
+    if ($null -eq $e) { throw "$Quoi : pas de bouton « $Nom » dans la barre ($($Barre.Noms -join ', '))" }
+    $r = $e.Current.BoundingRectangle
+    if ($r.IsEmpty -or $r.Width -le 0) { throw "$Quoi : rectangle de « $Nom » illisible" }
+    $x = [int]($r.X + $r.Width / 2); $y = [int]($r.Y + $r.Height / 2)
+    if (-not $M::IsWindowVisible($Barre.Fenetre)) { throw "$Quoi : la barre s'est fermée avant le clic" }
+    $sous = $M::RacineSous($x, $y)
+    if ($sous -ne $Barre.Fenetre) { throw "$Quoi : la barre n'est pas sous le point $x,$y (fenêtre $sous)" }
+    $M::Cliquer($x, $y)
+}
