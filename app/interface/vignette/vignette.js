@@ -232,7 +232,7 @@ function valider(c) {
 }
 
 // La carte en cours : { id, coin, actions, reduites, glisser, url, zone, animation,
-// barre, supprimee, partie, entree }
+// barre, supprimee, partie, entree, dedans }
 let courant = null;
 // Le cœur décide (réglage « Animations » et système) ; la page suit sa valeur seule.
 const reduites = () => courant?.reduites === true;
@@ -378,6 +378,8 @@ export async function preparer(brut) {
     minuteries: [],
     supprimee: false,
     partie: false,
+    // Dernier `vignette:survol` : le pointeur est sur la carte.
+    dedans: false,
   };
   courant = lui;
   carte.classList.toggle("reduites", reduites());
@@ -497,6 +499,8 @@ function supprimee(m) {
   lui.supprimee = m.oui === true;
   cacherInfobulle();
   carte.classList.toggle("supprimee", lui.supprimee);
+  // Annulée avec le pointeur resté sur la carte : les boutons reviennent sans nouveau survol.
+  if (!lui.supprimee) carte.classList.toggle("reveal", lui.dedans && !lui.partie);
   // Annuler paraît (ou s'en va) : le journal du cœur reçoit les boutons montrés.
   envoyerZone();
 }
@@ -635,8 +639,9 @@ const ECOUTES = {
   "vignette:preparer": pour(null, preparer),
   "vignette:entrer": pour(true, (p) => entrer(p.id)),
   "vignette:survol": pour(true, (p) => {
-    if (!p.dedans) cacherInfobulle();
-    carte.classList.toggle("reveal", p.dedans === true && !courant.supprimee && !courant.partie);
+    courant.dedans = p.dedans === true;
+    if (!courant.dedans) cacherInfobulle();
+    carte.classList.toggle("reveal", courant.dedans && !courant.supprimee && !courant.partie);
   }),
   "vignette:minuterie": pour(true, minuterie),
   "vignette:confirmer": pour(true, confirmer),
