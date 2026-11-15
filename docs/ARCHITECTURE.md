@@ -2726,7 +2726,10 @@ principal`, `fil de suppression impossible (<e>): suppression sur le fil princip
 `souffle_termine` et `vignette_image` (fenêtre `souffle`) ; droits dans
 `capabilities/vignette.json` et `souffle.json`. Événements : `vignette:preparer`, `:entrer`,
 `:survol`, `:minuterie`, `:confirmer`, `:supprimee`, `:glisser`, `:partir`, `:cachee` ;
-`souffle:jouer`, `souffle:effacer`. CSP : `img-src` reçoit `blob:`.
+`souffle:jouer`, `souffle:effacer`. CSP : `img-src` reçoit `blob:`. `:confirmer` change le
+texte montré et le nom accessible du bouton (« Copié », « Copiée ») le temps de la
+confirmation ; après `:supprimee`, la page renvoie `vignette_zone` (boutons montrés : le
+journal donne `vignette bouton <id> annuler`).
 
 ## 12. Installation (version 0.3)
 

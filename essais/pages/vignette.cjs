@@ -118,9 +118,12 @@ const charge = (o = {}) => ({ id: 5, coin: 'bas_gauche', retrait: { haut: 0, bas
   await emettre(p, 'vignette:confirmer', { id: 5, action: 'copier', reussi: true });
   await p.waitForTimeout(400);
   verifier(await p.evaluate(() => document.querySelector('[data-action=copier]').classList.contains('fait') && getComputedStyle(document.querySelector('[data-action=copier] .apres')).opacity === '1'), '3 « Copié » montré');
+  const nomCopier = () => p.evaluate(() => document.querySelector('[data-action=copier]').getAttribute('aria-label'));
+  verifier(await nomCopier() === 'Copié', '3 nom accessible « Copié » pendant la confirmation (UI Automation, essai 15 H)', String(await nomCopier()));
   await p.screenshot({ path: `${SORTIE}/vignette-copie-clair.png` });
   await p.waitForTimeout(1600);
   verifier(await p.evaluate(() => !document.querySelector('[data-action=copier]').classList.contains('fait')), '3 retour à « Copier » après 1,8 s');
+  verifier(await nomCopier() === 'Copier', '3 nom accessible revenu à « Copier » après 1,8 s', String(await nomCopier()));
   await emettre(p, 'vignette:confirmer', { id: 5, action: 'enregistrer', reussi: false });
   verifier(await p.evaluate(() => !document.querySelector('[data-action=enregistrer]').classList.contains('fait')), '3 échec : rien ne change');
   // Un id qui n'est pas le sien : ignoré.
@@ -138,10 +141,16 @@ const charge = (o = {}) => ({ id: 5, coin: 'bas_gauche', retrait: { haut: 0, bas
   await emettre(p, 'vignette:minuterie', { id: 5, restant_ms: 0, total_ms: null, en_marche: true });
   verifier(await p.evaluate(() => document.getElementById('barre').hidden), '4 pas de barre pour « toujours »');
 
-  // 5. Supprimée : seul Annuler, puis rétablie.
+  // 5. Supprimée : seul Annuler (et la zone renvoyée avec lui, pour le journal du cœur),
+  // puis rétablie.
+  const zonesAvant = (await appels(p, 'vignette_zone')).length;
   await emettre(p, 'vignette:supprimee', { id: 5, oui: true });
   await p.waitForTimeout(450);
   verifier(JSON.stringify(await visibles(p)) === JSON.stringify(['annuler']), '5 supprimée : seul Annuler', JSON.stringify(await visibles(p)));
+  const zones5 = await appels(p, 'vignette_zone');
+  const derniere5 = zones5[zones5.length - 1]?.[1];
+  verifier(zones5.length > zonesAvant && derniere5 && derniere5.boutons.some(b => b.action === 'annuler'),
+    '5 supprimée : vignette_zone renvoyé, avec « annuler »', JSON.stringify(derniere5 && derniere5.boutons.map(b => b.action)));
   await p.screenshot({ path: `${SORTIE}/vignette-supprimee-clair.png` });
   await emettre(p, 'vignette:supprimee', { id: 5, oui: false });
   await p.waitForTimeout(450);
@@ -351,6 +360,8 @@ const charge = (o = {}) => ({ id: 5, coin: 'bas_gauche', retrait: { haut: 0, bas
       await emettre(p, 'vignette:confirmer', { id: 5, action: 'copier', reussi: true });
       await p.waitForTimeout(400);
       verifier(await p.evaluate(() => document.querySelector('[data-action=copier] .apres').textContent) === 'Copiée', `14 ${theme} « Copiée » pour une vidéo`);
+      const nomV = await p.evaluate(() => document.querySelector('[data-action=copier]').getAttribute('aria-label'));
+      verifier(nomV === 'Copiée', `14 ${theme} nom accessible « Copiée » pour une vidéo`, String(nomV));
       // Supprimée : le rond et la durée partent, seul Annuler.
       await emettre(p, 'vignette:supprimee', { id: 5, oui: true });
       await p.waitForTimeout(450);
