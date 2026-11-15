@@ -155,6 +155,29 @@ const charge = (o = {}) => ({ id: 5, coin: 'bas_gauche', retrait: { haut: 0, bas
   await emettre(p, 'vignette:supprimee', { id: 5, oui: false });
   await p.waitForTimeout(450);
   verifier(!(await visibles(p)).includes('annuler'), '5 rétablie : Annuler caché');
+  // Pointeur resté sur la carte (survol vrai depuis 2, aucun nouveau survol) : les boutons
+  // reviennent tout de suite (essai 15 H).
+  verifier(JSON.stringify(await visibles(p)) === JSON.stringify(['copier', 'enregistrer', 'supprimer', 'fermer']),
+    '5 rétablie, pointeur resté sur la carte : boutons de nouveau montrés sans nouveau survol', JSON.stringify(await visibles(p)));
+  // Pointeur sorti puis revenu sur la carte pendant la suppression (survol vrai reçu
+  // pendant « supprimée », comme l'essai 15 qui pose le pointeur avant de cliquer Annuler) :
+  // les boutons reviennent à l'annulation, sans nouveau survol.
+  await emettre(p, 'vignette:supprimee', { id: 5, oui: true });
+  await emettre(p, 'vignette:survol', { id: 5, dedans: false });
+  await emettre(p, 'vignette:survol', { id: 5, dedans: true });
+  await p.waitForTimeout(450);
+  verifier(JSON.stringify(await visibles(p)) === JSON.stringify(['annuler']), '5 supprimée, survol revenu : toujours seul Annuler', JSON.stringify(await visibles(p)));
+  await emettre(p, 'vignette:supprimee', { id: 5, oui: false });
+  await p.waitForTimeout(450);
+  verifier(JSON.stringify(await visibles(p)) === JSON.stringify(['copier', 'enregistrer', 'supprimer', 'fermer']),
+    '5 rétablie, survol revenu pendant la suppression : boutons montrés sans nouveau survol', JSON.stringify(await visibles(p)));
+  // Pointeur sorti pendant la suppression : rétablie sans boutons.
+  await emettre(p, 'vignette:supprimee', { id: 5, oui: true });
+  await emettre(p, 'vignette:survol', { id: 5, dedans: false });
+  await emettre(p, 'vignette:supprimee', { id: 5, oui: false });
+  await p.waitForTimeout(450);
+  verifier(!(await p.evaluate(() => document.getElementById('carte').classList.contains('reveal'))) && (await visibles(p)).length === 0,
+    '5 rétablie, pointeur sorti pendant la suppression : boutons cachés', JSON.stringify(await visibles(p)));
 
   // 6. Glisser : appui sur l'image + 5 px → une fois ; 3 px → rien ; pendant glisser : 85 %.
   await emettre(p, 'vignette:survol', { id: 5, dedans: false });
@@ -370,6 +393,14 @@ const charge = (o = {}) => ({ id: 5, coin: 'bas_gauche', retrait: { haut: 0, bas
       verifier(e.rond.opacite === '0' && JSON.stringify(restent) === JSON.stringify(['annuler']), `14 ${theme} supprimée : ni rond ni durée, seul Annuler`, JSON.stringify([e.rond, restent]));
       await p.mouse.click(cx, cy);
       verifier((await appels(p, 'vignette_action')).filter(a => a[1].action === 'lire').length === 1, `14 ${theme} supprimée : le rond ne répond plus`);
+      // Pointeur sorti puis revenu pendant la suppression, puis Annuler : les boutons
+      // reviennent sans nouveau survol.
+      await emettre(p, 'vignette:survol', { id: 5, dedans: false });
+      await emettre(p, 'vignette:survol', { id: 5, dedans: true });
+      await emettre(p, 'vignette:supprimee', { id: 5, oui: false });
+      await p.waitForTimeout(450);
+      verifier(JSON.stringify(await visibles(p)) === JSON.stringify(['lire', 'copier', 'enregistrer', 'supprimer', 'fermer']),
+        `14 ${theme} rétablie, survol revenu pendant la suppression : boutons de nouveau montrés`, JSON.stringify(await visibles(p)));
       await p.context().close();
     }
     // GIF : « GIF · 0:07 », « Enregistré ».
