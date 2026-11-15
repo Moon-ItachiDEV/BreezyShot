@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Enregistrement BreezyShot</title>
+<link rel="stylesheet" href="../commun/jetons.css">
+<link rel="stylesheet" href="film.css">
+<script type="module" src="film.js"></script>
+</head>
+<body>
+  <!-- La fenêtre couvre l'écran de la zone, transparente, traversée par les clics, la
+       molette et le clavier : seule la pilule les reçoit, quand la souris y est. -->
+  <div class="scene" id="scene" hidden>
+    <div class="cadre" id="cadre"></div>
+    <div class="pilule" id="pilule" role="group">
+      <span class="duree"><span class="point" aria-hidden="true"></span><span id="duree"></span></span>
+      <button class="bouton" id="pause" type="button" tabindex="-1" data-action="pause"></button>
+      <button class="bouton" id="arreter" type="button" tabindex="-1" data-action="arreter"></button>
+      <span class="trait" id="trait" aria-hidden="true"></span>
+      <button class="bouton" id="micro" type="button" tabindex="-1" data-action="micro"></button>
+    </div>
+  </div>
+</body>
+</html>

@@ -5,6 +5,14 @@ fn main() {
     // (STATUS_ENTRYPOINT_NOT_FOUND). Le .exe de l'app garde son manifeste : rien n'y change.
     if std::env::var("CARGO_CFG_TARGET_ENV").as_deref() == Ok("msvc") {
         println!("cargo:rustc-link-arg=/DELAYLOAD:comctl32.dll");
+        // Vidéo et GIF (contrat 0.7, F31) : Media Foundation, DXGI et Direct3D 11 ne sont
+        // chargés qu'au premier appel, derrière la garde de `systeme::mp4` ; sans licence,
+        // aucun ne l'est (la 0.6.1 n'en charge aucun au repos, mesuré par la sonde).
+        // `mf.dll` n'y est pas : aucune fonction importée n'en vient (l'éditeur de liens
+        // l'écrivait, LNK4199) ; la garde la charge elle-même, depuis System32.
+        for dll in ["mfplat.dll", "mfreadwrite.dll", "dxgi.dll", "d3d11.dll"] {
+            println!("cargo:rustc-link-arg=/DELAYLOAD:{dll}");
+        }
         println!("cargo:rustc-link-arg=delayimp.lib");
     }
     // Manifeste Windows : contrôles communs v6 (comme Tauri par défaut) et conscience
@@ -63,6 +71,9 @@ fn main() {
         "defilante_zone",
         "defilante_terminer",
         "defilante_apercu",
+        "film_pret",
+        "film_zone",
+        "film_action",
         "installateur_pret",
         "installateur_action",
         "menu_pret",

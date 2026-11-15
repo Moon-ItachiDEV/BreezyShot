@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-film-zone"
+description = "Enables the film_zone command without any pre-configured scope."
+commands.allow = ["film_zone"]
+
+[[permission]]
+identifier = "deny-film-zone"
+description = "Denies the film_zone command without any pre-configured scope."
+commands.deny = ["film_zone"]

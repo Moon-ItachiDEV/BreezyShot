@@ -116,3 +116,7 @@ pub fn rendre_premier_plan(_identifiant: isize) -> bool {
 pub fn cacher_fenetre_async(_identifiant: isize) -> bool {
     false
 }
+
+pub fn ouvrir_fichier(_fichier: &std::path::Path) -> Result<(), String> {
+    Err("ouverture non disponible sur ce systeme".into())
+}

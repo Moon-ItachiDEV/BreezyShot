@@ -562,3 +562,44 @@ pub fn cacher_fenetre_async(identifiant: isize) -> bool {
     // SAFETY : simple poignée, vérifiée par `IsWindow` ; l'appel ne fait que poster.
     unsafe { IsWindow(Some(h)).as_bool() && ShowWindowAsync(h, SW_HIDE).as_bool() }
 }
+
+/// `ShellExecuteW` « open » (COM initialisé sur ce fil le temps de l'appel, comme le
+/// demande l'Explorateur). Rend une erreur si Windows répond 32 ou moins.
+pub fn ouvrir_fichier(fichier: &std::path::Path) -> Result<(), String> {
+    use std::os::windows::ffi::OsStrExt;
+
+    use ::windows::Win32::System::Com::{
+        CoInitializeEx, CoUninitialize, COINIT_APARTMENTTHREADED, COINIT_DISABLE_OLE1DDE,
+    };
+    use ::windows::Win32::UI::Shell::ShellExecuteW;
+    use ::windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
+
+    let large: Vec<u16> = fichier
+        .as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect();
+    // SAFETY : initialisation de COM sur ce fil ; rendue plus bas si elle a réussi.
+    let com = unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE) };
+    // SAFETY : chaînes terminées par un zéro, vivantes pendant l'appel.
+    let rendu = unsafe {
+        ShellExecuteW(
+            None,
+            w!("open"),
+            PCWSTR(large.as_ptr()),
+            PCWSTR::null(),
+            PCWSTR::null(),
+            SW_SHOWNORMAL,
+        )
+    };
+    if com.is_ok() {
+        // SAFETY : appelé une fois, après un CoInitializeEx réussi sur ce fil.
+        unsafe { CoUninitialize() };
+    }
+    let code = rendu.0 as isize;
+    if code > 32 {
+        Ok(())
+    } else {
+        Err(format!("ShellExecuteW a echoue ({code})"))
+    }
+}

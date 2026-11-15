@@ -87,11 +87,11 @@ function Fichiers-Png([string]$Dossier) {
     return @(Get-ChildItem -LiteralPath $Dossier -File -Filter '*.png' | Sort-Object LastWriteTimeUtc, Name)
 }
 
-# Réglages du cas (version 5 du fichier, complète : rien à réécrire ; durée « toujours » non essayée ici).
+# Réglages du cas (version 6 du fichier, complète : rien à réécrire ; durée « toujours » non essayée ici).
 function Ecrire-Reglages([string]$Dossier, [bool]$Afficher = $true, [string]$Coin = 'bas_gauche', [string]$Animations = 'normales', $DossierEnregistrement = $null) {
     $r = [ordered]@{
-        version                   = 5
-        raccourcis                = [ordered]@{ zone = @(); plein_ecran = @('Ctrl+Maj+2'); fenetre = @(); derniere_zone = @(); historique = @(); texte = @(); defilante = @() }
+        version                   = 6
+        raccourcis                = [ordered]@{ zone = @(); plein_ecran = @('Ctrl+Maj+2'); fenetre = @(); derniere_zone = @(); historique = @(); texte = @(); defilante = @(); video = @(); gif = @() }
         copier_apres_capture      = $true
         enregistrer_apres_capture = $false
         dossier_enregistrement    = $DossierEnregistrement
@@ -404,6 +404,7 @@ public static IntPtr[] FenetresDe(int[] pids) {
             $b = Lire-Rect (Derniere-Ligne -Motif "vignette bouton $($C.Id) $Action " -Dossier $Dossier)
             $V::Poser($C.Carte.CX, $C.Carte.CY)
             Start-Sleep -Milliseconds 450
+            $null = Garder-Clic $b.CX $b.CY "bouton $Action de la carte $($C.Id)"
             $V::Cliquer($b.CX, $b.CY)
         }
 
@@ -491,6 +492,7 @@ public static IntPtr[] FenetresDe(int[] pids) {
                 $script:g = Capturer $script:da '(10) glisser' $script:hs
                 $V::Poser($script:g.Carte.CX, $script:g.Carte.CY)
                 Start-Sleep -Milliseconds 450
+                $null = Garder-Clic $script:g.Carte.CX $script:g.Carte.CY 'début du glisser'
                 $V::BoutonBas()
                 $V::Deplacer($script:g.Carte.CX, $script:g.Carte.CY, $script:g.Carte.CX + 12, $script:g.Carte.CY - 4, 6, 15)
                 $null = Attendre-Motif -Motif "vignette glisser $($script:g.Id) (debut|indisponible|refuse.*|annule.*)$" -Dossier $script:da -DelaiS 3 -Quoi 'début du glisser'
@@ -530,6 +532,7 @@ public static IntPtr[] FenetresDe(int[] pids) {
                 $g = $script:g
                 $V::Poser($g.Carte.CX, $g.Carte.CY)
                 Start-Sleep -Milliseconds 450
+                $null = Garder-Clic $g.Carte.CX $g.Carte.CY 'glisser (Échap)'
                 $V::BoutonBas()
                 $V::Deplacer($g.Carte.CX, $g.Carte.CY, $g.Carte.CX + 12, $g.Carte.CY, 6, 15)
                 $null = Attendre-Motif -Motif "vignette glisser $($g.Id) debut$" -Dossier $script:da -DelaiS 3 -Quoi 'début (Échap)'
@@ -554,6 +557,7 @@ public static IntPtr[] FenetresDe(int[] pids) {
                 if (Test-Path -LiteralPath $depots) { $recusAvant = @(Get-Content -LiteralPath $depots | Where-Object { $_ -ne '' }).Count }
                 $V::Poser($g.Carte.CX, $g.Carte.CY)
                 Start-Sleep -Milliseconds 450
+                $null = Garder-Clic $g.Carte.CX $g.Carte.CY 'glisser (sur soi)'
                 $V::BoutonBas()
                 $V::Deplacer($g.Carte.CX, $g.Carte.CY, $g.Carte.CX + 30, $g.Carte.CY, 10, 20)
                 $null = Attendre-Motif -Motif "vignette glisser $($g.Id) debut$" -Dossier $script:da -DelaiS 3 -Quoi 'début (sur soi)' -Fois ($debuts + 1)
@@ -688,12 +692,14 @@ public static IntPtr[] FenetresDe(int[] pids) {
             Cliquer-Bouton $da $c 'supprimer'
             $null = Attendre-Motif -Motif "vignette suppression $($c.Id) en attente$" -Dossier $da -DelaiS 3 -Quoi '(9) en attente'
             Start-Sleep -Milliseconds 400
+            $null = Garder-Clic $c.Carte.CX $c.Carte.CY '(9) Annuler'
             $V::Cliquer($c.Carte.CX, $c.Carte.CY)   # « Annuler » est au centre de la carte
             $null = Attendre-Motif -Motif "vignette suppression $($c.Id) annulee$" -Dossier $da -DelaiS 3 -Quoi '(9) annulée'
             Verifier '(9) annulée : le fichier de « Récents » toujours là' (Test-Path -LiteralPath $recent9) | Out-Null
             $avantGlisser = @(Fichiers-Png $glisserDossier | ForEach-Object FullName)
             $V::Poser($c.Carte.CX, $c.Carte.CY)
             Start-Sleep -Milliseconds 450
+            $null = Garder-Clic $c.Carte.CX $c.Carte.CY '(9) glisser'
             $V::BoutonBas()
             $V::Deplacer($c.Carte.CX, $c.Carte.CY, $c.Carte.CX + 30, $c.Carte.CY, 10, 20)
             Start-Sleep -Milliseconds 300

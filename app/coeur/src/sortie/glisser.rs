@@ -6,7 +6,8 @@ use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
 use super::fichier::existe;
-use super::nom::chemin_libre;
+use super::film::{cle_film, SorteFilm};
+use super::nom::chemin_libre_ext;
 use super::recents::{cle_recent, RECENTS_GARDES};
 
 /// Nombre de fichiers gardes dans `<local>/Glisser` (borne comme « Recents »).
@@ -14,17 +15,24 @@ pub const GLISSER_GARDES: usize = RECENTS_GARDES;
 
 /// Les fichiers d'une capture que Supprimer efface : son fichier de « Recents », le
 /// fichier enregistre pour elle (chemin rendu par son bilan) et ses fichiers de glisser.
+/// Pour un film (0.7, F25) : son fichier de travail dans `<local>/Films`.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Suppression {
     pub recent: Option<PathBuf>,
     pub enregistre: Option<PathBuf>,
     pub liens: Vec<PathBuf>,
+    /// Le fichier de travail d'un film (`None` pour une image).
+    pub film: Option<PathBuf>,
 }
 
 /// Le fichier a donner au glisser : `<dossier>/<nom>.png` (« (2) » si besoin), lien dur
 /// vers le fichier de « Recents » (aucune donnee copiee) ; si le lien est impossible, une
 /// copie ; si la copie l'est aussi, le fichier de « Recents » lui-meme. Le dossier garde au
-/// plus `GLISSER_GARDES` fichiers, jamais celui qu'on vient d'y mettre.
+/// plus `GLISSER_GARDES` fichiers `.png`, jamais celui qu'on vient d'y mettre.
+///
+/// 0.7 (F23) : l'extension est celle du fichier donne (`.mp4` ou `.gif` pour un film, `.png`
+/// sans extension) ; les liens de films ne sont pas comptes ici, ils suivent
+/// `films_a_retirer` (`nettoyer_films`).
 pub fn fichier_a_glisser(recent: &Path, dossier: &Path, nom: &str) -> Result<PathBuf, String> {
     if !recent.is_file() {
         return Err("le fichier de la capture est introuvable".into());
@@ -32,7 +40,12 @@ pub fn fichier_a_glisser(recent: &Path, dossier: &Path, nom: &str) -> Result<Pat
     if fs::create_dir_all(dossier).is_err() {
         return Ok(recent.to_path_buf());
     }
-    let chemin = chemin_libre(dossier, nom, existe);
+    let extension = recent
+        .extension()
+        .and_then(|e| e.to_str())
+        .filter(|e| !e.is_empty())
+        .unwrap_or("png");
+    let chemin = chemin_libre_ext(dossier, nom, extension, existe);
     let fait = fs::hard_link(recent, &chemin).or_else(|_| fs::copy(recent, &chemin).map(|_| ()));
     if fait.is_err() {
         return Ok(recent.to_path_buf());
@@ -79,18 +92,45 @@ pub fn liens_a_supprimer(
         .collect()
 }
 
-fn est_png(chemin: &Path) -> bool {
+fn a_l_extension(chemin: &Path, voulue: &str) -> bool {
     chemin
         .extension()
         .and_then(|e| e.to_str())
-        .is_some_and(|e| e.eq_ignore_ascii_case("png"))
+        .is_some_and(|e| e.eq_ignore_ascii_case(voulue))
+}
+
+fn est_png(chemin: &Path) -> bool {
+    a_l_extension(chemin, "png")
+}
+
+/// Vrai pour un fichier que Supprimer peut effacer hors des dossiers de l'app : une image
+/// `.png`, ou un film `.mp4` ou `.gif` (0.7).
+fn est_capture(chemin: &Path) -> bool {
+    est_png(chemin) || est_film(chemin)
+}
+
+/// Vrai pour un fichier de film : `.mp4` ou `.gif`.
+pub(super) fn est_film(chemin: &Path) -> bool {
+    [SorteFilm::Video, SorteFilm::Gif]
+        .iter()
+        .any(|s| a_l_extension(chemin, s.extension()))
 }
 
 /// Ce que Supprimer efface (fonction pure) : le fichier de « Recents » s'il est dans
 /// `dossier_recents` et au format exact ; le fichier enregistre pour cette capture s'il
 /// est un chemin absolu `.png` ; les fichiers de glisser s'ils sont dans `dossier_glisser`
 /// et en `.png`. Rien d'autre, sans doublon.
-pub fn a_effacer(s: &Suppression, dossier_recents: &Path, dossier_glisser: &Path) -> Vec<PathBuf> {
+///
+/// Pour un film (0.7, F25) : son fichier de travail s'il est dans `dossier_films` et au
+/// format exact `AAAAMMJJ-HHMMSS-mmm.mp4` ou `.gif` (`cle_film`) ; le fichier enregistre
+/// s'il est un chemin absolu `.mp4` ou `.gif` ; les liens de `dossier_glisser` en `.mp4` ou
+/// `.gif`.
+pub fn a_effacer(
+    s: &Suppression,
+    dossier_recents: &Path,
+    dossier_glisser: &Path,
+    dossier_films: &Path,
+) -> Vec<PathBuf> {
     let mut liste: Vec<PathBuf> = Vec::new();
     let mut ajouter = |p: &Path| {
         if !liste.iter().any(|q| q == p) {
@@ -109,15 +149,24 @@ pub fn a_effacer(s: &Suppression, dossier_recents: &Path, dossier_glisser: &Path
             ajouter(r);
         }
     }
+    if let Some(f) = &s.film {
+        let au_format = f
+            .file_name()
+            .and_then(|n| n.to_str())
+            .is_some_and(|n| cle_film(n).is_some());
+        if !dossier_films.as_os_str().is_empty() && f.parent() == Some(dossier_films) && au_format {
+            ajouter(f);
+        }
+    }
     if let Some(e) = &s.enregistre {
-        if e.is_absolute() && est_png(e) {
+        if e.is_absolute() && est_capture(e) {
             ajouter(e);
         }
     }
     for l in &s.liens {
         if !dossier_glisser.as_os_str().is_empty()
             && l.parent() == Some(dossier_glisser)
-            && est_png(l)
+            && est_capture(l)
         {
             ajouter(l);
         }
@@ -131,8 +180,9 @@ pub fn supprimer(
     s: &Suppression,
     dossier_recents: &Path,
     dossier_glisser: &Path,
+    dossier_films: &Path,
 ) -> Vec<(PathBuf, Result<(), String>)> {
-    a_effacer(s, dossier_recents, dossier_glisser)
+    a_effacer(s, dossier_recents, dossier_glisser, dossier_films)
         .into_iter()
         .map(|p| {
             let r = match fs::remove_file(&p) {
@@ -183,6 +233,7 @@ mod tests {
     fn seuls_les_fichiers_de_la_capture_s_effacent() {
         let rec = Path::new("/l/Recents");
         let gli = Path::new("/l/Glisser");
+        let fil = Path::new("/l/Films");
         // Absolu sur tout système (sous Windows, « /i/… » sans lettre de lecteur ne l'est pas).
         let enregistre = std::env::temp_dir()
             .join("BreezyShot")
@@ -196,9 +247,10 @@ mod tests {
                 PathBuf::from("/ailleurs/x.png"),
                 gli.join("x.txt"),
             ],
+            film: None,
         };
         assert_eq!(
-            a_effacer(&s, rec, gli),
+            a_effacer(&s, rec, gli, fil),
             [
                 rec.join("20261111-194012-123.png"),
                 enregistre,
@@ -210,23 +262,26 @@ mod tests {
             recent: Some(rec.join("photo.png")),
             enregistre: Some(PathBuf::from("relatif.png")),
             liens: vec![],
+            film: None,
         };
-        assert!(a_effacer(&s, rec, gli).is_empty());
+        assert!(a_effacer(&s, rec, gli, fil).is_empty());
         let s = Suppression {
             recent: Some(PathBuf::from("/autre/20261111-194012-123.png")),
             enregistre: Some(PathBuf::from("/i/doc.txt")),
             liens: vec![],
+            film: None,
         };
-        assert!(a_effacer(&s, rec, gli).is_empty());
+        assert!(a_effacer(&s, rec, gli, fil).is_empty());
         // Le repli du glisser (le « Récents » lui-même) n'est compté qu'une fois.
         let r = rec.join("20261111-194012-123.png");
         let s = Suppression {
             recent: Some(r.clone()),
             enregistre: None,
             liens: vec![r.clone()],
+            film: None,
         };
-        assert_eq!(a_effacer(&s, rec, gli), [r]);
-        assert!(a_effacer(&Suppression::default(), rec, gli).is_empty());
+        assert_eq!(a_effacer(&s, rec, gli, fil), [r]);
+        assert!(a_effacer(&Suppression::default(), rec, gli, fil).is_empty());
     }
 
     #[test]
@@ -248,14 +303,17 @@ mod tests {
             recent: Some(recent.clone()),
             enregistre: None,
             liens: vec![a.clone(), b.clone()],
+            film: None,
         };
-        let r = supprimer(&s, &rec, &gli);
+        let r = supprimer(&s, &rec, &gli, &d.path().join("Films"));
         assert_eq!(r.len(), 3);
         assert!(r.iter().all(|(_, r)| r.is_ok()));
         assert!(!recent.exists() && !a.exists() && !b.exists());
         assert!(autre.exists());
         // Déjà absent : compté comme effacé.
-        assert!(supprimer(&s, &rec, &gli).iter().all(|(_, r)| r.is_ok()));
+        assert!(supprimer(&s, &rec, &gli, &d.path().join("Films"))
+            .iter()
+            .all(|(_, r)| r.is_ok()));
         assert!(fichier_a_glisser(&recent, &gli, "x").is_err());
     }
 }

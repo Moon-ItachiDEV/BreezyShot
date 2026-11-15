@@ -1,0 +1,13 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "film",
+  "description": "Droits de la page de contrôle du film (vidéo et GIF) : écouter ses événements et appeler ses trois commandes, rien d'autre.",
+  "windows": ["film"],
+  "permissions": [
+    "core:event:allow-listen",
+    "core:event:allow-unlisten",
+    "allow-film-pret",
+    "allow-film-zone",
+    "allow-film-action"
+  ]
+}

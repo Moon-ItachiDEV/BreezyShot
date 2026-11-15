@@ -679,6 +679,63 @@
     "value": "0 0 0 1px rgba(255,255,255,0.55), 0 8px 16px rgba(0,0,0,0.35)",
     "usage": "Liseré clair et ombre de l'aperçu en direct de la capture défilante (les mêmes dans les deux thèmes, comme tout ce qui est posé sur l'écran).",
     "origine": "design/defilante/index.html, .prev box-shadow."
+   },
+   {
+    "name": "rec",
+    "value": {
+     "light": "#E0393E",
+     "dark": "#FF5A5F"
+    },
+    "usage": "Point rouge de la pilule d'un film en cours (il respire).",
+    "origine": "design/capture/index.html, --rec ; Contrat 0.7 « Vidéo et GIF », §12."
+   },
+   {
+    "name": "film-voile",
+    "value": "rgba(0,0,0,0.18)",
+    "usage": "Voile léger sur l'écran de la zone pendant le décompte et l'enregistrement (le même dans les deux thèmes, posé sur l'écran).",
+    "origine": "design/capture/index.html, --scrim-l (.sel.frame) ; Contrat 0.7 « Vidéo et GIF », §12."
+   },
+   {
+    "name": "film-cadre",
+    "value": "#FFFFFF",
+    "usage": "Cadre blanc autour de la zone filmée, tracé dehors (écart E6), le même dans les deux thèmes.",
+    "origine": "design/capture/index.html, .sel.frame border:2px solid #fff."
+   },
+   {
+    "name": "film-cadre-lisere-dehors",
+    "value": "rgba(0,0,0,0.28)",
+    "usage": "Liseré sombre de 1 px autour du cadre, du côté de l'écran.",
+    "origine": "design/capture/index.html, .sel.frame box-shadow 0 0 0 1px rgba(0,0,0,.28)."
+   },
+   {
+    "name": "film-cadre-lisere-dedans",
+    "value": "rgba(0,0,0,0.18)",
+    "usage": "Liseré sombre de 1 px entre le cadre et la zone (hors de la zone : écart E6).",
+    "origine": "design/capture/index.html, .sel.frame box-shadow inset 0 0 0 1px rgba(0,0,0,.18)."
+   },
+   {
+    "name": "film-lecture-fond",
+    "value": "rgba(18,18,18,0.48)",
+    "usage": "Fond du rond de lecture de la vignette d'un film (le même dans les deux thèmes, posé sur l'image).",
+    "origine": "design/capture/index.html, .play background."
+   },
+   {
+    "name": "film-lecture-fond-survol",
+    "value": "rgba(18,18,18,0.6)",
+    "usage": "Fond du rond de lecture survolé (il ouvre le film, choix B2) : celui de la pastille de durée.",
+    "origine": "design/capture/index.html, .dur background (valeur reprise)."
+   },
+   {
+    "name": "film-duree-vignette-fond",
+    "value": "rgba(18,18,18,0.6)",
+    "usage": "Fond de la pastille de durée de la vignette d'un film.",
+    "origine": "design/capture/index.html, .dur background."
+   },
+   {
+    "name": "film-sur-image",
+    "value": "#FFFFFF",
+    "usage": "Triangle du rond de lecture et texte de la pastille de durée.",
+    "origine": "design/capture/index.html, .play color:#fff ; .dur color:#fff."
    }
   ]
  },
@@ -1145,6 +1202,12 @@
     "value": "260ms",
     "usage": "Le bout de l'instrument suit la taille choisie.",
     "origine": "design/annotation-instruments/index.html, dessin B « Couleur » choisi le 13/11 (.inst .tp)."
+   },
+   {
+    "name": "duree-film-point",
+    "value": "1.6s",
+    "usage": "Respiration du point rouge pendant l'enregistrement (aucune avec « Réduire les animations »).",
+    "origine": "design/capture/index.html, .dot animation:breathe 1.6s ease-in-out infinite ; Contrat 0.7 « Vidéo et GIF », §12."
    }
   ]
  },
@@ -3484,6 +3547,180 @@
     "value": "14px",
     "usage": "Marge horizontale du message (forme hud).",
     "origine": "design/defilante/index.html, .msg padding:7px 14px."
+   },
+   {
+    "name": "film-cadre-epaisseur",
+    "value": "2px",
+    "usage": "Épaisseur du cadre blanc de la zone filmée.",
+    "origine": "design/capture/index.html, .sel.frame border:2px ; Contrat 0.7 « Vidéo et GIF », §12."
+   },
+   {
+    "name": "film-cadre-rayon",
+    "value": "3px",
+    "usage": "Rayon extérieur du cadre de la zone filmée.",
+    "origine": "design/capture/index.html, .sel.frame border-radius:3px ; Contrat 0.7 « Vidéo et GIF », §12."
+   },
+   {
+    "name": "film-cadre-lisere",
+    "value": "1px",
+    "usage": "Épaisseur des deux liserés sombres du cadre.",
+    "origine": "design/capture/index.html, .sel.frame box-shadow (1px)."
+   },
+   {
+    "name": "film-ecart",
+    "value": "10px",
+    "usage": "Écart entre la zone et la pilule (placement fait par le cœur, §10).",
+    "origine": "design/capture/index.html, startRec : y=r.y+r.h+10 ; Contrat 0.7 « Vidéo et GIF », §12."
+   },
+   {
+    "name": "film-pilule-marge",
+    "value": "3px",
+    "usage": "Marge intérieure de la pilule de contrôle.",
+    "origine": "design/capture/index.html, .ctl padding:3px."
+   },
+   {
+    "name": "film-pilule-ecart",
+    "value": "2px",
+    "usage": "Écart entre les éléments de la pilule.",
+    "origine": "design/capture/index.html, .ctl gap:2px."
+   },
+   {
+    "name": "film-bouton",
+    "value": "28px",
+    "usage": "Côté des boutons ronds de la pilule (Pause, Arrêter, Micro).",
+    "origine": "design/capture/index.html, .ib 28 × 28 ; Contrat 0.7 « Vidéo et GIF », §12."
+   },
+   {
+    "name": "film-icone",
+    "value": "15px",
+    "usage": "Côté des icônes des boutons de la pilule.",
+    "origine": "design/capture/index.html, .ib .ico 15 × 15 ; Contrat 0.7 « Vidéo et GIF », §12."
+   },
+   {
+    "name": "film-duree-largeur",
+    "value": "58px",
+    "usage": "Largeur minimale de la durée (point compris), sans ses marges.",
+    "origine": "design/capture/index.html, .rtime min-width:58px ; Contrat 0.7 « Vidéo et GIF », §12."
+   },
+   {
+    "name": "film-duree-marge-gauche",
+    "value": "9px",
+    "usage": "Marge gauche de la durée.",
+    "origine": "design/capture/index.html, .rtime padding:0 8px 0 9px."
+   },
+   {
+    "name": "film-duree-marge-droite",
+    "value": "8px",
+    "usage": "Marge droite de la durée.",
+    "origine": "design/capture/index.html, .rtime padding:0 8px 0 9px."
+   },
+   {
+    "name": "film-duree-ecart",
+    "value": "7px",
+    "usage": "Écart entre le point et la durée.",
+    "origine": "design/capture/index.html, .rtime gap:7px."
+   },
+   {
+    "name": "film-duree-taille",
+    "value": "12.5px",
+    "usage": "Taille du texte de la durée (chiffres à chasse fixe).",
+    "origine": "design/capture/index.html, .rtime font-size:12.5px."
+   },
+   {
+    "name": "film-point",
+    "value": "8px",
+    "usage": "Diamètre du point de la pilule.",
+    "origine": "design/capture/index.html, .dot 8 × 8 ; Contrat 0.7 « Vidéo et GIF », §12."
+   },
+   {
+    "name": "film-point-respire",
+    "value": "0.45",
+    "usage": "Opacité du point au creux de sa respiration.",
+    "origine": "design/capture/index.html, @keyframes breathe{50%{opacity:.45}}."
+   },
+   {
+    "name": "film-trait-hauteur",
+    "value": "16px",
+    "usage": "Hauteur du trait fin avant « Micro ».",
+    "origine": "design/capture/index.html, .vs height:16px."
+   },
+   {
+    "name": "film-trait-marge",
+    "value": "2px",
+    "usage": "Marge de part et d'autre du trait fin avant « Micro » (le trait fait 1 px).",
+    "origine": "design/capture/index.html, .vs width:1px ; margin:0 2px."
+   },
+   {
+    "name": "film-appui-echelle",
+    "value": "0.92",
+    "usage": "Bouton de la pilule appuyé.",
+    "origine": "design/capture/index.html, .ib:active transform:scale(.92)."
+   },
+   {
+    "name": "film-entree-decalage",
+    "value": "4px",
+    "usage": "Départ vertical de l'entrée en ressort de la pilule.",
+    "origine": "design/capture/index.html, @keyframes ctlIn translateY(4px)."
+   },
+   {
+    "name": "film-entree-echelle",
+    "value": "0.96",
+    "usage": "Échelle de départ de l'entrée de la pilule.",
+    "origine": "design/capture/index.html, @keyframes ctlIn scale(.96)."
+   },
+   {
+    "name": "film-lecture",
+    "value": "34px",
+    "usage": "Diamètre du rond de lecture sur la vignette d'un film.",
+    "origine": "design/capture/index.html, .play 34 × 34 ; Contrat 0.7 « Vidéo et GIF », §12."
+   },
+   {
+    "name": "film-lecture-icone",
+    "value": "12px",
+    "usage": "Côté du triangle du rond de lecture.",
+    "origine": "design/capture/index.html, .play svg 12 × 12."
+   },
+   {
+    "name": "film-lecture-flou",
+    "value": "8px",
+    "usage": "Flou derrière le rond de lecture.",
+    "origine": "design/capture/index.html, .play backdrop-filter:blur(8px)."
+   },
+   {
+    "name": "film-duree-vignette-bord",
+    "value": "6px",
+    "usage": "Distance de la pastille de durée aux bords bas et droit de l'aperçu.",
+    "origine": "design/capture/index.html, .dur right:6px ; bottom:6px."
+   },
+   {
+    "name": "film-duree-vignette-marge",
+    "value": "7px",
+    "usage": "Marge horizontale de la pastille de durée.",
+    "origine": "design/capture/index.html, .dur padding:1px 7px."
+   },
+   {
+    "name": "film-duree-vignette-marge-haut",
+    "value": "1px",
+    "usage": "Marge verticale de la pastille de durée.",
+    "origine": "design/capture/index.html, .dur padding:1px 7px."
+   },
+   {
+    "name": "film-duree-vignette-taille",
+    "value": "11px",
+    "usage": "Taille du texte de la pastille de durée.",
+    "origine": "design/capture/index.html, .dur font:600 11px/16px."
+   },
+   {
+    "name": "film-duree-vignette-interligne",
+    "value": "16px",
+    "usage": "Interligne de la pastille de durée.",
+    "origine": "design/capture/index.html, .dur font:600 11px/16px."
+   },
+   {
+    "name": "film-bouton-inactif",
+    "value": "0.4",
+    "usage": "Opacité de « Pause » pendant le décompte (inactif).",
+    "origine": "design/capture/index.html, .ib:disabled opacity:.4."
    }
   ]
  },

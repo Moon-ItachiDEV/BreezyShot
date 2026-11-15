@@ -1607,6 +1607,76 @@ const L = 1280, H = 400;
     verifier(refusD.length === 0 && ef.entoure && a.length === 1 && a[0][0] === 'selection_terminee', '14 j CSP de l\'app, sombre : aucun refus, contour puis tracé', JSON.stringify({ refusD, ef, a }));
     await p.context().close();
   }
+  {
+    // 15. Mode film (0.7, F2) : exactement le mode zone ; seul le nom change (« Enregistrer
+    // l'écran : sélectionnez une zone »). Après l'envoi, la zone reste montrée telle quelle
+    // (le cœur garde la fenêtre jusqu'à la fenêtre de contrôle, 2 s au plus) : le filet ne
+    // rend pas la page avant.
+    const NF = "Enregistrer l'écran : sélectionnez une zone";
+    async function montrerFilm(p) {
+      const i = prochain++;
+      const k = p.echelle;
+      await p.evaluate(([i, k]) => {
+        const l = Math.round(innerWidth * k), h = Math.round(innerHeight * k);
+        __emettre('selection:montrer', { id: i, numero: i, largeur: l, hauteur: h, ecrans: [{ x: 0, y: 0, largeur: l, hauteur: h }], cote_min: 3, mode: 'film' });
+      }, [i, k]);
+      await attendrePrete(p, i);
+      await p.waitForTimeout(80);
+      await vider(p);
+      return i;
+    }
+    const nomF = (p) => p.evaluate(() => [document.body.getAttribute('role'), document.body.getAttribute('aria-label')]);
+    p = await page();
+    id = await montrer(p);
+    const nomZone = await nomF(p);
+    const pxZone = await ligne(p, 200);
+    id = await montrerFilm(p);
+    const nom = await nomF(p);
+    const pxFilm = await ligne(p, 200);
+    const texteF = await p.evaluate(() => document.body.innerText.trim());
+    const curseur = await p.evaluate(() => getComputedStyle(document.documentElement).cursor);
+    verifier(nomZone[0] === null && nomZone[1] === null && nom[0] === 'application' && nom[1] === NF,
+      '15 a mode film : nom « ' + NF + ' » (aucun en mode zone)', JSON.stringify([nomZone, nom]));
+    verifier(texteF === '' && curseur === 'crosshair' && JSON.stringify(pxFilm) === JSON.stringify(pxZone) && pxFilm.every(c => proche(c, VOILE)),
+      '15 a mode film : même voile que le mode zone, croix, aucun texte', JSON.stringify({ texteF, curseur }));
+    // Un clic sans glisser ne choisit rien (aucune fenêtre proposée).
+    await p.mouse.click(400, 200); await p.waitForTimeout(60);
+    let a = await appels(p);
+    verifier(a.length === 0, '15 b clic sans glisser : rien', JSON.stringify(a));
+    // Glisser : selection_terminee comme une zone ; la zone reste telle quelle.
+    await glisser(p, [100, 100], [300, 220]);
+    a = await appels(p);
+    const avant = await etatZone(p);
+    verifier(a.length === 1 && JSON.stringify(a[0]) === JSON.stringify(['selection_terminee', { id, numero: id, depart: { x: 100, y: 100 }, arrivee: { x: 300, y: 220 } }]),
+      '15 c glisser : selection_terminee comme une zone', JSON.stringify(a));
+    // 2,2 s après l'envoi (au-delà du filet du mode zone) : la zone est toujours là, et un
+    // nouveau glisser ne fait rien.
+    await p.waitForTimeout(2200);
+    await glisser(p, [500, 100], [700, 300]);
+    const garde = await etatZone(p);
+    a = await appels(p);
+    verifier(a.length === 1 && JSON.stringify(garde) === JSON.stringify(avant) && garde.glisse,
+      '15 d 2,2 s après l\'envoi : la zone reste, rien de nouveau (filet de 3,5 s)', JSON.stringify({ garde, a }));
+    await p.waitForTimeout(1500);
+    await glisser(p, [500, 100], [700, 300]);
+    a = await appels(p);
+    verifier(a.length === 2 && a[1][0] === 'selection_terminee', '15 d sans selection:cachee en 3,5 s : la page redevient utilisable', JSON.stringify(a));
+    // Puis une charge de mode zone : plus de nom.
+    id = await montrer(p);
+    const apres = await nomF(p);
+    verifier(apres[0] === null && apres[1] === null, '15 e charge de mode zone ensuite : plus de nom', JSON.stringify(apres));
+    await p.context().close();
+    // Sous la CSP de l'app, en sombre, à 150 % : aucun refus, tracé au pixel réel.
+    p = await page({ csp: true, theme: 'dark', echelle: 1.5 });
+    id = await montrerFilm(p);
+    await glisser(p, [100, 100], [300, 220]);
+    a = await appels(p);
+    const refusF = await p.evaluate(() => window.__refus);
+    verifier(refusF.length === 0 && a.length === 1 && JSON.stringify(a[0][1]) === JSON.stringify({ id, numero: id, depart: { x: 150, y: 150 }, arrivee: { x: 450, y: 330 } }),
+      '15 f CSP de l\'app, sombre, 150 % : aucun refus, coins en pixels réels', JSON.stringify({ refusF, a }));
+    await p.screenshot({ path: `${SORTIE}/selection-film-150.png` });
+    await p.context().close();
+  }
   console.log('ECHECS :', echecs);
   console.log('ERREURS PAGE :', JSON.stringify(erreurs));
   if (erreurs.length) echecs++;
