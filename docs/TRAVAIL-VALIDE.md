@@ -957,3 +957,63 @@ entièrement vert ; c'est le dernier passage de la demande de fusion qui fait fo
   à trois écrans : ces points sont dans la liste unique des tests à faire de l'utilisateur.
 - Une page réelle qui change de hauteur sous UI Automation, et un décalage lu biaisé
   réel : simulés seulement.
+
+## MVP, version 0.7 « Vidéo et GIF »
+
+Construite sur la branche `version-0.7` puis sur la branche du fil, la 0.7 porte la version
+à 0.7.0. Contrat : `contrat-0.7-video-gif.md` (v6). Ses décisions viennent d'une sonde jouée
+deux fois sur la machine Windows de GitHub, qui n'est pas dans `main`.
+
+Ce qu'elle apporte (fonction Pro, ouverte par la licence) :
+
+- La vidéo (Ctrl + Maj + 6) et le GIF (Ctrl + Maj + 7), aussi par le menu de l'icône : on
+  trace une zone, un décompte de 3 s, puis l'enregistrement. « Pause », « Arrêter » et, pour
+  la vidéo, « Micro » sous la zone ; le même raccourci arrête. Vidéo MP4 H.264 par Media
+  Foundation (son du micro en AAC si on l'ouvre), GIF à 15 images par seconde. Le film est
+  toujours rangé dans Images › BreezyShot ; la vignette le copie, l'ouvre ou le supprime.
+- Arrêt seul : 60 min de vidéo, 60 s de GIF, disque presque plein, écrans changés, session
+  verrouillée, veille. Quitter pendant un film le range aussi.
+- Sans licence, l'app se comporte comme la 0.6. Seule trace : les réglages passent en
+  version 6 (clés `raccourcis.video` et `raccourcis.gif`).
+
+Chantiers : A et C (images vivantes, contrôle), B (écrivain MP4), D et E (GIF, sortie du
+film), G à J (sélection, menu, réglages v6, fenêtre de contrôle), F (cœur du film), K
+(essai 15). Relectures par des agents distincts, en effort élevé : contrat, cœur, système,
+corrections, suite des corrections, derniers correctifs. Rapports hors dépôt.
+
+### Trouvé par les relectures, corrigé
+
+- Bloquant : un film arrêté par Quitter, `--quitter` ou la fin de session restait dans le
+  dossier de travail et n'arrivait jamais dans Images. Il est rangé à l'arrêt, ou noté et
+  rangé au lancement suivant.
+- Échéance de la Finalisation tenue aussi par le fil principal ; une source sans image arrête
+  le film au lieu d'un film vide de 60 min ; le glisser d'un film ne copie jamais sur le fil
+  principal ; la fin de session ne fait que fermer le fichier dans la procédure de fenêtre.
+- « Vidéo » présente dès le lancement, avant le rangement des films notés ; un film ne peut
+  plus arriver deux fois dans Images ; vidéo sans piste son si le codeur AAC refuse.
+
+### Trouvé sur Windows, corrigé
+
+- Toute zone tracée en mode film était refusée « hors du mode » (défaut du socle, vu par le
+  premier passage de l'essai 15).
+- Bouton « Copier » de la vignette : le nom accessible restait « Copier » pendant la
+  confirmation ; la zone du bouton Annuler n'était jamais envoyée.
+- Première image noire après une duplication, profil H.264 High (images relues décalées),
+  tests trop stricts sur les poignées et les prises perdues au démarrage d'une source.
+- Un clic réel de l'essai 03 pouvait tomber sur une console de la machine GitHub et l'arrêter :
+  tous les clics réels des essais sont gardés sur les fenêtres de l'app ou de l'essai.
+
+### Limites acceptées
+
+- Un film en cours est perdu si l'app est tuée ou plante (MP4 ordinaire, sans fin écrite).
+- Le premier film paie une fois environ 65 Mo de mémoire (WebView2, Media Foundation), qui ne
+  redescendent pas ; ensuite la mémoire reste stable d'un film à l'autre.
+- Sans licence, le dossier de travail des films n'est plus nettoyé après le retrait d'une
+  licence.
+
+### Non vérifié
+
+- Micro et son, codeur matériel, vraie carte graphique, écran 2K, échelle 125 et 150 %,
+  plusieurs écrans, vraie veille et vraie fin de session, OneDrive, coller le fichier dans
+  d'autres applis, lecture dans les lecteurs du système : dans la liste unique des tests à
+  faire de l'utilisateur.

@@ -49,10 +49,11 @@ Avec la licence :
   annule. L'image est dans le presse-papiers, comme une capture de zone.
 - Vidéo et GIF : Ctrl + Maj + 6 (vidéo) ou Ctrl + Maj + 7 (GIF), ou le menu de l'icône,
   puis tracer une zone : l'enregistrement part. « Pause » et « Arrêter » sous la zone ; le
-  même raccourci arrête aussi. Le fichier va dans Images › BreezyShot ; la vignette le
-  copie ou l'ouvre.
+  même raccourci arrête aussi. Pour une vidéo, le bouton « Micro » ajoute le son du micro
+  (coupé au début de chaque film). Le fichier va dans Images › BreezyShot ; la vignette le
+  copie ou l'ouvre. Si l'app est fermée de force pendant un film, ce film est perdu.
 
-Revenir à une version d'avant la 0.6 : les réglages ne s'enregistrent plus. Supprimer
+Revenir à une version d'avant la 0.7 (réglages en version 6) : les réglages ne s'enregistrent plus. Supprimer
 `%APPDATA%\BreezyShot\reglages.json` pour repartir.
 
 Le journal : `%LOCALAPPDATA%\BreezyShot\Journal\breezyshot.log`.
