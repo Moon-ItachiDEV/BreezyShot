@@ -460,7 +460,14 @@ fn detruire_controle(c: Arc<Controle>) {
 }
 
 /// Abandon de la visée au relâchement : tout est caché, Repos par `declencheur`.
-fn abandonner_visee(app: &AppHandle, mut garde: GardeEcran, declencheur: Declencheur) {
+/// `cause` va au journal : `film visee abandonnee: <cause>` (un mot, jamais un chemin).
+fn abandonner_visee(
+    app: &AppHandle,
+    mut garde: GardeEcran,
+    declencheur: Declencheur,
+    cause: &'static str,
+) {
+    log::info!("{}", film::ligne_visee_abandonnee(cause));
     garde.cacher_tout();
     drop(garde);
     super::appliquer(app, declencheur);
@@ -490,6 +497,7 @@ fn nom_de(fichier: &Path) -> String {
 pub fn zone_choisie(app: &AppHandle, zone: Rect) {
     let relache = Instant::now();
     let Some(capture) = super::ranger_capture(app, None) else {
+        log::info!("{}", film::ligne_visee_abandonnee("capture"));
         if let Some(s) = app.try_state::<Selection>() {
             s.cacher();
         }
@@ -503,24 +511,25 @@ pub fn zone_choisie(app: &AppHandle, zone: Rect) {
         .filter(|e| e.lancee.is_none())
         .map(|e| (e.numero, e.sorte));
     let (Some(ecran), Some((numero, sorte))) = (defilante::ecran_de(zone, &ecrans), visee) else {
-        abandonner_visee(app, garde, Declencheur::SelectionAnnulee);
+        let cause = if visee.is_none() { "visee" } else { "ecran" };
+        abandonner_visee(app, garde, Declencheur::SelectionAnnulee, cause);
         return;
     };
     let cadre = match film::cadrer(zone, &ecran, sorte, mp4::taille_acceptee) {
         Cadrage::Bon(c) => c,
         Cadrage::Vide => {
-            abandonner_visee(app, garde, Declencheur::SelectionAnnulee);
+            abandonner_visee(app, garde, Declencheur::SelectionAnnulee, "vide");
             return;
         }
         Cadrage::Refuse => {
-            abandonner_visee(app, garde, Declencheur::SelectionImpossible);
+            abandonner_visee(app, garde, Declencheur::SelectionImpossible, "codeur");
             log::info!("{}", film::ligne_impossible("codeur"));
             super::afficher(app, zone::message_capture_impossible());
             return;
         }
     };
     if super::appliquer(app, Declencheur::EnregistrementChoisi).is_none() {
-        abandonner_visee(app, garde, Declencheur::SelectionAnnulee);
+        abandonner_visee(app, garde, Declencheur::SelectionAnnulee, "automate");
         return;
     }
     log::info!("{}", film::ligne_zone(sorte, zone, &cadre));

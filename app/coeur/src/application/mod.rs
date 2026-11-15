@@ -2485,7 +2485,13 @@ fn traiter_zone(app: &AppHandle, arrivee: Arrivee<'_>) {
         Geste::Abandonner {
             declencheur,
             probleme,
-        } => abandonner(app, declencheur, probleme),
+        } => {
+            if film {
+                let cause = format!("{declencheur:?}");
+                log::info!("{}", film::ligne_visee_abandonnee(&cause));
+            }
+            abandonner(app, declencheur, probleme)
+        }
         // Copier le texte : la zone est lue, jamais découpée comme une capture.
         Geste::Decouper(zone) if texte => geste_texte::zone_choisie(app, zone),
         // Capture défilante : la zone (ou la page) est défilée, jamais découpée ici.

@@ -967,6 +967,13 @@ pub fn ligne_chrono(
     )
 }
 
+/// `film visee abandonnee: <cause>` : la visée (Sélection en mode film) finie sans film.
+/// Causes : `capture`, `visee`, `ecran`, `vide`, `codeur`, `automate` (geste_film), ou le
+/// déclencheur de la Sélection (`SelectionAnnulee`, `SelectionImpossible`…).
+pub fn ligne_visee_abandonnee(cause: &str) -> String {
+    format!("film visee abandonnee: {cause}")
+}
+
 /// `film impossible: <cause>`.
 pub fn ligne_impossible(cause: &str) -> String {
     format!("film impossible: {cause}")
@@ -1735,6 +1742,10 @@ mod tests {
             "chrono film cadence 0.00 prise-mediane - ecriture-mediane - file-max 0 arret-fichier 0"
         );
         assert_eq!(ligne_impossible("page"), "film impossible: page");
+        assert_eq!(
+            ligne_visee_abandonnee("codeur"),
+            "film visee abandonnee: codeur"
+        );
         let bilan = BilanFilm {
             copie: Etape::Faite,
             enregistrement: EtapeFichier::Fait("/i/a.mp4".into()),
