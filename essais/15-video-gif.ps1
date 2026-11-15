@@ -568,18 +568,30 @@ try {
             try { if (-not $aide.HasExited) { $aide.Kill(); $null = $aide.WaitForExit(5000) } } catch { }
             return $lu
         }
-        # Les fenêtres de plomberie de Tauri (instance unique « …-sic » / « …-siw », cible des
-        # événements de Tao) ne se montrent jamais à l'écran : elles ne comptent pas comme une
-        # fenêtre de l'app, mais restent dites (Plomberie-Visible) si leur drapeau visible est mis.
+        # Les fenêtres de plomberie de Tauri ne se montrent jamais à l'écran : l'instance unique
+        # (classe « …-sic », titre « …-siw », 16 × 16 en 0,0) et la cible des événements de Tao
+        # (classe « Tao Thread Event Target », titre vide ; tao 0.37 la crée en 0 × 0, styles
+        # étendus LAYERED | TRANSPARENT | NOACTIVATE | TOOLWINDOW, puis lui met WS_VISIBLE pour
+        # recevoir WM_PAINT). Elles ne comptent pas comme une fenêtre de l'app tant qu'elles
+        # gardent cette taille (au plus 16 × 16) ; une plus grande compte. Leur drapeau visible
+        # est dit à part (Plomberie-Visible : rectangle et styles étendus).
         function Est-Plomberie([IntPtr]$H) {
             $c = $script:Natif::Classe($H); $t = $script:Natif::Titre($H)
-            return (($c -like '*-sic') -and ($t -like '*-siw')) -or ($t -ceq 'Tao Thread Event Target')
+            $nom = (($c -like '*-sic') -and ($t -like '*-siw')) -or ($c -ceq 'Tao Thread Event Target')
+            if (-not $nom) { return $false }
+            $r = $script:Natif::Rect($H)
+            return ($null -eq $r) -or (($r[2] -le 16) -and ($r[3] -le 16))
         }
         function Visibles-App {
             return @($script:Natif::Visibles($script:proc.Id) | Where-Object { -not (Est-Plomberie $_) } | ForEach-Object { "$($script:Natif::Classe($_)) « $($script:Natif::Titre($_)) »" })
         }
         function Plomberie-Visible {
-            return @($script:Natif::Visibles($script:proc.Id) | Where-Object { Est-Plomberie $_ } | ForEach-Object { "$($script:Natif::Classe($_)) « $($script:Natif::Titre($_)) » $(@($script:Natif::Rect($_)) -join ',')" })
+            return @($script:Natif::Visibles($script:proc.Id) | Where-Object { Est-Plomberie $_ } | ForEach-Object { "$($script:Natif::Classe($_)) « $($script:Natif::Titre($_)) » $(@($script:Natif::Rect($_)) -join ',') ex 0x$('{0:X}' -f $script:Natif::StylesEtendus($_))" })
+        }
+        # Note une fois par point les fenêtres de plomberie marquées visibles.
+        function Noter-Plomberie([string]$Quoi) {
+            $l = @(Plomberie-Visible)
+            if ($l.Count -gt 0) { Noter-Mesure -Nom "$Quoi fenêtres de plomberie de Tauri marquées visibles (écartées, au plus 16 × 16)" -Valeur ($l -join ' ; ') }
         }
         # Le presse-papiers, dans un fil STA : la liste de fichiers ($null sans liste).
         function Fichiers-PressePapiers {
@@ -1338,6 +1350,7 @@ try {
                     $limite = [DateTime]::UtcNow.AddSeconds(3)
                     while (@(Visibles-App).Count -gt 0 -and [DateTime]::UtcNow -lt $limite) { Start-Sleep -Milliseconds 100 }
                     $vis = @(Visibles-App)
+                    Noter-Plomberie "(D) $cause"
                     $films = @(Fichiers-De $script:Cas.Films)
                     Verifier "(D) $cause pendant le décompte : film annule decompte ($cause), EnregistrementAnnule, aucune fenêtre de l'app visible, aucun fichier dans Films" (($fD.Annule -eq "film annule decompte ($cause)") -and ($vis.Count -eq 0) -and ($films.Count -eq 0)) "$($fD.Annule) ; visibles : $($vis -join ', ') ; Films : $($films.Count)" | Out-Null
                 }
@@ -1817,8 +1830,7 @@ try {
                 Lancer-App-Du-Cas '(L) relance'
                 Start-Sleep -Seconds 3
                 $vis = @(Visibles-App)
-                $plomberie = @(Plomberie-Visible)
-                if ($plomberie.Count -gt 0) { Noter-Mesure -Nom '(L) fenêtres de plomberie de Tauri marquées visibles après la relance (pour l''auteur du cœur)' -Valeur ($plomberie -join ' ; ') }
+                Noter-Plomberie '(L) relance :'
                 $msg = @(Toutes-Apres 'bandeau affiche ' $dl $base)
                 $quoiL = if ($script:LCoupee) { 'après Stop-Process pendant une vidéo' } else { 'après Stop-Process (aucune vidéo coupée : le point précédent a échoué)' }
                 Verifier "(L) relancée $quoiL : démarrage normal, sans fenêtre ni message" (($vis.Count -eq 0) -and ($msg.Count -eq 0)) "visibles : $($vis -join ', ') ; messages : $(@($msg | ForEach-Object { Message $_ }) -join ' | ')" | Out-Null
