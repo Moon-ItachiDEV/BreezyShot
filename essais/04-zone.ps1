@@ -499,6 +499,7 @@ function Fichiers-Png([string]$Dossier) {
         function Capturer([string]$Dossier, [string]$Quoi, [int[]]$De, [int[]]$A) {
             $annonces = Compter-Motif -Motif 'sortie annonce ' -Dossier $Dossier
             $null = Ouvrir-Selection -Dossier $Dossier -Quoi $Quoi
+            $null = Garder-Clic $De[0] $De[1] "$Quoi : glisser"
             [BreezyShotEssai.Zone]::Glisser($De[0], $De[1], $A[0], $A[1])
             return (Attendre-Motif -Motif 'sortie annonce ' -Dossier $Dossier -DelaiS 10 -Quoi "$Quoi : annonce de la sortie" -Fois ($annonces + 1))
         }
@@ -588,6 +589,7 @@ function Fichiers-Png([string]$Dossier) {
                 # (3) Glisser exact sur les quatre carrés.
                 $seqAvant = [BreezyShotEssai.Zone]::GetClipboardSequenceNumber()
                 $reposAvant = Repos-Vus $da
+                $null = Garder-Clic $HG[0] $HG[1] '(3) glisser'
                 [BreezyShotEssai.Zone]::Glisser($HG[0], $HG[1], $BD[0], $BD[1])
                 $null = Attendre-Motif -Motif "selection fin $($s.Id) zone$" -Dossier $da -DelaiS 5 -Quoi '(3) fin de la sélection'
                 Attendre-Repos -Dossier $da -Quoi '(3)' -Fois ($reposAvant + 1) -Sel $sel -Fige $fige
@@ -623,7 +625,7 @@ function Fichiers-Png([string]$Dossier) {
                     $reposAvant = Repos-Vus $da
                     $null = Ouvrir-Selection -Dossier $da -Quoi "(4) $geste"
                     if ($geste -eq 'Échap') { [BreezyShotEssai.Zone]::Touches($ECHAP) }
-                    else { [BreezyShotEssai.Zone]::Cliquer($TX + 50, $TY + 50, $true) }
+                    else { $null = Garder-Clic ($TX + 50) ($TY + 50) '(4) clic droit'; [BreezyShotEssai.Zone]::Cliquer($TX + 50, $TY + 50, $true) }
                     Attendre-Repos -Dossier $da -Quoi "(4) $geste" -Fois ($reposAvant + 1) -Sel $sel -Fige $fige
                     Verifier "(4) $geste : Selection -> Repos (SelectionAnnulee)" ((Derniere-Ligne -Motif 'etat \w+ -> Repos' -Dossier $da) -match 'etat Selection -> Repos \(SelectionAnnulee\)') | Out-Null
                     Verifier "(4) $geste : aucun fichier de plus, presse-papiers inchangé" ((@(Fichiers-Png $recents).Count -eq $n) -and ([BreezyShotEssai.Zone]::GetClipboardSequenceNumber() -eq $seq)) | Out-Null
@@ -634,9 +636,11 @@ function Fichiers-Png([string]$Dossier) {
                 # glisser de 1 px 2×2, tous deux sous COTE_MIN (3) : la sélection reste ; Échap.
                 $reposAvant = Repos-Vus $da
                 $null = Ouvrir-Selection -Dossier $da -Quoi '(5)'
+                $null = Garder-Clic ($TX + 30) ($TY + 30) '(5) clic'
                 [BreezyShotEssai.Zone]::Cliquer($TX + 30, $TY + 30, $false)
                 Start-Sleep -Milliseconds 600
                 Verifier '(5) clic sans glisser : la sélection reste ouverte' ((Visible $sel) -and ((Repos-Vus $da) -eq $reposAvant)) | Out-Null
+                $null = Garder-Clic ($TX + 30) ($TY + 30) '(5) glisser de 1 px'
                 [BreezyShotEssai.Zone]::Glisser($TX + 30, $TY + 30, $TX + 31, $TY + 31)
                 Start-Sleep -Milliseconds 600
                 Verifier '(5) glisser de 1 px (2×2) : la sélection reste ouverte' ((Visible $sel) -and ((Repos-Vus $da) -eq $reposAvant)) | Out-Null
@@ -679,6 +683,7 @@ function Fichiers-Png([string]$Dossier) {
                 $copies9 = Compter-Motif -Motif 'sortie copie faite ' -Dossier $da
                 $null = Ouvrir-Selection -Dossier $da -Quoi '(9) seconde'
                 Verifier '(9) pendant la seconde sélection, le bandeau est caché' (-not (Visible $bandeau)) | Out-Null
+                $null = Garder-Clic $HG[0] $HG[1] '(9) glisser'
                 [BreezyShotEssai.Zone]::Glisser($HG[0], $HG[1], $BD[0], $BD[1])
                 $null = Attendre-Motif -Motif 'sortie annonce ' -Dossier $da -DelaiS 10 -Quoi '(9) annonce de la seconde' -Fois ($annonces + 1)
                 Verifier-Copie -Dossier $da -Quoi '(9) seconde image, sans le bandeau' -Seq $seq9 -Copies $copies9

@@ -627,6 +627,7 @@ public static int NonOpaques(byte[] o, int stride, int l, int h) {
                 Verifier '(2) écran figé et sélection visibles' ((Visible $sel) -and (Visible $fige)) | Out-Null
 
                 # (3) Clic gauche au milieu du vrai bord.
+                $null = Garder-Clic $MX $MY '(3) clic sur le bord'
                 [BreezyShotEssai.Fenetre]::Cliquer($MX, $MY, $false)
                 $null = Attendre-Motif -Motif "selection fin $($s.Id) fenetre$" -Dossier $da -DelaiS 5 -Quoi '(3) fin de la sélection'
                 $null = Attendre-Motif -Motif 'sortie annonce ' -Dossier $da -DelaiS 10 -Quoi '(3) annonce de la sortie' -Fois ($annonces + 1)
@@ -758,6 +759,7 @@ public static int NonOpaques(byte[] o, int stride, int l, int h) {
                     # Encore libre, vérifié juste avant le clic (rien n'est apparu entre-temps).
                     $sous = @([BreezyShotEssai.Fenetre]::FenetresSous($libre[0], $libre[1], $p.Id))
                     Verifier '(7) toujours aucune fenêtre sous le point au moment du clic' ($sous.Count -eq 0) ($sous -join ', ') | Out-Null
+                    $null = Garder-Clic $libre[0] $libre[1] '(7) clic sur le bureau'
                     [BreezyShotEssai.Fenetre]::Cliquer($libre[0], $libre[1], $false)
                     Verifier-Reste-Ouverte -Dossier $da -Quoi '(7) clic sur le bureau' -S $s7 -Sel $sel -Repos $reposAvant
                     [BreezyShotEssai.Fenetre]::Touches($ECHAP)
@@ -768,8 +770,10 @@ public static int NonOpaques(byte[] o, int stride, int l, int h) {
                 # (8) Glisser sur la témoin : aucune fin ; clic droit : annulée.
                 $reposAvant = Repos-Vus $da
                 $s8 = Ouvrir-Selection -Dossier $da -Quoi '(8)'
+                $null = Garder-Clic ($MX - 60) ($MY - 40) '(8) glisser'
                 [BreezyShotEssai.Fenetre]::Glisser(($MX - 60), ($MY - 40), ($MX + 60), ($MY + 40))
                 Verifier-Reste-Ouverte -Dossier $da -Quoi '(8) glisser' -S $s8 -Sel $sel -Repos $reposAvant
+                $null = Garder-Clic $MX $MY '(8) clic droit'
                 [BreezyShotEssai.Fenetre]::Cliquer($MX, $MY, $true)
                 $null = Attendre-Motif -Motif "selection fin $($s8.Id) annulee clic_droit$" -Dossier $da -DelaiS 5 -Quoi '(8) clic droit'
                 Verifier-Fin -Dossier $da -Quoi '(8) clic droit' -Fois ($reposAvant + 1) -S $s8 -Sel $sel -Fige $fige

@@ -502,6 +502,7 @@ public static string[] Ecarts(byte[] o, int s, int l, int h, int[] c, int max) {
             $C::Touches($CTRL_MAJ_1)
             $null = Attendre-Suivante 'chrono selection prete \d+' $D $pretes "$Quoi : sélection prête"
             Start-Sleep -Milliseconds 150
+            $null = Garder-Clic $X $Y "$Quoi : glisser"
             $C::Glisser($X, $Y, $X + $L - 1, $Y + $H - 1)
             return (Attendre-Suivante 'zone choisie ' $D $zones "$Quoi : zone choisie")
         }
@@ -694,6 +695,7 @@ public static string[] Ecarts(byte[] o, int s, int l, int h, int[] c, int max) {
                 Verifier '(9) décompte puis sélection en mode zone' ($sm -match ' mode zone ') $sm | Out-Null
                 $null = Attendre-Suivante 'chrono selection prete \d+' $db $pretes '(9) sélection prête'
                 Start-Sleep -Milliseconds 150
+                $null = Garder-Clic $TX $TY '(9) glisser'
                 $C::Glisser($TX, $TY, $TX + $COTE - 1, $TY + $COTE - 1)
                 $zc = Attendre-Suivante 'zone choisie ' $db $zones '(9) zone choisie'
                 $png = Attendre-Png $recents $n '(9) PNG'
@@ -755,6 +757,7 @@ public static string[] Ecarts(byte[] o, int s, int l, int h, int[] c, int max) {
                 $lzb = Attendre-Motif -Motif "bandeau zone $id (-?\d+),(-?\d+) (\d+)x(\d+)$" -Dossier $db -DelaiS 2 -Quoi '(8) bandeau zone de la croix'
                 $null = $lzb -match "bandeau zone $id (-?\d+),(-?\d+) (\d+)x(\d+)$"
                 $px = [int]$Matches[1] + [int]([int]$Matches[3] / 2); $py = [int]$Matches[2] + [int]([int]$Matches[4] / 2)
+                $null = Garder-Clic $px $py '(8) croix du décompte'
                 $C::Cliquer($px, $py)
                 $null = Attendre-Motif -Motif "bandeau action $id annuler$" -Dossier $db -DelaiS 2 -Quoi "(8) bandeau action (clic en $px,$py)"
                 $la = Attendre-Motif -Motif 'decompte \d+ annule \(\w+\)$' -Dossier $db -DelaiS 2 -Quoi '(8) annulation' -Fois 2
