@@ -552,9 +552,12 @@ dans le dossier temporaire du système (`systeme::dossier_secours()`), sous le n
   **Depuis la 0.5.2 (piste A « Liste », choisie le 13/11/2026)** : sous Windows et macOS, le
   menu est une fenêtre web (`fenetres::menu`, page `menu/menu.html`), parce que le menu
   natif ne se style pas. Un clic gauche OU droit sur l'icône (`Evenement::ClicIcone`, avec
-  le rectangle de l'icône) l'ouvre au-dessus d'elle, au-dessus de la barre des tâches, bord
-  droit à 44 px à droite du centre de l'icône, borné à la zone utile (`menu::placer`, pur,
-  testé) ; un second clic le ferme. Il se ferme aussi au choix, sur Échap ou Tab, au clic
+  le rectangle de l'icône et la place du pointeur) l'ouvre comme un menu de Windows
+  (0.7.2) : coin bas gauche de la carte au pointeur, carte vers la droite ou, sans place,
+  vers la gauche ; au-dessus de la barre des tâches pour un clic dans la barre ; bornée à
+  la zone utile (`menu::placer`, pur, testé). Le pointeur ne compte que sur l'icône (à
+  4 px près) ; sinon (clavier, automatisation) le haut de l'icône en son milieu
+  (`menu::point_d_ancrage`). Un second clic le ferme. Il se ferme aussi au choix, sur Échap ou Tab, au clic
   ailleurs (perte du focus), et quand une capture démarre. La fenêtre est créée cachée à la
   première ouverture, puis gardée cachée et réutilisée. Groupes : les captures (zone, écran,
   fenêtre) ; « Refaire la dernière zone », « Capture défilante » (0.6, avec une licence,

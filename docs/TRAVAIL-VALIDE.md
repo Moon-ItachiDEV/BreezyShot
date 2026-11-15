@@ -1093,3 +1093,34 @@ très pâles ou très foncées et « Autre couleur », la CSP.
 - Rien n'a été essayé sur un vrai Windows par une personne : à l'utilisateur, d'après la
   liste unique des tests à faire.
 - Les pages sont essayées dans Chromium sous Linux, pas dans WebView2.
+
+## Retours des premiers essais de la 0.7 (version 0.7.2)
+
+Retours de l'utilisateur le 15/11/2026, sur la 0.7.1 :
+
+- Le menu de l'icône s'ouvrait au-dessus de l'icône, bord droit à 44 px à droite de son
+  centre : dans le panneau des icônes cachées, il partait loin à gauche et au-dessus du
+  panneau. Il se pose maintenant comme un menu de Windows : le coin bas gauche de la carte
+  au pointeur, la carte vers la droite, ou vers la gauche sans place ; pour un clic dans la
+  barre des tâches, au-dessus de la barre. Le pointeur ne compte que s'il est sur l'icône
+  (à 4 px près) ; sinon (clavier, automatisation) le menu part du haut de l'icône.
+- Éditeur : « Enregistrer » et « Enregistrer sous » semblaient en double. Ils ne font pas
+  la même chose : le premier range l'image dans le dossier des captures sans rien
+  demander, le second demande le dossier et le nom. L'entrée du menu « … » s'écrit
+  maintenant « Enregistrer sous… » : les points disent, comme partout dans Windows, qu'une
+  fenêtre s'ouvre pour choisir. Les info-bulles restent le nom seul (règle de l'éditeur).
+- « Je fais comment une vidéo ? », et Vidéo absente de Réglages › Raccourcis : la licence
+  d'essai n'était pas activée ; sans elle, les fonctions Pro sont cachées partout. Rien
+  ne change dans l'app ; la licence lui a été redonnée.
+
+### Vérifié
+
+- Tests du placement (`menu::placer`, `menu::point_d_ancrage`) : barre en bas et en
+  haut, bords gauche et droit, panneau des icônes cachées, échelle 150 %, écran à gauche,
+  pointeur loin de l'icône.
+- Page de l'éditeur : l'entrée « Enregistrer sous… » du menu « … ».
+
+### Non vérifié
+
+- Le menu dans le vrai panneau des icônes cachées : à l'utilisateur.
+

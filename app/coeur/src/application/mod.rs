@@ -205,9 +205,9 @@ pub enum Evenement {
     ThemeBarre(Theme),
     /// Une entrée du menu de l'icône a été choisie (son identifiant).
     Menu(String),
-    /// Clic gauche ou droit sur l'icône (son rectangle, pixels réels) : le menu web
-    /// s'ouvre, ou se ferme s'il est ouvert.
-    ClicIcone(fenetres::Rect),
+    /// Clic gauche ou droit sur l'icône (son rectangle et la place du pointeur, pixels
+    /// réels) : le menu web s'ouvre, ou se ferme s'il est ouvert.
+    ClicIcone(fenetres::Rect, Option<(i32, i32)>),
     /// Signal du module des raccourcis (appui).
     Raccourci(raccourcis::Signal),
     /// Signal du module des fenêtres (clic dans le bandeau).
@@ -800,7 +800,7 @@ fn demarrer(app: &AppHandle, commande: Commande, inconnus: &[String]) {
             bilan.libelle_menu(a)
         }),
         |app, id| traiter(app, Evenement::Menu(id)),
-        |app, rect| traiter(app, Evenement::ClicIcone(rect)),
+        |app, rect, pointeur| traiter(app, Evenement::ClicIcone(rect, pointeur)),
     ) {
         Ok(()) => log::info!(
             "icone installee ({taille} px, echelle {echelle_principale}, barre {})",
@@ -1564,7 +1564,7 @@ pub fn traiter(app: &AppHandle, evenement: Evenement) {
                 Err(e) => log::warn!("icone non mise a jour: {e}"),
             }
         }
-        Evenement::ClicIcone(rect) => fenetre_menu::clic_icone(app, rect),
+        Evenement::ClicIcone(rect, pointeur) => fenetre_menu::clic_icone(app, rect, pointeur),
         Evenement::Menu(id) => match (id.as_str(), mode_du_menu(&id)) {
             (MENU_QUITTER, _) => {
                 log::info!("menu: quitter");

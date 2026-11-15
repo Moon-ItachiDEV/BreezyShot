@@ -1,6 +1,6 @@
 //! Menu de l'icône de la zone de notification (piste A « Liste », choisie le 13/11/2026) :
 //! le menu natif ne se style pas, c'est donc une petite fenêtre web sans cadre, posée
-//! au-dessus de l'icône. Créée cachée à la première ouverture, puis gardée cachée et
+//! comme un menu de Windows : un coin au pointeur (0.7.2). Créée cachée à la première ouverture, puis gardée cachée et
 //! réutilisée (elle s'ouvre alors sans attendre).
 //!
 //! Le module crée, place, montre et cache ; il ne décide de rien. L'Application lui donne
@@ -37,11 +37,8 @@ pub const HAUTEUR_SEPARATEUR: f64 = 9.0;
 pub const CADRE: f64 = 10.0;
 /// Place de l'ombre autour de la carte, de chaque côté.
 pub const MARGE: f64 = 16.0;
-/// Écart entre la carte et la barre des tâches (ou l'icône).
+/// Écart entre la carte et les bords de la zone utile (la barre des tâches comprise).
 pub const ECART: f64 = 8.0;
-/// La carte dépasse l'icône de ce décalage vers la droite (maquette : menu presque aligné
-/// à droite sur l'icône).
-pub const DEBORD_DROITE: f64 = 44.0;
 
 /// Un clic sur l'icône qui suit de si près la fermeture du menu (perte du focus causée par
 /// ce même clic) ne le rouvre pas : le clic referme, comme un menu natif.
@@ -90,11 +87,12 @@ pub fn hauteur_carte(lignes: &[Ligne]) -> f64 {
     CADRE + actions * HAUTEUR_LIGNE + seps * HAUTEUR_SEPARATEUR
 }
 
-/// Place de la fenêtre (pure, pixels réels), ombre comprise. La carte se pose au-dessus de
-/// l'icône, sans descendre sous la zone utile (la barre des tâches), le bord droit à
-/// `DEBORD_DROITE` à droite du centre de l'icône ; sans place au-dessus, en dessous de
-/// l'icône (barre des tâches en haut). Toujours dans la zone utile, à `ECART` des bords.
-pub fn placer(icone: Rect, ecran: &Ecran, hauteur_logique: f64) -> Rect {
+/// Place de la fenêtre (pure, pixels réels), ombre comprise, comme un menu de Windows :
+/// le coin bas gauche de la carte au point (le pointeur au clic), la carte vers la droite,
+/// ou vers la gauche si elle déborderait ; au-dessus du point, ou en dessous sans place
+/// au-dessus (barre des tâches en haut). Un point dans la barre des tâches pose la carte
+/// au-dessus de la barre. Toujours dans la zone utile, à `ECART` des bords.
+pub fn placer(point: (i32, i32), ecran: &Ecran, hauteur_logique: f64) -> Rect {
     let e = echelle_sure(ecran.echelle);
     let px = |v: f64| (v * e).round() as i64;
     let (marge, ecart) = (px(MARGE), px(ECART));
@@ -102,26 +100,50 @@ pub fn placer(icone: Rect, ecran: &Ecran, hauteur_logique: f64) -> Rect {
     let z = ecran.zone_utile;
     let (zg, zh) = (i64::from(z.x), i64::from(z.y));
     let (zd, zb) = (zg + i64::from(z.largeur), zh + i64::from(z.hauteur));
-    let (ig, ih) = (i64::from(icone.x), i64::from(icone.y));
-    let ib = ih + i64::from(icone.hauteur);
-    let centre = ig + i64::from(icone.largeur) / 2;
+    let (x, y) = (i64::from(point.0), i64::from(point.1));
 
-    // Horizontal : bord droit près de l'icône, borné à la zone utile.
-    let droite_voulue = centre + px(DEBORD_DROITE);
-    let gauche = (droite_voulue - lc).min(zd - ecart - lc).max(zg + ecart);
+    // Horizontal : vers la droite du point, sinon vers sa gauche ; bornée à la zone utile.
+    let gauche = if x + lc <= zd - ecart { x } else { x - lc };
+    let gauche = gauche.min(zd - ecart - lc).max(zg + ecart);
 
-    // Vertical : au-dessus si la carte tient, sinon en dessous.
-    let bas = ih.min(zb) - ecart;
+    // Vertical : le bas au point (ou au-dessus de la barre), sinon le haut au point.
+    let bas = y.min(zb - ecart);
     let haut = if bas - hc >= zh + ecart {
         bas - hc
     } else {
-        (ib.max(zh) + ecart).min(zb - ecart - hc).max(zh + ecart)
+        y.max(zh + ecart).min(zb - ecart - hc).max(zh + ecart)
     };
     Rect {
         x: (gauche - marge) as i32,
         y: (haut - marge) as i32,
         largeur: (lc + 2 * marge).max(1) as u32,
         hauteur: (hc + 2 * marge).max(1) as u32,
+    }
+}
+
+/// Tolérance autour de l'icône pour croire le pointeur (pixels réels).
+const PRES_DE_L_ICONE: i64 = 4;
+
+/// Le point où poser le menu : le pointeur au clic, s'il est sur l'icône (ou si l'icône
+/// est inconnue) ; sinon le haut de l'icône en son milieu. Un clic venu du clavier (Win +
+/// B, puis Entrée) ou d'une automatisation laisse le pointeur ailleurs : le menu reste
+/// alors près de l'icône (pixels réels).
+pub fn point_d_ancrage(icone: Option<Rect>, pointeur: Option<(i32, i32)>) -> Option<(i32, i32)> {
+    let Some(r) = icone else {
+        return pointeur;
+    };
+    let (g, h) = (i64::from(r.x), i64::from(r.y));
+    let (d, b) = (g + i64::from(r.largeur), h + i64::from(r.hauteur));
+    let sur = |(x, y): (i32, i32)| {
+        let (x, y) = (i64::from(x), i64::from(y));
+        x >= g - PRES_DE_L_ICONE
+            && x <= d + PRES_DE_L_ICONE
+            && y >= h - PRES_DE_L_ICONE
+            && y <= b + PRES_DE_L_ICONE
+    };
+    match pointeur {
+        Some(p) if sur(p) => Some(p),
+        _ => Some(((g + i64::from(r.largeur) / 2) as i32, r.y)),
     }
 }
 
@@ -179,34 +201,34 @@ pub fn rect_inconnu(r: &Rect) -> bool {
     (r.largeur <= 1 && r.hauteur <= 1) || (r.x == 0 && r.y == 0)
 }
 
-/// Ouvre le menu au-dessus de l'icône (`icone` : son rectangle, pixels réels ; `None` ou
-/// inconnu : sous la souris). La première fois, la fenêtre est créée et la page envoie
+/// Ouvre le menu au pointeur (`pointeur` : sa place au clic, s'il est sur l'icône ; sinon
+/// le haut de l'icône, `icone` : son rectangle ; sans les deux, ou l'icône inconnue : sous
+/// la souris ; pixels réels ; voir `point_d_ancrage`). La première fois, la fenêtre est créée et la page envoie
 /// `menu_pret` : les lignes lui sont données à ce moment-là. `exclu` : la fenêtre est
 /// exclue des captures pour cette ouverture (pendant une défilante, où elle pourrait
 /// entrer dans une image), et l'exclusion est retirée à la première ouverture sans. Rend
 /// vrai si le menu est montré.
-pub fn ouvrir(app: &AppHandle, icone: Option<Rect>, lignes: Vec<Ligne>, exclu: bool) -> bool {
+pub fn ouvrir(
+    app: &AppHandle,
+    icone: Option<Rect>,
+    pointeur: Option<(i32, i32)>,
+    lignes: Vec<Ligne>,
+    exclu: bool,
+) -> bool {
     let icone = icone.filter(|r| !rect_inconnu(r));
-    let ancre = icone.or_else(|| {
-        super::souris(app).map(|(x, y)| Rect {
-            x: x as i32,
-            y: y as i32,
-            largeur: 1,
-            hauteur: 1,
-        })
-    });
-    let centre = ancre.map(|r| {
-        (
-            f64::from(r.x) + f64::from(r.largeur) / 2.0,
-            f64::from(r.y) + f64::from(r.hauteur) / 2.0,
-        )
-    });
+    let point = point_d_ancrage(icone, pointeur)
+        .or_else(|| super::souris(app).map(|(x, y)| (x.round() as i32, y.round() as i32)));
+    let centre = point.map(|(x, y)| (f64::from(x), f64::from(y)));
     let Some(ecran) = ecran_sous(centre, &ecrans(app)) else {
         log::warn!("menu non ouvert: aucun ecran");
         return false;
     };
-    let ancre = ancre.unwrap_or(ecran.zone_utile);
-    let place = placer(ancre, &ecran, hauteur_carte(&lignes));
+    let z = ecran.zone_utile;
+    let point = point.unwrap_or((
+        z.x.saturating_add((z.largeur / 2) as i32),
+        z.y.saturating_add((z.hauteur / 2) as i32),
+    ));
+    let place = placer(point, &ecran, hauteur_carte(&lignes));
     let charge = Ouverture { lignes };
     let (f, nouvelle) = match fenetre(app) {
         Some(f) => (f, false),
@@ -414,65 +436,60 @@ mod tests {
     }
 
     #[test]
-    fn au_dessus_de_la_barre_des_taches() {
+    fn clic_dans_la_barre_au_bord_droit_carte_a_gauche_du_pointeur() {
         let e = ecran(1.0);
-        // Icône dans la barre, près de l'horloge.
-        let icone = Rect {
-            x: 1700,
-            y: 1036,
-            largeur: 24,
-            hauteur: 40,
-        };
-        let p = placer(icone, &e, 200.0);
+        // Clic sur l'icône près de l'horloge : pas de place à droite, la carte part vers
+        // la gauche, son bord droit au pointeur, son bas au-dessus de la barre.
+        let p = placer((1712, 1056), &e, 200.0);
         let (marge, ecart) = (MARGE as i32, ECART as i32);
-        // Carte : bas à 8 px au-dessus de la zone utile, bord droit à 44 px du centre.
         assert_eq!(p.y + p.hauteur as i32 - marge, 1032 - ecart);
-        assert_eq!(p.x + p.largeur as i32 - marge, 1712 + 44);
+        assert_eq!(p.x + p.largeur as i32 - marge, 1712);
         assert_eq!(p.largeur, (LARGEUR + 2.0 * MARGE) as u32);
+    }
+
+    #[test]
+    fn clic_dans_la_barre_avec_de_la_place_carte_a_droite_du_pointeur() {
+        let e = ecran(1.0);
+        let p = placer((900, 1056), &e, 200.0);
+        assert_eq!(p.x + MARGE as i32, 900);
+        assert_eq!(p.y + p.hauteur as i32 - MARGE as i32, 1032 - ECART as i32);
+    }
+
+    #[test]
+    fn dans_le_panneau_des_icones_cachees_coin_au_pointeur() {
+        // Retour de l'utilisateur (15/11) : l'icône dans le panneau au-dessus de la barre.
+        // Le coin bas gauche de la carte est au pointeur, comme un menu de Windows.
+        let e = ecran(1.0);
+        let p = placer((1210, 970), &e, 200.0);
+        assert_eq!(p.x + MARGE as i32, 1210);
+        assert_eq!(p.y + p.hauteur as i32 - MARGE as i32, 970);
     }
 
     #[test]
     fn bornee_au_bord_droit() {
         let e = ecran(1.0);
-        let icone = Rect {
-            x: 1900,
-            y: 1036,
-            largeur: 20,
-            hauteur: 40,
-        };
-        let p = placer(icone, &e, 200.0);
+        // Même vers la gauche, la carte reste dans l'écran (pointeur hors de la zone).
+        let p = placer((2500, 1056), &e, 200.0);
         assert_eq!(p.x + p.largeur as i32 - MARGE as i32, 1920 - ECART as i32);
+    }
+
+    #[test]
+    fn bornee_au_bord_gauche() {
+        let e = ecran(1.0);
+        let p = placer((-50, 500), &e, 200.0);
+        assert_eq!(p.x + MARGE as i32, ECART as i32);
     }
 
     #[test]
     fn a_l_echelle_de_l_ecran() {
         let e = ecran(1.5);
-        let icone = Rect {
-            x: 2500,
-            y: 1560,
-            largeur: 36,
-            hauteur: 60,
-        };
-        let p = placer(icone, &e, 200.0);
+        let p = placer((2500, 1590), &e, 200.0);
         assert_eq!(p.largeur, ((LARGEUR + 2.0 * MARGE) * 1.5).round() as u32);
         assert_eq!(p.hauteur, ((200.0 + 2.0 * MARGE) * 1.5).round() as u32);
         let bas_carte = p.y + p.hauteur as i32 - (MARGE * 1.5) as i32;
         assert_eq!(bas_carte, 1620 - 48 * 3 / 2 - (ECART * 1.5) as i32);
-    }
-
-    #[test]
-    fn dans_le_panneau_des_icones_cachees() {
-        // L'icône est dans le panneau au-dessus de la barre : la carte se pose au-dessus
-        // de l'icône elle-même.
-        let e = ecran(1.0);
-        let icone = Rect {
-            x: 1600,
-            y: 960,
-            largeur: 32,
-            hauteur: 32,
-        };
-        let p = placer(icone, &e, 200.0);
-        assert_eq!(p.y + p.hauteur as i32 - MARGE as i32, 960 - ECART as i32);
+        let droite_carte = p.x + p.largeur as i32 - (MARGE * 1.5) as i32;
+        assert_eq!(droite_carte, 2500);
     }
 
     #[test]
@@ -492,14 +509,15 @@ mod tests {
             },
             echelle: 1.0,
         };
-        let icone = Rect {
-            x: 1700,
-            y: 4,
-            largeur: 24,
-            hauteur: 40,
-        };
-        let p = placer(icone, &e, 300.0);
+        let p = placer((1712, 24), &e, 300.0);
         assert_eq!(p.y + MARGE as i32, 48 + ECART as i32);
+    }
+
+    #[test]
+    fn pas_de_place_au_dessus_carte_sous_le_pointeur() {
+        let e = ecran(1.0);
+        let p = placer((500, 100), &e, 200.0);
+        assert_eq!(p.y + MARGE as i32, 100);
     }
 
     #[test]
@@ -507,13 +525,34 @@ mod tests {
         let mut e = ecran(1.0);
         e.rect.x = -1920;
         e.zone_utile.x = -1920;
+        let p = placer((-18, 1056), &e, 200.0);
+        assert_eq!(p.x + p.largeur as i32 - MARGE as i32, -18);
+    }
+
+    #[test]
+    fn ancrage_au_pointeur_sinon_au_haut_de_l_icone() {
         let icone = Rect {
-            x: -30,
+            x: 1700,
             y: 1036,
             largeur: 24,
             hauteur: 40,
         };
-        let p = placer(icone, &e, 200.0);
-        assert_eq!(p.x + p.largeur as i32 - MARGE as i32, -ECART as i32);
+        assert_eq!(
+            point_d_ancrage(Some(icone), Some((1705, 1050))),
+            Some((1705, 1050))
+        );
+        assert_eq!(point_d_ancrage(Some(icone), None), Some((1712, 1036)));
+        // Pointeur loin de l'icône (clavier, automatisation) : le haut de l'icône.
+        assert_eq!(
+            point_d_ancrage(Some(icone), Some((300, 300))),
+            Some((1712, 1036))
+        );
+        // Au bord, à la tolérance près.
+        assert_eq!(
+            point_d_ancrage(Some(icone), Some((1728, 1080))),
+            Some((1728, 1080))
+        );
+        assert_eq!(point_d_ancrage(None, Some((3, 4))), Some((3, 4)));
+        assert_eq!(point_d_ancrage(None, None), None);
     }
 }
