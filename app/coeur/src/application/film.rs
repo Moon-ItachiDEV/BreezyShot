@@ -187,12 +187,12 @@ impl Sorte {
         }
     }
 
-    /// Images par seconde (F13).
     /// L'écart entre deux images de la grille (une seconde / la cadence).
     pub fn pas(self) -> Duration {
         Duration::from_secs(1) / self.cadence()
     }
 
+    /// Images par seconde (F13).
     pub fn cadence(self) -> u32 {
         match self {
             Sorte::Video => CADENCE_VIDEO,
@@ -562,6 +562,8 @@ pub enum Vu {
     SourceReprise,
     SourceFinie,
     MicroPerdu,
+    /// La vidéo se fait sans piste son (codeur du son refusé) : le bouton « Micro » part.
+    SansPiste,
     PretEchu,
     /// Une préparation ratée ou un fil arrêté (F9, F37) : `film impossible: <cause>`.
     Echec(&'static str),
@@ -695,6 +697,23 @@ pub fn suite(cours: &mut Cours, vu: Vu) -> Vec<Geste> {
             }
             _ => Vec::new(),
         },
+        Vu::SansPiste => {
+            let ouvert = cours.micro == Some(true);
+            if cours.micro.take().is_none() {
+                return Vec::new();
+            }
+            let mut gestes = Vec::new();
+            if ouvert {
+                gestes.push(Geste::CouperMicro);
+                if phase.avant() {
+                    cours.micro_a_dire = true;
+                } else {
+                    gestes.push(Geste::Dire(TITRE_MICRO_INDISPONIBLE));
+                }
+            }
+            gestes.push(Geste::Etat);
+            gestes
+        }
         Vu::MicroPerdu => {
             if cours.micro.is_none() {
                 return Vec::new();
@@ -946,6 +965,13 @@ pub fn ligne_chrono(
         mediane(ecriture),
         ms(arret_fichier)
     )
+}
+
+/// `film visee abandonnee: <cause>` : la visée (Sélection en mode film) finie sans film.
+/// Causes : `capture`, `visee`, `ecran`, `vide`, `codeur`, `automate` (geste_film), ou le
+/// déclencheur de la Sélection (`SelectionAnnulee`, `SelectionImpossible`…).
+pub fn ligne_visee_abandonnee(cause: &str) -> String {
+    format!("film visee abandonnee: {cause}")
 }
 
 /// `film impossible: <cause>`.
@@ -1515,6 +1541,37 @@ mod tests {
         assert_eq!(charge_etat(1, &c).micro.unwrap().libelle, "Micro");
     }
 
+    /// m3 : la vidéo se fait sans piste son : le bouton « Micro » part ; ouvert, il est
+    /// coupé et « Micro indisponible » est dit au départ ; sans micro, rien.
+    #[test]
+    fn sans_piste_son_plus_de_micro() {
+        let mut c = Cours::nouveau(Sorte::Video, 3);
+        c.micro_present(true);
+        suite(&mut c, Vu::PageMontree);
+        assert_eq!(suite(&mut c, Vu::SansPiste), vec![Geste::Etat]);
+        assert_eq!(c.micro(), None);
+        assert!(charge_etat(1, &c).micro.is_none());
+        assert!(suite(&mut c, Vu::Micro).is_empty());
+        assert!(suite(&mut c, Vu::SansPiste).is_empty());
+        let mut c = Cours::nouveau(Sorte::Video, 3);
+        c.micro_present(true);
+        suite(&mut c, Vu::PageMontree);
+        suite(&mut c, Vu::Micro);
+        assert_eq!(
+            suite(&mut c, Vu::SansPiste),
+            vec![Geste::CouperMicro, Geste::Etat]
+        );
+        suite(&mut c, Vu::Pret);
+        assert_eq!(
+            suite(&mut c, Vu::DecompteFini),
+            vec![
+                Geste::Demarrer,
+                Geste::Etat,
+                Geste::Dire(TITRE_MICRO_INDISPONIBLE)
+            ]
+        );
+    }
+
     /// M4 : perdu pendant le décompte, puis rouvert avant le départ : rien n'est dit au
     /// départ (le micro marche).
     #[test]
@@ -1685,6 +1742,10 @@ mod tests {
             "chrono film cadence 0.00 prise-mediane - ecriture-mediane - file-max 0 arret-fichier 0"
         );
         assert_eq!(ligne_impossible("page"), "film impossible: page");
+        assert_eq!(
+            ligne_visee_abandonnee("codeur"),
+            "film visee abandonnee: codeur"
+        );
         let bilan = BilanFilm {
             copie: Etape::Faite,
             enregistrement: EtapeFichier::Fait("/i/a.mp4".into()),

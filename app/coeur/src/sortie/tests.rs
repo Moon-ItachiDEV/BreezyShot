@@ -3357,12 +3357,62 @@ mod films {
         let g = film(&l, SorteFilm::Gif, 500);
         let mut d = l.demande.clone();
         d.dossier_enregistrement = ailleurs.path().join("Images");
-        assert!(ranger_film(&g, SorteFilm::Gif, &d).is_err());
+        // Le journal n'a qu'un mot fixe, jamais le nom du dossier (m4).
+        assert_eq!(ranger_film(&g, SorteFilm::Gif, &d), Err("autre volume"));
         assert!(g.is_file());
         let copies = fs::read_dir(&d.dossier_enregistrement)
             .map(|r| r.count())
             .unwrap_or(0);
         assert_eq!(copies, 0, "rien de copié ni réservé");
+    }
+
+    /// m1 : « Enregistrer » de la carte réussi : le film n'est plus à ranger au lancement
+    /// suivant (il serait deux fois dans le dossier d'enregistrement). Le registre est écrit
+    /// par un temporaire renommé (m6) : rien ne reste à côté.
+    #[test]
+    fn enregistrer_oublie_le_film_note() {
+        let l = local();
+        let f = film(&l, SorteFilm::Video, 100);
+        noter_film_ferme(&f);
+        assert!(!l.films.join(format!("{REGISTRE_A_RANGER}.tmp")).exists());
+        assert_eq!(films_a_ranger(&l.films), vec![f.clone()]);
+        let mut d = l.demande.clone();
+        let bloque = l.racine.join("un fichier");
+        fs::write(&bloque, b"x").unwrap();
+        d.dossier_enregistrement = bloque.join("Images");
+        assert!(matches!(
+            enregistrer_film(&f, SorteFilm::Video, &d),
+            EtapeFichier::Echec { .. }
+        ));
+        assert_eq!(films_a_ranger(&l.films), vec![f.clone()], "échec : gardé");
+        assert!(matches!(
+            enregistrer_film(&f, SorteFilm::Video, &l.demande),
+            EtapeFichier::Fait(_)
+        ));
+        assert!(films_a_ranger(&l.films).is_empty());
+        assert!(f.is_file(), "la carte garde son fichier");
+    }
+
+    /// m2 : un dossier d'enregistrement de l'utilisateur nommé « Films » n'est pas le
+    /// dossier de travail : son film est donné lui-même, sans lien dans Glisser.
+    #[test]
+    fn dossier_de_l_utilisateur_nomme_films() {
+        let l = local();
+        let siens = l.racine.join("D").join(SOUS_DOSSIER_FILMS);
+        fs::create_dir_all(&siens).unwrap();
+        let f = siens.join("20261111-194012-123.mp4");
+        fs::write(&f, b"film").unwrap();
+        assert_eq!(
+            film_a_glisser(&f, &l.glisser, "BreezyShot film", &[]),
+            Ok(f.clone())
+        );
+        assert!(!l.glisser.join("BreezyShot film.mp4").exists());
+        // Le vrai dossier de travail, lui, l'est toujours.
+        let g = film(&l, SorteFilm::Video, 10);
+        assert_eq!(
+            film_a_glisser(&g, &l.glisser, "BreezyShot film", &[]),
+            Ok(l.glisser.join("BreezyShot film.mp4"))
+        );
     }
 
     /// I3 : le glisser d'un film ne copie jamais : un film rangé donne lui-même, un fichier

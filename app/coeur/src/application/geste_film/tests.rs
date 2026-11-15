@@ -287,11 +287,16 @@ impl Banc {
     }
 
     fn pret(&mut self, n: u64) {
+        self.pret_son(n, true);
+    }
+
+    fn pret_son(&mut self, n: u64, son: bool) {
         let a = self.a(n);
         self.fil.recevoir(
             Courrier::Pret {
                 fichier: PathBuf::from("/l/Films/20261114-101500-000.mp4"),
                 a,
+                son,
             },
             a,
         );
@@ -841,6 +846,28 @@ fn micro() {
     );
     assert!(!b.fil.liens.ouvert.load(Ordering::SeqCst));
     assert!(b.fil.micro.is_none());
+}
+
+/// m3 : une vidéo sans piste son (codeur du son refusé) : le micro ouvert est coupé et le
+/// fil principal l'apprend (`SansPiste`) avant « prêt » ; un GIF n'en dit rien.
+#[test]
+fn video_sans_piste_son() {
+    let mut b = banc(Sorte::Video);
+    b.tour(0);
+    b.ordre(Ordre::Micro(true), 10);
+    b.fil.recevoir(
+        Courrier::Micro(Ok(Box::new(FauxMicro(Arc::new(AtomicBool::new(false)))))),
+        b.a(20),
+    );
+    assert!(b.fil.liens.ouvert.load(Ordering::SeqCst));
+    b.pret_son(30, false);
+    assert_eq!(b.vus(), vec![Vu::SansPiste, Vu::Pret]);
+    assert!(b.fil.micro.is_none());
+    assert!(!b.fil.liens.ouvert.load(Ordering::SeqCst));
+    let mut b = banc(Sorte::Gif);
+    b.tour(0);
+    b.pret_son(30, false);
+    assert_eq!(b.vus(), vec![Vu::Pret]);
 }
 
 /// M3 : ouvrir, couper, rouvrir vite : deux ouvertures en cours ; seule la dernière

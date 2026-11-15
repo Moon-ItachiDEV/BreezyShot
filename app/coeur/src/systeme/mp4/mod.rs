@@ -155,6 +155,12 @@ impl Ecrivain {
         plateforme::codeur(&self.interne)
     }
 
+    /// Le fichier a une piste son : `Parametres::son` demandé et le codeur du son accepté
+    /// (sinon la vidéo se fait sans, `film son non (codeur du son refuse: <code>)`).
+    pub fn piste_son(&self) -> bool {
+        plateforme::piste_son(&self.interne)
+    }
+
     /// Convertit les pixels RGBA en NV12 (BT.709, plage réduite) directement dans le
     /// tampon donné au codeur, puis les lui donne à `instant` du film (F15). Les côtés
     /// doivent être ceux de `Parametres`, et `instant` doit avancer. Rend le temps passé.

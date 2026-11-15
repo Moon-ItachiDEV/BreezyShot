@@ -27,6 +27,10 @@ pub fn codeur(e: &Ecrivain) -> Codeur {
     match *e {}
 }
 
+pub fn piste_son(e: &Ecrivain) -> bool {
+    match *e {}
+}
+
 pub fn image(e: &mut Ecrivain, _pixels: &Pixels, _instant: Duration) -> Result<Duration, String> {
     match *e {}
 }

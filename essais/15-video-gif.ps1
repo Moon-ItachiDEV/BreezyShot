@@ -19,7 +19,8 @@
 #     et `gif` → `--capturer: mode non construit` ; réglages passés en v6 (video
 #     Ctrl+Maj+6, gif Ctrl+Maj+7) ; aucune fenêtre `film` ; modules 10 s après le
 #     démarrage : rien de plus que la référence de la 0.6.1 (docs/sonde-film-modules-0.6.1.txt,
-#     « sans licence »), aucun des huit surveillés ; mémoire comparée à l'essai 14.
+#     « sans licence »), aucun des huit surveillés ; mémoire (app et WebView2) au plus celle
+#     de l'essai 13 sans licence + 8 Mo (l'essai 14 mesure après le menu : pas comparable).
 # L1, licence (cas A) : `raccourci video: Ctrl+Maj+6`, `raccourci gif: Ctrl+Maj+7`, `video
 #     disponible: oui` ; menu : « Vidéo », « GIF » dans leur groupe après « Copier le
 #     texte » ; Réglages › Raccourcis dans le même ordre ; aucune fenêtre `film` au repos ;
@@ -52,8 +53,8 @@
 #     Ctrl+Maj+7 l'arrête ; --quitter pendant un film : `film arret: fichier range`, le
 #     film dans le dossier d'enregistrement au nom du modèle, relu entier) ; F (80 × 60 agrandie à 120 × 120,
 #     601 × 451 : vidéo 600 × 450, GIF 601 × 451 ; GIF laissé à la limite de 60 s, sur le
-#     témoin simple, avec I) ; F125 (échelle 125 %, capturable, « non joué » si la session
-#     ne suit pas) ; G (sans vignette, annonces) ; H (copie éteinte : Copier, Supprimer puis
+#     témoin simple, avec I) ; F125 (échelle 125 %, capturable, « non joué » si un témoin
+#     lancé après le changement ne le suit pas) ; G (sans vignette, annonces) ; H (copie éteinte : Copier, Supprimer puis
 #     Annuler, Supprimer puis le délai) ; I (vidéo de 30 s, GIF jusqu'à la limite : processeur
 #     et mémoire ; 10 s après la vignette ; cinq films de suite) ; J (sans Media Foundation) ;
 #     K (session, veille, écrans 800 × 600, disque virtuel de 300 Mo plein) ; L (app tuée
@@ -567,8 +568,18 @@ try {
             try { if (-not $aide.HasExited) { $aide.Kill(); $null = $aide.WaitForExit(5000) } } catch { }
             return $lu
         }
+        # Les fenêtres de plomberie de Tauri (instance unique « …-sic » / « …-siw », cible des
+        # événements de Tao) ne se montrent jamais à l'écran : elles ne comptent pas comme une
+        # fenêtre de l'app, mais restent dites (Plomberie-Visible) si leur drapeau visible est mis.
+        function Est-Plomberie([IntPtr]$H) {
+            $c = $script:Natif::Classe($H); $t = $script:Natif::Titre($H)
+            return (($c -like '*-sic') -and ($t -like '*-siw')) -or ($t -ceq 'Tao Thread Event Target')
+        }
         function Visibles-App {
-            return @($script:Natif::Visibles($script:proc.Id) | ForEach-Object { "$($script:Natif::Classe($_)) « $($script:Natif::Titre($_)) »" })
+            return @($script:Natif::Visibles($script:proc.Id) | Where-Object { -not (Est-Plomberie $_) } | ForEach-Object { "$($script:Natif::Classe($_)) « $($script:Natif::Titre($_)) »" })
+        }
+        function Plomberie-Visible {
+            return @($script:Natif::Visibles($script:proc.Id) | Where-Object { Est-Plomberie $_ } | ForEach-Object { "$($script:Natif::Classe($_)) « $($script:Natif::Titre($_)) » $(@($script:Natif::Rect($_)) -join ',')" })
         }
         # Le presse-papiers, dans un fil STA : la liste de fichiers ($null sans liste).
         function Fichiers-PressePapiers {
@@ -1043,6 +1054,7 @@ try {
         $script:VideoFaite = $false
         $script:ReposL0 = $null; $script:ReposL0App = $null; $script:ReposA = $null; $script:ReposAApp = $null
         $script:EcranFige = [IntPtr]::Zero; $script:FenetreVignette = [IntPtr]::Zero
+        $script:LCoupee = $false
         $script:ModeDepart = $script:Natif::ModeCourant()
         $script:EchelleDepart = $null
         $script:Vhd = $null
@@ -1075,15 +1087,18 @@ try {
                 Noter-Mesure -Nom '(L0) mémoire privée au repos sans licence, processus de l''app (sonde 0.6.1 : 6,78 à 6,90 Mo)' -Valeur $script:ReposL0App -Unite 'Mo'
                 Noter-Mesure -Nom '(L0) mémoire privée au repos sans licence (app et WebView2)' -Valeur $script:ReposL0 -Unite 'Mo'
                 Verifier '(L0) mémoire du processus de l''app : celle de la 0.6.1 à ± 6 Mo (6,9 Mo)' ([math]::Abs($script:ReposL0App - 6.9) -le 6) "$($script:ReposL0App) Mo" | Out-Null
-                $j14 = Join-Path $script:Essai.Sortie '14-defilante.json'
-                $m14 = $null
-                if (Test-Path -LiteralPath $j14) {
-                    try { $m14 = @((Get-Content -LiteralPath $j14 -Raw | ConvertFrom-Json).Mesures | Where-Object { $_.Nom -like '(L0) mémoire privée au repos sans licence*' })[0] } catch { }
+                # Référence comparable : l'essai 13 mesure lui aussi l'app sans licence au repos,
+                # avant toute ouverture du menu (l'essai 14 mesure après le menu, page web du menu
+                # chargée : 205 Mo contre 172). Borne haute seulement : plus bas n'est pas une
+                # régression ; plus de 8 Mo au-dessus en est une.
+                $j13 = Join-Path $script:Essai.Sortie '13-historique-texte.json'
+                $ref = $null; $refDe = 'essai 13 de ce passage'
+                if (Test-Path -LiteralPath $j13) {
+                    try { $ref = @((Get-Content -LiteralPath $j13 -Raw | ConvertFrom-Json).Mesures | Where-Object { $_.Nom -eq 'memoire privee au repos sans licence (app et WebView2)' })[0].Valeur } catch { $ref = $null }
                 }
-                if ($null -ne $m14) {
-                    Verifier '(L0) mémoire (app et WebView2) : celle de l''essai 14 à ± 6 Mo' ([math]::Abs($script:ReposL0 - [double]$m14.Valeur) -le 6) "$($script:ReposL0) Mo ; essai 14 : $($m14.Valeur) Mo" | Out-Null
-                }
-                else { Write-Host '[note] (L0) mesure de l''essai 14 absente : mémoire notée seulement' }
+                if ($null -eq $ref) { $ref = 174.1; $refDe = 'essai 13 mesuré au passage 65 (mesure de ce passage absente)' }
+                $ref = [double]$ref
+                Verifier '(L0) mémoire (app et WebView2) : au plus celle de l''essai 13 sans licence + 8 Mo' ($script:ReposL0 -le $ref + 8) "$($script:ReposL0) Mo ; référence $ref Mo ($refDe)" | Out-Null
                 $m = Ouvrir-Menu '(L0)'
                 $films = @($m.Textes | Where-Object { $_.StartsWith('Vidéo', [StringComparison]::Ordinal) -or $_.StartsWith('GIF', [StringComparison]::Ordinal) })
                 Verifier '(L0) menu de la 0.6.1 sans licence : 9 positions, ni « Vidéo » ni « GIF »' (($films.Count -eq 0) -and ($m.Textes.Count -eq 9)) $m.Lus | Out-Null
@@ -1608,16 +1623,24 @@ try {
                 if ($er[0] -ne 0 -or $er[3] -le $er[2]) { Noter-Mesure -Nom '(F125)' -Valeur "non joué : aucun pas d'échelle au-dessus (code $($er[0]), actuel $($er[2]), max $($er[3]))"; return }
                 $script:EchelleDepart = $er[2]
                 $c = $script:Natif::FixerEchelleRelative($er[2] + 1)
-                $limite = [DateTime]::UtcNow.AddSeconds(5)
+                if ($c -ne 0) { Noter-Mesure -Nom '(F125)' -Valeur "non joué : DisplayConfigSetDeviceInfo refuse (code $c ; relatif actuel $($er[2]), max $($er[3]))"; return }
+                # Le DPI lu par ce processus (lancé avant le changement) peut rester ancien : on
+                # attend 10 s au plus, puis c'est un processus neuf, le témoin, qui juge.
+                $limite = [DateTime]::UtcNow.AddSeconds(10)
                 while ($script:Natif::DpiEcran(1, 1) -ne 120 -and [DateTime]::UtcNow -lt $limite) { Start-Sleep -Milliseconds 200 }
                 $dpi = $script:Natif::DpiEcran(1, 1)
-                if ($c -ne 0 -or $dpi -ne 120) { Noter-Mesure -Nom '(F125)' -Valeur "non joué : échelle non suivie (code $c, DPI $dpi)"; return }
+                $apres = @($script:Natif::EchelleRelative())
                 Start-Sleep -Seconds 1
-                $null = Ouvrir-Cas 'f125' '(F125)' -Capturable
-                $script:Cas.Temoin = Lancer-Temoin 'f125' 'simple'
-                $tem = $script:Cas.Temoin
+                $tem = Lancer-Temoin 'f125' 'simple'
                 $rect = @($script:Natif::Rect($tem.Hwnd))
-                if ([math]::Abs($tem.Echelle - 1.25) -gt 0.01 -or $rect[2] -ne 600 -or $rect[3] -ne 450) { Noter-Mesure -Nom '(F125)' -Valeur "non joué : le témoin ne suit pas (échelle $($tem.Echelle), fenêtre $($rect -join ','))"; return }
+                if ([math]::Abs($tem.Echelle - 1.25) -gt 0.01 -or $rect[2] -ne 600 -or $rect[3] -ne 450) {
+                    Arreter-Temoin $tem
+                    Noter-Mesure -Nom '(F125)' -Valeur "non joué : échelle non suivie (code $c, DPI lu ici $dpi, relatif lu $($apres[2]) ; témoin neuf : échelle $($tem.Echelle), fenêtre $($rect -join ','))"
+                    return
+                }
+                Noter-Mesure -Nom '(F125) échelle suivie' -Valeur "DPI lu ici $dpi ; témoin neuf $($tem.Echelle)"
+                $null = Ouvrir-Cas 'f125' '(F125)' -Capturable
+                $script:Cas.Temoin = $tem
                 $fS = Faire-Film -Sorte video -Quoi '(F125)' -DureeS 5 -Arret raccourci -Pendant {
                     param($F)
                     Start-Sleep -Milliseconds 800
@@ -1639,9 +1662,12 @@ try {
             if ($null -ne $script:EchelleDepart) {
                 $x = @($script:Natif::EchelleRelative())
                 if ($x[0] -eq 0 -and $x[2] -ne $script:EchelleDepart) { [void]$script:Natif::FixerEchelleRelative($script:EchelleDepart) }
+                # Jugé sur la valeur relative relue (DisplayConfigGetDeviceInfo, à jour) : le DPI
+                # lu par ce processus peut être resté ancien.
                 $limite = [DateTime]::UtcNow.AddSeconds(5)
+                do { $x = @($script:Natif::EchelleRelative()); if ($x[0] -eq 0 -and $x[2] -eq $script:EchelleDepart) { break }; Start-Sleep -Milliseconds 200 } while ([DateTime]::UtcNow -lt $limite)
                 while ($script:Natif::DpiEcran(1, 1) -ne 96 -and [DateTime]::UtcNow -lt $limite) { Start-Sleep -Milliseconds 200 }
-                Verifier '(F125) échelle remise à 100 %' ($script:Natif::DpiEcran(1, 1) -eq 96) "DPI $($script:Natif::DpiEcran(1, 1))" | Out-Null
+                Verifier '(F125) échelle remise à 100 %' (($x[0] -eq 0) -and ($x[2] -eq $script:EchelleDepart)) "relatif $($x[2]) (départ $($script:EchelleDepart)) ; DPI lu ici $($script:Natif::DpiEcran(1, 1))" | Out-Null
                 $script:EchelleDepart = $null
                 Start-Sleep -Seconds 1
             }
@@ -1777,6 +1803,7 @@ try {
                     Stop-Process -Id $script:proc.Id -Force
                     $F.TueeSortie = $script:proc.WaitForExit(5000)
                     $F.Tuee = $true
+                    $script:LCoupee = $true
                 }
                 Start-Sleep -Milliseconds 300
                 $fins = @(Toutes-Apres 'film fin ' $dl $fT.Base)
@@ -1790,13 +1817,17 @@ try {
                 Lancer-App-Du-Cas '(L) relance'
                 Start-Sleep -Seconds 3
                 $vis = @(Visibles-App)
+                $plomberie = @(Plomberie-Visible)
+                if ($plomberie.Count -gt 0) { Noter-Mesure -Nom '(L) fenêtres de plomberie de Tauri marquées visibles après la relance (pour l''auteur du cœur)' -Valeur ($plomberie -join ' ; ') }
                 $msg = @(Toutes-Apres 'bandeau affiche ' $dl $base)
-                Verifier '(L) relancée après Stop-Process pendant une vidéo : démarrage normal, sans fenêtre ni message' (($vis.Count -eq 0) -and ($msg.Count -eq 0)) "visibles : $($vis -join ', ') ; messages : $(@($msg | ForEach-Object { Message $_ }) -join ' | ')" | Out-Null
+                $quoiL = if ($script:LCoupee) { 'après Stop-Process pendant une vidéo' } else { 'après Stop-Process (aucune vidéo coupée : le point précédent a échoué)' }
+                Verifier "(L) relancée $quoiL : démarrage normal, sans fenêtre ni message" (($vis.Count -eq 0) -and ($msg.Count -eq 0)) "visibles : $($vis -join ', ') ; messages : $(@($msg | ForEach-Object { Message $_ }) -join ' | ')" | Out-Null
                 # Le fichier d'un film tué n'est pas noté (il n'a jamais été fermé) : il reste
                 # dans Films, et le nettoyage du lancement garde toujours le film le plus récent.
                 $restes = @(Fichiers-De $script:Cas.Films '*.mp4')
                 $ranges = Trouver-Apres 'films ranges au lancement: ' $dl $base
-                Verifier '(L) le film coupé reste dans <local>/Films après le nettoyage du lancement (le plus récent est gardé)' ($restes.Count -ge 1) "$($restes.Count) fichier(s) ; $(if ($ranges) { Message $ranges.Ligne } else { 'aucune ligne films ranges au lancement' })" | Out-Null
+                if ($script:LCoupee) { Verifier '(L) le film coupé reste dans <local>/Films après le nettoyage du lancement (le plus récent est gardé)' ($restes.Count -ge 1) "$($restes.Count) fichier(s) ; $(if ($ranges) { Message $ranges.Ligne } else { 'aucune ligne films ranges au lancement' })" | Out-Null }
+                else { Noter-Mesure -Nom '(L) film coupé gardé dans <local>/Films' -Valeur 'non joué : aucune vidéo coupée' }
                 Noter-Mesure -Nom '(L) film laissé dans <local>/Films (non relu : R17, MP4 sans fin)' -Valeur "$($restes.Count) fichier(s) ; $(if ($ranges) { Message $ranges.Ligne } else { 'rien rangé au lancement' })"
                 Arreter-Temoin $script:Cas.Temoin
                 Verifier-Interdites $dl '(L)'
