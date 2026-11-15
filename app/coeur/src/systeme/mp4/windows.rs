@@ -1848,7 +1848,8 @@ mod tests {
     }
 
     /// `abandonner` et `finir` sans fuite, dans un processus neuf : le fichier s'efface
-    /// tout de suite après, et les poignées du processus ne montent pas.
+    /// tout de suite après, et les poignées du processus ne grandissent pas avec le nombre
+    /// de films.
     #[test]
     fn fermer_sans_fuite() {
         dans_un_enfant("enfant_fermeture", &[]);
@@ -1859,6 +1860,19 @@ mod tests {
         // SAFETY : sortie valide, pseudo-poignée du processus.
         unsafe { GetProcessHandleCount(GetCurrentProcess(), &mut n) }.unwrap();
         n
+    }
+
+    /// Les poignées une fois le processus reposé : le plus petit compte relevé toutes les
+    /// 100 ms pendant 2 s. Les fils de travail que Windows et Media Foundation retirent
+    /// d'eux-mêmes (réservoir de fils, fils du codeur qui finissent) n'y comptent plus ;
+    /// une poignée perdue, elle, ne s'en va jamais et y reste.
+    fn poignees_au_repos() -> u32 {
+        let mut plus_petit = poignees();
+        for _ in 0..20 {
+            std::thread::sleep(Duration::from_millis(100));
+            plus_petit = plus_petit.min(poignees());
+        }
+        plus_petit
     }
 
     /// Efface `f` ; il doit l'être en 1 s au plus. Rend le temps pris.
@@ -1908,18 +1922,37 @@ mod tests {
                 pire = pire.max(effacer(&f));
             }
         };
-        for i in 0..3 {
+        // Échauffement : le réservoir de fils de Media Foundation (rtworkq) et les fils du
+        // codeur grandissent aux premiers films puis plafonnent (à la CI : 390 puis 391 à
+        // une course, 376 puis 391 à une autre, sur le même code : la fin au même
+        // plafond, la référence prise plus bas). La référence est donc prise après dix
+        // écrivains (cinq tours d'un abandon et d'une fin), au repos ; le compte est relu,
+        // au repos aussi, après vingt écrivains de plus puis vingt encore. Une fuite d'une
+        // poignée par film (+20 par moitié) passerait largement les deux marges.
+        for i in 0..5 {
             cycle(i);
         }
-        std::thread::sleep(Duration::from_millis(300));
-        let avant = poignees();
-        for i in 3..13 {
+        let avant = poignees_au_repos();
+        for i in 5..15 {
             cycle(i);
         }
-        std::thread::sleep(Duration::from_millis(500));
-        let apres = poignees();
-        println!("poignées {avant} puis {apres} après dix films ; effacé en {pire:?} au pire");
-        assert!(apres <= avant + 5, "poignées {avant} puis {apres}");
+        let milieu = poignees_au_repos();
+        for i in 15..25 {
+            cycle(i);
+        }
+        let apres = poignees_au_repos();
+        println!(
+            "poignées au repos {avant}, puis {milieu} après vingt écrivains, puis {apres} \
+             après quarante ; effacé en {pire:?} au pire"
+        );
+        assert!(
+            apres <= avant + 10,
+            "fuite de poignées : {avant} puis {milieu} puis {apres}"
+        );
+        assert!(
+            apres <= milieu + 5,
+            "poignées qui grandissent avec les films : {avant} puis {milieu} puis {apres}"
+        );
         println!("enfant_fermeture: ok");
     }
 }
