@@ -19,9 +19,11 @@ le dossier des captures sans rien demander ; le bouton à côté s'attrape pour 
 vers une appli ; « … » : Enregistrer sous… (Ctrl + Maj + S) demande le dossier et le nom.
 
 Échap ou clic droit annule. L'icône près de l'horloge (clic gauche ou droit) ouvre le menu au
-pointeur, d'où Réglages et Quitter. Relancer BreezyShot (icône épinglée à la barre des tâches) ouvre la
+pointeur, d'où Réglages et Quitter ; un second clic sur l'icône le ferme. Lancer BreezyShot à la
+main (icône épinglée à la barre des tâches, menu Démarrer), qu'il soit déjà ouvert ou non, ouvre la
 barre de capture en haut de l'écran : Zone, Plein écran, Fenêtre, Retardateur, Réglages (et, avec
-la licence, Capture défilante, Vidéo et GIF).
+la licence, Capture défilante, Vidéo et GIF). Au démarrage de Windows (« Démarrer avec Windows ») et
+après l'installation, BreezyShot démarre sans l'ouvrir.
 
 Réglages › Capture : retardateur (3, 5 ou 10 s ; Échap ou la croix l'annule), Inclure le
 pointeur dans l'image.

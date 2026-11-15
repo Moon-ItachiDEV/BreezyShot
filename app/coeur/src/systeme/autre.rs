@@ -76,6 +76,10 @@ pub fn bouton_souris_enfonce() -> bool {
     false
 }
 
+pub fn delai_double_clic_ms() -> Option<u32> {
+    None
+}
+
 pub fn position_souris() -> Option<(f64, f64)> {
     None
 }

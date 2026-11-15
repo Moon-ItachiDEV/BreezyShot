@@ -147,6 +147,33 @@ pub fn point_d_ancrage(icone: Option<Rect>, pointeur: Option<(i32, i32)>) -> Opt
     }
 }
 
+/// Ligne du journal de la place du menu (pixels réels) : le rectangle donné pour l'icône
+/// (`inconnue` s'il n'y en a pas, `ignoree` s'il est inutilisable), le pointeur au clic et
+/// le point retenu. Un rectangle faux (panneau des icônes cachées) laisse ainsi une trace.
+/// Fonction pure.
+pub fn ligne_place(
+    icone: Option<Rect>,
+    pointeur: Option<(i32, i32)>,
+    point: Option<(i32, i32)>,
+) -> String {
+    let p = |v: Option<(i32, i32)>| match v {
+        Some((x, y)) => format!("{x},{y}"),
+        None => "inconnu".into(),
+    };
+    let i = match icone {
+        Some(r) if rect_inconnu(&r) => {
+            format!("{},{} {}x{} ignoree", r.x, r.y, r.largeur, r.hauteur)
+        }
+        Some(r) => format!("{},{} {}x{}", r.x, r.y, r.largeur, r.hauteur),
+        None => "inconnue".into(),
+    };
+    format!(
+        "menu place: icone {i}, pointeur {}, point {}",
+        p(pointeur),
+        p(point)
+    )
+}
+
 /// Vrai si un clic sur l'icône arrive juste après une fermeture : il ne rouvre pas.
 pub fn vient_de_fermer() -> bool {
     FERME_A
@@ -215,9 +242,11 @@ pub fn ouvrir(
     lignes: Vec<Ligne>,
     exclu: bool,
 ) -> bool {
+    let donnee = icone;
     let icone = icone.filter(|r| !rect_inconnu(r));
     let point = point_d_ancrage(icone, pointeur)
         .or_else(|| super::souris(app).map(|(x, y)| (x.round() as i32, y.round() as i32)));
+    log::info!("{}", ligne_place(donnee, pointeur, point));
     let centre = point.map(|(x, y)| (f64::from(x), f64::from(y)));
     let Some(ecran) = ecran_sous(centre, &ecrans(app)) else {
         log::warn!("menu non ouvert: aucun ecran");
@@ -527,6 +556,34 @@ mod tests {
         e.zone_utile.x = -1920;
         let p = placer((-18, 1056), &e, 200.0);
         assert_eq!(p.x + p.largeur as i32 - MARGE as i32, -18);
+    }
+
+    #[test]
+    fn ligne_du_journal_de_la_place() {
+        let icone = Rect {
+            x: 1700,
+            y: 1036,
+            largeur: 24,
+            hauteur: 40,
+        };
+        assert_eq!(
+            ligne_place(Some(icone), Some((1705, 1050)), Some((1705, 1050))),
+            "menu place: icone 1700,1036 24x40, pointeur 1705,1050, point 1705,1050"
+        );
+        let nulle = Rect {
+            x: 0,
+            y: 0,
+            largeur: 0,
+            hauteur: 0,
+        };
+        assert_eq!(
+            ligne_place(Some(nulle), None, Some((-3, 4))),
+            "menu place: icone 0,0 0x0 ignoree, pointeur inconnu, point -3,4"
+        );
+        assert_eq!(
+            ligne_place(None, None, None),
+            "menu place: icone inconnue, pointeur inconnu, point inconnu"
+        );
     }
 
     #[test]

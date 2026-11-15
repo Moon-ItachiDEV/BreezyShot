@@ -15,7 +15,7 @@ const CSP = Object.entries(JSON.parse(fs.readFileSync(path.join(__dirname, '..',
 // Mesures du cœur, lues dans fenetres/barre.rs.
 const RS = fs.readFileSync(path.join(__dirname, '..', '..', 'app', 'coeur', 'src', 'fenetres', 'barre.rs'), 'utf8');
 const mesure = (nom) => Number(RS.match(new RegExp(`pub const ${nom}: f64 = ([0-9.]+);`))[1]);
-const [HAUT, MARGE, HAUTEUR] = ['HAUT', 'MARGE', 'HAUTEUR_BARRE'].map(mesure);
+const [HAUT, MARGE, MARGE_BAS, HAUTEUR] = ['HAUT', 'MARGE', 'MARGE_BAS', 'HAUTEUR_BARRE'].map(mesure);
 const LARGEUR_FENETRE = 640;
 const types = { '.html': 'text/html', '.css': 'text/css', '.js': 'text/javascript' };
 const serveur = http.createServer((q, r) => {
@@ -39,7 +39,7 @@ const CURSEURS = ['M3 6.5h5.5M13.5 6.5H17M3 13.5h2.5M10.5 13.5H17', 'circle 11 6
   const json = JSON.stringify;
   async function page(o = {}) {
     const ctx = await nav.newContext({
-      viewport: { width: LARGEUR_FENETRE, height: Math.round(HAUT + HAUTEUR + MARGE + 80) },
+      viewport: { width: LARGEUR_FENETRE, height: Math.round(HAUT + HAUTEUR + MARGE_BAS + 80) },
       deviceScaleFactor: o.echelle || 1, colorScheme: o.sombre ? 'dark' : 'light', reducedMotion: o.reduit ? 'reduce' : 'no-preference',
     });
     const p = await ctx.newPage();
@@ -96,6 +96,15 @@ const CURSEURS = ['M3 6.5h5.5M13.5 6.5H17M3 13.5h2.5M10.5 13.5H17', 'circle 11 6
   verifier(json(vu.libelles.slice(3).map(x => [x[2], x[3]])) === json([['Capture défilante', 'Capture défilante'], ["Enregistrer l'écran", "Enregistrer l'écran"], ['Retardateur', 'Retardateur'], ['Réglages', 'Réglages']]),
     'les autres : le nom seul, en info-bulle et pour les lecteurs', json(vu.libelles.slice(3)));
   verifier(vu.fond === 'rgba(0, 0, 0, 0)', 'fond de la page transparent', vu.fond);
+  // L'ombre de la carte (et des menus) tient dans la marge de la fenêtre : MARGE sur les
+  // côtés, MARGE_BAS en bas, HAUT en haut.
+  const ombres = await p.evaluate(() => [...document.querySelectorAll('.carte')].map(e => getComputedStyle(e).boxShadow));
+  const debords = ombres.map(o => o.split(/,(?![^(]*\))/).map(c => {
+    const [x, y, flou, etale] = (c.match(/-?[\d.]+px/g) || []).map(parseFloat);
+    return { cote: Math.abs(x) + flou + (etale || 0), bas: y + flou + (etale || 0), haut: -y + flou + (etale || 0) };
+  }));
+  const pire = debords.flat().reduce((m, d) => ({ cote: Math.max(m.cote, d.cote), bas: Math.max(m.bas, d.bas), haut: Math.max(m.haut, d.haut) }), { cote: 0, bas: 0, haut: 0 });
+  verifier(ombres.length === 3 && pire.cote <= MARGE && pire.bas <= MARGE_BAS && pire.haut <= HAUT, `ombre dans la marge (côtés ${MARGE}, bas ${MARGE_BAS}, haut ${HAUT} px)`, JSON.stringify(pire));
   const t0 = await derniere(p, 'barre_taille');
   verifier(t0 && t0.hauteur === HAUTEUR && t0.largeur === Math.ceil(vu.carte[2]), 'barre_taille : la carte mesurée', json(t0));
   // Réglages : l'icône « Curseurs », jamais un engrenage.

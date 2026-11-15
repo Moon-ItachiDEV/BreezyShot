@@ -1,15 +1,21 @@
 //! Ligne de commande (§3.4) et ce que l'exe est (installateur, app ou désinstallation).
 //!
-//! `breezyshot.exe`, `breezyshot.exe --quitter`, `breezyshot.exe --capturer <mode>`,
-//! `breezyshot.exe --desinstaller`. Sans option, l'exe est l'app s'il s'appelle
+//! `breezyshot.exe`, `breezyshot.exe --discret`, `breezyshot.exe --quitter`,
+//! `breezyshot.exe --capturer <mode>`, `breezyshot.exe --desinstaller`. Sans option, l'exe est l'app s'il s'appelle
 //! `breezyshot.exe` ou `breezyshot` (casse ignorée), l'installateur sinon (le fichier
 //! téléchargé).
+
+pub use crate::systeme::OPTION_DISCRET;
 
 /// Ce que la ligne de commande demande.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Commande {
-    /// Démarrer (ou, si une instance tourne déjà, ne rien faire de visible).
+    /// Lancement à la main (icône épinglée, menu Démarrer, double-clic) : démarrer et ouvrir
+    /// la barre de capture à `pret` ; si une instance tourne déjà, elle ouvre la barre.
     Demarrer,
+    /// `--discret` : démarrer sans rien montrer (valeur `Run` de l'ouverture de session,
+    /// app lancée par l'installateur, essais) ; une instance qui tourne déjà ne fait rien.
+    Discret,
     /// Demander à l'instance en cours de se fermer proprement.
     Quitter,
     /// Lancer une capture de ce mode (nom d'action : `zone`, `plein_ecran`, `fenetre`,
@@ -36,7 +42,7 @@ pub const NOM_DE_L_APP_SANS_EXTENSION: &str = "breezyshot";
 
 /// Lecture des arguments, sans le nom du programme. Rend la commande et les arguments
 /// inconnus (ignorés, à écrire au journal). `--desinstaller` l'emporte sur tout, puis
-/// `--quitter`, puis `--capturer`.
+/// `--quitter`, puis `--capturer`, puis `--discret`.
 pub fn lire<I, S>(arguments: I) -> (Commande, Vec<String>)
 where
     I: IntoIterator<Item = S>,
@@ -45,6 +51,7 @@ where
     let mut quitter = false;
     let mut desinstaller = false;
     let mut capturer = None;
+    let mut discret = false;
     let mut inconnus = Vec::new();
     let mut suite = arguments
         .into_iter()
@@ -54,6 +61,7 @@ where
         match a.as_str() {
             "--quitter" => quitter = true,
             "--desinstaller" => desinstaller = true,
+            o if o == OPTION_DISCRET => discret = true,
             "--capturer" => {
                 let valeur = match suite.peek() {
                     Some(v) if !v.starts_with("--") => suite.next().unwrap_or_default(),
@@ -70,6 +78,8 @@ where
         Commande::Quitter
     } else if let Some(mode) = capturer {
         Commande::Capturer(mode)
+    } else if discret {
+        Commande::Discret
     } else {
         Commande::Demarrer
     };
@@ -142,6 +152,25 @@ mod tests {
         assert_eq!(
             lire(["--capturer", "zone", "--quitter"]).0,
             Commande::Quitter
+        );
+    }
+
+    #[test]
+    fn discret() {
+        assert_eq!(OPTION_DISCRET, "--discret");
+        assert_eq!(lire(["--discret"]), (Commande::Discret, vec![]));
+        // Les autres options l'emportent : rien ne s'y perd.
+        assert_eq!(
+            lire(["--discret", "--capturer", "zone"]).0,
+            Commande::Capturer("zone".into())
+        );
+        assert_eq!(lire(["--quitter", "--discret"]).0, Commande::Quitter);
+        let (c, i) = lire(["--discret", "--bizarre"]);
+        assert_eq!((c, i), (Commande::Discret, vec!["--bizarre".to_string()]));
+        // L'exe installé, lancé par `Run` : l'app, sans barre.
+        assert_eq!(
+            lancement(Some("breezyshot.exe"), &Commande::Discret),
+            Lancement::App(Commande::Discret)
         );
     }
 

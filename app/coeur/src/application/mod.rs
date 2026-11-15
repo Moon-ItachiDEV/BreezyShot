@@ -206,6 +206,15 @@ pub enum EnAttente {
     Barre,
 }
 
+/// La demande en attente après une demande de barre : une capture en attente
+/// (`--capturer`) n'est jamais remplacée par la barre ; sinon, la barre. Fonction pure.
+pub fn attente_avec_barre(avant: Option<EnAttente>) -> Option<EnAttente> {
+    match avant {
+        Some(EnAttente::Capture(mode)) => Some(EnAttente::Capture(mode)),
+        _ => Some(EnAttente::Barre),
+    }
+}
+
 /// Tout ce qui arrive à l'Application : signaux des modules, du système, du menu.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Evenement {
@@ -706,11 +715,24 @@ fn demarrer(app: &AppHandle, commande: Commande, inconnus: &[String]) {
         return;
     }
     // `--capturer <mode>` au démarrage (l'exe lancé directement) : la demande attend `pret`.
-    if let Commande::Capturer(mode) = &commande {
-        log::info!("--capturer recu: {}", mode_journal(mode));
-        if let Ok(mut attente) = app.state::<Application>().capture_en_attente.lock() {
-            *attente = Some(EnAttente::Capture(mode.clone()));
+    // Lancé à la main (icône épinglée, menu Démarrer, sans option) : la barre de capture
+    // s'ouvre à `pret` (0.7.2). `--discret` (ouverture de session, installateur, essais) :
+    // rien de visible.
+    match &commande {
+        Commande::Capturer(mode) => {
+            log::info!("--capturer recu: {}", mode_journal(mode));
+            if let Ok(mut attente) = app.state::<Application>().capture_en_attente.lock() {
+                *attente = Some(EnAttente::Capture(mode.clone()));
+            }
         }
+        Commande::Demarrer => {
+            log::info!("lancement a la main: barre de capture a pret");
+            if let Ok(mut attente) = app.state::<Application>().capture_en_attente.lock() {
+                *attente = attente_avec_barre(attente.take());
+            }
+        }
+        Commande::Discret => log::info!("lancement discret"),
+        Commande::Quitter | Commande::Desinstaller => {}
     }
 
     match systeme::version_windows() {
@@ -1570,9 +1592,11 @@ pub fn traiter(app: &AppHandle, evenement: Evenement) {
                         poster_plus_tard(app, Evenement::OuvrirBarre);
                     } else if let Ok(mut a) = app.state::<Application>().capture_en_attente.lock() {
                         log::info!("seconde instance: en attente du demarrage");
-                        *a = Some(EnAttente::Barre);
+                        *a = attente_avec_barre(a.take());
                     }
                 }
+                // `--discret` reçu par une instance qui tourne : rien à montrer.
+                Commande::Discret => log::info!("seconde instance discrete: rien a faire"),
                 // Désinstaller via une seconde instance n'aurait pas de sens : ignoré.
                 Commande::Desinstaller => log::info!("seconde instance refusee"),
             }
@@ -4437,6 +4461,17 @@ fn arreter(app: &AppHandle) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn la_barre_n_ecrase_pas_une_capture_en_attente() {
+        let zone = Some(EnAttente::Capture("zone".into()));
+        assert_eq!(attente_avec_barre(zone.clone()), zone);
+        assert_eq!(attente_avec_barre(None), Some(EnAttente::Barre));
+        assert_eq!(
+            attente_avec_barre(Some(EnAttente::Barre)),
+            Some(EnAttente::Barre)
+        );
+    }
 
     #[test]
     fn selection_gardee_sans_capture_cachee() {

@@ -1122,6 +1122,28 @@ Retours de l'utilisateur le 15/11/2026, sur la 0.7.1 :
   ferme sur Échap, au clic ailleurs, au choix et quand une capture démarre ; relancée
   ouverte, elle reste ouverte. Impr. écran, les raccourcis et le menu ne changent pas.
 
+Corrections de la relecture de la 0.7.2 :
+
+- Menu de l'icône : un second clic sur l'icône sans bouger tombait dans la marge
+  transparente de la fenêtre du menu (le coin de la carte est au pointeur) et le menu
+  restait ouvert. Tout clic hors de la carte le ferme maintenant. Un clic sur l'icône
+  cache la barre de capture avant d'ouvrir le menu. Le journal donne la place retenue
+  (`menu place: icone …, pointeur …, point …`).
+- La barre ne s'ouvrait pas au tout premier lancement, l'app pas encore ouverte. Un
+  lancement à la main l'ouvre maintenant à la fin du démarrage. Pour que l'ouverture de
+  session ne montre rien, la valeur « Démarrer avec Windows » de la clé `Run` porte
+  l'option `--discret` (démarrer sans rien montrer) ; l'ancienne valeur sans option est
+  réécrite au démarrage (la première ouverture de session après la mise à jour ouvre donc
+  encore la barre une fois). L'installateur lance l'app avec `--discret` ; « Essayer une
+  capture » (`--capturer zone`) et `--quitter` n'ouvrent pas la barre. Une capture en
+  attente du démarrage n'est jamais remplacée par la barre. Les essais lancent l'app avec
+  `--discret` par défaut, et `Demarrer-App -Nu` pour un lancement à la main.
+- Double-clic sur l'icône épinglée : le second clic refermait la barre que le premier
+  venait d'ouvrir. Pendant le délai de double-clic de Windows après l'ouverture, la perte
+  du focus et les clics hors de la barre sont ignorés.
+- Ombre de la barre coupée en bas : la marge basse passe à 24 px.
+- Le retardateur de la barre est refusé si la barre est cachée ou ne le montre pas.
+
 ### Vérifié
 
 - Tests du placement (`menu::placer`, `menu::point_d_ancrage`) : barre en bas et en
@@ -1134,6 +1156,12 @@ Retours de l'utilisateur le 15/11/2026, sur la 0.7.1 :
   vivantes, pendant une défilante) et des états où elle ne s'ouvre pas ; page
   `essais/pages/barre.cjs` (boutons selon la charge, taille rendue, choix, menus Vidéo/GIF
   et Retardateur, clavier, Échap, clic dans la marge, thèmes, mouvement réduit, CSP).
+- Relecture : tests purs de `--discret` (`arguments::lire`, priorités, option inconnue),
+  de la valeur `Run` et de la réécriture de l'ancienne (`demarrage::commande`,
+  `doit_reecrire`), de `attente_avec_barre`, du délai de double-clic
+  (`barre::dans_le_double_clic`) et de la ligne `menu place` ; page `menu.cjs` (clic dans
+  la marge : `menu_fermer` ; clic dans la carte : rien) ; page `barre.cjs` (l'ombre tient
+  dans les marges : côtés 16, bas 24, haut 8 px pour 14 de marge).
 
 ### Non vérifié
 
@@ -1141,4 +1169,10 @@ Retours de l'utilisateur le 15/11/2026, sur la 0.7.1 :
 - La barre dans WebView2 : premier plan à la relance, redimensionnement à la mesure de la
   page, menus volants, sur plusieurs écrans et à 150 % ; l'essai `01-socle.ps1` (barre
   montrée, clic sur « Zone », sélection ouverte, Échap) n'a pas été joué ici.
+- Relecture : les essais Windows modifiés (`01-socle.ps1` : lancement discret sans barre,
+  clic sur la barre, Échap, clic dans la marge, premier lancement à la main ;
+  `08-reglages-fenetre.ps1` : valeur `Run` avec `--discret` ; `09`, lancé par
+  `Demarrer-App`) n'ont pas été joués ici. Le double-clic réel sur l'icône épinglée, le
+  second clic sur l'icône de la zone de notification dans WebView2, et la première
+  ouverture de session après la mise à jour : à l'utilisateur.
 

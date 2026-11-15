@@ -11,7 +11,7 @@
 
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
@@ -34,8 +34,10 @@ pub const PAS_SURVEILLANCE: Duration = Duration::from_millis(30);
 /// Mesures en pixels logiques, les mêmes que `barre/barre.css`. Écart entre le haut de la
 /// zone utile et la carte (la fenêtre commence au haut de la zone utile).
 pub const HAUT: f64 = 14.0;
-/// Place de l'ombre à gauche, à droite et en bas de la carte.
+/// Place de l'ombre à gauche et à droite de la carte, puis en bas : `--shadow-16` du
+/// design descend de 8 px et s'étale sur 16 px, soit 24 px sous la carte.
 pub const MARGE: f64 = 16.0;
+pub const MARGE_BAS: f64 = 24.0;
 /// Hauteur de la carte, menus volants fermés : boutons de 36 px, retrait de 4 px et bord
 /// de 1 px en haut et en bas.
 pub const HAUTEUR_BARRE: f64 = 46.0;
@@ -78,6 +80,8 @@ struct EnCours {
     ecran: Ecran,
     place: Rect,
     boutons: Vec<String>,
+    /// Le bouton Retardateur est montré.
+    retardateur: bool,
     forme: String,
 }
 static EN_COURS: Mutex<Option<EnCours>> = Mutex::new(None);
@@ -85,6 +89,8 @@ static EN_COURS: Mutex<Option<EnCours>> = Mutex::new(None);
 static EN_ATTENTE: Mutex<Option<Ouverture>> = Mutex::new(None);
 /// Dernière largeur mesurée par la page, menus volants fermés, pour une forme de barre.
 static LARGEUR_MESUREE: Mutex<Option<(String, f64)>> = Mutex::new(None);
+/// Heure de la dernière ouverture (`dans_le_double_clic`).
+static OUVERTE_A: Mutex<Option<Instant>> = Mutex::new(None);
 /// Numéro de l'ouverture : une surveillance des clics d'une ouverture passée s'arrête.
 static NUMERO: AtomicU64 = AtomicU64::new(0);
 
@@ -122,6 +128,23 @@ pub fn largeur_estimee(o: &Ouverture) -> f64 {
     LARGEUR_BASE + pictos as f64 * LARGEUR_PICTO + 2.0 * LARGEUR_SEPARATEUR
 }
 
+/// Vrai si un clic ailleurs ou une perte du focus, `ecoule` après l'ouverture, tombe dans
+/// le délai du double-clic du système (`delai`) : il est ignoré. Un double-clic sur l'icône
+/// épinglée ouvre la barre au premier clic ; le second, sur la barre des tâches, ne doit
+/// pas la refermer. Fonction pure.
+pub fn dans_le_double_clic(ecoule: Duration, delai: Duration) -> bool {
+    ecoule < delai
+}
+
+/// Vrai si la dernière ouverture date de moins que le délai du double-clic.
+fn vient_d_ouvrir() -> bool {
+    OUVERTE_A
+        .lock()
+        .ok()
+        .and_then(|o| *o)
+        .is_some_and(|t| dans_le_double_clic(t.elapsed(), systeme::delai_double_clic()))
+}
+
 /// Une taille rendue par la page, si elle est sensée.
 pub fn taille_sensee(largeur: f64, hauteur: f64) -> Option<(f64, f64)> {
     let ok = |v: f64| (1.0..=TAILLE_MAX).contains(&v);
@@ -130,12 +153,13 @@ pub fn taille_sensee(largeur: f64, hauteur: f64) -> Option<(f64, f64)> {
 
 /// Place de la fenêtre (pure, pixels réels) pour une carte de `taille_logique` (barre et
 /// menu volant ouvert) : centrée en haut de la zone utile de `ecran`, la carte à `HAUT` du
-/// haut ; la fenêtre comprend la place de l'ombre (`MARGE`) à gauche, à droite et en bas.
+/// haut ; la fenêtre comprend la place de l'ombre (`MARGE` à gauche et à droite,
+/// `MARGE_BAS` en bas).
 /// Plus large que la zone utile, la carte reste à `ECART` de son bord gauche.
 pub fn placer(ecran: &Ecran, taille_logique: (f64, f64)) -> Rect {
     let e = echelle_sure(ecran.echelle);
     let px = |v: f64| (v * e).round() as i64;
-    let (haut, marge, ecart) = (px(HAUT), px(MARGE), px(ECART));
+    let (haut, marge, marge_bas, ecart) = (px(HAUT), px(MARGE), px(MARGE_BAS), px(ECART));
     let (lc, hc) = (px(taille_logique.0).max(1), px(taille_logique.1).max(1));
     let z = ecran.zone_utile;
     let (zg, zh) = (i64::from(z.x), i64::from(z.y));
@@ -147,7 +171,7 @@ pub fn placer(ecran: &Ecran, taille_logique: (f64, f64)) -> Rect {
         x: (gauche - marge) as i32,
         y: zh as i32,
         largeur: (lc + 2 * marge).max(1) as u32,
-        hauteur: (haut + hc + marge).max(1) as u32,
+        hauteur: (haut + hc + marge_bas).max(1) as u32,
     }
 }
 
@@ -159,7 +183,7 @@ pub fn ouverte(app: &AppHandle) -> bool {
 fn creer(app: &AppHandle) -> Result<WebviewWindow, String> {
     let f = WebviewWindowBuilder::new(app, ETIQUETTE_BARRE, WebviewUrl::App(PAGE.into()))
         .title("BreezyShot")
-        .inner_size(LARGEUR_BASE + 2.0 * MARGE, HAUT + HAUTEUR_BARRE + MARGE)
+        .inner_size(LARGEUR_BASE + 2.0 * MARGE, HAUT + HAUTEUR_BARRE + MARGE_BAS)
         .visible(false)
         .focused(false)
         .decorations(false)
@@ -177,9 +201,14 @@ fn creer(app: &AppHandle) -> Result<WebviewWindow, String> {
     }
     let pour_focus = app.clone();
     f.on_window_event(move |e| {
-        // Un clic ailleurs (ou Alt+Tab) : la barre se ferme.
+        // Un clic ailleurs (ou Alt+Tab) : la barre se ferme, sauf dans le délai du
+        // double-clic après l'ouverture.
         if let tauri::WindowEvent::Focused(false) = e {
-            let _ = cacher(&pour_focus);
+            if vient_d_ouvrir() {
+                log::info!("barre: perte du focus ignoree (double-clic)");
+            } else {
+                let _ = cacher(&pour_focus);
+            }
         }
     });
     match systeme::identifiant_fenetre(&f) {
@@ -230,6 +259,7 @@ pub fn ouvrir(app: &AppHandle, charge: Ouverture) -> bool {
             ecran,
             place,
             boutons: charge.boutons.clone(),
+            retardateur: charge.retardateur_s.is_some(),
             forme: cle,
         });
     }
@@ -240,6 +270,9 @@ pub fn ouvrir(app: &AppHandle, charge: Ouverture) -> bool {
         if let Err(e) = app.emit_to(ETIQUETTE_BARRE, EVENEMENT_OUVRIR, charge) {
             log::warn!("barre: boutons non envoyes: {e}");
         }
+    }
+    if let Ok(mut o) = OUVERTE_A.lock() {
+        *o = Some(Instant::now());
     }
     let _ = f.show();
     if !matches!(systeme::prendre_premier_plan(&f), Ok(true)) {
@@ -304,6 +337,11 @@ fn surveiller_clics(app: &AppHandle, numero: u64) {
                 if !relache {
                     continue;
                 }
+                // Le second clic d'un double-clic sur l'icône épinglée : ignoré.
+                if vient_d_ouvrir() {
+                    relache = false;
+                    continue;
+                }
                 let place = EN_COURS
                     .lock()
                     .ok()
@@ -340,6 +378,13 @@ pub fn bouton_montre(id: &str) -> bool {
     })
 }
 
+/// Vrai si l'ouverture en cours montre le bouton Retardateur.
+pub fn retardateur_montre() -> bool {
+    EN_COURS
+        .lock()
+        .is_ok_and(|c| c.as_ref().is_some_and(|c| c.retardateur))
+}
+
 /// Cache la barre (choix fait, Échap, clic ailleurs, capture qui démarre) et vide la page.
 /// Rend vrai si elle était montrée.
 pub fn cacher(app: &AppHandle) -> bool {
@@ -353,6 +398,7 @@ pub fn cacher(app: &AppHandle) -> bool {
     if let Ok(mut c) = EN_COURS.lock() {
         if let Some(c) = c.as_mut() {
             c.boutons.clear();
+            c.retardateur = false;
         }
     }
     if let Err(e) = app.emit_to(ETIQUETTE_BARRE, EVENEMENT_VIDER, ()) {
@@ -407,7 +453,7 @@ mod tests {
         assert_eq!(carte(&p, 1.0), (960, 14));
         assert_eq!(p.y, 0);
         assert_eq!(p.largeur, (500.0 + 2.0 * MARGE) as u32);
-        assert_eq!(p.hauteur, (HAUT + HAUTEUR_BARRE + MARGE) as u32);
+        assert_eq!(p.hauteur, (HAUT + HAUTEUR_BARRE + MARGE_BAS) as u32);
     }
 
     #[test]
@@ -418,7 +464,7 @@ mod tests {
         assert_eq!(p.largeur, ((500.0 + 2.0 * MARGE) * 1.5).round() as u32);
         assert_eq!(
             p.hauteur,
-            (HAUT * 1.5).round() as u32 + (HAUTEUR_BARRE * 1.5).round() as u32 + 24
+            (HAUT * 1.5).round() as u32 + (HAUTEUR_BARRE * 1.5).round() as u32 + 36
         );
     }
 
@@ -498,6 +544,15 @@ mod tests {
         assert_eq!(taille_sensee(520.0, 0.0), None);
         assert_eq!(taille_sensee(1e9, 46.0), None);
         assert_eq!(taille_sensee(-3.0, 46.0), None);
+    }
+
+    #[test]
+    fn delai_du_double_clic() {
+        let d = Duration::from_millis(500);
+        assert!(dans_le_double_clic(Duration::from_millis(0), d));
+        assert!(dans_le_double_clic(Duration::from_millis(499), d));
+        assert!(!dans_le_double_clic(Duration::from_millis(500), d));
+        assert!(!dans_le_double_clic(Duration::from_secs(3), d));
     }
 
     #[test]
