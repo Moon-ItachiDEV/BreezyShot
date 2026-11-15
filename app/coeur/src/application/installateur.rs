@@ -22,6 +22,7 @@ use crate::installation::{
 };
 use crate::systeme::installation as sys;
 use crate::systeme::installation::{ErreurFichier, Valeur, Verrou};
+use crate::systeme::OPTION_DISCRET;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -503,7 +504,9 @@ fn inscrire(etat: &Etat) -> Result<(), ErreurInstallation> {
 
 fn lancer_etape(app: &AppHandle, etat: &Etat) -> Result<(), ErreurInstallation> {
     sys::permettre_premier_plan();
-    sys::lancer(&etat.emplacements.exe, &[]).map_err(|d| {
+    // Sans rien montrer (`--discret`) : l'installateur dit lui-même que l'app est prête ;
+    // la barre de capture ne s'ouvre pas par-dessus.
+    sys::lancer(&etat.emplacements.exe, &[OPTION_DISCRET]).map_err(|d| {
         log::info!("etape lancement: erreur {d}");
         ErreurInstallation::Lancement
     })?;
@@ -580,7 +583,7 @@ fn lancer_app_installee(app: &AppHandle, etat: &Etat) {
         return;
     }
     if !sys::verrou_existe(&nom_verrou_app(IDENTIFIANT)) {
-        let _ = sys::lancer(&etat.emplacements.exe, &[]);
+        let _ = sys::lancer(&etat.emplacements.exe, &[OPTION_DISCRET]);
     }
     let _ = app;
 }

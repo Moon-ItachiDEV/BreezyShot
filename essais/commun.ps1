@@ -47,12 +47,18 @@ function Nouveau-DossierEssai {
 }
 
 # Lance l'app avec BREEZYSHOT_DOSSIER_ESSAI pointé sur $Dossier. Rend le processus.
+# Sans argument, l'app est lancée avec `--discret` (0.7.2), comme le fait Windows à
+# l'ouverture de session : un lancement nu (à la main) ouvrirait la barre de capture à
+# `pret`, par-dessus ce que l'essai regarde. -Nu lance l'exe sans rien, comme un clic sur
+# l'icône épinglée (essai 01, et toute relance d'une instance qui tourne).
 function Demarrer-App {
     param(
         [string]$Exe = $script:Essai.Exe,
         [string]$Dossier = $script:Essai.Dossier,
-        [string[]]$Arguments = @()
+        [string[]]$Arguments = @(),
+        [switch]$Nu
     )
+    if ($Arguments.Count -eq 0 -and -not $Nu) { $Arguments = @('--discret') }
     $ancien = $env:BREEZYSHOT_DOSSIER_ESSAI
     $env:BREEZYSHOT_DOSSIER_ESSAI = $Dossier
     try {
@@ -70,7 +76,8 @@ function Demarrer-App {
 
 # Lance l'app et attend qu'elle sorte. Rend Fini (sortie avant le délai), Code, DureeS,
 # Processus. Au-delà du délai, le processus est tué, sauf avec -LaisserVivant (l'essai
-# compte alors les processus avant de nettoyer lui-même).
+# compte alors les processus avant de nettoyer lui-même). Sans argument, c'est une relance
+# nue (-Nu de Demarrer-App) : l'instance qui tourne ouvre la barre de capture.
 function Lancer-Et-Attendre {
     param(
         [string[]]$Arguments = @(),
@@ -80,7 +87,7 @@ function Lancer-Et-Attendre {
         [string]$Dossier = $script:Essai.Dossier
     )
     $chrono = [System.Diagnostics.Stopwatch]::StartNew()
-    $p = Demarrer-App -Exe $Exe -Dossier $Dossier -Arguments $Arguments
+    $p = Demarrer-App -Exe $Exe -Dossier $Dossier -Arguments $Arguments -Nu
     $fini = $p.WaitForExit([int]($DelaiS * 1000))
     $chrono.Stop()
     $code = $null
@@ -529,16 +536,17 @@ function Fermer-Menu-Icone($Menu, [string]$Quoi) {
 }
 
 # --- Barre de capture (0.7.2) -----------------------------------------------------------
-# Relancer l'app ouvre la barre de capture, une page lue par UI Automation (role toolbar).
-# `Attendre-Barre` attend la $Fois-ième ligne « barre ouverte » et rend { Fenetre, Boutons,
-# Noms } : `Boutons`, les boutons par nom (« Zone », « Plein écran », « Fenêtre », puis le nom
-# seul des boutons à pictogramme) ; `Noms`, ces noms dans l'ordre.
-function Attendre-Barre([string]$Dossier, [string]$Quoi, [int]$Fois = 1) {
+# Lancer l'app à la main, ou la relancer, ouvre la barre de capture, une page lue par UI
+# Automation (role toolbar). `Attendre-Barre` attend la $Fois-ième ligne « barre ouverte »
+# ($DelaiS s au plus) et rend { Fenetre, Boutons, Noms } : `Boutons`, les boutons par nom
+# (« Zone », « Plein écran », « Fenêtre », puis le nom seul des boutons à pictogramme) ;
+# `Noms`, ces noms dans l'ordre.
+function Attendre-Barre([string]$Dossier, [string]$Quoi, [int]$Fois = 1, [double]$DelaiS = 5) {
     Initialiser-Menu-Icone
     $AE = [System.Windows.Automation.AutomationElement]
     $CT = [System.Windows.Automation.ControlType]
-    if (-not (Attendre-Ligne -Texte 'barre ouverte' -FinDeLigne -Fois $Fois -DelaiS 5 -Dossier $Dossier)) {
-        throw "$Quoi : la barre de capture ne s'ouvre pas en 5 s"
+    if (-not (Attendre-Ligne -Texte 'barre ouverte' -FinDeLigne -Fois $Fois -DelaiS $DelaiS -Dossier $Dossier)) {
+        throw "$Quoi : la barre de capture ne s'ouvre pas en $DelaiS s"
     }
     $fen = [IntPtr]::Zero
     foreach ($l in ((Lire-Journal -Dossier $Dossier) -split "`n")) {

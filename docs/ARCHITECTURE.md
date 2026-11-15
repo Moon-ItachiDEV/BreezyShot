@@ -474,7 +474,19 @@ dans le dossier temporaire du système (`systeme::dossier_secours()`), sous le n
   la sélection de zone seule de la 0.5.3 à la 0.7.1, les Réglages en 0.5.1 et 0.5.2) : la
   première écrit `seconde instance: barre de capture`, la seconde sort avec le code 0. Avant
   `pret`, la demande attend (`seconde instance: en attente du demarrage`) et la barre s'ouvre
-  à `pret` (`EnAttente::Barre` ; la dernière demande gagne, `--capturer` compris).
+  à `pret` (`EnAttente::Barre`). Une capture en attente (`--capturer`) n'est jamais
+  remplacée par la barre (`attente_avec_barre`, pur, testé) ; une capture demandée après
+  la barre la remplace.
+- **Premier lancement à la main (0.7.2)** : `breezyshot.exe` sans option, l'app pas encore
+  ouverte (`Commande::Demarrer`), ouvre aussi la barre de capture, à `pret` (journal
+  `lancement a la main: barre de capture a pret`, puis `barre ouverte`).
+- `breezyshot.exe --discret` (0.7.2, `Commande::Discret`, `systeme::OPTION_DISCRET`) :
+  démarre sans rien montrer (journal `lancement discret`) ; reçu par une seconde instance,
+  ne fait rien (`seconde instance discrete: rien a faire`). Trois usages : la valeur `Run`
+  de « Démarrer avec Windows » (l'ouverture de session ne doit rien ouvrir, §6.1), les
+  lancements de l'app par l'installateur (fin d'installation, « plus récente installée »,
+  §12.3), et les essais (`Demarrer-App` sans argument). `--capturer` et `--quitter` passent
+  avant (`--capturer zone --discret` capture) ; ni l'un ni l'autre n'ouvre la barre.
   `--desinstaller` reçu par une seconde instance reste refusé (`seconde instance refusee`).
 - `breezyshot.exe --quitter` : demande à l'instance en cours de se fermer proprement (libère
   les raccourcis, retire l'icône, écrit `arret propre`), puis sort. Sans instance en cours,
@@ -490,7 +502,7 @@ dans le dossier temporaire du système (`systeme::dossier_secours()`), sous le n
   sans extension (macOS, Linux), casse ignorée, il est l'app ; sous tout autre nom (le fichier téléchargé `BreezyShot-<v>-essai.exe`), il est
   l'installateur ; `--desinstaller` le fait désinstaller. Décision pure `arguments::lancement`.
   Le contexte Tauri n'est engendré qu'une fois. Détails : §12.
-- Aucune autre option pour l'instant.
+- Aucune autre option pour l'instant (une option inconnue est ignorée : lancement à la main).
 - Au démarrage, après `icone installee`, l'app vérifie que l'icône est réellement dans la
   zone de notification (son rectangle est connu du système) et écrit `icone visible` ou
   `icone invisible` (toujours `invisible` sous Linux, où Tauri ne donne pas ce rectangle).
@@ -562,7 +574,13 @@ dans le dossier temporaire du système (`systeme::dossier_secours()`), sous le n
   vers la gauche ; au-dessus de la barre des tâches pour un clic dans la barre ; bornée à
   la zone utile (`menu::placer`, pur, testé). Le pointeur ne compte que sur l'icône (à
   4 px près) ; sinon (clavier, automatisation) le haut de l'icône en son milieu
-  (`menu::point_d_ancrage`). Un second clic le ferme. Il se ferme aussi au choix, sur Échap ou Tab, au clic
+  (`menu::point_d_ancrage`). Un second clic sur l'icône le ferme : la fenêtre du menu a
+  16 px de marge transparente autour de la carte (l'ombre), et le coin de la carte est au
+  pointeur, donc un second clic sans bouger tombe dans cette marge ; la page appelle alors
+  `menu_fermer` (tout `pointerdown` hors de `.menu`, `menu.js`, essai `menu.cjs`). Un clic
+  sur l'icône pendant que la barre de capture est ouverte la cache avant d'ouvrir le menu
+  (`clic_icone`). Journal de la place : `menu place: icone <x>,<y> <l>x<h>[ ignoree],
+  pointeur <x>,<y>|inconnu, point <x>,<y>|inconnu` (`menu::ligne_place`, pur, testé). Il se ferme aussi au choix, sur Échap ou Tab, au clic
   ailleurs (perte du focus), et quand une capture démarre. La fenêtre est créée cachée à la
   première ouverture, puis gardée cachée et réutilisée. Groupes : les captures (zone, écran,
   fenêtre) ; « Refaire la dernière zone », « Capture défilante » (0.6, avec une licence,
@@ -611,9 +629,15 @@ dans le dossier temporaire du système (`systeme::dossier_secours()`), sous le n
   La largeur dépend des boutons et de la police : la page mesure sa carte (`barre_taille`,
   menu volant ouvert compris) et la fenêtre est reposée sur le même centre ; la première
   fois, une largeur estimée (`largeur_estimee`), puis la dernière mesurée pour la même
-  forme. Fermée sur Échap, au clic ailleurs (perte du focus, surveillance des clics, clic
+  forme. Marges transparentes autour de la carte pour l'ombre `shadow-16` : 16 px sur les
+  côtés, 24 px en bas (`MARGE_BAS`, l'ombre descend plus qu'elle ne s'étale ; essai
+  `barre.cjs` « ombre dans la marge »). Fermée sur Échap, au clic ailleurs (perte du focus, surveillance des clics, clic
   dans la marge de l'ombre), au choix, et quand une capture démarre (`demarrer_capture`, avec
-  le menu). Relancée barre ouverte : elle reste ouverte, reposée sur l'écran de la souris et
+  le menu). Pendant le délai de double-clic du système après `barre ouverte`
+  (`GetDoubleClickTime`, 500 ms sans lui ; `systeme::delai_double_clic`,
+  `barre::dans_le_double_clic`, pur, testé), la perte du focus et les clics hors de la barre
+  sont ignorés (journal `barre: perte du focus ignoree (double-clic)`) : un double-clic sur
+  l'icône épinglée ne referme pas la barre que son premier clic vient d'ouvrir. Relancée barre ouverte : elle reste ouverte, reposée sur l'écran de la souris et
   remise à jour. Elle ne s'ouvre pas pendant une capture défilante, un film ou une autre
   capture (au repos ou vignette montrée seulement ; `refus_etat`, pur). Jamais exclue des
   captures : elle ne s'ouvre ni pendant une défilante ni pendant un film, et chaque capture
@@ -621,7 +645,8 @@ dans le dossier temporaire du système (`systeme::dossier_secours()`), sous le n
   (en boucle) ; Flèche bas ouvre un menu ; Entrée, Espace ; Échap ferme le menu, sinon la
   barre. Info-bulles : le nom seul, sur les boutons sans libellé. Journal : `barre fenetre
   <hwnd>`, `barre page prete`, `barre ouverte`, `barre fermee`, `barre choisi <id>`, `barre
-  retardateur <s>`, `barre non ouverte: defilante en cours|film en cours|capture en cours`.
+  retardateur <s>`, `barre: retardateur refuse` (barre cachée, retardateur non montré ou
+  délai non proposé), `barre non ouverte: defilante en cours|film en cours|capture en cours`.
 - Info-bulle : « BreezyShot ».
 
 ### 3.6 Capture d'une zone (assemblage des étapes 4 à 6)
@@ -1454,7 +1479,9 @@ Module pur : il reçoit le dossier où écrire, ne connaît ni Tauri ni les autr
   la fenêtre). Un seul à la fois : un second « Parcourir… » est ignoré tant que le premier
   est ouvert. La page n'en montre que le nom court ; le chemin n'est jamais au journal.
 - **Démarrer avec Windows** : `systeme::demarrage_avec_systeme(Some(oui))` écrit ou efface
-  la valeur `BreezyShot` (`"<current_exe>"` entre guillemets) de la clé `Run`, `None` la lit.
+  la valeur `BreezyShot` (`"<current_exe>" --discret` : le chemin entre guillemets, puis
+  l'option qui démarre sans ouvrir la barre de capture, §3.4 ; `demarrage::commande`) de
+  la clé `Run`, `None` la lit.
   `EtatDemarrage` : `Actif`, `Inactif`, `DesactiveParWindows` (désactivé dans le Gestionnaire
   des tâches : `StartupApproved\Run`, affiché éteint, jamais réactivé par l'app),
   `Indisponible` (hors Windows). Avec `BREEZYSHOT_DOSSIER_ESSAI` non vide (même règle que
@@ -1462,7 +1489,10 @@ Module pur : il reçoit le dossier où écrire, ne connaît ni Tauri ni les autr
   `HKCU\Software\BreezyShot\Essais\Run` (`demarrage: cle d'essai`). La désinstallation
   la retire par la fermeture que lui donne `application::desinstaller` (§12.5).
   Au démarrage de l'app, une valeur existante qui pointe vers un autre exe (copie lancée
-  hors installation, puis installée) est réécrite vers l'exe en cours
+  hors installation, puis installée), ou l'ancienne valeur sans `--discret` (jusqu'à la
+  0.7.1), est réécrite vers la valeur attendue. Limite : la première ouverture de session
+  après la mise à jour lit encore l'ancienne valeur et ouvre donc la barre une fois ; ce
+  démarrage-là réécrit la valeur
   (`systeme::mettre_a_jour_chemin`, règle pure `doit_reecrire` : jamais si elle est
   absente, casse ignorée ; journal `demarrage avec le systeme: chemin mis a jour`). La
   désactivation par le Gestionnaire des tâches vit sous le même nom dans
@@ -2859,7 +2889,9 @@ La fenêtre (sans cadre, transparente, carte + marge d'ombre) est posée et dime
    avancement réel envoyé à la page ; puis renommage sur `breezyshot.exe` (retenté 5 s si pris) ;
 4. `verification` : octet à octet ;
 5. `raccourci` (IShellLinkW) ; 6. `inscription` (onze valeurs, ci-dessous) ;
-7. `lancement` : l'app installée démarre et tient son instance en 10 s.
+7. `lancement` : l'app installée démarre (`--discret` depuis la 0.7.2 : l'installateur dit
+   lui-même « BreezyShot est prêt », la barre de capture n'a pas à s'ouvrir) et tient son
+   instance en 10 s. « Essayer une capture » lance `--capturer zone`, sans barre.
 
 Les onze valeurs de la clé : `DisplayName`, `DisplayVersion`, `Publisher`, `DisplayIcon`
 (`"<exe>",0`), `InstallLocation`, `UninstallString` et `QuietUninstallString`

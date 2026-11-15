@@ -139,7 +139,11 @@ pub fn barre_choisi(app: AppHandle, id: String) {
 
 #[tauri::command]
 pub fn barre_retardateur(app: AppHandle, secondes: u32) -> u32 {
-    if !RETARDATEURS_PROPOSES.contains(&secondes) {
+    // Seulement barre ouverte, bouton Retardateur montré, et l'un des choix proposés.
+    if !barre::ouverte(&app)
+        || !barre::retardateur_montre()
+        || !RETARDATEURS_PROPOSES.contains(&secondes)
+    {
         log::warn!("barre: retardateur refuse");
     } else {
         log::info!("barre retardateur {secondes}");

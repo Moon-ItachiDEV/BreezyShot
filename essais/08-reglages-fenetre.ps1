@@ -433,7 +433,7 @@ public static string Titre(IntPtr h) {
     }
     Verifier '(1) raccourci plein_ecran: Ctrl+Maj+2' ((Compter-Motif -Motif 'raccourci plein_ecran: Ctrl\+Maj\+2$' -Dossier $cas) -eq 1) | Out-Null
     $vu = Valeur-Run $CLE_RUN_ESSAI
-    Verifier '(1) valeur Run d''une autre copie réécrite vers l''exe de l''essai' (((Compter-Motif -Motif 'demarrage avec le systeme: chemin mis a jour$' -Dossier $cas) -eq 1) -and ($vu -eq ('"' + $script:Essai.Exe + '"'))) "$vu" | Out-Null
+    Verifier '(1) valeur Run d''une autre copie réécrite vers l''exe de l''essai' (((Compter-Motif -Motif 'demarrage avec le systeme: chemin mis a jour$' -Dossier $cas) -eq 1) -and ($vu -eq ('"' + $script:Essai.Exe + '" --discret'))) "$vu" | Out-Null
     # Retirée : le point 7 part d'un démarrage éteint.
     Remove-ItemProperty -LiteralPath $CLE_RUN_ESSAI -Name 'BreezyShot' -ErrorAction SilentlyContinue
 
@@ -666,11 +666,11 @@ public static string Titre(IntPtr h) {
     Verifier '(6) Ctrl+Maj+7 repris par l''app (une autre application ne peut pas le prendre)' ($t -eq 'refuse') $t | Out-Null
 
     # (7) Lancer au démarrage, sur la clé d'essai.
-    $commande = '"' + $script:Essai.Exe + '"'
+    $commande = '"' + $script:Essai.Exe + '" --discret'
     Cliquer-Nom $fen 'Général' ([System.Windows.Automation.ControlType]::TabItem) '(7) rubrique Général'
     Cliquer-Interrupteur $fen 'Lancer au démarrage' '(7) interrupteur'
     $null = Attendre-Motif -Motif 'demarrage avec le systeme ecrit: oui$' -Dossier $cas -DelaiS 5 -Quoi '(7) écrit'
-    Verifier '(7) clé d''essai : la valeur est l''exe entre guillemets' ((Valeur-Run $CLE_RUN_ESSAI) -eq $commande) "$(Valeur-Run $CLE_RUN_ESSAI)" | Out-Null
+    Verifier '(7) clé d''essai : la valeur est l''exe entre guillemets, puis --discret' ((Valeur-Run $CLE_RUN_ESSAI) -eq $commande) "$(Valeur-Run $CLE_RUN_ESSAI)" | Out-Null
     Verifier '(7) fichier : demarrer_avec_systeme true' ((Lire-Reglages $cas).demarrer_avec_systeme -eq $true) | Out-Null
     Remove-ItemProperty -LiteralPath $CLE_RUN_ESSAI -Name 'BreezyShot'
     $fermes = Compter-Motif -Motif 'reglages fermes$' -Dossier $cas
