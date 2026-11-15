@@ -213,6 +213,12 @@ jobs:
           SORTIE: ${{ github.workspace }}/essais-resultats/pages
         run: node essais/pages/menu.cjs
 
+      - name: Essai de la page de la barre de capture
+        env:
+          NODE_PATH: ${{ github.workspace }}/app/node_modules
+          SORTIE: ${{ github.workspace }}/essais-resultats/pages
+        run: node essais/pages/barre.cjs
+
       - name: Essai de la page de contrôle d'un film
         env:
           NODE_PATH: ${{ github.workspace }}/app/node_modules

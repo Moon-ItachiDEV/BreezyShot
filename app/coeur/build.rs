@@ -79,6 +79,11 @@ fn main() {
         "menu_pret",
         "menu_choisi",
         "menu_fermer",
+        "barre_pret",
+        "barre_taille",
+        "barre_choisi",
+        "barre_retardateur",
+        "barre_fermer",
     ]);
     tauri_build::try_build(
         tauri_build::Attributes::new()

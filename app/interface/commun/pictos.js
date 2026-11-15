@@ -1,7 +1,7 @@
 // Pictogrammes 20 × 20 du menu de l'icône (design/menu-icone), d'après l'identifiant d'une
-// entrée du menu ; repris sur les lignes de Réglages › Raccourcis. Tirés de constantes,
-// jamais de innerHTML. Le trait et la couleur viennent de la page (fill: none ;
-// stroke: currentColor).
+// entrée du menu ; repris sur les lignes de Réglages › Raccourcis et dans la barre de
+// capture. Tirés de constantes, jamais de innerHTML. Le trait et la couleur viennent de la
+// page (fill: none ; stroke: currentColor).
 
 export const PICTOS = {
   capturer_zone: [
@@ -27,6 +27,10 @@ export const PICTOS = {
     "M8.2 8.3H6.6a.9.9 0 0 0-.9.9v1.6a.9.9 0 0 0 .9.9h1.6v-1.6H7.3M10.4 8.3v3.4M12.6 11.7V8.3h2M12.6 10h1.6",
   ],
   historique: ["M3.2 10a6.8 6.8 0 1 0 2-4.8", "M3.2 3v3.4h3.4", "M10 6.5V10l2.5 1.6"],
+  // Barre de capture (0.7.2) : i-rec (« Enregistrer l'écran », Vidéo ou GIF) et i-timer
+  // (Retardateur) de design/capture.
+  enregistrer_ecran: ["circle 10 10 7", "circle 10 10 3 plein"],
+  retardateur: ["circle 10 11 6.5", "M10 11V7.8M8 2.5h4M15 5.2l1.2-1.2"],
   // Icône « Curseurs » (choix du 13/11/2026) : jamais d'engrenage.
   reglages: ["M3 6.5h5.5M13.5 6.5H17M3 13.5h2.5M10.5 13.5H17", "circle 11 6.5 2.2", "circle 8 13.5 2.2"],
   quitter: ["M10 3v6.5", "M6.2 5.4a6 6 0 1 0 7.6 0"],
@@ -54,6 +58,11 @@ export function picto(id) {
       el.setAttribute("cx", v[0]);
       el.setAttribute("cy", v[1]);
       el.setAttribute("r", v[2]);
+      // Un rond plein (le point d'« Enregistrer l'écran ») : couleur du trait, sans trait.
+      if (v[3] === "plein") {
+        el.setAttribute("fill", "currentColor");
+        el.setAttribute("stroke", "none");
+      }
     } else {
       el = document.createElementNS(SVG, "path");
       el.setAttribute("d", forme);

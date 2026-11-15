@@ -1,0 +1,287 @@
+/* Barre de capture (design/capture, `.launcher`, validé le 12/11/2026). Faux verre peint par
+   l'app, comme le menu de l'icône : la fenêtre est transparente, la carte porte le fond, le
+   bord et l'ombre. Les mesures (haut, marge, hauteur) sont celles de `fenetres/barre.rs`. */
+
+html,
+body {
+  height: 100%;
+  margin: 0;
+  background: transparent;
+  overflow: hidden;
+}
+
+body {
+  font: var(--texte-body-graisse) var(--texte-body-taille) / var(--texte-body-interligne) var(--police-ui);
+  color: var(--text);
+  -webkit-font-smoothing: antialiased;
+  user-select: none;
+  -webkit-user-select: none;
+  cursor: default;
+}
+
+/* La boîte : la barre, et sous elle le menu volant ouvert. 14 px du haut (HAUT), centrée. */
+.boite {
+  position: relative;
+  width: max-content;
+  margin: 14px auto 0;
+}
+
+.carte {
+  box-sizing: border-box;
+  border: 1px solid var(--acrylic-stroke);
+  border-radius: var(--radius-md);
+  background:
+    linear-gradient(to bottom, color-mix(in srgb, var(--acrylic-solid) 70%, white 30%) 0, transparent 1px),
+    color-mix(in srgb, var(--acrylic-solid) 97%, transparent);
+  box-shadow: var(--shadow-16);
+}
+
+.barre {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  height: 46px;
+  padding: 4px;
+  transition:
+    opacity var(--duree-sortie) var(--courbe-douce),
+    transform var(--duree-sortie) var(--courbe-douce);
+}
+
+.barre[hidden] {
+  display: none;
+}
+
+/* Entrée : la carte descend de 4 px en fondu (167 ms). */
+.barre.entree {
+  opacity: 0;
+  transform: translateY(-4px);
+  transition: none;
+}
+
+.marque {
+  display: grid;
+  place-items: center;
+  padding: 0 6px 0 4px;
+}
+
+.logo {
+  width: 20px;
+  height: 20px;
+}
+.logo .logo-1 { stop-color: var(--logo-degrade-1); }
+.logo .logo-2 { stop-color: var(--logo-degrade-2); }
+.logo .logo-3 { stop-color: var(--logo-degrade-3); }
+.logo .logo-l { stop-color: var(--logo-lumiere); }
+.logo .logo-pales { fill: var(--logo-lumiere); }
+
+.separateur {
+  flex: none;
+  width: 1px;
+  height: 20px;
+  margin: 0 4px;
+  background: var(--divider);
+}
+
+.mode {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  box-sizing: border-box;
+  height: 36px;
+  padding: 0 10px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  white-space: nowrap;
+  cursor: default;
+  outline: none;
+  transition:
+    background var(--duree-survol) linear,
+    transform var(--duree-ressort) var(--courbe-ressort);
+}
+
+.mode.picto-seul {
+  padding: 0 8px;
+}
+
+.mode:hover {
+  background: var(--subtle-hover);
+  transform: translateY(-1px);
+}
+
+.mode:active {
+  background: var(--subtle-press);
+  transform: scale(0.97);
+  transition-duration: var(--duree-appui);
+}
+
+.mode[aria-expanded="true"] {
+  background: var(--subtle-hover);
+}
+
+.mode:focus-visible {
+  box-shadow: inset 0 0 0 2px var(--text);
+}
+
+.mode svg,
+.element svg {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* Retardateur armé : pictogramme en couleur d'accent, badge du délai. */
+.mode.arme svg {
+  color: var(--accent-text);
+}
+
+.badge {
+  position: absolute;
+  right: 3px;
+  bottom: 4px;
+  min-width: 12px;
+  height: 12px;
+  padding: 0 2px;
+  box-sizing: border-box;
+  border-radius: 6px;
+  background: var(--accent);
+  color: var(--on-accent);
+  font: 700 8.5px/12px var(--police-ui);
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  transform: scale(0);
+  transition: transform var(--duree-ressort) var(--courbe-ressort);
+}
+
+.mode.arme .badge {
+  transform: none;
+}
+
+/* Menus volants, sous leur bouton. */
+.volet {
+  position: absolute;
+  top: 54px;
+  padding: 4px;
+  transform-origin: 50% 0;
+}
+
+.volet[hidden] {
+  display: none;
+}
+
+.volet.ouvre {
+  animation: volet-entree var(--duree-ressort) var(--courbe-ressort);
+}
+
+@keyframes volet-entree {
+  from {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.96);
+  }
+}
+
+#volet-retardateur {
+  display: flex;
+  gap: 2px;
+}
+
+#volet-retardateur[hidden] {
+  display: none;
+}
+
+.choix {
+  box-sizing: border-box;
+  height: 30px;
+  min-width: 44px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 13px;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+  cursor: default;
+  outline: none;
+  transition: background var(--duree-survol) linear;
+}
+
+.choix:hover {
+  background: var(--subtle-hover);
+}
+
+.choix[aria-checked="true"] {
+  background: var(--accent);
+  color: var(--on-accent);
+}
+
+.element {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 128px;
+  height: 32px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: default;
+  outline: none;
+  transition: background var(--duree-survol) linear;
+}
+
+.element svg {
+  width: 16px;
+  height: 16px;
+}
+
+.element:hover {
+  background: var(--subtle-hover);
+}
+
+.element:active {
+  background: var(--subtle-press);
+}
+
+.choix:focus-visible,
+.element:focus-visible {
+  box-shadow: inset 0 0 0 2px var(--text);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .barre {
+    transition: opacity var(--duree-reduite) linear;
+  }
+  .barre.entree {
+    transform: none;
+  }
+  .mode {
+    transition: background var(--duree-survol) linear;
+  }
+  .mode:hover,
+  .mode:active {
+    transform: none;
+  }
+  .badge {
+    transition: none;
+  }
+  .volet.ouvre {
+    animation: none;
+  }
+}

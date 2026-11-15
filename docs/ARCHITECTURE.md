@@ -137,7 +137,8 @@ app/
                             « Terminer », message)
     film/                   page de contrôle du film (0.7) : film.html, .css, .js (cadre,
                             voile, pilule « Pause », « Arrêter », « Micro », durée)
-    barre/                  barre de capture (plus tard)
+    barre/                  barre de capture (0.7.2) : barre.html, .css, .js (boutons
+                            d'après les entrées du menu, menus Vidéo/GIF et Retardateur)
 design/                     jetons et icônes Moulinet, copiés du design system
 docs/                       ce fichier, TRAVAIL-VALIDE.md, notices d'essai
 essais/                     scénarios PowerShell joués sur la machine Windows de GitHub
@@ -469,9 +470,12 @@ dans le dossier temporaire du système (`systeme::dossier_secours()`), sous le n
 ### 3.4 Ligne de commande et instance unique
 
 - Une seule instance. Lancer `breezyshot.exe` une seconde fois (icône épinglée à la barre des
-  tâches, menu Démarrer) ouvre la barre de capture dans la première, comme Impr. écran
-  (depuis la 0.5.3 ; les Réglages en 0.5.1 et 0.5.2) : la première écrit `seconde instance: barre de capture`, la seconde sort avec le
-  code 0. `--desinstaller` reçu par une seconde instance reste refusé (`seconde instance refusee`).
+  tâches, menu Démarrer) ouvre la barre de capture dans la première (§3.5 ; depuis la 0.7.2 ;
+  la sélection de zone seule de la 0.5.3 à la 0.7.1, les Réglages en 0.5.1 et 0.5.2) : la
+  première écrit `seconde instance: barre de capture`, la seconde sort avec le code 0. Avant
+  `pret`, la demande attend (`seconde instance: en attente du demarrage`) et la barre s'ouvre
+  à `pret` (`EnAttente::Barre` ; la dernière demande gagne, `--capturer` compris).
+  `--desinstaller` reçu par une seconde instance reste refusé (`seconde instance refusee`).
 - `breezyshot.exe --quitter` : demande à l'instance en cours de se fermer proprement (libère
   les raccourcis, retire l'icône, écrit `arret propre`), puis sort. Sans instance en cours,
   sort tout de suite avec le code 0. C'est le moyen qu'utilisent les essais pour fermer l'app.
@@ -493,6 +497,7 @@ dans le dossier temporaire du système (`systeme::dossier_secours()`), sous le n
 - Lignes du journal sur lesquelles les essais s'appuient : `demarrage BreezyShot <version>`,
   `systeme windows build <n>`, `echelle par ecran v2: oui|non|sans objet`, `icone installee`
   (ou `icone non installee: …`), `icone visible|invisible`, `pret` (tout est en place), `seconde instance: barre de capture`,
+  `barre fenetre <hwnd>`, `barre ouverte`, `barre choisi <id>`, `barre fermee`,
   `--quitter recu: fermeture demandee`, `arret propre`, `--quitter: aucune instance en cours`.
 - `app/interface/index.html` est une page vide : elle n'existe que parce que Tauri veut un
   dossier d'interface non vide.
@@ -552,9 +557,12 @@ dans le dossier temporaire du système (`systeme::dossier_secours()`), sous le n
   **Depuis la 0.5.2 (piste A « Liste », choisie le 13/11/2026)** : sous Windows et macOS, le
   menu est une fenêtre web (`fenetres::menu`, page `menu/menu.html`), parce que le menu
   natif ne se style pas. Un clic gauche OU droit sur l'icône (`Evenement::ClicIcone`, avec
-  le rectangle de l'icône) l'ouvre au-dessus d'elle, au-dessus de la barre des tâches, bord
-  droit à 44 px à droite du centre de l'icône, borné à la zone utile (`menu::placer`, pur,
-  testé) ; un second clic le ferme. Il se ferme aussi au choix, sur Échap ou Tab, au clic
+  le rectangle de l'icône et la place du pointeur) l'ouvre comme un menu de Windows
+  (0.7.2) : coin bas gauche de la carte au pointeur, carte vers la droite ou, sans place,
+  vers la gauche ; au-dessus de la barre des tâches pour un clic dans la barre ; bornée à
+  la zone utile (`menu::placer`, pur, testé). Le pointeur ne compte que sur l'icône (à
+  4 px près) ; sinon (clavier, automatisation) le haut de l'icône en son milieu
+  (`menu::point_d_ancrage`). Un second clic le ferme. Il se ferme aussi au choix, sur Échap ou Tab, au clic
   ailleurs (perte du focus), et quand une capture démarre. La fenêtre est créée cachée à la
   première ouverture, puis gardée cachée et réutilisée. Groupes : les captures (zone, écran,
   fenêtre) ; « Refaire la dernière zone », « Capture défilante » (0.6, avec une licence,
@@ -583,6 +591,37 @@ dans le dossier temporaire du système (`systeme::dossier_secours()`), sous le n
   clic`, `menu fenetre <hwnd>`, `menu page prete`, `menu ouvert`, `menu ferme`, puis
   `menu: <entrée>` comme avant (l'entrée est traitée au tour suivant de la boucle). Sous
   Linux (Tauri n'y rapporte pas les clics sur l'icône), le menu natif reste.
+- **Barre de capture (0.7.2, design `capture` validé le 12/11/2026)** : relancer l'app déjà
+  ouverte (`Commande::Demarrer`, §3.4) l'ouvre ; Impr. écran, les raccourcis et le menu de
+  l'icône ne changent pas. Une petite fenêtre web sans cadre, toujours au premier plan
+  (`fenetres::barre`, page `barre/barre.html`, droits `capabilities/barre.json`), construite
+  comme le menu : créée cachée à la première ouverture puis réutilisée, `barre_pret`, thème,
+  surveillance des clics. Centrée en haut de la zone utile de l'écran sous la souris, la
+  carte à 14 px du haut (`barre::placer`, pur, testé : échelles, barre des tâches en haut ou
+  à gauche, écran à coordonnées négatives). Logo, Zone, Plein écran, Fenêtre (avec
+  libellés) | Capture défilante, « Enregistrer l'écran » (un menu Vidéo, GIF), Retardateur
+  (menu Aucun, 3 s, 5 s, 10 s ; badge du délai) | Réglages (icône « Curseurs »). Les boutons
+  sont tirés des entrées du menu de l'icône (`fenetre_barre::boutons(menu_actuel)`, pur,
+  testé) : licence, système et codeur H.264 suivent la même règle (sans Media Foundation,
+  GIF sans Vidéo ; sans licence, rien de Pro). Le retardateur n'y est que si Réglages ›
+  Capture le montre. Un choix poste `Evenement::Menu(id)` comme l'entrée du menu (captures
+  après `ATTENTE_MENU`) et cache la barre ; seul un bouton montré peut être choisi. Le
+  retardateur écrit le réglage par le chemin de la page des Réglages
+  (`fenetre_reglages::changer`), la page des Réglages ouverte suit, la barre reste ouverte.
+  La largeur dépend des boutons et de la police : la page mesure sa carte (`barre_taille`,
+  menu volant ouvert compris) et la fenêtre est reposée sur le même centre ; la première
+  fois, une largeur estimée (`largeur_estimee`), puis la dernière mesurée pour la même
+  forme. Fermée sur Échap, au clic ailleurs (perte du focus, surveillance des clics, clic
+  dans la marge de l'ombre), au choix, et quand une capture démarre (`demarrer_capture`, avec
+  le menu). Relancée barre ouverte : elle reste ouverte, reposée sur l'écran de la souris et
+  remise à jour. Elle ne s'ouvre pas pendant une capture défilante, un film ou une autre
+  capture (au repos ou vignette montrée seulement ; `refus_etat`, pur). Jamais exclue des
+  captures : elle ne s'ouvre ni pendant une défilante ni pendant un film, et chaque capture
+  la ferme avant sa photo. Clavier : Tab, Maj + Tab, flèches gauche et droite, Début, Fin
+  (en boucle) ; Flèche bas ouvre un menu ; Entrée, Espace ; Échap ferme le menu, sinon la
+  barre. Info-bulles : le nom seul, sur les boutons sans libellé. Journal : `barre fenetre
+  <hwnd>`, `barre page prete`, `barre ouverte`, `barre fermee`, `barre choisi <id>`, `barre
+  retardateur <s>`, `barre non ouverte: defilante en cours|film en cours|capture en cours`.
 - Info-bulle : « BreezyShot ».
 
 ### 3.6 Capture d'une zone (assemblage des étapes 4 à 6)
@@ -1207,7 +1246,7 @@ Module pur : il reçoit le dossier où écrire, ne connaît ni Tauri ni les autr
   de wry par défaut, plus `CalculateNativeWinOcclusion` coupé (une page cachée reste vivante
   et se repeint).
 - Place : centré en haut de la zone utile de l'écran où se trouve la souris, à 64 px du haut
-  (sous la future barre de capture). Position calculée en pixels réels avec l'échelle de cet
+  (sous la barre de capture, §3.5). Position calculée en pixels réels avec l'échelle de cet
   écran. La fenêtre mesure 560 × 220 pixels logiques (pilule de 460 × 108 au plus et place
   de son ombre), collée en haut de la zone utile ; la page pose la pilule à 64 px.
 - **Sans focus, sous Windows** : la fenêtre est créée `focused(false)` et `focusable(false)`

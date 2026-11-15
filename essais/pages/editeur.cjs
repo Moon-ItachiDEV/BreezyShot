@@ -394,8 +394,8 @@ const CHARGE = {
       .allTextContents();
     verifier(
       JSON.stringify(itemsP.map((t) => t.trim())) ===
-        '["Enregistrer sous"]',
-      '2 menu « Plus » : Enregistrer sous',
+        '["Enregistrer sous…"]',
+      '2 menu « Plus » : Enregistrer sous…',
       JSON.stringify(itemsP),
     );
     await p.keyboard.press('Escape');

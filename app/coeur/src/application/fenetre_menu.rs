@@ -49,9 +49,9 @@ pub fn lignes(entrees: &[EntreeMenu]) -> Vec<Ligne> {
         .collect()
 }
 
-/// Clic sur l'icône : ouvre le menu au-dessus d'elle, ou le ferme s'il est ouvert. Un clic
+/// Clic sur l'icône : ouvre le menu au pointeur, ou le ferme s'il est ouvert. Un clic
 /// qui vient de le fermer (le menu perd le focus au même clic) ne le rouvre pas.
-pub fn clic_icone(app: &AppHandle, rect: Rect) {
+pub fn clic_icone(app: &AppHandle, rect: Rect, pointeur: Option<(i32, i32)>) {
     log::info!("icone: clic");
     if menu::ouvert(app) {
         let _ = menu::cacher(app);
@@ -81,6 +81,7 @@ pub fn clic_icone(app: &AppHandle, rect: Rect) {
     if menu::ouvrir(
         app,
         Some(rect),
+        pointeur,
         lignes(&entrees),
         pendant_defilante || pendant_film,
     ) {

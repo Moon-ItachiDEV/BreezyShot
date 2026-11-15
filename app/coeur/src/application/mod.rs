@@ -44,6 +44,7 @@ pub mod defilante;
 pub mod editeur;
 pub mod etat;
 pub mod etats;
+pub mod fenetre_barre;
 pub mod fenetre_defilante;
 pub mod fenetre_editeur;
 pub mod fenetre_film;
@@ -196,6 +197,15 @@ pub const ORDRE_MENU: [Mode; 8] = [
     Mode::Gif,
 ];
 
+/// Ce qu'une demande arrivée avant `pret` jouera une fois l'app démarrée.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum EnAttente {
+    /// `--capturer <mode>` (au démarrage, ou confié par une seconde instance).
+    Capture(String),
+    /// L'app relancée : la barre de capture.
+    Barre,
+}
+
 /// Tout ce qui arrive à l'Application : signaux des modules, du système, du menu.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Evenement {
@@ -205,9 +215,9 @@ pub enum Evenement {
     ThemeBarre(Theme),
     /// Une entrée du menu de l'icône a été choisie (son identifiant).
     Menu(String),
-    /// Clic gauche ou droit sur l'icône (son rectangle, pixels réels) : le menu web
-    /// s'ouvre, ou se ferme s'il est ouvert.
-    ClicIcone(fenetres::Rect),
+    /// Clic gauche ou droit sur l'icône (son rectangle et la place du pointeur, pixels
+    /// réels) : le menu web s'ouvre, ou se ferme s'il est ouvert.
+    ClicIcone(fenetres::Rect, Option<(i32, i32)>),
     /// Signal du module des raccourcis (appui).
     Raccourci(raccourcis::Signal),
     /// Signal du module des fenêtres (clic dans le bandeau).
@@ -238,6 +248,8 @@ pub enum Evenement {
     LancerGlisser { id: u64, chemin: PathBuf },
     /// Capture demandée par la ligne de commande (`--capturer <mode>`, l'installateur).
     CaptureCli(String),
+    /// L'app relancée (seconde instance sans option) : la barre de capture s'ouvre.
+    OuvrirBarre,
     /// Le délai du décompte numéro `n` est écoulé (posté par le fil `decompte`).
     DecompteFini(u64),
     /// La fenêtre de l'éditeur est détruite (ramené sur le fil principal).
@@ -444,8 +456,9 @@ pub struct Application {
     retenues: Mutex<Vec<u64>>,
     /// Fils de suppression en cours, attendus (bornés) à l'arrêt.
     suppressions: (Mutex<u32>, std::sync::Condvar),
-    /// Capture demandée par `--capturer` avant la fin du démarrage : jouée à `pret`.
-    capture_en_attente: Mutex<Option<String>>,
+    /// Capture demandée par `--capturer`, ou barre de capture demandée par une relance,
+    /// avant la fin du démarrage : jouée à `pret` (la dernière demande gagne).
+    capture_en_attente: Mutex<Option<EnAttente>>,
     /// Le décompte en cours (fil principal ; verrou jamais tenu pendant un appel à un
     /// module), et le dernier numéro donné.
     decompte: Mutex<Option<DecompteEnCours>>,
@@ -607,7 +620,12 @@ fn lancer_app(contexte: tauri::Context, commande: Commande, inconnus: Vec<String
             fenetre_film::film_action,
             fenetre_menu::menu_pret,
             fenetre_menu::menu_choisi,
-            fenetre_menu::menu_fermer
+            fenetre_menu::menu_fermer,
+            fenetre_barre::barre_pret,
+            fenetre_barre::barre_taille,
+            fenetre_barre::barre_choisi,
+            fenetre_barre::barre_retardateur,
+            fenetre_barre::barre_fermer
         ])
         .setup(move |app| {
             demarrer(app.handle(), commande, &inconnus);
@@ -691,7 +709,7 @@ fn demarrer(app: &AppHandle, commande: Commande, inconnus: &[String]) {
     if let Commande::Capturer(mode) = &commande {
         log::info!("--capturer recu: {}", mode_journal(mode));
         if let Ok(mut attente) = app.state::<Application>().capture_en_attente.lock() {
-            *attente = Some(mode.clone());
+            *attente = Some(EnAttente::Capture(mode.clone()));
         }
     }
 
@@ -800,7 +818,7 @@ fn demarrer(app: &AppHandle, commande: Commande, inconnus: &[String]) {
             bilan.libelle_menu(a)
         }),
         |app, id| traiter(app, Evenement::Menu(id)),
-        |app, rect| traiter(app, Evenement::ClicIcone(rect)),
+        |app, rect, pointeur| traiter(app, Evenement::ClicIcone(rect, pointeur)),
     ) {
         Ok(()) => log::info!(
             "icone installee ({taille} px, echelle {echelle_principale}, barre {})",
@@ -853,16 +871,19 @@ fn demarrer(app: &AppHandle, commande: Commande, inconnus: &[String]) {
     // (qui reçoit les appuis) est restée bloquée.
     veille::lancer(app);
 
-    // Capture demandée avant `pret` (`--capturer` au démarrage) : postée pour le tour
-    // suivant, maintenant que tout est en place.
+    // Capture demandée avant `pret` (`--capturer` au démarrage, ou par une seconde
+    // instance), ou barre de capture (relance) : postée pour le tour suivant, maintenant
+    // que tout est en place.
     let en_attente = app
         .state::<Application>()
         .capture_en_attente
         .lock()
         .ok()
         .and_then(|mut a| a.take());
-    if let Some(mode) = en_attente {
-        poster_plus_tard(app, Evenement::CaptureCli(mode));
+    match en_attente {
+        Some(EnAttente::Capture(mode)) => poster_plus_tard(app, Evenement::CaptureCli(mode)),
+        Some(EnAttente::Barre) => poster_plus_tard(app, Evenement::OuvrirBarre),
+        None => {}
     }
 }
 
@@ -1510,6 +1531,7 @@ pub fn traiter(app: &AppHandle, evenement: Evenement) {
             | Evenement::TexteEchu(_)
             | Evenement::TexteDisponible(_)
             | Evenement::LicenceChangee
+            | Evenement::OuvrirBarre
             | Evenement::Fenetres(fenetres::Signal::ActionBandeau { .. })
     );
     if de_capture && hors_fil_principal(app) {
@@ -1534,20 +1556,21 @@ pub fn traiter(app: &AppHandle, evenement: Evenement) {
                         capturer_cli(app, &mode);
                     } else if let Ok(mut a) = app.state::<Application>().capture_en_attente.lock() {
                         log::info!("--capturer: en attente du demarrage");
-                        *a = Some(mode);
+                        *a = Some(EnAttente::Capture(mode));
                     }
                 }
                 // Relancer l'app déjà ouverte (icône épinglée, menu Démarrer, double-clic) :
-                // la barre de capture s'ouvre, comme Impr. écran (demande de l'utilisateur
-                // du 13/11/2026 ; en 0.5.1 et 0.5.2, c'étaient les Réglages, qui restent au
-                // menu de l'icône). Au tour suivant de la boucle, comme une entrée du menu.
+                // la barre de capture s'ouvre (demande de l'utilisateur du 13/11/2026 ; en
+                // 0.5.1 et 0.5.2, c'étaient les Réglages, qui restent au menu de l'icône ; de
+                // la 0.5.3 à la 0.7.1, la sélection de zone seule). Au tour suivant de la
+                // boucle, comme une entrée du menu. Déjà ouverte, elle reste ouverte.
                 Commande::Demarrer => {
                     log::info!("seconde instance: barre de capture");
                     if app.state::<Application>().demarree.load(Ordering::SeqCst) {
-                        poster_plus_tard(app, Evenement::Menu(id_menu(Mode::Zone)));
+                        poster_plus_tard(app, Evenement::OuvrirBarre);
                     } else if let Ok(mut a) = app.state::<Application>().capture_en_attente.lock() {
                         log::info!("seconde instance: en attente du demarrage");
-                        *a = Some(Mode::Zone.nom().to_string());
+                        *a = Some(EnAttente::Barre);
                     }
                 }
                 // Désinstaller via une seconde instance n'aurait pas de sens : ignoré.
@@ -1564,7 +1587,7 @@ pub fn traiter(app: &AppHandle, evenement: Evenement) {
                 Err(e) => log::warn!("icone non mise a jour: {e}"),
             }
         }
-        Evenement::ClicIcone(rect) => fenetre_menu::clic_icone(app, rect),
+        Evenement::ClicIcone(rect, pointeur) => fenetre_menu::clic_icone(app, rect, pointeur),
         Evenement::Menu(id) => match (id.as_str(), mode_du_menu(&id)) {
             (MENU_QUITTER, _) => {
                 log::info!("menu: quitter");
@@ -1641,6 +1664,7 @@ pub fn traiter(app: &AppHandle, evenement: Evenement) {
             sans_texte,
         } => annoncer_raccourcis(app, &local, &bilan, sans_texte),
         Evenement::CaptureCli(mode) => capturer_cli(app, &mode),
+        Evenement::OuvrirBarre => fenetre_barre::ouvrir(app),
         Evenement::SortieEchue(numero) => {
             if prendre_sortie_attendue(app, numero) {
                 log::warn!("sortie sans bilan");
@@ -1836,9 +1860,9 @@ fn demarrer_capture(app: &AppHandle, mode: Mode) {
         return;
     }
     noter_demande(app);
-    // Un raccourci pressé menu ouvert : le menu part avant la photo, et le compositeur est
-    // attendu comme pour le bandeau caché.
-    let menu_cache = fenetres::menu::cacher(app);
+    // Un raccourci pressé menu ou barre de capture ouverts : ils partent avant la photo, et
+    // le compositeur est attendu comme pour le bandeau caché.
+    let menu_cache = fenetres::menu::cacher(app) | fenetres::barre::cacher(app);
     match declencheur {
         Declencheur::DemandeDecompte(_) => commencer_decompte(app, mode, retardateur_s),
         _ => apres_gel(app, mode, recu_a, menu_cache),
