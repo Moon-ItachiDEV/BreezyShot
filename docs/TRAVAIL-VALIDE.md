@@ -1133,8 +1133,9 @@ Corrections de la relecture de la 0.7.2 :
   lancement à la main l'ouvre maintenant à la fin du démarrage. Pour que l'ouverture de
   session ne montre rien, la valeur « Démarrer avec Windows » de la clé `Run` porte
   l'option `--discret` (démarrer sans rien montrer) ; l'ancienne valeur sans option est
-  réécrite au démarrage (la première ouverture de session après la mise à jour ouvre donc
-  encore la barre une fois). L'installateur lance l'app avec `--discret` ; « Essayer une
+  réécrite au démarrage. L'installateur relance l'app (avec `--discret`) à la fin d'une
+  mise à jour : la valeur est réécrite à ce moment-là ; la barre ne s'ouvrirait à
+  l'ouverture de session que si l'app n'avait pas démarré depuis la mise à jour. L'installateur lance l'app avec `--discret` ; « Essayer une
   capture » (`--capturer zone`) et `--quitter` n'ouvrent pas la barre. Une capture en
   attente du démarrage n'est jamais remplacée par la barre. Les essais lancent l'app avec
   `--discret` par défaut, et `Demarrer-App -Nu` pour un lancement à la main.
@@ -1162,6 +1163,10 @@ Corrections de la relecture de la 0.7.2 :
   (`barre::dans_le_double_clic`) et de la ligne `menu place` ; page `menu.cjs` (clic dans
   la marge : `menu_fermer` ; clic dans la carte : rien) ; page `barre.cjs` (l'ombre tient
   dans les marges : côtés 16, bas 24, haut 8 px pour 14 de marge).
+- Seconde relecture : délai du double-clic plafonné à 1 s (`GetDoubleClickTime` peut
+  valoir 5 s ; test `delai_du_double_clic`) ; arguments des lancements de l'installateur
+  fixés (`ARGUMENTS_APP` : `--discret`, `ARGUMENTS_ESSAYER` : `--capturer zone`, test
+  `l_installateur_ne_lance_jamais_la_barre`).
 
 ### Non vérifié
 
@@ -1171,8 +1176,8 @@ Corrections de la relecture de la 0.7.2 :
   montrée, clic sur « Zone », sélection ouverte, Échap) n'a pas été joué ici.
 - Relecture : les essais Windows modifiés (`01-socle.ps1` : lancement discret sans barre,
   clic sur la barre, Échap, clic dans la marge, premier lancement à la main ;
-  `08-reglages-fenetre.ps1` : valeur `Run` avec `--discret` ; `09`, lancé par
-  `Demarrer-App`) n'ont pas été joués ici. Le double-clic réel sur l'icône épinglée, le
+  `08-reglages-fenetre.ps1` : valeur `Run` avec `--discret` ; `09` : app installée
+  lancée discrète, sans barre) n'ont pas été joués ici. Le double-clic réel sur l'icône épinglée, le
   second clic sur l'icône de la zone de notification dans WebView2, et la première
-  ouverture de session après la mise à jour : à l'utilisateur.
+  ouverture de session après une mise à jour : à l'utilisateur.
 

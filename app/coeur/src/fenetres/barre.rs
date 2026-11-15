@@ -128,12 +128,16 @@ pub fn largeur_estimee(o: &Ouverture) -> f64 {
     LARGEUR_BASE + pictos as f64 * LARGEUR_PICTO + 2.0 * LARGEUR_SEPARATEUR
 }
 
+/// Plafond du délai pendant lequel la barre ignore un clic ailleurs : `GetDoubleClickTime`
+/// peut aller jusqu'à 5 s, et la barre ne doit pas rester sourde aussi longtemps.
+pub const DOUBLE_CLIC_MAX: Duration = Duration::from_secs(1);
+
 /// Vrai si un clic ailleurs ou une perte du focus, `ecoule` après l'ouverture, tombe dans
-/// le délai du double-clic du système (`delai`) : il est ignoré. Un double-clic sur l'icône
-/// épinglée ouvre la barre au premier clic ; le second, sur la barre des tâches, ne doit
-/// pas la refermer. Fonction pure.
+/// le délai du double-clic du système (`delai`, plafonné à `DOUBLE_CLIC_MAX`) : il est
+/// ignoré. Un double-clic sur l'icône épinglée ouvre la barre au premier clic ; le second,
+/// sur la barre des tâches, ne doit pas la refermer. Fonction pure.
 pub fn dans_le_double_clic(ecoule: Duration, delai: Duration) -> bool {
-    ecoule < delai
+    ecoule < delai.min(DOUBLE_CLIC_MAX)
 }
 
 /// Vrai si la dernière ouverture date de moins que le délai du double-clic.
@@ -553,6 +557,15 @@ mod tests {
         assert!(dans_le_double_clic(Duration::from_millis(499), d));
         assert!(!dans_le_double_clic(Duration::from_millis(500), d));
         assert!(!dans_le_double_clic(Duration::from_secs(3), d));
+        // Plafonné à 1 s : le délai réglé au plus long dans Windows (5 s) n'y change rien.
+        assert_eq!(DOUBLE_CLIC_MAX, Duration::from_secs(1));
+        let long = Duration::from_secs(5);
+        assert!(dans_le_double_clic(Duration::from_millis(999), long));
+        assert!(!dans_le_double_clic(Duration::from_millis(1000), long));
+        assert!(!dans_le_double_clic(Duration::from_secs(3), long));
+        let pile = Duration::from_secs(1);
+        assert!(dans_le_double_clic(Duration::from_millis(999), pile));
+        assert!(!dans_le_double_clic(pile, pile));
     }
 
     #[test]

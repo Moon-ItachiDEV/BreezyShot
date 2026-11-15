@@ -533,6 +533,11 @@ try {
     foreach ($q in $procApp) { try { if ($q.Path -eq $exeInstalle) { $bonChemin = $true } } catch { } }
     Verifier 'app installée en cours, depuis l''exe installé' ($procApp.Count -ge 1 -and $bonChemin) | Out-Null
     Verifier 'app installée : journal « pret »' (Attendre-Ligne -Texte ' pret' -FinDeLigne -DelaiS 15) | Out-Null
+    # Lancée par l'installateur avec --discret (0.7.2) : aucune barre de capture par-dessus
+    # « BreezyShot est prêt ». « barre ouverte » suivrait « pret » de peu : attendre un peu.
+    Start-Sleep -Milliseconds 1000
+    Verifier 'app installée : lancée discrète (« lancement discret »)' ((Compter-Lignes -Texte 'lancement discret' -FinDeLigne) -eq 1) | Out-Null
+    Verifier 'app installée : aucune barre de capture' (((Compter-Lignes -Texte 'barre ouverte' -FinDeLigne) -eq 0) -and ((Compter-Lignes -Texte 'lancement a la main: barre de capture a pret') -eq 0)) | Out-Null
 
     # 8. « BreezyShot est prêt » visible, et ses deux boutons.
     Verifier-Texte -Texte 'BreezyShot est prêt' -Quoi 'écran « BreezyShot est prêt »' | Out-Null
