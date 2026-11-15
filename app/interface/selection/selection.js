@@ -11,7 +11,7 @@
 //
 // Contrat avec le cœur (fenetres/selection.rs) :
 // - écoute `selection:montrer` { id, numero, largeur, hauteur, ecrans: [{ x, y, largeur,
-//   hauteur }], cote_min, mode: "zone" | "fenetre" | "texte" | "defilante", fenetres: [{ x, y,
+//   hauteur }], cote_min, mode: "zone" | "fenetre" | "texte" | "defilante" | "film", fenetres: [{ x, y,
 //   largeur, hauteur, rayon }], souris: { x, y } | null, suite? } : tout en pixels réels entiers,
 //   relatifs au coin haut
 //   gauche de la fenêtre (une fenêtre proposée peut en déborder ; `mode` absent vaut "zone",
@@ -61,6 +61,10 @@
 //   aussitôt la page sous la pointe. Après l'envoi, la zone ou la page reste montrée (le
 //   cœur garde la fenêtre jusqu'à la fenêtre de contrôle) : filet FILET_DEFILANTE_MS.
 //   Nom : « Capture défilante : sélectionnez une zone ou une page ».
+// - Mode film (0.7, vidéo et GIF) : exactement le mode zone ; seul le nom change
+//   (« Enregistrer l'écran : sélectionnez une zone »). Après l'envoi, la zone reste montrée
+//   (le cœur garde la fenêtre jusqu'à la fenêtre de contrôle du film, 2 s au plus,
+//   `DELAI_PAGE` de application/film.rs) : filet FILET_FILM_MS.
 // - `selection_chargee` {} une fois, quand les écoutes sont en place.
 // Gestes : glisser du bouton gauche ; Maj tenue : carré ; Espace tenue : la zone se déplace ;
 // Échap ou clic droit : annuler. Une zone reste sur l'écran où le glisser a commencé.
@@ -117,6 +121,9 @@ const FILET_TEXTE_MS = FILET_MS + 500;
 // après la fin (D4, R1 : `DELAI_PAGE` de application/defilante.rs, qu'un test compare à
 // cette ligne) ; le filet ne doit pas rendre la page avant.
 const FILET_DEFILANTE_MS = FILET_MS + 2000;
+// Mode film : de même, la sélection reste jusqu'à la fenêtre de contrôle du film, 2 s au
+// plus après la fin (F5 du contrat 0.7, `DELAI_PAGE` de application/film.rs).
+const FILET_FILM_MS = FILET_MS + 2000;
 // Mode fenêtre.
 let mode = "zone";
 let fenetres = []; // { x, y, largeur, hauteur, rayon }, du premier plan vers le fond
@@ -182,7 +189,7 @@ function valider(m) {
   }
   if (!entier(m.cote_min) || m.cote_min < 0) return rejeter("cote_min invalide");
   const md = m.mode === undefined ? "zone" : m.mode;
-  if (md !== "zone" && md !== "fenetre" && md !== "texte" && md !== "defilante") return rejeter("mode inconnu");
+  if (md !== "zone" && md !== "fenetre" && md !== "texte" && md !== "defilante" && md !== "film") return rejeter("mode inconnu");
   if (m.suite !== undefined && typeof m.suite !== "boolean") return rejeter("suite invalide");
   const brutes = m.fenetres === undefined ? [] : m.fenetres;
   if (!Array.isArray(brutes)) return rejeter("fenetres invalides");
@@ -457,10 +464,12 @@ function poserZone(x0, y0, x1, y1) {
   corps.classList.add("glisse");
 }
 
-/** Le nom de la page : ceux des modes texte et défilante (les autres modes n'en ont pas). */
+/** Le nom de la page : ceux des modes texte, défilante et film (les autres modes n'en ont
+ *  pas). */
 const NOMS = {
   texte: "Copier le texte : sélectionnez une zone",
   defilante: "Capture défilante : sélectionnez une zone ou une page",
+  film: "Enregistrer l'écran : sélectionnez une zone",
 };
 function nommer() {
   if (NOMS[mode]) {
@@ -704,8 +713,8 @@ addEventListener(
       return;
     }
     // Rien n'est redessiné : le cœur cache la fenêtre (en mode défilante, il la garde
-    // jusqu'à la fenêtre de contrôle : la zone reste telle quelle).
-    const ms = mode === "defilante" ? FILET_DEFILANTE_MS : FILET_MS;
+    // jusqu'à la fenêtre de contrôle, comme en mode film : la zone reste telle quelle).
+    const ms = mode === "defilante" ? FILET_DEFILANTE_MS : mode === "film" ? FILET_FILM_MS : FILET_MS;
     envoyer("selection_terminee", { id, numero, depart: { x: a.x, y: a.y }, arrivee: { x: b.x, y: b.y } }, ms);
   },
   true,

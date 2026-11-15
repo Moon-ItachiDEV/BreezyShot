@@ -36,8 +36,17 @@ const LIGNES = [
   { id: '', libelle: '', raccourci: null, separateur: true },
   { id: 'quitter', libelle: 'Quitter BreezyShot', raccourci: null, separateur: false },
 ];
-const seps = LIGNES.filter(l => l.separateur).length;
-const HAUTEUR = CADRE + (LIGNES.length - seps) * LIGNE + seps * SEP;
+const hauteur = (lignes) => { const n = lignes.filter(l => l.separateur).length; return CADRE + (lignes.length - n) * LIGNE + n * SEP; };
+const HAUTEUR = hauteur(LIGNES);
+// Avec licence : le troisième groupe, Vidéo et GIF, entre deux séparateurs.
+const LIGNES_FILM = [
+  ...LIGNES.slice(0, 7),
+  { id: '', libelle: '', raccourci: null, separateur: true },
+  { id: 'capturer_video', libelle: 'Vidéo', raccourci: 'Ctrl + Maj + 6', separateur: false },
+  { id: 'capturer_gif', libelle: 'GIF', raccourci: 'Ctrl + Maj + 7', separateur: false },
+  { id: '', libelle: '', raccourci: null, separateur: true },
+  ...LIGNES.slice(8),
+];
 (async () => {
   await new Promise(ok => serveur.listen(0, ok));
   const base = `http://127.0.0.1:${serveur.address().port}/menu/menu.html?csp=1`;
@@ -46,7 +55,7 @@ const HAUTEUR = CADRE + (LIGNES.length - seps) * LIGNE + seps * SEP;
   let echecs = 0;
   const verifier = (ok, quoi, info = '') => { console.log(ok ? 'OK   ' : 'ECHEC', quoi, info); if (!ok) echecs++; };
   async function page(o = {}) {
-    const ctx = await nav.newContext({ viewport: { width: LARGEUR + 2 * MARGE, height: Math.round(HAUTEUR + 2 * MARGE) }, deviceScaleFactor: o.echelle || 1, colorScheme: o.sombre ? 'dark' : 'light' });
+    const ctx = await nav.newContext({ viewport: { width: LARGEUR + 2 * MARGE, height: Math.round(hauteur(o.lignes || LIGNES) + 2 * MARGE) }, deviceScaleFactor: o.echelle || 1, colorScheme: o.sombre ? 'dark' : 'light' });
     const p = await ctx.newPage();
     p.on('pageerror', e => erreurs.push(String(e)));
     p.on('console', m => { if (m.type() === 'error' || (m.type() === 'warning' && !o.bruitPermis)) erreurs.push(m.text()); });
@@ -62,7 +71,7 @@ const HAUTEUR = CADRE + (LIGNES.length - seps) * LIGNE + seps * SEP;
         event: { listen: (n, f) => { ecoutes[n] = f; return Promise.resolve(() => {}); } },
       };
       window.__emettre = (n, payload) => ecoutes[n]({ payload });
-    }, [LIGNES, o.refus || 0]);
+    }, [o.lignes || LIGNES, o.refus || 0]);
     await p.goto(base);
     await p.waitForTimeout(300);
     return p;
@@ -71,7 +80,7 @@ const HAUTEUR = CADRE + (LIGNES.length - seps) * LIGNE + seps * SEP;
 
   const p = await page();
   verifier((await appels(p, 'menu_pret')).length === 1, 'menu_pret une fois');
-  const vu = await p.evaluate(() => {
+  const mesurer = (q) => q.evaluate(() => {
     const m = document.getElementById('menu');
     const l = [...m.querySelectorAll('.ligne')];
     const r = m.getBoundingClientRect();
@@ -86,8 +95,10 @@ const HAUTEUR = CADRE + (LIGNES.length - seps) * LIGNE + seps * SEP;
       raccourciAligne: [...new Set(l.filter(b => b.querySelector('.raccourci')).map(b => Math.round(b.querySelector('.raccourci').getBoundingClientRect().right)))],
       engrenage: document.body.innerHTML.includes('gear'),
       defilantePointillee: !!m.querySelector('[data-id=capturer_defilante] svg path[stroke-dasharray]'),
+      ordre: [...m.children].map(e => e.getAttribute('role') === 'separator' ? '|' : e.dataset.id),
     };
   });
+  const vu = await mesurer(p);
   verifier(vu.lignes.length === 9 && vu.seps === 3, '9 lignes, 3 séparateurs', JSON.stringify(vu.lignes.map(x => x[0])));
   verifier(vu.lignes.every(x => x[3] === 'menuitem' && x[4]), 'chaque ligne : role menuitem et pictogramme');
   verifier(vu.lignes[4][0] === 'capturer_defilante' && vu.defilantePointillee, 'Capture défilante : cinquième, pictogramme au bas pointillé', JSON.stringify(vu.lignes.map(x => x[0])));
@@ -103,6 +114,30 @@ const HAUTEUR = CADRE + (LIGNES.length - seps) * LIGNE + seps * SEP;
       await q.waitForTimeout(200);
       await q.screenshot({ path: path.join(SORTIE, `menu-${nom}-${echelle}x.png`), omitBackground: true });
       await q.context().close();
+    }
+  }
+
+  {
+    // Avec licence : 11 lignes, 4 séparateurs ; Vidéo et GIF forment le troisième groupe.
+    const q = await page({ lignes: LIGNES_FILM });
+    const v = await mesurer(q);
+    verifier(v.lignes.length === 11 && v.seps === 4, 'avec licence : 11 lignes, 4 séparateurs', JSON.stringify(v.ordre));
+    const i = v.ordre.indexOf('capturer_video');
+    verifier(v.ordre[i - 1] === '|' && v.ordre[i + 1] === 'capturer_gif' && v.ordre[i + 2] === '|', 'Vidéo puis GIF, entre deux séparateurs', JSON.stringify(v.ordre));
+    verifier(v.lignes.every(x => x[3] === 'menuitem' && x[4]), 'avec licence : un pictogramme sur chaque ligne');
+    verifier(JSON.stringify(v.lignes.map(x => [x[1], x[2]])) === JSON.stringify(LIGNES_FILM.filter(l => !l.separateur).map(l => [l.libelle, l.raccourci])), 'Vidéo « Ctrl + Maj + 6 », GIF « Ctrl + Maj + 7 », tels quels');
+    const pictos = await q.evaluate(() => ['capturer_video', 'capturer_gif', 'capturer_zone'].map(id => document.querySelector(`[data-id=${id}] svg`).innerHTML));
+    verifier(new Set(pictos).size === 3, 'pictogrammes Vidéo et GIF propres, distincts de la zone');
+    const H = hauteur(LIGNES_FILM);
+    verifier(Math.abs(v.contenu - H) < 0.5, `avec licence : hauteur du contenu = celle du cœur (${H} px)`, String(v.contenu));
+    verifier(v.raccourciAligne.length === 1, 'avec licence : raccourcis alignés à droite', JSON.stringify(v.raccourciAligne));
+    await q.context().close();
+    for (const [nom, sombre] of [['clair', false], ['sombre', true]]) {
+      const r = await page({ sombre, echelle: 2, lignes: LIGNES_FILM });
+      await r.mouse.move(MARGE + 100, MARGE + 4 + LIGNE * 6 + SEP * 2 + 10);
+      await r.waitForTimeout(200);
+      await r.screenshot({ path: path.join(SORTIE, `menu-film-${nom}.png`), omitBackground: true });
+      await r.context().close();
     }
   }
 

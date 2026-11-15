@@ -127,6 +127,12 @@ pub fn decider(capture: Option<Vue<'_>>, arrivee: Arrivee<'_>) -> Geste {
                 SignalSelection::Zone { .. } | SignalSelection::Fenetre { .. }
                     if !signal_du_mode(signal, vue.mode) =>
                 {
+                    let choix = if matches!(signal, SignalSelection::Zone { .. }) {
+                        "zone"
+                    } else {
+                        "fenetre"
+                    };
+                    log::warn!("selection: {choix} hors du mode {}", vue.mode.nom());
                     abandon(Declencheur::SelectionImpossible, Some(Probleme::Selection))
                 }
                 SignalSelection::Zone {
@@ -170,10 +176,13 @@ pub fn ligne_zone_texte(zone: Rect) -> String {
 fn signal_du_mode(signal: &SignalSelection, mode: ModeSelection) -> bool {
     match signal {
         // Copier le texte trace une zone comme le mode zone ; la capture défilante (0.6)
-        // trace une zone ou clique sur une page proposée.
+        // trace une zone ou clique sur une page proposée ; un film (0.7) trace une zone.
         SignalSelection::Zone { .. } => matches!(
             mode,
-            ModeSelection::Zone | ModeSelection::Texte | ModeSelection::Defilante
+            ModeSelection::Zone
+                | ModeSelection::Texte
+                | ModeSelection::Defilante
+                | ModeSelection::Film
         ),
         SignalSelection::Fenetre { .. } => {
             matches!(mode, ModeSelection::Fenetre | ModeSelection::Defilante)
@@ -638,6 +647,37 @@ mod tests {
         };
         assert_eq!(
             decider(Some(sans_page), Arrivee::Selection(&clic)),
+            abandon(Declencheur::SelectionImpossible, Some(Probleme::Selection))
+        );
+    }
+
+    /// Un film (0.7) trace une zone : elle est filmée (`Decouper`, pris par
+    /// `geste_film::zone_choisie`), jamais refusée comme « hors du mode ». Un clic ne
+    /// désigne rien (la Sélection le refuse déjà, `clic en mode film`). Panne de la CI
+    /// 43651301507 : aucun film ne démarrait (`capture impossible: selection`).
+    #[test]
+    fn mode_film_trace_une_zone() {
+        let e = ecrans();
+        let film = Vue {
+            mode: ModeSelection::Film,
+            ..vue(Some(1), &e)
+        };
+        let zone = SignalSelection::Zone {
+            id: 1,
+            depart: (10, 20),
+            arrivee: (209, 69),
+        };
+        assert_eq!(
+            decider(Some(film), Arrivee::Selection(&zone)),
+            Geste::Decouper(r(10, 20, 200, 50))
+        );
+        let clic = SignalSelection::Fenetre {
+            id: 1,
+            indice: 0,
+            point: (5, 5),
+        };
+        assert_eq!(
+            decider(Some(film), Arrivee::Selection(&clic)),
             abandon(Declencheur::SelectionImpossible, Some(Probleme::Selection))
         );
     }

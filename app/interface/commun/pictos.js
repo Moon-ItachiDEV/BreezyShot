@@ -20,6 +20,12 @@ export const PICTOS = {
     "M3 6.5v-2A1.5 1.5 0 0 1 4.5 3h2M13.5 3h2A1.5 1.5 0 0 1 17 4.5v2M17 13.5v2a1.5 1.5 0 0 1-1.5 1.5h-2M6.5 17h-2A1.5 1.5 0 0 1 3 15.5v-2",
     "M7 7h6M10 7v6.5",
   ],
+  // Vidéo et GIF (0.7) : i-video et i-gif de design/capture.
+  capturer_video: ["rect 2.5 5 10.5 10 2", "M13 9l4.5-2.5v7L13 11z"],
+  capturer_gif: [
+    "rect 2.5 4.5 15 11 2",
+    "M8.2 8.3H6.6a.9.9 0 0 0-.9.9v1.6a.9.9 0 0 0 .9.9h1.6v-1.6H7.3M10.4 8.3v3.4M12.6 11.7V8.3h2M12.6 10h1.6",
+  ],
   historique: ["M3.2 10a6.8 6.8 0 1 0 2-4.8", "M3.2 3v3.4h3.4", "M10 6.5V10l2.5 1.6"],
   // Icône « Curseurs » (choix du 13/11/2026) : jamais d'engrenage.
   reglages: ["M3 6.5h5.5M13.5 6.5H17M3 13.5h2.5M10.5 13.5H17", "circle 11 6.5 2.2", "circle 8 13.5 2.2"],

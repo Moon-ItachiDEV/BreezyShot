@@ -68,6 +68,16 @@ pub(super) fn cause(erreur: &Error) -> String {
     }
 }
 
+/// Cause en clair d'une erreur du presse-papiers pour un fichier (un film) : les memes
+/// textes, sans le mot « image » (M9 de la relecture).
+pub(super) fn cause_fichier(erreur: &Error) -> String {
+    match erreur {
+        Error::ClipboardOccupied => CAUSE_OCCUPE.to_string(),
+        Error::ClipboardNotSupported => CAUSE_NON_DISPONIBLE.to_string(),
+        _ => "Le presse-papiers a refusé le fichier.".to_string(),
+    }
+}
+
 /// Cause en clair d'une erreur du presse-papiers natif, avec les memes textes.
 pub(super) fn cause_native(erreur: ErreurPressePapiers) -> String {
     match erreur {
@@ -160,6 +170,26 @@ pub(super) fn copier_transparent(
     }
 }
 
+/// Pose `chemin` dans le presse-papiers, en liste de fichiers (0.7, F23 : un film, prouvé
+/// par S6), avec les essais et l'échéance d'une image. Par l'objet gardé, le seul du
+/// processus : un second objet `arboard` ouvert à côté se disputerait le presse-papiers
+/// (sous X11, le dernier détruit emporte ce qu'il sert).
+pub(super) fn copier_fichier(chemin: &std::path::Path) -> Result<(), String> {
+    let mut garde = OUVERT.lock().unwrap_or_else(|e| e.into_inner());
+    let resultat = avec_echeance(ECHEANCE, Instant::now, thread::sleep, || {
+        ouvrir(&mut garde)?.set().file_list(&[chemin])
+    });
+    match resultat {
+        Ok(()) => Ok(()),
+        Err(e) => {
+            if !vaut_reessai(&e) {
+                *garde = None;
+            }
+            Err(cause_fichier(&e))
+        }
+    }
+}
+
 fn poser(garde: &mut Option<Clipboard>, image: ImageData<'_>) -> Result<(), Error> {
     ouvrir(garde)?.set_image(image)
 }
@@ -187,4 +217,11 @@ pub(super) fn sonder() -> Result<(), Error> {
 pub(super) fn relire() -> Result<ImageData<'static>, Error> {
     let mut garde = OUVERT.lock().unwrap_or_else(|e| e.into_inner());
     ouvrir(&mut garde)?.get_image()
+}
+
+/// Pour les tests : relit la liste de fichiers par l'objet garde.
+#[cfg(test)]
+pub(super) fn relire_fichiers() -> Result<Vec<std::path::PathBuf>, Error> {
+    let mut garde = OUVERT.lock().unwrap_or_else(|e| e.into_inner());
+    ouvrir(&mut garde)?.get().file_list()
 }

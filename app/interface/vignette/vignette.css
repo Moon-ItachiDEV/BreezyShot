@@ -419,3 +419,71 @@ button {
   animation-duration: 1ms !important;
   animation-delay: 0ms !important;
 }
+
+/* La carte d'un film (0.7, design/capture « vidéo et GIF ») : le rond de lecture au centre
+   de l'aperçu, la durée en bas à droite, effacée au survol. Sur l'image : les mêmes valeurs
+   dans les deux thèmes. */
+.film {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  aspect-ratio: var(--vignette-ratio);
+  pointer-events: none;
+  transition: opacity var(--duree-vignette-bouton) var(--courbe-douce);
+}
+.film .lecture {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  box-sizing: border-box;
+  width: var(--film-lecture);
+  height: var(--film-lecture);
+  margin: calc(var(--film-lecture) / -2) 0 0 calc(var(--film-lecture) / -2);
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: var(--film-lecture-fond);
+  -webkit-backdrop-filter: blur(var(--film-lecture-flou));
+  backdrop-filter: blur(var(--film-lecture-flou));
+  color: var(--film-sur-image);
+  transition: background var(--duree-survol) var(--courbe-douce);
+}
+.film button.lecture {
+  pointer-events: auto;
+}
+.film button.lecture:hover {
+  background: var(--film-lecture-fond-survol);
+}
+.film .lecture svg {
+  width: var(--film-lecture-icone);
+  height: var(--film-lecture-icone);
+  /* Le triangle est décalé vers la droite pour paraître centré (design : margin-left 2px). */
+  margin-left: calc(var(--film-lecture-icone) / 6);
+  fill: currentColor;
+  stroke: none;
+}
+.film .duree {
+  position: absolute;
+  right: var(--film-duree-vignette-bord);
+  bottom: var(--film-duree-vignette-bord);
+  padding: var(--film-duree-vignette-marge-haut) var(--film-duree-vignette-marge);
+  border-radius: var(--radius-pill);
+  background: var(--film-duree-vignette-fond);
+  color: var(--film-sur-image);
+  font-size: var(--film-duree-vignette-taille);
+  font-weight: 600;
+  line-height: var(--film-duree-vignette-interligne);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  transition: opacity var(--duree-survol) linear;
+}
+.carte.reveal .film .duree {
+  opacity: 0;
+}
+.carte.supprimee .film {
+  opacity: 0;
+}
+.carte.supprimee .film .lecture {
+  pointer-events: none;
+}

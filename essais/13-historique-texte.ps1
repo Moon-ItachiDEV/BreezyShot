@@ -1180,13 +1180,21 @@ public static uint Crc32(byte[] o) {
 
             # (2) Le menu avec la licence.
             Point '(2) menu avec la licence' {
+                # 0.7 : le groupe « Vidéo », « GIF » vient après celui de « Copier le texte » ; la
+                # vidéo n'y est qu'une fois la recherche du codeur finie (`video disponible`).
+                $video = Attendre-Motif -Motif 'video disponible: (oui|non)$' -Dossier $da -DelaiS 20 -Quoi '(2) recherche du codeur'
                 $m = Ouvrir-Menu '(2)'
                 $t = $m.Textes
                 # Piste A « Liste » : … séparateur, dernière zone, Capture défilante (0.6, avec
                 # la licence ; les réglages v3 du cas reçoivent son défaut Ctrl+Maj+5 à la mise
-                # à niveau), Copier le texte, séparateur, Historique, Réglages.
-                $ok = ($t.Count -ge 10) -and ($t[5] -ceq "Capture défilante`tCtrl + Maj + 5") -and ($t[6] -ceq "Copier le texte`tCtrl + Maj + T") -and ($t[7] -eq '') -and ($t[8] -ceq "Historique`tCtrl + Maj + H") -and ($t[9] -ceq 'Réglages')
-                Verifier '(2) « Capture défilante<tab>Ctrl + Maj + 5 » puis « Copier le texte<tab>Ctrl + Maj + T » après la dernière zone, séparateur, « Historique<tab>Ctrl + Maj + H » puis « Réglages »' $ok $m.Lus | Out-Null
+                # à niveau), Copier le texte, séparateur, [Vidéo,] GIF (0.7, défauts Ctrl+Maj+6
+                # et 7 reçus à la mise à niveau), séparateur, Historique, Réglages.
+                $films = if ($video -match 'oui$') { @("Vidéo`tCtrl + Maj + 6", "GIF`tCtrl + Maj + 7") } else { @("GIF`tCtrl + Maj + 7") }
+                $h = 8 + $films.Count
+                $ok = ($t.Count -ge ($h + 2)) -and ($t[5] -ceq "Capture défilante`tCtrl + Maj + 5") -and ($t[6] -ceq "Copier le texte`tCtrl + Maj + T") -and ($t[7] -eq '')
+                for ($i = 0; $i -lt $films.Count; $i++) { $ok = $ok -and ($t[8 + $i] -ceq $films[$i]) }
+                $ok = $ok -and ($t[$h] -eq '') -and ($t[$h + 1] -ceq "Historique`tCtrl + Maj + H") -and ($t[$h + 2] -ceq 'Réglages')
+                Verifier '(2) « Capture défilante<tab>Ctrl + Maj + 5 » puis « Copier le texte<tab>Ctrl + Maj + T » après la dernière zone, séparateur, le groupe des films, séparateur, « Historique<tab>Ctrl + Maj + H » puis « Réglages »' $ok "$($video -replace '^\S+\s+\S+\s+\S+\s+', '') ; $($m.Lus)" | Out-Null
                 $menus = Compter-Motif -Motif 'menu: ' -Dossier $da
                 Fermer-Menu $m '(2)'
                 Verifier '(2) Échap ferme le menu, aucune entrée choisie' ($script:FermeParEchap -and ((Compter-Motif -Motif 'menu: ' -Dossier $da) -eq $menus)) | Out-Null
@@ -1782,7 +1790,7 @@ public static uint Crc32(byte[] o) {
                 $f = Lire-Reglages $dc
                 $texte = @($f.raccourcis.texte)
                 $histo = @($f.raccourcis.historique)
-                Verifier '(C) fichier passé en v5 : historique Ctrl+Maj+H, texte vide (Ctrl+Maj+T déjà donné)' (($f.version -eq 5) -and ($texte.Count -eq 0) -and ($histo.Count -eq 1) -and ($histo[0] -eq 'Ctrl+Maj+H') -and ((Compter-Motif -Motif 'reglages mis a niveau de la version 3 a la version 5$' -Dossier $dc) -eq 1)) "version $($f.version), texte [$($texte -join ',')], historique [$($histo -join ',')]" | Out-Null
+                Verifier '(C) fichier passé en v6 : historique Ctrl+Maj+H, texte vide (Ctrl+Maj+T déjà donné)' (($f.version -eq 6) -and ($texte.Count -eq 0) -and ($histo.Count -eq 1) -and ($histo[0] -eq 'Ctrl+Maj+H') -and ((Compter-Motif -Motif 'reglages mis a niveau de la version 3 a la version 6$' -Dossier $dc) -eq 1)) "version $($f.version), texte [$($texte -join ',')], historique [$($histo -join ',')]" | Out-Null
                 Verifier '(C) raccourci texte: aucun' ($lt -match 'raccourci texte: aucun$') $lt | Out-Null
                 $o = Ouvrir-Historique $dc '(C)'
                 $c = Attendre-Cases $o.H 3 '(C)'

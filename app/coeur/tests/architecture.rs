@@ -6,7 +6,8 @@
 //!   que `systeme` ; `droits` n'utilise rien, et `droits::ouverte` n'est appelé que depuis
 //!   `application` (avenant 0.5, §2.2). `licence` (avenant « Licence ») n'utilise rien, et
 //!   `licence::verifier` n'est appelé que depuis `application`. `defilement` (0.6, assemblage
-//!   de la capture défilante) n'utilise que `systeme`.
+//!   de la capture défilante) n'utilise que `systeme`. `film` (0.7 : horloge, GIF, calage du
+//!   son) n'utilise que `systeme`.
 //!   `crate as …` et `super::super` sont interdits partout (ils contourneraient le contrôle).
 //! - Règle 3 : hors de `systeme/`, aucun `cfg` (attribut, `cfg_attr` ou
 //!   `cfg!`) qui parle du système, et aucune crate `windows`, sous quelque nom que ce soit.
@@ -30,6 +31,7 @@ const MODULES: &[&str] = &[
     "droits",
     "licence",
     "defilement",
+    "film",
 ];
 
 /// Dossiers où le code propre à un système est permis.
@@ -410,6 +412,16 @@ fn le_controle_repere_les_pieges() {
         (Some("systeme"), "use crate::defilement::Mesure;"),
         (Some("capture"), "use crate::defilement::Assemblage;"),
         (Some("defilement"), "fn f(){ crate::droits::ouverte(x); }"),
+        (Some("film"), "use crate::sortie::encoder_png;"),
+        (Some("film"), "fn f(){ crate::application::lancer(); }"),
+        (Some("film"), "#[cfg(windows)] fn f(){}"),
+        (
+            Some("film"),
+            "use ::windows::Win32::Media::MediaFoundation::MFStartup;",
+        ),
+        (Some("systeme"), "use crate::film::Horloge;"),
+        (Some("sortie"), "use crate::film::gif::Gif;"),
+        (Some("film"), "fn f(){ crate::droits::ouverte(x); }"),
     ];
     for (module, source) in fautes {
         assert!(
@@ -446,6 +458,12 @@ fn le_controle_repere_les_pieges() {
         (Some("licence"), "fn f(){ let _ = verifier(t); }"),
         (Some("defilement"), "use crate::systeme::gel::Pixels;"),
         (Some("application"), "use crate::defilement::{self, Mesure};"),
+        (Some("film"), "use crate::systeme::gel::Pixels;"),
+        (Some("application"), "use crate::film::{self, Horloge};"),
+        (
+            Some("application"),
+            "fn f(){ droits::ouverte(Fonction::Video, true); }",
+        ),
         (
             Some("application"),
             "fn f(){ droits::ouverte(Fonction::Defilante, true); }",

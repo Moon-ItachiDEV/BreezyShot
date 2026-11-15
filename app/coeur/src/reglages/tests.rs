@@ -82,7 +82,7 @@ fn assert_stable(d: &TempDir) {
 fn par_defaut_windows_suit_le_contrat() {
     let texte = texte_du_fichier(&Reglages::par_defaut(W)).unwrap();
     let attendu = json!({
-        "version": 5,
+        "version": 6,
         "raccourcis": {
             "zone": ["ImprEcran", "Ctrl+Maj+1"],
             "plein_ecran": ["Ctrl+Maj+2"],
@@ -90,7 +90,9 @@ fn par_defaut_windows_suit_le_contrat() {
             "derniere_zone": ["Ctrl+Maj+4"],
             "historique": ["Ctrl+Maj+H"],
             "texte": ["Ctrl+Maj+T"],
-            "defilante": ["Ctrl+Maj+5"]
+            "defilante": ["Ctrl+Maj+5"],
+            "video": ["Ctrl+Maj+6"],
+            "gif": ["Ctrl+Maj+7"]
         },
         "copier_apres_capture": true,
         "enregistrer_apres_capture": false,
@@ -115,7 +117,8 @@ fn par_defaut_mac_sans_impr_ecran() {
     let r = Reglages::par_defaut(Plateforme::Mac);
     for action in Raccourcis::ACTIONS {
         let c = r.raccourcis.candidats(action).unwrap();
-        assert!(!c.is_empty());
+        // Vidéo et GIF : aucun raccourci sur Mac (contrat 0.7, §7.1).
+        assert_eq!(c.is_empty(), matches!(action, "video" | "gif"), "{action}");
         assert!(c
             .iter()
             .all(|s| !s.contains("ImprEcran") && !s.contains("Ctrl")));
@@ -160,7 +163,7 @@ fn absent_cree_par_defaut_puis_stable() {
     assert_eq!(constats, vec![Constat::Cree { chemin: chemin(&d) }]);
     let texte = String::from_utf8(octets(&d)).unwrap();
     assert!(texte.ends_with("}\n"));
-    assert!(texte.contains("\n  \"version\": 5,"), "indenté");
+    assert!(texte.contains("\n  \"version\": 6,"), "indenté");
     assert!(
         texte.contains("BreezyShot {date} à {heure}"),
         "UTF-8 brut, pas \\u00e0"
@@ -790,7 +793,7 @@ fn selection_invalide() {
 #[test]
 fn selection_completee_par_la_mise_a_niveau() {
     let (d, r, c) = charger_json(json!({ "selection": { "zoom": 2 } }));
-    assert_eq!(c, vec![Constat::MisANiveau { de: 0, a: 5 }]);
+    assert_eq!(c, vec![Constat::MisANiveau { de: 0, a: 6 }]);
     assert!(!r.selection.loupe);
     assert_eq!(
         json_du_fichier(&d)["selection"],
@@ -798,7 +801,7 @@ fn selection_completee_par_la_mise_a_niveau() {
     );
     assert_stable(&d);
     let (_, r, c) = charger_json(json!({ "selection": { "loupe": true } }));
-    assert_eq!(c, vec![Constat::MisANiveau { de: 0, a: 5 }]);
+    assert_eq!(c, vec![Constat::MisANiveau { de: 0, a: 6 }]);
     assert!(r.selection.loupe);
 }
 
@@ -1010,14 +1013,14 @@ fn version_0_mise_a_niveau_sans_rien_effacer() {
         "raccourcis": { "zone": ["F9"] },
         "vieux": true
     }));
-    assert_eq!(c, vec![Constat::MisANiveau { de: 0, a: 5 }]);
+    assert_eq!(c, vec![Constat::MisANiveau { de: 0, a: 6 }]);
     assert_eq!(r.theme, Theme::Sombre);
     assert_eq!(r.vignette.duree_s, 10);
     assert!(r.vignette.afficher);
     assert_eq!(r.raccourcis.zone, vec!["F9".to_string()]);
     assert_eq!(r.raccourcis.fenetre, vec!["Ctrl+Maj+3".to_string()]);
     let f = json_du_fichier(&d);
-    assert_eq!(f["version"], json!(5));
+    assert_eq!(f["version"], json!(6));
     assert_eq!(f["vieux"], json!(true));
     assert_eq!(f["vignette"]["taille"], json!("grande"));
     assert_eq!(f["vignette"]["coin"], json!("bas_gauche"));
@@ -1027,7 +1030,7 @@ fn version_0_mise_a_niveau_sans_rien_effacer() {
 #[test]
 fn version_0_objet_vide() {
     let (d, r, c) = charger_json(json!({}));
-    assert_eq!(c, vec![Constat::MisANiveau { de: 0, a: 5 }]);
+    assert_eq!(c, vec![Constat::MisANiveau { de: 0, a: 6 }]);
     assert_eq!(r, Reglages::par_defaut(W));
     assert_stable(&d);
 }
@@ -1038,7 +1041,7 @@ fn version_0_avec_valeur_invalide() {
     assert_eq!(
         c,
         vec![
-            Constat::MisANiveau { de: 0, a: 5 },
+            Constat::MisANiveau { de: 0, a: 6 },
             remplacee("theme", Raison::Invalide)
         ]
     );
@@ -1053,11 +1056,11 @@ fn version_invalide_traitee_comme_0() {
             c,
             vec![
                 remplacee("version", Raison::Invalide),
-                Constat::MisANiveau { de: 0, a: 5 }
+                Constat::MisANiveau { de: 0, a: 6 }
             ],
             "{v}"
         );
-        assert_eq!(json_du_fichier(&d)["version"], json!(5));
+        assert_eq!(json_du_fichier(&d)["version"], json!(6));
         assert_stable(&d);
     }
 }
@@ -1066,7 +1069,7 @@ fn version_invalide_traitee_comme_0() {
 fn version_plus_recente_lue_sans_reecriture() {
     let d = dossier();
     let v = defaut_json(|m| {
-        m["version"] = json!(6);
+        m["version"] = json!(7);
         m["theme"] = json!("contraste");
         m.insert("nouveau".into(), json!([1]));
         m["copier_apres_capture"] = json!(false);
@@ -1081,17 +1084,17 @@ fn version_plus_recente_lue_sans_reecriture() {
             remplacee("theme", Raison::Invalide),
             Constat::CopieRallumee,
             Constat::VersionPlusRecente {
-                version: 6,
-                connue: 5
+                version: 7,
+                connue: 6
             },
         ]
     );
-    assert_eq!(r.version_fichier(), 6);
+    assert_eq!(r.version_fichier(), 7);
     assert!(r.copier_apres_capture, "copie rallumée en mémoire");
     assert_eq!(octets(&d), avant, "fichier non réécrit");
     assert!(matches!(
         ecrire(d.path(), &r),
-        Err(ErreurEcriture::VersionPlusRecente { version: 6 })
+        Err(ErreurEcriture::VersionPlusRecente { version: 7 })
     ));
     assert_eq!(octets(&d), avant);
 }
@@ -1101,7 +1104,7 @@ fn version_gigantesque_ou_decimale_plus_recente() {
     for (v, lue) in [
         (json!(4294967296u64), u32::MAX),
         (json!(1e30), u32::MAX),
-        (json!(6.0), 6),
+        (json!(7.0), 7),
     ] {
         let d = dossier();
         poser_json(
@@ -1117,7 +1120,7 @@ fn version_gigantesque_ou_decimale_plus_recente() {
             c,
             vec![Constat::VersionPlusRecente {
                 version: lue,
-                connue: 5
+                connue: 6
             }],
             "{v}"
         );
@@ -1128,11 +1131,11 @@ fn version_gigantesque_ou_decimale_plus_recente() {
 }
 
 #[test]
-fn version_5_0_lue_comme_5() {
-    let (d, r, c) = charger_json(defaut_json(|m| m["version"] = json!(5.0)));
+fn version_6_0_lue_comme_6() {
+    let (d, r, c) = charger_json(defaut_json(|m| m["version"] = json!(6.0)));
     assert_eq!(c, vec![]);
-    assert_eq!(r.version_fichier(), 5);
-    assert_eq!(json_du_fichier(&d)["version"], json!(5));
+    assert_eq!(r.version_fichier(), 6);
+    assert_eq!(json_du_fichier(&d)["version"], json!(6));
     assert_stable(&d);
 }
 
@@ -1278,7 +1281,7 @@ fn constats_lisibles_et_sans_accents() {
             chemin: PathBuf::from("a.json"),
         },
         Constat::LectureImpossible { erreur: "e".into() },
-        Constat::MisANiveau { de: 0, a: 5 },
+        Constat::MisANiveau { de: 0, a: 6 },
         remplacee("vignette.duree_s", Raison::Invalide),
         remplacee("theme", Raison::Absente),
         Constat::CopieRallumee,
@@ -1301,7 +1304,7 @@ fn constats_lisibles_et_sans_accents() {
     );
     assert_eq!(
         constats[5].to_string(),
-        "reglages mis a niveau de la version 0 a la version 5"
+        "reglages mis a niveau de la version 0 a la version 6"
     );
     assert!(ErreurEcriture::AucuneSortie.to_string().is_ascii());
 }
@@ -1311,18 +1314,18 @@ fn constats_lisibles_et_sans_accents() {
 /// Un fichier de version 1 passe en version 5 sans rien perdre ni changer d'autre ; sa
 /// durée « toujours » (0) n'existait pas en version 1 : elle y était invalide.
 #[test]
-fn version_1_mise_a_niveau_vers_5() {
+fn version_1_mise_a_niveau_vers_6() {
     let (d, r, c) = charger_json(defaut_json(|m| {
         m["version"] = json!(1);
         m["theme"] = json!("sombre");
         m["vignette"]["duree_s"] = json!(10);
         m.insert("inconnu".into(), json!({ "a": 1 }));
     }));
-    assert_eq!(c, vec![Constat::MisANiveau { de: 1, a: 5 }]);
+    assert_eq!(c, vec![Constat::MisANiveau { de: 1, a: 6 }]);
     assert_eq!(r.theme, Theme::Sombre);
     assert_eq!(r.vignette.duree_s, 10);
     let f = json_du_fichier(&d);
-    assert_eq!(f["version"], json!(5));
+    assert_eq!(f["version"], json!(6));
     assert_eq!(f["inconnu"], json!({ "a": 1 }));
     assert_stable(&d);
 }
@@ -1416,7 +1419,7 @@ fn fichier_v2_de_la_0_3() -> Value {
 #[test]
 fn defauts_de_la_version_3() {
     let r = Reglages::par_defaut(W);
-    assert_eq!(VERSION_ACTUELLE, 5);
+    assert_eq!(VERSION_ACTUELLE, 6);
     assert_eq!(r.capture, Capture::par_defaut());
     assert_eq!(r.capture.retardateur_s, 0);
     assert!(!r.capture.pointeur);
@@ -1436,7 +1439,9 @@ fn defauts_de_la_version_3() {
             "derniere_zone",
             "historique",
             "texte",
-            "defilante"
+            "defilante",
+            "video",
+            "gif"
         ]
     );
     assert_eq!(
@@ -1450,7 +1455,7 @@ fn defauts_de_la_version_3() {
 #[test]
 fn version_2_mise_a_niveau_vers_4() {
     let (d, r, c) = charger_json(fichier_v2_de_la_0_3());
-    assert_eq!(c, vec![Constat::MisANiveau { de: 2, a: 5 }]);
+    assert_eq!(c, vec![Constat::MisANiveau { de: 2, a: 6 }]);
     assert_eq!(r, Reglages::par_defaut(W));
     assert_eq!(
         octets(&d),
@@ -1466,12 +1471,12 @@ fn version_2_mise_a_niveau_vers_4() {
     v["selection"]["loupe"] = json!(true);
     v["futur"] = json!({ "a": 1 });
     let (d, r, c) = charger_json(v);
-    assert_eq!(c, vec![Constat::MisANiveau { de: 2, a: 5 }]);
+    assert_eq!(c, vec![Constat::MisANiveau { de: 2, a: 6 }]);
     assert_eq!(r.raccourcis.zone, ["F9"]);
     assert_eq!(r.vignette.duree_s, DUREE_TOUJOURS);
     assert!(r.selection.loupe);
     let f = json_du_fichier(&d);
-    assert_eq!(f["version"], json!(5));
+    assert_eq!(f["version"], json!(6));
     assert_eq!(f["futur"], json!({ "a": 1 }));
     assert_eq!(f["raccourcis"]["derniere_zone"], json!(["Ctrl+Maj+4"]));
     assert_eq!(
@@ -1484,11 +1489,11 @@ fn version_2_mise_a_niveau_vers_4() {
 #[test]
 fn version_0_mise_a_niveau_vers_4() {
     let (d, r, c) = charger_json(json!({ "raccourcis": { "zone": ["F9"] } }));
-    assert_eq!(c, vec![Constat::MisANiveau { de: 0, a: 5 }]);
+    assert_eq!(c, vec![Constat::MisANiveau { de: 0, a: 6 }]);
     assert_eq!(r.raccourcis.zone, ["F9"]);
     assert_eq!(r.raccourcis.derniere_zone, ["Ctrl+Maj+4"]);
     assert_eq!(r.capture, Capture::par_defaut());
-    assert_eq!(json_du_fichier(&d)["version"], json!(5));
+    assert_eq!(json_du_fichier(&d)["version"], json!(6));
     assert_stable(&d);
 }
 
@@ -1499,7 +1504,7 @@ fn derniere_zone_presente_gardee() {
         let mut v = fichier_v2_de_la_0_3();
         v["raccourcis"]["derniere_zone"] = garde.clone();
         let (d, r, c) = charger_json(v);
-        assert_eq!(c, vec![Constat::MisANiveau { de: 2, a: 5 }]);
+        assert_eq!(c, vec![Constat::MisANiveau { de: 2, a: 6 }]);
         assert_eq!(json!(r.raccourcis.derniere_zone), garde);
         assert_eq!(json_du_fichier(&d)["raccourcis"]["derniere_zone"], garde);
     }
@@ -1510,7 +1515,7 @@ fn derniere_zone_presente_gardee() {
     assert_eq!(
         c,
         vec![
-            Constat::MisANiveau { de: 2, a: 5 },
+            Constat::MisANiveau { de: 2, a: 6 },
             remplacee("raccourcis", Raison::Absente)
         ]
     );
@@ -1576,7 +1581,7 @@ fn capture_d_un_autre_type() {
     assert_eq!(
         c,
         vec![
-            Constat::MisANiveau { de: 2, a: 5 },
+            Constat::MisANiveau { de: 2, a: 6 },
             remplacee("capture", Raison::Invalide)
         ]
     );
@@ -1605,12 +1610,12 @@ fn capture_champ_inconnu_garde() {
 }
 
 #[test]
-fn version_6_non_reecrite() {
+fn version_7_non_reecrite() {
     let d = dossier();
     poser_json(
         &d,
         defaut_json(|m| {
-            m["version"] = json!(6);
+            m["version"] = json!(7);
             m["capture"]["retardateur_s"] = json!(30);
             m.insert("format".into(), json!("jpg"));
         }),
@@ -1622,8 +1627,8 @@ fn version_6_non_reecrite() {
         vec![
             remplacee("capture.retardateur_s", Raison::Invalide),
             Constat::VersionPlusRecente {
-                version: 6,
-                connue: 5
+                version: 7,
+                connue: 6
             },
         ]
     );
@@ -1693,9 +1698,9 @@ fn defauts_de_la_version_4() {
 /// Le fichier par défaut de la 0.4 devient, octet pour octet, celui de la 0.6 (les deux
 /// mises à niveau à la suite).
 #[test]
-fn version_3_mise_a_niveau_vers_5() {
+fn version_3_mise_a_niveau_vers_6() {
     let (d, r, c) = charger_json(fichier_v3_de_la_0_4());
-    assert_eq!(c, vec![Constat::MisANiveau { de: 3, a: 5 }]);
+    assert_eq!(c, vec![Constat::MisANiveau { de: 3, a: 6 }]);
     assert_eq!(r, Reglages::par_defaut(W));
     assert_eq!(
         octets(&d),
@@ -1728,7 +1733,7 @@ fn raccourci_deja_donne_non_repris() {
         let mut v = fichier_v3_de_la_0_4();
         v["raccourcis"][action] = json!(["F9", ecrite]);
         let (d, r, c) = charger_json(v);
-        assert_eq!(c, vec![Constat::MisANiveau { de: 3, a: 5 }], "{action}");
+        assert_eq!(c, vec![Constat::MisANiveau { de: 3, a: 6 }], "{action}");
         let libre = if prise == "texte" {
             "historique"
         } else {
@@ -1767,7 +1772,7 @@ fn historique_et_texte_presents_gardes() {
         v["raccourcis"]["historique"] = garde.clone();
         v["raccourcis"]["texte"] = garde.clone();
         let (d, r, c) = charger_json(v);
-        assert_eq!(c, vec![Constat::MisANiveau { de: 3, a: 5 }]);
+        assert_eq!(c, vec![Constat::MisANiveau { de: 3, a: 6 }]);
         assert_eq!(json!(r.raccourcis.historique), garde);
         assert_eq!(json!(r.raccourcis.texte), garde);
         assert_eq!(json_du_fichier(&d)["raccourcis"]["texte"], garde);
@@ -1778,7 +1783,7 @@ fn historique_et_texte_presents_gardes() {
     assert_eq!(
         c,
         vec![
-            Constat::MisANiveau { de: 3, a: 5 },
+            Constat::MisANiveau { de: 3, a: 6 },
             remplacee("raccourcis.texte", Raison::Invalide)
         ]
     );
@@ -1789,16 +1794,16 @@ fn historique_et_texte_presents_gardes() {
     assert_eq!(
         c,
         vec![
-            Constat::MisANiveau { de: 3, a: 5 },
+            Constat::MisANiveau { de: 3, a: 6 },
             remplacee("raccourcis", Raison::Absente)
         ]
     );
     assert_eq!(r.raccourcis, Raccourcis::par_defaut(W));
 }
 
-/// Un fichier à jour (v5) est lu sans constat ni réécriture.
+/// Un fichier à jour (v6) est lu sans constat ni réécriture.
 #[test]
-fn version_5_relue_telle_quelle() {
+fn version_6_relue_telle_quelle() {
     let (d, r, c) = charger_json(defaut_json(|m| {
         m["raccourcis"]["texte"] = json!([]);
         m["raccourcis"]["historique"] = json!(["F8"]);
@@ -1879,17 +1884,17 @@ fn fichier_v4_de_la_0_5() -> Value {
 /// Un fichier de la 0.4 où `Ctrl+Maj+5` est déjà donné passe par les deux mises à niveau :
 /// historique et texte reçoivent leur défaut, la défilante une liste vide.
 #[test]
-fn version_3_avec_ctrl_maj_5_pris_vers_5() {
+fn version_3_avec_ctrl_maj_5_pris_vers_6() {
     let mut v = fichier_v3_de_la_0_4();
     v["raccourcis"]["fenetre"] = json!(["Ctrl+Maj+5"]);
     let (d, r, c) = charger_json(v);
-    assert_eq!(c, vec![Constat::MisANiveau { de: 3, a: 5 }]);
+    assert_eq!(c, vec![Constat::MisANiveau { de: 3, a: 6 }]);
     assert_eq!(r.raccourcis.fenetre, ["Ctrl+Maj+5"]);
     assert_eq!(r.raccourcis.historique, ["Ctrl+Maj+H"]);
     assert_eq!(r.raccourcis.texte, ["Ctrl+Maj+T"]);
     assert!(r.raccourcis.defilante.is_empty());
     let f = json_du_fichier(&d);
-    assert_eq!(f["version"], json!(5));
+    assert_eq!(f["version"], json!(6));
     assert_eq!(f["raccourcis"]["defilante"], json!([]));
     assert_stable(&d);
 }
@@ -1899,7 +1904,7 @@ fn defauts_de_la_version_5() {
     let w = Raccourcis::par_defaut(W);
     assert_eq!(w.defilante, ["Ctrl+Maj+5"]);
     assert_eq!(w.candidats("defilante"), Some(&w.defilante[..]));
-    assert_eq!(Raccourcis::ACTIONS.last(), Some(&"defilante"));
+    assert_eq!(Raccourcis::ACTIONS[6], "defilante");
     // Mac : ni Cmd+Maj+3, 4, 5 (ceux de macOS), ni une touche d'une autre action.
     let m = Raccourcis::par_defaut(Plateforme::Mac);
     assert_eq!(m.defilante, ["Cmd+Maj+0"]);
@@ -1920,12 +1925,12 @@ fn defauts_de_la_version_5() {
     );
 }
 
-/// Le fichier par défaut de la 0.5 devient, octet pour octet, celui de la 0.6 : une clé de
-/// plus, à la fin des raccourcis, une ligne d'info.
+/// Le fichier par défaut de la 0.5 devient, octet pour octet, celui de la 0.7 : trois clés
+/// de plus (défilante, vidéo, GIF), à la fin des raccourcis, une ligne d'info.
 #[test]
-fn version_4_mise_a_niveau_vers_5() {
+fn version_4_mise_a_niveau_vers_6() {
     let (d, r, c) = charger_json(fichier_v4_de_la_0_5());
-    assert_eq!(c, vec![Constat::MisANiveau { de: 4, a: 5 }]);
+    assert_eq!(c, vec![Constat::MisANiveau { de: 4, a: 6 }]);
     assert_eq!(r, Reglages::par_defaut(W));
     assert_eq!(
         octets(&d),
@@ -1943,7 +1948,7 @@ fn version_4_mise_a_niveau_vers_5() {
     let d = dossier();
     poser_json(&d, v);
     let (r, c) = charger(d.path(), Plateforme::Mac);
-    assert_eq!(c, vec![Constat::MisANiveau { de: 4, a: 5 }]);
+    assert_eq!(c, vec![Constat::MisANiveau { de: 4, a: 6 }]);
     assert_eq!(r.raccourcis.defilante, ["Cmd+Maj+0"]);
 }
 
@@ -1960,7 +1965,7 @@ fn defilante_deja_donne_liste_vide() {
         let mut v = fichier_v4_de_la_0_5();
         v["raccourcis"][action] = json!(["F9", ecrite]);
         let (d, r, c) = charger_json(v);
-        assert_eq!(c, vec![Constat::MisANiveau { de: 4, a: 5 }], "{action}");
+        assert_eq!(c, vec![Constat::MisANiveau { de: 4, a: 6 }], "{action}");
         assert!(r.raccourcis.defilante.is_empty(), "{action}");
         let f = json_du_fichier(&d);
         assert_eq!(f["raccourcis"]["defilante"], json!([]), "{action}");
@@ -1989,7 +1994,7 @@ fn defilante_presente_gardee_objet_absent_non_cree() {
         let mut v = fichier_v4_de_la_0_5();
         v["raccourcis"]["defilante"] = garde.clone();
         let (d, r, c) = charger_json(v);
-        assert_eq!(c, vec![Constat::MisANiveau { de: 4, a: 5 }]);
+        assert_eq!(c, vec![Constat::MisANiveau { de: 4, a: 6 }]);
         assert_eq!(json!(r.raccourcis.defilante), garde);
         assert_eq!(json_du_fichier(&d)["raccourcis"]["defilante"], garde);
     }
@@ -1999,7 +2004,7 @@ fn defilante_presente_gardee_objet_absent_non_cree() {
     assert_eq!(
         c,
         vec![
-            Constat::MisANiveau { de: 4, a: 5 },
+            Constat::MisANiveau { de: 4, a: 6 },
             remplacee("raccourcis.defilante", Raison::Invalide)
         ]
     );
@@ -2014,7 +2019,7 @@ fn defilante_presente_gardee_objet_absent_non_cree() {
     assert_eq!(
         c,
         vec![
-            Constat::MisANiveau { de: 4, a: 5 },
+            Constat::MisANiveau { de: 4, a: 6 },
             remplacee("raccourcis", Raison::Absente)
         ]
     );
@@ -2023,5 +2028,135 @@ fn defilante_presente_gardee_objet_absent_non_cree() {
     let mut m = Map::new();
     m.insert("raccourcis".into(), json!([1]));
     super::lecture::MISES_A_NIVEAU[4](&mut m, W);
+    assert_eq!(m["raccourcis"], json!([1]));
+}
+
+// ---------- Version 6 (0.7) ----------
+
+/// Le fichier par défaut de la 0.6 (version 5), tel qu'elle l'écrit.
+fn fichier_v5_de_la_0_6() -> Value {
+    let mut v = fichier_v4_de_la_0_5();
+    v["version"] = json!(5);
+    v["raccourcis"]["defilante"] = json!(["Ctrl+Maj+5"]);
+    v
+}
+
+#[test]
+fn defauts_de_la_version_6() {
+    let w = Raccourcis::par_defaut(W);
+    assert_eq!(w.video, ["Ctrl+Maj+6"]);
+    assert_eq!(w.gif, ["Ctrl+Maj+7"]);
+    assert_eq!(w.candidats("video"), Some(&w.video[..]));
+    assert_eq!(w.candidats("gif"), Some(&w.gif[..]));
+    assert_eq!(&Raccourcis::ACTIONS[7..], ["video", "gif"]);
+    // Mac : deux listes vides (fonction absente, chiffres libres déjà pris).
+    let m = Raccourcis::par_defaut(Plateforme::Mac);
+    assert!(m.video.is_empty() && m.gif.is_empty());
+    assert_eq!(Raccourcis::par_defaut(Plateforme::Autre), w);
+    // Aucune autre action n'a ces touches.
+    for action in Raccourcis::ACTIONS {
+        if action != "video" && action != "gif" {
+            let c = w.candidats(action).unwrap();
+            assert!(
+                !c.contains(&w.video[0]) && !c.contains(&w.gif[0]),
+                "{action}"
+            );
+        }
+    }
+}
+
+/// Le fichier par défaut de la 0.6 devient, octet pour octet, celui de la 0.7 : deux clés
+/// de plus, à la fin des raccourcis, une ligne d'info. Rien d'autre ne change.
+#[test]
+fn version_5_mise_a_niveau_vers_6() {
+    let (d, r, c) = charger_json(fichier_v5_de_la_0_6());
+    assert_eq!(c, vec![Constat::MisANiveau { de: 5, a: 6 }]);
+    assert_eq!(r, Reglages::par_defaut(W));
+    assert_eq!(
+        octets(&d),
+        texte_du_fichier(&Reglages::par_defaut(W))
+            .unwrap()
+            .into_bytes()
+    );
+    let f = json_du_fichier(&d);
+    let cles: Vec<&String> = f["raccourcis"].as_object().unwrap().keys().collect();
+    assert_eq!(cles, Raccourcis::ACTIONS);
+    assert_stable(&d);
+    // Sur Mac, deux listes vides.
+    let mut v = fichier_v5_de_la_0_6();
+    v["raccourcis"]["zone"] = json!(["Cmd+Maj+1"]);
+    let d = dossier();
+    poser_json(&d, v);
+    let (r, c) = charger(d.path(), Plateforme::Mac);
+    assert_eq!(c, vec![Constat::MisANiveau { de: 5, a: 6 }]);
+    assert!(r.raccourcis.video.is_empty() && r.raccourcis.gif.is_empty());
+    assert_eq!(json_du_fichier(&d)["raccourcis"]["video"], json!([]));
+}
+
+/// `Ctrl+Maj+6` (ou `Ctrl+Maj+7`) déjà donné à une autre action, connue ou non,
+/// autrement écrit : la vidéo (ou le GIF) reçoit une liste vide, l'autre garde le sien.
+#[test]
+fn video_et_gif_deja_donnes_liste_vide() {
+    for (action, ecrite, vide) in [
+        ("fenetre", "Ctrl+Maj+6", "video"),
+        ("texte", " maj + CTRL+6 ", "video"),
+        ("defilante", "Ctrl+Maj+7", "gif"),
+        ("epingle", "Ctrl. + Maj + 7", "gif"),
+    ] {
+        let mut v = fichier_v5_de_la_0_6();
+        v["raccourcis"][action] = json!(["F9", ecrite]);
+        let (d, r, c) = charger_json(v);
+        assert_eq!(c, vec![Constat::MisANiveau { de: 5, a: 6 }], "{action}");
+        let plein = if vide == "video" { "gif" } else { "video" };
+        assert!(r.raccourcis.candidats(vide).unwrap().is_empty(), "{action}");
+        assert_eq!(
+            r.raccourcis.candidats(plein),
+            Raccourcis::par_defaut(W).candidats(plein),
+            "{action}"
+        );
+        let f = json_du_fichier(&d);
+        assert_eq!(f["raccourcis"][vide], json!([]), "{action}");
+        assert_eq!(f["raccourcis"][action], json!(["F9", ecrite]), "{action}");
+        assert_stable(&d);
+    }
+    // Un raccourci voisin n'est pas le même.
+    let mut v = fichier_v5_de_la_0_6();
+    v["raccourcis"]["zone"] = json!(["Ctrl+Alt+6", "Ctrl+7", "Ctrl+Maj+8"]);
+    let (_, r, _) = charger_json(v);
+    assert_eq!(r.raccourcis.video, ["Ctrl+Maj+6"]);
+    assert_eq!(r.raccourcis.gif, ["Ctrl+Maj+7"]);
+}
+
+/// Une vidéo ou un GIF déjà là (même vide) est gardé ; un objet `raccourcis` absent n'est
+/// pas créé.
+#[test]
+fn video_et_gif_presents_gardes_objet_absent_non_cree() {
+    for garde in [json!(["Ctrl+Alt+V"]), json!([])] {
+        let mut v = fichier_v5_de_la_0_6();
+        v["raccourcis"]["video"] = garde.clone();
+        v["raccourcis"]["gif"] = garde.clone();
+        let (d, r, c) = charger_json(v);
+        assert_eq!(c, vec![Constat::MisANiveau { de: 5, a: 6 }]);
+        assert_eq!(json!(r.raccourcis.video), garde);
+        assert_eq!(json!(r.raccourcis.gif), garde);
+        assert_eq!(json_du_fichier(&d)["raccourcis"]["gif"], garde);
+    }
+    let mut v = fichier_v5_de_la_0_6();
+    v.as_object_mut().unwrap().shift_remove("raccourcis");
+    let mut m = v.as_object().unwrap().clone();
+    super::lecture::MISES_A_NIVEAU[5](&mut m, W);
+    assert!(!m.contains_key("raccourcis"));
+    let (_, r, c) = charger_json(v);
+    assert_eq!(
+        c,
+        vec![
+            Constat::MisANiveau { de: 5, a: 6 },
+            remplacee("raccourcis", Raison::Absente)
+        ]
+    );
+    assert_eq!(r.raccourcis, Raccourcis::par_defaut(W));
+    let mut m = Map::new();
+    m.insert("raccourcis".into(), json!([1]));
+    super::lecture::MISES_A_NIVEAU[5](&mut m, W);
     assert_eq!(m["raccourcis"], json!([1]));
 }

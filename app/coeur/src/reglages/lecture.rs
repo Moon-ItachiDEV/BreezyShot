@@ -14,10 +14,11 @@ use super::modele::{
 /// le numéro de version est tenu par `interpreter`, pas par elle.
 pub(super) type MiseANiveau = fn(&mut Map<String, Value>, Plateforme);
 
-/// `MISES_A_NIVEAU[n]` fait passer de la version `n` à `n + 1`. Pour une version 6 un jour :
-/// ajouter `v5_vers_v6` à la fin, et `VERSION_ACTUELLE` passe à 6 tout seul.
-pub(super) const MISES_A_NIVEAU: &[MiseANiveau] =
-    &[v0_vers_v1, v1_vers_v2, v2_vers_v3, v3_vers_v4, v4_vers_v5];
+/// `MISES_A_NIVEAU[n]` fait passer de la version `n` à `n + 1`. Pour une version 7 un jour :
+/// ajouter `v6_vers_v7` à la fin, et `VERSION_ACTUELLE` passe à 7 tout seul.
+pub(super) const MISES_A_NIVEAU: &[MiseANiveau] = &[
+    v0_vers_v1, v1_vers_v2, v2_vers_v3, v3_vers_v4, v4_vers_v5, v5_vers_v6,
+];
 
 /// Version 0 (aucun champ `version`) vers 1 : ajoute les champs de la version 1 qui manquent,
 /// y compris dans les sous-objets, sans toucher à ceux qui sont là (même invalides : la
@@ -87,6 +88,19 @@ fn v4_vers_v5(objet: &mut Map<String, Value>, plateforme: Plateforme) {
     };
     let r = Raccourcis::par_defaut(plateforme);
     ajouter_action(raccourcis, "defilante", &r.defilante);
+}
+
+/// Version 5 vers 6 (0.7) : les raccourcis de la vidéo puis du GIF, avec la même règle que
+/// `v3_vers_v4` (défaut seulement s'il n'est pas déjà donné, action déjà là gardée, objet
+/// `raccourcis` absent non créé). Écrit aussi sans licence : invisible.
+fn v5_vers_v6(objet: &mut Map<String, Value>, plateforme: Plateforme) {
+    let Some(Value::Object(raccourcis)) = objet.get_mut("raccourcis") else {
+        return;
+    };
+    let r = Raccourcis::par_defaut(plateforme);
+    for (action, defaut) in [("video", &r.video), ("gif", &r.gif)] {
+        ajouter_action(raccourcis, action, defaut);
+    }
 }
 
 /// Ajoute `action` si elle manque : son défaut, ou une liste vide si l'un de ses candidats

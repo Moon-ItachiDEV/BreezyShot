@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-film-action"
+description = "Enables the film_action command without any pre-configured scope."
+commands.allow = ["film_action"]
+
+[[permission]]
+identifier = "deny-film-action"
+description = "Denies the film_action command without any pre-configured scope."
+commands.deny = ["film_action"]

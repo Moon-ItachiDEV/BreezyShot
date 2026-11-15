@@ -193,6 +193,32 @@ public static extern IntPtr GetWindowLongPtr(IntPtr h, int index);
             return (Get-Content -LiteralPath $f -Raw).Trim()
         }
 
+        # Le témoin du clic « à côté de la pilule » (temoin.ps1, une couleur loin du fond de la
+        # pilule) : posé avant l'app, sous le futur bandeau (centré en haut de l'écran), pour
+        # que ce clic traverse le bord transparent du bandeau et tombe sur une fenêtre de
+        # l'essai, jamais sur une fenêtre étrangère (la console de l'exécuteur, par exemple).
+        function Lancer-Temoin-Cote {
+            Add-Type -AssemblyName System.Windows.Forms
+            $ecran = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+            $cote = 300
+            $x = [int]($ecran.X + $ecran.Width / 2 - $cote); $y = [int]$ecran.Y
+            $f = Join-Path $script:Essai.Dossier ("temoin-cote-" + [guid]::NewGuid().ToString('N').Substring(0, 6) + '.txt')
+            # Sans -WindowStyle Hidden (appliqué sinon au témoin lui-même) : -CacherConsole.
+            $aide = Start-Process -FilePath $script:Pwsh -PassThru -ArgumentList @(
+                '-NoProfile', '-File', (Join-Path $PSScriptRoot 'temoin.ps1'),
+                '-X', $x, '-Y', $y, '-Cote', $cote, '-Couleurs', '40,90,160;40,90,160;40,90,160;40,90,160', '-Fichier', $f, '-CacherConsole')
+            $script:Auxiliaires.Add($aide)
+            $limite = [DateTime]::UtcNow.AddSeconds(30)
+            while (-not (Test-Path -LiteralPath $f)) {
+                if ([DateTime]::UtcNow -ge $limite -or $aide.HasExited) { Write-Host "témoin du clic à côté : aucun HWND (sorti : $($aide.HasExited))"; return $null }
+                Start-Sleep -Milliseconds 100
+            }
+            Start-Sleep -Milliseconds 500   # montré, console cachée
+            $h = [IntPtr][long](Get-Content -LiteralPath $f -Raw).Trim()
+            Write-Host "témoin du clic à côté : $x,$y ${cote}x$cote, fenêtre $h, processus $($aide.Id)"
+            return [pscustomobject]@{ Hwnd = $h; Aide = $aide }
+        }
+
         function Fermer-Auxiliaires {
             foreach ($a in $script:Auxiliaires) {
                 try { if (-not $a.HasExited) { $a.Kill(); $null = $a.WaitForExit(5000) } } catch { }
@@ -309,6 +335,7 @@ public static extern IntPtr GetWindowLongPtr(IntPtr h, int index);
             # (b) Impr. écran réservée par Windows, puis (d) clics, puis relance.
             Poser-Valeur 1
             $db = Dossier-Cas 'b'
+            $temoinCote = Lancer-Temoin-Cote
             $p = Demarrer-Cas -Dossier $db -Quoi '(b)'
             Verifier '(b) raccourci zone: Ctrl+Maj+1' ((Compter-Lignes -Texte 'raccourci zone: Ctrl+Maj+1' -Dossier $db) -eq 1) | Out-Null
             Verifier '(b) annonce (raison : réservée par Windows)' ((Compter-Lignes -Texte 'annonce raccourci: reserve_par_le_systeme' -Dossier $db) -eq 1) | Out-Null
@@ -328,16 +355,40 @@ public static extern IntPtr GetWindowLongPtr(IntPtr h, int index);
             $croixY = [int]($zy + $zh / 2)
             $cote = [int]($zx - 20 * $e)
             Write-Host "pilule $zx,$zy ${zl}x$zh echelle $e ; croix $croixX,$croixY ; à côté $cote,$croixY ; bandeau $hwnd"
+            # Le bandeau doit être au-dessus du témoin (montré après lui) : sur la pilule, au-dessus
+            # du témoin, la fenêtre sous la souris est le bandeau. Sinon le clic à côté ne
+            # traverserait pas son bord : il n'est pas joué.
+            $bandeauDessus = $false
+            if ($null -ne $temoinCote) {
+                $gx = [int]($zx + 8 * $e)
+                [BreezyShotEssai.Entree]::Placer($gx, $croixY)
+                $sousG = [BreezyShotEssai.Entree]::RacineSous($gx, $croixY)
+                $bandeauDessus = ($sousG -eq $hwnd)
+                Write-Host "(d) sur la pilule au-dessus du témoin ($gx,$croixY) : $((Fenetre-Visee $gx $croixY).Texte)"
+            }
             [BreezyShotEssai.Entree]::Placer($cote, $croixY)
             $sousCote = [BreezyShotEssai.Entree]::RacineSous($cote, $croixY)
             Verifier '(d) à côté de la pilule, la fenêtre sous la souris n''est pas le bandeau' ($sousCote -ne $hwnd) "sous la souris $sousCote" | Out-Null
-            [BreezyShotEssai.Entree]::Cliquer()
-            Start-Sleep -Milliseconds 700
-            Verifier '(d) clic à côté de la pilule : aucune bandeau action' ((Compter-Lignes -Texte 'bandeau action' -Dossier $db) -eq 0) | Out-Null
+            # Le clic ne part que sur le témoin posé là (le bord transparent du bandeau
+            # traversé) ou sur le bureau ; une fenêtre étrangère : « non joué », sans clic.
+            $vise = Fenetre-Visee $cote $croixY
+            Write-Host "(d) à côté de la pilule ($cote,$croixY) : $($vise.Texte)"
+            $surTemoin = ($null -ne $temoinCote) -and ($vise.Hwnd -eq $temoinCote.Hwnd) -and $bandeauDessus
+            if ($surTemoin -or (Visee-Permise $vise @() -Bureau)) {
+                [BreezyShotEssai.Entree]::Cliquer()
+                Start-Sleep -Milliseconds 700
+                Verifier "(d) clic à côté de la pilule ($(if ($surTemoin) { 'sur le témoin, à travers le bord du bandeau' } else { 'sur le bureau' })) : aucune bandeau action" ((Compter-Lignes -Texte 'bandeau action' -Dossier $db) -eq 0) $vise.Texte | Out-Null
+            }
+            else {
+                $pourquoi = if (($null -ne $temoinCote) -and ($vise.Hwnd -eq $temoinCote.Hwnd)) { 'le témoin est au-dessus du bandeau' } else { 'fenêtre étrangère sous le point' }
+                Write-Host "[saute] (d) clic à côté de la pilule : $pourquoi, aucun clic envoyé ($($vise.Texte))"
+                Noter-Mesure -Nom '(d) clic à côté de la pilule' -Valeur "non joué : $pourquoi, $($vise.Texte)"
+            }
             $premierPlanAvant = [BreezyShotEssai.Entree]::GetForegroundWindow()
             [BreezyShotEssai.Entree]::Placer($croixX, $croixY)
             $sousCroix = [BreezyShotEssai.Entree]::RacineSous($croixX, $croixY)
             Verifier '(d) sur la croix, la fenêtre sous la souris est le bandeau' ($sousCroix -eq $hwnd) "sous la souris $sousCroix" | Out-Null
+            $null = Garder-Clic $croixX $croixY '(d) clic sur la croix'
             [BreezyShotEssai.Entree]::Cliquer()
             $null = Attendre-Motif -Motif "bandeau action $($info.Id) fermer$" -Dossier $db -DelaiS 5 -Quoi '(d) clic sur la croix'
             Verifier '(d) bandeau action <id> fermer' $true | Out-Null
@@ -348,6 +399,7 @@ public static extern IntPtr GetWindowLongPtr(IntPtr h, int index);
             Verifier '(b) annonce retenue une fois montrée' ((Compter-Lignes -Texte "annonce montree $($info.Id): situation retenue" -Dossier $db) -eq 1) | Out-Null
             $premierPlanApres = [BreezyShotEssai.Entree]::GetForegroundWindow()
             Verifier '(d) fenêtre au premier plan inchangée' ($premierPlanAvant -eq $premierPlanApres) "avant $premierPlanAvant, après $premierPlanApres" | Out-Null
+            if ($null -ne $temoinCote) { try { $temoinCote.Aide.Kill(); $null = $temoinCote.Aide.WaitForExit(5000) } catch { } }
             # (b) Appui sur Ctrl+Maj+1.
             [BreezyShotEssai.Entree]::Touches($CTRL_MAJ_1)
             $null = Attendre-Motif -Motif 'raccourci presse: zone$' -Dossier $db -DelaiS 5 -Quoi '(b) appui sur Ctrl+Maj+1'
