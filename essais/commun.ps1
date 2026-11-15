@@ -190,6 +190,91 @@ function Memoire-Privee-Mo {
     return [math]::Round($total / 1MB, 1)
 }
 
+# --- Garde des clics réels (Windows) ---------------------------------------------------
+# Un clic réel ne part que si la fenêtre de premier niveau sous le point (celle qui le
+# recevrait) est à l'app ou à une aide de l'essai (témoin, cible) : jamais sur une fenêtre
+# étrangère de la machine. Une console n'est jamais une cible : la croix de celle de
+# l'exécuteur GitHub lui enverrait CTRL_CLOSE_EVENT (course coupée, « shutdown signal »).
+function Initialiser-Garde {
+    if ('BreezyShotEssai.Garde' -as [type]) { return }
+    Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+namespace BreezyShotEssai {
+public static class Garde {
+    [StructLayout(LayoutKind.Sequential)] public struct POINT { public int X; public int Y; }
+    [DllImport("user32.dll")] static extern IntPtr WindowFromPoint(POINT p);
+    [DllImport("user32.dll")] static extern IntPtr GetAncestor(IntPtr h, uint f);
+    [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetClassName(IntPtr h, System.Text.StringBuilder s, int n);
+    [DllImport("user32.dll")] static extern bool SetCursorPos(int x, int y);
+    [DllImport("user32.dll")] static extern void mouse_event(uint f, int x, int y, uint d, UIntPtr e);
+    [DllImport("user32.dll")] public static extern bool SetProcessDpiAwarenessContext(IntPtr c);
+    // La fenêtre de premier niveau sous le point (GA_ROOT) : celle qui recevrait le clic.
+    public static IntPtr Racine(int x, int y) {
+        var p = new POINT(); p.X = x; p.Y = y;
+        IntPtr h = WindowFromPoint(p);
+        return h == IntPtr.Zero ? IntPtr.Zero : GetAncestor(h, 2);
+    }
+    public static string Classe(IntPtr h) {
+        var s = new System.Text.StringBuilder(256);
+        GetClassName(h, s, s.Capacity);
+        return s.ToString();
+    }
+    public static int Pid(IntPtr h) { uint p; GetWindowThreadProcessId(h, out p); return (int)p; }
+    // La souris posée, avec un vrai mouvement (les fenêtres de l'app qui ne prennent les
+    // clics que sous la souris le voient).
+    public static void Poser(int x, int y) { SetCursorPos(x, y); mouse_event(0x1, 0, 0, 0, UIntPtr.Zero); }
+}
+}
+'@
+    try { $null = [BreezyShotEssai.Garde]::SetProcessDpiAwarenessContext([IntPtr]::new(-4)) } catch { }
+}
+# Les processus dont les fenêtres peuvent recevoir un clic : l'app, et les aides lancées
+# par l'essai ($script:Auxiliaires, s'il y en a).
+function Pids-Permis {
+    $pids = @(Processus-App | ForEach-Object { $_.Id })
+    $aux = Get-Variable -Scope Script -Name Auxiliaires -ValueOnly -ErrorAction SilentlyContinue
+    if ($null -ne $aux) { foreach ($a in $aux) { try { if (-not $a.HasExited) { $pids += $a.Id } } catch { } } }
+    return @($pids)
+}
+# La fenêtre visée en (X, Y) : { Hwnd, Classe, Pid, Processus, Texte }.
+function Fenetre-Visee([int]$X, [int]$Y) {
+    Initialiser-Garde
+    $G = [BreezyShotEssai.Garde]
+    $h = $G::Racine($X, $Y)
+    $classe = if ($h -ne [IntPtr]::Zero) { $G::Classe($h) } else { '' }
+    $id = if ($h -ne [IntPtr]::Zero) { $G::Pid($h) } else { 0 }
+    $nom = '?'
+    try { if ($id -ne 0) { $nom = (Get-Process -Id $id -ErrorAction Stop).ProcessName } } catch { }
+    return [pscustomobject]@{ Hwnd = $h; Classe = $classe; Pid = $id; Processus = $nom
+        Texte = "fenêtre $([long]$h) classe « $classe » processus $nom ($id)" }
+}
+$script:CLASSES_CONSOLE = @('ConsoleWindowClass', 'CASCADIA_HOSTING_WINDOW_CLASS', 'PseudoConsoleWindow')
+# Le clic visé est-il permis ? Jamais une console ; une fenêtre de $Pids (par défaut
+# Pids-Permis) ; le bureau (Progman, WorkerW) seulement avec -Bureau.
+function Visee-Permise($Visee, [int[]]$Pids = $null, [switch]$Bureau) {
+    if ($Visee.Hwnd -eq [IntPtr]::Zero) { return $false }
+    if ($script:CLASSES_CONSOLE -contains $Visee.Classe) { return $false }
+    if ($Bureau -and ($Visee.Classe -in 'Progman', 'WorkerW')) { return $true }
+    if ($null -eq $Pids) { $Pids = Pids-Permis }
+    return ($Pids -contains $Visee.Pid)
+}
+# Avant un clic (ou l'appui d'un glisser) réel en (X, Y) : la souris y est posée, puis on
+# attend au plus $DelaiMs que la fenêtre visée soit permise. Sinon : exception, et le clic
+# n'est pas envoyé. Rend la fenêtre visée.
+function Garder-Clic([int]$X, [int]$Y, [string]$Quoi, [int[]]$Pids = $null, [int]$DelaiMs = 2000, [switch]$Bureau) {
+    Initialiser-Garde
+    [BreezyShotEssai.Garde]::Poser($X, $Y)
+    $limite = [DateTime]::UtcNow.AddMilliseconds($DelaiMs)
+    do {
+        $v = Fenetre-Visee $X $Y
+        if (Visee-Permise $v $Pids -Bureau:$Bureau) { return $v }
+        Start-Sleep -Milliseconds 50
+    } while ([DateTime]::UtcNow -lt $limite)
+    throw "$Quoi : clic non envoyé en $X,$Y : la fenêtre visée n'est ni à l'app ni à une aide de l'essai ($($v.Texte))"
+}
+
 # Ferme de force tout BreezyShot restant (nettoyage, jamais une vérification).
 function Arreter-Tout {
     foreach ($p in (Processus-App)) {

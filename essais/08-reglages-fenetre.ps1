@@ -364,6 +364,7 @@ public static string Titre(IntPtr h) {
             Verifier "$Quoi : élément à l'écran" $false $d | Out-Null
             throw "$Quoi : élément hors écran ou sans rectangle ($d)"
         }
+        $null = Garder-Clic ([int]($r.X + $r.Width / 2)) ([int]($r.Y + $r.Height / 2)) $Quoi
         [BreezyShotEssai.Reglages]::Cliquer([int]($r.X + $r.Width / 2), [int]($r.Y + $r.Height / 2))
         Start-Sleep -Milliseconds 150
     }
@@ -764,6 +765,7 @@ public static string Titre(IntPtr h) {
     $null = [BreezyShotEssai.Reglages]::SetForegroundWindow($dialogue)
     Start-Sleep -Milliseconds 200
     $rc = $champ.Current.BoundingRectangle
+    $null = Garder-Clic ([int]($rc.X + $rc.Width / 2)) ([int]($rc.Y + $rc.Height / 2)) '(8) champ du dossier'
     [BreezyShotEssai.Reglages]::Cliquer([int]($rc.X + $rc.Width / 2), [int]($rc.Y + $rc.Height / 2))
     Start-Sleep -Milliseconds 200
     [BreezyShotEssai.Reglages]::Appuyer([byte[]]@(0x11), 0x41)

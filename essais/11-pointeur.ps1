@@ -414,6 +414,7 @@ public static int[] EcartsTemoin(byte[] o, int stride, int il, int ih, int tx, i
         $avant = @(Fichiers-Png $recents).Count
         $annonces = Compter-Motif -Motif 'sortie annonce ' -Dossier $da
         $zx = $TX + 110; $zy = $TY + 110
+        $null = Garder-Clic $zx $zy '(4) glisser'
         [BreezyShotEssai.Pointeur]::Glisser($zx, $zy, ($zx + 79), ($zy + 79))
         $null = Attendre-Motif -Motif 'sortie annonce ' -Dossier $da -DelaiS 10 -Quoi '(4) annonce de la sortie' -Fois ($annonces + 1)
         $zone = Derniere-Ligne -Motif 'zone choisie ' -Dossier $da
