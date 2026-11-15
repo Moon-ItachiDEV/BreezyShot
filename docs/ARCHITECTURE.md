@@ -634,7 +634,7 @@ dans le dossier temporaire du système (`systeme::dossier_secours()`), sous le n
   `barre.cjs` « ombre dans la marge »). Fermée sur Échap, au clic ailleurs (perte du focus, surveillance des clics, clic
   dans la marge de l'ombre), au choix, et quand une capture démarre (`demarrer_capture`, avec
   le menu). Pendant le délai de double-clic du système après `barre ouverte`
-  (`GetDoubleClickTime`, 500 ms sans lui ; `systeme::delai_double_clic`,
+  (`GetDoubleClickTime`, 500 ms sans lui, plafonné à 1 s `DOUBLE_CLIC_MAX` ; `systeme::delai_double_clic`,
   `barre::dans_le_double_clic`, pur, testé), la perte du focus et les clics hors de la barre
   sont ignorés (journal `barre: perte du focus ignoree (double-clic)`) : un double-clic sur
   l'icône épinglée ne referme pas la barre que son premier clic vient d'ouvrir. Relancée barre ouverte : elle reste ouverte, reposée sur l'écran de la souris et
@@ -1490,11 +1490,13 @@ Module pur : il reçoit le dossier où écrire, ne connaît ni Tauri ni les autr
   la retire par la fermeture que lui donne `application::desinstaller` (§12.5).
   Au démarrage de l'app, une valeur existante qui pointe vers un autre exe (copie lancée
   hors installation, puis installée), ou l'ancienne valeur sans `--discret` (jusqu'à la
-  0.7.1), est réécrite vers la valeur attendue. Limite : la première ouverture de session
-  après la mise à jour lit encore l'ancienne valeur et ouvre donc la barre une fois ; ce
-  démarrage-là réécrit la valeur
-  (`systeme::mettre_a_jour_chemin`, règle pure `doit_reecrire` : jamais si elle est
-  absente, casse ignorée ; journal `demarrage avec le systeme: chemin mis a jour`). La
+  0.7.1), est réécrite vers la valeur attendue. Après une mise à jour par l'installateur,
+  c'est fait tout de suite : il relance l'app (`--discret`, §12.3) et ce démarrage réécrit
+  la valeur. La barre ne s'ouvrirait à une ouverture de session que si l'app n'a pas
+  démarré entre la mise à jour et cette ouverture de session (une copie remplacée à la
+  main, sans l'installateur). Réécriture : `systeme::mettre_a_jour_chemin`, règle pure
+  `doit_reecrire` (jamais si elle est absente, casse ignorée ; journal `demarrage avec le
+  systeme: chemin mis a jour`). La
   désactivation par le Gestionnaire des tâches vit sous le même nom dans
   `StartupApproved\Run`, que cette écriture ne touche pas : elle reste telle quelle.
   **La vérité est le registre** : `demarrer_avec_systeme` est écrit dans `reglages.json`
@@ -2889,7 +2891,7 @@ La fenêtre (sans cadre, transparente, carte + marge d'ombre) est posée et dime
    avancement réel envoyé à la page ; puis renommage sur `breezyshot.exe` (retenté 5 s si pris) ;
 4. `verification` : octet à octet ;
 5. `raccourci` (IShellLinkW) ; 6. `inscription` (onze valeurs, ci-dessous) ;
-7. `lancement` : l'app installée démarre (`--discret` depuis la 0.7.2 : l'installateur dit
+7. `lancement` : l'app installée démarre (`--discret` depuis la 0.7.2, `ARGUMENTS_APP` : l'installateur dit
    lui-même « BreezyShot est prêt », la barre de capture n'a pas à s'ouvrir) et tient son
    instance en 10 s. « Essayer une capture » lance `--capturer zone`, sans barre.
 
