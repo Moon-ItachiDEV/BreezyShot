@@ -11,8 +11,10 @@
 // - `vignette:entrer` { id } : entrée ; au premier dessin, `vignette_entree` { id }.
 // - `vignette:survol` { id, dedans } : boutons montrés ou cachés (classe « reveal »).
 // - `vignette:minuterie` { id, restant_ms, total_ms | null, en_marche } : la barre.
-// - `vignette:confirmer` { id, action, reussi } : « Copié », « Enregistré » 1,8 s.
-// - `vignette:supprimee` { id, oui }, `vignette:glisser` { id, en_cours }.
+// - `vignette:confirmer` { id, action, reussi } : « Copié », « Enregistré » 1,8 s (texte
+//   montré et nom accessible du bouton).
+// - `vignette:supprimee` { id, oui } : seul Annuler, puis `vignette_zone` de nouveau (les
+//   boutons montrés) ; `vignette:glisser` { id, en_cours }.
 // - `vignette:partir` { id, animee } : coup de vent (miroir à droite), puis
 //   `vignette_terminee` { id }. `vignette:cachee` { id } : tout s'arrête, sans réponse.
 // - `vignette_action` { id, action } au clic ; `vignette_glisser` { id } après un appui sur
@@ -471,14 +473,21 @@ function confirmer(m) {
   if (!lui || lui.id !== m.id || m.reussi !== true) return;
   const b = carte.querySelector(`button.pilule[data-action="${CSS.escape(String(m.action))}"]`);
   if (!b) return;
+  // Le nom accessible suit le libellé montré : « Copié » le temps de la confirmation.
+  const nommer = (cle) => {
+    const t = b.querySelector(`.libelles .${cle}`)?.textContent;
+    if (t) b.setAttribute("aria-label", t);
+  };
   b.classList.remove("onde", "fait");
+  nommer("avant");
   void b.offsetWidth;
   b.classList.add("onde", "fait");
+  nommer("apres");
   clearTimeout(b._fin);
-  b._fin = setTimeout(
-    () => b.classList.remove("onde", "fait"),
-    duree("--duree-vignette-confirmation"),
-  );
+  b._fin = setTimeout(() => {
+    b.classList.remove("onde", "fait");
+    nommer("avant");
+  }, duree("--duree-vignette-confirmation"));
   lui.minuteries.push(b._fin);
 }
 
@@ -488,6 +497,8 @@ function supprimee(m) {
   lui.supprimee = m.oui === true;
   cacherInfobulle();
   carte.classList.toggle("supprimee", lui.supprimee);
+  // Annuler paraît (ou s'en va) : le journal du cœur reçoit les boutons montrés.
+  envoyerZone();
 }
 
 function partir(m) {
