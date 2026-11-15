@@ -1774,7 +1774,7 @@ try {
                 }
                 Verifier '(F125) zone et image en pixels réels au journal' ($fS.Zone -eq "film video zone $($tem.X),$($tem.Y) 600x450 agrandie non image 600x450") $fS.Zone | Out-Null
                 $blancs = 0
-                foreach ($p in @(@(6, 233), @(8 + 600 + 1, 233), @(308, 6), @(308, 8 + 450 + 1))) { $c = Pixel-Copie $fS.CopieZone $p[0] $p[1]; if ($c[0] -ge 240 -and $c[1] -ge 240 -and $c[2] -ge 240) { $blancs++ } }
+                foreach ($p in @(@(6, 233), @((8 + 600 + 1), 233), @(308, 6), @(308, (8 + 450 + 1)))) { $c = Pixel-Copie $fS.CopieZone $p[0] $p[1]; if ($c[0] -ge 240 -and $c[1] -ge 240 -and $c[2] -ge 240) { $blancs++ } }
                 $place = ($null -ne $fS.Pilule) -and ($fS.Pilule.Y -ge $tem.Y + 450) -and ($fS.Pilule.Y -le $tem.Y + 450 + 50) -and ($fS.Pilule.Right -le $tem.X + 600 + 3)
                 Verifier '(F125) cadre hors de la zone, pilule sous la zone à droite' (($blancs -eq 4) -and $place) "cadre $blancs/4 ; pilule $($fS.Pilule)" | Out-Null
                 $null = Verifier-Mp4 '(F125)' $fS
