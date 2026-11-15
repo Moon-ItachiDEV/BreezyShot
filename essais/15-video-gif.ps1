@@ -1133,7 +1133,7 @@ try {
 
         $script:VideoFaite = $false
         $script:ReposL0 = $null; $script:ReposL0App = $null; $script:ReposA = $null; $script:ReposAApp = $null
-        $script:ReposChaud = $null; $script:ReposChaudApp = $null
+        $script:ReposChaud = $null; $script:ReposChaudApp = $null; $script:PlateauFilms = $null
         $script:EcranFige = [IntPtr]::Zero; $script:FenetreVignette = [IntPtr]::Zero
         $script:LCoupee = $false
         $script:ModeDepart = $script:Natif::ModeCourant()
@@ -1530,6 +1530,7 @@ try {
                 }
                 $txt = ($suite | ForEach-Object { "$($_.Mo) Mo, $($_.Fils) fils, $($_.Poignees) poignées" }) -join ' ; '
                 Noter-Mesure -Nom '(I) cinq films de suite' -Valeur $txt
+                $script:PlateauFilms = $suite[4].Mo
                 $dm = $suite[4].Mo - $suite[0].Mo; $df = $suite[4].Fils - $suite[0].Fils; $dp = $suite[4].Poignees - $suite[0].Poignees
                 Verifier '(I) cinq films de suite : mémoire stable (≤ 2 Mo par film), fils et poignées stables' (($dm -le 8) -and ($df -le 2) -and ($dp -le 50)) "mémoire $dm Mo, fils $df, poignées $dp du premier au cinquième" | Out-Null
             }
@@ -1558,13 +1559,15 @@ try {
                 $apresApp = Memoire-App
                 Noter-Mesure -Nom '(I) 10 s après la vignette partie (app et WebView2 ; app seule)' -Valeur "$apres Mo ; $apresApp Mo"
                 Noter-Mesure -Nom '(I) 10 s après la vignette partie, par processus (Mo)' -Valeur (Detail-Memoire $script:proc).Texte
-                if ($null -ne $script:ReposChaud) {
-                    # + 20 Mo : le renderer de WebView2 garde ~15 Mo de plus après la vidéo de
-                    # 30 s (CI 43678387003 : 118.9 → 133.2), stable sur cinq films ; la
-                    # rétention de l'app est gardée par la borne de l'app seule, ci-dessous.
-                    Verifier '(I) 10 s après la vignette partie : mémoire (app et WebView2) ≤ repos chaud + 20 Mo' ($apres -le $script:ReposChaud + 20) "$apres Mo (repos chaud $($script:ReposChaud) Mo, repos L1 $($script:ReposA) Mo)" | Out-Null
+                if ($null -ne $script:PlateauFilms) {
+                    # Jugé contre le palier des cinq films courts (même app, même WebView2, juste
+                    # avant) : le renderer de WebView2 garde 15 à 20 Mo de plus que le repos chaud
+                    # selon la machine (CI 43678387003 : +15.7 ; 43683232936 : +15.8 ;
+                    # 43690728184 : +20.1), alors que l'écart au palier reste petit (-1.6 ; +5.7).
+                    # La rétention de l'app est gardée par la borne de l'app seule, ci-dessous.
+                    Verifier '(I) 10 s après la vignette partie : mémoire (app et WebView2) ≤ palier des cinq films + 10 Mo' ($apres -le $script:PlateauFilms + 10) "$apres Mo (palier $($script:PlateauFilms) Mo, repos chaud $($script:ReposChaud) Mo, repos L1 $($script:ReposA) Mo)" | Out-Null
                 }
-                else { Noter-Mesure -Nom '(I) 10 s après la vignette, contre le repos chaud' -Valeur 'non joué : repos chaud absent (cas A en échec)' }
+                else { Noter-Mesure -Nom '(I) 10 s après la vignette, contre le palier des cinq films' -Valeur 'non joué : palier absent (cinq films en échec)' }
                 Verifier '(I) 10 s après la vignette partie : app seule ≤ app au repos L1 + 15 Mo' ($apresApp -le $script:ReposAApp + 15) "$apresApp Mo (repos L1 $($script:ReposAApp) Mo)" | Out-Null
             }
             # (I et F) GIF laissé à la limite de 60 s (témoin simple) : processeur et mémoire
@@ -1576,11 +1579,15 @@ try {
                     $F.Mesure = Mesurer-Pendant 25
                 }
                 $m = $fL.Mesure
-                # Mesuré sur la machine GitHub : pic +101 Mo, app seule 26 Mo.
-                $plafond = $script:ReposA + 110
+                # Mesuré sur la machine GitHub, contre le repos chaud (WebView2 déjà monté par
+                # un film) : pic +51.9 Mo (CI 43683232936) et +57.8 Mo (43690728184) ; app
+                # seule 26 à 34 Mo. Sans repos chaud, contre le repos L1 : +102 et +110.
+                if ($null -ne $script:ReposChaud) { $base = $script:ReposChaud; $marge = 70; $quoi = 'repos chaud' }
+                else { $base = $script:ReposA; $marge = 125; $quoi = 'repos L1' }
+                $plafond = $base + $marge
                 Noter-Mesure -Nom '(I) GIF : processeur de l''app, mémoire (pic app et WebView2 ; app seule)' -Valeur "$($m.Cpu) % d'un cœur ; $($m.Pic) Mo ; $($m.PicApp) Mo"
                 Verifier '(I) GIF : processeur de l''app ≤ 30 % d''un cœur' ($m.Cpu -le 30) "$($m.Cpu) %" | Out-Null
-                Verifier '(I) GIF : mémoire (app et WebView2) ≤ repos + 110 Mo' ($m.Pic -le $plafond) "$($m.Pic) Mo (plafond $([math]::Round($plafond, 1)) Mo, repos $($script:ReposA) Mo)" | Out-Null
+                Verifier "(I) GIF : mémoire (app et WebView2) ≤ $quoi + $marge Mo" ($m.Pic -le $plafond) "$($m.Pic) Mo (plafond $([math]::Round($plafond, 1)) Mo, $quoi $base Mo, repos L1 $($script:ReposA) Mo)" | Out-Null
                 Verifier '(I) GIF : app seule ≤ 40 Mo' ($m.PicApp -le 40) "$($m.PicApp) Mo" | Out-Null
                 $msg = @(Toutes-Apres 'bandeau affiche ' $da $fL.Base)
                 Verifier '(F) GIF laissé aller : film fin limite duree 60000 à 300 ms près, sans message' (($fL.Cause -eq 'limite') -and ([math]::Abs($fL.Duree - 60000) -le 300) -and ($msg.Count -eq 0)) "$($fL.Fin) ; messages $($msg.Count)" | Out-Null
