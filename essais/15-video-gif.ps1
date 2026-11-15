@@ -35,7 +35,7 @@
 #     A4 la souris 1 s sur la pastille jaune ; A5 « Arrêter » après 6 s, Finalisation,
 #     vignette (« Enregistrement terminé », durée, boutons) ; A6 le MP4 relu (H.264, 600 ×
 #     450, sans son, durée à 200 ms, ≥ 28 images par seconde, k sans recul, premier k après
-#     le décompte, dernier à l'arrêt à 300 ms, pastilles ± 8, bords blancs, pointeur pendant
+#     le décompte, dernier à l'arrêt à 300 ms, pastilles ± 8, bords blancs et bords exacts contre le dessin du témoin, pointeur pendant
 #     sa seconde et plus après) ; A7 fraîcheur sur le témoin -Rapide (10 s) ; A8
 #     presse-papiers (le .mp4 rangé dans le dossier d'enregistrement lui-même, aucun lien
 #     dans `Glisser`), « Récents » inchangé, `Films` vide
@@ -280,8 +280,11 @@ try {
         # son centre ; ses quatre points de lecture sont dans le blanc de la flèche.
         $POINTEUR = @(232, 392)
         $POINTS_POINTEUR = @(233, 396, 234, 399, 235, 402, 233, 402)
-        # Les bords exacts de l'image (rangées et colonnes 0 et dernière, au milieu).
+        # Les bords exacts de l'image (rangées et colonnes 0 et dernière, au milieu), jugés
+        # contre le dessin du témoin (Temoin::Pixel) : la rangée 0 est une ligne de la grille
+        # du fond (225, 228, 234, y % 30 < 2), pas du blanc ; les trois autres sont blancs.
         $POINTS_BORDS = @(0, 225, 599, 225, 300, 0, 300, 449)
+        $NOMS_BORDS = @('colonne 0', 'colonne 599', 'rangée 0', 'rangée 449')
         Write-Host "écran $ecran ; zone utile $utile ; mode $($script:Natif::ModeCourant()) ; DPI $($script:Natif::DpiEcran(1, 1))"
 
         # Le lecteur MP4 (chantier B) : BREEZYSHOT_LIRE_FILM (la CI), sinon à côté du .exe.
@@ -787,8 +790,26 @@ try {
             $script:Natif::Poser($REPOS_X, $REPOS_Y)
             return $q
         }
-        # Survole la carte de la vignette (boutons montrés), puis clique le bouton $Action
-        # (rectangle de `vignette bouton <id> <action>`).
+        # Le survol de la carte $Id tel que le cœur l'a vu en dernier (`vignette minuterie <id>
+        # pause survol` ou `reprise`) : vrai si la souris est dedans pour lui.
+        function Survol-Vu([int]$Id, [string]$Dossier) {
+            $l = Derniere-Ligne "vignette minuterie $Id (pause survol|reprise)$" $Dossier
+            return ($null -ne $l -and $l -match 'pause survol$')
+        }
+        function Attendre-Survol([int]$Id, [bool]$Dedans, [string]$Dossier, [double]$DelaiS = 2) {
+            $limite = [DateTime]::UtcNow.AddSeconds($DelaiS)
+            do {
+                if ((Survol-Vu $Id $Dossier) -eq $Dedans) { return $true }
+                Start-Sleep -Milliseconds 30
+            } while ([DateTime]::UtcNow -lt $limite)
+            return $false
+        }
+        # Survole la carte de la vignette, puis clique le bouton $Action (rectangle de
+        # `vignette bouton <id> <action>`). Les boutons ne se montrent qu'à un survol que le
+        # cœur a vu commencer (`vignette:survol` dedans, classe « reveal ») : la souris part
+        # d'abord si le cœur la croit encore sur la carte, puis le clic attend `pause survol`
+        # (son fil relève la souris toutes les 30 à 60 ms : un départ plus bref lui échappe).
+        # Après le clic, la souris repart et l'essai attend que le cœur l'ait vue partir.
         function Cliquer-Vignette([int]$Id, [string]$Action, [string]$Quoi) {
             $d = $script:Cas.Dossier
             $lb = Derniere-Ligne "vignette bouton $Id $Action " $d
@@ -796,11 +817,19 @@ try {
             if (-not $lb -or -not $lz) { throw "$Quoi : bouton « $Action » de la carte $Id inconnu du journal" }
             $b = Lire-Rect (Message $lb)
             $z = Lire-Rect (Message $lz)
+            if (Survol-Vu $Id $d) {
+                $script:Natif::Poser($REPOS_X, $REPOS_Y)
+                if (-not (Attendre-Survol $Id $false $d)) { throw "$Quoi : la carte $Id ne voit pas la souris partir en 2 s ; $(Diagnostic-Journal $d)" }
+            }
             $script:Natif::Poser($z.CX, $z.CY)
-            Start-Sleep -Milliseconds 450
+            if (-not (Attendre-Survol $Id $true $d)) { throw "$Quoi : la carte $Id ne voit pas la souris en 2 s (aucun « vignette minuterie $Id pause survol ») ; $(Diagnostic-Journal $d)" }
+            # Les boutons révélés (fondu et décalage de la page).
+            Start-Sleep -Milliseconds 350
             $script:Natif::Cliquer($b.CX, $b.CY)
             Start-Sleep -Milliseconds 100
             $script:Natif::Poser($REPOS_X, $REPOS_Y)
+            # Fermer : la carte part, son survol n'est plus suivi.
+            if ($Action -ne 'fermer') { $null = Attendre-Survol $Id $false $d }
         }
         # Un film de bout en bout : raccourci ou menu, visée, tracé (par défaut la zone du
         # témoin), décompte, film, arrêt, Finalisation, sortie. $Arret : bouton | raccourci |
@@ -1303,9 +1332,22 @@ try {
                 Verifier-Budgets '(A)' $fA
                 # (A6)
                 $lu = Verifier-Mp4 '(A6)' $fA -Plus ($POINTS_POINTEUR + $POINTS_BORDS)
-                $exacts = 0
-                foreach ($coul in $lu.Couleurs) { for ($q = 33; $q -lt 37; $q++) { $x = $coul[$q]; if ($null -ne $x -and ([int]$x[0] -ge 231 -and [int]$x[1] -ge 231 -and [int]$x[2] -ge 231)) { $exacts++ } } }
-                Verifier '(A6) bords exacts de l''image (colonnes 0 et 599, rangées 0 et 449) : le blanc du témoin à 24 près' ($exacts -ge 4 * $lu.Couleurs.Count - 4) "$exacts points blancs sur $(4 * $lu.Couleurs.Count)" | Out-Null
+                # Chaque point contre la couleur du témoin à cet endroit (fixe pour le témoin
+                # simple hors des carrés et de la bande), à 24 près par canal ; le compte par
+                # point dit lequel manque (un décalage de la zone en ferait manquer deux).
+                $attendus = @(for ($q = 0; $q -lt 4; $q++) { , $script:Temoin::Pixel($POINTS_BORDS[2 * $q], $POINTS_BORDS[2 * $q + 1], 0, 0) })
+                $exacts = 0; $parPoint = [int[]]::new(4)
+                foreach ($coul in $lu.Couleurs) {
+                    for ($q = 0; $q -lt 4; $q++) {
+                        $x = $coul[33 + $q]
+                        if ($null -eq $x) { continue }
+                        $bon = $true
+                        for ($c = 0; $c -lt 3; $c++) { if ([math]::Abs([int]$x[$c] - $attendus[$q][$c]) -gt 24) { $bon = $false } }
+                        if ($bon) { $exacts++; $parPoint[$q]++ }
+                    }
+                }
+                $detailBords = @(for ($q = 0; $q -lt 4; $q++) { "$($NOMS_BORDS[$q]) $($parPoint[$q])/$($lu.Couleurs.Count) (attendu $($attendus[$q] -join ','))" }) -join ' ; '
+                Verifier '(A6) bords exacts de l''image (colonnes 0 et 599, rangées 0 et 449) : la couleur du témoin à 24 près' ($exacts -ge 4 * $lu.Couleurs.Count - 4) "$exacts points justes sur $(4 * $lu.Couleurs.Count) : $detailBords" | Out-Null
                 # Le pointeur : pendant sa seconde sur la pastille jaune, des pixels qui ne sont
                 # pas ceux de la pastille ; plus après.
                 $dans = 0; $nDans = 0; $apres = 0
@@ -1517,7 +1559,10 @@ try {
                 Noter-Mesure -Nom '(I) 10 s après la vignette partie (app et WebView2 ; app seule)' -Valeur "$apres Mo ; $apresApp Mo"
                 Noter-Mesure -Nom '(I) 10 s après la vignette partie, par processus (Mo)' -Valeur (Detail-Memoire $script:proc).Texte
                 if ($null -ne $script:ReposChaud) {
-                    Verifier '(I) 10 s après la vignette partie : mémoire (app et WebView2) ≤ repos chaud + 10 Mo' ($apres -le $script:ReposChaud + 10) "$apres Mo (repos chaud $($script:ReposChaud) Mo, repos L1 $($script:ReposA) Mo)" | Out-Null
+                    # + 20 Mo : le renderer de WebView2 garde ~15 Mo de plus après la vidéo de
+                    # 30 s (CI 43678387003 : 118.9 → 133.2), stable sur cinq films ; la
+                    # rétention de l'app est gardée par la borne de l'app seule, ci-dessous.
+                    Verifier '(I) 10 s après la vignette partie : mémoire (app et WebView2) ≤ repos chaud + 20 Mo' ($apres -le $script:ReposChaud + 20) "$apres Mo (repos chaud $($script:ReposChaud) Mo, repos L1 $($script:ReposA) Mo)" | Out-Null
                 }
                 else { Noter-Mesure -Nom '(I) 10 s après la vignette, contre le repos chaud' -Valeur 'non joué : repos chaud absent (cas A en échec)' }
                 Verifier '(I) 10 s après la vignette partie : app seule ≤ app au repos L1 + 15 Mo' ($apresApp -le $script:ReposAApp + 15) "$apresApp Mo (repos L1 $($script:ReposAApp) Mo)" | Out-Null
@@ -1783,11 +1828,18 @@ try {
                     $lien = Verifier-PressePapiers "(H $sorte) « Copier »" $fH $(if ($sorte -eq 'video') { '.mp4' } else { '.gif' })
                     Verifier "(H) $sorte : « Copier » sur un film non copié : le bouton dit « $fait »" ($null -ne $bouton) $(if ($null -eq $bouton) { Elements-Vus $script:FenetreVignette }) | Out-Null
                     $suppr = Compter-Motif "vignette suppression $id en attente$" $dh
+                    $annuler = Compter-Motif "vignette bouton $id annuler " $dh
                     Cliquer-Vignette $id 'supprimer' "(H $sorte) Supprimer"
                     $null = Attendre-Motif "vignette suppression $id en attente$" $dh 3 "(H $sorte) suppression en attente" ($suppr + 1)
+                    # La zone renvoyée à la suppression (seul Annuler montré) : le bouton
+                    # Annuler n'est lu qu'une fois au journal.
+                    $null = Attendre-Motif "vignette bouton $id annuler " $dh 3 "(H $sorte) bouton Annuler au journal" ($annuler + 1)
                     Start-Sleep -Milliseconds 400
+                    $supprimer = Compter-Motif "vignette bouton $id supprimer " $dh
                     Cliquer-Vignette $id 'annuler' "(H $sorte) Annuler"
                     $null = Attendre-Motif "vignette suppression $id annulee$" $dh 3 "(H $sorte) suppression annulée"
+                    # La zone renvoyée à l'annulation (les boutons de nouveau) avant le second clic.
+                    $null = Attendre-Motif "vignette bouton $id supprimer " $dh 3 "(H $sorte) bouton Supprimer au journal après Annuler" ($supprimer + 1)
                     Verifier "(H) $sorte : Supprimer puis Annuler : le fichier enregistré (celui du presse-papiers) encore là" ((Test-Path -LiteralPath $fH.Enregistre) -and $lien -and (Test-Path -LiteralPath $lien)) "presse-papiers $(if ($lien) { Split-Path -Leaf $lien })" | Out-Null
                     Cliquer-Vignette $id 'supprimer' "(H $sorte) Supprimer (2)"
                     $null = Attendre-Motif "vignette suppression $id en attente$" $dh 3 "(H $sorte) suppression en attente (2)" ($suppr + 2)
