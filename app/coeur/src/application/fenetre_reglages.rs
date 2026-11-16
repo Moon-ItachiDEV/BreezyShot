@@ -250,7 +250,7 @@ fn vue(app: &AppHandle) -> VueReglages {
         defaut: &defaut,
         refus_raccourcis: &refus,
         dossier_affiche,
-        dossier_films_affiche: r.film.dossier.as_deref().map(|d| sortie::nom_affiche(d)),
+        dossier_films_affiche: r.film.dossier.as_deref().map(sortie::nom_affiche),
         editeur_construit: EDITEUR_CONSTRUIT,
         demarrage: systeme::demarrage_avec_systeme(None).unwrap_or(EtatDemarrage::Indisponible),
         impr_ecran: systeme::impr_ecran_pour_breezyshot(),

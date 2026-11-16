@@ -59,7 +59,7 @@ use super::vignette::{self, Contenu, EtatSuppression};
 use super::{
     defilante, zone, Apercu, Application, CaptureEnCours, Evenement, FinAction, FinFilm, GardeEcran,
 };
-use crate::capture;
+use crate::capture::{self, clics::Clics};
 use crate::fenetres::film::{
     self as controle, ChargeCacher, ChargeMontrer, Controle, PointPage, RectPage,
 };
@@ -68,7 +68,7 @@ use crate::fenetres::{self, theme, Bandeau, Genre, Message};
 use crate::film::{self as images, Calage, Gif, Horloge, Pas};
 use crate::sortie::{self, BilanFilm, Etape, EtapeFichier};
 use crate::systeme::gel::{self, Changement, EcranInfo, Pixels, Pointeur};
-use crate::systeme::{self, micro, mp4, vivant, Rect};
+use crate::systeme::{self, micro, mp4, souris, vivant, Rect};
 
 /// Une source d'images vivantes est-elle ouverte (film ou défilante) ? Une seule à la fois
 /// (`Jeton`).
@@ -570,11 +570,15 @@ pub fn zone_choisie(app: &AppHandle, zone: Rect) {
         return;
     }
     let (_, glisser) = super::dossiers_vignette(app);
-    let cadence = sorte.cadence_pour(super::reglages_lus(app).film.fluidite);
+    let reglages = super::reglages_lus(app);
+    let cadence = sorte.cadence_pour(reglages.film.fluidite);
+    let ordinateur = sorte == Sorte::Video && reglages.film.son_systeme && super::pro(app);
     let depart = Depart {
         numero,
         sorte,
         cadence,
+        ordinateur,
+        clics: reglages.film.clics_visibles && super::pro(app),
         relache,
         cadre,
         ecran,
@@ -1829,6 +1833,10 @@ struct Depart {
     sorte: Sorte,
     /// Images par seconde, figées au départ (réglage « Fluidité » pour une vidéo).
     cadence: u32,
+    /// Prendre aussi le son de l'ordinateur (réglage, licence, vidéo), figé au départ.
+    ordinateur: bool,
+    /// Poser un anneau à chaque clic (réglage, licence), figé au départ.
+    clics: bool,
     relache: Instant,
     cadre: Cadre,
     ecran: EcranInfo,
@@ -1916,16 +1924,33 @@ impl Prise for vivant::Source {
 fn filmer(d: Depart, app: AppHandle) {
     let numero = d.numero;
     let sortie_app = app.clone();
-    let son = d.sorte == Sorte::Video && micro::present();
+    let avec_micro = d.sorte == Sorte::Video && micro::present();
     if d.sorte == Sorte::Video {
         poster(
             &app,
             Signal::Micro {
                 numero,
-                present: son,
+                present: avec_micro,
             },
         );
     }
+    // Le son de l'ordinateur (0.7.6) : ouvert tout de suite, gardé jusqu'à la fin du film
+    // (sa destruction rend l'appareil). Absent ou refusé : la vidéo se fait sans.
+    let calage_ordinateur = Arc::new(Mutex::new(Calage::default()));
+    let ordinateur = (d.ordinateur && micro::ordinateur_present())
+        .then(|| {
+            let pour = Arc::clone(&calage_ordinateur);
+            micro::ouvrir_ordinateur(move |pcm| {
+                pour.lock().unwrap_or_else(|e| e.into_inner()).ranger(pcm)
+            })
+            .ok()
+        })
+        .flatten();
+    if d.ordinateur {
+        log::info!("{}", film::ligne_ordinateur(ordinateur.is_some()));
+    }
+    let avec_ordinateur = ordinateur.is_some().then(|| Arc::clone(&calage_ordinateur));
+    let son = avec_micro || avec_ordinateur.is_some();
     let calage = Arc::new(Mutex::new(Calage::default()));
     let ouvert = Arc::new(AtomicBool::new(false));
     let (envoi_ecriture, envois) = mpsc::channel();
@@ -1949,7 +1974,16 @@ fn filmer(d: Depart, app: AppHandle) {
     let fabrique: Fabrique = match d.sorte {
         Sorte::Video => {
             let (calage, ouvert) = (Arc::clone(&calage), Arc::clone(&ouvert));
-            Box::new(move |chemin: &Path| creer_video(chemin, (l, h), cadence, son, calage, ouvert))
+            Box::new(move |chemin: &Path| {
+                creer_video(
+                    chemin,
+                    (l, h),
+                    cadence,
+                    son,
+                    (calage, ouvert),
+                    avec_ordinateur,
+                )
+            })
         }
         Sorte::Gif => Box::new(move |chemin: &Path| creer_gif(chemin, (l, h))),
     };
@@ -1982,6 +2016,7 @@ fn filmer(d: Depart, app: AppHandle) {
         place: Box::new(move || systeme::installation::espace_libre(&films)),
         taille: Box::new(|f: &Path| std::fs::metadata(f).ok().map(|m| m.len())),
         pointeur: Box::new(|| gel::lire_pointeur().ok().flatten()),
+        souris: Box::new(souris::lire),
         ouvrir_micro: Box::new(ouvrir_micro),
         apercu: |p| super::faire_apercu(p, false),
     };
@@ -1990,6 +2025,7 @@ fn filmer(d: Depart, app: AppHandle) {
             numero,
             sorte: d.sorte,
             cadence: d.cadence,
+            clics: d.clics.then_some(d.ecran.echelle),
             relache: d.relache,
             cadre: d.cadre,
             ecrans: d.ecrans,
@@ -2127,6 +2163,8 @@ struct Bureau {
     place: Box<dyn FnMut() -> Option<u64> + Send>,
     taille: Taille,
     pointeur: Box<dyn FnMut() -> Option<Pointeur> + Send>,
+    /// La souris (position, boutons), lue à chaque pas quand « Clics visibles » est voulu.
+    souris: Box<dyn FnMut() -> Option<souris::Lecture> + Send>,
     ouvrir_micro: OuvrirMicro,
     apercu: fn(&Pixels) -> Option<Apercu>,
 }
@@ -2136,6 +2174,9 @@ struct Lancement {
     numero: u64,
     sorte: Sorte,
     cadence: u32,
+    /// « Clics visibles » : l'échelle d'affichage de l'écran du film si voulu (réglage,
+    /// licence), figée au départ.
+    clics: Option<f64>,
     relache: Instant,
     cadre: Cadre,
     ecrans: Vec<EcranInfo>,
@@ -2201,6 +2242,8 @@ struct Fil<P: Prise> {
     /// Pour poser le pointeur avant la réduction de moitié.
     tampon: Pixels,
     pointeur: Option<Pointeur>,
+    /// Les clics visibles (0.7.6), s'ils sont voulus.
+    clics: Option<Clics>,
     sautees: u64,
     premiere_dite: bool,
     seconde: u64,
@@ -2254,6 +2297,7 @@ impl<P: Prise> Fil<P> {
             a_image: false,
             tampon: vide(),
             pointeur: None,
+            clics: l.clics.map(Clics::nouveau),
             sautees: 0,
             premiere_dite: false,
             seconde: 0,
@@ -2567,15 +2611,22 @@ impl<P: Prise> Fil<P> {
                 Err(_) => {}
             }
         }
+        let zone = self.l.cadre.zone;
+        // La souris est lue à chaque pas, même avant la première image : un bouton déjà
+        // tenu au départ n'est pas un clic.
+        if let Some(c) = self.clics.as_mut() {
+            c.lire((self.bureau.souris)(), zone, instant);
+        }
         if !self.a_image {
             return;
         }
-        let zone = self.l.cadre.zone;
         let pointeur = (self.bureau.pointeur)().filter(|p| sur_la_zone(p, zone));
         let premiere = self.l.envoyees.load(Ordering::SeqCst) == 0;
-        let change = nouvelle || premiere || pointeur != self.pointeur;
+        // Un anneau de clic en vie (ou qui vient de s'éteindre) change l'image à chaque pas.
+        let anneaux = self.clics.as_mut().is_some_and(|c| c.change(instant));
+        let change = nouvelle || premiere || pointeur != self.pointeur || anneaux;
         let envoi = if change {
-            let pixels = self.composer(pointeur.as_ref());
+            let pixels = self.composer(pointeur.as_ref(), instant);
             self.pointeur = pointeur;
             Some(Envoi::Image { pixels, instant })
         } else if self.l.sorte == Sorte::Video {
@@ -2602,7 +2653,7 @@ impl<P: Prise> Fil<P> {
 
     /// L'image à écrire : une copie de la brute où le pointeur est posé, réduite de moitié
     /// si le cadre le dit (F4, F14). Le tampon vient du fil d'écriture quand il en rend un.
-    fn composer(&mut self, pointeur: Option<&Pointeur>) -> Pixels {
+    fn composer(&mut self, pointeur: Option<&Pointeur>, instant: Duration) -> Pixels {
         let mut image = self.liens.retours.try_recv().unwrap_or_else(|_| vide());
         let zone = self.l.cadre.zone;
         if self.l.cadre.reduite {
@@ -2610,11 +2661,17 @@ impl<P: Prise> Fil<P> {
             if let Some(p) = pointeur {
                 capture::poser_pointeur(&mut self.tampon, zone, p);
             }
+            if let Some(c) = &self.clics {
+                c.poser(&mut self.tampon, zone, instant);
+            }
             images::moitie(&self.tampon, &mut image);
         } else {
             copier_dans(&self.brute, &mut image);
             if let Some(p) = pointeur {
                 capture::poser_pointeur(&mut image, zone, p);
+            }
+            if let Some(c) = &self.clics {
+                c.poser(&mut image, zone, instant);
             }
         }
         image
@@ -3081,7 +3138,10 @@ fn ecrire(e: Ecriture, fabrique: Fabrique) {
 struct EcrivainVideo {
     ecrivain: mp4::Ecrivain,
     son: Option<(Arc<Mutex<Calage>>, Arc<AtomicBool>)>,
+    /// Le son de l'ordinateur, mêlé à la piste du micro (qui garde l'horloge).
+    ordinateur: Option<Arc<Mutex<Calage>>>,
     pcm: Vec<i16>,
+    pcm_ordinateur: Vec<i16>,
 }
 
 impl EcrivainVideo {
@@ -3097,6 +3157,15 @@ impl EcrivainVideo {
         );
         if self.pcm.is_empty() {
             return Ok(());
+        }
+        if let Some(ordinateur) = &self.ordinateur {
+            self.pcm_ordinateur.clear();
+            ordinateur.lock().unwrap_or_else(|e| e.into_inner()).suivre(
+                self.pcm.len(),
+                true,
+                &mut self.pcm_ordinateur,
+            );
+            images::melanger(&mut self.pcm, &self.pcm_ordinateur);
         }
         self.ecrivain.son(&self.pcm, debut)
     }
@@ -3135,8 +3204,8 @@ fn creer_video(
     (largeur, hauteur): (u32, u32),
     cadence: u32,
     son: bool,
-    calage: Arc<Mutex<Calage>>,
-    ouvert: Arc<AtomicBool>,
+    (calage, ouvert): (Arc<Mutex<Calage>>, Arc<AtomicBool>),
+    ordinateur: Option<Arc<Mutex<Calage>>>,
 ) -> Result<Box<dyn Ecrivain>, &'static str> {
     let p = mp4::Parametres {
         largeur,
@@ -3158,7 +3227,9 @@ fn creer_video(
             Ok(Box::new(EcrivainVideo {
                 ecrivain,
                 son: son.then_some((calage, ouvert)),
+                ordinateur: ordinateur.filter(|_| son),
                 pcm: Vec::new(),
+                pcm_ordinateur: Vec::new(),
             }))
         }
         Err(e) => {

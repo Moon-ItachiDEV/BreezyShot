@@ -20,6 +20,7 @@ pub mod installation;
 pub mod micro;
 pub mod mp4;
 pub mod presse_papiers;
+pub mod souris;
 pub mod texte;
 pub mod vivant;
 pub use composition::attendre_composition;

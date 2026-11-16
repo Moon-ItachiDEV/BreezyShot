@@ -926,6 +926,14 @@ pub fn ligne_micro(etat: &str) -> String {
     format!("film micro {etat}")
 }
 
+/// `film ordinateur <ouvert|indisponible>` : le son de l'ordinateur (0.7.6).
+pub fn ligne_ordinateur(ouvert: bool) -> String {
+    format!(
+        "film ordinateur {}",
+        if ouvert { "ouvert" } else { "indisponible" }
+    )
+}
+
 /// L'instant de départ d'un film (F11) : `film debut (relache <ms> ms, pret <ms> ms,
 /// decompte-premiere <ms> ms)` ; `relache` : du relâchement à la première image, `pret` :
 /// du relâchement à la préparation finie, `decompte-premiere` : de la fin du décompte à la

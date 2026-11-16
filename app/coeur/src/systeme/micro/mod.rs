@@ -1,6 +1,8 @@
 //! Le micro (contrat 0.7, §13.1, F17, F18) : WASAPI, le point de capture par défaut du rôle
 //! `eConsole` (celui de « Son › Entrée »), en mode partagé, converti par Windows en PCM
-//! 48 kHz mono 16 bits. L'appareil n'est ouvert que pendant que « Micro » est actif ; le
+//! 48 kHz mono 16 bits. L'appareil n'est ouvert que pendant que « Micro » est actif. Le son
+//! de l'ordinateur (0.7.6, réglage « Son de l'ordinateur », Pro) se prend par le même
+//! chemin sur le point de lecture par défaut (`Origine::Ordinateur`) ; sans ce réglage, le
 //! son du système n'est jamais pris.
 //!
 //! Façade commune : `windows.rs` la réalise, `autre.rs` dit « absent » ailleurs. Ce qui ne
@@ -21,9 +23,22 @@ mod plateforme;
 #[path = "autre.rs"]
 mod plateforme;
 
+/// Ce qu'on capte : le micro (point de capture par défaut) ou le son de l'ordinateur (ce
+/// que le point de lecture par défaut joue, en « loopback » WASAPI, 0.7.6).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Origine {
+    Micro,
+    Ordinateur,
+}
+
 /// Vrai si le PC a un point de capture actif (le bouton « Micro » est montré).
 pub fn present() -> bool {
-    plateforme::present()
+    plateforme::present(Origine::Micro)
+}
+
+/// Vrai si le PC a un point de lecture actif dont on peut prendre le son.
+pub fn ordinateur_present() -> bool {
+    plateforme::present(Origine::Ordinateur)
 }
 
 /// Pourquoi le micro ne s'ouvre pas.
@@ -45,7 +60,13 @@ pub struct Micro {
 /// Ouvre le micro : `rappel` reçoit du PCM 48 kHz mono 16 bits, depuis le fil `film-son` ;
 /// il ne fait que ranger (`film::Calage`).
 pub fn ouvrir(rappel: impl FnMut(&[i16]) + Send + 'static) -> Result<Micro, Erreur> {
-    plateforme::ouvrir(Box::new(rappel)).map(|interne| Micro { interne })
+    plateforme::ouvrir(Box::new(rappel), Origine::Micro).map(|interne| Micro { interne })
+}
+
+/// Ouvre le son de l'ordinateur, comme `ouvrir` : même PCM 48 kHz mono 16 bits, même fil
+/// `film-son`. Rien n'arrive tant que rien ne joue : le film comble par du silence.
+pub fn ouvrir_ordinateur(rappel: impl FnMut(&[i16]) + Send + 'static) -> Result<Micro, Erreur> {
+    plateforme::ouvrir(Box::new(rappel), Origine::Ordinateur).map(|interne| Micro { interne })
 }
 
 impl Micro {
