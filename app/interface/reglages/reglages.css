@@ -11,6 +11,9 @@
 [hidden] { display: none !important; }
 
 html, body { height: 100%; }
+/* WebView2 rebondit en fin de défilement (pavé tactile, écran tactile) : sans ces deux
+   règles, le rebond du contenu passe à la page entière et emporte le volet avec lui. */
+html, body { overflow: hidden; overscroll-behavior: none; }
 body {
   margin: 0;
   background: var(--reglages-volet);
@@ -73,6 +76,7 @@ svg { display: block; }
   flex-direction: column;
   gap: var(--reglages-rubrique-ecart);
   overflow: hidden auto;
+  overscroll-behavior: contain;
 }
 /* Repère d'accent devant la rubrique choisie : il glisse d'une rubrique à l'autre. */
 .rubriques .repere {
@@ -140,6 +144,7 @@ svg { display: block; }
 .contenu {
   min-height: 0;
   overflow: auto;
+  overscroll-behavior: contain;
   scrollbar-gutter: stable;
   padding: var(--reglages-contenu-haut) var(--reglages-contenu-marge-h) var(--reglages-contenu-marge-h);
   background: var(--reglages-contenu);

@@ -14,6 +14,8 @@ body {
   margin: 0;
   height: 100%;
   overflow: hidden;
+  /* Le rebond de WebView2 en fin de défilement reste dans la grille (comme les Réglages). */
+  overscroll-behavior: none;
 }
 body {
   background: var(--page);
@@ -177,6 +179,7 @@ svg {
   position: absolute;
   inset: 0;
   overflow: auto;
+  overscroll-behavior: contain;
   padding: var(--historique-marge);
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(var(--historique-case-min), 1fr));
