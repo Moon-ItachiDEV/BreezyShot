@@ -1568,7 +1568,17 @@ try {
                     Verifier '(I) 10 s après la vignette partie : mémoire (app et WebView2) ≤ palier des cinq films + 10 Mo' ($apres -le $script:PlateauFilms + 10) "$apres Mo (palier $($script:PlateauFilms) Mo, repos chaud $($script:ReposChaud) Mo, repos L1 $($script:ReposA) Mo)" | Out-Null
                 }
                 else { Noter-Mesure -Nom '(I) 10 s après la vignette, contre le palier des cinq films' -Valeur 'non joué : palier absent (cinq films en échec)' }
-                Verifier '(I) 10 s après la vignette partie : app seule ≤ app au repos L1 + 15 Mo' ($apresApp -le $script:ReposAApp + 15) "$apresApp Mo (repos L1 $($script:ReposAApp) Mo)" | Out-Null
+                # Jugée contre le repos chaud de l'app seule (après un premier film : Media
+                # Foundation et Direct3D restent chargés) ; le repos L1 les précède et
+                # laissait 15 Mo à peine (CI de la 0.7 : +14.6 ; 43751587377 : +14.8 ;
+                # 43799011424 : +15.2, sans fuite). Écart au repos chaud : +0.5 à +10.7 Mo.
+                # Une vidéo de 30 s gardée en mémoire (pic de l'app seule : 70 Mo) dépasse.
+                if ($null -ne $script:ReposChaudApp) {
+                    Verifier '(I) 10 s après la vignette partie : app seule ≤ app au repos chaud + 15 Mo' ($apresApp -le $script:ReposChaudApp + 15) "$apresApp Mo (repos chaud $($script:ReposChaudApp) Mo, repos L1 $($script:ReposAApp) Mo)" | Out-Null
+                }
+                else {
+                    Verifier '(I) 10 s après la vignette partie : app seule ≤ app au repos L1 + 25 Mo (pas de repos chaud)' ($apresApp -le $script:ReposAApp + 25) "$apresApp Mo (repos L1 $($script:ReposAApp) Mo)" | Out-Null
+                }
             }
             # (I et F) GIF laissé à la limite de 60 s (témoin simple) : processeur et mémoire
             # sur 25 s, puis `film fin limite duree 60000`, sans message.
