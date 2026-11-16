@@ -2174,7 +2174,12 @@ fn version_6_mise_a_niveau_vers_7_valeurs_d_avant() {
     let d = dossier();
     let v = defaut_json(|m| {
         m["version"] = json!(6);
-        for cle in ["format_image", "editeur_apres_capture", "film", "historique"] {
+        for cle in [
+            "format_image",
+            "editeur_apres_capture",
+            "film",
+            "historique",
+        ] {
             m.shift_remove(cle);
         }
         m["theme"] = json!("sombre");

@@ -821,7 +821,7 @@ const SANS_VIGNETTE = { ...VUE, lignes: ['copier', 'dossier', 'modele_nom', 'the
         volet: Math.round(r('.volet').width), contenuX: Math.round(r('.contenu').left),
         pro: !document.querySelector('[data-valeur="pro"]').hidden,
         version: Math.round(r('[data-valeur="version"]').bottom),
-        rubriques: [...document.querySelectorAll('.volet [role="tab"]')].map(o => Math.round(o.getBoundingClientRect().left)),
+        rubriques: [...document.querySelectorAll('.volet [role="tab"]:not([hidden])')].map(o => Math.round(o.getBoundingClientRect().left)),
         fonds: [fond('body'), fond('.contenu'), fond('.carte')],
         rayon: getComputedStyle(document.querySelector('.contenu')).borderTopLeftRadius,
       };
@@ -833,7 +833,16 @@ const SANS_VIGNETTE = { ...VUE, lignes: ['copier', 'dossier', 'modele_nom', 'the
     await poser('Après la capture');
     const deborde = await p.$eval('.contenu', e => e.scrollHeight - e.clientHeight);
     const nom = await visible(p, '[data-reglage="modele_nom"]');
-    verifier(nom && deborde <= 0, `13 ${theme} « Après la capture » tient sans défiler, Nom des fichiers déplié`, json([nom, deborde]));
+    // 0.7.6 : « Format » et « Ouvrir dans l'éditeur » s'ajoutent ; Nom des fichiers déplié,
+    // la rubrique défile d'une ligne ou deux au plus (la page défile déjà) ; par défaut
+    // (Nom des fichiers replié), tout tient sans défiler.
+    verifier(nom && deborde <= 80, `13 ${theme} « Après la capture » : Nom des fichiers déplié, au plus une ligne ou deux à défiler`, json([nom, deborde]));
+    await p.evaluate((v) => { __vue = v; __emettre('reglages:etat', v); }, { ...VUE_PRO, enregistrer: false });
+    await p.waitForTimeout(450);
+    const debordeDefaut = await p.$eval('.contenu', e => e.scrollHeight - e.clientHeight);
+    verifier(debordeDefaut <= 0, `13 ${theme} « Après la capture » par défaut (Nom des fichiers replié) tient sans défiler`, json(debordeDefaut));
+    await p.evaluate((v) => { __vue = v; __emettre('reglages:etat', v); }, { ...VUE_PRO, enregistrer: true });
+    await p.waitForTimeout(450);
     await p.screenshot({ path: `${SORTIE}/reglages-volet-apres-${theme}.png` });
     // Ronds de l'interrupteur éteint et pastille du sélecteur : à l'écart de leur fond.
     await poser('Capture', true);
@@ -872,7 +881,7 @@ const SANS_VIGNETTE = { ...VUE, lignes: ['copier', 'dossier', 'modele_nom', 'the
   {
     const p = await page({ largeur: 600, hauteur: 420 });
     const etroit = await p.evaluate(() => [Math.round(document.querySelector('.volet').getBoundingClientRect().width),
-      [...document.querySelectorAll('.volet [role="tab"]')].map(o => o.textContent.trim()),
+      [...document.querySelectorAll('.volet [role="tab"]:not([hidden])')].map(o => o.textContent.trim()),
       document.documentElement.scrollWidth <= innerWidth]);
     verifier(etroit[0] === 56 && etroit[1].length === 4 && etroit[2],
       '13 taille minimale 600 × 420 : volet de 56 px, rubriques nommées, rien ne déborde', json(etroit));
@@ -924,6 +933,86 @@ const SANS_VIGNETTE = { ...VUE, lignes: ['copier', 'dossier', 'modele_nom', 'the
     });
     verifier(d.contenu && json(d.page) === '[0,0,0]' && d.volet === 0 && json(d.rebond) === '["none/none","none/none","contain/contain","contain/contain"]',
       '16 défilement du contenu : règles anti-rebond posées, la page ne défile pas, ni de côté', json(d));
+    await p.context().close();
+  }
+
+  // 17. Réglages Pro (0.7.6) : « Format » et « Ouvrir dans l'éditeur » (gratuits, Après la
+  // capture) ; rubriques Enregistrement et Historique, absentes sans licence (le cœur ne
+  // nomme pas leurs lignes), avec une pastille Pro à leur onglet.
+  {
+    const PRO_FILM = { ...VUE_PRO, lignes: [...VUE_PRO.lignes, 'fluidite', 'son_systeme', 'clics_visibles', 'film_dossier'] };
+    const p = await page({ largeur: 780, hauteur: 520, vue: REEL.vue });
+    const onglets = () => p.$$eval('.volet [role="tab"]', ts => ts.filter(t => !t.hidden).map(t => t.dataset.rubrique));
+    verifier(!(await onglets()).some(r => ['enregistrement', 'historique'].includes(r)),
+      '17 sans licence : ni Enregistrement ni Historique', json(await onglets()));
+    // Format et éditeur : gratuits, dans « Après la capture ».
+    await onglet(p, 'Après la capture');
+    await vider(p);
+    await p.getByRole('radio', { name: 'JPG' }).click();
+    await p.waitForTimeout(60);
+    verifier(json((await dernier(p, 'reglages_changer'))?.[1]) === json({ changement: { cle: 'format_image', valeur: 'jpg' } }), '17 Format JPG → reglages_changer format_image jpg');
+    await p.getByRole('switch', { name: "Ouvrir dans l'éditeur" }).click();
+    await p.waitForTimeout(60);
+    verifier(json((await dernier(p, 'reglages_changer'))?.[1]) === json({ changement: { cle: 'editeur_apres', valeur: true } }), "17 Ouvrir dans l'éditeur → reglages_changer editeur_apres true");
+    // Avec la licence : les deux rubriques, pastille Pro à chaque onglet.
+    await p.evaluate((v) => { __vue = v; __emettre('reglages:etat', v); }, { ...PRO_FILM, format_image: 'jpg', historique: { gardes: 25, choix: [0, 25, 50, 100, 200] } });
+    await p.waitForTimeout(60);
+    verifier(json(await onglets()) === json(['capture', 'apres', 'enregistrement', 'historique', 'raccourcis', 'general']), '17 avec licence : Enregistrement et Historique', json(await onglets()));
+    const pastilles = await p.$$eval('.volet [role="tab"]:not([hidden]) .onglet-pro', e => e.length);
+    verifier(pastilles === 2, '17 une pastille Pro sur chacun des deux onglets', String(pastilles));
+    await onglet(p, 'Enregistrement');
+    await p.waitForTimeout(450);
+    verifier(await p.getByRole('radio', { name: '30 i/s' }).getAttribute('aria-checked') === 'true'
+      && await p.$eval('[data-valeur="film_dossier"]', e => e.textContent) === 'Comme les images'
+      && await visible(p, '[data-reglage="film_dossier"]') && !(await visible(p, '[data-controle="film_dossier_defaut"]')),
+    '17 Enregistrement : 30 i/s coché, dossier « Comme les images », sans bouton de retour');
+    await vider(p);
+    await p.getByRole('radio', { name: '60 i/s' }).click();
+    await p.waitForTimeout(60);
+    verifier(json((await dernier(p, 'reglages_changer'))?.[1]) === json({ changement: { cle: 'fluidite', valeur: 60 } }), '17 Fluidité 60 → reglages_changer fluidite 60 (nombre)');
+    for (const [nom, cle] of [["Son de l'ordinateur", 'son_systeme'], ['Clics visibles', 'clics_visibles']]) {
+      await p.getByRole('switch', { name: nom }).click();
+      await p.waitForTimeout(60);
+      verifier(json((await dernier(p, 'reglages_changer'))?.[1]) === json({ changement: { cle, valeur: true } }), `17 ${nom} → reglages_changer ${cle} true`);
+    }
+    await vider(p);
+    await p.locator('[data-controle="parcourir_films"]').click();
+    await p.waitForTimeout(60);
+    verifier((await dernier(p, 'reglages_parcourir_films')) !== undefined, '17 Parcourir… des films → reglages_parcourir_films');
+    // Un dossier à part : son nom, et le retour à « Comme les images ».
+    await p.evaluate((v) => { __vue = v; __emettre('reglages:etat', v); }, { ...PRO_FILM, film: { ...PRO_FILM.film, dossier: 'Vidéos › Films' } });
+    await p.waitForTimeout(60);
+    verifier(await p.$eval('[data-valeur="film_dossier"]', e => e.textContent) === 'Vidéos › Films' && await visible(p, '[data-controle="film_dossier_defaut"]'), '17 dossier à part : son nom et le bouton de retour');
+    await vider(p);
+    await p.locator('[data-controle="film_dossier_defaut"]').click();
+    await p.waitForTimeout(60);
+    verifier(json((await dernier(p, 'reglages_changer'))?.[1]) === json({ changement: { cle: 'film_dossier', valeur: 'defaut' } }), '17 retour à « Comme les images » → reglages_changer film_dossier defaut');
+    await p.screenshot({ path: `${SORTIE}/reglages-enregistrement.png` });
+    // Historique : 25 coché ; « Aucun » envoie 0 ; Vider demande confirmation.
+    await onglet(p, 'Historique');
+    await p.waitForTimeout(450);
+    verifier(await p.getByRole('radio', { name: '50', exact: true }).getAttribute('aria-checked') === 'true'
+      && json(await p.$$eval('[data-controle="historique_gardes"] [role="radio"]', r => r.map(b => b.textContent))) === json(['Aucun', '25', '50', '100', '200']),
+    '17 Historique : Aucun, 25, 50, 100, 200, 50 coché');
+    await vider(p);
+    await p.getByRole('radio', { name: 'Aucun' }).click();
+    await p.waitForTimeout(60);
+    verifier(json((await dernier(p, 'reglages_changer'))?.[1]) === json({ changement: { cle: 'historique_gardes', valeur: 0 } }), '17 Aucun → reglages_changer historique_gardes 0');
+    await vider(p);
+    const boutonVider = p.locator('[data-controle="historique_vider"]');
+    await boutonVider.click();
+    verifier((await dernier(p, 'reglages_vider_historique')) === undefined && (await boutonVider.textContent()) === 'Confirmer', '17 Vider : un premier clic demande « Confirmer », rien n\'est vidé');
+    await boutonVider.click();
+    await p.waitForTimeout(60);
+    verifier((await dernier(p, 'reglages_vider_historique')) !== undefined && (await boutonVider.textContent()) === 'Vidé', '17 Vider : le second clic vide (reglages_vider_historique)');
+    await p.screenshot({ path: `${SORTIE}/reglages-historique.png` });
+    // Licence retirée : les deux rubriques partent, l'onglet ouvert aussi.
+    await p.evaluate((v) => { __vue = v; __emettre('reglages:etat', v); }, REEL.vue);
+    await p.waitForTimeout(60);
+    const sections = await p.$$eval('section[role="tabpanel"]', ss => ss.filter(s => !s.hidden).map(s => s.dataset.rubrique));
+    verifier(!(await onglets()).some(r => ['enregistrement', 'historique'].includes(r)) && !sections.some(r => ['enregistrement', 'historique'].includes(r)),
+      '17 licence retirée : les deux rubriques disparaissent et une autre s\'ouvre', json([await onglets(), sections]));
+    verifier(p.erreurs.length === 0, '17 aucune erreur de console', json(p.erreurs));
     await p.context().close();
   }
 

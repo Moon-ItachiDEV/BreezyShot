@@ -19,11 +19,12 @@ use super::page_reglages::{
 };
 use super::{
     actions_en_vigueur, plateforme_reglages, pro, refaire_menu as refaire_menu_actuel, zone,
-    Application, VERSION, VIGNETTE_CONSTRUITE,
+    Application, EDITEUR_CONSTRUIT, VERSION, VIGNETTE_CONSTRUITE,
 };
 use crate::fenetres::{reglages as fenetre, theme};
 use crate::raccourcis::{self, Raison};
 use crate::reglages::{self, Raccourcis, Reglages};
+use crate::sortie;
 use crate::systeme::gel;
 use crate::systeme::{self, EtatDemarrage};
 
@@ -249,6 +250,8 @@ fn vue(app: &AppHandle) -> VueReglages {
         defaut: &defaut,
         refus_raccourcis: &refus,
         dossier_affiche,
+        dossier_films_affiche: r.film.dossier.as_deref().map(|d| sortie::nom_affiche(d)),
+        editeur_construit: EDITEUR_CONSTRUIT,
         demarrage: systeme::demarrage_avec_systeme(None).unwrap_or(EtatDemarrage::Indisponible),
         impr_ecran: systeme::impr_ecran_pour_breezyshot(),
         licence_active: pro(app),
@@ -415,6 +418,10 @@ pub fn reglages_changer(app: AppHandle, changement: Changement) -> Reponse {
 /// (0.7.2), par le même chemin (relire, valider, écrire, garder, effets).
 pub(super) fn changer(app: &AppHandle, changement: Changement) -> Reponse {
     let app = app.clone();
+    // Une page forgée ne peut pas écrire un réglage Pro sans licence.
+    if changement.exige_pro() && !pro(&app) {
+        return refuser(&app, Refus::nouveau(changement.ligne(), "", "sans_licence"));
+    }
     let base = relire(&app);
     let nouveau = match page::appliquer(&base, &changement) {
         Ok(n) => n,
@@ -506,15 +513,30 @@ pub struct Apercu {
 
 /// L'aperçu du nom des fichiers, sans rien écrire.
 #[tauri::command]
-pub fn reglages_apercu_nom(modele: String) -> Apercu {
+pub fn reglages_apercu_nom(app: AppHandle, modele: String) -> Apercu {
     Apercu {
-        apercu: page::apercu_nom(&modele, chrono::Local::now()),
+        apercu: page::apercu_nom(&modele, chrono::Local::now(), memoire(&app).format_image),
     }
 }
 
 /// « Parcourir… » : le sélecteur de dossier du système, dans un fil à lui.
 #[tauri::command]
 pub async fn reglages_parcourir(app: AppHandle) -> Reponse {
+    parcourir(app, false).await
+}
+
+/// « Parcourir… » du dossier des films (Pro) : le même sélecteur, le choix va à
+/// `film.dossier` ; le dossier des images revient à « comme les images ».
+#[tauri::command]
+pub async fn reglages_parcourir_films(app: AppHandle) -> Reponse {
+    if !pro(&app) {
+        return refuser(&app, Refus::nouveau("film_dossier", "", "sans_licence"));
+    }
+    parcourir(app, true).await
+}
+
+async fn parcourir(app: AppHandle, films: bool) -> Reponse {
+    let ligne = if films { "film_dossier" } else { "dossier" };
     if DIALOGUE_OUVERT.swap(true, Ordering::SeqCst) {
         log::info!("dossier: dialogue deja ouvert");
         return reponse(&app, None);
@@ -523,8 +545,13 @@ pub async fn reglages_parcourir(app: AppHandle) -> Reponse {
     let proprietaire = fenetre::identifiant(&app);
     let r = memoire(&app);
     let images = images(&app);
-    let (depart, _) =
+    let (depart_images, _) =
         zone::dossier_enregistrement(r.dossier_enregistrement.as_deref(), images.as_deref());
+    // Les films partent de leur dossier à part, s'il y en a un.
+    let depart = match (films, r.film.dossier.clone()) {
+        (true, Some(d)) => d,
+        _ => depart_images.clone(),
+    };
     let (tx, rx) = std::sync::mpsc::channel();
     let lance = std::thread::Builder::new()
         .name("dossier".into())
@@ -547,18 +574,28 @@ pub async fn reglages_parcourir(app: AppHandle) -> Reponse {
         }
         Err(e) => {
             log::warn!("dossier: dialogue impossible ({e})");
-            return refuser(&app, Refus::nouveau("dossier", "", "dialogue_impossible"));
+            return refuser(&app, Refus::nouveau(ligne, "", "dialogue_impossible"));
         }
     };
-    let Ok(dossier) = page::dossier_choisi(&choisi, images.as_deref()) else {
-        return refuser(&app, Refus::nouveau("dossier", "", "invalide"));
+    // Les films : « comme les images » est le dossier d'enregistrement en vigueur.
+    let par_defaut = if films {
+        Some(depart_images.as_path())
+    } else {
+        images.as_deref()
+    };
+    let Ok(dossier) = page::dossier_choisi(&choisi, par_defaut) else {
+        return refuser(&app, Refus::nouveau(ligne, "", "invalide"));
     };
     let mut nouveau = relire(&app);
-    nouveau.dossier_enregistrement = dossier;
-    if let Err(e) = reglages::valider(&nouveau) {
-        return refuser(&app, Refus::nouveau("dossier", "", e.code()));
+    if films {
+        nouveau.film.dossier = dossier;
+    } else {
+        nouveau.dossier_enregistrement = dossier;
     }
-    log::info!("reglage change: dossier");
+    if let Err(e) = reglages::valider(&nouveau) {
+        return refuser(&app, Refus::nouveau(ligne, "", e.code()));
+    }
+    log::info!("reglage change: {ligne}");
     ecrire_et_garder(&app, nouveau);
     let rep = reponse(&app, None);
     fenetre::emettre_etat(&app, rep.vue.clone());

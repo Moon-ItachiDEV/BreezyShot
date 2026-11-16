@@ -592,6 +592,7 @@ fn lancer_app(contexte: tauri::Context, commande: Commande, inconnus: Vec<String
             fenetre_reglages::reglages_changer,
             fenetre_reglages::reglages_apercu_nom,
             fenetre_reglages::reglages_parcourir,
+            fenetre_reglages::reglages_parcourir_films,
             fenetre_reglages::reglages_saisie,
             fenetre_reglages::reglages_raccourci,
             fenetre_reglages::reglages_retablir,

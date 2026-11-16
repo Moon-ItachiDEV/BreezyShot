@@ -40,6 +40,10 @@
           aria-controls="rubrique-capture" aria-selected="true"><svg class="onglet-picto" viewBox="0 0 20 20" aria-hidden="true"><path d="M3 7V4.5A1.5 1.5 0 0 1 4.5 3H7M13 3h2.5A1.5 1.5 0 0 1 17 4.5V7M17 13v2.5a1.5 1.5 0 0 1-1.5 1.5H13M7 17H4.5A1.5 1.5 0 0 1 3 15.5V13"/><path d="M10 7.5v5M7.5 10h5"/></svg><span>Capture</span></button>
         <button role="tab" id="onglet-apres" title="Après la capture" data-rubrique="apres" aria-controls="rubrique-apres"
           aria-selected="false" tabindex="-1"><svg class="onglet-picto" viewBox="0 0 20 20" aria-hidden="true"><rect x="2.5" y="3.5" width="15" height="11" rx="1.5"/><rect x="4.5" y="9" width="6" height="4" rx="1"/></svg><span>Après la capture</span></button>
+        <button role="tab" id="onglet-enregistrement" title="Enregistrement" data-rubrique="enregistrement"
+          aria-controls="rubrique-enregistrement" aria-selected="false" tabindex="-1"><svg class="onglet-picto" viewBox="0 0 20 20" aria-hidden="true"><rect x="2.5" y="4.5" width="10" height="11" rx="1.5"/><path d="M12.5 8.5 17.5 6v8l-5-2.5"/></svg><span>Enregistrement</span><span class="pro onglet-pro">Pro</span></button>
+        <button role="tab" id="onglet-historique" title="Historique" data-rubrique="historique"
+          aria-controls="rubrique-historique" aria-selected="false" tabindex="-1"><svg class="onglet-picto" viewBox="0 0 20 20" aria-hidden="true"><path d="M3.5 10a6.5 6.5 0 1 0 2-4.7"/><path d="M3.5 3.5v3h3M10 6.5V10l2.5 1.5"/></svg><span>Historique</span><span class="pro onglet-pro">Pro</span></button>
         <button role="tab" id="onglet-raccourcis" title="Raccourcis" data-rubrique="raccourcis"
           aria-controls="rubrique-raccourcis" aria-selected="false" tabindex="-1"><svg class="onglet-picto" viewBox="0 0 20 20" aria-hidden="true"><rect x="2.5" y="5.5" width="15" height="9" rx="1.5"/><path d="M5.5 8.5h1M9.5 8.5h1M13.5 8.5h1M6.5 11.5h7"/></svg><span>Raccourcis</span></button>
         <button role="tab" id="onglet-general" title="Général" data-rubrique="general" aria-controls="rubrique-general"
@@ -108,9 +112,21 @@
               <button class="bouton" data-controle="parcourir" aria-describedby="l-dossier">Parcourir…</button>
             </div>
           </div>
+          <div class="ligne" data-reglage="format_image" hidden>
+            <div class="lb"><span class="libelle" id="l-format">Format</span><p class="refus" data-refus role="status" hidden></p></div>
+            <div class="choix" role="radiogroup" data-controle="format_image" aria-labelledby="l-format">
+              <button role="radio" data-valeur="png">PNG</button>
+              <button role="radio" data-valeur="jpg">JPG</button>
+            </div>
+          </div>
         </div>
 
         <div class="groupe carte">
+          <div class="ligne" data-reglage="editeur_apres" hidden>
+            <div class="lb"><span class="libelle" id="l-editeur-apres">Ouvrir dans l'éditeur</span><p class="refus" data-refus role="status" hidden></p></div>
+            <button role="switch" data-controle="editeur_apres" aria-labelledby="l-editeur-apres"
+              aria-checked="false"><svg class="sw-picto sw-non" viewBox="0 0 14 14" aria-hidden="true"><path d="M3.5 3.5l7 7M10.5 3.5l-7 7"/></svg><svg class="sw-picto sw-oui" viewBox="0 0 14 14" aria-hidden="true"><path d="M2.5 7.5 5.5 10.5 11.5 3.5"/></svg><span class="sw-bouton" aria-hidden="true"><svg viewBox="0 0 12 12"><path d="M2.2 6.4 4.8 9 9.8 3.2"/></svg></span></button>
+          </div>
           <div class="ligne" data-reglage="vignette" hidden>
             <div class="lb"><span class="libelle" id="l-vignette">Vignette</span><p class="refus" data-refus role="status" hidden></p></div>
             <button role="switch" data-controle="vignette" aria-labelledby="l-vignette"
@@ -132,6 +148,54 @@
             </div>
           </div>
           </div></div>
+        </div>
+      </section>
+
+      <section id="rubrique-enregistrement" role="tabpanel" data-rubrique="enregistrement"
+        aria-labelledby="onglet-enregistrement" hidden>
+        <h2 class="titre">Enregistrement</h2>
+        <div class="groupe carte">
+          <div class="ligne" data-reglage="fluidite" hidden>
+            <div class="lb"><span class="libelle" id="l-fluidite">Fluidité</span><p class="refus" data-refus role="status" hidden></p></div>
+            <div class="choix" role="radiogroup" data-controle="fluidite" aria-labelledby="l-fluidite">
+              <button role="radio" data-valeur="30">30 i/s</button>
+              <button role="radio" data-valeur="60">60 i/s</button>
+            </div>
+          </div>
+          <div class="ligne" data-reglage="son_systeme" hidden>
+            <div class="lb"><span class="libelle" id="l-son-systeme">Son de l'ordinateur</span><p class="refus" data-refus role="status" hidden></p></div>
+            <button role="switch" data-controle="son_systeme" aria-labelledby="l-son-systeme"
+              aria-checked="false"><svg class="sw-picto sw-non" viewBox="0 0 14 14" aria-hidden="true"><path d="M3.5 3.5l7 7M10.5 3.5l-7 7"/></svg><svg class="sw-picto sw-oui" viewBox="0 0 14 14" aria-hidden="true"><path d="M2.5 7.5 5.5 10.5 11.5 3.5"/></svg><span class="sw-bouton" aria-hidden="true"><svg viewBox="0 0 12 12"><path d="M2.2 6.4 4.8 9 9.8 3.2"/></svg></span></button>
+          </div>
+          <div class="ligne" data-reglage="clics_visibles" hidden>
+            <div class="lb"><span class="libelle" id="l-clics-visibles">Clics visibles</span><p class="refus" data-refus role="status" hidden></p></div>
+            <button role="switch" data-controle="clics_visibles" aria-labelledby="l-clics-visibles"
+              aria-checked="false"><svg class="sw-picto sw-non" viewBox="0 0 14 14" aria-hidden="true"><path d="M3.5 3.5l7 7M10.5 3.5l-7 7"/></svg><svg class="sw-picto sw-oui" viewBox="0 0 14 14" aria-hidden="true"><path d="M2.5 7.5 5.5 10.5 11.5 3.5"/></svg><span class="sw-bouton" aria-hidden="true"><svg viewBox="0 0 12 12"><path d="M2.2 6.4 4.8 9 9.8 3.2"/></svg></span></button>
+          </div>
+          <div class="ligne" data-reglage="film_dossier" hidden>
+            <div class="lb"><span class="libelle" id="l-film-dossier">Dossier des films</span><p class="refus" data-refus role="status" hidden></p></div>
+            <div class="ctl">
+              <span class="valeur" data-valeur="film_dossier"></span>
+              <button class="bouton-icone retablir" data-controle="film_dossier_defaut" aria-label="Comme les images" hidden><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4.5 9.5a5.5 5.5 0 1 0 1.7-4"/><path d="M5.5 2.8v3.4h3.4"/></svg></button>
+              <button class="bouton" data-controle="parcourir_films" aria-describedby="l-film-dossier">Parcourir…</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="rubrique-historique" role="tabpanel" data-rubrique="historique"
+        aria-labelledby="onglet-historique" hidden>
+        <h2 class="titre">Historique</h2>
+        <div class="groupe carte">
+          <div class="ligne" data-reglage="historique_gardes" hidden>
+            <div class="lb"><span class="libelle" id="l-historique-gardes">Captures gardées</span><p class="refus" data-refus role="status" hidden></p></div>
+            <div class="choix" role="radiogroup" data-controle="historique_gardes" aria-labelledby="l-historique-gardes">
+            </div>
+          </div>
+          <div class="ligne" data-reglage="historique_vider" hidden>
+            <div class="lb"><span class="libelle" id="l-historique-vider">Vider l'historique</span><p class="refus" data-refus role="status" hidden></p></div>
+            <button class="bouton" data-controle="historique_vider" aria-describedby="l-historique-vider">Vider</button>
+          </div>
         </div>
       </section>
 
