@@ -506,7 +506,24 @@ fn inscrire(etat: &Etat) -> Result<(), ErreurInstallation> {
         "etape inscription: {}",
         if fait { "faite" } else { "sans objet" }
     );
+    associer(e);
     Ok(())
+}
+
+/// L'association des fichiers `.breezy` à l'app (0.7.9) : double-clic dans l'Explorateur. Un
+/// échec n'empêche pas l'installation (l'app marche sans) ; il est écrit au journal.
+fn associer(e: &Emplacements) {
+    for (cle, valeurs) in installation::association(e) {
+        if let Err(d) = sys::ecrire_cle(&cle, &valeurs) {
+            log::info!("etape association: erreur {d}");
+            return;
+        }
+    }
+    // L'Explorateur relit ses types de fichiers (jamais pour les clés d'essai).
+    if e.classes == installation::emplacements::CLE_CLASSES {
+        sys::notifier_associations();
+    }
+    log::info!("etape association: faite");
 }
 
 fn lancer_etape(app: &AppHandle, etat: &Etat) -> Result<(), ErreurInstallation> {
@@ -809,6 +826,7 @@ fn nom_retrait(r: &Retrait) -> &'static str {
     match r {
         Retrait::Raccourci { .. } => "raccourci",
         Retrait::Cle { .. } => "inscription",
+        Retrait::Association { .. } => "association",
         Retrait::Fichier(_) => "fichier",
         Retrait::ExeDeplace { .. } => "exe",
         Retrait::DossierSiVide(_) => "dossier",
@@ -872,6 +890,7 @@ fn appliquer_retrait(retrait: Retrait) {
             Ok(false) => log::info!("desinstallation inscription: absente"),
             Err(e) => log::warn!("desinstallation inscription: {e}"),
         },
+        Retrait::Association { base, exe } => retirer_association(&base, &exe),
         Retrait::Fichier(p) => {
             let _ = sys::supprimer_fichier(&p);
         }
@@ -892,6 +911,41 @@ fn appliquer_retrait(retrait: Retrait) {
             }
         }
     }
+}
+
+/// Retire l'association des fichiers `.breezy`, seulement si sa commande d'ouverture est
+/// celle de notre exe ; l'extension seulement si elle désigne encore notre type.
+fn retirer_association(base: &str, exe: &Path) {
+    let commande = sys::lire_texte(
+        &format!(
+            r"{base}\{}\shell\open\command",
+            installation::emplacements::PROGID
+        ),
+        "",
+    );
+    if commande.is_none() {
+        log::info!("desinstallation association: absente");
+        return;
+    }
+    if !installation::emplacements::association_a_nous(commande.as_deref(), exe) {
+        log::info!("desinstallation association: gardee (autre commande)");
+        return;
+    }
+    let extension = format!(r"{base}\{}", installation::emplacements::EXTENSION_BREEZY);
+    let extension_a_nous =
+        sys::lire_texte(&extension, "").as_deref() == Some(installation::emplacements::PROGID);
+    for cle in installation::cles_association(base) {
+        if cle == extension && !extension_a_nous {
+            continue;
+        }
+        if let Err(e) = sys::retirer_valeurs_et_cle(&cle, &[""]) {
+            log::warn!("desinstallation association: {e}");
+        }
+    }
+    if base == installation::emplacements::CLE_CLASSES {
+        sys::notifier_associations();
+    }
+    log::info!("desinstallation association: retiree");
 }
 
 fn si(cond: bool, oui: &'static str, non: &'static str) -> &'static str {

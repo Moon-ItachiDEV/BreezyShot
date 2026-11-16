@@ -935,3 +935,182 @@ export function cadre(doc) {
 export function vide(doc) {
   return doc.objets.length === 0 && doc.recadrage === null;
 }
+
+// ---------- lecture d'un fichier .breezy (0.7.9) ----------
+//
+// Un fichier .breezy vient du disque : il peut être faux, abîmé ou fait pour nuire. Le
+// document n'est donc jamais « repris » tel que le JSON le donne : chaque objet est
+// reconstruit champ par champ, avec des types, des bornes et des plafonds ; ce qui est
+// inconnu ou hors plafond est écarté (jamais copié, jamais exécuté). Les noms de champs que
+// le fichier invente (`__proto__`…) ne sont jamais lus.
+
+// Plafonds : le JSON au plus, nombre d'objets, points d'un trait et au total, passages de
+// gomme, longueur d'un texte.
+export const BREEZY_OCTETS_MAX = 16 * 1024 * 1024;
+const BREEZY_OBJETS_MAX = 2000;
+const BREEZY_POINTS_MAX = 20000;
+const BREEZY_POINTS_TOTAL = 400000;
+const BREEZY_GOMMES_MAX = 2000;
+const BREEZY_TEXTE_MAX = 5000;
+// Coordonnées : un peu au-delà de l'image (un objet peut dépasser un bord).
+const COORD_MAX = 65536;
+const COULEUR = /^#[0-9a-fA-F]{6}$/;
+
+const nombre = (v, min, max, defaut) =>
+  typeof v === "number" && Number.isFinite(v) ? borne(v, min, max) : defaut;
+const coord = (v) => nombre(v, -COORD_MAX, COORD_MAX, 0);
+const entier = (v, min, max, defaut) => Math.round(nombre(v, min, max, defaut));
+const booleen = (v) => v === true;
+const couleurLue = (v) => (typeof v === "string" && COULEUR.test(v) ? v : "#1A1A1A");
+const niveau = (v) => entier(v, 0, 2, 1);
+const opaciteLue = (v) => {
+  // Absente : opaque ; au-dessus de 1 : lue en pour cent (contrat du document).
+  if (typeof v !== "number" || !Number.isFinite(v)) return 1;
+  return borne(v > 1 ? v / 100 : v, 0, 1);
+};
+
+function pointsLus(v, budget) {
+  if (!Array.isArray(v)) return [];
+  const sortie = [];
+  for (const p of v) {
+    if (sortie.length >= BREEZY_POINTS_MAX || budget.points <= 0) break;
+    if (Array.isArray(p) && p.length >= 2) {
+      sortie.push([coord(p[0]), coord(p[1])]);
+      budget.points--;
+    }
+  }
+  return sortie;
+}
+
+function gommesLues(v, budget) {
+  if (!Array.isArray(v)) return undefined;
+  const sortie = [];
+  for (const g of v) {
+    if (sortie.length >= BREEZY_GOMMES_MAX || budget.points <= 0) break;
+    if (g && typeof g === "object") {
+      sortie.push({ largeur: nombre(g.largeur, 1, 2000, 10), points: pointsLus(g.points, budget) });
+    }
+  }
+  return sortie.length ? sortie : undefined;
+}
+
+const STYLES = ["simple", "contour", "etiquette"];
+const SORTES = ["pixeliser", "flouter", "bloc"];
+const FORMES_PROJECTEUR = ["rectangle", "ovale"];
+
+// Un objet lu, ou null s'il n'est pas d'un type connu.
+function objetLu(o, budget) {
+  if (!o || typeof o !== "object" || Array.isArray(o)) return null;
+  const rect = () => ({ x1: coord(o.x1), y1: coord(o.y1), x2: coord(o.x2), y2: coord(o.y2) });
+  let r;
+  switch (o.type) {
+    case "fleche":
+      r = { type: "fleche", ...rect() };
+      if (typeof o.cx === "number" && typeof o.cy === "number"
+        && Number.isFinite(o.cx) && Number.isFinite(o.cy)) {
+        r.cx = coord(o.cx);
+        r.cy = coord(o.cy);
+      }
+      Object.assign(r, { double: booleen(o.double), couleur: couleurLue(o.couleur),
+        epaisseur: niveau(o.epaisseur), opacite: opaciteLue(o.opacite) });
+      break;
+    case "rectangle":
+      r = { type: "rectangle", ...rect(), couleur: couleurLue(o.couleur),
+        epaisseur: niveau(o.epaisseur), plein: booleen(o.plein),
+        arrondi: nombre(o.arrondi, 0, 2000, 0), opacite: opaciteLue(o.opacite) };
+      break;
+    case "ellipse":
+      r = { type: "ellipse", ...rect(), couleur: couleurLue(o.couleur),
+        epaisseur: niveau(o.epaisseur), plein: booleen(o.plein), opacite: opaciteLue(o.opacite) };
+      break;
+    case "ligne":
+      r = { type: "ligne", ...rect(), couleur: couleurLue(o.couleur),
+        epaisseur: niveau(o.epaisseur), opacite: opaciteLue(o.opacite) };
+      break;
+    case "crayon":
+      r = { type: "crayon", points: pointsLus(o.points, budget), couleur: couleurLue(o.couleur),
+        epaisseur: niveau(o.epaisseur), opacite: opaciteLue(o.opacite) };
+      if (!r.points.length) return null; // un trait sans point n'a pas de boîte
+      break;
+    case "surligneur":
+      r = { type: "surligneur", points: pointsLus(o.points, budget),
+        couleur: couleurLue(o.couleur), epaisseur: niveau(o.epaisseur) };
+      if (!r.points.length) return null;
+      break;
+    case "texte":
+      r = { type: "texte", x: coord(o.x), y: coord(o.y),
+        texte: typeof o.texte === "string" ? o.texte.slice(0, BREEZY_TEXTE_MAX) : "",
+        couleur: couleurLue(o.couleur), taille: nombre(o.taille, 4, 600, 28),
+        gras: booleen(o.gras), style: STYLES.includes(o.style) ? o.style : "simple",
+        opacite: opaciteLue(o.opacite) };
+      break;
+    case "numero":
+      r = { type: "numero", x: coord(o.x), y: coord(o.y), rayon: nombre(o.rayon, 2, 400, 16),
+        couleur: couleurLue(o.couleur), ordre: entier(o.ordre, 1, 1000000, 1),
+        opacite: opaciteLue(o.opacite) };
+      break;
+    case "masque":
+      r = { type: "masque", ...rect(), sorte: SORTES.includes(o.sorte) ? o.sorte : "pixeliser",
+        intensite: niveau(o.intensite), graine: entier(o.graine, 0, 0xFFFFFFFF, 0) };
+      break;
+    case "projecteur":
+      r = { type: "projecteur", ...rect(), forme: FORMES_PROJECTEUR.includes(o.forme) ? o.forme : "rectangle" };
+      break;
+    default:
+      return null;
+  }
+  if (ENCRES[r.type]) {
+    const g = gommesLues(o.gommes, budget);
+    if (g) r.gommes = g;
+  }
+  r.id = o.id;
+  return r;
+}
+
+// Lit le document d'un fichier .breezy : `texte` est le JSON des annotations, `largeur` et
+// `hauteur` ceux de l'image du fichier (l'image fait foi). Rend { doc, ecartes } : le
+// document propre, et le nombre d'objets écartés (type inconnu, au-delà du plafond). Lève une
+// Error si le texte n'est pas un document (trop gros, pas du JSON, pas un objet).
+export function lireDocument(texte, largeur, hauteur) {
+  if (typeof texte !== "string" || texte.length > BREEZY_OCTETS_MAX) throw new Error("trop gros");
+  let brut;
+  try {
+    brut = JSON.parse(texte);
+  } catch {
+    throw new Error("JSON illisible");
+  }
+  if (!brut || typeof brut !== "object" || Array.isArray(brut)) throw new Error("pas un document");
+  const liste = Array.isArray(brut.objets) ? brut.objets : [];
+  const doc = nouveauDocument(largeur, hauteur);
+  const budget = { points: BREEZY_POINTS_TOTAL };
+  const vus = new Set();
+  let ecartes = Math.max(0, liste.length - BREEZY_OBJETS_MAX);
+  let maxId = 0;
+  const lus = [];
+  for (const o of liste.slice(0, BREEZY_OBJETS_MAX)) {
+    const r = objetLu(o, budget);
+    if (!r) {
+      ecartes++;
+      continue;
+    }
+    if (Number.isInteger(r.id) && r.id > 0 && r.id < 1e9 && !vus.has(r.id)) {
+      vus.add(r.id);
+      maxId = Math.max(maxId, r.id);
+    } else {
+      r.id = 0;
+    }
+    lus.push(r);
+  }
+  // Les identifiants manquants ou en double reçoivent un numéro neuf, au-dessus de tous.
+  let suivant = Math.max(maxId + 1, Number.isInteger(brut.suivant) && brut.suivant < 1e9
+    ? brut.suivant : 1);
+  for (const r of lus) if (!r.id) r.id = suivant++;
+  doc.objets = lus;
+  doc.suivant = suivant;
+  const c = brut.recadrage;
+  if (c && typeof c === "object" && !Array.isArray(c)) {
+    recadrer(doc, { x: nombre(c.x, 0, largeur, 0), y: nombre(c.y, 0, hauteur, 0),
+      largeur: nombre(c.largeur, 0, largeur, 0), hauteur: nombre(c.hauteur, 0, hauteur, 0) });
+  }
+  return { doc, ecartes };
+}

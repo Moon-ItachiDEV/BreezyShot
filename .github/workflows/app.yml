@@ -195,6 +195,14 @@ jobs:
           SORTIE: ${{ github.workspace }}/essais-resultats/pages
         run: node essais/pages/editeur.cjs
 
+      - name: Essai des fichiers .breezy (lecture stricte, page de l'éditeur)
+        env:
+          NODE_PATH: ${{ github.workspace }}/app/node_modules
+          SORTIE: ${{ github.workspace }}/essais-resultats/pages
+        run: |
+          node essais/pages/editeur-breezy.cjs
+          node essais/pages/editeur-breezy-page.cjs
+
       - name: Essai de la page de l'historique
         env:
           NODE_PATH: ${{ github.workspace }}/app/node_modules

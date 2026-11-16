@@ -412,7 +412,7 @@ const CHARGE = {
       return { dessous: m.top >= b.bottom, droite: Math.abs(m.right - b.right) < 1 };
     });
     verifier(
-      JSON.stringify(itemsP.map((t) => t.trim())) === '["Enregistrer sous…"]' &&
+      JSON.stringify(itemsP.map((t) => t.trim())) === '["Enregistrer sous…","Enregistrer en .breezy"]' &&
         sous.dessous &&
         sous.droite,
       '2 la flèche d’« Enregistrer » ouvre « Enregistrer sous… », sous elle, calé à droite',

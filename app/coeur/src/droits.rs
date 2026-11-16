@@ -13,6 +13,8 @@ pub enum Fonction {
     Video,
     /// L'enregistrement d'un GIF (0.7), indépendant de la vidéo.
     Gif,
+    /// Enregistrer et rouvrir un fichier modifiable `.breezy` (0.7.9).
+    Breezy,
 }
 
 /// Vrai si `f` est ouverte. `pro` : une licence valide est en place.
@@ -22,7 +24,8 @@ pub fn ouverte(f: Fonction, pro: bool) -> bool {
         | Fonction::Texte
         | Fonction::Defilante
         | Fonction::Video
-        | Fonction::Gif => pro,
+        | Fonction::Gif
+        | Fonction::Breezy => pro,
     }
 }
 
@@ -39,13 +42,15 @@ mod tests {
             Fonction::Defilante,
             Fonction::Video,
             Fonction::Gif,
+            Fonction::Breezy,
         ] {
             match f {
                 Fonction::Historique
                 | Fonction::Texte
                 | Fonction::Defilante
                 | Fonction::Video
-                | Fonction::Gif => {
+                | Fonction::Gif
+                | Fonction::Breezy => {
                     assert!(ouverte(f, true), "{f:?}");
                     assert!(!ouverte(f, false), "{f:?}");
                 }

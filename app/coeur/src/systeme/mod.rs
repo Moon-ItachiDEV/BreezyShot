@@ -26,7 +26,7 @@ pub mod texte;
 pub mod vivant;
 pub use composition::attendre_composition;
 pub use demarrage::{demarrage_avec_systeme, mettre_a_jour_chemin, EtatDemarrage, OPTION_DISCRET};
-pub use dossier::{choisir_dossier, choisir_fichier_png};
+pub use dossier::{choisir_dossier, choisir_fichier_breezy, choisir_fichier_png};
 pub use gel::Rect;
 pub use texte::fin_de_ligne;
 

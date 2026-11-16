@@ -282,6 +282,11 @@ pub fn retirer_valeurs_et_cle(cle: &str, noms: &[&str]) -> Result<bool, String> 
     plateforme::retirer_valeurs_et_cle(cle, noms)
 }
 
+/// Dit à l'Explorateur que les types de fichiers ont changé (association `.breezy`).
+pub fn notifier_associations() {
+    plateforme::notifier_associations();
+}
+
 /// Vrai si un mutex de ce nom existe dans la session.
 pub fn verrou_existe(nom: &str) -> bool {
     plateforme::verrou_existe(nom)

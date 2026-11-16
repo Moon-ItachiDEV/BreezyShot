@@ -504,3 +504,16 @@ pub fn ramener_fenetre(titre: &str) -> bool {
         true
     }
 }
+
+/// `SHChangeNotify(SHCNE_ASSOCCHANGED)` : l'Explorateur relit les types de fichiers.
+pub fn notifier_associations() {
+    // SAFETY : aucun pointeur donné ; l'appel ne lit rien de notre mémoire.
+    unsafe {
+        windows::Win32::UI::Shell::SHChangeNotify(
+            windows::Win32::UI::Shell::SHCNE_ASSOCCHANGED,
+            windows::Win32::UI::Shell::SHCNF_IDLIST,
+            None,
+            None,
+        );
+    }
+}

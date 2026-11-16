@@ -1,7 +1,7 @@
 //! Ligne de commande (§3.4) et ce que l'exe est (installateur, app ou désinstallation).
 //!
 //! `breezyshot.exe`, `breezyshot.exe --discret`, `breezyshot.exe --quitter`,
-//! `breezyshot.exe --capturer <mode>`, `breezyshot.exe --desinstaller`. Sans option, l'exe est l'app s'il s'appelle
+//! `breezyshot.exe --capturer <mode>`, `breezyshot.exe --desinstaller`, `breezyshot.exe <fichier>.breezy`. Sans option, l'exe est l'app s'il s'appelle
 //! `breezyshot.exe` ou `breezyshot` (casse ignorée), l'installateur sinon (le fichier
 //! téléchargé).
 
@@ -24,6 +24,19 @@ pub enum Commande {
     Capturer(String),
     /// Désinstaller BreezyShot (« Applications installées »).
     Desinstaller,
+    /// Un fichier `.breezy` donné en argument (double-clic dans l'Explorateur, 0.7.9) : le
+    /// rouvrir dans l'éditeur. Le chemin tel que Windows l'a donné.
+    Ouvrir(String),
+}
+
+/// Vrai si `argument` est un chemin de fichier `.breezy` (pas une option), casse ignorée.
+pub fn est_fichier_breezy(argument: &str) -> bool {
+    let ext = format!(".{}", crate::sortie::EXTENSION_BREEZY);
+    // En octets : un chemin accentué ne se coupe jamais au milieu d'un caractère.
+    let (a, e) = (argument.as_bytes(), ext.as_bytes());
+    !argument.starts_with("--")
+        && a.len() > e.len()
+        && a[a.len() - e.len()..].eq_ignore_ascii_case(e)
 }
 
 /// Ce que l'exe va être.
@@ -42,7 +55,7 @@ pub const NOM_DE_L_APP_SANS_EXTENSION: &str = "breezyshot";
 
 /// Lecture des arguments, sans le nom du programme. Rend la commande et les arguments
 /// inconnus (ignorés, à écrire au journal). `--desinstaller` l'emporte sur tout, puis
-/// `--quitter`, puis `--capturer`, puis `--discret`.
+/// `--quitter`, puis `--capturer`, puis un fichier `.breezy` (le premier), puis `--discret`.
 pub fn lire<I, S>(arguments: I) -> (Commande, Vec<String>)
 where
     I: IntoIterator<Item = S>,
@@ -52,6 +65,7 @@ where
     let mut desinstaller = false;
     let mut capturer = None;
     let mut discret = false;
+    let mut fichier: Option<String> = None;
     let mut inconnus = Vec::new();
     let mut suite = arguments
         .into_iter()
@@ -69,6 +83,11 @@ where
                 };
                 capturer = Some(valeur);
             }
+            _ if est_fichier_breezy(&a) => {
+                if fichier.is_none() {
+                    fichier = Some(a);
+                }
+            }
             _ => inconnus.push(a),
         }
     }
@@ -78,12 +97,30 @@ where
         Commande::Quitter
     } else if let Some(mode) = capturer {
         Commande::Capturer(mode)
+    } else if let Some(chemin) = fichier {
+        Commande::Ouvrir(chemin)
     } else if discret {
         Commande::Discret
     } else {
         Commande::Demarrer
     };
     (commande, inconnus)
+}
+
+/// Les arguments d'une seconde instance, avec le chemin des fichiers `.breezy` rendu absolu
+/// depuis `dossier` (le dossier courant de l'instance qui les a reçus). Le premier argument
+/// est le programme : il reste tel quel.
+pub fn absolus(argv: Vec<String>, dossier: &std::path::Path) -> Vec<String> {
+    argv.into_iter()
+        .enumerate()
+        .map(|(i, a)| {
+            if i > 0 && est_fichier_breezy(&a) && std::path::Path::new(&a).is_relative() {
+                dossier.join(&a).to_string_lossy().into_owned()
+            } else {
+                a
+            }
+        })
+        .collect()
 }
 
 /// Vrai si le nom de fichier est celui de l'app, avec ou sans `.exe` (casse ignorée, rien
@@ -97,9 +134,9 @@ pub fn est_nom_de_l_app(nom: &str) -> bool {
 pub fn lancement(nom_exe: Option<&str>, commande: &Commande) -> Lancement {
     match commande {
         Commande::Desinstaller => Lancement::Desinstallation,
-        Commande::Demarrer => match nom_exe {
+        Commande::Demarrer | Commande::Ouvrir(_) => match nom_exe {
             Some(nom) if !est_nom_de_l_app(nom) => Lancement::Installateur,
-            _ => Lancement::App(Commande::Demarrer),
+            _ => Lancement::App(commande.clone()),
         },
         autre => Lancement::App(autre.clone()),
     }
@@ -242,5 +279,68 @@ mod tests {
             lancement(t, &Commande::Desinstaller),
             Lancement::Desinstallation
         );
+    }
+
+    #[test]
+    fn fichier_breezy() {
+        assert_eq!(
+            lire([r"C:\Docs\Capture 1.breezy"]),
+            (Commande::Ouvrir(r"C:\Docs\Capture 1.breezy".into()), vec![])
+        );
+        // Casse ignorée ; le premier fichier seul compte ; les options inconnues restent.
+        let (c, i) = lire(["--bizarre", "A.BREEZY", "b.breezy"]);
+        assert_eq!(c, Commande::Ouvrir("A.BREEZY".into()));
+        assert_eq!(i, ["--bizarre"]);
+        // Les options l'emportent, un nom sans nom n'est pas un fichier, une option non plus.
+        assert_eq!(lire(["--quitter", "a.breezy"]).0, Commande::Quitter);
+        assert_eq!(
+            lire(["--capturer", "zone", "a.breezy"]).0,
+            Commande::Capturer("zone".into())
+        );
+        for non in [
+            ".breezy",
+            "a.breezy.png",
+            "--x.breezy",
+            "a.breezyx",
+            "breezy",
+            "ééééé",
+            "été.png",
+            "é.breezyé",
+        ] {
+            assert!(!est_fichier_breezy(non), "{non}");
+        }
+        assert!(est_fichier_breezy("Zoé/été.BREEZY"));
+        assert_eq!(
+            lire(["a.breezy", "--discret"]).0,
+            Commande::Ouvrir("a.breezy".into())
+        );
+    }
+
+    #[test]
+    fn un_fichier_breezy_donne_a_l_exe_telecharge_lance_l_installateur() {
+        let o = Commande::Ouvrir("a.breezy".into());
+        assert_eq!(
+            lancement(Some("BreezyShot-0.7.9-essai.exe"), &o),
+            Lancement::Installateur
+        );
+        assert_eq!(
+            lancement(Some("breezyshot.exe"), &o),
+            Lancement::App(o.clone())
+        );
+        assert_eq!(lancement(None, &o), Lancement::App(o));
+    }
+
+    #[test]
+    fn chemins_breezy_relatifs_d_une_seconde_instance() {
+        let dossier = Path::new("/home/moi");
+        let argv = ["prog.exe", "a.breezy", "--x", "/abs/b.breezy", "c.png"]
+            .map(String::from)
+            .to_vec();
+        let sortie = absolus(argv, dossier);
+        assert_eq!(sortie[0], "prog.exe");
+        assert_eq!(Path::new(&sortie[1]), Path::new("/home/moi/a.breezy"));
+        assert_eq!(&sortie[2..], ["--x", "/abs/b.breezy", "c.png"]);
+        // Un programme qui s'appellerait « x.breezy » n'est pas touché.
+        assert_eq!(absolus(vec!["x.breezy".into()], dossier), ["x.breezy"]);
     }
 }

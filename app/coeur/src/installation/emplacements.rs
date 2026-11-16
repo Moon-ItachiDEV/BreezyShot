@@ -42,6 +42,15 @@ pub const NOMS_VALEURS: [&str; 11] = [
     "InstallDate",
 ];
 
+/// Racine des classes de fichiers, sous HKCU (l'association d'un type de fichier à l'app).
+pub const CLE_CLASSES: &str = r"Software\Classes";
+/// L'extension des fichiers modifiables (0.7.9).
+pub const EXTENSION_BREEZY: &str = ".breezy";
+/// Le type de fichier que l'extension désigne.
+pub const PROGID: &str = "BreezyShot.Fichier";
+/// Le nom du type de fichier dans l'Explorateur.
+pub const NOM_TYPE_FICHIER: &str = "Fichier BreezyShot";
+
 /// Option de la ligne de commande qui désinstalle.
 pub const OPTION_DESINSTALLER: &str = "--desinstaller";
 
@@ -62,6 +71,9 @@ pub struct Emplacements {
     pub webview_installateur: PathBuf,
     /// Dossier du journal (`installation.log`).
     pub journal: PathBuf,
+    /// Où l'association des fichiers `.breezy` est écrite, sous HKCU (`CLE_CLASSES` ; en
+    /// essai, sous la racine d'essai : jamais l'association réelle).
+    pub classes: String,
 }
 
 /// Emplacements d'après le dossier d'essai (`BREEZYSHOT_DOSSIER_ESSAI`) ou les dossiers
@@ -92,6 +104,7 @@ pub fn emplacements(
             temporaire,
             secours: e.to_path_buf(),
             journal: e.join("local").join("Journal"),
+            classes: format!(r"{RACINE_CLES_ESSAI}\{nom}\Classes"),
         });
     }
     let programmes = connus
@@ -111,6 +124,7 @@ pub fn emplacements(
         secours: programmes.parent().unwrap_or(programmes).to_path_buf(),
         webview_installateur: connus.temporaire.join(NOM_WEBVIEW),
         journal: local.join(NOM_DOSSIER).join("Journal"),
+        classes: CLE_CLASSES.into(),
     })
 }
 
@@ -127,6 +141,9 @@ pub enum Ecriture {
     Journal(PathBuf),
     /// L'exe désinstallé, déplacé dans ce dossier sous `nom_exe_deplace` (désinstallation).
     ExeDesinstalle(PathBuf),
+    /// Les clés de l'association des fichiers `.breezy` sous cette racine de HKCU
+    /// (`cles_association`, et rien d'autre).
+    Association(String),
 }
 
 pub fn ecritures(e: &Emplacements) -> Vec<Ecriture> {
@@ -135,6 +152,7 @@ pub fn ecritures(e: &Emplacements) -> Vec<Ecriture> {
         Ecriture::Fichier(e.exe.clone()),
         Ecriture::Raccourci(e.raccourci.clone()),
         Ecriture::Cle(e.cle_desinstallation.clone()),
+        Ecriture::Association(e.classes.clone()),
         Ecriture::DossierWebview(e.webview_installateur.clone()),
         Ecriture::Journal(e.journal.clone()),
         Ecriture::ExeDesinstalle(e.temporaire.clone()),
@@ -165,10 +183,60 @@ pub enum Retrait {
         vers: PathBuf,
         secours: PathBuf,
     },
+    /// L'association des fichiers `.breezy`, seulement si elle désigne `exe` (un autre
+    /// programme qui l'aurait prise n'est pas touché).
+    Association {
+        base: String,
+        exe: PathBuf,
+    },
     /// Le dossier installé, seulement s'il est vide.
     DossierSiVide(PathBuf),
     /// Le dossier WebView2 de l'installateur, seulement s'il est reconnu.
     DossierWebview(PathBuf),
+}
+
+/// La commande d'ouverture d'un fichier `.breezy` : `"<exe>" "%1"`.
+pub fn commande_ouverture(exe: &Path) -> String {
+    format!("\"{}\" \"%1\"", exe.display())
+}
+
+/// Les clés de l'association des fichiers `.breezy` sous `base`, avec leur valeur par défaut
+/// (nom de valeur vide), de la moins profonde à la plus profonde : l'extension désigne le
+/// type, le type a son nom, son icône (celle de l'exe) et sa commande d'ouverture.
+pub fn association(e: &Emplacements) -> Vec<(String, Vec<(&'static str, Valeur)>)> {
+    let b = &e.classes;
+    let texte = |t: String| vec![("", Valeur::Texte(t))];
+    vec![
+        (format!(r"{b}\{EXTENSION_BREEZY}"), texte(PROGID.into())),
+        (format!(r"{b}\{PROGID}"), texte(NOM_TYPE_FICHIER.into())),
+        (
+            format!(r"{b}\{PROGID}\DefaultIcon"),
+            texte(format!("\"{}\",0", e.exe.display())),
+        ),
+        (
+            format!(r"{b}\{PROGID}\shell\open\command"),
+            texte(commande_ouverture(&e.exe)),
+        ),
+    ]
+}
+
+/// Les clés que `association` crée (les sous-clés `shell` et `shell\open` comprises), de la
+/// plus profonde à la moins profonde : une clé ne se retire qu'une fois vide.
+pub fn cles_association(base: &str) -> Vec<String> {
+    vec![
+        format!(r"{base}\{PROGID}\shell\open\command"),
+        format!(r"{base}\{PROGID}\shell\open"),
+        format!(r"{base}\{PROGID}\shell"),
+        format!(r"{base}\{PROGID}\DefaultIcon"),
+        format!(r"{base}\{PROGID}"),
+        format!(r"{base}\{EXTENSION_BREEZY}"),
+    ]
+}
+
+/// Vrai si la commande d'ouverture lue est celle de `exe` : l'association est la nôtre.
+pub fn association_a_nous(commande: Option<&str>, exe: &Path) -> bool {
+    let normal = |t: &str| t.replace('/', "\\").to_lowercase();
+    commande.is_some_and(|c| normal(c) == normal(&commande_ouverture(exe)))
 }
 
 /// Nom de l'exe désinstallé, déplacé dans le dossier temporaire.
@@ -179,7 +247,10 @@ pub fn nom_exe_deplace(processus: u32) -> String {
 impl Retrait {
     /// Vrai pour ce qui ne se retire qu'une fois l'exe parti.
     pub fn exige_exe_parti(&self) -> bool {
-        matches!(self, Retrait::Raccourci { .. } | Retrait::Cle { .. })
+        matches!(
+            self,
+            Retrait::Raccourci { .. } | Retrait::Cle { .. } | Retrait::Association { .. }
+        )
     }
 }
 
@@ -199,6 +270,10 @@ pub fn retraits(e: &Emplacements, processus: u32) -> Vec<Retrait> {
         Retrait::Cle {
             cle: e.cle_desinstallation.clone(),
             valeurs: &NOMS_VALEURS,
+        },
+        Retrait::Association {
+            base: e.classes.clone(),
+            exe: e.exe.clone(),
         },
         Retrait::DossierSiVide(e.dossier.clone()),
         Retrait::DossierWebview(e.webview_installateur.clone()),
@@ -307,7 +382,9 @@ mod tests {
         assert_eq!(e.secours, Path::new("/tmp/essai-09 é"));
         for ecr in ecritures(&e) {
             match ecr {
-                Ecriture::Cle(c) => assert!(c.starts_with(RACINE_CLES_ESSAI)),
+                Ecriture::Cle(c) | Ecriture::Association(c) => {
+                    assert!(c.starts_with(RACINE_CLES_ESSAI))
+                }
                 Ecriture::Fichier(p)
                 | Ecriture::Raccourci(p)
                 | Ecriture::DossierWebview(p)
@@ -344,6 +421,7 @@ mod tests {
                 Ecriture::Fichier(p) => assert_eq!(p.parent(), Some(e.dossier.as_path())),
                 Ecriture::Raccourci(p) => assert_eq!(p, &e.raccourci),
                 Ecriture::Cle(c) => assert_eq!(c, CLE_DESINSTALLATION),
+                Ecriture::Association(c) => assert_eq!(c, CLE_CLASSES),
                 Ecriture::DossierWebview(p) => assert_eq!(p, &e.webview_installateur),
                 Ecriture::Journal(p) => assert_eq!(p, &e.journal),
                 Ecriture::ExeDesinstalle(p) => {
@@ -359,7 +437,8 @@ mod tests {
         assert!(exe < rang(|r| matches!(r, Retrait::Raccourci { .. })));
         assert!(exe < rang(|r| matches!(r, Retrait::Cle { .. })));
         let exigeants: Vec<_> = liste.iter().filter(|r| r.exige_exe_parti()).collect();
-        assert_eq!(exigeants.len(), 2);
+        assert!(exe < rang(|r| matches!(r, Retrait::Association { .. })));
+        assert_eq!(exigeants.len(), 3);
         for r in liste {
             match r {
                 Retrait::Raccourci { lien, exe } => {
@@ -378,6 +457,10 @@ mod tests {
                     for d in [vers.parent().unwrap(), secours.parent().unwrap()] {
                         assert!(ecrits.contains(&Ecriture::ExeDesinstalle(d.to_path_buf())));
                     }
+                }
+                Retrait::Association { base, exe } => {
+                    assert!(ecrits.contains(&Ecriture::Association(base)));
+                    assert_eq!(exe, e.exe);
                 }
                 Retrait::DossierSiVide(p) => assert_eq!(p, e.dossier),
                 Retrait::DossierWebview(p) => {
@@ -432,5 +515,62 @@ mod tests {
         assert_eq!(texte("NoRepair"), "1");
         assert_eq!(texte("EstimatedSize"), "15157");
         assert_eq!(texte("InstallDate"), "20261112");
+    }
+
+    #[test]
+    fn association_des_fichiers_breezy() {
+        let e = emplacements(None, &connus()).unwrap();
+        assert_eq!(e.classes, r"Software\Classes");
+        let a = association(&e);
+        let cles: Vec<&str> = a.iter().map(|(c, _)| c.as_str()).collect();
+        assert_eq!(
+            cles,
+            [
+                r"Software\Classes\.breezy",
+                r"Software\Classes\BreezyShot.Fichier",
+                r"Software\Classes\BreezyShot.Fichier\DefaultIcon",
+                r"Software\Classes\BreezyShot.Fichier\shell\open\command",
+            ]
+        );
+        let valeur = |i: usize| match &a[i].1[..] {
+            [("", Valeur::Texte(t))] => t.clone(),
+            autre => panic!("valeurs inattendues {autre:?}"),
+        };
+        assert_eq!(valeur(0), "BreezyShot.Fichier");
+        assert_eq!(valeur(1), "Fichier BreezyShot");
+        let exe = e.exe.display().to_string();
+        assert_eq!(valeur(2), format!("\"{exe}\",0"));
+        assert_eq!(valeur(3), format!("\"{exe}\" \"%1\""));
+        // Tout ce qui est écrit est retiré, du plus profond au moins profond, et rien de plus.
+        let retirees = cles_association(&e.classes);
+        for (c, _) in &a {
+            assert!(retirees.contains(c), "{c}");
+        }
+        for (i, c) in retirees.iter().enumerate() {
+            // Une clé ne passe jamais avant l'une de ses sous-clés.
+            for apres in &retirees[i + 1..] {
+                assert!(!apres.starts_with(&format!("{c}\\")), "{apres} après {c}");
+            }
+            assert!(c.starts_with(&e.classes));
+        }
+        // En essai, jamais sous Software\Classes.
+        let essai = emplacements(Some(Path::new("/tmp/essai-16")), &connus()).unwrap();
+        assert_eq!(
+            essai.classes,
+            r"Software\BreezyShot-essais\essai-16\Classes"
+        );
+        for (c, _) in association(&essai) {
+            assert!(c.starts_with(RACINE_CLES_ESSAI), "{c}");
+        }
+    }
+
+    #[test]
+    fn association_a_nous_selon_la_commande_lue() {
+        let exe = Path::new(r"C:\Users\a\AppData\Local\Programs\BreezyShot\breezyshot.exe");
+        let nous = commande_ouverture(exe);
+        assert!(association_a_nous(Some(&nous), exe));
+        assert!(association_a_nous(Some(&nous.to_uppercase()), exe));
+        assert!(!association_a_nous(None, exe));
+        assert!(!association_a_nous(Some(r#""C:\Autre\app.exe" "%1""#), exe));
     }
 }

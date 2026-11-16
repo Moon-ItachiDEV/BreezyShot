@@ -445,6 +445,8 @@ try {
 
     # 1. État réel noté avant : il ne doit pas bouger.
     $cleReelleAvant = Test-Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\BreezyShot'
+    # Association des fichiers .breezy (0.7.9) : en essai sous la racine d'essai, jamais la vraie.
+    $assocReelleAvant = Test-Path 'HKCU:\Software\Classes\BreezyShot.Fichier'
     $dossierReelProgrammes = [Environment]::GetFolderPath('LocalApplicationData')
     $dossierReelAvant = Test-Path (Join-Path $dossierReelProgrammes 'Programs/BreezyShot')
     $runReelAvant = Valeur-Registre -Cle $cleRunReelle -Nom 'BreezyShot'
@@ -526,6 +528,24 @@ try {
         elseif ([int64]$taille -le 0) { $ecarts += "EstimatedSize = $taille" }
     }
     Verifier 'clé de désinstallation : onze valeurs exactes' ($ecarts.Count -eq 0) ($ecarts -join ' ; ') | Out-Null
+
+    # 6 bis. Association des fichiers .breezy (0.7.9), sous la racine d'essai : l'extension désigne
+    # le type, le type a son nom, son icône et sa commande d'ouverture « "<exe>" "%1" ».
+    $classes = "HKCU:\Software\BreezyShot-essais\$(Split-Path -Leaf $script:Essai.Dossier)\Classes"
+    $ecartsAssoc = @()
+    $attendues = [ordered]@{
+        ".breezy"                              = 'BreezyShot.Fichier'
+        "BreezyShot.Fichier"                   = 'Fichier BreezyShot'
+        "BreezyShot.Fichier\DefaultIcon"       = "`"$exeInstalle`",0"
+        "BreezyShot.Fichier\shell\open\command" = "`"$exeInstalle`" `"%1`""
+    }
+    foreach ($sous in $attendues.Keys) {
+        $lu = Valeur-Registre -Cle "$classes\$sous" -Nom '(default)'
+        if ($null -eq $lu) { $ecartsAssoc += "$sous absente" }
+        elseif ("$lu" -ne "$($attendues[$sous])") { $ecartsAssoc += "$sous = $lu (attendu $($attendues[$sous]))" }
+    }
+    Verifier 'association .breezy : extension, type, icône et commande d''ouverture' ($ecartsAssoc.Count -eq 0) ($ecartsAssoc -join ' ; ') | Out-Null
+    Verifier 'association .breezy : « etape association: faite » au journal d''installation' ($null -ne (Ligne-Installation -Texte 'etape association: faite')) | Out-Null
 
     # 7. L'app installée tourne, depuis l'exe installé, et est prête.
     $procApp = @(Processus-App)
@@ -732,6 +752,8 @@ try {
     }
     Verifier 'désinstallation : app arrêtée' (@(Processus-App).Count -eq 0) | Out-Null
     Verifier 'clé de désinstallation retirée' (-not (Test-Path -LiteralPath $cle)) | Out-Null
+    Verifier 'désinstallation : « desinstallation association: retiree »' ($null -ne (Ligne-Installation -Texte 'desinstallation association: retiree' -Depuis $m)) | Out-Null
+    Verifier 'association .breezy retirée (type, extension et sous-clés)' (-not (Test-Path -LiteralPath "$classes\.breezy") -and -not (Test-Path -LiteralPath "$classes\BreezyShot.Fichier")) | Out-Null
     Verifier 'raccourci retiré' (-not (Test-Path -LiteralPath $raccourci)) | Out-Null
     Verifier 'exe installé retiré (déplacé)' (-not (Test-Path -LiteralPath $exeInstalle)) | Out-Null
     $deplace = Join-Path $racineEssai "temp/BreezyShot-desinstalle-$($desinst.Id).exe"
@@ -759,6 +781,7 @@ try {
     $dossierReelApres = Test-Path (Join-Path $dossierReelProgrammes 'Programs/BreezyShot')
     $runReelApres = Valeur-Registre -Cle $cleRunReelle -Nom 'BreezyShot'
     Verifier 'clé de désinstallation réelle inchangée' ($cleReelleAvant -eq $cleReelleApres) | Out-Null
+    Verifier 'association .breezy réelle inchangée' ($assocReelleAvant -eq (Test-Path 'HKCU:\Software\Classes\BreezyShot.Fichier')) | Out-Null
     Verifier 'dossier installé réel inchangé' ($dossierReelAvant -eq $dossierReelApres) | Out-Null
     Verifier 'valeur Run réelle inchangée' ("$runReelAvant" -eq "$runReelApres") | Out-Null
     Verifier 'aucun processus BreezyShot restant' (@(Processus-App).Count -eq 0) | Out-Null

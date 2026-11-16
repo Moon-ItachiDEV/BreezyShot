@@ -82,6 +82,37 @@ pub fn choisir_fichier_png(
     depart: Option<&Path>,
     nom: &str,
 ) -> Result<Option<PathBuf>, String> {
+    choisir_fichier(
+        proprietaire,
+        depart,
+        nom,
+        super::FILTRE_PNG,
+        super::EXTENSION_PNG,
+    )
+}
+
+/// Le même dialogue pour un fichier `.breezy` (0.7.9).
+pub fn choisir_fichier_breezy(
+    proprietaire: Option<isize>,
+    depart: Option<&Path>,
+    nom: &str,
+) -> Result<Option<PathBuf>, String> {
+    choisir_fichier(
+        proprietaire,
+        depart,
+        nom,
+        super::FILTRE_BREEZY,
+        super::EXTENSION_BREEZY,
+    )
+}
+
+fn choisir_fichier(
+    proprietaire: Option<isize>,
+    depart: Option<&Path>,
+    nom: &str,
+    filtre: (&str, &str),
+    extension: &str,
+) -> Result<Option<PathBuf>, String> {
     // SAFETY : initialisation COM de ce fil ; la garde la défait sur tous les retours.
     let _appartement = unsafe {
         CoInitializeEx(None, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE)
@@ -89,9 +120,9 @@ pub fn choisir_fichier_png(
             .map_err(|e| format!("com: {:#010x}", e.code().0))?;
         Appartement
     };
-    let filtre_nom = super::large(super::FILTRE_PNG.0);
-    let filtre_motif = super::large(super::FILTRE_PNG.1);
-    let extension = super::large(super::EXTENSION_PNG);
+    let filtre_nom = super::large(filtre.0);
+    let filtre_motif = super::large(filtre.1);
+    let extension_large = super::large(extension);
     let filtres = [COMDLG_FILTERSPEC {
         pszName: PCWSTR(filtre_nom.as_ptr()),
         pszSpec: PCWSTR(filtre_motif.as_ptr()),
@@ -116,9 +147,9 @@ pub fn choisir_fichier_png(
             .SetFileTypeIndex(1)
             .map_err(|e| format!("filtre: {:#010x}", e.code().0))?;
         dialogue
-            .SetDefaultExtension(PCWSTR(extension.as_ptr()))
+            .SetDefaultExtension(PCWSTR(extension_large.as_ptr()))
             .map_err(|e| format!("extension: {:#010x}", e.code().0))?;
-        if let Some(nom) = super::nom_propose(nom) {
+        if let Some(nom) = super::nom_propose_avec(nom, extension) {
             let texte = super::large(&nom);
             // Un nom refusé laisse le champ vide : l'utilisateur en tape un.
             let _ = dialogue.SetFileName(PCWSTR(texte.as_ptr()));
@@ -148,5 +179,5 @@ pub fn choisir_fichier_png(
         CoTaskMemFree(Some(texte.0 as *const core::ffi::c_void));
         chemin?
     };
-    super::chemin_png(choisi, |c| c.symlink_metadata().is_ok()).map(Some)
+    super::chemin_avec_extension(choisi, extension, |c| c.symlink_metadata().is_ok()).map(Some)
 }
