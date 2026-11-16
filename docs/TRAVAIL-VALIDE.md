@@ -1242,3 +1242,18 @@ remplace la barre de la 0.7.2.
 - Le rendu dans WebView2 sous Windows (police Segoe UI Variable, ombre dans la fenêtre
   transparente, nom fantôme à la réouverture) et les essais PowerShell : essais Windows de la
   CI, puis à l'utilisateur.
+
+## Retours des essais de la 0.7.4 (version 0.7.5)
+
+- Réglages : « quand je scroll, ça scroll aussi sur le côté ». Le rebond de WebView2 en fin
+  de défilement (pavé tactile, écran tactile) passait du contenu à la page entière, volet
+  compris. La page ne défile plus (`overflow: hidden`, `overscroll-behavior: none` sur
+  `html` et `body`) et le contenu comme la liste des rubriques gardent leur rebond
+  (`overscroll-behavior: contain`). Même règle pour la grille de l'historique. Essai
+  `reglages.cjs` 16 : les règles anti-rebond sont posées ; molette verticale puis
+  horizontale, la page ne défile pas.
+
+### Non vérifié
+
+- Le rebond lui-même n'existe pas dans Chromium sous Linux : la cause est déduite du
+  retour de l'utilisateur, la correction est à confirmer par lui sous Windows.

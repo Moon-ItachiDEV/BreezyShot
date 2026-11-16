@@ -899,6 +899,34 @@ const SANS_VIGNETTE = { ...VUE, lignes: ['copier', 'dossier', 'modele_nom', 'the
     await p.context().close();
   }
 
+  // 16. Défilement : retour du 16/11 sur la 0.7.4 (le volet bougeait avec le contenu sous
+  // WebView2). Chromium sous Linux n'a pas de rebond : l'essai garde les règles anti-rebond
+  // et vérifie que la page ne défile pas ; le rebond lui-même se vérifie sous Windows.
+  {
+    const p = await page({ largeur: 600, hauteur: 420, vue: VUE_FILM });
+    await p.click('[role="tab"][data-rubrique="raccourcis"]');
+    await p.waitForTimeout(300);
+    await p.mouse.move(500, 210);
+    for (let k = 0; k < 10; k++) { await p.mouse.wheel(0, 300); await p.waitForTimeout(30); }
+    await p.mouse.move(30, 210);
+    for (let k = 0; k < 5; k++) { await p.mouse.wheel(0, 300); await p.waitForTimeout(30); }
+    await p.mouse.move(500, 210);
+    await p.mouse.wheel(300, 0);
+    await p.waitForTimeout(300);
+    const d = await p.evaluate(() => {
+      const cs = (s) => getComputedStyle(document.querySelector(s));
+      return {
+        contenu: document.querySelector('.contenu').scrollTop > 0,
+        page: [document.scrollingElement.scrollTop, document.scrollingElement.scrollLeft, document.querySelector('.contenu').scrollLeft],
+        volet: document.querySelector('.volet').getBoundingClientRect().top,
+        rebond: ['html', 'body', '.contenu', '[role="tablist"]'].map(s => cs(s).overscrollBehaviorX + '/' + cs(s).overscrollBehaviorY),
+      };
+    });
+    verifier(d.contenu && json(d.page) === '[0,0,0]' && d.volet === 0 && json(d.rebond) === '["none/none","none/none","contain/contain","contain/contain"]',
+      '16 défilement du contenu : règles anti-rebond posées, la page ne défile pas, ni de côté', json(d));
+    await p.context().close();
+  }
+
   console.log('ECHECS :', echecs);
   await nav.close(); serveur.close();
   process.exitCode = echecs === 0 ? 0 : 1;
