@@ -361,7 +361,16 @@ function poserListeImpr(l) {
         return [trait, o];
       }),
     );
-    if (ouverte && focus) optionsImpr().find((o) => o.dataset.valeur === focus)?.focus();
+    // Liste ouverte : le focus suit l'option qu'il avait ; si elle a disparu (licence retirée),
+    // la liste se ferme et le focus revient au bouton.
+    if (ouverte) {
+      const meme = focus && optionsImpr().find((o) => o.dataset.valeur === focus);
+      if (meme) meme.focus();
+      else {
+        ouvrirListeImpr(false);
+        boutonImpr.focus();
+      }
+    }
   }
   for (const o of optionsImpr()) {
     o.setAttribute("aria-selected", o.dataset.valeur === l.valeur ? "true" : "false");
@@ -373,6 +382,10 @@ function ouvrirListeImpr(oui) {
   listeImpr.hidden = !oui;
   boutonImpr.setAttribute("aria-expanded", oui ? "true" : "false");
   if (!oui) return;
+  // Bornée à la place sous le bouton : au-delà, la liste défile.
+  listeImpr.style.maxHeight = "";
+  const place = innerHeight - listeImpr.getBoundingClientRect().top - 8;
+  if (listeImpr.offsetHeight > place) listeImpr.style.maxHeight = `${Math.max(place, 96)}px`;
   const options = optionsImpr();
   (options.find((o) => o.getAttribute("aria-selected") === "true") ?? options[0])?.focus();
 }
@@ -748,10 +761,10 @@ if (tauri?.event?.listen) {
       choix: [
         { id: "windows", libelle: "Outil Capture de Windows", groupe: 0 },
         { id: "barre", libelle: "Barre de capture", groupe: 1 },
-        { id: "zone", libelle: "Zone", groupe: 2 },
-        { id: "plein_ecran", libelle: "Plein écran", groupe: 2 },
-        { id: "fenetre", libelle: "Fenêtre", groupe: 2 },
-        { id: "derniere_zone", libelle: "Refaire la dernière zone", groupe: 2 },
+        { id: "zone", libelle: "Zone", groupe: 1 },
+        { id: "plein_ecran", libelle: "Plein écran", groupe: 1 },
+        { id: "fenetre", libelle: "Fenêtre", groupe: 1 },
+        { id: "derniere_zone", libelle: "Refaire la dernière zone", groupe: 1 },
       ],
       valeur: "zone",
       refus: null,

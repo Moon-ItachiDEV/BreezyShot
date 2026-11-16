@@ -248,7 +248,7 @@ try {
     if (-not $IsWindows) {
         # --- Hors Windows : démarrage seulement -------------------------------------------
         $d = Dossier-Cas 'linux'
-        Ecrire-Reglages $d 7
+        Ecrire-Reglages $d 8
         $script:proc = Demarrer-Cas $d 'hors Windows'
         Verifier 'démarrage, licence absente' ((Compter-Motif 'licence absente' $d) -ge 1) | Out-Null
         Fermer-Cas $script:proc $d 'hors Windows'
@@ -737,7 +737,7 @@ try {
         # Un cas avec licence : dossier, réglages v6, licence, app lancée.
         function Ouvrir-Cas([string]$Nom, [string]$Quoi, [switch]$Capturable, [switch]$SansCodeur, [bool]$Copier = $true, [bool]$Vignette = $true) {
             $d = Dossier-Cas $Nom
-            Ecrire-Reglages $d 7 $Copier $Vignette
+            Ecrire-Reglages $d 8 $Copier $Vignette
             Poser-Licence $d
             $script:Cas = [pscustomobject]@{ Nom = $Nom; Dossier = $d; Images = (Join-Path $d 'images'); Films = (Join-Path $d 'local/Films')
                 Recents = (Join-Path $d 'local/Recents'); Glisser = (Join-Path $d 'local/Glisser'); Capturable = [bool]$Capturable; SansCodeur = [bool]$SansCodeur
@@ -1929,7 +1929,7 @@ try {
                 }
                 $libre = @($script:Natif::Disque("$films\"))
                 Noter-Mesure -Nom '(K4) disque virtuel posé (diskpart) ; place libre avant le film' -Valeur "$($x.Ms) ms ; $([math]::Round($libre[0] / 1MB, 2)) Mo libres sur $([math]::Round($libre[1] / 1MB, 1)) Mo"
-                Ecrire-Reglages $dk 7
+                Ecrire-Reglages $dk 8
                 Poser-Licence $dk
                 $script:Cas = [pscustomobject]@{ Nom = 'k4'; Dossier = $dk; Images = (Join-Path $dk 'images'); Films = $films; Recents = (Join-Path $dk 'local/Recents'); Glisser = (Join-Path $dk 'local/Glisser')
                     Capturable = $false; SansCodeur = $false; Vignette = $true; Temoin = $null }

@@ -81,6 +81,14 @@ impl Bilan {
         self.actions.iter().find(|a| a.action == nom)
     }
 
+    /// Remplace la ligne de l'action de `choix` (ou l'ajoute).
+    pub fn poser(&mut self, choix: &ChoixAction) {
+        match self.actions.iter_mut().find(|a| a.action == choix.action) {
+            Some(a) => *a = choix.clone(),
+            None => self.actions.push(choix.clone()),
+        }
+    }
+
     /// Le raccourci retenu pour une action.
     pub fn retenu(&self, action: &str) -> Option<&Raccourci> {
         self.action(action).and_then(|a| a.retenu.as_ref())
@@ -99,6 +107,14 @@ impl Bilan {
     pub fn libelle_menu(&self, action: &str) -> Option<String> {
         self.retenu(action).map(Raccourci::affichage)
     }
+}
+
+/// Vrai si un changement de candidats sans résultat doit quand même poser sa ligne dans le
+/// bilan : rien n'était tenu avant (`avait_un_raccourci` faux) et des candidats étaient
+/// voulus. Le bilan garde ainsi les candidats écartés et leur raison (la vue dit l'état réel) ;
+/// un ancien raccourci reste tenu, lui, et sa ligne ne bouge pas. Fonction pure.
+pub fn echec_a_poser(avait_un_raccourci: bool, candidats_voulus: bool) -> bool {
+    !avait_un_raccourci && candidats_voulus
 }
 
 /// Rang de tri : d'abord les actions prioritaires dans leur ordre, puis les autres.
@@ -485,5 +501,39 @@ mod tests {
         let impr = b.action(ACTION_IMPR_ECRAN).unwrap();
         assert_eq!(impr.retenu, None);
         assert_eq!(impr.ecartes[0].raison, Raison::ReserveParLeSysteme);
+    }
+
+    #[test]
+    fn un_echec_sans_ancien_raccourci_pose_sa_ligne() {
+        assert!(echec_a_poser(false, true));
+        assert!(!echec_a_poser(true, true), "l'ancien reste tenu");
+        assert!(
+            !echec_a_poser(false, false),
+            "liste vide : pas de raccourci voulu"
+        );
+        // La ligne remplace la précédente, sans doublon, et dit pourquoi.
+        let mut b = choisir(&table(&[("zone", &["Ctrl+Maj+1"])]), false, |_| true);
+        assert_eq!(b.retenu("zone"), Some(&r("Ctrl+Maj+1")));
+        let echec = choisir_action("zone", &["ImprEcran".to_string()], &[], None, false, |_| {
+            false
+        });
+        b.poser(&echec);
+        assert_eq!(b.actions.len(), 1);
+        assert_eq!(b.retenu("zone"), None);
+        assert_eq!(
+            b.action("zone").unwrap().ecartes[0].raison,
+            Raison::RefuseParLeSysteme
+        );
+        b.poser(&choix_vide("autre"));
+        assert_eq!(b.actions.len(), 2);
+    }
+
+    fn choix_vide(action: &str) -> ChoixAction {
+        ChoixAction {
+            action: action.into(),
+            retenu: None,
+            ecartes: Vec::new(),
+            nb_candidats: 0,
+        }
     }
 }

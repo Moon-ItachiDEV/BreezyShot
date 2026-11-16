@@ -750,9 +750,9 @@ const SANS_VIGNETTE = { ...VUE, lignes: ['copier', 'dossier', 'modele_nom', 'the
     const noms = await optionsImpr(p);
     const traits = await p.$$eval('[role="listbox"] .trait', ts => ts.length);
     const ouvert = await bouton.getAttribute('aria-expanded');
-    verifier(json(noms) === json(REEL.vue.impr_ecran.choix.map(c => c.libelle)) && noms.length === 6 && traits === 2
+    verifier(json(noms) === json(REEL.vue.impr_ecran.choix.map(c => c.libelle)) && noms.length === 6 && traits === 1
       && ouvert === 'true' && json(await choisiImpr(p)) === json(['Outil Capture de Windows']) && await enFocus(p) === 'windows',
-    `14 ${theme} liste ouverte : six choix dans l’ordre, deux traits, « Outil Capture de Windows » coché et au focus`, json([noms, traits, ouvert]));
+    `14 ${theme} liste ouverte : six choix dans l’ordre, un trait avant « Barre de capture » (aucun entre elle et Zone), « Outil Capture de Windows » coché et au focus`, json([noms, traits, ouvert]));
     const contenu = await p.evaluate(() => {
       const m = document.querySelector('[role="listbox"]').getBoundingClientRect();
       const b = document.querySelector('[data-controle="impr_ecran"]').getBoundingClientRect();
@@ -852,12 +852,49 @@ const SANS_VIGNETTE = { ...VUE, lignes: ['copier', 'dossier', 'modele_nom', 'the
     const noms = await optionsImpr(p);
     const traits = await p.$$eval('[role="listbox"] .trait', ts => ts.length);
     verifier(json(noms.slice(2)) === json(['Zone', 'Plein écran', 'Fenêtre', 'Refaire la dernière zone', 'Capture défilante', 'Copier le texte', 'Historique'])
-      && traits === 3, '14 avec la licence : le groupe Pro suit un troisième trait ; un choix fermé (Vidéo) est absent', json([noms, traits]));
+      && traits === 2, '14 avec la licence : un second trait avant « Capture défilante » ; un choix fermé (Vidéo) est absent', json([noms, traits]));
     await p.evaluate((v) => __emettre('reglages:etat', v), REEL.vue); await p.waitForTimeout(30);
     const apres = await optionsImpr(p);
-    verifier(apres.length === 6 && await p.$$eval('[role="listbox"] .trait', ts => ts.length) === 2,
+    verifier(apres.length === 6 && await p.$$eval('[role="listbox"] .trait', ts => ts.length) === 1,
       '14 licence retirée : les choix Pro disparaissent de la liste', json(apres));
     verifier(p.erreurs.length === 0, '14 licence : aucune erreur de console', json(p.erreurs));
+    await p.context().close();
+  }
+  // 14 quater. Licence retirée pendant que la liste est ouverte sur une option Pro : la liste
+  // se ferme et le focus revient au bouton (Échap et Tab ne se perdent pas).
+  {
+    const p = await page({ vue: REEL.vue_pro });
+    await onglet(p, 'Raccourcis');
+    const bouton = p.getByRole('button', { name: NOM_IMPR });
+    await bouton.click();
+    await p.getByRole('option', { name: 'Capture défilante' }).focus();
+    const avant = await enFocus(p);
+    await p.evaluate((v) => __emettre('reglages:etat', v), REEL.vue); await p.waitForTimeout(30);
+    verifier(avant === 'defilante' && await p.getByRole('listbox').count() === 0 && await bouton.getAttribute('aria-expanded') === 'false' && await enFocus(p) === 'impr_ecran',
+      '14 licence retirée liste ouverte sur une option Pro : liste fermée, focus au bouton', json([avant, await enFocus(p)]));
+    // Une option qui reste garde le focus, liste ouverte.
+    await p.evaluate((v) => __emettre('reglages:etat', v), REEL.vue_pro); await p.waitForTimeout(30);
+    await bouton.click(); await p.getByRole('option', { name: 'Zone', exact: true }).focus();
+    await p.evaluate((v) => __emettre('reglages:etat', v), REEL.vue); await p.waitForTimeout(30);
+    verifier(await p.getByRole('listbox').count() === 1 && await enFocus(p) === 'zone', '14 option conservée : liste ouverte, focus gardé', await enFocus(p));
+    await p.keyboard.press('Escape'); await p.waitForTimeout(30);
+    verifier(await p.getByRole('listbox').count() === 0, '14 Échap ferme encore la liste');
+    await p.context().close();
+  }
+  // 14 quinquies. Petite fenêtre (600 × 420) avec la liste complète : elle reste dans la
+  // fenêtre, défile au besoin, et la dernière option est atteignable.
+  {
+    const p = await page({ vue: REEL.vue_pro, largeur: 600, hauteur: 420 });
+    await onglet(p, 'Raccourcis');
+    await p.getByRole('button', { name: NOM_IMPR }).click(); await p.waitForTimeout(250);
+    const m = await p.evaluate(() => {
+      const l = document.querySelector('[role="listbox"]'), r = l.getBoundingClientRect();
+      return [r.bottom <= innerHeight, l.scrollHeight >= l.clientHeight, getComputedStyle(l).overflowY];
+    });
+    await p.keyboard.press('End');
+    const dernier = await enFocus(p);
+    const visible = await p.evaluate(() => { const o = document.activeElement.getBoundingClientRect(); const l = document.querySelector('[role="listbox"]').getBoundingClientRect(); return o.bottom <= l.bottom + 1 && o.top >= l.top - 1; });
+    verifier(m[0] && m[2] === 'auto' && dernier === 'historique' && visible, '14 600 × 420 : liste bornée à la fenêtre, défile, dernière option visible', json([m, dernier, visible]));
     await p.context().close();
   }
 

@@ -7,7 +7,7 @@ use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Runtime};
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Shortcut, ShortcutState};
 
-use super::choix::{choisir, choisir_action, Bilan, ChoixAction, Ecarte, Raison};
+use super::choix::{choisir, choisir_action, echec_a_poser, Bilan, ChoixAction, Ecarte, Raison};
 use super::conversion::vers_systeme;
 use super::notation::Raccourci;
 use super::Signal;
@@ -167,6 +167,11 @@ impl Reservations {
             tenir(app, r, &self.bilan, &self.rappel)
         });
         let Some(nouveau) = choix.retenu else {
+            // Rien n'est tenu avant et rien ne l'est après : le bilan dit l'échec (les
+            // candidats écartés et pourquoi), sinon la vue garderait une raison périmée.
+            if echec_a_poser(actuel.is_some(), !candidats.is_empty()) {
+                self.poser(&choix);
+            }
             if candidats.is_empty() {
                 // Liste vide : « pas de raccourci voulu ». L'ancien est rendu au système.
                 self.poser(&choix);
@@ -186,10 +191,7 @@ impl Reservations {
     /// Remplace, dans le bilan, la ligne de l'action de `choix`.
     fn poser(&self, choix: &ChoixAction) {
         if let Ok(mut b) = self.bilan.lock() {
-            match b.actions.iter_mut().find(|a| a.action == choix.action) {
-                Some(a) => *a = choix.clone(),
-                None => b.actions.push(choix.clone()),
-            }
+            b.poser(choix);
         }
     }
 

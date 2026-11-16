@@ -572,6 +572,7 @@ section > .carte:last-of-type { margin-bottom: 0; }
   border: var(--reglages-filet) solid var(--stroke);
   background: var(--acrylic-solid);
   box-shadow: var(--shadow-16);
+  overflow-y: auto;
   transform-origin: top right;
   animation: menu var(--duree-reglages-menu) var(--courbe-douce);
 }

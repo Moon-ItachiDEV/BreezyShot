@@ -83,22 +83,22 @@
         {
           "id": "zone",
           "libelle": "Zone",
-          "groupe": 2
+          "groupe": 1
         },
         {
           "id": "plein_ecran",
           "libelle": "Plein écran",
-          "groupe": 2
+          "groupe": 1
         },
         {
           "id": "fenetre",
           "libelle": "Fenêtre",
-          "groupe": 2
+          "groupe": 1
         },
         {
           "id": "derniere_zone",
           "libelle": "Refaire la dernière zone",
-          "groupe": 2
+          "groupe": 1
         }
       ],
       "valeur": "windows",
@@ -241,37 +241,37 @@
         {
           "id": "zone",
           "libelle": "Zone",
-          "groupe": 2
+          "groupe": 1
         },
         {
           "id": "plein_ecran",
           "libelle": "Plein écran",
-          "groupe": 2
+          "groupe": 1
         },
         {
           "id": "fenetre",
           "libelle": "Fenêtre",
-          "groupe": 2
+          "groupe": 1
         },
         {
           "id": "derniere_zone",
           "libelle": "Refaire la dernière zone",
-          "groupe": 2
+          "groupe": 1
         },
         {
           "id": "defilante",
           "libelle": "Capture défilante",
-          "groupe": 3
+          "groupe": 2
         },
         {
           "id": "texte",
           "libelle": "Copier le texte",
-          "groupe": 3
+          "groupe": 2
         },
         {
           "id": "historique",
           "libelle": "Historique",
-          "groupe": 3
+          "groupe": 2
         }
       ],
       "valeur": "windows",
