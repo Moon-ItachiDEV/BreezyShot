@@ -13,7 +13,13 @@ fn main() {
         // `winmm.dll` (0.7.7, `systeme::minuterie`) : timeBeginPeriod n'est appelé que
         // pendant un film à 60 images/s ; chargé au repos, il sortait de la liste des
         // modules de l'essai 15 (L0, L1).
-        for dll in ["mfplat.dll", "mfreadwrite.dll", "dxgi.dll", "d3d11.dll", "winmm.dll"] {
+        for dll in [
+            "mfplat.dll",
+            "mfreadwrite.dll",
+            "dxgi.dll",
+            "d3d11.dll",
+            "winmm.dll",
+        ] {
             println!("cargo:rustc-link-arg=/DELAYLOAD:{dll}");
         }
         println!("cargo:rustc-link-arg=delayimp.lib");
