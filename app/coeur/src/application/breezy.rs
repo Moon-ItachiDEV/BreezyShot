@@ -58,7 +58,7 @@ pub fn accepter(
     if octets == 0 || octets > ANNOTATIONS_OCTETS_MAX {
         return Err(Refus::Taille);
     }
-    if etat.breezy_en_cours || editeur::export_en_cours(etat, maintenant) {
+    if editeur::breezy_en_cours(etat, maintenant) || editeur::export_en_cours(etat, maintenant) {
         return Err(Refus::DejaEnCours);
     }
     Ok(())
@@ -217,10 +217,12 @@ mod tests {
             Err(Refus::Taille)
         );
         assert_eq!(accepter(&e, 7, ANNOTATIONS_OCTETS_MAX, true, t), Ok(()));
-        e.breezy_en_cours = true;
+        e.breezy_en_cours = Some(t);
         assert_eq!(accepter(&e, 7, 10, true, t), Err(Refus::DejaEnCours));
+        // Oublié au-delà de OUBLI_BREEZY (écriture figée).
+        assert_eq!(accepter(&e, 7, 10, true, t + editeur::OUBLI_BREEZY), Ok(()));
         // Et un export de pixels en cours bloque aussi.
-        e.breezy_en_cours = false;
+        e.breezy_en_cours = None;
         e.export = Some(editeur::ExportEnCours {
             numero: 1,
             but: editeur::But::Copier,
@@ -245,7 +247,7 @@ mod tests {
             editeur::accepter_export(&e, &en_tete, 48, Instant::now()),
             Ok(())
         );
-        e.breezy_en_cours = true;
+        e.breezy_en_cours = Some(Instant::now());
         assert_eq!(
             editeur::accepter_export(&e, &en_tete, 48, Instant::now()),
             Err(editeur::Refus::DejaEnCours)

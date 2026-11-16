@@ -1830,6 +1830,8 @@ pub fn traiter(app: &AppHandle, evenement: Evenement) {
         // Aucune annonce à l'activation ni au retrait de la licence.
         Evenement::LicenceChangee => {
             suivre_les_actions(app);
+            // L'éditeur ouvert remet à jour la mention « Pro » de « Enregistrer en .breezy ».
+            fenetres::editeur::emettre(app, fenetres::editeur::EVENEMENT_PRO, breezy_ouvert(app));
             // Première activation : les langues de lecture et le codeur H.264 (une fois
             // par lancement chacun).
             geste_texte::lancer_sonde(app);

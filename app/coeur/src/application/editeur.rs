@@ -81,9 +81,10 @@ pub struct EtatEditeur {
     /// remplacée par la suivante, oubliée avec le document. Le texte ne quitte le cœur que
     /// par `editeur_copier_texte`.
     pub texte: Option<(u64, Lu)>,
-    /// Un enregistrement `.breezy` est en cours (dialogue compris) : aucun autre export, ni
-    /// autre enregistrement `.breezy`, n'est accepté pendant ce temps (0.7.5).
-    pub breezy_en_cours: bool,
+    /// Le début d'un enregistrement `.breezy` en cours (dialogue compris) : aucun autre export,
+    /// ni autre enregistrement `.breezy`, n'est accepté pendant ce temps (0.7.5), sauf s'il
+    /// dure plus que `OUBLI_BREEZY` (écriture figée) : il est alors oublié.
+    pub breezy_en_cours: Option<Instant>,
 }
 
 /// Un export parti dans le fil `editeur-sortie`.
@@ -368,7 +369,7 @@ pub fn accepter_export(
     }
     // Un export n'est oublié que par son échéance (son résultat d'échec est alors émis) ou
     // par `export_perime`, qui le rend pour son résultat : jamais en silence.
-    if etat.breezy_en_cours {
+    if breezy_en_cours(etat, maintenant) {
         return Err(Refus::DejaEnCours);
     }
     if export_en_cours(etat, maintenant) {
@@ -376,6 +377,16 @@ pub fn accepter_export(
     }
     Ok(())
 }
+
+/// Un enregistrement `.breezy` est encore attendu : parti depuis moins de `OUBLI_BREEZY`.
+pub fn breezy_en_cours(etat: &EtatEditeur, maintenant: Instant) -> bool {
+    etat.breezy_en_cours
+        .is_some_and(|debut| maintenant.saturating_duration_since(debut) < OUBLI_BREEZY)
+}
+
+/// Au-delà, un enregistrement `.breezy` sans bilan (écriture figée, bilan non rendu) ne
+/// bloque plus rien. Large : le dialogue « Enregistrer sous… » peut rester ouvert longtemps.
+pub const OUBLI_BREEZY: Duration = Duration::from_secs(600);
 
 /// Un export est encore attendu : en dialogue, ou plus jeune que `OUBLI_EXPORT`.
 pub fn export_en_cours(etat: &EtatEditeur, maintenant: Instant) -> bool {
@@ -815,7 +826,7 @@ impl EtatEditeur {
             sans_reponse: false,
             affichee: false,
             texte: None,
-            breezy_en_cours: false,
+            breezy_en_cours: None,
             document,
         }
     }

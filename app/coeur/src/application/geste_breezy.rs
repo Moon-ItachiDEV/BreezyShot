@@ -52,7 +52,7 @@ pub fn enregistrer(app: &AppHandle, requete: &tauri::ipc::Request<'_>) -> Result
     let maintenant = Instant::now();
     let decision = avec_editeur(app, None, |e| {
         breezy::accepter(e, id, corps.len(), pro, maintenant).map(|()| {
-            e.breezy_en_cours = true;
+            e.breezy_en_cours = Some(maintenant);
             (
                 Arc::clone(&e.document.pixels),
                 e.document.transparence,
@@ -179,7 +179,7 @@ fn fin(
     ms: u128,
 ) {
     let reste = avec_editeur(app, Some(id), |e| {
-        e.breezy_en_cours = false;
+        e.breezy_en_cours = None;
         if issue == Issue::Fait {
             // La version enregistrée est propre : fermer ne demande plus rien. Le nom du
             // fichier sert à la proposition suivante.

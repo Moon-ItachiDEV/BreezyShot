@@ -553,9 +553,8 @@ async function lireAnnotations(charge, id) {
             : null;
     if (!vue) throw new Error("octets");
     const texte = new TextDecoder("utf-8", { fatal: true }).decode(vue);
-    const { doc, ecartes } = modele.lireDocument(texte, charge.largeur, charge.hauteur);
+    const { doc } = modele.lireDocument(texte, charge.largeur, charge.hauteur);
     ed.h = modele.creerHistorique(doc);
-    if (ecartes > 0) ed.barre?.message("Certains éléments de ce fichier n'ont pas pu être lus");
   } catch (e) {
     echec(e);
   }
@@ -729,6 +728,7 @@ async function demarrer() {
       }),
       ecoute("editeur:resultat", (e) => resultat(e?.payload)),
       ecoute("editeur:breezy", (e) => breezyFini(e?.payload)),
+      ecoute("editeur:pro", (e) => ed.barre?.poserBreezy(e?.payload === true)),
       ecoute("editeur:texte", (e) => ed.texte.recu(e?.payload)),
       ecoute("editeur:texte_copie", (e) => ed.texte.copie(e?.payload)),
       ecoute("editeur:glisser", (e) => {

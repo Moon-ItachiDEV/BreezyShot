@@ -415,11 +415,16 @@ fn zip_lire(octets: &[u8]) -> Result<Vec<(String, &[u8])>, ErreurBreezy> {
         if donnees_fin > debut_centrale {
             return Err(ErreurBreezy::Abime);
         }
+        let nom = std::str::from_utf8(nom).map_err(|_| ErreurBreezy::Abime)?;
+        // Un nom déjà lu est refusé avant tout calcul : un fichier ne peut pas faire
+        // recalculer l'empreinte d'une même grosse image par dizaines d'entrées.
+        if resultat.iter().any(|(deja, _)| deja == nom) {
+            return Err(ErreurBreezy::Abime);
+        }
         let donnees = &octets[donnees_debut..donnees_fin];
         if crc32(donnees) != crc {
             return Err(ErreurBreezy::Abime);
         }
-        let nom = std::str::from_utf8(nom).map_err(|_| ErreurBreezy::Abime)?;
         resultat.push((nom.to_string(), donnees));
     }
     Ok(resultat)
