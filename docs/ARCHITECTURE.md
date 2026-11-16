@@ -246,7 +246,7 @@ l'icône, raccourcis, lignes de Réglages › Raccourcis, bouton « Texte » de 
   bouts (`nettoyer`), refuse au-delà de 1 000 caractères (`LONGUEUR_MAX`) avant tout
   décodage, puis rend `Licence { id, essai }` ou un `Refus` dans cet ordre : `vide`,
   `trop_longue`, `forme` (préfixe, nombre de parties, base64, taille de la signature),
-  `signature`, `charge`, `revoquee`, `edition`, `essai`. Licence d'essai, publique :
+  `signature`, `charge`, `edition`, `revoquee`, `essai`. Licence d'essai, publique :
   `essais/licence-essai.txt`.
 - **Sécurité** (audit 0.7.8) : seule la clé publique est dans le code et le binaire ; la clé
   privée d'essai a été jetée, la clé privée de vente ne sera jamais dans le dépôt, la CI ni

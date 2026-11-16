@@ -6,7 +6,7 @@
 //!
 //! Ordre des refus : vide, trop longue (bornée avant tout décodage), forme (préfixe,
 //! parties, base64 strict, taille de la signature), signature, puis seulement la charge
-//! (JSON, `id`), la révocation, l'édition et l'essai.
+//! (JSON, `id`), l'édition, la révocation et l'essai.
 //!
 //! Sécurité (audit du 16/11/2026) : seule la clé publique est dans le code ; une licence
 //! ne se forge pas sans la clé privée, qui n'est jamais dans le dépôt, la CI ni le binaire.

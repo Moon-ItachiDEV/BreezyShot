@@ -309,7 +309,7 @@ fn version_1_0_refuse_les_essais() {
         assert!(!avant_1_0(v), "{v}");
     }
     // Cette version est d'avant la 1.0 : la licence d'essai de l'utilisateur marche.
-    assert!(ESSAIS_PERMIS);
+    const { assert!(ESSAIS_PERMIS) };
     assert_eq!(CLES, &[CLE_ESSAI]);
     // Règles d'une 1.0 : la licence d'essai est refusée, même si la clé est restée…
     assert_eq!(
