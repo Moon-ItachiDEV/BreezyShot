@@ -1,20 +1,24 @@
-//! La barre de capture côté Application (0.7.2) : l'ouvrir quand l'app est relancée
+//! La barre de capture « Galet » côté Application (0.7.2, refaite en 0.7.4) : l'ouvrir quand l'app est relancée
 //! (`Commande::Demarrer`), et les commandes de la page `barre/barre.html`. La fenêtre
 //! elle-même est dans `fenetres::barre`.
 //!
-//! Ses boutons sont tirés des entrées du menu de l'icône (`menu_actuel`), jamais d'une
-//! autre règle : licence, système, codeur H.264 suivent donc le menu (GIF sans Vidéo
-//! quand Media Foundation manque, rien de Pro sans licence).
+//! Ses boutons sont tirés des entrées du menu de l'icône (`menu_actuel`) et de ce que le
+//! menu montrerait avec une licence (`actions_avec_licence`) : système et codeur H.264
+//! suivent donc le menu (GIF sans Vidéo quand Media Foundation manque). Sans licence, la
+//! Capture défilante, la Vidéo et le GIF restent sur la barre, éteints (`verrouilles`) :
+//! un clic ouvre Réglages › Licence, jamais la fonction.
 //!
 //! Contrat avec la page :
 //! - `barre_pret` : la page écoute `barre:ouvrir` et le thème ; rend la charge de la
 //!   première ouverture (ou `null`).
-//! - `barre:ouvrir` { boutons: [id], retardateur_s: n | null, retardateurs: [n] } à
-//!   chaque ouverture suivante ; `barre:vider` quand la barre est cachée.
-//! - `barre_taille` { largeur, hauteur } : la carte mesurée (pixels logiques, menu volant
-//!   ouvert compris) ; la fenêtre est reposée à cette taille.
+//! - `barre:ouvrir` { boutons: [id], verrouilles: [id], retardateur_s: n | null,
+//!   retardateurs: [n] } à chaque ouverture suivante ; `barre:vider` quand la barre est
+//!   cachée.
+//! - `barre_taille` { largeur, hauteur } : la carte mesurée (pixels logiques, étage du
+//!   retardateur ouvert compris) ; la fenêtre est reposée à cette taille.
 //! - `barre_choisi` { id } : un bouton choisi ; la barre se cache, l'entrée du menu de même
-//!   identifiant est traitée au tour suivant de la boucle (`Evenement::Menu`).
+//!   identifiant est traitée au tour suivant de la boucle (`Evenement::Menu`). Un bouton
+//!   éteint (Pro sans licence) poste `MENU_LICENCE` à la place : Réglages › Licence.
 //! - `barre_retardateur` { secondes } : le retardateur des Réglages changé, par le même
 //!   chemin que la page des Réglages ; rend la valeur en vigueur. La barre reste ouverte.
 //! - `barre_fermer` : Échap ; la barre se cache.
@@ -26,8 +30,9 @@ use super::etats::{Etat, Mode};
 use super::icone::EntreeMenu;
 use super::page_reglages::{lignes_montrees, Changement};
 use super::{
-    etat_automate, fenetre_reglages, geste_defilante, geste_film, id_menu, menu_actuel,
-    poster_plus_tard, reglages_lus, Evenement, MENU_REGLAGES, VIGNETTE_CONSTRUITE,
+    actions_avec_licence, etat_automate, fenetre_reglages, geste_defilante, geste_film, id_menu,
+    menu_actuel, poster_plus_tard, pro, reglages_lus, Evenement, MENU_LICENCE, MENU_REGLAGES,
+    VIGNETTE_CONSTRUITE,
 };
 use crate::fenetres::barre::{self, Ouverture};
 use crate::fenetres::{menu, theme};
@@ -65,11 +70,34 @@ pub fn boutons(entrees: &[EntreeMenu]) -> Vec<String> {
     b
 }
 
-/// La charge de la page : les boutons, et le retardateur s'il a un effet (`retardateur_s`
-/// des réglages ; `None` quand Réglages › Capture ne le montre pas). Fonction pure.
-pub fn ouverture(entrees: &[EntreeMenu], retardateur_s: Option<u32>) -> Ouverture {
+/// La charge de la page : les boutons, ceux que la licence n'ouvre pas (`verrouilles`), et
+/// le retardateur s'il a un effet (`retardateur_s` des réglages ; `None` quand Réglages ›
+/// Capture ne le montre pas). `entrees` : le menu en vigueur ; `actions_pro` : les actions
+/// que le menu aurait avec une licence. Un mode seulement présent avec une licence est un
+/// bouton, éteint. Fonction pure.
+pub fn ouverture(
+    entrees: &[EntreeMenu],
+    actions_pro: &[&str],
+    retardateur_s: Option<u32>,
+) -> Ouverture {
+    let ouverts = boutons(entrees);
+    let mut tous: Vec<String> = MODES_BARRE
+        .iter()
+        .map(|m| (id_menu(*m), actions_pro.contains(&m.nom())))
+        .filter(|(id, avec_licence)| *avec_licence || ouverts.contains(id))
+        .map(|(id, _)| id)
+        .collect();
+    let verrouilles: Vec<String> = tous
+        .iter()
+        .filter(|id| !ouverts.contains(id))
+        .cloned()
+        .collect();
+    if ouverts.iter().any(|id| id == MENU_REGLAGES) {
+        tous.push(MENU_REGLAGES.into());
+    }
     Ouverture {
-        boutons: boutons(entrees),
+        boutons: tous,
+        verrouilles,
         retardateur_s,
         retardateurs: RETARDATEURS_PROPOSES.to_vec(),
     }
@@ -110,7 +138,10 @@ pub fn ouvrir(app: &AppHandle) {
     let retardateur = lignes_montrees(VIGNETTE_CONSTRUITE, gel::disponible())
         .contains(&"retardateur")
         .then(|| reglages_lus(app).capture.retardateur_s);
-    barre::ouvrir(app, ouverture(&entrees, retardateur));
+    barre::ouvrir(
+        app,
+        ouverture(&entrees, &actions_avec_licence(app), retardateur),
+    );
 }
 
 #[tauri::command]
@@ -130,6 +161,14 @@ pub fn barre_choisi(app: AppHandle, id: String) {
     // Seul un bouton montré peut être choisi (jamais « Quitter », par exemple).
     if !barre::bouton_montre(&id) {
         log::warn!("barre: choix inconnu");
+        return;
+    }
+    // Un bouton éteint (Pro sans licence) ouvre Réglages › Licence ; avec une licence
+    // arrivée entre-temps, il se choisit comme un autre.
+    if barre::bouton_verrouille(&id) && !pro(&app) {
+        log::info!("barre: licence {id}");
+        let _ = barre::cacher(&app);
+        poster_plus_tard(&app, Evenement::Menu(MENU_LICENCE.into()));
         return;
     }
     log::info!("barre choisi {id}");
@@ -172,8 +211,42 @@ mod tests {
         entrees_menu(&actions, |_| Some("Ctrl + Maj + 1".into()))
     }
 
+    /// La charge de la page : le menu d'après la licence, les actions d'une licence.
+    fn charge(pro: bool, video: bool, vivant: bool, retardateur: Option<u32>) -> Ouverture {
+        let avec = actions_selon(true, true, true, vivant, vivant && video, vivant);
+        ouverture(&menu(pro, video, vivant), &avec, retardateur)
+    }
+
+    const TOUT: [&str; 7] = [
+        "capturer_zone",
+        "capturer_plein_ecran",
+        "capturer_fenetre",
+        "capturer_defilante",
+        "capturer_video",
+        "capturer_gif",
+        "reglages",
+    ];
+
     #[test]
-    fn sans_licence_les_trois_captures_et_reglages() {
+    fn sans_licence_la_defilante_la_video_et_le_gif_sont_eteints() {
+        let o = charge(false, true, true, None);
+        assert_eq!(o.boutons, TOUT);
+        assert_eq!(
+            o.verrouilles,
+            ["capturer_defilante", "capturer_video", "capturer_gif"]
+        );
+    }
+
+    #[test]
+    fn avec_licence_rien_n_est_eteint() {
+        let o = charge(true, true, true, None);
+        assert_eq!(o.boutons, TOUT);
+        assert!(o.verrouilles.is_empty());
+    }
+
+    #[test]
+    fn le_menu_de_l_icone_ne_change_pas() {
+        // Sans licence, le menu ne propose toujours rien de Pro : seule la barre le montre.
         assert_eq!(
             boutons(&menu(false, true, true)),
             [
@@ -183,62 +256,62 @@ mod tests {
                 "reglages"
             ]
         );
-    }
-
-    #[test]
-    fn avec_licence_defilante_video_et_gif() {
-        assert_eq!(
-            boutons(&menu(true, true, true)),
-            [
-                "capturer_zone",
-                "capturer_plein_ecran",
-                "capturer_fenetre",
-                "capturer_defilante",
-                "capturer_video",
-                "capturer_gif",
-                "reglages"
-            ]
-        );
+        assert_eq!(boutons(&menu(true, true, true)), TOUT);
     }
 
     #[test]
     fn sans_media_foundation_gif_sans_video() {
-        let b = boutons(&menu(true, false, true));
-        assert!(b.contains(&"capturer_gif".to_string()));
-        assert!(!b.contains(&"capturer_video".to_string()));
-        assert!(b.contains(&"capturer_defilante".to_string()));
+        for pro in [true, false] {
+            let o = charge(pro, false, true, None);
+            assert!(o.boutons.contains(&"capturer_gif".to_string()));
+            assert!(!o.boutons.contains(&"capturer_video".to_string()));
+            assert!(o.boutons.contains(&"capturer_defilante".to_string()));
+            assert!(!o.verrouilles.contains(&"capturer_video".to_string()));
+        }
     }
 
     #[test]
-    fn sans_images_vivantes_rien_de_pro() {
-        assert_eq!(boutons(&menu(true, true, false)).len(), 4);
+    fn sans_images_vivantes_rien_de_pro_meme_eteint() {
+        // Le système ne prend pas d'images vivantes : ni bouton, ni bouton éteint.
+        for pro in [true, false] {
+            let o = charge(pro, true, false, None);
+            assert_eq!(o.boutons.len(), 4, "{:?}", o.boutons);
+            assert!(o.verrouilles.is_empty());
+        }
     }
 
     #[test]
     fn jamais_ce_qui_n_est_pas_un_bouton() {
         // Dernière zone, Copier le texte, Historique, Quitter : au menu, pas dans la barre.
-        let b = boutons(&menu(true, true, true));
-        for absent in [
-            "capturer_derniere_zone",
-            "capturer_texte",
-            "historique",
-            "quitter",
-        ] {
-            assert!(!b.contains(&absent.to_string()), "{absent}");
+        for pro in [true, false] {
+            let o = charge(pro, true, true, None);
+            for absent in [
+                "capturer_derniere_zone",
+                "capturer_texte",
+                "historique",
+                "quitter",
+            ] {
+                assert!(!o.boutons.contains(&absent.to_string()), "{absent}");
+            }
         }
         // Le menu d'une défilante (Quitter seul) : aucun bouton.
         assert!(boutons(&entrees_pendant_defilante()).is_empty());
     }
 
     #[test]
+    fn un_verrouille_est_toujours_un_bouton() {
+        for pro in [true, false] {
+            let o = charge(pro, true, true, Some(3));
+            assert!(o.verrouilles.iter().all(|v| o.boutons.contains(v)));
+        }
+    }
+
+    #[test]
     fn charge_avec_le_retardateur() {
-        let o = ouverture(&menu(false, false, false), Some(5));
+        let o = charge(false, false, false, Some(5));
         assert_eq!(o.retardateur_s, Some(5));
         assert_eq!(o.retardateurs, [0, 3, 5, 10]);
-        assert_eq!(
-            ouverture(&menu(false, false, false), None).retardateur_s,
-            None
-        );
+        assert_eq!(charge(false, false, false, None).retardateur_s, None);
     }
 
     #[test]

@@ -1,6 +1,50 @@
-/* Barre de capture (design/capture, `.launcher`, validé le 12/11/2026). Faux verre peint par
-   l'app, comme le menu de l'icône : la fenêtre est transparente, la carte porte le fond, le
-   bord et l'ombre. Les mesures (haut, marge, hauteur) sont celles de `fenetres/barre.rs`. */
+/* Barre de capture « Galet » (design/barre-capture, piste A, choisie le 16/11/2026). La barre
+   est une fenêtre transparente posée sur le bureau : pas de flou d'arrière-plan possible, le
+   fond est plein (`--acrylic-solid`) et c'est le bord et l'ombre qui la détachent d'une page
+   blanche. Les mesures (haut, marges, hauteur) sont celles de `fenetres/barre.rs`. */
+
+:root {
+  --bc-fond: var(--acrylic-solid);
+  --bc-reflet: rgba(255, 255, 255, 0.9);
+  --bc-bord: rgba(0, 0, 0, 0.11);
+  --bc-ombre: 0 0 0 0.5px rgba(0, 0, 0, 0.05), 0 2px 5px rgba(0, 0, 0, 0.1), 0 12px 28px rgba(0, 0, 0, 0.17);
+  --bc-ombre-petite: 0 0 0 0.5px rgba(0, 0, 0, 0.05), 0 1px 3px rgba(0, 0, 0, 0.1), 0 6px 14px rgba(0, 0, 0, 0.13);
+  --bc-survol: rgba(0, 0, 0, 0.055);
+  --bc-appui: rgba(0, 0, 0, 0.035);
+  --bc-filet: rgba(0, 0, 0, 0.1);
+  --bc-pastille: #ffffff;
+  --bc-pastille-ombre: 0 0 0 1px rgba(0, 0, 0, 0.1), 0 1px 2px rgba(0, 0, 0, 0.16);
+  --bc-pro-fond: rgba(0, 0, 0, 0.07);
+  --bc-eteint: 0.5;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bc-reflet: rgba(255, 255, 255, 0.07);
+    --bc-bord: rgba(255, 255, 255, 0.12);
+    --bc-ombre: 0 0 0 0.5px rgba(0, 0, 0, 0.5), 0 2px 5px rgba(0, 0, 0, 0.2), 0 12px 28px rgba(0, 0, 0, 0.3);
+    --bc-ombre-petite: 0 0 0 0.5px rgba(0, 0, 0, 0.5), 0 1px 3px rgba(0, 0, 0, 0.2), 0 6px 14px rgba(0, 0, 0, 0.26);
+    --bc-survol: rgba(255, 255, 255, 0.09);
+    --bc-appui: rgba(255, 255, 255, 0.055);
+    --bc-filet: rgba(255, 255, 255, 0.12);
+    --bc-pastille: rgba(255, 255, 255, 0.16);
+    --bc-pastille-ombre: 0 0 0 1px rgba(255, 255, 255, 0.07), 0 1px 2px rgba(0, 0, 0, 0.5);
+    --bc-pro-fond: rgba(255, 255, 255, 0.13);
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bc-reflet: rgba(255, 255, 255, 0.07);
+  --bc-bord: rgba(255, 255, 255, 0.12);
+  --bc-ombre: 0 0 0 0.5px rgba(0, 0, 0, 0.5), 0 2px 5px rgba(0, 0, 0, 0.2), 0 12px 28px rgba(0, 0, 0, 0.3);
+  --bc-ombre-petite: 0 0 0 0.5px rgba(0, 0, 0, 0.5), 0 1px 3px rgba(0, 0, 0, 0.2), 0 6px 14px rgba(0, 0, 0, 0.26);
+  --bc-survol: rgba(255, 255, 255, 0.09);
+  --bc-appui: rgba(255, 255, 255, 0.055);
+  --bc-filet: rgba(255, 255, 255, 0.12);
+  --bc-pastille: rgba(255, 255, 255, 0.16);
+  --bc-pastille-ombre: 0 0 0 1px rgba(255, 255, 255, 0.07), 0 1px 2px rgba(0, 0, 0, 0.5);
+  --bc-pro-fond: rgba(255, 255, 255, 0.13);
+  color-scheme: dark;
+}
 
 html,
 body {
@@ -11,7 +55,7 @@ body {
 }
 
 body {
-  font: var(--texte-body-graisse) var(--texte-body-taille) / var(--texte-body-interligne) var(--police-ui);
+  font: 400 13px/1 var(--police-ui);
   color: var(--text);
   -webkit-font-smoothing: antialiased;
   user-select: none;
@@ -19,7 +63,7 @@ body {
   cursor: default;
 }
 
-/* La boîte : la barre, et sous elle le menu volant ouvert. 14 px du haut (HAUT), centrée. */
+/* La boîte : la carte et, sous elle, l'étiquette du nom. 14 px du haut (HAUT), centrée. */
 .boite {
   position: relative;
   width: max-content;
@@ -28,260 +72,231 @@ body {
 
 .carte {
   box-sizing: border-box;
-  border: 1px solid var(--acrylic-stroke);
-  border-radius: var(--radius-md);
+  border: 1px solid var(--bc-bord);
   background:
-    linear-gradient(to bottom, color-mix(in srgb, var(--acrylic-solid) 70%, white 30%) 0, transparent 1px),
-    color-mix(in srgb, var(--acrylic-solid) 97%, transparent);
-  box-shadow: var(--shadow-16);
+    linear-gradient(to bottom, var(--bc-reflet) 0, transparent 1px) padding-box,
+    var(--bc-fond);
+  box-shadow: var(--bc-ombre);
 }
 
 .barre {
-  display: flex;
-  align-items: center;
-  gap: 2px;
-  height: 46px;
-  padding: 4px;
+  display: grid;
+  padding: 6px;
+  border-radius: 20px;
   transition:
     opacity var(--duree-sortie) var(--courbe-douce),
-    transform var(--duree-sortie) var(--courbe-douce);
+    transform var(--duree-ressort) var(--courbe-ressort);
 }
-
 .barre[hidden] {
   display: none;
 }
-
-/* Entrée : la carte descend de 4 px en fondu (167 ms). */
+/* Entrée : la carte descend en ressort. */
 .barre.entree {
   opacity: 0;
-  transform: translateY(-4px);
+  transform: translateY(-8px) scale(0.97);
   transition: none;
 }
 
-.marque {
-  display: grid;
-  place-items: center;
-  padding: 0 6px 0 4px;
+.rang {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  height: 44px;
 }
 
-.logo {
-  width: 20px;
-  height: 20px;
-}
-.logo .logo-1 { stop-color: var(--logo-degrade-1); }
-.logo .logo-2 { stop-color: var(--logo-degrade-2); }
-.logo .logo-3 { stop-color: var(--logo-degrade-3); }
-.logo .logo-l { stop-color: var(--logo-lumiere); }
-.logo .logo-pales { fill: var(--logo-lumiere); }
-
-.separateur {
-  flex: none;
-  width: 1px;
-  height: 20px;
-  margin: 0 4px;
-  background: var(--divider);
-}
-
-.mode {
+.b,
+.choix {
+  all: unset;
+  box-sizing: border-box;
   position: relative;
+  cursor: default;
+  white-space: nowrap;
+  -webkit-tap-highlight-color: transparent;
+}
+.b {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
-  box-sizing: border-box;
-  height: 36px;
-  padding: 0 10px;
-  border: 1px solid transparent;
-  border-radius: var(--radius-sm);
-  background: transparent;
-  color: var(--text);
-  font: inherit;
-  font-size: 13px;
-  white-space: nowrap;
-  cursor: default;
-  outline: none;
+  justify-content: center;
+  flex: none;
+  width: 44px;
+  height: 44px;
+  border-radius: 13px;
   transition:
-    background var(--duree-survol) linear,
+    background-color var(--duree-survol) linear,
+    box-shadow var(--duree-survol) linear,
     transform var(--duree-ressort) var(--courbe-ressort);
 }
-
-.mode.picto-seul {
-  padding: 0 8px;
+.b:hover,
+.b[aria-expanded="true"] {
+  background: var(--bc-survol);
 }
-
-.mode:hover {
-  background: var(--subtle-hover);
-  transform: translateY(-1px);
+.b:active {
+  background: var(--bc-appui);
+  transform: scale(0.94);
+  transition-duration: var(--duree-couleur), var(--duree-couleur), var(--duree-appui);
 }
-
-.mode:active {
-  background: var(--subtle-press);
-  transform: scale(0.97);
-  transition-duration: var(--duree-appui);
-}
-
-.mode[aria-expanded="true"] {
-  background: var(--subtle-hover);
-}
-
-.mode:focus-visible {
+.b:focus-visible,
+.choix:focus-visible {
   box-shadow: inset 0 0 0 2px var(--text);
 }
 
-.mode svg,
-.element svg {
+svg.p {
   flex: none;
-  width: 18px;
-  height: 18px;
+  width: 22px;
+  height: 22px;
   fill: none;
   stroke: currentColor;
-  stroke-width: 1.4;
+  stroke-width: 1.45;
   stroke-linecap: round;
   stroke-linejoin: round;
 }
+/* Le délai écrit dans le cadran : des traits, pas du texte, pour que le « 10 » ne dépende
+   pas de la police. */
+svg.p .chiffres {
+  stroke-width: 1.05;
+}
+svg.p text {
+  fill: currentColor;
+  stroke: none;
+  font: 700 8.2px/1 var(--police-ui);
+  font-variant-numeric: tabular-nums;
+  text-anchor: middle;
+}
 
-/* Retardateur armé : pictogramme en couleur d'accent, badge du délai. */
-.mode.arme svg {
+.filet {
+  flex: none;
+  width: 1px;
+  height: 24px;
+  margin: 0 7px;
+  background: var(--bc-filet);
+}
+
+/* Retardateur armé : la couleur d'accent, le délai dans le cadran. */
+.b.arme {
   color: var(--accent-text);
 }
-
-.badge {
-  position: absolute;
-  right: 3px;
-  bottom: 4px;
-  min-width: 12px;
-  height: 12px;
-  padding: 0 2px;
-  box-sizing: border-box;
-  border-radius: 6px;
-  background: var(--accent);
-  color: var(--on-accent);
-  font: 700 8.5px/12px var(--police-ui);
-  text-align: center;
-  font-variant-numeric: tabular-nums;
-  transform: scale(0);
-  transition: transform var(--duree-ressort) var(--courbe-ressort);
+/* Un peu plus grand, pour que le délai (le « 10 ») se lise à 100 % comme à 200 %. */
+.b.arme > svg.p {
+  width: 26px;
+  height: 26px;
 }
 
-.mode.arme .badge {
-  transform: none;
+/* Sans licence : la fonction Pro reste visible, éteinte ; un clic mène à la licence. */
+.b.pro > svg.p {
+  opacity: var(--bc-eteint);
+}
+.puce {
+  flex: none;
+  margin: 0 4px 0 6px;
+  font: 600 10.5px/16px var(--police-ui);
+  letter-spacing: 0.02em;
+  padding: 0 6px;
+  border-radius: 5px;
+  background: var(--bc-pro-fond);
+  color: var(--text-2);
 }
 
-/* Menus volants, sous leur bouton. */
-.volet {
-  position: absolute;
-  top: 54px;
-  padding: 4px;
-  transform-origin: 50% 0;
+/* L'étage du retardateur : il se déplie sous les boutons, dans la même carte. */
+.etage {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows var(--duree-ressort) var(--courbe-douce);
 }
-
-.volet[hidden] {
-  display: none;
+.etage.ouvert {
+  grid-template-rows: 1fr;
 }
-
-.volet.ouvre {
-  animation: volet-entree var(--duree-ressort) var(--courbe-ressort);
+.etage > div {
+  min-height: 0;
+  overflow: hidden;
+  visibility: hidden;
+  transition: visibility 0s var(--duree-ressort);
 }
-
-@keyframes volet-entree {
-  from {
-    opacity: 0;
-    transform: translateY(-4px) scale(0.96);
-  }
+.etage.ouvert > div {
+  visibility: visible;
+  transition-delay: 0s;
 }
-
-#volet-retardateur {
+.etage-rang {
   display: flex;
   gap: 2px;
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid var(--bc-filet);
 }
-
-#volet-retardateur[hidden] {
-  display: none;
+.etage-rang .choix {
+  flex: 1;
 }
-
+/* Le choix en cours : la pastille claire en relief (barre « Calme » de l'éditeur). */
 .choix {
-  box-sizing: border-box;
-  height: 30px;
-  min-width: 44px;
-  padding: 0 10px;
-  border: 0;
-  border-radius: var(--radius-sm);
-  background: transparent;
-  color: inherit;
-  font: inherit;
-  font-size: 13px;
-  white-space: nowrap;
-  font-variant-numeric: tabular-nums;
-  cursor: default;
-  outline: none;
-  transition: background var(--duree-survol) linear;
-}
-
-.choix:hover {
-  background: var(--subtle-hover);
-}
-
-.choix[aria-checked="true"] {
-  background: var(--accent);
-  color: var(--on-accent);
-}
-
-.element {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  box-sizing: border-box;
-  width: 100%;
-  min-width: 128px;
+  display: inline-grid;
+  place-items: center;
   height: 32px;
+  min-width: 46px;
   padding: 0 10px;
-  border: 0;
-  border-radius: var(--radius-sm);
-  background: transparent;
-  color: inherit;
-  font: inherit;
+  border-radius: 10px;
   font-size: 13px;
-  text-align: left;
-  cursor: default;
-  outline: none;
-  transition: background var(--duree-survol) linear;
+  font-variant-numeric: tabular-nums;
+  transition:
+    background-color var(--duree-survol) linear,
+    box-shadow var(--duree-survol) linear;
+}
+.choix:hover {
+  background: var(--bc-survol);
+}
+.choix[aria-checked="true"] {
+  background: var(--bc-pastille);
+  box-shadow: var(--bc-pastille-ombre);
+  font-weight: 600;
+}
+.choix[aria-checked="true"]:focus-visible {
+  box-shadow:
+    var(--bc-pastille-ombre),
+    inset 0 0 0 2px var(--text);
 }
 
-.element svg {
-  width: 16px;
-  height: 16px;
+/* Le nom d'un bouton, sous la barre, au survol ou au clavier. */
+.nom {
+  position: absolute;
+  left: 0;
+  top: calc(100% + 8px);
+  z-index: 2;
+  padding: 0 9px;
+  font-size: 12px;
+  line-height: 24px;
+  white-space: nowrap;
+  border-radius: 8px;
+  border: 1px solid var(--bc-bord);
+  background: var(--bc-fond);
+  box-shadow: var(--bc-ombre-petite);
+  pointer-events: none;
+  opacity: 0;
+  translate: -50% -3px;
+  transition:
+    opacity 90ms linear,
+    translate var(--duree-survol) var(--courbe-douce);
 }
-
-.element:hover {
-  background: var(--subtle-hover);
+.nom.vu {
+  opacity: 1;
+  translate: -50% 0;
 }
-
-.element:active {
-  background: var(--subtle-press);
-}
-
-.choix:focus-visible,
-.element:focus-visible {
-  box-shadow: inset 0 0 0 2px var(--text);
+.nom.glisse {
+  transition:
+    opacity 90ms linear,
+    translate var(--duree-survol) var(--courbe-douce),
+    left var(--duree-survol) var(--courbe-douce);
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .barre {
+  .b,
+  .barre,
+  .nom,
+  .nom.glisse,
+  .etage {
     transition: opacity var(--duree-reduite) linear;
+  }
+  .b:active {
+    transform: none;
   }
   .barre.entree {
     transform: none;
-  }
-  .mode {
-    transition: background var(--duree-survol) linear;
-  }
-  .mode:hover,
-  .mode:active {
-    transform: none;
-  }
-  .badge {
-    transition: none;
-  }
-  .volet.ouvre {
-    animation: none;
   }
 }

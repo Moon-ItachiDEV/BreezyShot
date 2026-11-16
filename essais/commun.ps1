@@ -535,11 +535,12 @@ function Fermer-Menu-Icone($Menu, [string]$Quoi) {
     Start-Sleep -Milliseconds 200
 }
 
-# --- Barre de capture (0.7.2) -----------------------------------------------------------
+# --- Barre de capture (0.7.2, « Galet » en 0.7.4) -----------------------------------------------------------
 # Lancer l'app à la main, ou la relancer, ouvre la barre de capture, une page lue par UI
 # Automation (role toolbar). `Attendre-Barre` attend la $Fois-ième ligne « barre ouverte »
 # ($DelaiS s au plus) et rend { Fenetre, Boutons, Noms } : `Boutons`, les boutons par nom
-# (« Zone », « Plein écran », « Fenêtre », puis le nom seul des boutons à pictogramme) ;
+# (l'étiquette de chaque pictogramme : « Zone », « Plein écran », « Fenêtre », « Retardateur »,
+# puis sans licence « Capture défilante, Pro », « Vidéo, Pro », « GIF, Pro », « Réglages ») ;
 # `Noms`, ces noms dans l'ordre.
 function Attendre-Barre([string]$Dossier, [string]$Quoi, [int]$Fois = 1, [double]$DelaiS = 5) {
     Initialiser-Menu-Icone

@@ -65,10 +65,48 @@ pub fn ouvrir(app: &AppHandle) {
     }
 }
 
+/// La rubrique que la page doit ouvrir dès qu'elle est prête (une seule fois).
+static RUBRIQUE_DEMANDEE: std::sync::Mutex<Option<&'static str>> = std::sync::Mutex::new(None);
+
+/// Rubrique de la ligne Licence (Réglages › Général).
+pub const RUBRIQUE_LICENCE: &str = "licence";
+
+/// Ouvre la fenêtre sur Réglages › Général › Licence (clic sur un bouton Pro éteint de la
+/// barre de capture). Une seule voie : la demande est retenue, puis envoyée à la page quand
+/// elle est prête, tout de suite si elle l'est déjà, sinon à son premier `reglages_lire`.
+pub fn ouvrir_licence(app: &AppHandle) {
+    if let Ok(mut d) = RUBRIQUE_DEMANDEE.lock() {
+        *d = Some(RUBRIQUE_LICENCE);
+    }
+    ouvrir(app);
+    if fenetre::fenetre(app).is_none() {
+        // Fenêtre non créée : la demande ne doit pas rester pour une ouverture ordinaire.
+        if let Ok(mut d) = RUBRIQUE_DEMANDEE.lock() {
+            *d = None;
+        }
+        return;
+    }
+    if etat(app).page_reglages_prete.load(Ordering::SeqCst) {
+        envoyer_rubrique(app);
+    }
+}
+
+/// Envoie la rubrique demandée à la page, une seule fois.
+fn envoyer_rubrique(app: &AppHandle) {
+    let demandee = RUBRIQUE_DEMANDEE.lock().ok().and_then(|mut d| d.take());
+    if let Some(r) = demandee {
+        log::info!("reglages rubrique {r}");
+        fenetre::emettre_rubrique(app, r);
+    }
+}
+
 /// La fenêtre a été détruite : la saisie éventuelle est annulée, les refus oubliés, et la
 /// prochaine page écrira de nouveau `reglages page prete`.
 fn fermee(app: &AppHandle) {
     log::info!("reglages fermes");
+    if let Ok(mut d) = RUBRIQUE_DEMANDEE.lock() {
+        *d = None;
+    }
     etat(app).page_reglages_prete.store(false, Ordering::SeqCst);
     annuler_saisie(app, "raccourcis repris");
 }
@@ -362,7 +400,9 @@ pub fn reglages_lire(app: AppHandle) -> Reponse {
         log::info!("reglages page prete");
     }
     relire(&app);
-    reponse(&app, None)
+    let r = reponse(&app, None);
+    envoyer_rubrique(&app);
+    r
 }
 
 /// Un changement de la page.

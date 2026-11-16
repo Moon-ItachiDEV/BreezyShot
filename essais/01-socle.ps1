@@ -60,8 +60,16 @@ try {
         $barre = Attendre-Barre -Dossier $script:Essai.Dossier -Quoi 'seconde instance'
         $M = [BreezyShotEssai.MenuIcone]
         Verifier 'la seconde instance ouvre la barre de capture' ($M::IsWindowVisible($barre.Fenetre)) "boutons : $($barre.Noms -join ', ')" | Out-Null
-        $attendus = @('Zone', 'Plein écran', 'Fenêtre', 'Retardateur', 'Réglages')
-        Verifier 'barre : Zone, Plein écran, Fenêtre, Retardateur, Réglages (sans licence)' (($barre.Noms -join '|') -eq ($attendus -join '|')) ($barre.Noms -join ', ') | Out-Null
+        # Barre « Galet » (0.7.4) : sans licence, la défilante, la vidéo et le GIF restent, nommés
+        # « …, Pro » (la vidéo manque sans codeur H.264) ; un seul bouton Pro en moins n'est
+        # pas toléré pour la défilante et le GIF.
+        $debut = @('Zone', 'Plein écran', 'Fenêtre', 'Retardateur')
+        $noms = @($barre.Noms)
+        $milieu = @($noms[4..($noms.Count - 2)])
+        $ok = ($noms.Count -ge 7) -and ((($noms[0..3]) -join '|') -eq ($debut -join '|')) -and ($noms[-1] -eq 'Réglages') -and
+            ($milieu -contains 'Capture défilante, Pro') -and ($milieu -contains 'GIF, Pro') -and
+            (@($milieu | Where-Object { $_ -notmatch ', Pro$' }).Count -eq 0)
+        Verifier 'barre : Zone, Plein écran, Fenêtre, Retardateur, Capture défilante, Pro, (Vidéo, Pro), GIF, Pro, Réglages (sans licence)' $ok ($barre.Noms -join ', ') | Out-Null
         # Un clic sur « Zone » : la barre se ferme, la sélection s'ouvre (après ATTENTE_MENU).
         Cliquer-Bouton-Barre $barre 'Zone' 'seconde instance'
         Verifier 'clic sur Zone : « barre choisi capturer_zone »' (Attendre-Ligne -Texte 'barre choisi capturer_zone' -DelaiS 5) | Out-Null
@@ -88,18 +96,18 @@ try {
         Verifier 'troisième lancement : code de sortie 0' ($encore.Fini -and $encore.Code -eq 0) "code $($encore.Code)" | Out-Null
         $barre = Attendre-Barre -Dossier $script:Essai.Dossier -Quoi 'troisième lancement' -Fois 2
         $fermees = Compter-Lignes -Texte 'barre fermee' -FinDeLigne
-        # Un clic sur le logo (aucune action) lui donne le clavier et la laisse ouverte. Le
-        # bouton « Zone » mesure 36 px logiques ; le logo est centré 18 px à sa gauche, la
-        # carte finit 5 px sous lui, et la marge de l'ombre 24 px plus bas. Attendre d'abord
-        # la fin du délai du double-clic (un clic ailleurs y serait ignoré).
+        # Un clic sur le filet entre Retardateur et Capture défilante (aucune action) lui
+        # donne le clavier et la laisse ouverte : au milieu de l'espace entre ces deux boutons
+        # (19 px logiques). Attendre d'abord la fin du délai du double-clic (un clic ailleurs
+        # y serait ignoré).
         Start-Sleep -Milliseconds 600
-        $r = $barre.Boutons['Zone'].Current.BoundingRectangle
-        $k = $r.Height / 36
-        $x = [int]($r.X - 18 * $k); $y = [int]($r.Y + $r.Height / 2)
-        if ($M::RacineSous($x, $y) -ne $barre.Fenetre) { throw "troisième lancement : le logo de la barre n'est pas sous le point $x,$y" }
+        $ra = $barre.Boutons['Retardateur'].Current.BoundingRectangle
+        $rb = $barre.Boutons['Capture défilante, Pro'].Current.BoundingRectangle
+        $x = [int](($ra.X + $ra.Width + $rb.X) / 2); $y = [int]($ra.Y + $ra.Height / 2)
+        if ($M::RacineSous($x, $y) -ne $barre.Fenetre) { throw "troisième lancement : le filet de la barre n'est pas sous le point $x,$y" }
         $M::Cliquer($x, $y)
         Start-Sleep -Milliseconds 300
-        Verifier 'un clic sur le logo laisse la barre ouverte' (($M::IsWindowVisible($barre.Fenetre)) -and ((Compter-Lignes -Texte 'barre fermee' -FinDeLigne) -eq $fermees)) | Out-Null
+        Verifier 'un clic sur le filet laisse la barre ouverte' (($M::IsWindowVisible($barre.Fenetre)) -and ((Compter-Lignes -Texte 'barre fermee' -FinDeLigne) -eq $fermees)) | Out-Null
         # Après ce clic, la barre est au premier plan : sinon, l'essai échoue (jamais de
         # touche envoyée hors des fenêtres de l'app).
         $limite = [DateTime]::UtcNow.AddSeconds(2)
@@ -121,12 +129,23 @@ try {
         $fermees = Compter-Lignes -Texte 'barre fermee' -FinDeLigne
         Start-Sleep -Milliseconds 600
         $r = $barre.Boutons['Zone'].Current.BoundingRectangle
-        $k = $r.Height / 36
+        $k = $r.Height / 44
         $x = [int]($r.X + $r.Width / 2); $y = [int]($r.Y + $r.Height + 14 * $k)
         if ($M::RacineSous($x, $y) -ne $barre.Fenetre) { throw "quatrième lancement : la marge de la barre n'est pas sous le point $x,$y" }
         $M::Cliquer($x, $y)
         Verifier 'un clic dans la marge, hors de la carte, ferme la barre' (Attendre-Ligne -Texte 'barre fermee' -FinDeLigne -Fois ($fermees + 1) -DelaiS 5) | Out-Null
         Verifier 'rien de lancé : un seul « barre choisi »' ((Compter-Lignes -Texte 'barre choisi') -eq 1) | Out-Null
+
+        # Cinquième lancement : un bouton Pro éteint ouvre Réglages › Licence, sans rien lancer
+        # (la ligne du journal est « barre: licence <id> », pas « barre choisi »).
+        $encore = Lancer-Et-Attendre -DelaiS 10
+        Verifier 'cinquième lancement : code de sortie 0' ($encore.Fini -and $encore.Code -eq 0) "code $($encore.Code)" | Out-Null
+        $barre = Attendre-Barre -Dossier $script:Essai.Dossier -Quoi 'cinquième lancement' -Fois 4
+        Start-Sleep -Milliseconds 600
+        Cliquer-Bouton-Barre $barre 'Capture défilante, Pro' 'cinquième lancement'
+        Verifier 'clic sur un bouton Pro éteint : « barre: licence capturer_defilante »' (Attendre-Ligne -Texte 'barre: licence capturer_defilante' -DelaiS 5) | Out-Null
+        Verifier 'puis « menu: licence » et la rubrique Licence demandée' ((Attendre-Ligne -Texte 'menu: licence' -DelaiS 5) -and (Attendre-Ligne -Texte 'reglages rubrique licence' -DelaiS 8)) | Out-Null
+        Verifier 'rien de lancé : toujours un seul « barre choisi »' ((Compter-Lignes -Texte 'barre choisi') -eq 1) | Out-Null
     }
     Verifier 'un seul processus BreezyShot' ($restants.Count -eq 1) "$($restants.Count) processus" | Out-Null
     if (-not $seconde.Fini) { try { $seconde.Processus.Kill() } catch { } }
