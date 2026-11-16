@@ -16,6 +16,7 @@ use crate::fenetres::{Action, Genre, Message};
 use crate::sortie::Etape;
 use crate::systeme::texte::Disponibilite;
 use crate::systeme::Rect;
+use crate::texte::qr::{Code, Genre as Genre_};
 use crate::texte::{extrait, Issue, Lu, PETITE_IMAGE};
 
 /// Vrai quand Copier le texte est construit (chantier E) : seulement alors l'action
@@ -59,6 +60,15 @@ pub const TITRE_COPIE: &str = "Texte copié";
 pub const TITRE_AUCUN_TEXTE: &str = "Aucun texte trouvé";
 pub const TITRE_LECTURE_IMPOSSIBLE: &str = "Impossible de lire le texte";
 pub const TITRE_COPIE_IMPOSSIBLE: &str = "Impossible de copier";
+/// Un QR code lu (QR code) : le titre selon ce qu'il contient.
+pub const TITRE_LIEN_COPIE: &str = "Lien copié";
+pub const TITRE_CODE_TEXTE_COPIE: &str = "Texte du QR code copié";
+pub const TITRE_WIFI_COPIE: &str = "Mot de passe Wi-Fi copié";
+pub const TITRE_WIFI_OUVERT_COPIE: &str = "Nom du réseau Wi-Fi copié";
+/// L'action « Ouvrir » du bandeau d'un lien lu, et sa durée avant de partir seul.
+pub const ACTION_OUVRIR_LIEN: &str = "ouvrir_lien";
+pub const LIBELLE_OUVRIR_LIEN: &str = "Ouvrir";
+pub const DUREE_CODE_MS: u32 = 7000;
 /// « Aucun texte trouvé » part seul après ce délai (croix gardée, U5).
 pub const DUREE_AUCUN_TEXTE_MS: u32 = 4000;
 
@@ -337,7 +347,7 @@ pub fn facteur_de(l: u32, h: u32, dimension_max: u32) -> f32 {
 /// Le déclencheur de la fin d'une lecture du raccourci.
 pub fn declencheur(issue: &Issue) -> Declencheur {
     match issue {
-        Issue::Texte(_) | Issue::Vide => Declencheur::TexteLu,
+        Issue::Texte(_) | Issue::Code(_) | Issue::Vide => Declencheur::TexteLu,
         Issue::AucuneLangue | Issue::Echec(_) => Declencheur::LectureImpossible,
     }
 }
@@ -365,6 +375,11 @@ pub fn message_fin(fin: &FinLecture) -> Message {
             message(Genre::Erreur, TITRE_COPIE_IMPOSSIBLE, cause)
         }
         (Issue::Texte(_), _) => message(Genre::Erreur, TITRE_COPIE_IMPOSSIBLE, ""),
+        (Issue::Code(code), Some(Etape::Faite)) => message_code(code),
+        (Issue::Code(_), Some(Etape::Echec(cause))) => {
+            message(Genre::Erreur, TITRE_COPIE_IMPOSSIBLE, cause)
+        }
+        (Issue::Code(_), _) => message(Genre::Erreur, TITRE_COPIE_IMPOSSIBLE, ""),
         (Issue::Vide, _) => Message::erreur_breve(
             TITRE_AUCUN_TEXTE,
             vec![Action {
@@ -374,6 +389,32 @@ pub fn message_fin(fin: &FinLecture) -> Message {
             DUREE_AUCUN_TEXTE_MS,
         ),
         (Issue::AucuneLangue | Issue::Echec(_), _) => message_impossible(),
+    }
+}
+
+/// Le bandeau d'un QR code lu et copié (QR code) : le titre dit ce qui est copié, le détail
+/// le domaine (ou le nom du réseau, ou le début du texte), et un lien sûr a « Ouvrir ».
+pub fn message_code(code: &Code) -> Message {
+    let titre = match code.genre() {
+        Genre_::Lien => TITRE_LIEN_COPIE,
+        Genre_::Texte => TITRE_CODE_TEXTE_COPIE,
+        Genre_::Wifi if code.est_secret() => TITRE_WIFI_COPIE,
+        Genre_::Wifi => TITRE_WIFI_OUVERT_COPIE,
+    };
+    let actions = if code.lien().is_some() {
+        vec![Action {
+            id: ACTION_OUVRIR_LIEN.into(),
+            libelle: LIBELLE_OUVRIR_LIEN.into(),
+        }]
+    } else {
+        Vec::new()
+    };
+    Message {
+        genre: Genre::Reussite,
+        titre: titre.into(),
+        detail: code.detail().into(),
+        actions,
+        duree_ms: Some(DUREE_CODE_MS),
     }
 }
 
@@ -416,6 +457,12 @@ pub fn ligne_issue(issue: &Issue, duree: Duration, facteur: f32) -> String {
         ),
         Issue::Vide => format!("texte vide en {} ms", ms(duree)),
         Issue::AucuneLangue => "texte impossible: aucune_langue".into(),
+        // Le genre en un mot, jamais le contenu du code.
+        Issue::Code(code) => format!(
+            "texte code {} en {} ms facteur {facteur}",
+            code.genre_en_clair(),
+            ms(duree)
+        ),
         Issue::Echec(c) if c == CAUSE_ECHEANCE => "texte impossible: echeance".into(),
         Issue::Echec(c) => format!("texte impossible: moteur ({c})"),
     }
@@ -449,7 +496,7 @@ pub fn code_echec(issue: &Issue) -> Option<&str> {
     match issue {
         Issue::AucuneLangue => Some("aucune_langue"),
         Issue::Echec(c) => Some(c),
-        Issue::Texte(_) | Issue::Vide => None,
+        Issue::Texte(_) | Issue::Code(_) | Issue::Vide => None,
     }
 }
 
@@ -463,6 +510,8 @@ pub fn ligne_editeur(id: u64, numero: u64, issue: &Issue, duree: Duration) -> St
             ms(duree)
         ),
         Issue::Vide => "vide".into(),
+        // L'éditeur ne lit pas les codes : son lecteur de texte est `lire`.
+        Issue::Code(_) => "vide".into(),
         autre => format!("echec ({})", code_echec(autre).unwrap_or_default()),
     };
     format!("editeur texte {id} {numero} {suite}")
@@ -521,7 +570,7 @@ pub fn charge_editeur(id: u64, numero: u64, issue: &Issue) -> ChargeTexte {
                 })
                 .collect(),
         ),
-        Issue::Vide => ("vide", Vec::new()),
+        Issue::Vide | Issue::Code(_) => ("vide", Vec::new()),
         Issue::AucuneLangue | Issue::Echec(_) => ("echec", Vec::new()),
     };
     ChargeTexte {
@@ -826,6 +875,80 @@ mod tests {
             assert_eq!(m.titre, "Impossible de lire le texte");
             assert!(m.detail.is_empty() && m.actions.is_empty());
         }
+    }
+
+    #[test]
+    fn un_code_lu_dit_ce_qu_il_a_copie() {
+        use crate::texte::qr::classer;
+        let ouvre = |c: &str| {
+            let f = fin(Issue::Code(classer(c.into())), Some(Etape::Faite));
+            assert_eq!(declencheur(&f.issue), Declencheur::TexteLu);
+            assert!(!a_surligner(&f));
+            message_fin(&f)
+        };
+        // Un lien sûr : le titre, le domaine en détail, « Ouvrir », une durée (croix gardée).
+        let m = ouvre("https://billetterie.exemple.fr/reserver?evt=1");
+        assert_eq!((m.genre, m.titre.as_str()), (Genre::Reussite, "Lien copié"));
+        assert_eq!(m.detail, "billetterie.exemple.fr");
+        assert_eq!(m.actions.len(), 1);
+        assert_eq!(m.actions[0].id, "ouvrir_lien");
+        assert_eq!(m.actions[0].libelle, "Ouvrir");
+        assert_eq!(m.duree_ms, Some(DUREE_CODE_MS));
+        assert!(m.a_croix());
+        // Un lien douteux, du texte, un Wi-Fi : copiés, mais sans « Ouvrir ».
+        for (code, titre, detail) in [
+            (
+                "http://banque.fr@pirate.site/",
+                "Texte du QR code copié",
+                "http://banque.fr@pirate.site/",
+            ),
+            ("Billet 2412", "Texte du QR code copié", "Billet 2412"),
+            (
+                "WIFI:T:WPA;S:Salle;P:mdp;;",
+                "Mot de passe Wi-Fi copié",
+                "Salle",
+            ),
+            (
+                "WIFI:T:nopass;S:Cafe;;",
+                "Nom du réseau Wi-Fi copié",
+                "Cafe (réseau ouvert)",
+            ),
+        ] {
+            let m = ouvre(code);
+            assert_eq!(m.titre, titre, "{code}");
+            assert_eq!(m.detail, detail, "{code}");
+            assert!(m.actions.is_empty(), "{code}");
+            assert_eq!(m.duree_ms, Some(DUREE_CODE_MS));
+        }
+        // Une copie qui échoue : l'erreur habituelle, jamais « Ouvrir ».
+        let code = Issue::Code(classer("https://exemple.fr".into()));
+        let m = message_fin(&fin(code.clone(), Some(Etape::Echec("occupe".into()))));
+        assert_eq!(
+            (m.genre, m.titre.as_str(), m.detail.as_str()),
+            (Genre::Erreur, "Impossible de copier", "occupe")
+        );
+        assert!(m.actions.is_empty());
+        assert_eq!(message_fin(&fin(code, None)).titre, "Impossible de copier");
+    }
+
+    #[test]
+    fn le_journal_d_un_code_ne_dit_que_son_genre() {
+        use crate::texte::qr::classer;
+        let ms = Duration::from_millis(12);
+        for (contenu, mot) in [
+            ("https://secret.exemple.fr/jeton=abc", "lien"),
+            ("WIFI:T:WPA;S:Maison;P:hunter2;;", "wifi"),
+            ("WIFI:T:nopass;S:Maison;;", "wifi ouvert"),
+            ("un secret", "texte"),
+        ] {
+            let ligne = ligne_issue(&Issue::Code(classer(contenu.into())), ms, 1.0);
+            assert_eq!(ligne, format!("texte code {mot} en 12 ms facteur 1"));
+        }
+        // L'éditeur ne lit pas les codes.
+        let code = Issue::Code(classer("https://exemple.fr".into()));
+        assert_eq!(code_echec(&code), None);
+        assert_eq!(ligne_editeur(1, 2, &code, ms), "editeur texte 1 2 vide");
+        assert_eq!(charge_editeur(1, 2, &code).etat, "vide");
     }
 
     #[test]

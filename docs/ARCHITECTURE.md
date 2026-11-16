@@ -34,7 +34,7 @@ app/
                             et leurs tests), fenetre_editeur.rs : ses neuf commandes
                             (0.4, §6.2) ; les gestes de l'éditeur sont dans mod.rs ;
                             historique.rs : décisions de l'historique (pures, 0.5),
-                            breezy.rs : décisions des fichiers `.breezy` (pures, 0.7.6),
+                            breezy.rs : décisions des fichiers `.breezy` (pures, 0.7.7),
                             geste_breezy.rs : enregistrer, rouvrir, annotations (§6.5) ;
                             geste_historique.rs : ses gestes, fenetre_historique.rs : ses
                             huit commandes ; texte.rs : décisions de Copier le texte
@@ -57,7 +57,7 @@ app/
                             pointeur posé dans l'image (0.4) ; aucun code propre à un
                             système
       sortie/               presse-papiers, PNG, « Récents », enregistrement (étape 6) ;
-                            breezy.rs : le fichier `.breezy` (archive ZIP, pur, 0.7.6, §6.5) ;
+                            breezy.rs : le fichier `.breezy` (archive ZIP, pur, 0.7.7, §6.5) ;
                             glisser.rs : fichier donné au glisser, effacement de Supprimer ;
                             fichier.rs : aussi `enregistrer_a` (Enregistrer sous…, 0.4) ;
                             historique.rs : « Récents » lu, aperçus, effacements (0.5) ;
@@ -81,7 +81,9 @@ app/
                             emplacements.rs, parcours.rs, envol.rs ; n'utilise que systeme.
                             Câblage : application/installateur.rs
       texte/                partie commune de Copier le texte (0.5) : préparer l'image,
-                            ramener les boîtes, assembler le texte ; n'utilise que systeme
+                            ramener les boîtes, assembler le texte ; n'utilise que systeme.
+                            qr.rs : lire un QR code (crate rqrr), le classer (lien sûr,
+                            Wi-Fi, texte)
       defilement/           assemblage de la capture défilante (0.6) : mesurer le
                             décalage de deux images, bandes fixes, ajout des lignes,
                             image finale ; pur, n'utilise que systeme
@@ -207,7 +209,7 @@ dépôt privé ni option de compilation. Les fonctions Pro de la feuille de rout
 se construisent ici, dans la même app ; en 0.5, seuls l'historique (§6.3) et Copier le
 texte (§6.4) existent ; la 0.6 ajoute la capture défilante (`Fonction::Defilante`), la
 0.7 la vidéo et le GIF (`Fonction::Video`, `Fonction::Gif`, indépendantes l'une de
-l'autre), la 0.7.6 les fichiers modifiables `.breezy` (`Fonction::Breezy`, §6.5 : montrés
+l'autre), la 0.7.7 les fichiers modifiables `.breezy` (`Fonction::Breezy`, §6.5 : montrés
 éteints sans licence, avec « Pro »). Une licence collée dans Réglages › Général les débloque ; l'achat, le
 lien avec un vendeur et le nombre d'appareils ne sont pas construits. Sans licence, l'app est
 celle de la 0.4 plus la ligne « Licence » : « Historique », « Copier le texte »,
@@ -367,7 +369,7 @@ Lecture    LectureImpossible      -> Repos
 Aucune ligne `DemandeDecompte(Texte)` : Copier le texte n'a pas de retardateur. Les sorties
 de la Sélection (annulée, écrans changés, muette…) servent telles quelles. En Lecture, toute
 demande de capture est ignorée (`capture deja en cours: appui ignore`). `TexteLu` finit une
-lecture qui a rendu un texte ou rien (« Aucun texte trouvé ») ; `LectureImpossible` une
+lecture qui a rendu un texte, un QR code ou rien (« Aucun texte trouvé ») ; `LectureImpossible` une
 lecture sans langue, en échec ou échue. Écrans changés ou session verrouillée pendant la
 Lecture : seuls l'écran figé et la sélection sont libérés, la lecture finit normalement
 (`texte ecran libere: bureau change`, §6.4).
@@ -443,7 +445,7 @@ de même (`film::CONSTRUIT`), `video` de même et si un codeur H.264 a été tro
   `2026-11-11T18:40:12.345+01:00 INFO  raccourcis  message`.
 - Rotation : 1 Mo par fichier, 5 fichiers au plus (`breezyshot.log`, `.1` … `.4`).
 - Jamais d'image, jamais le contenu du presse-papiers, jamais le texte lu par Copier le
-  texte (§6.4) ni le texte d'une licence (§2). Les chemins de fichiers sont permis.
+  texte (§6.4), ni le contenu d'un QR code lu (§6.4), ni le texte d'une licence (§2). Les chemins de fichiers sont permis.
 - Les essais automatiques lisent ce fichier : les lignes citées dans `essais/` sont un contrat,
   on ne les reformule pas sans adapter l'essai.
 
@@ -1349,6 +1351,10 @@ Module pur : il reçoit le dossier où écrire, ne connaît ni Tauri ni les autr
     actions, et part seul après ce délai, comme une réussite (`bandeau:afficher.duree_ms`).
     Filet du cœur : caché d'office `MARGE_DUREE` (1 s) après la durée si la page ne l'a pas
     fait (`cacher_message_d_office`). Le survol ne suspend pas le délai.
+  - **Réussite à durée** (QR code lu, §6.4) : un message `Reussite` qui porte `duree_ms`
+    (`Message::a_croix`) est une pilule élargie comme l'info, avec son détail, ses actions
+    (« Ouvrir ») et sa croix, et part seule après `duree_ms` ; sans `duree_ms`, la réussite
+    reste la ligne seule (détail et actions ignorés par la page).
   - **Info** (forme de l'erreur A, validée par le fil design le 11/11) : « i » sur `accent`,
     titre seul (sans détail), pas de bouton d'action, reste affichée jusqu'à un clic sur la croix.
   - Titre sur 2 lignes au plus, cause sur 3 lignes au plus : la pilule a une hauteur maximale
@@ -2041,7 +2047,42 @@ lecture impossible: <e>`, `echeance de lecture non armee: <e>`, `fil de copie du
 impossible: <e>`, `selection balayage <id> non envoye: <e>`, `selection surlignage <id>
 non envoye: <e>`, `surlignage sans fil (<e>): fin montree tout de suite`.
 
-### 6.5 Fichier `.breezy` : enregistrer et rouvrir (0.7.6, Pro)
+**Lire un QR code** (`texte/qr.rs`, `Issue::Code`). Le raccourci et le menu lisent aussi un
+QR code : `lire_zone` essaie `qr::lire` avant l'OCR, dans le même fil `texte`, sous la même
+échéance. L'éditeur (bouton « Texte ») ne lit pas les codes (`lire`). Pas de nouvelle action,
+pas de nouveau raccourci : le code suit les droits de Copier le texte (licence et langue de
+lecture, §2), choix de l'utilisateur du 16/11/2026 (Pro).
+- Lecture (`rqrr`, pur Rust, MIT OR Apache-2.0 avec ISC pour `g2p`) : gris de l'image, essais
+  dans l'ordre sur l'image, ses couleurs inversées, réduite de moitié, agrandie ×2 (sous 500
+  px), le premier qui rend un code gagne. Un seul contenu à la fois (deux codes différents :
+  refus définitif, on passe à l'OCR) et le cadre du code doit couvrir un dixième de la zone au moins
+  (`PART_MINIMALE`) : un petit code dans un coin de page rend le texte de la page. Mesuré
+  sur 2560 × 1440 sans code : 116 ms (Linux, release), les quatre essais compris.
+- Genres (`classer`) : `Lien` (http ou https ; de l'ASCII visible seulement, sans `"<>^|{}`,
+  accent grave ni `\` ; pas d'identifiant avant le domaine ; domaine non vide en ASCII, sans
+  point final, port numérique ; ni `localhost`, ni `127.x.x.x`, ni `0.0.0.0` ; une adresse IPv4
+  seulement en quatre nombres décimaux sans zéro devant ; 2 048 octets au plus), sinon `Texte`
+  (donc sans « Ouvrir » : `mailto:`, `javascript:`, `file:`, domaines aux lettres imitées,
+  liens aux accents…) ; `Wifi` (`WIFI:T:…;S:…;P:…;;`, `\;`, `\:`, `\\`, `\"` rendus, paire de
+  guillemets des chiffres retirée) : on copie le mot de passe, ou le nom d'un réseau ouvert.
+  Le mot de passe va au presse-papiers hors de l'historique (Win + V) et du nuage
+  (`sortie::copier_texte_secret`, `exclude_from_monitoring`). Un lien en clair (`http://`) le
+  dit dans le détail du bandeau.
+- Bandeau : réussite à durée (`DUREE_CODE_MS`, 7 s), pilule élargie avec détail (domaine de
+  `qr::domaine_sur`, nom du réseau, début du texte), croix, et « Ouvrir » pour un lien sûr
+  seulement. La page ne reçoit ni n'envoie jamais le lien : `bandeau_action { id, action:
+  "ouvrir_lien" }`, le cœur garde le lien (`LIEN`, avec l'identifiant du message), le prend
+  une fois, le revérifie (`domaine_sur`, puis `systeme::ouvrir_lien` : http ou https
+  seulement) et l'ouvre hors du fil principal (`ShellExecuteW` « open »). Une nouvelle lecture
+  du raccourci, un autre message (l'identifiant ne correspond plus), ou 10 s écoulées
+  (`LIEN_VALIDITE`), l'annule. Une panique de `rqrr` est rattrapée (`lire_zone`) : on lit alors le texte.
+- Journal : `texte code lien|wifi|wifi ouvert|texte en <ms> ms facteur <f>`, `texte lien
+  ouvert`. En WARN : `texte lien non ouvert: <e>`, `texte lien sans fil: <e>`. Jamais le
+  contenu ni le lien (le `Debug` de `Code` ne dit que son genre et sa taille).
+- Pas fait : les codes-barres (EAN, Code 128…), un code lu dans l'éditeur, un QR code en
+  Shift-JIS (la crate ne lit que de l'UTF-8), un code seul sans langue de lecture installée.
+
+### 6.5 Fichier `.breezy` : enregistrer et rouvrir (0.7.7, Pro)
 
 Demande de l'utilisateur (16/11/2026) : un fichier propre à l'app, comme les fichiers modifiables
 de CleanShot, qui garde la capture et chaque annotation séparément pour tout modifier plus tard.
@@ -2054,7 +2095,7 @@ relecture par Python d'une archive de l'app) : une archive ZIP à entrées « st
 compression, sans ZIP64, sans chiffrement), écrite et lue à la main (CRC-32 compris : aucune
 dépendance) :
 
-- `breezy.json` : `{"format":"breezy","version":1,"app":"0.7.6","largeur":L,"hauteur":H,
+- `breezy.json` : `{"format":"breezy","version":1,"app":"0.7.7","largeur":L,"hauteur":H,
   "transparence":bool,"cree":"…"}` ; champs inconnus ignorés ; `version` plus grande que
   `VERSION_FORMAT` : refus `plus_recent` (« Fichier fait par une version plus récente ») ;
 - `image.png` : les pixels d'origine (RGBA 8 bits, alpha gardé), sans aucune annotation ;
@@ -2924,7 +2965,7 @@ sous `<E>`, entre parenthèses :
 - raccourci : `BreezyShot.lnk` au menu Démarrer de l'utilisateur (`<E>\menu\`) ;
 - clé (HKCU) : `Software\Microsoft\Windows\CurrentVersion\Uninstall\BreezyShot`
   (`Software\BreezyShot-essais\<nom de E>\Uninstall\BreezyShot`) ;
-- association des fichiers `.breezy` (0.7.6, §6.5) : sous `Software\Classes` (en essai
+- association des fichiers `.breezy` (0.7.7, §6.5) : sous `Software\Classes` (en essai
   `Software\BreezyShot-essais\<nom de E>\Classes`), les clés `.breezy` (valeur par défaut
   `BreezyShot.Fichier`), `BreezyShot.Fichier` (« Fichier BreezyShot »), `…\DefaultIcon` (l'exe) et
   `…\shell\open\command` (`"<exe>" "%1"`), et rien d'autre (`Ecriture::Association`) ;

@@ -17,6 +17,19 @@ use super::{ecrire_dib, taille_dib, ErreurPressePapiers};
 
 pub const DISPONIBLE: bool = true;
 
+/// Le texte reste hors de l'historique (Win + V) et du nuage : `arboard` pose pour cela les
+/// formats « ExcludeClipboardContentFromMonitorProcessing » et voisins.
+pub fn poser_texte_secret(
+    presse: &mut arboard::Clipboard,
+    texte: &str,
+) -> Result<(), arboard::Error> {
+    use arboard::SetExtWindows;
+    presse
+        .set()
+        .exclude_from_monitoring()
+        .text(texte.to_owned())
+}
+
 /// `CF_DIB` : « un BITMAPINFO suivi des bits de l'image » (formats standard du
 /// presse-papiers, valeur 8). Recopié ici pour ne pas tirer `Win32_System_Ole`.
 pub(super) const CF_DIB: u32 = 8;

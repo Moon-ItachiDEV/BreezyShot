@@ -13,7 +13,7 @@ pub enum Fonction {
     Video,
     /// L'enregistrement d'un GIF (0.7), indépendant de la vidéo.
     Gif,
-    /// Enregistrer et rouvrir un fichier modifiable `.breezy` (0.7.6).
+    /// Enregistrer et rouvrir un fichier modifiable `.breezy` (0.7.7).
     Breezy,
 }
 

@@ -1,4 +1,4 @@
-//! Les gestes des fichiers `.breezy` (0.7.6, Pro) : enregistrer depuis l'éditeur, rouvrir un
+//! Les gestes des fichiers `.breezy` (0.7.7, Pro) : enregistrer depuis l'éditeur, rouvrir un
 //! fichier, rendre ses annotations à la page. Les décisions sont dans `breezy.rs`, le
 //! format dans `sortie/breezy.rs`. Un enregistrement a son propre fil (`editeur-breezy`), à
 //! part du chemin des exports de pixels : la page lui envoie le JSON de ses annotations, le

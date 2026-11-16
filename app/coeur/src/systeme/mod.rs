@@ -358,6 +358,18 @@ pub fn ouvrir_fichier(fichier: &Path) -> Result<(), String> {
     plateforme::ouvrir_fichier(fichier)
 }
 
+/// Ouvre un lien dans le navigateur de Windows (QR code lu). L'appelant a déjà jugé le lien
+/// sûr (`texte::qr::domaine_sur`) ; ici, en dernier filet, seuls `http://` et `https://`
+/// passent : jamais un fichier, un programme ni un autre schéma. Peut attendre
+/// l'Explorateur : jamais sur le fil principal.
+pub fn ouvrir_lien(lien: &str) -> Result<(), String> {
+    let debut = lien.get(..8).unwrap_or(lien).to_ascii_lowercase();
+    if !(debut.starts_with("https://") || debut.starts_with("http://")) {
+        return Err("lien refuse".into());
+    }
+    plateforme::ouvrir_lien(lien)
+}
+
 /// Variable d'essai : le bandeau reste capturable (pour prouver qu'il est peint).
 pub const VARIABLE_CAPTURABLE: &str = "BREEZYSHOT_ESSAI_CAPTURABLE";
 

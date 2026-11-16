@@ -574,6 +574,16 @@ pub fn cacher_fenetre_async(identifiant: isize) -> bool {
 /// `ShellExecuteW` « open » (COM initialisé sur ce fil le temps de l'appel, comme le
 /// demande l'Explorateur). Rend une erreur si Windows répond 32 ou moins.
 pub fn ouvrir_fichier(fichier: &std::path::Path) -> Result<(), String> {
+    ouvrir_par_le_shell(fichier.as_os_str())
+}
+
+/// Ouvre un lien http ou https dans le navigateur (QR code) : `ShellExecuteW` « open », comme
+/// un fichier. Le lien a déjà été vérifié par `systeme::ouvrir_lien`.
+pub fn ouvrir_lien(lien: &str) -> Result<(), String> {
+    ouvrir_par_le_shell(std::ffi::OsStr::new(lien))
+}
+
+fn ouvrir_par_le_shell(cible: &std::ffi::OsStr) -> Result<(), String> {
     use std::os::windows::ffi::OsStrExt;
 
     use ::windows::Win32::System::Com::{
@@ -582,11 +592,7 @@ pub fn ouvrir_fichier(fichier: &std::path::Path) -> Result<(), String> {
     use ::windows::Win32::UI::Shell::ShellExecuteW;
     use ::windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
 
-    let large: Vec<u16> = fichier
-        .as_os_str()
-        .encode_wide()
-        .chain(std::iter::once(0))
-        .collect();
+    let large: Vec<u16> = cible.encode_wide().chain(std::iter::once(0)).collect();
     // SAFETY : initialisation de COM sur ce fil ; rendue plus bas si elle a réussi.
     let com = unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE) };
     // SAFETY : chaînes terminées par un zéro, vivantes pendant l'appel.

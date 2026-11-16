@@ -46,9 +46,9 @@ pub const EVENEMENT_CHARGER: &str = "editeur:charger";
 pub const EVENEMENT_FERMER_DEMANDE: &str = "editeur:fermer_demande";
 pub const EVENEMENT_RESULTAT: &str = "editeur:resultat";
 pub const EVENEMENT_GLISSER: &str = "editeur:glisser";
-/// Fin d'un enregistrement `.breezy` (0.7.6).
+/// Fin d'un enregistrement `.breezy` (0.7.7).
 pub const EVENEMENT_BREEZY: &str = "editeur:breezy";
-/// La licence a changé : `true` si « Enregistrer en .breezy » est ouvert (0.7.6).
+/// La licence a changé : `true` si « Enregistrer en .breezy » est ouvert (0.7.7).
 pub const EVENEMENT_PRO: &str = "editeur:pro";
 
 /// Ce qu'a fait `ouvrir`.
