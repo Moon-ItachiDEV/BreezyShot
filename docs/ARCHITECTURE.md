@@ -1537,7 +1537,7 @@ sans rien remplacer, les défauts qui reproduisent l'app d'avant :
   (`systeme::impr_ecran_pour_breezyshot`) : une ligne et une liste déroulante (bouton
   `aria-haspopup="listbox"`, options `role="option"`, flèches, Entrée, Échap, Tab). Les choix,
   dans l'ordre et par groupes séparés d'un trait : « Outil Capture de Windows » ; « Barre de
-  capture » ; Zone, Plein écran, Fenêtre, Refaire la dernière zone ; Capture défilante, Copier
+  capture », Zone, Plein écran, Fenêtre, Refaire la dernière zone ; Capture défilante, Copier
   le texte, Vidéo, GIF, Historique (`page_reglages::choix_impr_ecran`). Une action fermée
   (licence, codeur, langue de lecture) est absente de la liste, comme une rubrique Pro sans
   licence ; la valeur montrée (`vue.impr_ecran.valeur`) est `windows` si le registre garde la
@@ -1548,8 +1548,13 @@ sans rien remplacer, les défauts qui reproduisent l'app d'avant :
   (HKCU, la valeur de Paramètres › Accessibilité › Clavier) et lâche la réservation de
   `impr_ecran` (liste vide : `Reservations::changer` garderait sinon l'ancienne) ; choisir autre
   chose depuis cet état écrit `0`, réserve `impr_ecran` et écrit `impr_ecran_ouvre`. D'une
-  action de BreezyShot à une autre, seul le champ change : ni registre, ni réservation. Si la
-  touche n'est pas tenue après coup, la ligne dit où Windows la garde (`REFUS_IMPR_ECRAN`) ou
+  action de BreezyShot à une autre, seul le champ change : le registre n'est pas réécrit, et la
+  réservation n'est retentée que si la touche n'est pas tenue (`page_reglages::geste_impr_ecran` :
+  le registre d'après le registre, la réservation d'après le bilan). Choisir la valeur déjà en
+  vigueur n'écrit pas le fichier. À chaque lecture de la page (ouverture, retour du focus), hors
+  saisie et une fois les raccourcis réservés, `synchroniser_impr_ecran` remet la réservation
+  d'accord sur le registre (touche rendue ou reprise dans Paramètres de Windows, lâchée par une
+  autre application). Si la touche n'est pas tenue après coup, la ligne dit où Windows la garde (`REFUS_IMPR_ECRAN`) ou
   qu'une autre application la tient. Journal : `impr ecran: breezyshot oui|non, touche
   tenue|non tenue`, à l'appui `impr ecran: <action>|barre`.
 - **La page ne décide rien.** Elle appelle `reglages_lire` (à l'ouverture et à chaque retour

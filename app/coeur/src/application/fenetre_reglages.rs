@@ -486,8 +486,10 @@ pub(super) fn changer(app: &AppHandle, changement: Changement) -> Reponse {
         geste = g.reserver;
     }
     let inchange = matches!(changement, Changement::ImprEcran(_)) && nouveau == base;
-    if !inchange {
+    if !inchange || geste.is_some() {
         log::info!("{}", page::ligne_changement(&changement));
+    }
+    if !inchange {
         ecrire_et_garder(&app, nouveau.clone());
         appliquer_theme(&app, &nouveau);
     }
@@ -507,7 +509,9 @@ fn synchroniser_impr_ecran(app: &AppHandle) {
     let Some(registre) = systeme::impr_ecran_pour_breezyshot() else {
         return;
     };
-    if etat(app).saisie.lock().map(|s| s.is_some()).unwrap_or(true) {
+    if !etat(app).raccourcis_reserves.load(Ordering::SeqCst)
+        || etat(app).saisie.lock().map(|s| s.is_some()).unwrap_or(true)
+    {
         return;
     }
     if let Some(prise) = page::synchro_impr_ecran(registre, impr_ecran_tenue(app)) {
