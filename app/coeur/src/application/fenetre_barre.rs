@@ -49,6 +49,9 @@ pub const MODES_BARRE: [Mode; 6] = [
     Mode::Gif,
 ];
 
+/// Les modes que la licence ouvre : les seuls que la barre montre éteints.
+const MODES_PRO: [Mode; 3] = [Mode::Defilante, Mode::Video, Mode::Gif];
+
 /// Les boutons de la barre d'après les entrées du menu de l'icône : chaque mode de
 /// `MODES_BARRE` présent au menu, puis Réglages. Fonction pure.
 pub fn boutons(entrees: &[EntreeMenu]) -> Vec<String> {
@@ -87,9 +90,11 @@ pub fn ouverture(
         .filter(|(id, avec_licence)| *avec_licence || ouverts.contains(id))
         .map(|(id, _)| id)
         .collect();
+    // Seules les fonctions Pro peuvent être éteintes.
+    let pro: Vec<String> = MODES_PRO.iter().map(|m| id_menu(*m)).collect();
     let verrouilles: Vec<String> = tous
         .iter()
-        .filter(|id| !ouverts.contains(id))
+        .filter(|id| !ouverts.contains(id) && pro.contains(id))
         .cloned()
         .collect();
     if ouverts.iter().any(|id| id == MENU_REGLAGES) {
@@ -213,7 +218,10 @@ mod tests {
 
     /// La charge de la page : le menu d'après la licence, les actions d'une licence.
     fn charge(pro: bool, video: bool, vivant: bool, retardateur: Option<u32>) -> Ouverture {
-        let avec = actions_selon(true, true, true, vivant, vivant && video, vivant);
+        // Sans licence, le codeur n'est pas cherché : la vidéo est montrée éteinte quand même
+        // (`actions_avec_licence`).
+        let video_connue = video || !pro;
+        let avec = actions_selon(true, true, true, vivant, vivant && video_connue, vivant);
         ouverture(&menu(pro, video, vivant), &avec, retardateur)
     }
 
@@ -261,13 +269,35 @@ mod tests {
 
     #[test]
     fn sans_media_foundation_gif_sans_video() {
-        for pro in [true, false] {
-            let o = charge(pro, false, true, None);
-            assert!(o.boutons.contains(&"capturer_gif".to_string()));
-            assert!(!o.boutons.contains(&"capturer_video".to_string()));
-            assert!(o.boutons.contains(&"capturer_defilante".to_string()));
-            assert!(!o.verrouilles.contains(&"capturer_video".to_string()));
-        }
+        // Avec une licence, le codeur a été cherché : pas de Vidéo, GIF et défilante restent.
+        let o = charge(true, false, true, None);
+        assert!(o.boutons.contains(&"capturer_gif".to_string()));
+        assert!(!o.boutons.contains(&"capturer_video".to_string()));
+        assert!(o.boutons.contains(&"capturer_defilante".to_string()));
+        assert!(o.verrouilles.is_empty());
+    }
+
+    #[test]
+    fn sans_licence_la_video_est_eteinte_meme_sans_codeur_connu() {
+        // Le codeur n'est cherché qu'avec une licence : sans elle, `video_disponible` reste
+        // faux, et la Vidéo est tout de même sur la barre, éteinte.
+        let o = charge(false, false, true, None);
+        assert_eq!(o.boutons, TOUT);
+        assert_eq!(
+            o.verrouilles,
+            ["capturer_defilante", "capturer_video", "capturer_gif"]
+        );
+    }
+
+    #[test]
+    fn seules_les_fonctions_pro_sont_eteintes() {
+        // Un menu réduit (Quitter seul) : les captures gratuites ne sortent pas verrouillées.
+        let avec = actions_selon(true, true, true, true, true, true);
+        let o = ouverture(&entrees_pendant_defilante(), &avec, None);
+        assert!(o.verrouilles.iter().all(|v| matches!(
+            v.as_str(),
+            "capturer_defilante" | "capturer_video" | "capturer_gif"
+        )));
     }
 
     #[test]

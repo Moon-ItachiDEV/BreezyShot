@@ -232,7 +232,8 @@ function montrer(charge) {
   choisi = false;
   fermerEtage(false, false);
   clearTimeout(minuterieChoix);
-  cacherNom();
+  clearTimeout(minuterieRepli);
+  viderNom();
   const ids = charge.boutons.filter((id) => typeof id === "string" && Object.hasOwn(NOMS, id));
   const verrouilles = Array.isArray(charge.verrouilles) ? charge.verrouilles : [];
   const rang = document.createElement("div");
@@ -312,7 +313,7 @@ function vider() {
   fermerEtage(false, false);
   clearTimeout(minuterieChoix);
   clearTimeout(minuterieRepli);
-  cacherNom();
+  viderNom();
   barre.hidden = true;
   barre.replaceChildren();
   boutonRetardateur = null;
@@ -367,6 +368,7 @@ function fermerEtage(rendreFocus, avecTaille) {
   if (!ouvert) return;
   const { bouton: b } = ouvert;
   ouvert = null;
+  clearTimeout(minuterieChoix);
   etage?.classList.remove("ouvert");
   b.setAttribute("aria-expanded", "false");
   if (rendreFocus) b.focus();
@@ -398,8 +400,17 @@ function cacherNom() {
   nomVu.classList.remove("vu", "glisse");
 }
 
+// Barre cachée : l'étiquette est vidée sans transition, pour qu'aucun nom ne reste (ni ne
+// s'efface) à la prochaine ouverture.
+function viderNom() {
+  cacherNom();
+  nomVu.style.transition = "none";
+  nomVu.textContent = "";
+}
+
 function montrerNom(b) {
   if (ouvert || !b.dataset.nom) return;
+  nomVu.style.transition = "";
   nomVu.textContent = b.dataset.nom;
   nomVu.classList.toggle("glisse", nomVu.classList.contains("vu"));
   nomVu.style.left = `${Math.round(centreDans(b))}px`;

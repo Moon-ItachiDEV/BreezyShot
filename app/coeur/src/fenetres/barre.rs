@@ -316,7 +316,7 @@ pub fn ouvrir(app: &AppHandle, charge: Ouverture) -> bool {
 }
 
 /// La page a mesuré sa carte (pixels logiques, étage ouvert compris) : la fenêtre
-/// est reposée à cette taille, centrée de même. La largeur, menus fermés, est retenue pour
+/// est reposée à cette taille, centrée de même. La largeur, étage fermé, est retenue pour
 /// les prochaines ouvertures de la même forme.
 pub fn redimensionner(app: &AppHandle, largeur: f64, hauteur: f64) {
     let Some((l, h)) = taille_sensee(largeur, hauteur) else {

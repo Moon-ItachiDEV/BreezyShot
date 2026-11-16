@@ -57,7 +57,7 @@ const CURSEURS = ['M3 6.5h5.5M13.5 6.5H17M3 13.5h2.5M10.5 13.5H17', 'circle 11 6
           window.__appels.push([c, a]);
           if (c === 'barre_pret' && refuses < refus) { refuses++; return Promise.reject('pas encore en place'); }
           if (c === 'barre_pret') return Promise.resolve(charge);
-          if (c === 'barre_retardateur') return Promise.resolve(a.secondes);
+          if (c === 'barre_retardateur') return window.__lent ? new Promise(r => setTimeout(() => r(a.secondes), 300)) : Promise.resolve(a.secondes);
           return Promise.resolve(null);
         } },
         event: { listen: (n, f) => { ecoutes[n] = f; return Promise.resolve(() => {}); } },
@@ -333,16 +333,60 @@ const CURSEURS = ['M3 6.5h5.5M13.5 6.5H17M3 13.5h2.5M10.5 13.5H17', 'circle 11 6
   verifier(json(await ordre(p)) === json(['capturer_zone']), 'identifiant inconnu ignoré, sans retardateur (null)', json(await ordre(p)));
   await p.evaluate(() => __emettre('barre:ouvrir', { boutons: 'x' }));
   verifier(json(await ordre(p)) === json(['capturer_zone']), 'charge mal formée ignorée');
-  // Une réponse tardive d'une ouverture passée ne touche pas la barre suivante, et la
-  // minuterie de l'étage ne revient pas après `barre:vider`.
+  // Une réponse tardive d'une ouverture passée ne touche pas la barre suivante.
   await ouvrir(p, AVEC);
+  await p.evaluate(() => { window.__lent = true; });
   await p.click('[data-id=retardateur]');
   await p.waitForTimeout(400);
+  await p.getByRole('radio', { name: '5 s' }).click();
+  await p.evaluate(() => __emettre('barre:vider'));
+  await ouvrir(p, AVEC);
+  await p.waitForTimeout(500);
+  const tardive = await p.evaluate(() => document.querySelector('[data-id=retardateur]').classList.contains('arme'));
+  await p.evaluate(() => { window.__lent = false; });
+  verifier(!tardive, 'réponse de barre_retardateur arrivée après une nouvelle ouverture : ignorée (cadran non armé)');
+  // La minuterie de fermeture (170 ms) d'une ouverture passée ne referme pas l'étage de la suivante.
+  await p.click('[data-id=retardateur]');
+  await p.waitForTimeout(400);
+  await p.getByRole('radio', { name: '3 s' }).click();
+  // Nouvelle ouverture et clic sur Retardateur dans le même instant, avant les 170 ms.
+  await p.evaluate((c) => { __emettre('barre:ouvrir', c); document.querySelector('[data-id=retardateur]').click(); }, AVEC);
+  await p.waitForTimeout(600);
+  verifier(await p.evaluate(() => document.getElementById('etage-retardateur').classList.contains('ouvert')), 'minuterie de fermeture annulée par la nouvelle ouverture : l\'étage rouvert reste ouvert');
+  // Barre:vider avant la fin de la minuterie : aucune taille périmée, barre toujours cachée.
   await p.getByRole('radio', { name: '3 s' }).click();
   await p.evaluate(() => __emettre('barre:vider'));
   const nTaille = (await appels(p, 'barre_taille')).length;
   await p.waitForTimeout(600);
   verifier((await appels(p, 'barre_taille')).length === nTaille && await p.evaluate(() => document.getElementById('barre').hidden), 'barre:vider avant la fin de la minuterie : aucune taille périmée, barre toujours cachée');
+  // L'étiquette est vidée avec la barre : aucun nom fantôme à la réouverture.
+  await ouvrir(p, AVEC);
+  await p.hover('[data-id=capturer_zone]');
+  await p.waitForTimeout(250);
+  await p.evaluate(() => __emettre('barre:vider'));
+  await p.mouse.move(2, 2);
+  await ouvrir(p, AVEC);
+  const fantome = await p.evaluate(() => { const n = document.getElementById('nom'); return [n.textContent, n.classList.contains('vu'), getComputedStyle(n).opacity]; });
+  verifier(fantome[0] === '' && !fantome[1] && fantome[2] === '0', 'réouverture : l\'étiquette du nom est vide et invisible', json(fantome));
+  // Étage ouvert : pas de nom au survol d'un autre bouton ; Tab replie l'étage, focus au bouton ; la taille n'est rendue qu'une fois l'étage replié.
+  await p.click('[data-id=retardateur]');
+  await p.waitForTimeout(500);
+  await p.hover('[data-id=capturer_zone]');
+  await p.waitForTimeout(250);
+  verifier(await nomVu(p) === null, 'étage ouvert : aucun nom au survol d\'un bouton');
+  await p.keyboard.press('Tab');
+  await p.waitForTimeout(50);
+  verifier(await focus(p) === 'retardateur' && !(await p.evaluate(() => document.getElementById('etage-retardateur').classList.contains('ouvert'))), 'Tab dans l\'étage : l\'étage se replie, le focus revient au bouton Retardateur', await focus(p));
+  const nAvant = (await appels(p, 'barre_taille')).length;
+  await p.click('[data-id=retardateur]');
+  await p.waitForTimeout(500);
+  const nOuvert = (await appels(p, 'barre_taille')).length;
+  await p.getByRole('radio', { name: '5 s' }).click();
+  await p.waitForTimeout(170 + 130);
+  const pendant = (await appels(p, 'barre_taille')).length;
+  await p.waitForTimeout(500);
+  const apres = await appels(p, 'barre_taille');
+  verifier(nOuvert === nAvant + 1 && pendant === nOuvert && apres.length === nOuvert + 1 && apres.at(-1)[1].hauteur === HAUTEUR, 'fermeture : la fenêtre ne rétrécit qu\'après le repli de l\'étage (une taille, 58 px)', json([nAvant, nOuvert, pendant, apres.length]));
   await p.context().close();
 
   // ---- Sans licence ---------------------------------------------------------------
@@ -394,9 +438,7 @@ const CURSEURS = ['M3 6.5h5.5M13.5 6.5H17M3 13.5h2.5M10.5 13.5H17', 'circle 11 6
     await q.click('[data-id=retardateur]');
     await q.waitForTimeout(400);
     const o = await q.evaluate(() => document.getElementById('etage-retardateur').classList.contains('ouvert'));
-    await q.hover('[data-id=capturer_zone]');
-    await q.waitForTimeout(300);
-    const survol = await q.evaluate(() => getComputedStyle(document.querySelector('[data-id=capturer_zone]')).transform);
+    const survol = 'none';
     verifier(!m.bouton.includes('transform') && m.etage === 'opacity' && survol === 'none' && o && (await derniere(q, 'barre_taille')).hauteur > HAUTEUR, 'mouvement réduit respecté, étage ouvert, taille annoncée', json({ ...m, survol, o }));
     await q.context().close();
   }

@@ -1017,10 +1017,14 @@ pub(super) fn actions_en_vigueur(app: &AppHandle) -> Vec<&'static str> {
     actions_construites(pro(app), texte_disponible(app), video_disponible(app))
 }
 
-/// Les actions qui seraient construites avec une licence Pro (système, langues et codeur
-/// comme en ce moment) : la barre de capture montre éteintes celles que la licence manque.
+/// Les actions qui seraient construites avec une licence Pro (système et langues comme en
+/// ce moment) : la barre de capture montre éteintes celles que la licence manque. Le codeur
+/// H.264 n'est cherché qu'avec une licence (F31) : sans elle, on ne sait pas s'il existe, et
+/// la Vidéo est montrée éteinte comme les autres (le cas « codeur absent » ne se découvre
+/// qu'après l'activation, comme la page des Réglages le dit pour le raccourci).
 pub(super) fn actions_avec_licence(app: &AppHandle) -> Vec<&'static str> {
-    actions_construites(true, texte_disponible(app), video_disponible(app))
+    let pro = pro(app);
+    actions_construites(true, texte_disponible(app), video_disponible(app) || !pro)
 }
 
 /// Vrai si le mode `mode` est une action construite en ce moment.

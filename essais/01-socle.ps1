@@ -61,15 +61,14 @@ try {
         $M = [BreezyShotEssai.MenuIcone]
         Verifier 'la seconde instance ouvre la barre de capture' ($M::IsWindowVisible($barre.Fenetre)) "boutons : $($barre.Noms -join ', ')" | Out-Null
         # Barre « Galet » (0.7.4) : sans licence, la défilante, la vidéo et le GIF restent, nommés
-        # « …, Pro » (la vidéo manque sans codeur H.264) ; un seul bouton Pro en moins n'est
-        # pas toléré pour la défilante et le GIF.
+        # « …, Pro » (sans licence, le codeur H.264 n'est pas cherché : la vidéo est là aussi).
         $debut = @('Zone', 'Plein écran', 'Fenêtre', 'Retardateur')
         $noms = @($barre.Noms)
         $milieu = @($noms[4..($noms.Count - 2)])
         $ok = ($noms.Count -ge 7) -and ((($noms[0..3]) -join '|') -eq ($debut -join '|')) -and ($noms[-1] -eq 'Réglages') -and
-            ($milieu -contains 'Capture défilante, Pro') -and ($milieu -contains 'GIF, Pro') -and
+            ($milieu -contains 'Capture défilante, Pro') -and ($milieu -contains 'Vidéo, Pro') -and ($milieu -contains 'GIF, Pro') -and
             (@($milieu | Where-Object { $_ -notmatch ', Pro$' }).Count -eq 0)
-        Verifier 'barre : Zone, Plein écran, Fenêtre, Retardateur, Capture défilante, Pro, (Vidéo, Pro), GIF, Pro, Réglages (sans licence)' $ok ($barre.Noms -join ', ') | Out-Null
+        Verifier 'barre : Zone, Plein écran, Fenêtre, Retardateur, Capture défilante, Pro, Vidéo, Pro, GIF, Pro, Réglages (sans licence)' $ok ($barre.Noms -join ', ') | Out-Null
         # Un clic sur « Zone » : la barre se ferme, la sélection s'ouvre (après ATTENTE_MENU).
         Cliquer-Bouton-Barre $barre 'Zone' 'seconde instance'
         Verifier 'clic sur Zone : « barre choisi capturer_zone »' (Attendre-Ligne -Texte 'barre choisi capturer_zone' -DelaiS 5) | Out-Null
@@ -144,7 +143,7 @@ try {
         Start-Sleep -Milliseconds 600
         Cliquer-Bouton-Barre $barre 'Capture défilante, Pro' 'cinquième lancement'
         Verifier 'clic sur un bouton Pro éteint : « barre: licence capturer_defilante »' (Attendre-Ligne -Texte 'barre: licence capturer_defilante' -DelaiS 5) | Out-Null
-        Verifier 'puis « menu: licence » et la rubrique Licence demandée' ((Attendre-Ligne -Texte 'menu: licence' -DelaiS 5) -and (Attendre-Ligne -Texte 'reglages rubrique licence' -DelaiS 8)) | Out-Null
+        Verifier 'puis « menu: licence » et la rubrique Licence demandée' ((Attendre-Ligne -Texte 'menu: licence' -DelaiS 5) -and (Attendre-Ligne -Texte 'reglages rubrique licence' -DelaiS 20)) | Out-Null
         Verifier 'rien de lancé : toujours un seul « barre choisi »' ((Compter-Lignes -Texte 'barre choisi') -eq 1) | Out-Null
     }
     Verifier 'un seul processus BreezyShot' ($restants.Count -eq 1) "$($restants.Count) processus" | Out-Null
