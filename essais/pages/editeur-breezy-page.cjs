@@ -144,7 +144,7 @@ const DOC = { largeur: 400, hauteur: 300, suivant: 3, recadrage: null, objets: [
   const hostile = '{"objets":[{"type":"fleche","x1":"a","couleur":"url(x)"},{"type":"evil"},{"type":"texte","texte":"<img src=x onerror=alert(1)>","couleur":"red"}],"__proto__":{"x":1}}';
   p = await ouvrir({ charge: CHARGE, annotations: hostile });
   verifier(JSON.stringify(await objets(p)).startsWith('[[') && (await objets(p)).length === 2, 'fichier hostile : deux objets propres, un écarté', JSON.stringify(await objets(p)));
-  verifier((await p.locator('#message span').textContent()).startsWith('Certains éléments'), 'message : certains éléments n\'ont pas pu être lus');
+  verifier((await p.locator('#message span').allTextContents()).join('') === '', 'objet écarté : aucun message (sobriété)');
   verifier(await p.evaluate(() => window.__ed.h.doc.objets.every((o) => !o.couleur || /^#[0-9A-Fa-f]{6}$/.test(o.couleur))), 'couleurs piégées remplacées');
   verifier(p.erreurs.length === 0, 'aucune erreur de page (hostile)', p.erreurs.join('|'));
   await p.context().close();
