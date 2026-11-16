@@ -770,22 +770,6 @@ pub(super) fn vider_depuis_les_reglages(app: &AppHandle) {
     });
 }
 
-/// Le réglage « nombre gardé » a changé : « Récents » est ramené tout de suite à ce nombre
-/// (une capture au moins), puis la liste ouverte est relue.
-pub(super) fn purger_selon_le_reglage(app: &AppHandle) {
-    let gardes =
-        historique::gardes_en_vigueur(super::reglages_lus(app).historique.gardes, super::pro(app));
-    let pour = app.clone();
-    dans_un_fil_ou_ici("historique-purge", move || {
-        let d = dossiers(&pour);
-        let partis = sortie::purger_recents(&d.recents, gardes);
-        log::info!("historique purge {gardes} gardes {partis} partis");
-        if super::historique_ouvert(&pour).is_some() {
-            relister(&pour);
-        }
-    });
-}
-
 // Glisser (§2.2, U3).
 
 /// Glisser de la case `nom` (déjà connue) : le lien est posé dans `Glisser`, puis le

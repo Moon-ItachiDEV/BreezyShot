@@ -463,9 +463,6 @@ pub(super) fn changer(app: &AppHandle, changement: Changement) -> Reponse {
     log::info!("{}", page::ligne_changement(&changement));
     ecrire_et_garder(&app, nouveau.clone());
     appliquer_theme(&app, &nouveau);
-    if matches!(changement, Changement::HistoriqueGardes(_)) {
-        super::geste_historique::purger_selon_le_reglage(&app);
-    }
     if let Changement::ImprEcran(oui) = changement {
         return reponse(&app, reprendre_impr_ecran(&app, &nouveau, oui));
     }

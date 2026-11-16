@@ -1200,8 +1200,8 @@ sans rien remplacer, les défauts qui reproduisent l'app d'avant :
   - `historique.gardes` : 0 (« Aucun » : la capture qu'on vient de faire seulement), 25, 50, 100
     ou 200 captures gardées dans « Récents » (`sortie::Demande.recents_gardes`,
     `historique::gardes_en_vigueur` : sans licence jamais moins que 50 ni que le réglage lu).
-    Un changement ramène « Récents » tout de suite à ce nombre (`sortie::purger_recents`) ;
-    « Vider l'historique » (`reglages_vider_historique`, Pro) efface « Récents », les aperçus et
+    Une baisse du nombre ne s'applique qu'à la capture suivante (jamais d'effacement sur un
+    simple clic ou une flèche du clavier) ; « Vider l'historique » (`reglages_vider_historique`, Pro) efface « Récents », les aperçus et
     `Glisser`, fenêtre de l'historique ouverte ou non. `Glisser` garde toujours 50 liens.
 
 ## 5. Raccourcis (`raccourcis/`, étape 3)

@@ -1445,7 +1445,7 @@ fn nettoyer(films: &Path, glisser: &Path, proteges: &[String]) {
 /// Copier (`copier`) ou Enregistrer depuis la carte d'un film (F25) : le fichier, dans le
 /// fil `vignette-action`, puis le chemin commun d'`ActionFaite`.
 pub fn lancer_action_vignette(app: &AppHandle, id: u64, copier: bool) {
-    let base = super::demande_sortie(app, false);
+    let base = demande_du_film(app).0;
     let Some((fichier, sorte, demande)) = super::avec_montree(app, id, |c| {
         let (f, sorte) = c.contenu.film()?;
         let (f, sorte) = (f.to_path_buf(), sorte);
@@ -1920,6 +1920,60 @@ impl Prise for vivant::Source {
     }
 }
 
+/// Le son de l'ordinateur ouvert par son petit fil : l'appareil y est gardé jusqu'à la fin
+/// du film (`Drop` : le fil d'ouverture, s'il est en retard, le rend dès qu'il a fini).
+struct OrdinateurOuvert {
+    appareil: Arc<Mutex<Option<micro::Micro>>>,
+    fini: Arc<AtomicBool>,
+}
+
+impl OrdinateurOuvert {
+    fn lancer(voulu: bool, calage: &Arc<Mutex<Calage>>) -> OrdinateurOuvert {
+        let ouvert = OrdinateurOuvert {
+            appareil: Arc::new(Mutex::new(None)),
+            fini: Arc::new(AtomicBool::new(false)),
+        };
+        if !voulu {
+            return ouvert;
+        }
+        let (appareil, fini, calage) = (
+            Arc::clone(&ouvert.appareil),
+            Arc::clone(&ouvert.fini),
+            Arc::clone(calage),
+        );
+        let lance = std::thread::Builder::new()
+            .name("film-ordinateur".into())
+            .spawn(move || {
+                let pris = micro::ordinateur_present()
+                    .then(|| {
+                        micro::ouvrir_ordinateur(move |pcm| {
+                            calage.lock().unwrap_or_else(|e| e.into_inner()).ranger(pcm)
+                        })
+                        .ok()
+                    })
+                    .flatten();
+                log::info!("{}", film::ligne_ordinateur(pris.is_some()));
+                // Le film est déjà fini : l'appareil est rendu tout de suite.
+                let mut garde = appareil.lock().unwrap_or_else(|e| e.into_inner());
+                if !fini.load(Ordering::SeqCst) {
+                    *garde = pris;
+                }
+            });
+        if lance.is_err() {
+            log::info!("{}", film::ligne_ordinateur(false));
+        }
+        ouvert
+    }
+}
+
+impl Drop for OrdinateurOuvert {
+    fn drop(&mut self) {
+        let mut garde = self.appareil.lock().unwrap_or_else(|e| e.into_inner());
+        self.fini.store(true, Ordering::SeqCst);
+        garde.take();
+    }
+}
+
 /// Le fil `film` : le micro (vidéo), le fil d'écriture, la source, puis la cadence.
 fn filmer(d: Depart, app: AppHandle) {
     let numero = d.numero;
@@ -1934,22 +1988,13 @@ fn filmer(d: Depart, app: AppHandle) {
             },
         );
     }
-    // Le son de l'ordinateur (0.7.7) : ouvert tout de suite, gardé jusqu'à la fin du film
-    // (sa destruction rend l'appareil). Absent ou refusé : la vidéo se fait sans.
+    // Le son de l'ordinateur (0.7.7) : ouvert dans un petit fil à lui (une sortie Bluetooth
+    // peut mettre des secondes à répondre, le fil `film` n'attend jamais), gardé jusqu'à la
+    // fin du film (sa destruction rend l'appareil). Absent ou refusé : la piste reste muette
+    // pour cette source.
     let calage_ordinateur = Arc::new(Mutex::new(Calage::default()));
-    let ordinateur = (d.ordinateur && micro::ordinateur_present())
-        .then(|| {
-            let pour = Arc::clone(&calage_ordinateur);
-            micro::ouvrir_ordinateur(move |pcm| {
-                pour.lock().unwrap_or_else(|e| e.into_inner()).ranger(pcm)
-            })
-            .ok()
-        })
-        .flatten();
-    if d.ordinateur {
-        log::info!("{}", film::ligne_ordinateur(ordinateur.is_some()));
-    }
-    let avec_ordinateur = ordinateur.is_some().then(|| Arc::clone(&calage_ordinateur));
+    let ordinateur = OrdinateurOuvert::lancer(d.ordinateur, &calage_ordinateur);
+    let avec_ordinateur = d.ordinateur.then(|| Arc::clone(&calage_ordinateur));
     let son = avec_micro || avec_ordinateur.is_some();
     let calage = Arc::new(Mutex::new(Calage::default()));
     let ouvert = Arc::new(AtomicBool::new(false));
@@ -2049,7 +2094,10 @@ fn filmer(d: Depart, app: AppHandle) {
         None,
     );
     fil.tenir(jeton);
+    // 60 images par seconde demandent un réveil plus fin que le tick de 15,6 ms de Windows.
+    let _minuterie = (d.cadence > film::CADENCE_VIDEO).then(systeme::minuterie::Fine::demander);
     boucler(fil, d.reception);
+    drop(ordinateur);
 }
 
 /// Le filet de F5, depuis le fil `film-filet` : sans pilule posée, l'écran figé et la sélection

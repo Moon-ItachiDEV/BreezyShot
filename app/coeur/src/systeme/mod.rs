@@ -18,6 +18,7 @@ pub mod gel;
 pub mod glisser;
 pub mod installation;
 pub mod micro;
+pub mod minuterie;
 pub mod mp4;
 pub mod presse_papiers;
 pub mod souris;
