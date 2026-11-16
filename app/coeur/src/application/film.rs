@@ -39,6 +39,8 @@ pub const DECOMPTE_DEFAUT_S: u32 = 3;
 /// Images par seconde d'une vidéo et d'un GIF (F13).
 pub const CADENCE_VIDEO: u32 = 30;
 pub const CADENCE_GIF: u32 = 15;
+/// Images par seconde d'une vidéo « fluide » (réglage « Fluidité », Pro).
+pub const CADENCE_VIDEO_FLUIDE: u32 = 60;
 /// La page de contrôle doit avoir posé sa pilule (`film_zone`) dans ce délai après le
 /// relâchement (F5).
 pub const DELAI_PAGE: Duration = Duration::from_secs(2);
@@ -195,7 +197,22 @@ impl Sorte {
 
     /// L'écart entre deux images de la grille (une seconde / la cadence).
     pub fn pas(self) -> Duration {
-        Duration::from_secs(1) / self.cadence()
+        self.pas_a(self.cadence())
+    }
+
+    /// L'écart entre deux images pour la cadence `cadence` (jamais nulle).
+    pub fn pas_a(self, cadence: u32) -> Duration {
+        Duration::from_secs(1) / cadence.max(1)
+    }
+
+    /// Images par seconde pour le réglage « Fluidité » : 60 ou 30 pour une vidéo (toute
+    /// autre valeur, 30) ; un GIF reste à 15.
+    pub fn cadence_pour(self, fluidite: u32) -> u32 {
+        match self {
+            Sorte::Video if fluidite == CADENCE_VIDEO_FLUIDE => CADENCE_VIDEO_FLUIDE,
+            Sorte::Video => CADENCE_VIDEO,
+            Sorte::Gif => CADENCE_GIF,
+        }
     }
 
     /// Images par seconde (F13).
@@ -371,9 +388,10 @@ pub fn decompte_s(retardateur_s: u32) -> u32 {
     }
 }
 
-/// Le débit moyen visé d'une vidéo (F15), bits par seconde (`mp4::debit_vise`).
-pub fn debit(largeur: u32, hauteur: u32) -> u32 {
-    mp4::debit_vise(largeur, hauteur)
+/// Le débit moyen visé d'une vidéo (F15), bits par seconde (`mp4::debit_vise`), pour la
+/// cadence `cadence` (une vidéo à 60 images par seconde demande une moitié de plus).
+pub fn debit(largeur: u32, hauteur: u32, cadence: u32) -> u32 {
+    mp4::debit_vise_a(largeur, hauteur, cadence)
 }
 
 /// La file entre le fil `film` et le fil d'écriture pour des images de `octets` (F20) :
@@ -1060,6 +1078,13 @@ mod tests {
         assert_eq!(Sorte::Gif.sortie().extension(), "gif");
         assert_eq!(Sorte::Video.cadence(), 30);
         assert_eq!(Sorte::Gif.cadence(), 15);
+        // « Fluidité » : 60 ou 30 pour la vidéo, le GIF reste à 15.
+        assert_eq!(Sorte::Video.cadence_pour(60), 60);
+        assert_eq!(Sorte::Video.cadence_pour(30), 30);
+        assert_eq!(Sorte::Video.cadence_pour(0), 30);
+        assert_eq!(Sorte::Gif.cadence_pour(60), 15);
+        assert_eq!(Sorte::Video.pas_a(60), Duration::from_secs(1) / 60);
+        assert_eq!(Sorte::Video.pas(), Duration::from_secs(1) / 30);
         assert_eq!(Sorte::Video.duree_max(), Duration::from_secs(3600));
         assert_eq!(Sorte::Gif.duree_max(), Duration::from_secs(60));
         for m in Mode::TOUS {
@@ -1155,10 +1180,14 @@ mod tests {
         assert_eq!(decompte_s(0), 3);
         assert_eq!(decompte_s(5), 5);
         assert_eq!(decompte_s(10), 10);
-        assert_eq!(debit(600, 450), 1_080_000);
-        assert_eq!(debit(1920, 1080), 8_294_400);
-        assert_eq!(debit(64, 64), 1_000_000);
-        assert_eq!(debit(4096, 2304), 16_000_000);
+        assert_eq!(debit(600, 450, 30), 1_080_000);
+        assert_eq!(debit(1920, 1080, 30), 8_294_400);
+        assert_eq!(debit(64, 64, 30), 1_000_000);
+        assert_eq!(debit(4096, 2304, 30), 16_000_000);
+        // 60 images par seconde : une moitié de plus, plafond relevé.
+        assert_eq!(debit(1920, 1080, 60), 12_441_600);
+        assert_eq!(debit(64, 64, 60), 1_000_000);
+        assert_eq!(debit(4096, 2304, 60), 24_000_000);
     }
 
     #[test]
@@ -1737,7 +1766,7 @@ mod tests {
             "film source reprise apres 3050 ms"
         );
         assert_eq!(
-            ligne_codeur("logiciel", (600, 450), debit(600, 450)),
+            ligne_codeur("logiciel", (600, 450), debit(600, 450, 30)),
             "film codeur logiciel 600x450 1080 kbit/s"
         );
         assert_eq!(ligne_son(false), "film son non");

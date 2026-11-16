@@ -197,6 +197,7 @@ fn banc_avec(sorte: Sorte, reduite: bool, source: bool, d: Delais) -> Banc {
         Lancement {
             numero: 5,
             sorte,
+            cadence: sorte.cadence(),
             relache: t0,
             cadre: c,
             ecrans: vec![ecran()],
@@ -1179,6 +1180,7 @@ fn atelier(sorte: Sorte, refuser_apres: Option<usize>, paniquer: bool, reelle: b
     let journal = Arc::new(Mutex::new(Journal::default()));
     let e = Ecriture {
         sorte,
+        cadence: sorte.cadence(),
         dossier_films: films.clone(),
         dossier_glisser: dossier.path().join("Glisser"),
         proteges: Vec::new(),
@@ -1370,6 +1372,7 @@ fn ecriture_sans_dossier() {
     let (fini_envoi, fini) = mpsc::channel();
     let e = Ecriture {
         sorte: Sorte::Video,
+        cadence: 30,
         dossier_films: bloque,
         dossier_glisser: dossier.path().join("Glisser"),
         proteges: Vec::new(),
@@ -1396,6 +1399,7 @@ fn ecriture_codeur_refuse() {
     let (fini_envoi, fini) = mpsc::channel();
     let e = Ecriture {
         sorte: Sorte::Video,
+        cadence: 30,
         dossier_films: films.clone(),
         dossier_glisser: dossier.path().join("Glisser"),
         proteges: Vec::new(),

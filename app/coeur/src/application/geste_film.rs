@@ -570,9 +570,11 @@ pub fn zone_choisie(app: &AppHandle, zone: Rect) {
         return;
     }
     let (_, glisser) = super::dossiers_vignette(app);
+    let cadence = sorte.cadence_pour(super::reglages_lus(app).film.fluidite);
     let depart = Depart {
         numero,
         sorte,
+        cadence,
         relache,
         cadre,
         ecran,
@@ -1825,6 +1827,8 @@ type Fini = Option<PathBuf>;
 struct Depart {
     numero: u64,
     sorte: Sorte,
+    /// Images par seconde, figées au départ (réglage « Fluidité » pour une vidéo).
+    cadence: u32,
     relache: Instant,
     cadre: Cadre,
     ecran: EcranInfo,
@@ -1929,6 +1933,7 @@ fn filmer(d: Depart, app: AppHandle) {
     let en_file = Arc::new(AtomicUsize::new(0));
     let ecriture = Ecriture {
         sorte: d.sorte,
+        cadence: d.cadence,
         dossier_films: d.dossier_films.clone(),
         dossier_glisser: d.dossier_glisser,
         proteges: d.proteges,
@@ -1940,10 +1945,11 @@ fn filmer(d: Depart, app: AppHandle) {
         fini: d.fini,
     };
     let (l, h) = d.cadre.image;
+    let cadence = d.cadence;
     let fabrique: Fabrique = match d.sorte {
         Sorte::Video => {
             let (calage, ouvert) = (Arc::clone(&calage), Arc::clone(&ouvert));
-            Box::new(move |chemin: &Path| creer_video(chemin, (l, h), son, calage, ouvert))
+            Box::new(move |chemin: &Path| creer_video(chemin, (l, h), cadence, son, calage, ouvert))
         }
         Sorte::Gif => Box::new(move |chemin: &Path| creer_gif(chemin, (l, h))),
     };
@@ -1983,6 +1989,7 @@ fn filmer(d: Depart, app: AppHandle) {
         Lancement {
             numero,
             sorte: d.sorte,
+            cadence: d.cadence,
             relache: d.relache,
             cadre: d.cadre,
             ecrans: d.ecrans,
@@ -2128,6 +2135,7 @@ struct Bureau {
 struct Lancement {
     numero: u64,
     sorte: Sorte,
+    cadence: u32,
     relache: Instant,
     cadre: Cadre,
     ecrans: Vec<EcranInfo>,
@@ -2725,7 +2733,7 @@ impl<P: Prise> Fil<P> {
             Ordre::Demarrer(t) => {
                 if matches!(self.etape, Moment::Attente | Moment::Decompte(_)) {
                     self.etape = Moment::Marche;
-                    self.horloge = Some(Horloge::nouvelle(self.l.sorte.cadence(), t));
+                    self.horloge = Some(Horloge::nouvelle(self.l.cadence, t));
                     self.fin_decompte.get_or_insert(t);
                     self.prochain_disque = Some(t);
                 }
@@ -2920,6 +2928,7 @@ type Fabrique = Box<dyn FnOnce(&Path) -> Result<Box<dyn Ecrivain>, &'static str>
 /// Ce que le fil d'écriture reçoit au départ.
 struct Ecriture {
     sorte: Sorte,
+    cadence: u32,
     dossier_films: PathBuf,
     dossier_glisser: PathBuf,
     proteges: Vec<String>,
@@ -2948,6 +2957,7 @@ fn ecrire_sans_panique(ecriture: Ecriture, fabrique: Fabrique) {
 fn ecrire(e: Ecriture, fabrique: Fabrique) {
     let Ecriture {
         sorte,
+        cadence,
         dossier_films,
         dossier_glisser,
         proteges,
@@ -3040,7 +3050,7 @@ fn ecrire(e: Ecriture, fabrique: Fabrique) {
             // Le fil `film` arrêté net (panique) après des images : le fichier est fini à
             // la dernière, gardé et noté à ranger (M8) ; sinon, comme un abandon.
             Err(_) if dernier.is_some() && !refuse => {
-                let duree = dernier.unwrap_or_default() + sorte.pas();
+                let duree = dernier.unwrap_or_default() + sorte.pas_a(cadence);
                 let ferme = match ecrivain.finir(duree) {
                     Ok(()) => {
                         log::warn!("film: fil arrete, fichier garde");
@@ -3123,6 +3133,7 @@ impl Ecrivain for EcrivainVideo {
 fn creer_video(
     chemin: &Path,
     (largeur, hauteur): (u32, u32),
+    cadence: u32,
     son: bool,
     calage: Arc<Mutex<Calage>>,
     ouvert: Arc<AtomicBool>,
@@ -3130,8 +3141,8 @@ fn creer_video(
     let p = mp4::Parametres {
         largeur,
         hauteur,
-        cadence: film::CADENCE_VIDEO,
-        debit_bit_s: film::debit(largeur, hauteur),
+        cadence,
+        debit_bit_s: film::debit(largeur, hauteur, cadence),
         son,
         materiel: true,
     };
