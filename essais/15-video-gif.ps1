@@ -163,9 +163,9 @@ function Nombre-Texte([string]$Texte) {
     return [double]::NaN
 }
 
-# Réglages en version 7 (complets : rien à réécrire) ou 5 (sans `video` ni `gif` : l'app
-# les passe en version 7). Vignette « toujours », en bas à droite, animations réduites.
-function Ecrire-Reglages([string]$Dossier, [int]$Version = 7, [bool]$Copier = $true, [bool]$Vignette = $true) {
+# Réglages en version 8 (complets : rien à réécrire) ou 5 (sans `video` ni `gif` : l'app
+# les passe en version 8). Vignette « toujours », en bas à droite, animations réduites.
+function Ecrire-Reglages([string]$Dossier, [int]$Version = 8, [bool]$Copier = $true, [bool]$Vignette = $true) {
     $racc = [ordered]@{ zone = @(); plein_ecran = @('Ctrl+Maj+2'); fenetre = @(); derniere_zone = @(); historique = @(); texte = @(); defilante = @() }
     if ($Version -ge 6) { $racc['video'] = @('Ctrl+Maj+6'); $racc['gif'] = @('Ctrl+Maj+7') }
     $r = [ordered]@{
@@ -182,6 +182,7 @@ function Ecrire-Reglages([string]$Dossier, [int]$Version = 7, [bool]$Copier = $t
         modele_nom                = 'BreezyShot {date} à {heure}'
         theme                     = 'systeme'
     }
+    if ($Version -ge 8) { $r['impr_ecran_ouvre'] = 'zone' }
     if ($Version -ge 7) {
         $r['format_image'] = 'png'
         $r['editeur_apres_capture'] = $false
@@ -1204,8 +1205,8 @@ try {
                 $f = Lire-Reglages $d0
                 $video = if ($f.raccourcis.PSObject.Properties.Name -contains 'video') { @($f.raccourcis.video) -join ',' } else { '<absent>' }
                 $gif = if ($f.raccourcis.PSObject.Properties.Name -contains 'gif') { @($f.raccourcis.gif) -join ',' } else { '<absent>' }
-                $mises = Compter-Motif 'reglages mis a niveau de la version 5 a la version 7$' $d0
-                Verifier '(L0) réglages réécrits en v7 : video = Ctrl+Maj+6, gif = Ctrl+Maj+7, une ligne « de la version 5 a la version 7 »' (($f.version -eq 7) -and ($video -eq 'Ctrl+Maj+6') -and ($gif -eq 'Ctrl+Maj+7') -and ($mises -eq 1)) "version $($f.version), video $video, gif $gif, lignes $mises" | Out-Null
+                $mises = Compter-Motif 'reglages mis a niveau de la version 5 a la version 8$' $d0
+                Verifier '(L0) réglages réécrits en v8 : video = Ctrl+Maj+6, gif = Ctrl+Maj+7, une ligne « de la version 5 a la version 8 »' (($f.version -eq 8) -and ($video -eq 'Ctrl+Maj+6') -and ($gif -eq 'Ctrl+Maj+7') -and ($mises -eq 1)) "version $($f.version), video $video, gif $gif, lignes $mises" | Out-Null
                 Verifier '(L0) aucune fenêtre « film »' ((Compter-Motif 'film fenetre \d+' $d0) -eq 0) | Out-Null
                 Fermer-Cas $script:proc $d0 '(L0)'
             }

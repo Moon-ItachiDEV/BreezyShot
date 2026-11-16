@@ -422,6 +422,16 @@ pub(super) fn changer(app: &AppHandle, changement: Changement) -> Reponse {
     if changement.exige_pro() && !pro(&app) {
         return refuser(&app, Refus::nouveau(changement.ligne(), "", "sans_licence"));
     }
+    // Impr. écran : seul un choix de la liste en vigueur passe (action fermée par la licence,
+    // le codeur ou la langue de lecture, valeur forgée), et seulement là où la ligne existe.
+    if let Changement::ImprEcran(t) = &changement {
+        if systeme::impr_ecran_pour_breezyshot().is_none() {
+            return refuser(&app, Refus::nouveau("impr_ecran", "", "sans_objet"));
+        }
+        if !page::impr_ecran_permis(t, &actions_en_vigueur(&app)) {
+            return refuser(&app, Refus::nouveau("impr_ecran", "", "invalide"));
+        }
+    }
     let base = relire(&app);
     let nouveau = match page::appliquer(&base, &changement) {
         Ok(n) => n,
@@ -447,57 +457,73 @@ pub(super) fn changer(app: &AppHandle, changement: Changement) -> Reponse {
             }
         }
     }
-    if let Changement::ImprEcran(oui) = changement {
-        let impossible =
-            || Refus::nouveau("impr_ecran", "Impossible de changer Impr. écran", "echec");
-        match systeme::donner_impr_ecran(oui) {
-            Ok(true) => {}
-            // Hors Windows : rien à changer (la ligne n'est pas montrée).
-            Ok(false) => return refuser(&app, Refus::nouveau("impr_ecran", "", "sans_objet")),
-            Err(e) => {
-                log::warn!("impr ecran: echec ({e})");
-                return refuser(&app, impossible());
+    // Le registre : seulement en passant de l'Outil Capture à BreezyShot ou l'inverse. D'une
+    // action de BreezyShot à une autre, on change le champ et rien d'autre.
+    let mut touche = Touche::Inchangee;
+    if let Changement::ImprEcran(t) = &changement {
+        let rendre = t == page::CHOIX_WINDOWS;
+        let tenue_par_breezyshot = systeme::impr_ecran_pour_breezyshot() == Some(true);
+        if rendre == tenue_par_breezyshot {
+            let impossible =
+                || Refus::nouveau("impr_ecran", "Impossible de changer Impr. écran", "echec");
+            match systeme::donner_impr_ecran(!rendre) {
+                Ok(true) => {}
+                // Hors Windows : rien à changer (la ligne n'est pas montrée).
+                Ok(false) => return refuser(&app, Refus::nouveau("impr_ecran", "", "sans_objet")),
+                Err(e) => {
+                    log::warn!("impr ecran: echec ({e})");
+                    return refuser(&app, impossible());
+                }
             }
+            touche = if rendre {
+                Touche::Rendue
+            } else {
+                Touche::Prise
+            };
         }
     }
     log::info!("{}", page::ligne_changement(&changement));
     ecrire_et_garder(&app, nouveau.clone());
     appliquer_theme(&app, &nouveau);
-    if let Changement::ImprEcran(oui) = changement {
-        return reponse(&app, reprendre_impr_ecran(&app, &nouveau, oui));
-    }
-    reponse(&app, None)
+    let refus = match touche {
+        Touche::Inchangee => None,
+        t => reserver_impr_ecran(&app, t == Touche::Prise),
+    };
+    reponse(&app, refus)
 }
 
-/// Après « Impr. écran ouvre BreezyShot » : la zone reprend ses candidats avec la règle de
-/// Windows à jour (Impr. écran prise, ou rendue et remplacée par le candidat suivant).
-/// Allumée sans que la touche soit tenue : le refus dit où Windows la garde.
-fn reprendre_impr_ecran(app: &AppHandle, r: &Reglages, oui: bool) -> Option<Refus> {
-    let mut candidats = r.raccourcis.candidats("zone").unwrap_or_default().to_vec();
-    if !oui {
-        // Rendue à Windows : la zone ne la propose plus, l'ancienne réservation est lâchée
-        // même si aucun autre candidat n'est libre.
-        candidats.retain(|c| !page::est_impr_ecran(c));
-    }
-    let choix = changer_raccourci_choix(app, "zone", &candidats);
-    let tenue = choix
-        .as_ref()
-        .and_then(|c| c.retenu)
-        .is_some_and(|x| x.est_impr_ecran_seule());
+/// Ce que le changement d'Impr. écran a fait de la touche dans le registre.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Touche {
+    /// Pas de passage entre l'Outil Capture et BreezyShot : rien à réserver ni à rendre.
+    Inchangee,
+    /// Prise à Windows : la pseudo-action d'Impr. écran la réserve.
+    Prise,
+    /// Rendue à Windows : la réservation est lâchée.
+    Rendue,
+}
+
+/// Après le passage de la touche entre Windows et BreezyShot : la pseudo-action d'Impr.
+/// écran la réserve (`prise`, la règle de Windows relue) ou la lâche (liste vide, sinon
+/// `Reservations::changer` garderait l'ancienne). Prise sans être tenue : le refus dit
+/// pourquoi, et où Windows la garde.
+fn reserver_impr_ecran(app: &AppHandle, prise: bool) -> Option<Refus> {
+    let candidats: Vec<String> = if prise {
+        vec![page::IMPR_ECRAN.to_string()]
+    } else {
+        Vec::new()
+    };
+    let choix = changer_raccourci_choix(app, raccourcis::ACTION_IMPR_ECRAN, &candidats);
+    let tenue = choix.as_ref().is_some_and(|c| c.retenu.is_some());
     log::info!(
         "impr ecran: breezyshot {}, touche {}",
-        if oui { "oui" } else { "non" },
+        if prise { "oui" } else { "non" },
         if tenue { "tenue" } else { "non tenue" }
     );
-    if !oui || tenue {
+    if !prise || tenue {
         return None;
     }
-    // Allumée sans être tenue : la raison de l'écart d'Impr. écran, dite telle quelle.
-    let raison = choix?
-        .ecartes
-        .into_iter()
-        .find(|e| page::est_impr_ecran(&e.candidat))
-        .map(|e| e.raison)?;
+    let raison = choix?.ecartes.into_iter().next().map(|e| e.raison)?;
     Some(match raison {
         Raison::ReserveParLeSysteme => {
             Refus::nouveau("impr_ecran", page::REFUS_IMPR_ECRAN, "gardee")

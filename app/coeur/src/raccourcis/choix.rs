@@ -7,9 +7,17 @@ use std::collections::{BTreeMap, HashSet};
 
 use super::notation::{analyser, ErreurNotation, Raccourci};
 
+/// Pseudo-action qui tient la touche Impr. écran (version 0.8.0) : une seule candidate,
+/// `ImprEcran`, jamais écrite dans la liste d'une vraie action. Un appui sur elle se traduit
+/// en l'action choisie dans les réglages (`impr_ecran_ouvre`). Elle ne figure pas dans la
+/// liste des actions construites, ni dans Réglages › Raccourcis, ni dans les annonces.
+pub const ACTION_IMPR_ECRAN: &str = "impr_ecran";
+
 /// Les actions dont l'ordre de traitement est fixé. Les autres suivent, par ordre
-/// alphabétique.
-pub const ACTIONS_PRIORITAIRES: [&str; 9] = [
+/// alphabétique. La pseudo-action d'Impr. écran passe la première : la touche ne dépend
+/// d'aucune autre.
+pub const ACTIONS_PRIORITAIRES: [&str; 10] = [
+    ACTION_IMPR_ECRAN,
     "zone",
     "plein_ecran",
     "fenetre",
@@ -449,5 +457,33 @@ mod tests {
         let c = choisir_action("zone", &liste(&["ImprEcran"]), &[], None, true, |_| true);
         assert_eq!(c.retenu, None);
         assert_eq!(c.ecartes[0].raison, Raison::ReserveParLeSysteme);
+    }
+
+    /// La pseudo-action d'Impr. écran est traitée la première, quel que soit l'ordre de la
+    /// table, et tient la touche seule sans la prendre à une autre action.
+    #[test]
+    fn la_pseudo_action_impr_ecran_passe_la_premiere() {
+        let t = table(&[
+            ("zone", &["Ctrl+Maj+1"]),
+            (ACTION_IMPR_ECRAN, &["ImprEcran"]),
+            ("aaa_autre", &["Ctrl+Maj+9"]),
+        ]);
+        let mut essais = Vec::new();
+        let b = choisir(&t, false, |x| {
+            essais.push(x.canonique());
+            true
+        });
+        assert_eq!(b.actions[0].action, ACTION_IMPR_ECRAN);
+        assert_eq!(essais, ["ImprEcran", "Ctrl+Maj+1", "Ctrl+Maj+9"]);
+        assert_eq!(b.retenu(ACTION_IMPR_ECRAN), Some(&r("ImprEcran")));
+        assert_eq!(b.action_de(&r("ImprEcran")), Some(ACTION_IMPR_ECRAN));
+        // Windows garde la touche : la pseudo-action n'a rien, sans essai auprès du système.
+        let b = choisir(&t, true, |x| {
+            assert!(!x.est_impr_ecran_seule());
+            true
+        });
+        let impr = b.action(ACTION_IMPR_ECRAN).unwrap();
+        assert_eq!(impr.retenu, None);
+        assert_eq!(impr.ecartes[0].raison, Raison::ReserveParLeSysteme);
     }
 }

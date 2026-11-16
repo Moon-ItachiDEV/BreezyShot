@@ -84,7 +84,7 @@ function Lignes-Depuis([string]$Dossier, [int]$Debut) {
 }
 
 # Réglages du cas : Ctrl+Maj+1 pour la zone, Ctrl+Maj+2 pour le plein écran (pas
-# d'Impr. écran, pas d'annonce au démarrage), copie, enregistrement vrai, vignette coupée
+# d'annonce au démarrage ; depuis 0.8 la migration donne Impr. écran à la zone), copie, enregistrement vrai, vignette coupée
 # (elle a son essai 07).
 function Ecrire-Reglages([string]$Dossier) {
     $r = [ordered]@{

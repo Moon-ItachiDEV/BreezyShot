@@ -118,8 +118,8 @@ function Attendre-Motif([string]$Motif, [string]$Dossier, [double]$DelaiS, [stri
     throw "$Quoi : rien dans le journal en $DelaiS s (motif « $Motif », attendu $Fois fois, vu $vu)"
 }
 
-# Réglages du cas : raccourci Ctrl+Maj+1 seul (pas d'Impr. écran, pas d'annonce au
-# démarrage), copie, enregistrement et dossier au choix. Depuis 0.3, seul le réglage décide
+# Réglages du cas : raccourci Ctrl+Maj+1 seul (pas d'annonce au démarrage ; depuis 0.8 la
+# migration donne Impr. écran à la zone), copie, enregistrement et dossier au choix. Depuis 0.3, seul le réglage décide
 # de l'enregistrement : l'essai le met à vrai et coupe la vignette (essai 07) pour garder le
 # parcours de 0.2 (bandeau, fichier enregistré).
 function Ecrire-Reglages([string]$Dossier, [bool]$Enregistrer, $DossierEnregistrement) {

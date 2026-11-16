@@ -1312,3 +1312,43 @@ nouvelle. F125 écrit aussi ses quatre points lus.
 - `defilante.js` a le même défaut (relecture du 16/11) : trait de 1 px posé en pixels
   logiques fractionnaires, qui mord dans la zone ou n'est pas symétrique à 125, 150 et 175 %.
   Noté dans les finitions, pas corrigé ici.
+
+## Touche Impr. écran au choix (version 0.8.0)
+
+- Demande de l'utilisateur : choisir dans Réglages › Raccourcis ce que lance la touche Impr.
+  écran. L'interrupteur « Impr. écran ouvre BreezyShot » devient une ligne « Touche Impr. écran »
+  avec une liste déroulante (piste B de la maquette) : Outil Capture de Windows, Barre de
+  capture, Zone, Plein écran, Fenêtre, Refaire la dernière zone, Capture défilante, Copier le
+  texte, Vidéo, GIF, Historique. Chaque action garde son propre `Ctrl+Maj` ; la liste des
+  raccourcis ne montre pas Impr. écran sur la ligne de l'action choisie. Détail :
+  `docs/ARCHITECTURE.md` §4 (réglages), §5 (raccourcis) et §6 (page des Réglages).
+- Modèle retenu après relecture d'un conseiller : mettre Impr. écran en tête des candidats de
+  l'action choisie ne tenait pas (une seule touche tenue par action, réécriture des listes par
+  la page, ordre de réservation, repli qui garde l'ancien raccourci). À la place, un champ
+  `impr_ecran_ouvre` (réglages version 8, mise à niveau qui complète sans effacer) et une
+  pseudo-action `impr_ecran` qui tient la touche seule, traduite en l'action cible à l'appui.
+  La barre de capture n'est pas une action : la cible `barre` ouvre la barre directement.
+- Choix faits à l'écriture : une cible fermée (licence retirée, codeur ou langue absents) ouvre
+  la barre et le fichier n'est pas touché ; la liste n'offre pas les actions fermées (comme la
+  page cache les rubriques Pro sans licence) et le cœur refuse une valeur forgée ou Pro sans
+  licence ; la liste montre « Barre de capture » quand la cible est fermée, puisque c'est ce que
+  fait l'appui. « Outil Capture de Windows » rend la touche à Windows (registre) et lâche la
+  réservation ; choisir autre chose la reprend ; d'une action à une autre, seul le champ change.
+  La pseudo-action n'annonce rien au démarrage : Windows qui garde la touche est un choix de la
+  liste, et une autre application qui la tient est dite sur la ligne.
+- Effet à connaître : Impr. écran est maintenant tenue dès que Windows ne la garde pas, même
+  pour un fichier de la 0.7 dont l'utilisateur avait retiré Impr. écran de toutes les listes
+  (la cible migrée est alors la zone).
+- Essais : tests Rust (réglages v7 vers v8, défauts, validation de la valeur forgée, `exige_pro`,
+  traduction de l'appui, ordre de la pseudo-action, annonces) ; essai de page `reglages.cjs`
+  (liste ouverte, clic, flèches, Entrée, Échap, Tab, clic ailleurs, groupe Pro, thèmes clair et
+  sombre) et `vue-reglages.json` régénéré ; essais `02` à `15` mis à jour pour la version 8
+  et pour les lignes de journal d'Impr. écran.
+
+### Non vérifié
+
+- Tout ce qui touche à Windows pour de vrai : l'écriture de `PrintScreenKeyForSnippingEnabled`
+  et son effet sur la touche, la réservation et le relâchement de `impr_ecran` à chaud, la
+  barre ouverte par la touche, le refus quand une autre application la tient. Les essais
+  PowerShell (`02`, `03`, `13` à `15`) ont été mis à jour sans être lancés (CI seulement).
+- La liste dans WebView2 : vérifiée dans Chromium seulement.

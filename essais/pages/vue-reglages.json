@@ -68,7 +68,42 @@
     "apercu_nom": "BreezyShot 2026-11-12 à 10.42.08.png",
     "theme": "systeme",
     "demarrage": "non",
-    "impr_ecran": false,
+    "impr_ecran": {
+      "choix": [
+        {
+          "id": "windows",
+          "libelle": "Outil Capture de Windows",
+          "groupe": 0
+        },
+        {
+          "id": "barre",
+          "libelle": "Barre de capture",
+          "groupe": 1
+        },
+        {
+          "id": "zone",
+          "libelle": "Zone",
+          "groupe": 2
+        },
+        {
+          "id": "plein_ecran",
+          "libelle": "Plein écran",
+          "groupe": 2
+        },
+        {
+          "id": "fenetre",
+          "libelle": "Fenêtre",
+          "groupe": 2
+        },
+        {
+          "id": "derniere_zone",
+          "libelle": "Refaire la dernière zone",
+          "groupe": 2
+        }
+      ],
+      "valeur": "windows",
+      "refus": null
+    },
     "raccourcis": [
       {
         "action": "zone",
@@ -191,7 +226,57 @@
     "apercu_nom": "BreezyShot 2026-11-12 à 10.42.08.png",
     "theme": "systeme",
     "demarrage": "non",
-    "impr_ecran": false,
+    "impr_ecran": {
+      "choix": [
+        {
+          "id": "windows",
+          "libelle": "Outil Capture de Windows",
+          "groupe": 0
+        },
+        {
+          "id": "barre",
+          "libelle": "Barre de capture",
+          "groupe": 1
+        },
+        {
+          "id": "zone",
+          "libelle": "Zone",
+          "groupe": 2
+        },
+        {
+          "id": "plein_ecran",
+          "libelle": "Plein écran",
+          "groupe": 2
+        },
+        {
+          "id": "fenetre",
+          "libelle": "Fenêtre",
+          "groupe": 2
+        },
+        {
+          "id": "derniere_zone",
+          "libelle": "Refaire la dernière zone",
+          "groupe": 2
+        },
+        {
+          "id": "defilante",
+          "libelle": "Capture défilante",
+          "groupe": 3
+        },
+        {
+          "id": "texte",
+          "libelle": "Copier le texte",
+          "groupe": 3
+        },
+        {
+          "id": "historique",
+          "libelle": "Historique",
+          "groupe": 3
+        }
+      ],
+      "valeur": "windows",
+      "refus": null
+    },
     "raccourcis": [
       {
         "action": "zone",

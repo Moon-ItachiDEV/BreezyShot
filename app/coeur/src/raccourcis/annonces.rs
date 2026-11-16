@@ -6,7 +6,7 @@
 //! clic sur la croix. Au plus une annonce par démarrage, et une seule fois par situation
 //! (`decider_annonce`).
 
-use super::choix::{Bilan, ChoixAction, Raison};
+use super::choix::{Bilan, ChoixAction, Raison, ACTION_IMPR_ECRAN};
 use super::notation::analyser;
 
 /// Longueur maximale d'un candidat recopié dans un texte (au-delà : coupé, suivi de « … »).
@@ -162,16 +162,21 @@ impl Bilan {
     /// action, dans l'ordre de traitement, dont le premier candidat n'a pas été retenu
     /// (info).
     fn annonce_et_situation(&self) -> Option<(Annonce, Situation)> {
-        let sans_rien = self
-            .actions
-            .iter()
-            .find(|a| a.nb_candidats > 0 && a.retenu.is_none());
+        // La pseudo-action d'Impr. écran n'annonce rien : Windows qui garde la touche est un
+        // choix de la liste des Réglages, et une autre application qui la tient est dit sur
+        // sa ligne ; elle ne compte pas non plus pour « aucune action n'a de raccourci ».
+        let vraies = || {
+            self.actions
+                .iter()
+                .filter(|a| a.action != ACTION_IMPR_ECRAN)
+        };
+        let sans_rien = vraies().find(|a| a.nb_candidats > 0 && a.retenu.is_none());
         match sans_rien {
             Some(a) => {
-                let aucune_autre = self.actions.iter().all(|x| x.retenu.is_none());
+                let aucune_autre = vraies().all(|x| x.retenu.is_none());
                 Some(annonce_sans_raccourci(a, aucune_autre))
             }
-            None => self.actions.iter().find_map(annonce_action),
+            None => vraies().find_map(annonce_action),
         }
     }
 
@@ -490,6 +495,37 @@ mod tests {
                 candidat: "ImprEcran".into(),
                 raison: "aucun_raccourci".into(),
             })
+        );
+    }
+
+    /// La pseudo-action d'Impr. écran n'annonce rien : ni Windows qui garde la touche, ni
+    /// une autre application qui la tient, et elle ne compte pas parmi les raccourcis
+    /// obtenus (version 0.8.0).
+    #[test]
+    fn la_pseudo_action_impr_ecran_n_annonce_rien() {
+        let t = table(&[
+            (ACTION_IMPR_ECRAN, &["ImprEcran"]),
+            ("zone", &["Ctrl+Maj+1"]),
+            ("plein_ecran", &["Ctrl+Maj+2"]),
+        ]);
+        // Réservée par Windows, puis prise par une autre application : silence.
+        assert_eq!(choisir(&t, true, |_| true).annonce(), None);
+        assert_eq!(
+            choisir(&t, false, |r| !r.est_impr_ecran_seule()).annonce(),
+            None
+        );
+        // Seule Impr. écran a obtenu sa touche : les autres actions n'ont rien, l'erreur
+        // reste « Aucun raccourci disponible ».
+        let b = choisir(&t, false, |r| r.est_impr_ecran_seule());
+        assert_eq!(
+            b.annonce().map(|a| (a.erreur, a.titre)),
+            Some((true, "Aucun raccourci disponible".to_string()))
+        );
+        // Une vraie action sans raccourci est dite, la pseudo-action ne passe pas devant.
+        let b = choisir(&t, false, |r| r.canonique() != "Ctrl+Maj+2");
+        assert_eq!(
+            b.annonce().map(|a| a.titre),
+            Some("Aucun raccourci pour l'écran".to_string())
         );
     }
 }
