@@ -52,7 +52,8 @@ app/
                             (étape 4), partie 16:10 du haut (aperçu, 0.6) ; fenetre.rs :
                             liste des fenêtres, partie à découper,
                             rayon et coins à arrondir (étape 8) ; pointeur.rs : le
-                            pointeur posé dans l'image (0.4) ; aucun code propre à un
+                            pointeur posé dans l'image (0.4) ; clics.rs : les anneaux
+                            des clics visibles du film (0.7.6) ; aucun code propre à un
                             système
       sortie/               presse-papiers, PNG, « Récents », enregistrement (étape 6) ;
                             glisser.rs : fichier donné au glisser, effacement de Supprimer ;
@@ -85,7 +86,8 @@ app/
       film/                 partie pure de la vidéo et du GIF (0.7) : horloge.rs (cadence
                             fixe, pas sautés, pauses), difference.rs (rectangle changé,
                             sous-image, moitié), gif.rs (écriture du GIF, crate `gif`),
-                            son.rs (calage du micro) ; n'utilise que systeme
+                            son.rs (calage du micro, `suivre` et `melanger` pour le son
+                            de l'ordinateur, 0.7.6) ; n'utilise que systeme
       systeme/              tous les gestes propres à un système : mod.rs (façade commune),
                             windows.rs, autre.rs (Linux pour le développement, macos.rs ensuite),
                             composition.rs (attendre le compositeur),
@@ -108,7 +110,9 @@ app/
                             sous un clic, position, écoute de la molette ; 0.6),
                             mp4/ (écriture d'un MP4 H.264 par Media Foundation, garde
                             des DLL chargées à la demande ; 0.7), micro/ (micro par
-                            défaut, WASAPI ; 0.7) ; dans gel/, depuis la 0.7, les mises
+                            défaut, WASAPI ; 0.7 ; en 0.7.6 aussi le son de l'ordinateur,
+                            `Origine::Ordinateur`, loopback WASAPI), souris/ (position et
+                            boutons, `GetCursorPos` et `GetAsyncKeyState` ; 0.7.6) ; dans gel/, depuis la 0.7, les mises
                             en veille et la fin de session Windows ; dans mod.rs,
                             `ouvrir_fichier` (un film dans le lecteur de Windows, 0.7)
   interface/                ce qu'on voit (web), partagé entre Windows et Mac
@@ -1154,6 +1158,49 @@ Module pur : il reçoit le dossier où écrire, ne connaît ni Tauri ni les autr
   format produit par le module. Un fichier de plus de 1 Mio est traité comme abîmé.
 - Accepté : un très grand nombre dans un champ inconnu peut perdre en précision à la
   réécriture (l'option qui l'éviterait s'applique à tout le programme, Tauri compris).
+
+### 4.1 Réglages de la 0.7.6 (version 7)
+
+`v6 -> v7` (`v6_vers_v7`, constat `reglages mis a niveau de la version 6 a la version 7`) ajoute,
+sans rien remplacer, les défauts qui reproduisent l'app d'avant :
+
+```json
+  "format_image": "png",
+  "editeur_apres_capture": false,
+  "film": { "fluidite": 30, "son_systeme": false, "clics_visibles": false, "dossier": null },
+  "historique": { "gardes": 50 }
+```
+
+- **Libres** (« Après la capture ») : `format_image` (`png` ou `jpg`, une valeur inconnue
+  → `png` avec un avertissement) et `editeur_apres_capture`. Le JPG ne concerne que le fichier du
+  dossier d'enregistrement (qualité fixe 90, `sortie::png::encoder_jpg`, transparence mise sur
+  blanc) ; « Récents », le presse-papiers, le glisser, les aperçus et « Enregistrer sous… »
+  restent en PNG, et un côté de plus de 65 535 pixels est enregistré en PNG.
+  `editeur_apres_capture` : la capture s'ouvre dans l'éditeur à la place de la vignette si
+  l'éditeur est construit et l'image annotable (`vignette::ouvre_l_editeur`) ; la sortie
+  (copie, fichier, « Récents ») se fait comme avant.
+- **Pro** (rubriques « Enregistrement » et « Historique » du Volet, absentes sans licence :
+  le cœur ne nomme pas leurs lignes dans `vue.lignes`, une rubrique sans ligne disparaît ; une
+  page forgée est refusée par `Changement::exige_pro`) :
+  - `film.fluidite` 30 ou 60 images par seconde (autre valeur → 30), vidéo seulement, figée au
+    départ du film (`Depart.cadence`) ; le débit vise ×1,5 au-delà de 30 (`mp4::debit_vise_a`,
+    plafond 24 Mbit/s). Le GIF reste à 15.
+  - `film.son_systeme` : le son de l'ordinateur (WASAPI loopback du point de lecture par défaut,
+    `micro::ouvrir_ordinateur`) est mêlé à la piste du micro (qui garde l'horloge : le second
+    flux est servi par `Calage::suivre`, avec une réserve de 20 ms, puis `melanger`). Le bouton
+    « Micro » de la pilule ne change pas : il ne coupe que le micro. Un ordinateur sans point de
+    lecture, ou un flux refusé : la vidéo se fait sans (`film ordinateur indisponible`).
+  - `film.clics_visibles` : un anneau s'ouvre et s'efface (450 ms) à chaque clic dans la zone,
+    posé comme le pointeur dans chaque image, vidéo et GIF (`capture::clics`, souris lue à
+    chaque pas par `systeme::souris`, jamais par un crochet). Un anneau en vie change l'image à
+    chaque pas, une dernière fois à son extinction.
+  - `film.dossier` : où va le film fermé (`film::demande_film`) ; `null` = comme les images.
+  - `historique.gardes` : 0 (« Aucun » : la capture qu'on vient de faire seulement), 25, 50, 100
+    ou 200 captures gardées dans « Récents » (`sortie::Demande.recents_gardes`,
+    `historique::gardes_en_vigueur` : sans licence jamais moins que 50 ni que le réglage lu).
+    Un changement ramène « Récents » tout de suite à ce nombre (`sortie::purger_recents`) ;
+    « Vider l'historique » (`reglages_vider_historique`, Pro) efface « Récents », les aperçus et
+    `Glisser`, fenêtre de l'historique ouverte ou non. `Glisser` garde toujours 50 liens.
 
 ## 5. Raccourcis (`raccourcis/`, étape 3)
 

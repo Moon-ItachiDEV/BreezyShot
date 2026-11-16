@@ -18,7 +18,7 @@
 #     defilante` ; menu web de l'icône de 9 positions (séparateurs comptés) sans « Capture
 #     défilante » ; Ctrl+Maj+5 libre ;
 #     `--capturer defilante` → `--capturer: mode non construit` ; fichier passé en v6
-#     (0.7 ; `defilante` = Ctrl+Maj+5, une ligne « de la version 4 a la version 6 ») ; aucune
+#     (0.7 ; `defilante` = Ctrl+Maj+5, une ligne « de la version 4 a la version 7 ») ; aucune
 #     fenêtre `defilante`. Mémoire au repos notée.
 # Cas A (licence, non capturable : les fenêtres de l'app sont exclues des copies d'écran ;
 #     copie, vignette « toujours » ; un témoin de 600 × 6 000 en 40,80 et une sentinelle) :
@@ -254,7 +254,7 @@ function Fichiers-Format([string]$Dossier) {
 }
 function Recents([string]$Dossier) { return @(Fichiers-Format (Join-Path $Dossier 'local/Recents') | ForEach-Object { $_.FullName }) }
 
-# Réglages en version 4 (ceux de la 0.5) : l'app les passe en version 6 au démarrage (0.7).
+# Réglages en version 4 (ceux de la 0.5) : l'app les passe en version 7 au démarrage (0.7.6).
 function Ecrire-Reglages([string]$Dossier, [bool]$Vignette) {
     $r = [ordered]@{
         version                   = 4
@@ -1643,8 +1643,8 @@ public static int[] ClasserResumes(int[] ra, int[] rb, int h, int minRecouvremen
                 Verifier '(L0) --capturer defilante → « mode non construit », aucune capture' ((Compter-Motif 'DemandeCapture defilante' $d0) -eq 0) | Out-Null
                 $f = Lire-Reglages $d0
                 $def = if ($f.raccourcis.PSObject.Properties.Name -contains 'defilante') { @($f.raccourcis.defilante) -join ',' } else { '<absent>' }
-                $mises = Compter-Motif 'reglages mis a niveau de la version 4 a la version 6$' $d0
-                Verifier '(L0) réglages passés en v6 (0.7) : defilante = Ctrl+Maj+5, une ligne « de la version 4 a la version 6 »' (($f.version -eq 6) -and ($def -eq 'Ctrl+Maj+5') -and ($mises -eq 1)) "version $($f.version), defilante $def, lignes $mises" | Out-Null
+                $mises = Compter-Motif 'reglages mis a niveau de la version 4 a la version 7$' $d0
+                Verifier '(L0) réglages passés en v7 (0.7.6) : defilante = Ctrl+Maj+5, une ligne « de la version 4 a la version 7 »' (($f.version -eq 7) -and ($def -eq 'Ctrl+Maj+5') -and ($mises -eq 1)) "version $($f.version), defilante $def, lignes $mises" | Out-Null
                 Verifier '(L0) aucune fenêtre « defilante »' ((Compter-Motif $MOTIFS['Fenetre'] $d0) -eq 0) | Out-Null
             }
             Start-Sleep -Seconds 2   # la mémoire se pose (aucune ligne ne le dit)

@@ -33,8 +33,8 @@ mod tests {
     /// position ou rien, sans panique.
     #[test]
     fn lire_sans_panique() {
-        let a = super::super::lire();
-        let b = super::super::lire();
+        let a = crate::systeme::souris::lire();
+        let b = crate::systeme::souris::lire();
         eprintln!("souris: {a:?} puis {b:?}");
     }
 }
