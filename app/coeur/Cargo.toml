@@ -38,6 +38,9 @@ base64 = "0.23"
 # Pur Rust, aucune dépendance native ; le module `film` s'en sert sur tous les systèmes.
 # `raii_no_panic` : détruire l'encodeur sur un disque plein ne panique pas (fil `film-gif`).
 gif = { version = "0.14.2", default-features = false, features = ["color_quant", "std", "raii_no_panic"] }
+# Format JPG de l'image enregistrée (0.7.6) : `jpeg-encoder` (licence `(MIT OR Apache-2.0) AND
+# IJG`, permissive), pur Rust, sans dépendance native ni `simd`.
+jpeg-encoder = { version = "0.7", default-features = false, features = ["std"] }
 
 [target.'cfg(windows)'.dependencies]
 # Copier le texte (0.5) : la lecture de Windows (Media.Ocr) et ce qu'elle demande pour
@@ -103,3 +106,5 @@ opt-level = 3
 syn = { version = "2", features = ["full", "visit"] }
 proc-macro2 = "1"
 tempfile = "3"
+# Relire un JPG enregistré (0.7.6) : seulement dans les tests.
+jpeg-decoder = { version = "0.3", default-features = false }

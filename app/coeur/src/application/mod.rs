@@ -2663,6 +2663,7 @@ pub(super) fn demande_sortie(app: &AppHandle, transparence: bool) -> sortie::Dem
         modele_nom: reglages.modele_nom,
         maintenant: chrono::Local::now(),
         transparence,
+        format: zone::format_fichier(reglages.format_image),
     }
 }
 

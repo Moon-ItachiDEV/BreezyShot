@@ -936,6 +936,7 @@ mod tests {
             modele_nom: "BreezyShot {date} à {heure}".into(),
             maintenant: Local::now(),
             transparence: true,
+            format: sortie::FormatFichier::Png,
         };
         let d = demande_action(&base, true, &c);
         assert!(d.copier && !d.enregistrer && !d.ranger_recents && !d.transparence);

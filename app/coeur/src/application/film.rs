@@ -1093,6 +1093,7 @@ mod tests {
             modele_nom: "BreezyShot {date} à {heure}".into(),
             maintenant: chrono::Local::now(),
             transparence: true,
+            format: sortie::FormatFichier::Png,
         };
         let (d, deplacer) = demande_film(&base);
         assert!(!d.ranger_recents);

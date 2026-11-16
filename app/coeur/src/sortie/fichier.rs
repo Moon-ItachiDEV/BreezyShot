@@ -17,7 +17,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use super::nom::chemin_libre;
+use super::nom::chemin_libre_ext;
 use super::{png, EtapeFichier};
 use crate::systeme::gel::Pixels;
 
@@ -44,14 +44,18 @@ pub(super) fn existe(chemin: &Path) -> bool {
     chemin.symlink_metadata().is_ok()
 }
 
-/// Enregistre `octets` dans `dossier` sous le premier nom libre derive de `nom`.
+/// Enregistre `octets` dans `dossier` sous le premier nom libre derive de `nom`, avec
+/// l'extension `extension` (`png` ou `jpg`).
 pub(super) fn enregistrer(
     dossier: &Path,
     affiche: &str,
     nom: &str,
+    extension: &str,
     octets: &[u8],
 ) -> Result<PathBuf, String> {
-    ecrire_sans_ecraser(dossier, affiche, octets, |d| chemin_libre(d, nom, existe))
+    ecrire_sans_ecraser(dossier, affiche, octets, |d| {
+        chemin_libre_ext(d, nom, extension, existe)
+    })
 }
 
 /// Enregistre `pixels` en PNG exactement a `chemin` (Enregistrer sous... de l'editeur, 0.4) :

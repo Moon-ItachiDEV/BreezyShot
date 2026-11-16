@@ -73,3 +73,33 @@ pub fn sur_blanc(rgba: &[u8]) -> Vec<u8> {
     }
     sortie
 }
+
+/// Qualité du JPG enregistré (0 à 100), fixe : 90, net pour une capture d'écran sans que le
+/// fichier ne grossisse trop.
+pub const QUALITE_JPG: u8 = 90;
+
+/// Le plus grand côté d'un JPG (le format l'écrit sur 16 bits).
+pub const COTE_MAX_JPG: u32 = 65_535;
+
+/// Encode en JPG (qualité `QUALITE_JPG`, sans transparence) des pixels RGBA : un pixel
+/// transparent est posé sur du blanc (`sur_blanc`), comme le fait déjà le presse-papiers.
+/// Erreur (cause en clair, jamais le message de la crate) si un côté dépasse `COTE_MAX_JPG`
+/// ou si les dimensions et le tampon ne vont pas ensemble.
+pub fn encoder_jpg(largeur: u32, hauteur: u32, rgba: &[u8]) -> Result<Vec<u8>, String> {
+    let (Ok(l), Ok(h)) = (u16::try_from(largeur), u16::try_from(hauteur)) else {
+        return Err(CAUSE_JPG.to_string());
+    };
+    if l == 0 || h == 0 || rgba.len() as u64 != u64::from(largeur) * u64::from(hauteur) * 4 {
+        return Err(CAUSE_JPG.to_string());
+    }
+    let sur_fond = sur_blanc(rgba);
+    let mut sortie = Vec::new();
+    let encodeur = jpeg_encoder::Encoder::new(&mut sortie, QUALITE_JPG);
+    encodeur
+        .encode(&sur_fond, l, h, jpeg_encoder::ColorType::Rgba)
+        .map_err(|_| CAUSE_JPG.to_string())?;
+    Ok(sortie)
+}
+
+/// Cause donnee si l'encodage JPG echoue (jamais le message de la crate).
+const CAUSE_JPG: &str = "L'image n'a pas pu être convertie en JPG.";
