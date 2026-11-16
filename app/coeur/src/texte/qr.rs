@@ -107,29 +107,43 @@ impl Code {
 
 /// Lit le code de `pixels` : `None` s'il n'y en a pas, s'il y en a plusieurs différents, ou
 /// s'il est trop petit dans la zone. Bloquant : dans le fil `texte`, jamais sur le fil
-/// principal. Au premier essai qui réussit, les suivants ne sont pas faits.
+/// principal. Au premier essai qui réussit (ou refuse), les suivants ne sont pas faits.
 pub fn lire(pixels: &Pixels) -> Option<Code> {
     let gris = Gris::depuis(pixels)?;
     // L'image comme elle est, puis ses couleurs inversées (un code clair sur fond sombre),
     // puis réduite de moitié (un code aux modules gros, ou un écran en 125 ou 150 %), puis
     // agrandie ×2 (une petite zone).
-    if let Some(code) = essayer(&gris).or_else(|| essayer(&gris.inverser())) {
-        return Some(code);
-    }
+    //
+    // Un refus (plusieurs codes différents, ou un code trop petit) arrête tout : les essais
+    // suivants ne verraient qu'une partie de ce qui est là.
     let cote = gris.l.max(gris.h);
+    let mut essais = vec![gris.clone(), gris.inverser()];
     if cote >= 200 {
-        if let Some(code) = essayer(&gris.reduire_de_moitie()) {
-            return Some(code);
-        }
+        essais.push(gris.reduire_de_moitie());
     }
     if cote <= PETIT_COTE {
-        return essayer(&gris.doubler());
+        essais.push(gris.doubler());
+    }
+    for essai in &essais {
+        match essayer(essai) {
+            Passage::Rien => {}
+            Passage::Refuse => return None,
+            Passage::Code(code) => return Some(code),
+        }
     }
     None
 }
 
+/// Ce qu'un passage de détection a vu.
+enum Passage {
+    Rien,
+    /// Plusieurs codes différents, ou un code trop petit pour la zone.
+    Refuse,
+    Code(Code),
+}
+
 /// Un seul passage de détection sur `gris`.
-fn essayer(gris: &Gris) -> Option<Code> {
+fn essayer(gris: &Gris) -> Passage {
     let (l, h) = (gris.l as usize, gris.h as usize);
     let mut image = PreparedImage::prepare_from_greyscale(l, h, |x, y| gris.pixels[y * l + x]);
     let mut lus: Vec<String> = Vec::new();
@@ -148,10 +162,11 @@ fn essayer(gris: &Gris) -> Option<Code> {
         couvert = couvert.max(part);
     }
     // Plusieurs codes différents : on ne choisit pas pour la personne.
-    if lus.len() != 1 || couvert < PART_MINIMALE {
-        return None;
+    match lus.len() {
+        0 => Passage::Rien,
+        1 if couvert >= PART_MINIMALE => Passage::Code(classer(lus.remove(0))),
+        _ => Passage::Refuse,
     }
-    Some(classer(lus.remove(0)))
 }
 
 /// La part de l'image prise par le cadre du code (l'aire du quadrilatère, par la formule du
@@ -268,22 +283,26 @@ pub fn classer(contenu: String) -> Code {
         return Code {
             genre: Genre::Wifi,
             copie,
-            detail: couper_debut(&detail, DETAIL_TEXTE),
+            detail: couper_debut(&sur_une_ligne(&detail), DETAIL_TEXTE),
             avec_mot_de_passe,
         };
     }
     if let Some(domaine) = domaine_sur(&contenu) {
+        // Un lien sans chiffrement le dit : « http://domaine ».
+        let clair = contenu.len() >= 7 && contenu[..7].eq_ignore_ascii_case("http://");
+        let detail = couper_fin(&domaine, DETAIL_DOMAINE);
         return Code {
             genre: Genre::Lien,
-            detail: couper_fin(&domaine, DETAIL_DOMAINE),
+            detail: if clair {
+                format!("http://{detail}")
+            } else {
+                detail
+            },
             copie: contenu,
             avec_mot_de_passe: false,
         };
     }
-    let detail = couper_debut(
-        &contenu.split_whitespace().collect::<Vec<_>>().join(" "),
-        DETAIL_TEXTE,
-    );
+    let detail = couper_debut(&sur_une_ligne(&contenu), DETAIL_TEXTE);
     Code {
         genre: Genre::Texte,
         copie: contenu,
@@ -298,23 +317,22 @@ pub fn classer(contenu: String) -> Code {
 /// (`http://banque.fr@autre.site`), un domaine vide ou qui n'est pas en ASCII (des lettres
 /// qui en imitent d'autres), un port qui n'est pas un nombre.
 pub fn domaine_sur(contenu: &str) -> Option<String> {
+    // Seulement de l'ASCII visible, sans ce qui casse une ligne de commande ou qui trompe
+    // l'œil (`"`, `<`, `>`, `^`, `|`, `{`, `}`, accent grave, barre oblique inverse) : un
+    // lien aux accents ou aux caractères invisibles reste un texte.
     if contenu.len() > LIEN_MAX
-        || contenu
-            .chars()
-            .any(|c| c.is_control() || c.is_whitespace() || c == '\\')
+        || !contenu
+            .bytes()
+            .all(|b| (0x21..=0x7e).contains(&b) && !b"\"<>^|{}`".contains(&b))
     {
         return None;
     }
-    let reste = {
-        let bas = contenu.get(..8).map(str::to_ascii_lowercase);
-        let bas7 = contenu.get(..7).map(str::to_ascii_lowercase);
-        if bas.as_deref() == Some("https://") {
-            &contenu[8..]
-        } else if bas7.as_deref() == Some("http://") {
-            &contenu[7..]
-        } else {
-            return None;
-        }
+    let reste = if contenu.len() >= 8 && contenu[..8].eq_ignore_ascii_case("https://") {
+        &contenu[8..]
+    } else if contenu.len() >= 7 && contenu[..7].eq_ignore_ascii_case("http://") {
+        &contenu[7..]
+    } else {
+        return None;
     };
     let autorite = reste.split(['/', '?', '#']).next().unwrap_or("");
     if autorite.contains('@') {
@@ -329,20 +347,56 @@ pub fn domaine_sur(contenu: &str) -> Option<String> {
             return None;
         }
     }
-    let hote_ok = !hote.is_empty()
+    let hote = hote.to_ascii_lowercase();
+    if !hote_sur(&hote) {
+        return None;
+    }
+    Some(match port {
+        Some(p) => format!("{hote}:{p}"),
+        None => hote,
+    })
+}
+
+/// Un nom de domaine, ou une adresse IPv4 écrite en quatre nombres, qui n'envoie ni à la
+/// machine elle-même (`localhost`, `127.x.x.x`, `0.0.0.0`) ni ailleurs que ce qui est écrit
+/// (`http://3232235777`, `http://0x7f.1`, `http://017.0.0.1` : le navigateur les lit
+/// autrement). `hote` est en minuscules.
+fn hote_sur(hote: &str) -> bool {
+    let forme = !hote.is_empty()
         && !hote.starts_with(['.', '-'])
-        && !hote.ends_with(['-'])
+        && !hote.ends_with(['.', '-'])
         && !hote.contains("..")
         && hote
             .bytes()
             .all(|b| b.is_ascii_alphanumeric() || b == b'.' || b == b'-');
-    if !hote_ok {
-        return None;
+    if !forme || hote == "localhost" || hote.ends_with(".localhost") {
+        return false;
     }
-    Some(match port {
-        Some(p) => format!("{}:{p}", hote.to_ascii_lowercase()),
-        None => hote.to_ascii_lowercase(),
-    })
+    let dernier = hote.rsplit('.').next().unwrap_or("");
+    let numerique = !dernier.is_empty()
+        && (dernier.bytes().all(|b| b.is_ascii_digit()) || dernier.starts_with("0x"));
+    if !numerique {
+        return true;
+    }
+    // Quatre nombres décimaux de 0 à 255, sans zéro devant.
+    let nombres: Vec<&str> = hote.split('.').collect();
+    if nombres.len() != 4 {
+        return false;
+    }
+    let mut octets = [0u8; 4];
+    for (o, n) in octets.iter_mut().zip(&nombres) {
+        if n.is_empty()
+            || (n.len() > 1 && n.starts_with('0'))
+            || !n.bytes().all(|b| b.is_ascii_digit())
+        {
+            return false;
+        }
+        match n.parse::<u8>() {
+            Ok(v) => *o = v,
+            Err(_) => return false,
+        }
+    }
+    octets[0] != 127 && octets != [0, 0, 0, 0]
 }
 
 struct Wifi {
@@ -351,28 +405,25 @@ struct Wifi {
 }
 
 /// `WIFI:T:WPA;S:nom;P:mot de passe;H:false;;` : les champs dans n'importe quel ordre, les
-/// `\;`, `\:`, `\,`, `\"` et `\\` rendus. Un nom vide n'est pas un réseau ; un mot de passe
+/// `\;`, `\:`, `\,`, `\"` et `\\` rendus, la paire de guillemets qui entoure un nom ou un mot
+/// de passe écrit en chiffres retirée. Un nom vide n'est pas un réseau ; un mot de passe
 /// vide, ou `T:nopass`, est un réseau ouvert.
 fn analyser_wifi(contenu: &str) -> Option<Wifi> {
     let debut = contenu.get(..5)?;
     if !debut.eq_ignore_ascii_case("WIFI:") {
         return None;
     }
-    let mut nom = None;
-    let mut mdp = None;
-    let mut sans_mot_de_passe = false;
+    // Découpe sur les `;` non échappés, en gardant les barres (rendues plus bas).
+    let mut champs: Vec<String> = Vec::new();
     let mut champ = String::new();
     let mut echappe = false;
-    let mut champs: Vec<String> = Vec::new();
     for c in contenu[5..].chars() {
         if echappe {
             champ.push(c);
             echappe = false;
         } else if c == '\\' {
+            champ.push(c);
             echappe = true;
-            // Le champ garde la barre pour que `:` échappé ne coupe pas la clé : on la
-            // retire plus bas, au découpage clé/valeur.
-            champ.push('\u{1}');
         } else if c == ';' {
             champs.push(std::mem::take(&mut champ));
         } else {
@@ -382,27 +433,16 @@ fn analyser_wifi(contenu: &str) -> Option<Wifi> {
     if !champ.is_empty() {
         champs.push(champ);
     }
-    for c in champs {
-        // Le premier `:` non échappé sépare la clé de la valeur.
-        let mut cle = String::new();
-        let mut valeur = String::new();
-        let mut dans_valeur = false;
-        let mut precedent_echappe = false;
-        for ch in c.chars() {
-            if ch == '\u{1}' {
-                precedent_echappe = true;
-                continue;
-            }
-            if dans_valeur {
-                valeur.push(ch);
-            } else if ch == ':' && !precedent_echappe {
-                dans_valeur = true;
-            } else {
-                cle.push(ch);
-            }
-            precedent_echappe = false;
-        }
-        match cle.as_str() {
+    let mut nom = None;
+    let mut mdp = None;
+    let mut sans_mot_de_passe = false;
+    for champ in champs {
+        // La clé est une lettre : le premier `:` sépare, la valeur garde ses barres.
+        let Some((cle, brut)) = champ.split_once(':') else {
+            continue;
+        };
+        let valeur = rendre_wifi(brut);
+        match cle {
             "S" => nom = Some(valeur),
             "P" => mdp = Some(valeur),
             "T" if valeur.eq_ignore_ascii_case("nopass") => sans_mot_de_passe = true,
@@ -412,6 +452,49 @@ fn analyser_wifi(contenu: &str) -> Option<Wifi> {
     let nom = nom.filter(|n| !n.is_empty())?;
     let mot_de_passe = mdp.filter(|m| !m.is_empty() && !sans_mot_de_passe);
     Some(Wifi { nom, mot_de_passe })
+}
+
+/// La valeur d'un champ Wi-Fi : la paire de guillemets qui l'entoure retirée (si le dernier
+/// guillemet n'est pas échappé), puis les échappements rendus.
+fn rendre_wifi(brut: &str) -> String {
+    let barres = brut
+        .bytes()
+        .rev()
+        .skip(1)
+        .take_while(|b| *b == b'\\')
+        .count();
+    let entoure =
+        brut.len() >= 2 && brut.starts_with('"') && brut.ends_with('"') && barres % 2 == 0;
+    let corps = if entoure {
+        &brut[1..brut.len() - 1]
+    } else {
+        brut
+    };
+    let mut sortie = String::new();
+    let mut echappe = false;
+    for c in corps.chars() {
+        if echappe || c != '\\' {
+            sortie.push(c);
+            echappe = false;
+        } else {
+            echappe = true;
+        }
+    }
+    sortie
+}
+
+/// Le texte sur une ligne : les blancs et les retours à la ligne ramenés à une espace.
+fn sur_une_ligne(texte: &str) -> String {
+    // Sans les caractères de format (retournement du sens d'écriture, largeur nulle…) qui
+    // changeraient ce que l'œil lit.
+    let net: String = texte
+        .chars()
+        .filter(|c| {
+            !matches!(*c as u32,
+                0x200b..=0x200f | 0x202a..=0x202e | 0x2060..=0x2064 | 0x2066..=0x2069 | 0xfeff)
+        })
+        .collect();
+    net.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
 /// Les `max` premiers caractères, « … » si on a coupé.
@@ -517,6 +600,43 @@ mod tests {
     }
 
     #[test]
+    fn le_detail_n_a_ni_retournement_ni_largeur_nulle() {
+        let code = classer("abc\u{202e}def\u{200b}ghi".into());
+        assert_eq!(code.detail(), "abcdefghi");
+        let wifi = classer("WIFI:S:a\u{202e}b;P:x;;".into());
+        assert_eq!(wifi.detail(), "ab");
+    }
+
+    #[test]
+    fn le_meme_code_est_lu_serre_et_refuse_dans_une_grande_zone() {
+        // Serré : (25 + 8) modules de 3 px = 99 px, lu ; le même code au milieu de 900 × 900
+        // couvre moins d'un dixième : refusé, la zone rend son texte.
+        assert!(lire(&image("https://exemple.fr", 3, 99, 99, false)).is_some());
+        assert!(lire(&image("https://exemple.fr", 3, 900, 900, false)).is_none());
+    }
+
+    #[test]
+    fn lire_zone_rend_le_code_avant_le_texte() {
+        // Le code gagne, sans moteur de texte : l'OCR n'est pas appelé.
+        match crate::texte::lire_zone(&image("https://exemple.fr", 6, 300, 300, false)) {
+            crate::texte::Issue::Code(code) => assert_eq!(code.detail(), "exemple.fr"),
+            autre => panic!("attendu un code : {autre:?}"),
+        }
+    }
+
+    #[test]
+    fn des_images_extremes_ne_font_pas_paniquer() {
+        for (l, h) in [(1u32, 1u32), (5000, 3), (3, 5000), (7, 7), (4000, 4000)] {
+            let p = Pixels {
+                largeur: l,
+                hauteur: h,
+                rgba: vec![128; (l * h * 4) as usize],
+            };
+            assert!(lire(&p).is_none(), "{l}x{h}");
+        }
+    }
+
+    #[test]
     fn un_code_trop_petit_dans_la_zone_laisse_le_texte() {
         // Un petit code dans une grande zone : 3 px le module, zone 900 × 900.
         let petit = image("https://exemple.fr", 3, 900, 900, false);
@@ -613,6 +733,22 @@ mod tests {
             "https://exemple.fr: 80",
             "https://exemple.fr/un deux",
             "https://exemple.fr/\u{7}",
+            "https://exemple.fr/a\"b",
+            "https://exemple.fr/a<b>",
+            "https://exemple.fr/caf\u{e9}",
+            "https://exemple.fr/a\u{202e}b",
+            "http://3232235777",
+            "http://0x7f.1",
+            "http://017.0.0.1",
+            "http://127.1",
+            "http://127.0.0.1:8080/x",
+            "http://127.9.9.9",
+            "http://0.0.0.0",
+            "http://localhost:8080/admin",
+            "http://api.localhost/",
+            "https://exemple.fr./x",
+            "http://192.168.1.256",
+            "http://1.2.3",
             "ftp://exemple.fr",
             "javascript:alert(1)",
             "file:///C:/Windows/system32/calc.exe",
@@ -628,6 +764,56 @@ mod tests {
                 "{lien}"
             );
         }
+    }
+
+    #[test]
+    fn le_lien_en_clair_le_dit() {
+        assert_eq!(
+            classer("http://exemple.fr/x".into()).detail(),
+            "http://exemple.fr"
+        );
+        assert_eq!(
+            classer("https://exemple.fr/x".into()).detail(),
+            "exemple.fr"
+        );
+    }
+
+    #[test]
+    fn le_wifi_retire_les_guillemets_des_chiffres() {
+        let code = classer(r#"WIFI:T:WPA;S:"1234";P:"98765432";;"#.into());
+        assert_eq!(code.a_copier(), "98765432");
+        assert_eq!(code.detail(), "1234");
+        // Un guillemet échappé à la fin n'est pas une paire.
+        let code = classer(r#"WIFI:S:Maison;P:"abc\";;"#.into());
+        assert_eq!(code.a_copier(), r#""abc""#);
+    }
+
+    #[test]
+    fn le_nom_du_wifi_tient_sur_une_ligne() {
+        let code = classer("WIFI:S:Un\nDeux;P:x;;".into());
+        assert!(!code.detail().contains('\n'));
+    }
+
+    #[test]
+    fn deux_codes_dont_un_seul_lisible_a_la_reduction_ne_donnent_rien() {
+        // Deux codes différents côte à côte : refus dès le premier passage qui les voit.
+        let a = image("https://un.fr", 4, 300, 300, false);
+        let b = image("https://deux.fr", 4, 300, 300, false);
+        let mut rgba = Vec::new();
+        for y in 0..300usize {
+            rgba.extend_from_slice(&a.rgba[y * 300 * 4..(y + 1) * 300 * 4]);
+            rgba.extend_from_slice(&b.rgba[y * 300 * 4..(y + 1) * 300 * 4]);
+        }
+        let deux = Pixels {
+            largeur: 600,
+            hauteur: 300,
+            rgba,
+        };
+        assert!(lire(&deux).is_none());
+        let mut gris = Gris::depuis(&deux).unwrap();
+        assert!(matches!(essayer(&gris), Passage::Refuse));
+        gris = gris.reduire_de_moitie();
+        let _ = essayer(&gris);
     }
 
     #[test]

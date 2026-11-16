@@ -319,7 +319,13 @@ pub fn lire(pixels: &Pixels) -> Issue {
 /// bonne part de la zone (`qr::lire`), sinon le texte (`lire`). Le code ne demande aucune
 /// langue de lecture, mais « Copier le texte » n'est construit qu'avec elles.
 pub fn lire_zone(pixels: &Pixels) -> Issue {
-    match qr::lire(pixels) {
+    // Une panique de la crate de lecture ne doit pas coûter le texte : on passe à l'OCR.
+    let code = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| qr::lire(pixels)))
+        .unwrap_or_else(|_| {
+            log::warn!("texte code: lecture interrompue (panique), texte lu a la place");
+            None
+        });
+    match code {
         Some(code) => Issue::Code(code),
         None => lire(pixels),
     }

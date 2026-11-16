@@ -2051,21 +2051,27 @@ lecture, §2), choix de l'utilisateur du 16/11/2026 (Pro).
 - Lecture (`rqrr`, pur Rust, MIT OR Apache-2.0 avec ISC pour `g2p`) : gris de l'image, essais
   dans l'ordre sur l'image, ses couleurs inversées, réduite de moitié, agrandie ×2 (sous 500
   px), le premier qui rend un code gagne. Un seul contenu à la fois (deux codes différents :
-  rien, on passe à l'OCR) et le cadre du code doit couvrir un dixième de la zone au moins
+  refus définitif, on passe à l'OCR) et le cadre du code doit couvrir un dixième de la zone au moins
   (`PART_MINIMALE`) : un petit code dans un coin de page rend le texte de la page. Mesuré
   sur 2560 × 1440 sans code : 116 ms (Linux, release), les quatre essais compris.
-- Genres (`classer`) : `Lien` (http ou https ; ni espace, ni contrôle, ni `\` ; pas
-  d'identifiant avant le domaine ; domaine non vide en ASCII, port numérique ; 2 048 octets
-  au plus), sinon `Texte` (donc sans « Ouvrir » : `mailto:`, `javascript:`, `file:`, domaines
-  aux lettres imitées…) ; `Wifi` (`WIFI:T:…;S:…;P:…;;`, `\;`, `\:`, `\\`, `\"` rendus) : on copie
-  le mot de passe, ou le nom d'un réseau ouvert. Le mot de passe va au presse-papiers hors de
-  l'historique (Win + V) et du nuage (`sortie::copier_texte_secret`, `exclude_from_monitoring`).
+- Genres (`classer`) : `Lien` (http ou https ; de l'ASCII visible seulement, sans `"<>^|{}`,
+  accent grave ni `\` ; pas d'identifiant avant le domaine ; domaine non vide en ASCII, sans
+  point final, port numérique ; ni `localhost`, ni `127.x.x.x`, ni `0.0.0.0` ; une adresse IPv4
+  seulement en quatre nombres décimaux sans zéro devant ; 2 048 octets au plus), sinon `Texte`
+  (donc sans « Ouvrir » : `mailto:`, `javascript:`, `file:`, domaines aux lettres imitées,
+  liens aux accents…) ; `Wifi` (`WIFI:T:…;S:…;P:…;;`, `\;`, `\:`, `\\`, `\"` rendus, paire de
+  guillemets des chiffres retirée) : on copie le mot de passe, ou le nom d'un réseau ouvert.
+  Le mot de passe va au presse-papiers hors de l'historique (Win + V) et du nuage
+  (`sortie::copier_texte_secret`, `exclude_from_monitoring`). Un lien en clair (`http://`) le
+  dit dans le détail du bandeau.
 - Bandeau : réussite à durée (`DUREE_CODE_MS`, 7 s), pilule élargie avec détail (domaine de
   `qr::domaine_sur`, nom du réseau, début du texte), croix, et « Ouvrir » pour un lien sûr
   seulement. La page ne reçoit ni n'envoie jamais le lien : `bandeau_action { id, action:
   "ouvrir_lien" }`, le cœur garde le lien (`LIEN`, avec l'identifiant du message), le prend
-  une fois, le revérifie (`systeme::ouvrir_lien`) et l'ouvre hors du fil principal
-  (`ShellExecuteW` « open »). Une nouvelle lecture, ou un autre message, l'annule.
+  une fois, le revérifie (`domaine_sur`, puis `systeme::ouvrir_lien` : http ou https
+  seulement) et l'ouvre hors du fil principal (`ShellExecuteW` « open »). Une nouvelle lecture
+  du raccourci, un autre message (l'identifiant ne correspond plus), ou 10 s écoulées
+  (`LIEN_VALIDITE`), l'annule. Une panique de `rqrr` est rattrapée (`lire_zone`) : on lit alors le texte.
 - Journal : `texte code lien|wifi|wifi ouvert|texte en <ms> ms facteur <f>`, `texte lien
   ouvert`. En WARN : `texte lien non ouvert: <e>`, `texte lien sans fil: <e>`. Jamais le
   contenu ni le lien (le `Debug` de `Code` ne dit que son genre et sa taille).
