@@ -1285,3 +1285,30 @@ remplace la barre de la 0.7.2.
 - Pas de codes-barres, pas de lecture dans l'éditeur, pas de QR code en Shift-JIS, et sans
   langue de lecture installée « Copier le texte » n'existe pas, donc le QR code non plus.
 - Un QR code qui couvre un dixième de la zone ou plus l'emporte sur le texte de la zone.
+
+## Cadre du film à 125 % (version 0.7.9)
+
+L'essai 15 (cas F125) voyait « cadre 2/4 » à 125 %. Ce n'était pas un hasard : le cadre du
+film était décalé d'un pixel. Les runs verts étaient ceux où F125 n'était pas joué (« échelle
+non suivie »). La page posait le cadre en pixels logiques fractionnaires : à 125 %, la
+bordure de 2 px fait 2,5 px réels et le bord gauche tombe en 36,25. Le moteur arrondissait
+chaque côté à sa façon, et le cadre tombait à 3 px de la zone à gauche et en haut, à 2 px à
+droite et en bas.
+
+`film.js` (`poser`) pose maintenant le cadre en pixels réels entiers, dans un repère
+`scale(1 / k)` : épaisseurs arrondies vers le bas (2,5 font 2, 1,5 font 1), position et taille
+entières, rayon arrondi et borné à la bordure et au liseré (coin de la zone net). La portée
+du voile suit l'échelle (`200vmax × k`) : dans ce repère, elle ne couvrait plus l'écran au-delà
+de 200 %. À 100 %, le rendu ne change pas. L'essai de page `film.cjs` vérifie
+le blanc net à 2 px de la zone sur les quatre côtés à 100, 125, 150 et 175 %, le voile
+jusqu'aux coins de l'écran à 350 %, et rejoue le cas F125 (zone 600 ×
+450 en (40, 40) à 125 %). Les deux contrôles échouent sur l'ancienne page et passent sur la
+nouvelle. F125 écrit aussi ses quatre points lus.
+
+### Non vérifié
+
+- WebView2 sur Windows : vérifié dans Chromium seulement. La CI (F125) le jouera, si son
+  changement d'échelle est suivi.
+- `defilante.js` a le même défaut (relecture du 16/11) : trait de 1 px posé en pixels
+  logiques fractionnaires, qui mord dans la zone ou n'est pas symétrique à 125, 150 et 175 %.
+  Noté dans les finitions, pas corrigé ici.

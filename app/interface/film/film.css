@@ -40,7 +40,7 @@ body {
   box-shadow:
     0 0 0 var(--film-cadre-lisere) var(--film-cadre-lisere-dehors),
     inset 0 0 0 var(--film-cadre-lisere) var(--film-cadre-lisere-dedans),
-    0 0 0 200vmax var(--film-voile);
+    0 0 0 var(--film-voile-portee, 200vmax) var(--film-voile);
 }
 
 /* Pilule à fond plein (écart E13 : une fenêtre transparente ne peut pas flouter l'écran
