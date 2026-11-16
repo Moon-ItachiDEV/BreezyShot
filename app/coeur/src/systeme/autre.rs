@@ -124,3 +124,7 @@ pub fn cacher_fenetre_async(_identifiant: isize) -> bool {
 pub fn ouvrir_fichier(_fichier: &std::path::Path) -> Result<(), String> {
     Err("ouverture non disponible sur ce systeme".into())
 }
+
+pub fn ouvrir_lien(_lien: &str) -> Result<(), String> {
+    Err("ouverture non disponible sur ce systeme".into())
+}

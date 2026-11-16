@@ -95,12 +95,13 @@ body {
   line-height: var(--bandeau-detail-interligne);
 }
 
-/* Réussite : une ligne, titre seul, coupé par « … » s'il est trop long (maquette). */
-.reussite .detail,
-.reussite .boutons {
+/* Réussite : une ligne, titre seul, coupé par « … » s'il est trop long (maquette). Avec une
+   durée (QR code), elle est élargie (`.large`) et montre son détail et ses boutons. */
+.reussite:not(.large) .detail,
+.reussite:not(.large) .boutons {
   display: none;
 }
-.reussite .titre {
+.reussite:not(.large) .titre {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;

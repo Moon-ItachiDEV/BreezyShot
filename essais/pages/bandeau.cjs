@@ -301,6 +301,70 @@ const LONG_OK = { id: 'long-ok', genre: 'reussite', titre: 'Enregistré dans Ima
     await pa.context().close();
     await pb.context().close();
   }
+  // QR code : une réussite à `duree_ms` (un QR code lu) devient une pilule élargie : titre,
+  // détail, « Ouvrir » et croix ; elle part seule à `duree_ms`. Sans `duree_ms`, une réussite
+  // reste la ligne seule (détail et actions ignorés, comme avant).
+  {
+    const LIEN = {
+      id: 'qr1',
+      genre: 'reussite',
+      titre: 'Lien copié',
+      detail: 'billetterie.exemple.fr',
+      actions: [{ id: 'ouvrir_lien', libelle: 'Ouvrir' }],
+      duree_ms: 1500,
+    };
+    const pq = await tauriPage();
+    await pq.evaluate((m) => { window.__t0 = performance.now(); __emettre(m); }, LIEN);
+    await pq.waitForTimeout(400);
+    const etat = await pq.evaluate(() => ({
+      large: bandeau.classList.contains('large'),
+      reussite: bandeau.classList.contains('reussite'),
+      titre: document.querySelector('.titre').textContent,
+      detail: document.querySelector('.detail').textContent,
+      detailVu: getComputedStyle(document.querySelector('.detail')).display !== 'none',
+      boutons: [...document.querySelectorAll('#bandeau button')].map((b) => b.dataset.action),
+      zone: __appels.filter((x) => x[0] === 'bandeau_zone').length,
+    }));
+    verifier(
+      etat.large && etat.reussite && etat.titre === 'Lien copié' &&
+        etat.detail === 'billetterie.exemple.fr' && etat.detailVu &&
+        JSON.stringify(etat.boutons) === JSON.stringify(['ouvrir_lien', 'fermer']) &&
+        etat.zone >= 1,
+      'QR code : réussite à durée : élargie, détail, « Ouvrir » et croix, zone envoyée',
+      JSON.stringify(etat),
+    );
+    await capture(pq, 'qr-lien-clair', 'light');
+    await pq.waitForFunction(() => __appels.some((a) => a[0] === 'bandeau_termine'), null, { timeout: 3000 }).catch(() => {});
+    const fin = await pq.evaluate(() => ({
+      ms: performance.now() - window.__t0,
+      n: __appels.filter((a) => a[0] === 'bandeau_termine').length,
+      actions: __appels.filter((a) => a[0] === 'bandeau_action').length,
+    }));
+    verifier(fin.n === 1 && fin.actions === 0 && fin.ms >= 1500 && fin.ms < 3500, 'QR code : réussite à durée : part seule à duree_ms', JSON.stringify(fin));
+    await pq.context().close();
+
+    // Le clic sur « Ouvrir » envoie l'action, rien d'autre (jamais un lien).
+    const po = await tauriPage();
+    await po.evaluate((m) => __emettre(m), { ...LIEN, duree_ms: 6000 });
+    await po.waitForTimeout(400);
+    const [bx, by] = await centre(po, '.act');
+    await po.mouse.click(bx, by); await po.waitForTimeout(300);
+    const act = sansZone(await lesAppels(po));
+    verifier(act.length === 2 && act[0][0] === 'bandeau_action' && JSON.stringify(act[0][1]) === JSON.stringify({ id: 'qr1', action: 'ouvrir_lien' }), 'QR code : « Ouvrir » : bandeau_action { id, action } seulement', JSON.stringify(act));
+    await po.context().close();
+
+    // Sans durée : la ligne seule, détail et actions ignorés.
+    const ps = await tauriPage();
+    await ps.evaluate((m) => __emettre(m), { ...LIEN, duree_ms: undefined, tenir: true });
+    await ps.waitForTimeout(300);
+    const simple = await ps.evaluate(() => ({
+      large: bandeau.classList.contains('large'),
+      boutons: document.querySelectorAll('#bandeau button').length,
+      detail: document.querySelector('.detail').textContent,
+    }));
+    verifier(!simple.large && simple.boutons === 0 && simple.detail === '', 'QR code : réussite sans durée : une ligne, détail et actions ignorés', JSON.stringify(simple));
+    await ps.context().close();
+  }
   // bandeau_pret : une seule fois, avant tout autre appel.
   p = await tauriPage();
   await p.waitForTimeout(100);

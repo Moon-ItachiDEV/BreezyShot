@@ -34,6 +34,11 @@ use crate::texte::{self as lecture, Issue};
 /// La sonde des langues de lecture est partie (une fois par lancement).
 static SONDE_LANCEE: AtomicBool = AtomicBool::new(false);
 
+/// Le lien du dernier QR code lu et montré, avec l'identifiant du message du bandeau qui
+/// propose « Ouvrir » : la page n'envoie que l'action, jamais le lien (QR code). Vidé à chaque
+/// nouvelle lecture et dès qu'il est pris.
+static LIEN: Mutex<Option<(u64, String)>> = Mutex::new(None);
+
 /// Dernier numéro de lecture donné (raccourci et menu).
 static NUMERO: AtomicU64 = AtomicU64::new(0);
 
@@ -291,6 +296,8 @@ fn garder_ecran(app: &AppHandle, numero: u64, relache: Instant, minimum: Duratio
 /// `Evenement::TexteLu` ; le fil `texte-echeance` tient `DELAI_LECTURE`. `document` :
 /// l'éditeur (`Some(id)`) ou le raccourci.
 fn lancer_lecture(app: &AppHandle, numero: u64, document: Option<u64>, pixels: Pixels) {
+    // Un nouveau texte à lire : le lien de la lecture d'avant n'est plus proposé.
+    retenir_lien(None);
     let (fini, attente) = mpsc::channel::<()>();
     let pour = app.clone();
     let lance = std::thread::Builder::new()
@@ -302,7 +309,12 @@ fn lancer_lecture(app: &AppHandle, numero: u64, document: Option<u64>, pixels: P
                 pixels.hauteur,
                 systeme::texte::dimension_max(),
             );
-            let issue = lecture::lire(&pixels);
+            // Le raccourci lit aussi un QR code (QR code) ; l'éditeur, que le texte.
+            let issue = if document.is_none() {
+                lecture::lire_zone(&pixels)
+            } else {
+                lecture::lire(&pixels)
+            };
             let duree = debut.elapsed();
             drop(pixels);
             if let Some(d) = systeme::texte::derniere_creation() {
@@ -320,6 +332,10 @@ fn lancer_lecture(app: &AppHandle, numero: u64, document: Option<u64>, pixels: P
                     lu,
                     systeme::texte::fin_de_ligne(),
                 ))),
+                (Issue::Code(code), None) if code.est_secret() => {
+                    Some(sortie::copier_texte_secret(code.a_copier()))
+                }
+                (Issue::Code(code), None) => Some(sortie::copier_texte(code.a_copier())),
                 _ => None,
             };
             let fin = FinLecture {
@@ -523,8 +539,50 @@ fn conclure(app: &AppHandle, fin: FinLecture) {
         log::info!("{ligne}");
     }
     super::appliquer(app, texte::declencheur(&fin.issue));
-    super::afficher(app, texte::message_fin(&fin));
+    let lien = match (&fin.issue, &fin.copie) {
+        (Issue::Code(code), Some(Etape::Faite)) => code.lien().map(str::to_owned),
+        _ => None,
+    };
+    let id = super::afficher(app, texte::message_fin(&fin));
+    retenir_lien(id.zip(lien));
     log::info!("{}", texte::ligne_chrono(gel_cache, x.relache.elapsed()));
+}
+
+/// Garde le lien à ouvrir (ou l'oublie : `None`) avec l'identifiant de son message.
+fn retenir_lien(lien: Option<(u64, String)>) {
+    *LIEN.lock().unwrap_or_else(|e| e.into_inner()) = lien;
+}
+
+/// « Ouvrir » du bandeau d'un lien lu (fil principal) : seulement le lien du message dont
+/// l'action vient (`message`), pris une fois, ouvert hors du fil principal. Le journal dit
+/// le résultat, jamais le lien.
+pub fn ouvrir_lien(message: u64) {
+    let lien = {
+        let mut place = LIEN.lock().unwrap_or_else(|e| e.into_inner());
+        match place.take() {
+            Some((id, lien)) if id == message => Some(lien),
+            // Le message d'un autre lien : celui-ci n'est plus proposé.
+            _ => None,
+        }
+    };
+    let Some(lien) = lien else {
+        log::info!("texte lien: ouverture ignoree (message {message} perime)");
+        return;
+    };
+    // Jugé de nouveau ici : seul un lien sûr part au système.
+    if crate::texte::qr::domaine_sur(&lien).is_none() {
+        log::warn!("texte lien non ouvert: lien refuse");
+        return;
+    }
+    let lance = std::thread::Builder::new()
+        .name("texte-lien".into())
+        .spawn(move || match systeme::ouvrir_lien(&lien) {
+            Ok(()) => log::info!("texte lien ouvert"),
+            Err(e) => log::warn!("texte lien non ouvert: {e}"),
+        });
+    if let Err(e) = lance {
+        log::warn!("texte lien sans fil: {e}");
+    }
 }
 
 /// Écrans changés ou session verrouillée pendant la Lecture (fil principal) : l'écran
