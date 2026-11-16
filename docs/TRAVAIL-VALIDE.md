@@ -1257,3 +1257,31 @@ remplace la barre de la 0.7.2.
 
 - Le rebond lui-même n'existe pas dans Chromium sous Linux : la cause est déduite du
   retour de l'utilisateur, la correction est à confirmer par lui sous Windows.
+
+## Lire un QR code dans « Copier le texte » (version 0.7.6)
+
+- Choix de l'utilisateur (16/11/2026) : la lecture passe par « Copier le texte », sans nouveau
+  raccourci ni bouton ; réservée au Pro. Trois pistes avaient été montrées en maquette ; la
+  fiche de la piste B n'est pas faite (le détail d'un code qui n'est pas un lien est dans le
+  bandeau). Détail du fonctionnement : `docs/ARCHITECTURE.md` §6.4.
+- Qui a relu quoi : conseil de plan et conseil sur le diff final par un agent Fable 5.2 ;
+  relecture distincte du diff par un agent Opus 5.5 avant la PR. Constats traités : refus
+  définitif pour plusieurs codes ou un code trop petit, liens plus stricts (adresses IP
+  trompeuses, `localhost`, caractères invisibles ou de ligne de commande), guillemets du
+  Wi-Fi, panique de la crate rattrapée, lien gardé testé, détail sans retournement du sens
+  d'écriture.
+- Mesure : 116 ms pour une image de 2 560 × 1 440 sans code (Linux, release, quatre passages).
+
+### Non vérifié
+
+- Tout le code Windows exécuté pour de vrai : l'ouverture du lien (`ShellExecuteW`, le
+  navigateur peut s'ouvrir derrière le bandeau, qui n'a pas le focus), le mot de passe Wi-Fi
+  hors de l'historique Win + V, le clic sur « Ouvrir » dans la fenêtre traversante du bandeau.
+  Compilé et passé à clippy pour `x86_64-pc-windows-msvc`, non lancé.
+- La lecture sur de vraies captures d'écran chargées (écrans en 125 et 150 %, moiré).
+
+### Limites acceptées
+
+- Pas de codes-barres, pas de lecture dans l'éditeur, pas de QR code en Shift-JIS, et sans
+  langue de lecture installée « Copier le texte » n'existe pas, donc le QR code non plus.
+- Un QR code qui couvre un dixième de la zone ou plus l'emporte sur le texte de la zone.

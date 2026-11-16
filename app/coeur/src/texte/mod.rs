@@ -10,6 +10,8 @@ use std::time::Duration;
 use crate::systeme::gel::Pixels;
 use crate::systeme::texte::{self as moteur, ErreurMoteur, LigneBrute, Reconnu};
 
+pub mod qr;
+
 #[cfg(test)]
 mod tests;
 
@@ -282,17 +284,21 @@ fn texte_de(lu: &Lu, debut: usize, fin: usize, fin_de_ligne: &str) -> String {
 #[derive(Clone, PartialEq, Eq)]
 pub enum Issue {
     Texte(Lu),
+    /// Un QR code lu à la place du texte (QR code) : `lire_zone`.
+    Code(qr::Code),
     Vide,
     AucuneLangue,
     /// Cause en code court.
     Echec(String),
 }
 
-/// Comme un `Debug` dérivé, mais `Texte` passe par celui de `Lu` (jamais le texte).
+/// Comme un `Debug` dérivé, mais `Texte` et `Code` passent par ceux de `Lu` et de `Code`
+/// (jamais le texte ni le contenu du code).
 impl fmt::Debug for Issue {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Issue::Texte(lu) => f.debug_tuple("Texte").field(lu).finish(),
+            Issue::Code(code) => f.debug_tuple("Code").field(code).finish(),
             Issue::Vide => f.write_str("Vide"),
             Issue::AucuneLangue => f.write_str("AucuneLangue"),
             Issue::Echec(code) => f.debug_tuple("Echec").field(code).finish(),
@@ -307,6 +313,22 @@ impl fmt::Debug for Issue {
 /// maximale : `Echec`. Image vide, ou aucun mot lu : `Vide`.
 pub fn lire(pixels: &Pixels) -> Issue {
     lire_avec(pixels, moteur::dimension(), moteur::reconnaitre)
+}
+
+/// La lecture d'une zone choisie pour « Copier le texte » (QR code) : un QR code qui couvre une
+/// bonne part de la zone (`qr::lire`), sinon le texte (`lire`). Le code ne demande aucune
+/// langue de lecture, mais « Copier le texte » n'est construit qu'avec elles.
+pub fn lire_zone(pixels: &Pixels) -> Issue {
+    // Une panique de la crate de lecture ne doit pas coûter le texte : on passe à l'OCR.
+    let code = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| qr::lire(pixels)))
+        .unwrap_or_else(|_| {
+            log::warn!("texte code: lecture interrompue (panique), texte lu a la place");
+            None
+        });
+    match code {
+        Some(code) => Issue::Code(code),
+        None => lire(pixels),
+    }
 }
 
 /// `lire`, avec la dimension maximale et le moteur donnés (pour les tests).

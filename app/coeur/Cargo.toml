@@ -1,6 +1,6 @@
 [package]
 name = "breezyshot"
-version = "0.7.5"
+version = "0.7.6"
 description = "Outil de capture d'écran pour Windows 11, puis macOS"
 edition = "2021"
 license = "FSL-1.1-MIT"
@@ -38,6 +38,11 @@ base64 = "0.23"
 # Pur Rust, aucune dépendance native ; le module `film` s'en sert sur tous les systèmes.
 # `raii_no_panic` : détruire l'encodeur sur un disque plein ne panique pas (fil `film-gif`).
 gif = { version = "0.14.2", default-features = false, features = ["color_quant", "std", "raii_no_panic"] }
+
+# Lire un QR code (QR code) : `rqrr` (MIT OR Apache-2.0, avec ISC pour sa table de Galois
+# `g2p`), pur Rust, sans décodeur d'images (`default-features = false` : on lui passe un
+# tableau de gris). Elle tire `g2p` et `lru` ; Rust 1.85 au moins (le dépôt fige 1.97).
+rqrr = { version = "0.11", default-features = false }
 
 [target.'cfg(windows)'.dependencies]
 # Copier le texte (0.5) : la lecture de Windows (Media.Ocr) et ce qu'elle demande pour
@@ -103,3 +108,5 @@ opt-level = 3
 syn = { version = "2", features = ["full", "visit"] }
 proc-macro2 = "1"
 tempfile = "3"
+# Les QR codes des essais de `texte/qr.rs` : on en dessine, puis on les relit.
+qrcode = { version = "0.14", default-features = false }

@@ -51,7 +51,7 @@ pub use licence::{ecrire_licence, effacer_licence, lire_licence};
 pub use nom::{chemin_libre, nom_affiche, nom_fichier};
 pub use png::{encoder_png, sur_blanc};
 pub use recents::{recents_a_supprimer, RECENTS_GARDES};
-pub use texte::copier_texte;
+pub use texte::{copier_texte, copier_texte_secret};
 
 /// Ce que l'Application demande de faire d'une capture.
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -1767,6 +1767,10 @@ pub fn traiter(app: &AppHandle, evenement: Evenement) {
             if !decompte && action == texte::ACTION_REESSAYER && texte_construit(app) {
                 lancer_capture(app, Mode::Texte);
             }
+            // « Ouvrir » du lien d'un QR code lu (QR code) : le lien est celui du cœur.
+            if !decompte && action == texte::ACTION_OUVRIR_LIEN {
+                geste_texte::ouvrir_lien(id);
+            }
         }
         Evenement::Vignette(signal) => traiter_vignette(app, signal),
         Evenement::ActionFaite(fin) => action_faite(app, *fin),

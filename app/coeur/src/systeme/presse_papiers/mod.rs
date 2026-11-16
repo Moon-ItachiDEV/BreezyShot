@@ -24,6 +24,16 @@ pub enum ErreurPressePapiers {
     Refuse,
 }
 
+/// Pose `texte` dans le presse-papiers ouvert de `presse` sans qu'il reste dans l'historique
+/// du presse-papiers ni dans le nuage de Windows (un secret : mot de passe Wi-Fi lu dans un
+/// QR code). Hors Windows : un texte ordinaire.
+pub fn poser_texte_secret(
+    presse: &mut arboard::Clipboard,
+    texte: &str,
+) -> Result<(), arboard::Error> {
+    plateforme::poser_texte_secret(presse, texte)
+}
+
 /// Vrai si le presse-papiers natif existe sur ce système.
 pub fn disponible() -> bool {
     plateforme::DISPONIBLE

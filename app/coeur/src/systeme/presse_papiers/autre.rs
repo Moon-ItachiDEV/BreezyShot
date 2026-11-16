@@ -4,6 +4,13 @@ use super::ErreurPressePapiers;
 
 pub const DISPONIBLE: bool = false;
 
+pub fn poser_texte_secret(
+    presse: &mut arboard::Clipboard,
+    texte: &str,
+) -> Result<(), arboard::Error> {
+    presse.set_text(texte)
+}
+
 pub struct Preparee;
 
 pub fn preparer(

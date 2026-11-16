@@ -97,6 +97,12 @@ pub struct Message {
 }
 
 impl Message {
+    /// Reçoit-il des clics ? Info et erreur, et la réussite à durée (un QR code lu :
+    /// sa croix et son « Ouvrir »).
+    pub fn a_croix(&self) -> bool {
+        self.genre.a_croix() || (self.genre == Genre::Reussite && self.duree_ms.is_some())
+    }
+
     /// Une erreur qui part seule après `duree_ms`, avec ses actions et sa croix.
     pub fn erreur_breve(titre: &str, actions: Vec<Action>, duree_ms: u32) -> Message {
         Message {
@@ -158,7 +164,7 @@ impl Contenu {
     /// Reçoit-il des clics ? Un message à croix, et le décompte (sa croix « Annuler »).
     fn a_croix(&self) -> bool {
         match self {
-            Contenu::Message(m) => m.genre.a_croix(),
+            Contenu::Message(m) => m.a_croix(),
             Contenu::Decompte(_) => true,
         }
     }
@@ -1009,6 +1015,13 @@ mod tests {
             ..info()
         };
         assert!(!Contenu::Message(reussite).a_croix());
+        // Une réussite à durée (un QR code lu) reçoit les clics : « Ouvrir » et sa croix.
+        let code_lu = Message {
+            genre: Genre::Reussite,
+            duree_ms: Some(7000),
+            ..info()
+        };
+        assert!(Contenu::Message(code_lu).a_croix());
         // Le filet du bandeau vaut pour le décompte : sans zone en 3 s, caché d'office.
         let c = EnCours::nouveau(2, Contenu::Decompte(decompte()));
         assert!(cacher_d_office(c.contenu.a_croix(), DELAI_ZONE_MAX, false));
