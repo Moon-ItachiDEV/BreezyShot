@@ -817,7 +817,7 @@ export function installerOutils(ed) {
     }
   });
   saisie.addEventListener("blur", (e) => {
-    if (edition && !e.relatedTarget?.closest?.("#palette")) validerSaisie();
+    if (edition && !e.relatedTarget?.closest?.("#socle")) validerSaisie();
   });
 
   // ---------- opérations sur la sélection ----------

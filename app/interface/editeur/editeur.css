@@ -1,8 +1,8 @@
 /* Éditeur d'annotation : habillage « Éditeur épuré », piste B « Fenêtre »
-   (design/editeur-epure/index.html, règles communes et .dir-b), barre d'annotation C et
-   instruments B (design/annotation-pistes, design/annotation-instruments), par les jetons
-   seulement (commun/jetons.css, jetons « editeur-* »). La fenêtre n'a pas de cadre Windows :
-   la barre du haut est la barre de la fenêtre. */
+   (design/editeur-epure/index.html, règles communes et .dir-b) ; barre du haut et socle
+   d'annotation de la piste C « Étages » (design/annotation-v3, choisie le 16/11), en fin de
+   fichier. Jetons de commun/jetons.css. La fenêtre n'a pas de cadre Windows : la barre du
+   haut est la barre de la fenêtre. */
 
 * {
   box-sizing: border-box;
@@ -52,32 +52,10 @@ input {
   height: 100%;
   overflow: hidden;
   background: var(--editeur-scene);
-}
-.tbar {
-  position: absolute;
-  left: 0;
-  right: 0;
-  top: 0;
-  z-index: 5;
-  height: var(--editeur-barre-hauteur);
-  display: flex;
-  align-items: center;
-  gap: var(--editeur-barre-ecart);
-  padding: 0 var(--editeur-barre-marge);
-  background: var(--editeur-mica);
-  border-bottom: var(--editeur-trait-largeur) solid var(--editeur-trait);
-}
-.sp {
-  flex: 1;
-  align-self: stretch;
+  container: fen / inline-size;
 }
 .rb,
-.ok,
-.pb,
-.tl,
-.mi,
-.sz,
-.sw {
+.mi {
   all: unset;
   box-sizing: border-box;
   cursor: pointer;
@@ -100,46 +78,6 @@ input {
 }
 .rb:active {
   transform: scale(0.94);
-}
-.ok {
-  width: var(--editeur-copier-largeur);
-  height: var(--editeur-copier-hauteur);
-  border-radius: var(--editeur-bouton-haut-rayon);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: var(--accent);
-  color: var(--on-accent);
-  transition:
-    transform var(--duree-editeur-appui),
-    background-color var(--duree-editeur-survol);
-}
-.ok:active {
-  transform: scale(0.93);
-}
-.ok:focus-visible {
-  outline-offset: var(--editeur-copier-focus);
-}
-.ok svg {
-  width: var(--editeur-copier-picto);
-  height: var(--editeur-copier-picto);
-  fill: none;
-  stroke: currentColor;
-  stroke-width: 2.2;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-}
-.ok path {
-  stroke-dasharray: 20;
-  stroke-dashoffset: 0;
-}
-.ok.done {
-  background: var(--success);
-  color: var(--editeur-copier-fait-texte);
-  animation: pop var(--duree-editeur-fait) var(--courbe-ressort);
-}
-.ok.done path {
-  animation: trace var(--duree-editeur-fait) var(--courbe-douce) both;
 }
 @keyframes trace {
   from {
@@ -232,423 +170,6 @@ input {
   cursor: grabbing;
 }
 
-/* Barre d'annotation : barre C « Souffle » (design/annotation-pistes) et instruments B
-   « Couleur » (design/annotation-instruments), choisis le 13/11. L'outil déplié s'ouvre dans
-   la barre, rien ne s'ouvre par-dessus l'image. La fenêtre s'ouvre assez large pour elle
-   (`editeur-ouverture-largeur`) ; plus étroite, seuls les outils défilent (Annuler,
-   Rétablir et Plus restent) et s'estompent du côté qui en cache. */
-.pal {
-  position: absolute;
-  left: var(--editeur-dock-marge);
-  right: var(--editeur-dock-marge);
-  bottom: var(--editeur-dock-bas);
-  z-index: 5;
-  width: fit-content;
-  min-width: min(var(--editeur-dock-min), calc(100% - var(--editeur-dock-retrait)));
-  max-width: calc(100% - var(--editeur-dock-retrait));
-  margin-inline: auto;
-  display: flex;
-  align-items: stretch;
-  height: var(--editeur-dock-hauteur);
-  padding: 0 var(--editeur-dock-marge);
-  border-radius: var(--editeur-dock-rayon);
-  background: var(--editeur-verre);
-  border: var(--editeur-trait-largeur) solid var(--editeur-verre-bord);
-  box-shadow: var(--shadow-16);
-  backdrop-filter: blur(var(--editeur-palette-flou)) saturate(1.4);
-}
-.tools::-webkit-scrollbar {
-  display: none;
-}
-.tools[data-suite="fin"] {
-  mask-image: linear-gradient(90deg, #000 calc(100% - var(--editeur-dock-fondu)), transparent);
-}
-.tools[data-suite="debut"] {
-  mask-image: linear-gradient(270deg, #000 calc(100% - var(--editeur-dock-fondu)), transparent);
-}
-.tools[data-suite="deux"] {
-  mask-image: linear-gradient(
-    90deg,
-    transparent,
-    #000 var(--editeur-dock-fondu),
-    #000 calc(100% - var(--editeur-dock-fondu)),
-    transparent
-  );
-}
-.dv {
-  width: var(--editeur-trait-largeur);
-  height: var(--editeur-separateur-hauteur);
-  background: var(--editeur-trait-fort);
-  flex: none;
-  align-self: center;
-  margin: 0 var(--editeur-separateur-marge-dock);
-}
-/* Annuler, Rétablir, Plus, et les outils à pictogramme. */
-.pb,
-.ip {
-  position: relative;
-  width: var(--editeur-outil-largeur);
-  height: var(--editeur-outil-hauteur);
-  border-radius: var(--editeur-outil-rayon);
-  display: grid;
-  place-items: center;
-  flex: none;
-  align-self: center;
-  color: var(--text);
-  transition:
-    background-color var(--duree-editeur-survol),
-    color var(--duree-editeur-encre),
-    transform var(--duree-editeur-appui),
-    opacity var(--duree-editeur-survol);
-}
-.pb:hover,
-.ip:hover,
-.pb[aria-expanded="true"] {
-  background: var(--editeur-survol);
-}
-.pb:active,
-.ip:active {
-  transform: scale(0.97);
-}
-.pb:disabled {
-  opacity: 0.3;
-  cursor: default;
-  background: none;
-  transform: none;
-}
-/* Les outils : la seule partie de la barre qui défile (repère des plis, `offsetLeft`). */
-.tools {
-  position: relative;
-  display: flex;
-  align-items: stretch;
-  gap: var(--editeur-outils-ecart);
-  flex: 0 1 auto;
-  min-width: 0;
-  padding: var(--editeur-outils-ecart-v) 0;
-  overflow-x: auto;
-  overflow-y: hidden;
-  scrollbar-width: none;
-}
-.pli {
-  display: flex;
-  align-items: stretch;
-  flex: none;
-  border-radius: var(--editeur-pli-rayon);
-  transition:
-    background-color var(--duree-editeur-encre),
-    box-shadow var(--duree-editeur-encre);
-}
-.pli[data-on] {
-  background: var(--editeur-survol);
-  box-shadow: inset 0 0 0 var(--editeur-trait-largeur) var(--editeur-trait);
-}
-/* L'outil en main et l'outil déplié : à la couleur d'accent. Replié, un outil à couleur
-   garde une petite nuance de sa couleur sous son pictogramme, bordée comme les nuances du pli
-   (barre plus claire, piste A : un trait rouge s'y lisait comme une faute). */
-.ip[aria-pressed="true"],
-.pli[data-on] .ip {
-  color: var(--accent-text);
-}
-.ip::after {
-  content: "";
-  position: absolute;
-  left: 50%;
-  bottom: var(--editeur-encre-bas);
-  width: var(--editeur-encre-nuance);
-  height: var(--editeur-encre-nuance);
-  border-radius: var(--editeur-encre-nuance-rayon);
-  background: var(--ink, transparent);
-  transform: translateX(-50%);
-  transition:
-    opacity var(--duree-editeur-survol),
-    background-color var(--duree-editeur-encre);
-}
-.pli[data-on] .ip::after {
-  opacity: 0;
-}
-.ip[data-encre]::after {
-  box-shadow: 0 0 0 var(--editeur-trait-largeur)
-    color-mix(in srgb, var(--text) var(--editeur-nuance-bord), transparent);
-}
-/* Encre très foncée ou très pâle : le liseré des instruments, marqué là où elle se confond
-   avec le fond de la barre (pâle en clair, foncée en sombre). */
-.ip[data-ton="f"]::after {
-  box-shadow: 0 0 0 var(--editeur-trait-largeur) var(--editeur-inst-trait-fonce);
-}
-.ip[data-ton="p"]::after {
-  box-shadow: 0 0 0 var(--editeur-trait-largeur) var(--editeur-inst-trait-pale);
-}
-
-/* Instruments dessinés : l'instrument en main se lève, le bas s'efface dans la barre. */
-.ib {
-  position: relative;
-  width: var(--editeur-inst-boite);
-  flex: none;
-  overflow: hidden;
-  border-radius: var(--editeur-pli-rayon);
-  mask-image: linear-gradient(#000 var(--editeur-inst-fondu), transparent 100%);
-}
-.ib .inst {
-  --encre: var(--editeur-instrument-neutre);
-  position: absolute;
-  left: var(--editeur-inst-gauche);
-  top: 0;
-  width: var(--editeur-inst-largeur);
-  height: var(--editeur-inst-hauteur);
-  transform: translateY(var(--editeur-inst-repos));
-  transition: transform var(--duree-editeur-instrument) var(--courbe-ressort);
-  filter: drop-shadow(0 var(--editeur-inst-ombre-y) var(--editeur-inst-ombre-flou) var(--editeur-inst-ombre));
-}
-.ib:hover .inst {
-  transform: translateY(var(--editeur-inst-survol));
-}
-.ib[aria-pressed="true"] .inst {
-  transform: translateY(var(--editeur-inst-leve));
-}
-.inst .i-encre {
-  fill: var(--encre);
-  stroke: var(--editeur-inst-trait-encre);
-  stroke-width: 0.6;
-  transition:
-    fill var(--duree-editeur-encre) var(--courbe-douce),
-    stroke var(--duree-editeur-encre) var(--courbe-douce);
-}
-.inst.encre-foncee .i-encre {
-  stroke: var(--editeur-inst-trait-fonce);
-  stroke-width: 0.8;
-}
-.inst.encre-pale .i-encre {
-  stroke: var(--editeur-inst-trait-pale);
-  stroke-width: 0.8;
-}
-.inst .i-reflet {
-  fill: url(#i-reflet);
-}
-.inst .i-facette-encre {
-  fill: var(--editeur-inst-facette-encre);
-}
-.inst .i-facette {
-  fill: var(--editeur-inst-facette);
-}
-.inst .i-corps,
-.inst .i-prise,
-.inst .i-bague,
-.inst .i-gomme {
-  stroke: var(--editeur-inst-trait);
-  stroke-width: 0.7;
-}
-.inst .i-corps {
-  fill: url(#i-corps);
-}
-.inst .i-prise {
-  fill: url(#i-prise);
-}
-.inst .i-bague {
-  fill: var(--editeur-inst-bague);
-}
-.inst .i-gomme {
-  fill: var(--editeur-inst-gomme);
-}
-.inst .i-gomme-reflet {
-  fill: url(#i-reflet);
-  opacity: 0.5;
-}
-/* Reflet blanc sur la face du biseau du surligneur (dessin, pas thème). */
-.inst .i-lumiere {
-  fill: #fff;
-  opacity: 0.3;
-}
-.inst .i-entaille {
-  fill: none;
-  stroke: var(--editeur-inst-entaille);
-  stroke-width: 0.5;
-}
-.inst .i-arete {
-  stroke-width: 0.45;
-}
-.corps-0 {
-  stop-color: var(--editeur-inst-corps-0);
-}
-.corps-1 {
-  stop-color: var(--editeur-inst-corps-1);
-}
-.corps-2 {
-  stop-color: var(--editeur-inst-corps-2);
-}
-.corps-3 {
-  stop-color: var(--editeur-inst-corps-3);
-}
-.prise-0 {
-  stop-color: var(--editeur-inst-prise-0);
-}
-.prise-1 {
-  stop-color: var(--editeur-inst-prise-1);
-}
-.prise-2 {
-  stop-color: var(--editeur-inst-prise-2);
-}
-/* La pointe suit la taille de l'outil ; l'instrument saute quand elle ou sa couleur change. */
-.inst .tp {
-  transform-box: fill-box;
-  transform-origin: 50% 100%;
-  transition: transform var(--duree-editeur-bout) var(--courbe-ressort);
-}
-.inst.o-stylo[data-t="0"] .tp {
-  transform: scaleX(0.7);
-}
-.inst.o-stylo[data-t="2"] .tp {
-  transform: scaleX(1.34);
-}
-.inst.o-fleche[data-t="0"] .tp {
-  transform: scale(0.84);
-}
-.inst.o-fleche[data-t="2"] .tp {
-  transform: scale(1.14);
-}
-.inst.saute {
-  animation: saute var(--duree-editeur-saut) var(--courbe-ressort);
-}
-@keyframes saute {
-  40% {
-    translate: 0 var(--editeur-inst-saut);
-  }
-}
-
-/* Le pli de l'outil déplié : variantes, tailles, couleurs, opacité. Barre plus claire, piste
-   A « Calme » (design/barre-claire) : le choix d'un groupe est une pastille claire en relief,
-   pas un carré plein ; un trait fin sépare les variantes des réglages. */
-.pli .in {
-  display: grid;
-  grid-template-columns: 0fr;
-  transition: grid-template-columns var(--duree-editeur-pli) var(--courbe-ressort);
-}
-.pli[data-on] .in {
-  grid-template-columns: 1fr;
-}
-.pli .in > div {
-  overflow: hidden;
-  min-width: 0;
-  display: flex;
-  align-items: center;
-  gap: var(--editeur-separateur-marge-dock);
-}
-.grp {
-  display: flex;
-  align-items: center;
-  gap: var(--editeur-outils-ecart);
-  flex: none;
-}
-.grp[hidden] {
-  display: none;
-}
-.pli .in .grp:first-child {
-  padding-left: var(--editeur-pli-marge);
-}
-/* Le dernier groupe visible ne touche pas le bord du pli (les nuances ont leur marge). */
-.pli .in .grp:not(.cols):last-child,
-.pli .in .grp:has(+ .sep[hidden]) {
-  padding-right: var(--editeur-pli-marge);
-}
-.sep {
-  width: var(--editeur-trait-largeur);
-  height: var(--editeur-pli-separateur);
-  flex: none;
-  align-self: center;
-  background: var(--editeur-trait-fort);
-}
-.sep[hidden] {
-  display: none;
-}
-.grp.cols {
-  gap: var(--editeur-nuances-ecart);
-  padding: 0 var(--editeur-pli-marge-couleurs) 0 var(--editeur-separateur-marge-dock);
-}
-.sz {
-  width: var(--editeur-cran);
-  height: var(--editeur-cran);
-  border-radius: var(--editeur-cran-rayon);
-  display: grid;
-  place-items: center;
-  flex: none;
-  color: var(--text-2);
-  transition:
-    background-color var(--duree-editeur-survol),
-    color var(--duree-editeur-survol);
-}
-.sz:hover {
-  background: var(--editeur-survol);
-}
-.sz[aria-pressed="true"] {
-  background: var(--editeur-choix-fond);
-  box-shadow: var(--editeur-choix-ombre);
-  color: var(--text);
-}
-.sz b {
-  display: block;
-  border-radius: 50%;
-  background: currentColor;
-}
-.sz .t0 {
-  width: var(--editeur-taille-0);
-  height: var(--editeur-taille-0);
-}
-.sz .t1 {
-  width: var(--editeur-taille-1);
-  height: var(--editeur-taille-1);
-}
-.sz .t2 {
-  width: var(--editeur-taille-2);
-  height: var(--editeur-taille-2);
-}
-.sz .s0 {
-  width: var(--editeur-taille-surligneur-0);
-  height: var(--editeur-taille-surligneur-0);
-}
-.sz .s1 {
-  width: var(--editeur-taille-surligneur-1);
-  height: var(--editeur-taille-surligneur-1);
-}
-.sz .s2 {
-  width: var(--editeur-taille-surligneur-2);
-  height: var(--editeur-taille-surligneur-2);
-}
-.sz .g0 {
-  width: var(--editeur-taille-gomme-0);
-  height: var(--editeur-taille-gomme-0);
-}
-.sz .g1 {
-  width: var(--editeur-taille-gomme-1);
-  height: var(--editeur-taille-gomme-1);
-}
-.sz .g2 {
-  width: var(--editeur-taille-gomme-2);
-  height: var(--editeur-taille-gomme-2);
-}
-.sz .n0 {
-  width: var(--editeur-taille-numero-0);
-  height: var(--editeur-taille-numero-0);
-}
-.sz .n1 {
-  width: var(--editeur-taille-numero-1);
-  height: var(--editeur-taille-numero-1);
-}
-.sz .n2 {
-  width: var(--editeur-taille-numero-2);
-  height: var(--editeur-taille-numero-2);
-}
-.sz .a {
-  font-weight: 700;
-  line-height: 1;
-}
-.sz .a0 {
-  font-size: var(--editeur-taille-texte-0);
-}
-.sz .a1 {
-  font-size: var(--editeur-taille-texte-1);
-}
-.sz .a2 {
-  font-size: var(--editeur-taille-texte-2);
-}
 /* Bloc noir : une bande toujours noire, bordée, dans les deux thèmes, comme l'objet qu'il
    pose. Le dessin est cloné par <use> : le sélecteur vise l'original, sans ancêtre. */
 .bloc-noir {
@@ -656,57 +177,6 @@ input {
   stroke: currentColor;
   stroke-opacity: 0.55;
   stroke-width: 1;
-}
-.sw {
-  position: relative;
-  width: var(--editeur-nuance);
-  height: var(--editeur-nuance);
-  border-radius: var(--editeur-nuance-rayon);
-  background: var(--c);
-  border: var(--editeur-trait-largeur) solid
-    color-mix(in srgb, var(--text) var(--editeur-nuance-bord), transparent);
-  flex: none;
-  transition: transform var(--duree-editeur-survol) var(--courbe-ressort);
-}
-.sw:hover {
-  transform: scale(1.1);
-}
-.sw[aria-pressed="true"] {
-  box-shadow:
-    0 0 0 var(--editeur-nuance-anneau) var(--acrylic-solid),
-    0 0 0 calc(var(--editeur-nuance-anneau) * 2) var(--text);
-}
-.sw.roue {
-  background: var(--editeur-roue);
-}
-.sw.roue i {
-  position: absolute;
-  inset: var(--editeur-roue-centre);
-  border-radius: calc(var(--editeur-nuance-rayon) / 2);
-  background: var(--c);
-  box-shadow: var(--editeur-roue-centre-bord);
-  display: none;
-}
-.sw.roue.has i {
-  display: block;
-}
-.op {
-  display: flex;
-  align-items: center;
-  gap: var(--editeur-glissiere-ecart);
-  flex: none;
-  padding-right: var(--editeur-pli-marge-couleurs);
-  color: var(--text-2);
-}
-.op .ico {
-  width: var(--editeur-picto-petit);
-  height: var(--editeur-picto-petit);
-}
-.op input[type="range"] {
-  width: var(--editeur-opacite-largeur);
-  accent-color: var(--accent);
-  margin: 0;
-  height: var(--editeur-glissiere-hauteur);
 }
 .cc {
   position: absolute;
@@ -829,31 +299,6 @@ input {
   stroke-linejoin: round;
 }
 
-/* Bouton « Glisser vers une appli » (design/glisser-appli, piste A) : on l'attrape et on
-   glisse ; un simple clic le secoue et dit quoi faire. */
-.rb.prise {
-  cursor: grab;
-  touch-action: none;
-}
-.rb.prise.glisse {
-  cursor: grabbing;
-  background: var(--editeur-survol);
-}
-.rb.prise.secoue {
-  animation: secoue var(--duree-editeur-vignette) ease-out;
-}
-@keyframes secoue {
-  25% {
-    transform: translateX(-2px);
-  }
-  50% {
-    transform: translateX(2px);
-  }
-  75% {
-    transform: translateX(-1px);
-  }
-}
-
 /* Saisie du texte en place */
 .saisie {
   resize: none;
@@ -878,24 +323,12 @@ input {
 }
 
 /* Copier le texte (contrat 0.5, §2.4 ; design/historique, « .ov.ed », « .w », « .ocrbar ») :
-   bouton « Texte » de la barre du haut, calque de balayage et de choix des mots. Les jetons
+   calque de balayage et de choix des mots (le bouton « Texte » est une sortie du haut). Les jetons
    `texte-*` (balayage, teinte de l'éditeur, survol, choix) viennent de design/historique. */
-.rb.lib {
-  width: auto;
-  display: flex;
-  gap: var(--editeur-message-ecart);
-  padding: 0 var(--editeur-menu-marge) 0 var(--editeur-message-marge-icone);
-  white-space: nowrap;
-}
 .rb:disabled {
   opacity: 0.3;
   cursor: default;
   background: none;
-  transform: none;
-}
-.ok:disabled {
-  opacity: 0.3;
-  cursor: default;
   transform: none;
 }
 .calque-texte {
@@ -1043,34 +476,521 @@ input {
   width: var(--editeur-copier-hauteur);
   height: var(--editeur-copier-hauteur);
 }
-/* Anneau de focus : `all: unset` des boutons l'efface ; celui de toute la page, remis
-   (« Copier » du haut garde son écart, .ok:focus-visible plus haut). Dans la barre
-   d'annotation, qui défile et coupe ce qui dépasse : en dedans ; l'instrument dessiné et
-   l'outil à pictogramme, en ombre intérieure (le masque de l'un efface le bas ; la nuance de
-   l'autre passe par-dessus l'anneau au lieu d'être barrée par lui). */
-.bt:focus-visible,
-.rb:focus-visible,
-.ok:focus-visible,
-.pb:focus-visible,
-.sz:focus-visible,
-.sw:focus-visible {
-  outline: var(--editeur-focus) solid var(--accent);
-}
+/* Anneau de focus : `all: unset` des boutons l'efface ; celui de toute la page, remis. */
 .bt:focus-visible,
 .rb:focus-visible {
+  outline: var(--editeur-focus) solid var(--accent);
   outline-offset: var(--editeur-focus);
 }
-.pb:focus-visible,
-.sz:focus-visible {
+
+/* ================= Piste C « Étages » (design/annotation-v3, choisie le 16/11) =================
+   En bas, le socle : les réglages de l'outil déplié au-dessus de la rangée des outils ; en
+   haut, Fermer et les sorties. */
+/* La barre du haut (aussi la barre de la fenêtre) : Fermer à gauche, les sorties à droite. */
+.hc {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  z-index: 5;
+  height: var(--editeur-barre-hauteur);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--editeur-barre-ecart);
+  padding: 0 var(--editeur-barre-marge);
+  background: var(--editeur-mica);
+  border-bottom: var(--editeur-trait-largeur) solid var(--editeur-trait);
+}
+.h-vide {
+  flex: 1;
+  align-self: stretch;
+}
+/* ---------- pièces communes ---------- */
+.h-b,
+.outil,
+.rg-b,
+.rg-c,
+.s-b,
+.copier {
+  all: unset;
+  box-sizing: border-box;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+/* `all: unset` efface aussi l'anneau du focus : le revoici (editeur.css fait de même). */
+.h-b:focus-visible,
+.outil:focus-visible,
+.rg-b:focus-visible,
+.rg-c:focus-visible,
+.s-b:focus-visible,
+.copier:focus-visible {
+  outline: var(--editeur-focus) solid var(--accent);
+  outline-offset: var(--editeur-focus);
+}
+.rg-b:focus-visible,
+.rg-c:focus-visible {
   outline-offset: calc(0px - var(--editeur-focus));
 }
-.sw:focus-visible {
-  outline-offset: var(--editeur-nuance-anneau-ecart);
+.ico.petit {
+  width: 14px;
+  height: 14px;
 }
-.ib:focus-visible,
-.ip:focus-visible {
-  outline: none;
-  box-shadow: inset 0 0 0 var(--editeur-focus) var(--accent);
+.filet {
+  flex: none;
+  width: var(--editeur-trait-largeur);
+  height: 20px;
+  margin: 0 6px;
+  background: var(--editeur-trait-fort);
+}
+.h-b {
+  width: 34px;
+  height: 34px;
+  border-radius: 9px;
+  display: grid;
+  place-items: center;
+  transition:
+    background-color var(--duree-editeur-survol),
+    transform var(--duree-editeur-appui);
+}
+.h-b:hover,
+.h-b[aria-expanded="true"] {
+  background: var(--editeur-survol);
+}
+.h-b:active,
+.outil:active,
+.s-b:active {
+  transform: scale(0.95);
+}
+.fenetre button:disabled {
+  opacity: 0.32;
+  cursor: default;
+  transform: none;
+}
+.fenetre button:disabled:hover {
+  background: none;
+}
+.fenetre .copier:disabled:hover {
+  background: var(--accent);
+}
+
+/* Un outil du socle : le choisi est une pastille claire en relief ; un point dit la couleur
+   de son encre. */
+.outil {
+  position: relative;
+  width: 38px;
+  height: 38px;
+  border-radius: 10px;
+  display: grid;
+  place-items: center;
+  color: var(--text-2);
+  transition:
+    background-color var(--duree-editeur-survol),
+    color var(--duree-editeur-survol),
+    transform var(--duree-editeur-appui);
+}
+.outil:hover {
+  background: var(--editeur-survol);
+  color: var(--text);
+}
+.outil[aria-pressed="true"] {
+  background: var(--editeur-choix-fond);
+  box-shadow: var(--editeur-choix-ombre);
+  color: var(--text);
+}
+.outil[data-encre]::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  bottom: 3px;
+  width: 5px;
+  height: 5px;
+  margin-left: -2.5px;
+  border-radius: 50%;
+  background: var(--encre);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--text) 34%, transparent);
+  opacity: 0;
+  transition: opacity var(--duree-editeur-survol);
+}
+.outil[data-encre][aria-pressed="true"]::after {
+  opacity: 1;
+}
+
+/* Réglages : variantes, tailles, couleurs, opacité. */
+.rg-zone {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+.rg {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  animation: rg-entre var(--duree-ressort) var(--courbe-ressort);
+}
+@keyframes rg-entre {
+  from {
+    opacity: 0;
+    transform: translateY(3px);
+  }
+}
+.rg-grp {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+.rg-grp[hidden],
+.rg-sep[hidden] {
+  display: none;
+}
+.rg-sep {
+  flex: none;
+  width: var(--editeur-trait-largeur);
+  height: 20px;
+  margin: 0 7px;
+  background: var(--editeur-trait-fort);
+}
+.rg-b {
+  min-width: 34px;
+  height: 32px;
+  padding: 0 4px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  color: var(--text-2);
+  transition:
+    background-color var(--duree-editeur-survol),
+    color var(--duree-editeur-survol);
+}
+.rg-b:hover {
+  background: var(--editeur-survol);
+  color: var(--text);
+}
+.rg-b[aria-pressed="true"] {
+  background: var(--editeur-choix-fond);
+  box-shadow: var(--editeur-choix-ombre);
+  color: var(--text);
+}
+.sg {
+  width: 26px;
+  height: 20px;
+  flex: none;
+}
+.sg-trait {
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+}
+.sg-large {
+  stroke-linecap: butt;
+  opacity: 0.6;
+}
+.sg-cercle {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+}
+.sg-plein {
+  fill: currentColor;
+}
+.sg-a {
+  width: 26px;
+  text-align: center;
+  font-weight: 600;
+  line-height: 20px;
+}
+.sg-a0 {
+  font-size: 12px;
+}
+.sg-a1 {
+  font-size: 15px;
+}
+.sg-a2 {
+  font-size: 19px;
+}
+.rg-couleurs {
+  gap: 0;
+}
+.rg-c {
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+}
+.rg-c i {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--c);
+  box-shadow: inset 0 0 0 1px var(--editeur-trait-fort);
+  transition:
+    transform var(--duree-ressort) var(--courbe-ressort),
+    box-shadow var(--duree-editeur-survol);
+}
+/* Blanc et Noir : un bord qui se voit sur les deux thèmes. */
+.rg-c.rg-pale i,
+.rg-c.rg-nuit i {
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--text) 42%, transparent);
+}
+.rg-c:hover i {
+  transform: scale(1.12);
+}
+/* La couleur choisie : un anneau autour d'elle. */
+.rg-c[aria-pressed="true"] i,
+.rg-c.rg-pale[aria-pressed="true"] i,
+.rg-c.rg-nuit[aria-pressed="true"] i {
+  transform: scale(0.84);
+  box-shadow:
+    inset 0 0 0 1px var(--editeur-trait-fort),
+    0 0 0 2.5px var(--rg-fond, var(--editeur-pop)),
+    0 0 0 4.5px var(--text);
+}
+.rg-roue i {
+  background: conic-gradient(#e5484d, #ffd43b, #30a46c, #0090ff, #8e4ec6, #e5484d);
+}
+.rg-roue.a i {
+  background:
+    radial-gradient(circle, var(--c) 0 46%, transparent 50%),
+    conic-gradient(#e5484d, #ffd43b, #30a46c, #0090ff, #8e4ec6, #e5484d);
+}
+.rg-op {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-2);
+  padding: 0 4px;
+}
+.rg-op .ico {
+  width: 18px;
+  height: 18px;
+}
+.rg-op input[type="range"] {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 84px;
+  height: 20px;
+  margin: 0;
+  background: none;
+  cursor: pointer;
+}
+.rg-op input[type="range"]::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: 2px;
+  background: linear-gradient(
+    to right,
+    var(--accent) var(--part, 100%),
+    var(--editeur-trait-fort) var(--part, 100%)
+  );
+}
+.rg-op input[type="range"]::-moz-range-track {
+  height: 4px;
+  border-radius: 2px;
+  background: linear-gradient(
+    to right,
+    var(--accent) var(--part, 100%),
+    var(--editeur-trait-fort) var(--part, 100%)
+  );
+}
+.rg-op input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 16px;
+  height: 16px;
+  margin-top: -6px;
+  border-radius: 50%;
+  background: var(--editeur-choix-fond);
+  box-shadow: var(--editeur-choix-ombre), inset 0 0 0 4px var(--editeur-pop), inset 0 0 0 9px var(--accent);
+}
+.rg-op input[type="range"]::-moz-range-thumb {
+  width: 16px;
+  height: 16px;
+  border: 0;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: var(--editeur-choix-ombre), inset 0 0 0 4px var(--editeur-pop);
+}
+
+/* Sorties : Texte, Glisser, Enregistrer et sa flèche, Copier. */
+.sorties {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex: none;
+}
+.s-b {
+  height: 34px;
+  padding: 0 11px 0 8px;
+  border-radius: 9px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 13px;
+  white-space: nowrap;
+  transition:
+    background-color var(--duree-editeur-survol),
+    transform var(--duree-editeur-appui);
+}
+.s-b:hover,
+.s-b[aria-expanded="true"] {
+  background: var(--editeur-survol);
+}
+.s-b .ico {
+  width: 18px;
+  height: 18px;
+}
+.s-b[hidden] {
+  display: none;
+}
+.duo {
+  display: flex;
+  align-items: center;
+}
+.duo .s-b:first-child {
+  padding-right: 7px;
+  border-radius: 9px 3px 3px 9px;
+}
+.duo .s-plus {
+  padding: 0 5px;
+  border-radius: 3px 9px 9px 3px;
+}
+[data-glisser] {
+  cursor: grab;
+}
+[data-glisser].glisse {
+  opacity: 0.45;
+}
+[data-glisser].secoue {
+  animation: secoue 320ms var(--courbe-douce);
+}
+@keyframes secoue {
+  20% {
+    transform: translateX(-3px);
+  }
+  45% {
+    transform: translateX(3px);
+  }
+  70% {
+    transform: translateX(-2px);
+  }
+}
+/* « Copier » : l'action principale, en toutes lettres ; réussie, sa coche se dessine. */
+.copier {
+  flex: none;
+  height: 34px;
+  margin-left: 8px;
+  padding: 0 18px;
+  border-radius: 17px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  background: var(--accent);
+  color: var(--on-accent);
+  font-size: 13px;
+  font-weight: 600;
+  transition:
+    background-color var(--duree-editeur-survol),
+    transform var(--duree-editeur-appui);
+}
+.copier:hover {
+  background: var(--accent-hover);
+}
+.copier:active {
+  transform: scale(0.96);
+}
+.copier:focus-visible {
+  outline-offset: 3px;
+}
+.copier .coche {
+  display: none;
+  width: 18px;
+  height: 18px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.copier.fait {
+  background: var(--success);
+  color: var(--editeur-copier-fait-texte);
+  animation: pop var(--duree-editeur-fait) var(--courbe-ressort);
+}
+.copier.fait .coche {
+  display: block;
+  margin-left: -4px;
+}
+.copier.fait .coche path {
+  stroke-dasharray: 20;
+  animation: trace var(--duree-editeur-fait) var(--courbe-douce) both;
+}
+
+/* Le socle d'annotation, posé sur le bas de la scène. */
+.socle {
+  position: absolute;
+  left: 50%;
+  bottom: 12px;
+  z-index: 5;
+  width: min(624px, calc(100% - 24px));
+  transform: translateX(-50%);
+  display: grid;
+  border-radius: 20px;
+  background: var(--editeur-verre);
+  border: var(--editeur-trait-largeur) solid var(--editeur-verre-bord);
+  box-shadow: var(--shadow-16);
+  backdrop-filter: blur(var(--editeur-palette-flou)) saturate(1.4);
+  --rg-fond: var(--editeur-pop);
+  transition: opacity var(--duree-editeur-survol);
+}
+/* Pendant « Copier le texte », le socle s'efface : la barre du calque prend sa place. */
+.fenetre[data-calque] .socle {
+  opacity: 0;
+  pointer-events: none;
+}
+.socle .rg-zone :focus-visible {
+  outline-offset: calc(0px - var(--editeur-focus));
+}
+.socle .rg-zone {
+  height: 46px;
+  justify-content: center;
+  padding: 0 10px;
+  overflow: hidden;
+  border-bottom: var(--editeur-trait-largeur) solid var(--editeur-trait);
+}
+.c-outils {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  height: 56px;
+  padding: 0 8px;
+}
+.c-outils .outil {
+  width: 44px;
+  height: 44px;
+  border-radius: 13px;
+}
+.c-outils .outil .ico {
+  width: 22px;
+  height: 22px;
+}
+.c-outils .outil[data-encre]::after {
+  bottom: 4px;
+}
+.c-outils .filet {
+  height: 24px;
+  margin: 0 7px;
+}
+/* Fenêtre étroite : les mots des sorties s'effacent, les pictogrammes restent. */
+@container fen (max-width: 940px) {
+  .s-b span {
+    display: none;
+  }
+  .s-b {
+    padding: 0 8px;
+  }
 }
 
 /* Animations réduites : réglage du système ou `reduites` de la charge (data-reduites). */

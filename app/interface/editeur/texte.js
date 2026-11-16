@@ -8,7 +8,7 @@
 // hauteur, ligne }] } ; `editeur_copier_texte` { id, numero, debut, fin } (indices inclus) ;
 // `editeur:texte_copie` { id, numero, etat: "fait" | "echec" }.
 //
-// Le bouton n'existe que si la charge le dit (`texte: true`, R10) : sinon rien n'est créé.
+// Le bouton n'est montré que si la charge le dit (`texte: true`, R10).
 // Tant que le calque est ouvert, tout le clavier est à lui, où que soit le focus (écoute en
 // capture sur `window`) : Échap ne ferme que lui, Ctrl + C copie le texte choisi (jamais
 // l'image), les touches des outils et du zoom sont sans effet, Tab reste dans le calque et sa
@@ -51,42 +51,22 @@ function mots(liste) {
 
 export function installerTexte(ed, { appeler, message, reduites }) {
   const fenetre = document.getElementById("fenetre");
-  const enregistrer = document.querySelector('#barre-haut [data-act="enregistrer"]');
-  const bCopier = document.querySelector('#barre-haut [data-act="copier"]');
-  const bFermer = document.querySelector('#barre-haut [data-act="fermer"]');
-  let bTexte = null;
   // La lecture en cours ou le choix : { numero, recu, balaye, phase, calque, ... }, ou null.
   let l = null;
   let retour = null; // focus rendu à la sortie
   const premiers = new Map(); // `editeur:texte` reçus avant le numéro de leur export
 
-  // ---------- bouton « Texte » ----------
-  function poserBouton(voulu) {
-    if (voulu && !bTexte) {
-      bTexte = bouton("rb lib", "lancer", "");
-      bTexte.title = "Copier le texte";
-      const s = document.createElement("span");
-      s.textContent = "Texte";
-      bTexte.append(picto("i-ocr"), s);
-      bTexte.addEventListener("click", () => lancer());
-      // Avant « Glisser vers une appli », qui reste avec Enregistrer et Copier.
-      (document.getElementById("bouton-glisser") ?? enregistrer).before(bTexte);
-    } else if (!voulu && bTexte) {
-      bTexte.remove();
-      bTexte = null;
-    }
+  // ---------- bouton « Texte » (posé par barre.js, montré si la charge le dit) ----------
+  // barre.js grise aussi Enregistrer, Copier et Glisser pendant le calque, et le « Fermer »
+  // de la barre du haut ferme d'abord le calque.
+  let voulu = false;
+  function poserBouton(v) {
+    voulu = !!v;
     synchroniser();
   }
   function synchroniser() {
-    if (bTexte) bTexte.disabled = ed.exportEnCours();
-    enregistrer.disabled = !!l;
-    bCopier.disabled = !!l;
-    const bGlisser = document.getElementById("bouton-glisser");
-    if (bGlisser) bGlisser.disabled = !!l;
+    ed.barre?.synchroniser();
   }
-  // « Fermer » de la barre du haut pendant le calque : le calque se ferme d'abord, puis le
-  // geste suit son cours (editeur.js).
-  bFermer.addEventListener("click", () => fermer(false), true);
 
   // ---------- géométrie : pixels de l'image composée → pixels CSS du calque ----------
   function geometrie() {
@@ -506,6 +486,7 @@ export function installerTexte(ed, { appeler, message, reduites }) {
     recu,
     copie,
     ouvert: () => !!l,
+    disponible: () => voulu,
     // Toute ouverture d'un menu ou d'une bulle (menu « Fermer » demandé par le cœur compris)
     // ferme d'abord le calque, sans lui rendre le focus.
     fermer: () => fermer(false),

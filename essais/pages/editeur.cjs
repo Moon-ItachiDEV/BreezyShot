@@ -227,23 +227,25 @@ const CHARGE = {
     await uneImage(p);
   };
   const bouton = (p, nom) => p.getByRole('button', { name: nom, exact: true });
-  // « Texte » du haut (Copier le texte), à ne pas confondre avec l'outil Texte de la barre.
+  // « Texte » du haut (Copier le texte), à ne pas confondre avec l'outil Texte du socle (son
+  // nom est « Copier le texte », le mot montré « Texte »).
   const texteHaut = (p) =>
-    p.locator('#barre-haut').getByRole('button', { name: 'Texte', exact: true });
+    p.locator('#barre-haut').getByRole('button', { name: 'Copier le texte', exact: true });
   const outil = async (p, nom) => {
-    await p.locator('#outils [data-outil]').and(bouton(p, nom)).click();
+    await p.locator('#socle [data-outil]').and(bouton(p, nom)).click();
     await uneImage(p);
   };
   const ouvert = (p, sel) => p.$eval(sel, (m) => m.classList.contains('ouvert'));
-  // L'outil en main (son bouton enfoncé) et l'outil déplié dans la barre.
+  // L'outil en main (son bouton enfoncé) et l'outil déplié : celui dont le socle montre les
+  // réglages, juste au-dessus des outils.
   const choisi = (p) =>
-    p.$$eval('#outils [data-outil][aria-pressed="true"]', (bs) =>
+    p.$$eval('#socle [data-outil][aria-pressed="true"]', (bs) =>
       bs.map((b) => b.getAttribute('aria-label')),
     );
   const deplie = (p) =>
-    p.$$eval('#outils .pli[data-on]', (ps) => ps.map((x) => x.dataset.pli));
-  // Le pli ouvert : les plis fermés sont inertes, mais Playwright y trouve encore les noms.
-  const pli = (p) => p.locator('#outils .pli[data-on]');
+    p.$$eval('#socle .rg-zone', (zs) => zs.map((z) => z.dataset.pour).filter(Boolean));
+  // Les réglages montrés (ceux de l'outil déplié).
+  const pli = (p) => p.locator('#socle .rg-zone');
   const reglage = async (p, nom) => {
     await pli(p).getByRole('button', { name: nom, exact: true }).click();
     await uneImage(p);
@@ -256,7 +258,7 @@ const CHARGE = {
   // Ce que montre le pli ouvert : ses groupes (nom, boutons, enfoncés), sa glissière.
   const contenuPli = (p) =>
     p.evaluate(() => {
-      const d = document.querySelector('#outils .pli[data-on] .in');
+      const d = document.querySelector('#socle .rg-zone .rg');
       if (!d) return null;
       const i = d.querySelector('input[type="range"]');
       return {
@@ -319,37 +321,48 @@ const CHARGE = {
     await fin(p, '1');
   }
 
-  // ---------- 2. noms et rôles (avenant §4, barre C), absents, barre de la fenêtre ----------
+  // ---------- 2. noms et rôles (piste C « Étages »), absents, barre de la fenêtre ----------
   {
     const p = await page();
     const haut = p.locator('#barre-haut');
     let ok = true;
     const manque = [];
-    for (const n of ['Fermer', 'Enregistrer', 'Copier']) {
+    for (const n of ['Fermer', 'Glisser vers une appli', 'Enregistrer', 'Enregistrer sous…', 'Copier']) {
       if ((await haut.getByRole('button', { name: n, exact: true }).count()) !== 1) manque.push(n);
     }
-    const pal = p.getByRole('toolbar', { name: 'Annotation', exact: true });
-    ok = (await pal.count()) === 1;
-    for (const n of ['Annuler', 'Rétablir', 'Plus']) {
-      if ((await pal.getByRole('button', { name: n, exact: true }).count()) !== 1) manque.push(n);
+    const socle = p.getByRole('toolbar', { name: 'Annotation', exact: true });
+    ok = (await socle.count()) === 1;
+    for (const n of ['Annuler', 'Rétablir']) {
+      if ((await socle.getByRole('button', { name: n, exact: true }).count()) !== 1) manque.push(n);
     }
-    // Barre C : les neuf outils dans l'ordre, les quatre instruments dessinés puis un
-    // séparateur ; la Flèche en main est dépliée, les autres plis sont fermés et inertes.
+    // Le socle : Annuler, Rétablir, un filet, puis les neuf outils dans l'ordre (ce qui
+    // montre, ce qui écrit, ce qui cache, ce qui corrige), un filet entre les groupes ; au-
+    // dessus, les réglages de la Flèche en main.
     const barre = await p.evaluate(() => {
       const tous = (s) => [...document.querySelectorAll(s)];
       return {
-        outils: tous('#outils [data-outil]').map((b) => b.getAttribute('aria-label')),
-        dessines: tous('#outils .tl.ib').map(
-          (b) => b.dataset.outil + (b.querySelector('svg.inst') ? '' : ' sans dessin'),
+        rangee: tous('#socle .c-outils > *').map((b) =>
+          b.classList.contains('filet') ? '|' : b.getAttribute('aria-label'),
         ),
-        separe: !!document
-          .querySelector('#outils .pli[data-pli="gomme"]')
-          .nextElementSibling?.classList.contains('dv'),
-        ouverts: tous('#outils .pli[data-on]').map((x) => x.dataset.pli),
-        inertes: tous('#outils .pli > .in')
-          .filter((x) => x.inert)
-          .map((x) => x.parentElement.dataset.pli),
+        reglagesAuDessus:
+          document.querySelector('#socle .rg-zone').getBoundingClientRect().bottom <=
+          document.querySelector('#socle .c-outils').getBoundingClientRect().top + 1,
+        deplie: document.querySelector('#socle .rg-zone').dataset.pour,
+        haut: tous('#barre-haut > *, #barre-haut .sorties > *, #barre-haut .duo > *')
+          .filter((b) => b.matches('button') && !b.hidden)
+          .map((b) => b.getAttribute('aria-label')),
+        mots: tous('#barre-haut button')
+          .filter((b) => !b.hidden)
+          .map((b) => b.textContent.trim())
+          .filter(Boolean),
         anciens: [
+          '#palette',
+          '#outils',
+          '#menu-plus',
+          '#bouton-plus',
+          '#bouton-glisser',
+          '.pli',
+          'svg.inst',
           '#bouton-ajouter',
           '#menu-ajouter',
           '#reglages-outil',
@@ -363,15 +376,15 @@ const CHARGE = {
     verifier(
       ok &&
         !manque.length &&
-        JSON.stringify(barre.outils) ===
-          '["Flèche","Stylo","Surligneur","Gomme","Texte","Forme","Numéro","Flou","Projecteur"]' &&
-        JSON.stringify(barre.dessines) === '["fleche","stylo","surligneur","gomme"]' &&
-        barre.separe &&
-        JSON.stringify(barre.ouverts) === '["fleche"]' &&
-        JSON.stringify(barre.inertes) ===
-          '["stylo","surligneur","gomme","texte","forme","numero","flou","projecteur"]' &&
+        JSON.stringify(barre.rangee) ===
+          '["Annuler","Rétablir","|","Flèche","Forme","Texte","Numéro","|","Stylo","Surligneur","|","Flou","Projecteur","|","Gomme"]' &&
+        barre.reglagesAuDessus &&
+        barre.deplie === 'fleche' &&
+        JSON.stringify(barre.haut) ===
+          '["Fermer","Glisser vers une appli","Enregistrer","Enregistrer sous…","Copier"]' &&
+        JSON.stringify(barre.mots) === '["Glisser","Enregistrer","Copier"]' &&
         barre.anciens.length === 0,
-      '2 barre « Annotation » : neuf outils dans l’ordre, quatre instruments dessinés, la Flèche seule dépliée, ni « Ajouter » ni bulle',
+      '2 socle « Annotation » : Annuler, Rétablir, neuf outils dans l’ordre, les réglages de la Flèche au-dessus ; en haut Fermer, Glisser, Enregistrer et sa flèche, Copier',
       JSON.stringify([manque, barre]),
     );
     const c = await contenuPli(p);
@@ -387,20 +400,28 @@ const CHARGE = {
       '2 Flèche dépliée : Taille, Couleur (six et « Autre couleur »), Opacité de 20 à 100 % par 5',
       JSON.stringify(c),
     );
-    await bouton(p, 'Plus').click();
+    await bouton(p, 'Enregistrer sous…').click();
+    await calme(p);
     const itemsP = await p
-      .getByRole('menu', { name: 'Plus', exact: true })
+      .getByRole('menu', { name: 'Enregistrer', exact: true })
       .getByRole('menuitem')
       .allTextContents();
+    const sous = await p.evaluate(() => {
+      const m = document.querySelector('#menu-enregistrer').getBoundingClientRect();
+      const b = document.querySelector('[data-menu="enregistrer"]').getBoundingClientRect();
+      return { dessous: m.top >= b.bottom, droite: Math.abs(m.right - b.right) < 1 };
+    });
     verifier(
-      JSON.stringify(itemsP.map((t) => t.trim())) ===
-        '["Enregistrer sous…"]',
-      '2 menu « Plus » : Enregistrer sous…',
-      JSON.stringify(itemsP),
+      JSON.stringify(itemsP.map((t) => t.trim())) === '["Enregistrer sous…"]' &&
+        sous.dessous &&
+        sous.droite,
+      '2 la flèche d’« Enregistrer » ouvre « Enregistrer sous… », sous elle, calé à droite',
+      JSON.stringify([itemsP, sous]),
     );
     await p.keyboard.press('Escape');
     const r = await p.evaluate(() => {
-      const tous = [...document.querySelectorAll('*')];
+      // Le bouton « Texte » (Copier le texte) existe caché : la charge ne le permet pas ici.
+      const tous = [...document.querySelectorAll('*')].filter((e) => !e.closest('[hidden]'));
       const noms = tous.map((e) => (e.getAttribute('aria-label') || '') + '|' + (e.title || ''));
       const textes = document.body.innerText;
       const interdits = [
@@ -424,7 +445,7 @@ const CHARGE = {
         ocr: !!document.querySelector('#ocr, .pin, .allc, [draggable="true"]'),
         drag:
           document.querySelector('#barre-haut').hasAttribute('data-tauri-drag-region') &&
-          document.querySelector('#barre-haut .sp').hasAttribute('data-tauri-drag-region'),
+          document.querySelector('#barre-haut .h-vide').hasAttribute('data-tauri-drag-region'),
         dragBouton: boutons.filter((b) => b.closest('[data-tauri-drag-region]') === b).length,
         titres: boutons
           .filter((b) => b.title && b.title !== b.getAttribute('aria-label'))
@@ -450,12 +471,17 @@ const CHARGE = {
     );
     const t = await p.evaluate(() => {
       const b = document.querySelector('#barre-haut').getBoundingClientRect();
-      const pal = document.querySelector('#palette').getBoundingClientRect();
-      return { h: b.height, palH: pal.height, bas: innerHeight - pal.bottom };
+      const s = document.querySelector('#socle').getBoundingClientRect();
+      return {
+        h: b.height,
+        bas: innerHeight - s.bottom,
+        centre: Math.abs((s.left + s.right) / 2 - innerWidth / 2),
+        largeur: s.width,
+      };
     });
     verifier(
-      t.h === 52 && t.palH === 80 && t.bas === 14,
-      '2 barre 52 px, barre d’annotation 80 px à 14 px du bas',
+      t.h === 52 && t.bas === 12 && t.centre < 1 && t.largeur === 624,
+      '2 barre 52 px ; socle de 624 px centré, à 12 px du bas',
       JSON.stringify(t),
     );
     await fin(p, '2');
@@ -1295,7 +1321,7 @@ const CHARGE = {
     };
     const vu = {};
     for (const nom of ['Flèche', 'Stylo', 'Surligneur', 'Gomme', 'Texte']) vu[nom] = await resume(nom);
-    const glyphes = await p.$$eval('#outils .pli[data-on] .sz .a', (s) =>
+    const glyphes = await p.$$eval('#socle .rg-zone .sg-a', (s) =>
       s.map((x) => getComputedStyle(x).fontSize),
     );
     await reglage(p, 'Grand');
@@ -1317,7 +1343,7 @@ const CHARGE = {
     };
     verifier(
       JSON.stringify(vu) === JSON.stringify(attendu) &&
-        JSON.stringify(glyphes) === '["12px","16px","21px"]' &&
+        JSON.stringify(glyphes) === '["12px","15px","19px"]' &&
         tt === 2 &&
         JSON.stringify(bloc.groupes) === '[["Variante",["Pixeliser","Flouter","Bloc noir"]]]',
       '9 ce que chaque outil déplie ; Texte en A de trois tailles ; Bloc noir sans intensité',
@@ -1486,23 +1512,33 @@ const CHARGE = {
     await fin(p, '9 ter');
   }
 
-  // ---------- 9 quater. barre plus claire (piste A « Calme », design/barre-claire) ----------
+  // ---------- 9 quater. réglages : pictogrammes, pastille du choix, trait, point d'encre ----------
   {
     const p = await page();
-    // Aucun outil ne répète le dessin d'une de ses variantes (la 0.5.4 montrait cinq grilles
-    // dans le pli du Flou) ; chaque pictogramme visé existe, le filtre de la tache floue aussi.
-    const dessins = await p.evaluate(() => {
-      const ref = (e) => (e && e.querySelector('use') ? e.querySelector('use').getAttribute('href') : '');
-      const r = {};
-      for (const b of document.querySelectorAll('#outils [data-outil]')) {
-        const variantes = [...b.closest('.pli').querySelectorAll('[data-variante]')];
-        r[b.dataset.outil] = [ref(b), variantes.map(ref)];
-      }
-      return r;
-    });
-    const repetes = Object.entries(dessins).filter(([, [o, vs]]) => o && vs.includes(o));
+    // Aucun outil ne répète le dessin d'une de ses variantes ; chaque pictogramme visé
+    // existe, le filtre de la tache floue aussi.
+    const dessins = {};
+    for (const [t, nom] of [
+      ['fleche', 'Flèche'],
+      ['forme', 'Forme'],
+      ['texte', 'Texte'],
+      ['numero', 'Numéro'],
+      ['stylo', 'Stylo'],
+      ['surligneur', 'Surligneur'],
+      ['flou', 'Flou'],
+      ['projecteur', 'Projecteur'],
+      ['gomme', 'Gomme'],
+    ]) {
+      await outil(p, nom);
+      dessins[t] = await p.evaluate((x) => {
+        const ref = (e) => (e && e.querySelector('use') ? e.querySelector('use').getAttribute('href') : '');
+        const b = document.querySelector(`#socle [data-outil="${x}"]`);
+        return [ref(b), [...document.querySelectorAll('#socle .rg-zone [data-variante]')].map(ref)];
+      }, t);
+    }
+    const repetes = Object.entries(dessins).filter(([, [o, vs]]) => !o || vs.includes(o));
     const manquants = await p.evaluate(() =>
-      [...new Set([...document.querySelectorAll('#palette use')].map((u) => u.getAttribute('href')))]
+      [...new Set([...document.querySelectorAll('#socle use, #barre-haut use')].map((u) => u.getAttribute('href')))]
         .concat([...document.querySelectorAll('svg.defs [filter]')].map((e) => e.getAttribute('filter').slice(4, -1)))
         .filter((h) => !document.querySelector(h)),
     );
@@ -1516,14 +1552,15 @@ const CHARGE = {
         manquants.length === 0 &&
         flouDoux &&
         JSON.stringify(dessins.flou) === '["#i-goutte",["#i-mosaique","#i-doux","#i-box"]]' &&
-        JSON.stringify(dessins.projecteur) === '["#i-lampe",["#i-spot","#i-spotE"]]',
+        JSON.stringify(dessins.projecteur) === '["#i-lampe",["#i-spot","#i-spotE"]]' &&
+        JSON.stringify(dessins.fleche) === '["#i-fleche",[]]' &&
+        JSON.stringify(dessins.gomme) === '["#i-gomme",[]]',
       '9 quater aucun outil ne répète une de ses variantes ; Flou : goutte, mosaïque, tache floue, bande ; Projecteur : lampe',
       JSON.stringify({ dessins, manquants, flouDoux }),
     );
     // Le choix d'un groupe : une pastille claire en relief (jeton editeur-choix-fond, ombre),
-    // le signe à la couleur du texte ; plus de carré plein. Un trait fin (jetons
-    // editeur-trait-largeur, editeur-pli-separateur) sépare les variantes de l'intensité, en
-    // trois points comme les épaisseurs ; le dernier groupe visible garde une marge au bord.
+    // le signe à la couleur du texte. Un trait fin sépare deux groupes ; pour Bloc noir,
+    // l'intensité et son trait partent.
     await outil(p, 'Flou');
     await calme(p);
     const lire = () =>
@@ -1531,26 +1568,17 @@ const CHARGE = {
         const sonde = document.createElement('i');
         sonde.style.setProperty('background', 'var(--editeur-choix-fond)');
         sonde.style.setProperty('color', 'var(--text)');
-        sonde.style.setProperty('padding-right', 'var(--editeur-pli-marge)');
-        // Le trait à part : la marge compterait dans sa largeur.
-        const sondeTrait = document.createElement('i');
-        sondeTrait.style.setProperty('display', 'block');
-        sondeTrait.style.setProperty('width', 'var(--editeur-trait-largeur)');
-        sondeTrait.style.setProperty('height', 'var(--editeur-pli-separateur)');
-        document.body.append(sonde, sondeTrait);
+        document.body.append(sonde);
         const s = getComputedStyle(sonde);
-        const st = getComputedStyle(sondeTrait);
-        const attendu = [s.backgroundColor, s.color, s.paddingRight, st.width, st.height];
+        const attendu = [s.backgroundColor, s.color];
         sonde.remove();
-        sondeTrait.remove();
-        const d = document.querySelector('#outils .pli[data-on]');
-        const vs = d.querySelector('[data-variante]').closest('.grp');
+        const d = document.querySelector('#socle .rg-zone');
         const g = d.querySelector('[data-cle="intensite"]');
-        const sep = d.querySelector('.sep');
+        const sep = d.querySelector('.rg-sep');
         const ts = sep && getComputedStyle(sep);
         return {
           attendu,
-          choix: [...d.querySelectorAll('.sz[aria-pressed="true"]')].map((b) => {
+          choix: [...d.querySelectorAll('.rg-b[aria-pressed="true"]')].map((b) => {
             const c = getComputedStyle(b);
             return [b.getAttribute('aria-label'), c.backgroundColor, c.boxShadow !== 'none', c.color];
           }),
@@ -1558,8 +1586,7 @@ const CHARGE = {
             sep && !sep.hidden && sep.getClientRects().length
               ? [ts.width, ts.height, ts.backgroundColor !== 'rgba(0, 0, 0, 0)']
               : null,
-          signes: g.hidden ? [] : [...g.querySelectorAll('[data-taille] b')].map((b) => getComputedStyle(b).width),
-          marges: [vs, g].map((e) => (e.hidden ? '' : getComputedStyle(e).paddingRight)),
+          signes: g.hidden ? [] : [...g.querySelectorAll('[data-taille] circle')].map((c) => c.getAttribute('r')),
         };
       });
     const pix = await lire();
@@ -1569,9 +1596,9 @@ const CHARGE = {
     await reglage(p, 'Bloc noir');
     await calme(p);
     const blo = await lire();
-    const [fond, texte, marge, traitL, traitH] = pix.attendu;
-    const points = JSON.stringify(['4px', '7px', '11px']);
-    const trait = JSON.stringify([traitL, traitH, true]);
+    const [fond, texte] = pix.attendu;
+    const points = JSON.stringify(['2.4', '4', '5.8']);
+    const trait = JSON.stringify(['1px', '20px', true]);
     verifier(
       JSON.stringify(pix.choix) ===
         JSON.stringify([
@@ -1579,38 +1606,45 @@ const CHARGE = {
           ['Moyen', fond, true, texte],
         ]) &&
         fond !== texte &&
-        marge === '4px' &&
-        traitH === '18px' &&
         JSON.stringify(pix.trait) === trait &&
         JSON.stringify(pix.signes) === points &&
-        JSON.stringify(pix.marges) === JSON.stringify(['0px', marge]) &&
         JSON.stringify(flo.trait) === trait &&
         JSON.stringify(flo.signes) === points &&
         blo.trait === null &&
-        JSON.stringify(blo.signes) === '[]' &&
-        JSON.stringify(blo.marges) === JSON.stringify([marge, '']),
-      '9 quater choix en pastille claire ; trait entre variantes et intensité en trois points ; cachés pour Bloc noir ; marge du dernier groupe',
+        JSON.stringify(blo.signes) === '[]',
+      '9 quater choix en pastille claire ; trait entre variantes et intensité en trois points ; cachés pour Bloc noir',
       JSON.stringify({ pix, flo, blo }),
     );
-    // Un outil replié garde une petite nuance bordée de sa couleur sous son pictogramme, pas
-    // un trait ; un outil sans couleur (Projecteur) n'en a pas.
-    const nuances = await p.evaluate(() =>
-      ['texte', 'projecteur'].map((t) => {
-        const a = getComputedStyle(document.querySelector(`#outils [data-outil="${t}"]`), '::after');
-        return [a.width, a.height, a.bottom, a.borderTopLeftRadius, a.backgroundColor, a.boxShadow !== 'none'];
+    // L'outil en main : un point de la couleur de son encre sous son pictogramme ; les
+    // autres n'en montrent pas ; un outil sans couleur (Projecteur) n'en a pas.
+    await outil(p, 'Texte');
+    await calme(p);
+    const points2 = await p.evaluate(() =>
+      ['texte', 'fleche', 'projecteur'].map((t) => {
+        const b = document.querySelector(`#socle [data-outil="${t}"]`);
+        const a = getComputedStyle(b, '::after');
+        return [t, b.hasAttribute('data-encre'), a.width, a.backgroundColor, a.opacity];
       }),
     );
+    await outil(p, 'Projecteur');
+    await calme(p);
+    const projecteur = await p.evaluate(() => {
+      const b = document.querySelector('#socle [data-outil="projecteur"]');
+      return [b.getAttribute('aria-pressed'), b.hasAttribute('data-encre'), getComputedStyle(b, '::after').content];
+    });
     verifier(
-      JSON.stringify(nuances) ===
+      JSON.stringify(points2) ===
         JSON.stringify([
-          ['8px', '8px', '1px', '2px', 'rgb(229, 72, 77)', true],
-          ['8px', '8px', '1px', '2px', 'rgba(0, 0, 0, 0)', false],
-        ]),
-      '9 quater outil replié : une nuance bordée de sa couleur, rien sans couleur',
-      JSON.stringify(nuances),
+          ['texte', true, '5px', 'rgb(229, 72, 77)', '1'],
+          ['fleche', true, '5px', 'rgb(229, 72, 77)', '0'],
+          ['projecteur', false, 'auto', 'rgba(0, 0, 0, 0)', '1'],
+        ]) && JSON.stringify(projecteur) === '["true",false,"none"]',
+      '9 quater outil en main : un point de sa couleur ; les autres, aucun ; rien sans couleur',
+      JSON.stringify([points2, projecteur]),
     );
     // L'intensité qui part gardait le focus (Rétablir rend Bloc noir à la zone choisie) : il
     // va à la variante prise, pas à la page.
+    await outil(p, 'Flou');
     await reglage(p, 'Pixeliser');
     await glisser(p, [40, 40], [200, 110]);
     await outil(p, 'Flèche');
@@ -1655,7 +1689,7 @@ const CHARGE = {
           document.body.appendChild(sonde);
           const fond = getComputedStyle(sonde).backgroundColor;
           sonde.remove();
-          const choix = [...document.querySelectorAll('#outils .pli[data-on] .sz[aria-pressed="true"]')].map((b) => {
+          const choix = [...document.querySelectorAll('#socle .rg-zone .rg-b[aria-pressed="true"]')].map((b) => {
             const c = getComputedStyle(b);
             return c.backgroundColor === fond && c.boxShadow !== 'none';
           });
@@ -1675,49 +1709,38 @@ const CHARGE = {
     );
   }
 
-  // ---------- 10. couleurs : le changement se voit sur l'instrument ----------
+  // ---------- 10. couleurs : le changement se voit sur l'outil ----------
   {
     const p = await page();
     const outilVu = (q, t) =>
       q.evaluate((x) => {
-        const b = document.querySelector(`#outils [data-outil="${x}"]`);
-        const inst = b.querySelector('.inst');
-        const encre = inst && inst.querySelector('.i-encre');
-        return {
-          ink: b.style.getPropertyValue('--ink'),
-          ton: b.dataset.ton || '',
-          encre: inst ? inst.style.getPropertyValue('--encre') : null,
-          rempli: encre ? getComputedStyle(encre).fill : null,
-          saute: inst ? inst.classList.contains('saute') : null,
-          fonce: inst ? inst.classList.contains('encre-foncee') : null,
-          pale: inst ? inst.classList.contains('encre-pale') : null,
-          t: inst ? inst.getAttribute('data-t') : null,
-        };
+        const b = document.querySelector(`#socle [data-outil="${x}"]`);
+        return { encre: b.style.getPropertyValue('--encre'), point: b.hasAttribute('data-encre') };
       }, t);
     const enfoncee = (q) =>
-      q.$$eval('#outils .pli[data-on] .sw[aria-pressed="true"]', (bs) =>
+      q.$$eval('#socle .rg-zone .rg-c[aria-pressed="true"]', (bs) =>
         bs.map((b) => b.getAttribute('aria-label')),
       );
     await reglage(p, 'Vert');
-    const saut = (await outilVu(p, 'fleche')).saute;
     await calme(p);
     const r = { c: await p.evaluate(() => __ed.prefs.couleurs.fleche), ...(await outilVu(p, 'fleche')) };
+    const pointVert = await p.evaluate(
+      () => getComputedStyle(document.querySelector('#socle [data-outil="fleche"]'), '::after').backgroundColor,
+    );
     verifier(
       r.c === '#30A46C' &&
         JSON.stringify(await enfoncee(p)) === '["Vert"]' &&
-        r.ink === '#30A46C' &&
         r.encre === '#30A46C' &&
-        r.rempli === 'rgb(48, 164, 108)' &&
-        saut &&
-        !r.saute,
-      '10 Vert : couleur de la Flèche, nuance enfoncée, corps de l’instrument vert (il saute)',
-      JSON.stringify([saut, r]),
+        r.point &&
+        pointVert === 'rgb(48, 164, 108)',
+      '10 Vert : couleur de la Flèche, nuance enfoncée, point vert sous la Flèche',
+      JSON.stringify([r, pointVert]),
     );
     const autres = {};
-    for (const t of ['texte', 'numero', 'gomme', 'flou']) autres[t] = (await outilVu(p, t)).ink;
+    for (const t of ['texte', 'numero', 'gomme', 'flou']) autres[t] = (await outilVu(p, t)).encre;
     verifier(
       JSON.stringify(autres) === '{"texte":"#E5484D","numero":"#E5484D","gomme":"","flou":""}',
-      '10 les outils repliés gardent une nuance de leur couleur (aucun sans couleur)',
+      '10 chaque outil garde la couleur de son encre (aucune sans couleur)',
       JSON.stringify(autres),
     );
     await glisser(p, [20, 20], [120, 40]);
@@ -1732,11 +1755,11 @@ const CHARGE = {
     });
     await uneImage(p);
     const r2 = await p.evaluate(() => {
-      const w = document.querySelector('#outils .pli[data-on] .sw.roue');
+      const w = document.querySelector('#socle .rg-zone .rg-roue');
       return {
         c: __ed.h.doc.objets[0].couleur,
         autre: __ed.prefs.autre,
-        has: w.classList.contains('has'),
+        has: w.classList.contains('a'),
         presse: w.getAttribute('aria-pressed'),
       };
     });
@@ -1747,7 +1770,7 @@ const CHARGE = {
     );
     await p.keyboard.press('Escape');
     await outil(p, 'Gomme');
-    const nuancesGomme = (await p.$$('#outils .pli[data-on] .sw')).length;
+    const nuancesGomme = (await p.$$('#socle .rg-zone .rg-c')).length;
     await outil(p, 'Surligneur');
     const surl = await enfoncee(p);
     verifier(
@@ -1755,23 +1778,18 @@ const CHARGE = {
       '10 Gomme : aucune couleur ; Surligneur : Jaune',
       JSON.stringify([nuancesGomme, surl]),
     );
-    // Encre très foncée ou très pâle : un liseré plus marqué la détache de la barre.
+    // Blanc et Noir : un bord marqué les détache du socle, dans les deux thèmes.
     await outil(p, 'Stylo');
-    await reglage(p, 'Noir');
-    await reglage(p, 'Épais');
-    const noir = await outilVu(p, 'stylo');
-    await reglage(p, 'Blanc');
-    const blanc = await outilVu(p, 'stylo');
+    const bords = await p.evaluate(() =>
+      ['#1A1A1A', '#FFFFFF', '#E5484D'].map((c) => {
+        const b = document.querySelector(`#socle .rg-zone .rg-c[data-couleur="${c}"]`);
+        return [b.classList.contains('rg-nuit'), b.classList.contains('rg-pale')];
+      }),
+    );
     verifier(
-      noir.ton === 'f' &&
-        noir.fonce &&
-        !noir.pale &&
-        noir.t === '2' &&
-        blanc.ton === 'p' &&
-        blanc.pale &&
-        !blanc.fonce,
-      '10 Stylo noir puis blanc : liseré marqué ; Épais : pointe large',
-      JSON.stringify([noir, blanc]),
+      JSON.stringify(bords) === '[[true,false],[false,true],[false,false]]',
+      '10 Noir et Blanc : un bord marqué',
+      JSON.stringify(bords),
     );
     await fin(p, '10');
   }
@@ -1958,7 +1976,7 @@ const CHARGE = {
       but === 'copier_fermer' &&
         JSON.stringify(m) === '["status","Impossible de copier",true]' &&
         (await appels(p, 'editeur_fermer')).length === 0 &&
-        !(await p.$eval('[data-act="copier"]', (b) => b.classList.contains('done'))),
+        !(await p.$eval('[data-act="copier"]', (b) => b.classList.contains('fait'))),
       '12 Copier en échec : la fenêtre reste, « Impossible de copier »',
       JSON.stringify([but, m]),
     );
@@ -1968,7 +1986,7 @@ const CHARGE = {
       __emettre('editeur:resultat', { id: 7, numero: 2, but: 'copier_fermer', etat: 'fait' }),
     );
     await uneImage(p);
-    const done = await p.$eval('[data-act="copier"]', (b) => b.classList.contains('done'));
+    const done = await p.$eval('[data-act="copier"]', (b) => b.classList.contains('fait'));
     await sansAppel(p, 'editeur_fermer', {});
     const f = await appels(p, 'editeur_fermer');
     verifier(
@@ -2003,7 +2021,7 @@ const CHARGE = {
       __emettre('editeur:resultat', { id: 7, numero: 2, but: 'enregistrer', etat: 'deja_fait' }),
     );
     await uneImage(p);
-    await bouton(p, 'Plus').click();
+    await bouton(p, 'Enregistrer sous…').click();
     await p.getByRole('menuitem', { name: 'Enregistrer sous' }).click();
     await p.waitForFunction(() => window.__exports.length === 3);
     const r2 = await p.evaluate(() => [
@@ -2114,11 +2132,11 @@ const CHARGE = {
     await calme(p);
     const v = p.getByRole('button', { name: 'Glisser vers une appli', exact: true });
     const r = await p.evaluate(() => {
-      const g = document.querySelector('#bouton-glisser');
+      const g = document.querySelector('[data-glisser]');
       const e = document.querySelector('[data-act="enregistrer"]');
       return {
-        haut: g.parentElement.id === 'barre-haut',
-        avant: g.nextElementSibling === e,
+        haut: !!g.closest('#barre-haut'),
+        avant: g.nextElementSibling === e.closest('.duo'),
         draggable: document.querySelectorAll('[draggable="true"]').length,
       };
     });
@@ -2230,7 +2248,7 @@ const CHARGE = {
       const o = document.querySelector('#ombre-image');
       const b = o.getBoundingClientRect();
       const cs = getComputedStyle(o);
-      const pal = document.querySelector('#palette').offsetHeight;
+      const pal = s.bottom - document.querySelector('#socle').getBoundingClientRect().top;
       return {
         haut: b.top - s.top,
         bas: s.bottom - b.bottom,
@@ -2245,7 +2263,7 @@ const CHARGE = {
         r.bas >= r.pal + 34 - 1 &&
         r.ombre === 'rgba(0, 0, 0, 0.18) 0px 4px 18px 0px' &&
         r.rayon === '5px',
-      '15 image ajustée dans les réserves (14, palette + 34, 36), ombre, rayon 5',
+      '15 image ajustée dans les réserves (14, socle + 34, 36), ombre, rayon 5',
       JSON.stringify(r),
     );
     await fin(p, '15');
@@ -2256,12 +2274,11 @@ const CHARGE = {
     const p = await page({ theme });
     const r = await p.evaluate(() => {
       const cs = (s) => getComputedStyle(document.querySelector(s));
-      const bague = document.querySelector('[data-outil="fleche"] .inst .i-bague');
       return {
         barre: cs('#barre-haut').backgroundColor,
         scene: cs('#fenetre').backgroundColor,
         copier: cs('[data-act="copier"]').backgroundColor,
-        corps: getComputedStyle(bague).fill,
+        socle: cs('#socle').backgroundColor,
         equerre: getComputedStyle(document.documentElement)
           .getPropertyValue('--editeur-equerre')
           .trim(),
@@ -2273,19 +2290,19 @@ const CHARGE = {
             'rgb(238, 240, 243)',
             'rgb(230, 232, 236)',
             'rgb(0, 103, 192)',
-            'rgb(245, 246, 248)',
+            'rgba(250, 250, 251, 0.82)',
             '#1A1A1A',
           ]
         : [
             'rgb(35, 35, 35)',
             'rgb(23, 23, 23)',
             'rgb(76, 194, 255)',
-            'rgb(211, 215, 221)',
+            'rgba(44, 44, 46, 0.84)',
             '#FFFFFF',
           ];
     verifier(
-      JSON.stringify([r.barre, r.scene, r.copier, r.corps, r.equerre]) === JSON.stringify(attendu),
-      `16 ${theme} : mica, scène, Copier, instruments, équerres`,
+      JSON.stringify([r.barre, r.scene, r.copier, r.socle, r.equerre]) === JSON.stringify(attendu),
+      `16 ${theme} : mica, scène, Copier, socle, équerres`,
       JSON.stringify(r),
     );
     // L'équerre haut gauche est peinte dans la couleur du thème.
@@ -2304,185 +2321,59 @@ const CHARGE = {
     await fin(p, `16 ${theme}`);
   }
 
-  // ---------- 17. largeur d'ouverture, fenêtre étroite : seuls les outils défilent ----------
+  // ---------- 17. largeur d'ouverture, fenêtre étroite : le socle tient, rien ne défile ----------
   {
-    // À la largeur d'ouverture du cœur (jeton editeur-ouverture-largeur, LARGEUR_OUVERTURE),
-    // chaque outil déplié tient dans la barre sans défiler.
+    // À la largeur d'ouverture du cœur (jeton editeur-ouverture-largeur, LARGEUR_OUVERTURE)
+    // et à la taille minimale (640 × 440, TAILLE_MIN) : le socle tient dans la fenêtre, la
+    // rangée des outils et les réglages de chaque outil y tiennent en entier.
     const largeur = Number.parseFloat(
       fs.readFileSync(path.join(RACINE, 'commun', 'jetons.css'), 'utf8').match(/--editeur-ouverture-largeur:\s*([\d.]+)px/)[1],
     );
-    const p = await page({ largeur, hauteur: 600 });
-    const tiennent = [];
-    for (const n of ['Flèche', 'Stylo', 'Surligneur', 'Gomme', 'Texte', 'Forme', 'Numéro', 'Flou', 'Projecteur']) {
-      await outil(p, n);
-      await p
-        .waitForFunction(() => document.getAnimations().every((a) => a.playState !== 'running'), null, {
-          timeout: 3000,
-        })
-        .catch(() => {});
-      const m = await p.evaluate(() => {
-        const o = document.querySelector('#outils');
-        const b = document.querySelector('#palette').getBoundingClientRect();
-        return { defile: o.scrollWidth - o.clientWidth, g: b.left, d: b.right, suite: o.dataset.suite || '' };
-      });
-      tiennent.push([n, m.defile <= 0 && m.g >= 0 && m.d <= largeur && m.suite === '']);
-    }
-    verifier(
-      largeur === 1096 && tiennent.every(([, ok]) => ok),
-      `17 ${largeur} px (largeur d'ouverture) : chaque outil déplié tient dans la barre sans défiler`,
-      JSON.stringify(tiennent),
-    );
-    await fin(p, '17 ouverture');
-  }
-  {
-    const p = await page({ largeur: 640, hauteur: 440 });
-    const mesure = () =>
-      p.evaluate(() => {
-        const pal = document.querySelector('#palette');
-        const o = document.querySelector('#outils');
-        const b = pal.getBoundingClientRect();
-        const zo = o.getBoundingClientRect();
-        // Annuler, Rétablir et Plus : en entier dans la barre, hors de la zone qui défile.
-        const fixes = ['[data-act="annuler"]', '[data-act="retablir"]', '#bouton-plus'].map((s) => {
-          const r = document.querySelector(s).getBoundingClientRect();
-          return r.left >= b.left && r.right <= b.right && (r.right <= zo.left || r.left >= zo.right);
+    for (const [l, h] of [
+      [largeur, 600],
+      [640, 440],
+    ]) {
+      const p = await page({ largeur: l, hauteur: h });
+      const tiennent = [];
+      for (const n of ['Flèche', 'Stylo', 'Surligneur', 'Gomme', 'Texte', 'Forme', 'Numéro', 'Flou', 'Projecteur']) {
+        await outil(p, n);
+        await calme(p);
+        const m = await p.evaluate(() => {
+          const s = document.querySelector('#socle').getBoundingClientRect();
+          const z = document.querySelector('#socle .rg-zone');
+          const rg = z.querySelector('.rg').getBoundingClientRect();
+          const zr = z.getBoundingClientRect();
+          const o = document.querySelector('#socle .c-outils');
+          const or = o.getBoundingClientRect();
+          const boutons = [...o.querySelectorAll('button')].every((b) => {
+            const r = b.getBoundingClientRect();
+            return r.left >= or.left && r.right <= or.right;
+          });
+          return {
+            dansFenetre: s.left >= 0 && s.right <= innerWidth && s.bottom <= innerHeight,
+            reglages: rg.left >= zr.left && rg.right <= zr.right,
+            outils: boutons && o.scrollWidth <= o.clientWidth,
+          };
         });
-        const cs = getComputedStyle(pal);
-        return {
-          h: b.height,
-          g: b.left,
-          d: b.right,
-          l: innerWidth,
-          defile: o.scrollWidth - o.clientWidth,
-          x: o.scrollLeft,
-          suite: o.dataset.suite || '',
-          fixes,
-          // Le fond et l'ombre de la barre ne sont jamais estompés.
-          masque: cs.maskImage || cs.webkitMaskImage || 'none',
-          ombre: cs.boxShadow !== 'none',
-        };
-      });
-    const r = await mesure();
-    verifier(
-      r.h === 80 &&
-        r.g >= 0 &&
-        r.d <= r.l &&
-        r.defile > 0 &&
-        r.x === 0 &&
-        r.suite === 'fin' &&
-        r.fixes.every(Boolean) &&
-        r.masque === 'none' &&
-        r.ombre,
-      '17 640 × 440 : la barre tient dans la fenêtre, seuls les outils défilent, estompés du côté caché ; Annuler, Rétablir, Plus en entier ; fond et ombre gardés',
-      JSON.stringify(r),
-    );
-    // La molette, sur Annuler (hors de la zone qui défile), fait défiler les outils.
-    const [cx, cy] = await p.$eval('[data-act="annuler"]', (e) => {
-      const b = e.getBoundingClientRect();
-      return [b.left + b.width / 2, b.top + b.height / 2];
-    });
-    await p.mouse.move(cx, cy);
-    await p.mouse.wheel(0, 120);
-    await p
-      .waitForFunction(() => document.querySelector('#outils').scrollLeft > 0, null, {
-        timeout: 2000,
-      })
-      .catch(() => {});
-    await uneImage(p);
-    const r1 = await mesure();
-    verifier(
-      r1.x > 0 && r1.suite === 'deux' && r1.fixes.every(Boolean) && r1.masque === 'none',
-      '17 la molette fait défiler les outils, estompés des deux côtés ; Annuler, Rétablir, Plus restent',
-      JSON.stringify(r1),
-    );
-    // L'outil pris se montre en entier, son pli compris ; plus large que la zone, son début.
-    const vuDans = (t) =>
-      p.evaluate((t) => {
-        const o = document.querySelector('#outils').getBoundingClientRect();
-        const x = document.querySelector(`#outils .pli[data-pli="${t}"]`).getBoundingClientRect();
-        const b = document.querySelector(`#outils [data-outil="${t}"]`).getBoundingClientRect();
-        return { zone: [o.left, o.right], pli: [x.left, x.right], bouton: [b.left, b.right] };
-      }, t);
-    // Fin des transitions, puis du défilement doux (absent de getAnimations) : la position
-    // ne bouge plus pendant cinq images.
-    const calme = async () => {
-      await p
-        .waitForFunction(() => document.getAnimations().every((a) => a.playState !== 'running'), null, {
-          timeout: 3000,
-        })
-        .catch(() => {});
-      await p.evaluate(
-        () =>
-          new Promise((ok) => {
-            const o = document.querySelector('#outils');
-            let x = o.scrollLeft;
-            let n = 0;
-            let tours = 0;
-            const tour = () => {
-              n = o.scrollLeft === x ? n + 1 : 0;
-              x = o.scrollLeft;
-              if (n >= 5 || ++tours > 180) ok();
-              else requestAnimationFrame(tour);
-            };
-            requestAnimationFrame(tour);
-          }),
+        tiennent.push([n, m.dansFenetre && m.reglages && m.outils]);
+      }
+      // Sous 940 px, les sorties du haut ne gardent que leur pictogramme ; au-dessus, le mot.
+      const mots = await p.evaluate(() =>
+        [...document.querySelectorAll('#barre-haut .s-b span')]
+          .filter((s) => !s.closest('[hidden]'))
+          .map((s) => getComputedStyle(s).display !== 'none'),
       );
-    };
-    await p.mouse.move(cx, 20);
-    // Flou (pli plus étroit que la zone) : en entier, au bout des outils.
-    await outil(p, 'Flou');
-    await calme();
-    const vu = await vuDans('flou');
-    await reglage(p, 'Bloc noir');
-    verifier(
-      vu.pli[0] >= vu.zone[0] &&
-        vu.pli[1] <= vu.zone[1] &&
-        (await p.evaluate(() => __ed.prefs.variantes.flou)) === 'bloc',
-      '17 Flou pris : son pli se montre en entier parmi les outils ; Bloc noir choisi',
-      JSON.stringify(vu),
-    );
-    // Bloc noir puis Pixeliser : le pli s'élargit (l'intensité et son trait reviennent) ; il
-    // se montre encore en entier et l'estompe suit le défilement.
-    await reglage(p, 'Pixeliser');
-    await calme();
-    const ve = await vuDans('flou');
-    const estompe = await p.evaluate(() => {
-      const o = document.querySelector('#outils');
-      const g = o.scrollLeft > 2;
-      const d = o.scrollLeft + o.clientWidth < o.scrollWidth - 2;
-      return [o.dataset.suite || '', g && d ? 'deux' : g ? 'debut' : d ? 'fin' : ''];
-    });
-    verifier(
-      ve.pli[0] >= ve.zone[0] &&
-        ve.pli[1] <= ve.zone[1] &&
-        estompe[0] === estompe[1] &&
-        (await p.evaluate(() => __ed.prefs.variantes.flou)) === 'pixeliser',
-      '17 Bloc noir puis Pixeliser : le pli élargi se montre encore en entier, l\'estompe suit',
-      JSON.stringify([ve, estompe]),
-    );
-    // Numéro (pli plus large que la zone à 640 px) : son début, le bouton de l'outil compris.
-    await outil(p, 'Numéro');
-    await calme();
-    const vn = await vuDans('numero');
-    await reglage(p, 'Noir');
-    verifier(
-      vn.pli[1] - vn.pli[0] > vn.zone[1] - vn.zone[0] &&
-        vn.bouton[0] >= vn.zone[0] &&
-        vn.bouton[1] <= vn.zone[1] &&
-        (await p.evaluate(() => __ed.prefs.couleurs.numero)) === '#1A1A1A',
-      '17 Numéro pris (pli plus large que la zone) : son début se montre, bouton compris ; Noir choisi',
-      JSON.stringify(vn),
-    );
-    await outil(p, 'Flèche');
-    await calme();
-    const vf = await vuDans('fleche');
-    verifier(
-      vf.bouton[0] >= vf.zone[0] && vf.bouton[1] <= vf.zone[1],
-      '17 Flèche reprise : son bouton se montre (le pli commence par lui)',
-      JSON.stringify(vf),
-    );
-    await p.screenshot({ path: path.join(SORTIE, 'editeur-etroit.png') });
-    await fin(p, '17');
+      verifier(
+        largeur === 1096 &&
+          tiennent.every(([, ok]) => ok) &&
+          mots.length === 2 &&
+          mots.every((v) => v === l >= 940),
+        `17 ${l} × ${h} : le socle et les réglages de chaque outil tiennent sans défiler ; mots des sorties ${l >= 940 ? 'montrés' : 'cachés'}`,
+        JSON.stringify([tiennent, mots]),
+      );
+      if (l === 640) await p.screenshot({ path: path.join(SORTIE, 'editeur-etroit.png') });
+      await fin(p, `17 ${l}`);
+    }
   }
 
   // ---------- 18. messages et rechargement (horloge de Playwright) ----------
@@ -2558,7 +2449,7 @@ const CHARGE = {
     await outil(p, 'Stylo');
     const r = await p.evaluate(() => ({
       presse: document
-        .querySelector('#outils .pli[data-on] .sw[aria-pressed="true"]')
+        .querySelector('#socle .rg-zone .rg-c[aria-pressed="true"]')
         .getAttribute('aria-label'),
       p: [__ed.prefs.couleurs, __ed.prefs.tailles.fleche, __ed.prefs.tailles.stylo],
     }));
@@ -2688,14 +2579,16 @@ const CHARGE = {
     a.length === b.length && a.every((v, i) => v.every((x, j) => Math.abs(x - b[i][j]) < 0.02));
   {
     const p = await page({ charge: { texte: true } });
-    const haut = await p.$$eval('#barre-haut > button', (bs) =>
-      bs.map((b) => [b.getAttribute('aria-label') || b.textContent.trim(), b.title]),
+    const haut = await p.$$eval('#barre-haut button', (bs) =>
+      bs
+        .filter((b) => !b.hidden)
+        .map((b) => [b.getAttribute('aria-label'), b.title, b.textContent.trim()]),
     );
     verifier(
       JSON.stringify(haut) ===
-        '[["Fermer","Fermer"],["Texte","Copier le texte"],["Glisser vers une appli","Glisser vers une appli"],["Enregistrer","Enregistrer"],["Copier","Copier"]]' &&
+        '[["Fermer","Fermer",""],["Copier le texte","Copier le texte","Texte"],["Glisser vers une appli","Glisser vers une appli","Glisser"],["Enregistrer","Enregistrer","Enregistrer"],["Enregistrer sous…","Enregistrer sous…",""],["Copier","Copier","Copier"]]' &&
         (await texteHaut(p).count()) === 1,
-      '21 « Texte » (infobulle « Copier le texte ») entre Fermer et Glisser',
+      '21 « Texte » (nom et infobulle « Copier le texte ») entre Fermer et Glisser',
       JSON.stringify(haut),
     );
     // R7 : un Bloc noir posé ; l'image lue est l'image composée, la vue du document.
@@ -2996,10 +2889,12 @@ const CHARGE = {
     // Sans `texte` dans la charge : aucun bouton, rien de créé.
     const p = await page({ charge: { texte: false } });
     const r = await p.evaluate(() => ({
-      t: [...document.querySelectorAll('button')].filter(
-        (b) => b.textContent.trim() === 'Texte' && b.closest('#barre-haut'),
+      t: [...document.querySelectorAll('#barre-haut button')].filter(
+        (b) => b.textContent.trim() === 'Texte' && !b.closest('[hidden]'),
       ).length,
-      titre: [...document.querySelectorAll('[title="Copier le texte"]')].length,
+      titre: [...document.querySelectorAll('[title="Copier le texte"]')].filter(
+        (b) => !b.closest('[hidden]'),
+      ).length,
     }));
     verifier(
       r.t === 0 && r.titre === 0,
@@ -3011,16 +2906,16 @@ const CHARGE = {
       __emettre('editeur:charger', { ...window.__charge, id: 7, texte: true }),
     );
     await p
-      .waitForFunction(() => document.querySelector('#barre-haut [data-texte="lancer"]'), null, {
+      .waitForFunction(() => document.querySelector('#barre-haut [data-act="texte"]:not([hidden])'), null, {
         timeout: 3000,
       })
       .catch(() => {});
-    const avec = await p.locator('#barre-haut [data-texte="lancer"]').count();
+    const avec = await p.locator('#barre-haut [data-act="texte"]:not([hidden])').count();
     await p.evaluate(() =>
       __emettre('editeur:charger', { ...window.__charge, id: 7, texte: false }),
     );
     await uneImage(p);
-    const sans = await p.locator('#barre-haut [data-texte="lancer"]').count();
+    const sans = await p.locator('#barre-haut [data-act="texte"]:not([hidden])').count();
     verifier(
       avec === 1 && sans === 0,
       '21 le bouton suit la charge (paraît, puis part)',
@@ -3041,7 +2936,7 @@ const CHARGE = {
       ...['enregistrer', 'copier', 'fermer'].map(
         (a) => document.querySelector(`#barre-haut [data-act="${a}"]`).disabled,
       ),
-      document.querySelector('#bouton-glisser').disabled,
+      document.querySelector('[data-glisser]').disabled,
     ]);
     await vider(p);
     // Clic sur « Enregistrer » et « Copier » grisés : rien n'est exporté.
@@ -3050,7 +2945,7 @@ const CHARGE = {
     await uneImage(p);
     const sansExport = (await appels(p, 'editeur_exporter')).length;
     // Focus hors du calque (vide de la barre du haut) : Échap ne ferme que le calque.
-    await p.mouse.click(...(await centre('#barre-haut .sp')));
+    await p.mouse.click(...(await centre('#barre-haut .h-vide')));
     const hors = await p.evaluate(
       () => !document.querySelector('.calque-texte').contains(document.activeElement),
     );
@@ -3072,7 +2967,7 @@ const CHARGE = {
       ...['enregistrer', 'copier'].map(
         (a) => document.querySelector(`#barre-haut [data-act="${a}"]`).disabled,
       ),
-      document.querySelector('#bouton-glisser').disabled,
+      document.querySelector('[data-glisser]').disabled,
     ]);
     verifier(JSON.stringify(apres) === '[false,false,false]', '21 calque fermé : barre du haut rendue');
     // Ctrl + A puis focus hors du calque : Ctrl + C copie le texte, jamais l'image ; une
@@ -3080,7 +2975,7 @@ const CHARGE = {
     await vider(p);
     const n = await lireTexte(p);
     await p.keyboard.press('Control+a');
-    await p.mouse.click(...(await centre('#barre-haut .sp')));
+    await p.mouse.click(...(await centre('#barre-haut .h-vide')));
     const outil0 = await p.evaluate(() => __ed.prefs.outil);
     await p.keyboard.press('p');
     const outil1 = await p.evaluate(() => __ed.prefs.outil);
@@ -3106,7 +3001,7 @@ const CHARGE = {
       const s = getComputedStyle(document.activeElement);
       return [document.activeElement.getAttribute('aria-label'), s.outlineStyle, s.outlineWidth];
     });
-    await p.mouse.click(...(await centre('#barre-haut .sp')));
+    await p.mouse.click(...(await centre('#barre-haut .h-vide')));
     await p.keyboard.press('Control+c');
     await uneImage(p);
     const c = await copies(p);
@@ -3167,7 +3062,7 @@ const CHARGE = {
       return p.evaluate(() => ({
         calque: document.querySelector('.calque-texte.choix') ? 'choix' : null,
         bloque: __ed.exportEnCours(),
-        grise: document.querySelector('#barre-haut [data-texte="lancer"]').disabled,
+        grise: document.querySelector('#barre-haut [data-act="texte"]:not([hidden])').disabled,
       }));
     };
     const r1 = await avantNumero(false);
@@ -3320,7 +3215,7 @@ const CHARGE = {
       await p.evaluate(() => __exports.at(-1).numero),
     );
     const anneaux = [];
-    for (const sel of ['#barre-haut [data-act="copier"]', '#outils .sz']) {
+    for (const sel of ['#barre-haut [data-act="copier"]', '#socle .rg-zone .rg-b']) {
       await p.keyboard.press('Shift');
       await p.$eval(sel, (b) => b.focus());
       anneaux.push(
@@ -3330,24 +3225,21 @@ const CHARGE = {
         }),
       );
     }
-    // L'instrument dessiné et l'outil à pictogramme : un anneau intérieur (le masque de l'un
-    // coupe ce qui dépasse ; la nuance de l'autre passe par-dessus l'anneau).
-    const anneauxDedans = [];
-    for (const sel of ['#outils .tl.ib', '#outils .tl.ip']) {
+    // Un outil du socle et une pastille de couleur : l'anneau aussi (dedans pour la pastille).
+    for (const sel of ['#socle .outil[data-outil="stylo"]', '#socle .rg-zone .rg-c']) {
       await p.keyboard.press('Shift');
       await p.$eval(sel, (b) => b.focus());
-      anneauxDedans.push(
+      anneaux.push(
         await p.$eval(sel, (b) => {
           const s = getComputedStyle(b);
-          return [b.matches(':focus-visible'), s.outlineStyle, /inset/.test(s.boxShadow)];
+          return [b.matches(':focus-visible'), s.outlineStyle, s.outlineWidth];
         }),
       );
     }
     verifier(
-      JSON.stringify(anneaux) === '[[true,"solid","2px"],[true,"solid","2px"]]' &&
-        JSON.stringify(anneauxDedans) === '[[true,"none",true],[true,"none",true]]',
-      '21 anneau de focus sur « Copier » du haut, un réglage, un instrument et un outil',
-      JSON.stringify([anneaux, anneauxDedans]),
+      anneaux.length === 4 && anneaux.every((a) => JSON.stringify(a) === '[true,"solid","2px"]'),
+      '21 anneau de focus sur « Copier » du haut, un réglage, un outil et une couleur',
+      JSON.stringify(anneaux),
     );
     await fin(p, '21 Alt, Espace, anneaux');
   }
@@ -3389,26 +3281,26 @@ const CHARGE = {
       theme: 'dark',
     });
     const r = await p.evaluate(() => {
-      const bs = [...document.querySelectorAll('#barre-haut > button')].map((b) =>
-        b.getBoundingClientRect(),
-      );
-      const lib = [...document.querySelectorAll('#barre-haut span')].find(
-        (s) => s.textContent === 'Texte',
-      );
+      const bs = [...document.querySelectorAll('#barre-haut button')]
+        .filter((b) => !b.hidden)
+        .map((b) => b.getBoundingClientRect());
+      // Sous 940 px, les sorties ne gardent que leur pictogramme.
+      const mots = [...document.querySelectorAll('#barre-haut .s-b span')].filter(
+        (s) => getComputedStyle(s).display !== 'none',
+      ).length;
       const h = document.querySelector('#barre-haut').getBoundingClientRect();
       return {
         n: bs.length,
         rangee: bs.every((b) => b.top >= h.top && b.bottom <= h.bottom),
         ordre: bs.every((b, i) => i === 0 || bs[i - 1].right <= b.left),
         dedans: bs.every((b) => b.left >= 0 && b.right <= 640),
-        lib:
-          lib && lib.scrollWidth <= lib.clientWidth + 0.5 && lib.getBoundingClientRect().width > 20,
+        mots,
         deborde: document.documentElement.scrollWidth > innerWidth,
       };
     });
     verifier(
-      r.n === 5 && r.rangee && r.ordre && r.dedans && r.lib && !r.deborde,
-      '21 barre du haut à 640 px : cinq boutons sur une rangée, rien ne déborde',
+      r.n === 6 && r.rangee && r.ordre && r.dedans && r.mots === 0 && !r.deborde,
+      '21 barre du haut à 640 px : six boutons sur une rangée, pictogrammes seuls, rien ne déborde',
       JSON.stringify(r),
     );
     const t0 = await p.evaluate(() => performance.now());

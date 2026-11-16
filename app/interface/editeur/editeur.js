@@ -266,14 +266,17 @@ matchMedia(`(resolution: ${window.devicePixelRatio}dppx)`).addEventListener?.("c
 );
 
 // Zone utile de la scène pour l'image ajustée (pixels CSS) : les réserves de la maquette
-// (reserve(), piste b), la palette comprise.
+// (reserve(), piste b), au-dessus du socle d'annotation.
 function zoneUtile() {
   const l = scene.clientWidth;
   const h = scene.clientHeight;
   const etroite = $("#fenetre").clientWidth < jetonNombre("editeur-etroite");
   const cote = jetonNombre(etroite ? "editeur-reserve-cote-etroite" : "editeur-reserve-cote");
   const haut = jetonNombre("editeur-reserve-haut");
-  const bas = $("#palette").offsetHeight + jetonNombre("editeur-reserve-bas");
+  // Le socle est posé sur le bas de la scène : l'image ajustée passe au-dessus de lui.
+  const sc = scene.getBoundingClientRect();
+  const socle = $("#socle").getBoundingClientRect();
+  const bas = Math.max(0, sc.bottom - socle.top) + jetonNombre("editeur-reserve-bas");
   return { l, h, al: Math.max(1, l - 2 * cote), ah: Math.max(1, h - haut - bas), haut };
 }
 
