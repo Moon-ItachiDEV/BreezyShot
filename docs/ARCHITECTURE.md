@@ -34,7 +34,7 @@ app/
                             et leurs tests), fenetre_editeur.rs : ses neuf commandes
                             (0.4, §6.2) ; les gestes de l'éditeur sont dans mod.rs ;
                             historique.rs : décisions de l'historique (pures, 0.5),
-                            breezy.rs : décisions des fichiers `.breezy` (pures, 0.7.7),
+                            breezy.rs : décisions des fichiers `.breezy` (pures, 0.7.8),
                             geste_breezy.rs : enregistrer, rouvrir, annotations (§6.5) ;
                             geste_historique.rs : ses gestes, fenetre_historique.rs : ses
                             huit commandes ; texte.rs : décisions de Copier le texte
@@ -58,7 +58,7 @@ app/
                             des clics visibles du film (0.7.7) ; aucun code propre à un
                             système
       sortie/               presse-papiers, PNG, « Récents », enregistrement (étape 6) ;
-                            breezy.rs : le fichier `.breezy` (archive ZIP, pur, 0.7.7, §6.5) ;
+                            breezy.rs : le fichier `.breezy` (archive ZIP, pur, 0.7.8, §6.5) ;
                             glisser.rs : fichier donné au glisser, effacement de Supprimer ;
                             fichier.rs : aussi `enregistrer_a` (Enregistrer sous…, 0.4) ;
                             historique.rs : « Récents » lu, aperçus, effacements (0.5) ;
@@ -213,7 +213,7 @@ dépôt privé ni option de compilation. Les fonctions Pro de la feuille de rout
 se construisent ici, dans la même app ; en 0.5, seuls l'historique (§6.3) et Copier le
 texte (§6.4) existent ; la 0.6 ajoute la capture défilante (`Fonction::Defilante`), la
 0.7 la vidéo et le GIF (`Fonction::Video`, `Fonction::Gif`, indépendantes l'une de
-l'autre), la 0.7.7 les fichiers modifiables `.breezy` (`Fonction::Breezy`, §6.5 : montrés
+l'autre), la 0.7.8 les fichiers modifiables `.breezy` (`Fonction::Breezy`, §6.5 : montrés
 éteints sans licence, avec « Pro »). Une licence collée dans Réglages › Général les débloque ; l'achat, le
 lien avec un vendeur et le nombre d'appareils ne sont pas construits. Sans licence, l'app est
 celle de la 0.4 plus la ligne « Licence » : « Historique », « Copier le texte »,
@@ -2129,7 +2129,7 @@ lecture, §2), choix de l'utilisateur du 16/11/2026 (Pro).
 - Pas fait : les codes-barres (EAN, Code 128…), un code lu dans l'éditeur, un QR code en
   Shift-JIS (la crate ne lit que de l'UTF-8), un code seul sans langue de lecture installée.
 
-### 6.5 Fichier `.breezy` : enregistrer et rouvrir (0.7.7, Pro)
+### 6.5 Fichier `.breezy` : enregistrer et rouvrir (0.7.8, Pro)
 
 Demande de l'utilisateur (16/11/2026) : un fichier propre à l'app, comme les fichiers modifiables
 de CleanShot, qui garde la capture et chaque annotation séparément pour tout modifier plus tard.
@@ -2142,7 +2142,7 @@ relecture par Python d'une archive de l'app) : une archive ZIP à entrées « st
 compression, sans ZIP64, sans chiffrement), écrite et lue à la main (CRC-32 compris : aucune
 dépendance) :
 
-- `breezy.json` : `{"format":"breezy","version":1,"app":"0.7.7","largeur":L,"hauteur":H,
+- `breezy.json` : `{"format":"breezy","version":1,"app":"0.7.8","largeur":L,"hauteur":H,
   "transparence":bool,"cree":"…"}` ; champs inconnus ignorés ; `version` plus grande que
   `VERSION_FORMAT` : refus `plus_recent` (« Fichier fait par une version plus récente ») ;
 - `image.png` : les pixels d'origine (RGBA 8 bits, alpha gardé), sans aucune annotation ;
@@ -3012,7 +3012,7 @@ sous `<E>`, entre parenthèses :
 - raccourci : `BreezyShot.lnk` au menu Démarrer de l'utilisateur (`<E>\menu\`) ;
 - clé (HKCU) : `Software\Microsoft\Windows\CurrentVersion\Uninstall\BreezyShot`
   (`Software\BreezyShot-essais\<nom de E>\Uninstall\BreezyShot`) ;
-- association des fichiers `.breezy` (0.7.7, §6.5) : sous `Software\Classes` (en essai
+- association des fichiers `.breezy` (0.7.8, §6.5) : sous `Software\Classes` (en essai
   `Software\BreezyShot-essais\<nom de E>\Classes`), les clés `.breezy` (valeur par défaut
   `BreezyShot.Fichier`), `BreezyShot.Fichier` (« Fichier BreezyShot »), `…\DefaultIcon` (l'exe) et
   `…\shell\open\command` (`"<exe>" "%1"`), et rien d'autre (`Ecriture::Association`) ;

@@ -82,7 +82,7 @@ pub struct EtatEditeur {
     /// par `editeur_copier_texte`.
     pub texte: Option<(u64, Lu)>,
     /// Le début d'un enregistrement `.breezy` en cours (dialogue compris) : aucun autre export,
-    /// ni autre enregistrement `.breezy`, n'est accepté pendant ce temps (0.7.7), sauf s'il
+    /// ni autre enregistrement `.breezy`, n'est accepté pendant ce temps (0.7.8), sauf s'il
     /// dure plus que `OUBLI_BREEZY` (écriture figée) : il est alors oublié.
     pub breezy_en_cours: Option<Instant>,
 }

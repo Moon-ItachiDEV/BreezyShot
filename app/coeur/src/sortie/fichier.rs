@@ -73,7 +73,7 @@ pub fn enregistrer_a(pixels: &Pixels, chemin: &Path, transparence: bool) -> Etap
     }
 }
 
-/// Enregistre une capture et ses annotations en .breezy exactement a `chemin` (0.7.7, Pro) :
+/// Enregistre une capture et ses annotations en .breezy exactement a `chemin` (0.7.8, Pro) :
 /// meme methode et memes garanties que `enregistrer_a` (temporaire du meme dossier, puis
 /// remplacement confirme dans le dialogue ; le dossier n'est jamais cree ; aucune cause ne
 /// nomme un chemin). `version_app` et `cree` vont au manifeste.

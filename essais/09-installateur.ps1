@@ -445,7 +445,7 @@ try {
 
     # 1. État réel noté avant : il ne doit pas bouger.
     $cleReelleAvant = Test-Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\BreezyShot'
-    # Association des fichiers .breezy (0.7.7) : en essai sous la racine d'essai, jamais la vraie.
+    # Association des fichiers .breezy (0.7.8) : en essai sous la racine d'essai, jamais la vraie.
     $assocReelleAvant = Test-Path 'HKCU:\Software\Classes\BreezyShot.Fichier'
     $dossierReelProgrammes = [Environment]::GetFolderPath('LocalApplicationData')
     $dossierReelAvant = Test-Path (Join-Path $dossierReelProgrammes 'Programs/BreezyShot')
@@ -529,7 +529,7 @@ try {
     }
     Verifier 'clé de désinstallation : onze valeurs exactes' ($ecarts.Count -eq 0) ($ecarts -join ' ; ') | Out-Null
 
-    # 6 bis. Association des fichiers .breezy (0.7.7), sous la racine d'essai : l'extension désigne
+    # 6 bis. Association des fichiers .breezy (0.7.8), sous la racine d'essai : l'extension désigne
     # le type, le type a son nom, son icône et sa commande d'ouverture « "<exe>" "%1" ».
     $classes = "HKCU:\Software\BreezyShot-essais\$(Split-Path -Leaf $script:Essai.Dossier)\Classes"
     $ecartsAssoc = @()

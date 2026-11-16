@@ -1,4 +1,4 @@
-// Essai de la lecture d'un fichier .breezy par la page de l'éditeur (0.7.7) : `lireDocument`
+// Essai de la lecture d'un fichier .breezy par la page de l'éditeur (0.7.8) : `lireDocument`
 // de `app/interface/editeur/document.js`, sous Node seul. Un fichier vient du disque : faux,
 // abîmé ou fait pour nuire, il ne doit jamais fournir autre chose qu'un document propre.
 // Sort avec 1 si une vérification échoue.
