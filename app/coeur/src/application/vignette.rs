@@ -61,6 +61,13 @@ pub fn issue(doit_montrer: bool, apercu_ok: bool) -> Declencheur {
     }
 }
 
+/// Une capture s'ouvre-t-elle d'elle-même dans l'éditeur (réglage « Ouvrir dans l'éditeur
+/// après la capture ») ? Seulement si l'éditeur est construit et l'image annotable ; sinon
+/// la capture suit son chemin habituel (vignette ou bandeau).
+pub fn ouvre_l_editeur(voulu: bool, editeur_construit: bool, annotable: bool) -> bool {
+    voulu && editeur_construit && annotable
+}
+
 /// `duree_s` du réglage ; 0 = toujours (`None`).
 pub fn duree_affichage(duree_s: u32) -> Option<Duration> {
     (duree_s > 0).then(|| Duration::from_secs(u64::from(duree_s)))
@@ -574,6 +581,14 @@ pub fn ligne_chrono(souffle: Option<Duration>, entree: Duration) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn editeur_apres_capture_demande_les_trois_conditions() {
+        assert!(ouvre_l_editeur(true, true, true));
+        assert!(!ouvre_l_editeur(false, true, true));
+        assert!(!ouvre_l_editeur(true, false, true));
+        assert!(!ouvre_l_editeur(true, true, false));
+    }
 
     fn capture() -> CaptureMontree {
         CaptureMontree {
