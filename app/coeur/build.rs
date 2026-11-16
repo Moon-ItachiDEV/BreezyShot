@@ -10,7 +10,15 @@ fn main() {
         // aucun ne l'est (la 0.6.1 n'en charge aucun au repos, mesuré par la sonde).
         // `mf.dll` n'y est pas : aucune fonction importée n'en vient (l'éditeur de liens
         // l'écrivait, LNK4199) ; la garde la charge elle-même, depuis System32.
-        for dll in ["mfplat.dll", "mfreadwrite.dll", "dxgi.dll", "d3d11.dll"] {
+        // `winmm.dll` (0.7.7, `systeme::minuterie`) : seulement pour un film à 60 i/s ; sans
+        // elle à la demande, l'app la chargeait dès le démarrage (essai 15, L0 et L1).
+        for dll in [
+            "mfplat.dll",
+            "mfreadwrite.dll",
+            "dxgi.dll",
+            "d3d11.dll",
+            "winmm.dll",
+        ] {
             println!("cargo:rustc-link-arg=/DELAYLOAD:{dll}");
         }
         println!("cargo:rustc-link-arg=delayimp.lib");
