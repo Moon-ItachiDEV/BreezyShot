@@ -1297,8 +1297,11 @@ droite et en bas.
 
 `film.js` (`poser`) pose maintenant le cadre en pixels réels entiers, dans un repère
 `scale(1 / k)` : épaisseurs arrondies vers le bas (2,5 font 2, 1,5 font 1), position et taille
-entières, rayon arrondi. À 100 %, le rendu ne change pas. L'essai de page `film.cjs` vérifie
-la même distance sur les quatre côtés à 100, 125 et 150 %, et rejoue le cas F125 (zone 600 ×
+entières, rayon arrondi et borné à la bordure et au liseré (coin de la zone net). La portée
+du voile suit l'échelle (`200vmax × k`) : dans ce repère, elle ne couvrait plus l'écran au-delà
+de 200 %. À 100 %, le rendu ne change pas. L'essai de page `film.cjs` vérifie
+le blanc net à 2 px de la zone sur les quatre côtés à 100, 125, 150 et 175 %, le voile
+jusqu'aux coins de l'écran à 350 %, et rejoue le cas F125 (zone 600 ×
 450 en (40, 40) à 125 %). Les deux contrôles échouent sur l'ancienne page et passent sur la
 nouvelle. F125 écrit aussi ses quatre points lus.
 
@@ -1306,4 +1309,6 @@ nouvelle. F125 écrit aussi ses quatre points lus.
 
 - WebView2 sur Windows : vérifié dans Chromium seulement. La CI (F125) le jouera, si son
   changement d'échelle est suivi.
-- `defilante.js` lit l'échelle de la même façon : pas regardé s'il a le même décalage.
+- `defilante.js` a le même défaut (relecture du 16/11) : trait de 1 px posé en pixels
+  logiques fractionnaires, qui mord dans la zone ou n'est pas symétrique à 125, 150 et 175 %.
+  Noté dans les finitions, pas corrigé ici.

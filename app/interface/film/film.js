@@ -190,7 +190,12 @@ function poser(lui) {
   const s = cadre.style;
   s.setProperty("--film-cadre-epaisseur", `${dehors}px`);
   s.setProperty("--film-cadre-lisere", `${lisere}px`);
-  s.setProperty("--film-cadre-rayon", `${Math.round(px("--film-cadre-rayon") * k)}px`);
+  // Rayon borné à la bordure et au liseré : au-delà, le liseré du dedans s'arrondit et
+  // assombrit le coin de la zone.
+  s.setProperty("--film-cadre-rayon", `${Math.min(Math.round(px("--film-cadre-rayon") * k), dehors + lisere)}px`);
+  // Le voile vit aussi dans ce repère : sa portée est rendue en pixels logiques (au-delà de
+  // 200 %, 200vmax / k ne couvrait plus le coin opposé de l'écran).
+  s.setProperty("--film-voile-portee", `${200 * k}vmax`);
   s.left = "0px";
   s.top = "0px";
   s.transformOrigin = "0 0";
@@ -293,7 +298,8 @@ function animerEntree(lui) {
   if (reduites()) return;
   const d = duree("--duree-ressort");
   const fin = getComputedStyle(cadre).boxShadow;
-  const depart = `0 0 0 0 transparent, inset 0 0 0 0 transparent, 0 0 0 200vmax ${jeton("--scrim")}`;
+  const portee = cadre.style.getPropertyValue("--film-voile-portee") || "200vmax";
+  const depart = `0 0 0 0 transparent, inset 0 0 0 0 transparent, 0 0 0 ${portee} ${jeton("--scrim")}`;
   lui.animations.push(
     cadre.animate(
       [

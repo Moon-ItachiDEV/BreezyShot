@@ -149,7 +149,7 @@ function simuler(o) {
   }
 
   // 2. Cadre dehors, voile, pilule et film_zone : trois échelles, deux thèmes, vidéo et GIF.
-  for (const k of [1, 1.25, 1.5]) {
+  for (const k of [1, 1.25, 1.5, 1.75]) {
     for (const theme of ['light', 'dark']) {
       for (const sorte of ['video', 'gif']) {
         const nom = `${k * 100} % ${theme === 'light' ? 'clair' : 'sombre'} ${sorte}`;
@@ -173,8 +173,8 @@ function simuler(o) {
         verifier(noir(dehors, 46) && voile.every((x) => noir(x, 46)), `2 ${nom} : voile léger (18 %) sur le reste de l'écran`, JSON.stringify([dehors, voile]));
         // À 125 %, le cadre tombait à 3 px de la zone à gauche et en haut, à 2 px à droite et
         // en bas (essai 15, F125) : à 2 px de la zone, les quatre côtés sont pareils.
-        verifier(deux.every((x) => JSON.stringify(x) === JSON.stringify(deux[0])) && (k > 1.25 || deux.every(blanc)),
-          `2 ${nom} : cadre à la même distance de la zone sur les quatre côtés${k > 1.25 ? '' : ' (blanc à 2 px)'}`, JSON.stringify(deux));
+        verifier(deux.every(blanc),
+          `2 ${nom} : cadre blanc net à 2 px de la zone, sur les quatre côtés`, JSON.stringify(deux));
         const l = sorte === 'gif' ? GIF_L : VIDEO_L;
         const pl = await rect(p, '#pilule');
         const zs = await appels(p, 'film_zone');
@@ -210,6 +210,22 @@ function simuler(o) {
     const [l1, b2, b3, l4] = [pts.slice(0, 4), pts.slice(4, 8), pts.slice(8, 12), pts.slice(12)];
     verifier(l1.every((x) => noir(x, 46)) && b2.every(blanc) && b3.every(blanc) && l4.every((x) => noir(x, 104, 6)),
       '2 bis 125 %, zone en (40, 40) : liseré à 1 px, blanc à 2 et 3 px, liseré sur le voile à 4 px, sur les quatre côtés (F125)', JSON.stringify(pts));
+    await fermer(p);
+  }
+
+  // 2 ter. À 350 % (écran 4K), zone collée au coin haut gauche : le voile couvre encore les
+  // trois autres coins de l'écran (sa portée suit l'échelle, le cadre étant dans un repère
+  // `scale(1 / k)`).
+  {
+    const k = 3.5;
+    const p = await ouvrir({ k });
+    const c = charge(13, k, { charge: { zone: { x: 0, y: 0, largeur: 600, hauteur: 450 }, pilule: { x: 0, y: 470 } } });
+    await montrer(p, c);
+    await p.waitForTimeout(450);
+    const L = Math.round(VIEWPORT.width * k), H = Math.round(VIEWPORT.height * k);
+    const png = await cliche(p, { omitBackground: true });
+    const coins = await pixels(png, [[L - 2, 2], [2, H - 2], [L - 2, H - 2]]);
+    verifier(coins.every((x) => noir(x, 46)), '2 ter 350 %, zone au coin : voile sur les trois autres coins de l\'écran', JSON.stringify(coins));
     await fermer(p);
   }
 
