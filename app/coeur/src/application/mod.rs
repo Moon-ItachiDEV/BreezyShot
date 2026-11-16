@@ -210,7 +210,7 @@ pub enum EnAttente {
     Capture(String),
     /// L'app relancée : la barre de capture.
     Barre,
-    /// Un fichier `.breezy` à rouvrir (double-clic, 0.7.5).
+    /// Un fichier `.breezy` à rouvrir (double-clic, 0.7.6).
     Ouvrir(String),
 }
 
@@ -230,7 +230,7 @@ pub fn attente_avec_barre(avant: Option<EnAttente>) -> Option<EnAttente> {
 pub enum Evenement {
     /// Une autre instance a été lancée, avec ses arguments (le premier est le programme).
     SecondeInstance(Vec<String>),
-    /// Rouvrir un fichier `.breezy` dans l'éditeur (0.7.5, Pro ; le chemin n'est jamais
+    /// Rouvrir un fichier `.breezy` dans l'éditeur (0.7.6, Pro ; le chemin n'est jamais
     /// écrit au journal).
     OuvrirBreezy(String),
     /// Le thème de la barre des tâches a changé.
@@ -1064,7 +1064,7 @@ pub(super) fn texte_construit(app: &AppHandle) -> bool {
     mode_construit(app, Mode::Texte)
 }
 
-/// Vrai si la licence ouvre les fichiers `.breezy` (enregistrer et rouvrir, 0.7.5). Le seul
+/// Vrai si la licence ouvre les fichiers `.breezy` (enregistrer et rouvrir, 0.7.6). Le seul
 /// point qui le dit : `droits::ouverte`.
 pub(super) fn breezy_ouvert(app: &AppHandle) -> bool {
     droits::ouverte(droits::Fonction::Breezy, pro(app))
@@ -1642,7 +1642,7 @@ pub fn traiter(app: &AppHandle, evenement: Evenement) {
                         *a = attente_avec_barre(a.take());
                     }
                 }
-                // Un fichier `.breezy` double-cliqué (0.7.5) : il s'ouvre dans l'éditeur de
+                // Un fichier `.breezy` double-cliqué (0.7.6) : il s'ouvre dans l'éditeur de
                 // l'instance qui tourne, au tour suivant de la boucle.
                 Commande::Ouvrir(chemin) => {
                     log::info!("seconde instance: fichier .breezy");
