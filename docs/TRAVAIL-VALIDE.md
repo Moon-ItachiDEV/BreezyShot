@@ -1285,3 +1285,18 @@ remplace la barre de la 0.7.2.
 - Pas de codes-barres, pas de lecture dans l'éditeur, pas de QR code en Shift-JIS, et sans
   langue de lecture installée « Copier le texte » n'existe pas, donc le QR code non plus.
 - Un QR code qui couvre un dixième de la zone ou plus l'emporte sur le texte de la zone.
+
+## Publication de la 0.7.7 : winmm chargé à la demande
+
+Le run de main de la PR 22 était rouge sur l'essai 15. L0 et L1 voyaient `winmm.dll` chargé
+au repos. Il est importé pour `timeBeginPeriod` (`systeme::minuterie`), qui n'est appelé que
+pendant un film à 60 images/s. Il rejoint donc la liste `/DELAYLOAD` de `build.rs`, à côté
+de Media Foundation, et n'est plus chargé avant le premier film à 60. La version reste 0.7.7,
+puisqu'elle n'avait pas été publiée.
+
+Le cas F125 (« cadre 2/4 », intermittent depuis le 16/11) écrit maintenant ses quatre points
+lus, comme A9, pour trouver le côté qui manque.
+
+### Non vérifié
+
+- Les essais Windows n'ont pas été joués ici (pas de PowerShell) : ils le seront par la CI.
