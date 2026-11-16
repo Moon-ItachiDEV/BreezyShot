@@ -16,6 +16,7 @@
 //! - U1 (piste A) : `Ctrl + Maj + 6` et `Ctrl + Maj + 7` (`reglages`, défauts), « Vidéo »
 //!   et « GIF » (`libelle_menu`, `page_reglages::libelle_action`).
 
+use std::path::Path;
 use std::time::{Duration, Instant};
 
 use super::etats::Mode;
@@ -132,14 +133,19 @@ pub fn recherche_selon(construit: bool, pro: bool) -> bool {
 /// La demande de sortie d'un film (F23, choix U4), d'après celle des réglages du moment :
 /// jamais « Récents » (F24) ; avec `TOUJOURS_DANS_LE_DOSSIER`, toujours enregistré. Rend
 /// aussi `deplacer` (`sortie::sortir_film`) : le fichier de travail est déplacé dans le
-/// dossier d'enregistrement au lieu d'y être copié.
-pub fn demande_film(base: &sortie::Demande) -> (sortie::Demande, bool) {
-    let demande = sortie::Demande {
+/// dossier d'enregistrement au lieu d'y être copié. `dossier` : le réglage « Dossier des
+/// films » (Pro) ; absent ou vide, le film va au dossier des images, comme avant.
+pub fn demande_film(base: &sortie::Demande, dossier: Option<&Path>) -> (sortie::Demande, bool) {
+    let mut demande = sortie::Demande {
         enregistrer: base.enregistrer || TOUJOURS_DANS_LE_DOSSIER,
         ranger_recents: false,
         transparence: false,
         ..base.clone()
     };
+    if let Some(d) = dossier.filter(|d| !d.as_os_str().is_empty()) {
+        demande.dossier_enregistrement = d.to_path_buf();
+        demande.dossier_affiche = sortie::nom_affiche(d);
+    }
     (demande, TOUJOURS_DANS_LE_DOSSIER)
 }
 
@@ -1096,7 +1102,7 @@ mod tests {
             format: sortie::FormatFichier::Png,
             recents_gardes: sortie::RECENTS_GARDES,
         };
-        let (d, deplacer) = demande_film(&base);
+        let (d, deplacer) = demande_film(&base, None);
         assert!(!d.ranger_recents);
         assert!(!d.transparence);
         assert!(d.copier);
@@ -1104,11 +1110,24 @@ mod tests {
         assert_eq!(deplacer, TOUJOURS_DANS_LE_DOSSIER);
         assert_eq!(d.dossier_enregistrement, base.dossier_enregistrement);
         // « Enregistrer automatiquement » actif : enregistré dans tous les cas.
-        let (d, _) = demande_film(&sortie::Demande {
-            enregistrer: true,
-            ..base
-        });
+        let (d, _) = demande_film(
+            &sortie::Demande {
+                enregistrer: true,
+                ..base.clone()
+            },
+            None,
+        );
         assert!(d.enregistrer);
+        // « Dossier des films » : le film va là, nommé pour l'utilisateur ; vide = images.
+        let (d, _) = demande_film(&base, Some(Path::new("/f/Mes films")));
+        assert_eq!(d.dossier_enregistrement, Path::new("/f/Mes films"));
+        assert_eq!(
+            d.dossier_affiche,
+            sortie::nom_affiche(Path::new("/f/Mes films"))
+        );
+        let (d, _) = demande_film(&base, Some(Path::new("")));
+        assert_eq!(d.dossier_enregistrement, base.dossier_enregistrement);
+        assert_eq!(d.dossier_affiche, base.dossier_affiche);
     }
 
     /// Le filet de la page de sélection ne rend pas la main avant le filet du cœur (F5).

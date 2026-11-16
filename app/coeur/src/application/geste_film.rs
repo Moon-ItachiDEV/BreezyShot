@@ -1130,7 +1130,7 @@ fn ferme(app: &AppHandle, numero: u64, issue: Result<Box<Fermeture>, &'static st
         None => return,
     };
     fermer(app, e);
-    let (demande, deplacer) = film::demande_film(&super::demande_sortie(app, false));
+    let (demande, deplacer) = demande_du_film(app);
     let id = app
         .state::<Application>()
         .derniere_sortie
@@ -1696,10 +1696,19 @@ fn rendre_arret_differe(app: &AppHandle) -> bool {
 const ESSAIS_SESSION: u32 = 5;
 const ENTRE_ESSAIS_SESSION: Duration = Duration::from_millis(20);
 
+/// La demande de sortie d'un film : celle des réglages, avec le « Dossier des films ».
+fn demande_du_film(app: &AppHandle) -> (sortie::Demande, bool) {
+    let reglages = super::reglages_lus(app);
+    film::demande_film(
+        &super::demande_sortie(app, false),
+        reglages.film.dossier.as_deref(),
+    )
+}
+
 /// La demande d'un film rangé à l'arrêt (choix U4) : le dossier d'enregistrement et le
 /// nom du modèle ; ni copie, ni « Récents ».
 fn demande_d_arret(app: &AppHandle) -> sortie::Demande {
-    let (mut demande, _) = film::demande_film(&super::demande_sortie(app, false));
+    let (mut demande, _) = demande_du_film(app);
     demande.copier = false;
     demande
 }
