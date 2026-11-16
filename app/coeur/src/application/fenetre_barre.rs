@@ -21,7 +21,8 @@
 //!   éteint (Pro sans licence) poste `MENU_LICENCE` à la place : Réglages › Licence.
 //! - `barre_retardateur` { secondes } : le retardateur des Réglages changé, par le même
 //!   chemin que la page des Réglages ; rend la valeur en vigueur. La barre reste ouverte.
-//! - `barre_fermer` : Échap ; la barre se cache.
+//! - `barre_fermer` : Échap, ou un clic dans la marge transparente autour de la carte ; la
+//!   barre se cache.
 
 use tauri::AppHandle;
 

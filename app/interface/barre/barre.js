@@ -447,7 +447,7 @@ function deplacer(liste, pas) {
 }
 
 document.addEventListener("keydown", (e) => {
-  if (barre.hidden) return;
+  if (barre.hidden || e.altKey || e.ctrlKey || e.metaKey) return;
   if (ouvert) {
     const liste = elements();
     const pas = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 }[e.key];

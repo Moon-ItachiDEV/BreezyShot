@@ -100,6 +100,7 @@ try {
         # (19 px logiques). Attendre d'abord la fin du délai du double-clic (un clic ailleurs
         # y serait ignoré).
         Start-Sleep -Milliseconds 600
+        if (-not $barre.Boutons.ContainsKey('Capture défilante, Pro')) { throw "troisième lancement : pas de bouton « Capture défilante, Pro » (images vivantes absentes ?) : $($barre.Noms -join ', ')" }
         $ra = $barre.Boutons['Retardateur'].Current.BoundingRectangle
         $rb = $barre.Boutons['Capture défilante, Pro'].Current.BoundingRectangle
         $x = [int](($ra.X + $ra.Width + $rb.X) / 2); $y = [int]($ra.Y + $ra.Height / 2)
@@ -141,10 +142,12 @@ try {
         Verifier 'cinquième lancement : code de sortie 0' ($encore.Fini -and $encore.Code -eq 0) "code $($encore.Code)" | Out-Null
         $barre = Attendre-Barre -Dossier $script:Essai.Dossier -Quoi 'cinquième lancement' -Fois 4
         Start-Sleep -Milliseconds 600
+        Verifier 'cinquième lancement : le bouton « Capture défilante, Pro » est là' ($barre.Boutons.ContainsKey('Capture défilante, Pro')) ($barre.Noms -join ', ') | Out-Null
+        $avantCapture = Compter-Lignes -Texte 'menu: capturer'
         Cliquer-Bouton-Barre $barre 'Capture défilante, Pro' 'cinquième lancement'
         Verifier 'clic sur un bouton Pro éteint : « barre: licence capturer_defilante »' (Attendre-Ligne -Texte 'barre: licence capturer_defilante' -DelaiS 5) | Out-Null
         Verifier 'puis « menu: licence » et la rubrique Licence demandée' ((Attendre-Ligne -Texte 'menu: licence' -DelaiS 5) -and (Attendre-Ligne -Texte 'reglages rubrique licence' -DelaiS 20)) | Out-Null
-        Verifier 'rien de lancé : toujours un seul « barre choisi »' ((Compter-Lignes -Texte 'barre choisi') -eq 1) | Out-Null
+        Verifier 'rien de lancé : toujours un seul « barre choisi », aucune capture de plus' (((Compter-Lignes -Texte 'barre choisi') -eq 1) -and ((Compter-Lignes -Texte 'menu: capturer') -eq $avantCapture)) | Out-Null
     }
     Verifier 'un seul processus BreezyShot' ($restants.Count -eq 1) "$($restants.Count) processus" | Out-Null
     if (-not $seconde.Fini) { try { $seconde.Processus.Kill() } catch { } }

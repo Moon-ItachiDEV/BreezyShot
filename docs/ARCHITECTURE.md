@@ -1442,7 +1442,7 @@ Module pur : il reçoit le dossier où écrire, ne connaît ni Tauri ni les autr
   `reglages_parcourir`, `reglages_saisie`, `reglages_raccourci`, `reglages_retablir`. Chaque
   commande rend `{ vue, refus }` : la vue entière (lignes montrées, valeurs, raccourcis,
   alerte, version du programme) et au plus un refus d'une ligne pour la ligne concernée.
-  Le cœur peut aussi pousser la vue (`reglages:etat`). Une vue reçue ne remplace jamais un
+  Le cœur peut aussi demander une rubrique (`reglages:rubrique`, valeur `"licence"` : Général, la ligne Licence, focus sur son champ ; retenue jusqu'à ce que la page soit prête, jouée une fois). Le cœur peut aussi pousser la vue (`reglages:etat`). Une vue reçue ne remplace jamais un
   élément cliquable dont la valeur n'a pas changé (touches d'un raccourci, segments) : la vue
   relue au retour du focus arrive entre l'appui et le relâchement du premier clic sur la
   fenêtre inactive, et un élément remplacé ferait perdre ce clic (défaut de la 0.3, corrigé
@@ -1534,7 +1534,7 @@ Module pur : il reçoit le dossier où écrire, ne connaît ni Tauri ni les autr
   attributs `data-*`, les rôles et les noms accessibles, pour que le design puisse être
   refait sans y toucher.
 - Lignes du journal (contrat des essais, sans chemin, jamais un texte brut de la page) :
-  `menu: reglages`, `reglages fenetre <hwnd>`, `reglages ramenes devant`,
+  `menu: reglages`, `menu: licence` (bouton Pro éteint de la barre), `reglages rubrique licence` (la rubrique demandée est envoyée à la page), `reglages fenetre <hwnd>`, `reglages ramenes devant`,
   `reglages non ouverts: <erreur>`, `reglages page prete` (une fois par fenêtre créée),
   `reglages fermes`, `demarrage avec le systeme: actif|inactif|desactive par windows|indisponible`,
   `demarrage avec le systeme: echec (<erreur>)`, `reglages relus: <code du constat>`,
