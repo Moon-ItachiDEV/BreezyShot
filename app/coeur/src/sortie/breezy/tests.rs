@@ -267,3 +267,26 @@ fn les_causes_ne_contiennent_jamais_de_chemin() {
         assert!(!e.code().contains('/') && !e.code().contains('\\'));
     }
 }
+
+#[test]
+fn une_entree_inconnue_n_est_jamais_lue_meme_abimee() {
+    let brut = fichier();
+    let e = zip_lire(&brut).unwrap();
+    let get = |n: &str| e.iter().find(|(x, _)| x == n).unwrap().1.to_vec();
+    let z = zip_ecrire(&[
+        (NOM_MANIFESTE, &get(NOM_MANIFESTE)),
+        ("zzz.bin", b"donnees"),
+        (NOM_IMAGE, &get(NOM_IMAGE)),
+        (NOM_ANNOTATIONS, &get(NOM_ANNOTATIONS)),
+    ])
+    .unwrap();
+    // Le CRC de l'entrée inconnue est faux, et même sa méthode : elle est ignorée, le reste se lit.
+    let mut abime = z.clone();
+    let centrale = u32_a(&abime, abime.len() - 22 + 16).unwrap() as usize;
+    let mut p = centrale;
+    // Deuxième entrée du répertoire central : on saute la première (46 + nom).
+    p += 46 + NOM_MANIFESTE.len();
+    abime[p + 10] = 8; // méthode « compressée »
+    abime[p + 16] ^= 0xFF; // CRC faux
+    assert!(lire(&abime).is_ok());
+}

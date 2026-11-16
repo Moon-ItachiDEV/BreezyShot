@@ -111,6 +111,10 @@ const verifier = (ok, quoi, info = '') => {
   verifier(gommes.doc.objets[0].gommes.length === 2000, 'gommes plafonnées');
   verifier(!('gommes' in lire({ objets: [{ type: 'texte', gommes: [{ largeur: 1, points: [[1, 1]] }] }] }).doc.objets[0]), 'une gomme sur un texte est ignorée');
 
+  // 7 bis. Un trait sans point n'a pas de boîte : écarté.
+  const vides = lire({ objets: [{ type: 'crayon', points: [] }, { type: 'surligneur' }, { type: 'crayon', points: 'x' }, { type: 'crayon', points: [[1, 1]] }] });
+  verifier(vides.doc.objets.length === 1 && vides.ecartes === 3, 'traits sans point écartés', `${vides.doc.objets.length} gardé(s), ${vides.ecartes} écarté(s)`);
+
   // 8. Noms inventés : jamais copiés ; __proto__ sans effet.
   const proto = lire('{"objets":[{"type":"ligne","__proto__":{"x":1},"constructor":{"a":2},"evil":"x"}],"__proto__":{"polluee":true},"extra":1}');
   verifier(!('evil' in proto.doc.objets[0]) && !Object.hasOwn(proto.doc.objets[0], 'constructor') && !Object.hasOwn(proto.doc.objets[0], '__proto__') && ({}).polluee === undefined && proto.doc.polluee === undefined, 'champs inventés ignorés, rien ne pollue');

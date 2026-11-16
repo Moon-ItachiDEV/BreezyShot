@@ -723,7 +723,12 @@ fn demarrer(app: &AppHandle, commande: Commande, inconnus: &[String]) {
         }
     }
     for a in inconnus {
-        log::warn!("argument inconnu ignore: {a}");
+        // Un fichier (« Ouvrir avec… ») n'écrit jamais son chemin au journal.
+        if a.starts_with("--") {
+            log::warn!("argument inconnu ignore: {a}");
+        } else {
+            log::warn!("argument inconnu ignore: <fichier>");
+        }
     }
 
     if commande == Commande::Quitter {

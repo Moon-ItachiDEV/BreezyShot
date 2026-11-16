@@ -1030,10 +1030,12 @@ function objetLu(o, budget) {
     case "crayon":
       r = { type: "crayon", points: pointsLus(o.points, budget), couleur: couleurLue(o.couleur),
         epaisseur: niveau(o.epaisseur), opacite: opaciteLue(o.opacite) };
+      if (!r.points.length) return null; // un trait sans point n'a pas de boîte
       break;
     case "surligneur":
       r = { type: "surligneur", points: pointsLus(o.points, budget),
         couleur: couleurLue(o.couleur), epaisseur: niveau(o.epaisseur) };
+      if (!r.points.length) return null;
       break;
     case "texte":
       r = { type: "texte", x: coord(o.x), y: coord(o.y),

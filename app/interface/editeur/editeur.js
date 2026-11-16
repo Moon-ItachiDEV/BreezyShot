@@ -631,6 +631,8 @@ ed.enregistrerBreezy = async () => {
   } catch (e) {
     poserExport(false);
     console.info("editeur_breezy_enregistrer :", e);
+    // « pro » : le cœur a ouvert la licence ; tout autre refus se dit.
+    if (e !== "pro") ed.barre?.message("Impossible d'enregistrer le .breezy");
     return null;
   }
 };

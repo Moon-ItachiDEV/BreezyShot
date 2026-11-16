@@ -32,9 +32,11 @@ pub enum Commande {
 /// Vrai si `argument` est un chemin de fichier `.breezy` (pas une option), casse ignorée.
 pub fn est_fichier_breezy(argument: &str) -> bool {
     let ext = format!(".{}", crate::sortie::EXTENSION_BREEZY);
+    // En octets : un chemin accentué ne se coupe jamais au milieu d'un caractère.
+    let (a, e) = (argument.as_bytes(), ext.as_bytes());
     !argument.starts_with("--")
-        && argument.len() > ext.len()
-        && argument[argument.len() - ext.len()..].eq_ignore_ascii_case(&ext)
+        && a.len() > e.len()
+        && a[a.len() - e.len()..].eq_ignore_ascii_case(e)
 }
 
 /// Ce que l'exe va être.
@@ -301,9 +303,13 @@ mod tests {
             "--x.breezy",
             "a.breezyx",
             "breezy",
+            "ééééé",
+            "été.png",
+            "é.breezyé",
         ] {
             assert!(!est_fichier_breezy(non), "{non}");
         }
+        assert!(est_fichier_breezy("Zoé/été.BREEZY"));
         assert_eq!(
             lire(["a.breezy", "--discret"]).0,
             Commande::Ouvrir("a.breezy".into())

@@ -387,6 +387,14 @@ fn zip_lire(octets: &[u8]) -> Result<Vec<(String, &[u8])>, ErreurBreezy> {
             .and_then(|x| x.checked_add(commentaire_long))
             .filter(|x| *x <= fin_centrale)
             .ok_or(ErreurBreezy::Abime)?;
+        // Une entrée qu'on ne lit pas (nom inconnu) est ignorée avant tout calcul : un fichier
+        // ne peut pas faire recalculer des empreintes sur des données qu'il ne sert pas.
+        if ![NOM_MANIFESTE, NOM_IMAGE, NOM_ANNOTATIONS]
+            .iter()
+            .any(|n| n.as_bytes() == nom)
+        {
+            continue;
+        }
         // Chiffrée (bit 0), ou autre chose que « stockée » : pas une archive BreezyShot.
         if drapeaux & 1 != 0 || methode != 0 || compresse != brut {
             return Err(ErreurBreezy::Abime);

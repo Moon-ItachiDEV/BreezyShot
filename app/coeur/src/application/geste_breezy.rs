@@ -101,13 +101,20 @@ pub fn enregistrer(app: &AppHandle, requete: &tauri::ipc::Request<'_>) -> Result
         .name("editeur-breezy".into())
         .spawn(move || {
             let debut = Instant::now();
-            let issue = travail(
-                (&pixels, transparence),
-                &annotations,
-                proprietaire,
-                &depart,
-                &nom,
-            );
+            // Une panique du fil rend le drapeau et la page : jamais un éditeur bloqué.
+            let issue = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                travail(
+                    (&pixels, transparence),
+                    &annotations,
+                    proprietaire,
+                    &depart,
+                    &nom,
+                )
+            }))
+            .unwrap_or_else(|_| {
+                log::warn!("editeur breezy {id}: panique du fil");
+                (Issue::Echec, None)
+            });
             drop(pixels);
             let pour = pour_fil.clone();
             if let Err(e) = pour_fil.run_on_main_thread(move || {
