@@ -1789,7 +1789,7 @@ public static uint Crc32(byte[] o) {
                 $f = Lire-Reglages $dc
                 $texte = @($f.raccourcis.texte)
                 $histo = @($f.raccourcis.historique)
-                Verifier '(C) fichier passé en v6 : historique Ctrl+Maj+H, texte vide (Ctrl+Maj+T déjà donné)' (($f.version -eq 6) -and ($texte.Count -eq 0) -and ($histo.Count -eq 1) -and ($histo[0] -eq 'Ctrl+Maj+H') -and ((Compter-Motif -Motif 'reglages mis a niveau de la version 3 a la version 6$' -Dossier $dc) -eq 1)) "version $($f.version), texte [$($texte -join ',')], historique [$($histo -join ',')]" | Out-Null
+                Verifier '(C) fichier passé en v7 : historique Ctrl+Maj+H, texte vide (Ctrl+Maj+T déjà donné)' (($f.version -eq 7) -and ($texte.Count -eq 0) -and ($histo.Count -eq 1) -and ($histo[0] -eq 'Ctrl+Maj+H') -and ((Compter-Motif -Motif 'reglages mis a niveau de la version 3 a la version 7$' -Dossier $dc) -eq 1)) "version $($f.version), texte [$($texte -join ',')], historique [$($histo -join ',')]" | Out-Null
                 Verifier '(C) raccourci texte: aucun' ($lt -match 'raccourci texte: aucun$') $lt | Out-Null
                 $o = Ouvrir-Historique $dc '(C)'
                 $c = Attendre-Cases $o.H 3 '(C)'

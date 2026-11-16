@@ -25,17 +25,20 @@ use std::time::Duration;
 
 use ::windows::Win32::Foundation::E_INVALIDARG;
 use ::windows::Win32::Media::Audio::{
-    eCapture, eConsole, IAudioCaptureClient, IAudioClient, IMMDevice, IMMDeviceEnumerator,
+    eCapture, eConsole, eRender, IAudioCaptureClient, IAudioClient, IMMDevice, IMMDeviceEnumerator,
     MMDeviceEnumerator, AUDCLNT_BUFFERFLAGS_DATA_DISCONTINUITY, AUDCLNT_BUFFERFLAGS_SILENT,
     AUDCLNT_E_UNSUPPORTED_FORMAT, AUDCLNT_SHAREMODE_SHARED, AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM,
-    AUDCLNT_STREAMFLAGS_SRC_DEFAULT_QUALITY, DEVICE_STATE_ACTIVE, WAVEFORMATEX, WAVE_FORMAT_PCM,
+    AUDCLNT_STREAMFLAGS_LOOPBACK, AUDCLNT_STREAMFLAGS_SRC_DEFAULT_QUALITY, DEVICE_STATE_ACTIVE,
+    WAVEFORMATEX, WAVE_FORMAT_PCM,
 };
 use ::windows::Win32::System::Com::{
     CoCreateInstance, CoInitializeEx, CoTaskMemFree, CoUninitialize, CLSCTX_ALL,
     COINIT_MULTITHREADED,
 };
 
-use super::{absence_ordinaire, code_hex, erreur_de, lire_format, Conversion, Erreur, FREQUENCE};
+use super::{
+    absence_ordinaire, code_hex, erreur_de, lire_format, Conversion, Erreur, Origine, FREQUENCE,
+};
 
 /// Le rappel du son, du fil `film-son`.
 pub type Rappel = Box<dyn FnMut(&[i16]) + Send + 'static>;
@@ -85,20 +88,25 @@ impl Drop for MemoireCom {
     }
 }
 
-/// Le point de capture par défaut du rôle `eConsole` (« Son › Entrée »).
-fn point_par_defaut() -> ::windows::core::Result<IMMDevice> {
+/// Le point par défaut du rôle `eConsole` : la capture (« Son › Entrée ») pour le micro,
+/// la lecture (« Son › Sortie ») pour le son de l'ordinateur.
+fn point_par_defaut(origine: Origine) -> ::windows::core::Result<IMMDevice> {
     // SAFETY : COM initialisé dans ce fil par l'appelant ; objets rendus par leur compte
     // de références.
     unsafe {
         let enumerateur: IMMDeviceEnumerator =
             CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL)?;
-        enumerateur.GetDefaultAudioEndpoint(eCapture, eConsole)
+        let flux = match origine {
+            Origine::Micro => eCapture,
+            Origine::Ordinateur => eRender,
+        };
+        enumerateur.GetDefaultAudioEndpoint(flux, eConsole)
     }
 }
 
-pub fn present() -> bool {
+pub fn present(origine: Origine) -> bool {
     let _com = Com::initialiser();
-    let Ok(appareil) = point_par_defaut() else {
+    let Ok(appareil) = point_par_defaut(origine) else {
         return false;
     };
     // SAFETY : appareil vivant ; lecture de son état.
@@ -125,16 +133,23 @@ struct Flux {
 }
 
 /// Active un client audio sur le point de capture par défaut.
-fn activer() -> Result<IAudioClient, Erreur> {
-    let appareil = point_par_defaut().map_err(|e| echec(&e))?;
+fn activer(origine: Origine) -> Result<IAudioClient, Erreur> {
+    let appareil = point_par_defaut(origine).map_err(|e| echec(&e))?;
     // SAFETY : appareil vivant ; le client est rendu par son compte de références.
     unsafe { appareil.Activate(CLSCTX_ALL, None) }.map_err(|e| echec(&e))
 }
 
 /// Ouvre et démarre le flux : en 48 kHz mono 16 bits converti par Windows, ou, s'il refuse,
-/// dans le format de mélange de l'appareil, converti ici.
-fn ouvrir_flux() -> Result<Flux, Erreur> {
-    let client = activer()?;
+/// dans le format de mélange de l'appareil, converti ici. Le son de l'ordinateur (loopback,
+/// `AUDCLNT_STREAMFLAGS_LOOPBACK`) prend toujours le format de mélange : Windows n'y
+/// convertit pas de façon sûre.
+fn ouvrir_flux(origine: Origine) -> Result<Flux, Erreur> {
+    let client = activer(origine)?;
+    let boucle = if origine == Origine::Ordinateur {
+        AUDCLNT_STREAMFLAGS_LOOPBACK
+    } else {
+        0
+    };
     let voulu = WAVEFORMATEX {
         wFormatTag: WAVE_FORMAT_PCM as u16,
         nChannels: 1,
@@ -144,23 +159,27 @@ fn ouvrir_flux() -> Result<Flux, Erreur> {
         wBitsPerSample: 16,
         cbSize: 0,
     };
-    // SAFETY : format décrit en entier ; mode partagé ; sans session nommée.
-    let direct = unsafe {
-        client.Initialize(
-            AUDCLNT_SHAREMODE_SHARED,
-            AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM | AUDCLNT_STREAMFLAGS_SRC_DEFAULT_QUALITY,
-            DUREE_TAMPON,
-            0,
-            &voulu,
-            None,
-        )
+    let direct = if origine == Origine::Ordinateur {
+        Err(::windows::core::Error::from(E_INVALIDARG))
+    } else {
+        // SAFETY : format décrit en entier ; mode partagé ; sans session nommée.
+        unsafe {
+            client.Initialize(
+                AUDCLNT_SHAREMODE_SHARED,
+                AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM | AUDCLNT_STREAMFLAGS_SRC_DEFAULT_QUALITY,
+                DUREE_TAMPON,
+                0,
+                &voulu,
+                None,
+            )
+        }
     };
     let (client, conversion, bloc) = match direct {
         Ok(()) => (client, None, 2),
         Err(e) if e.code() == AUDCLNT_E_UNSUPPORTED_FORMAT || e.code() == E_INVALIDARG => {
             // Un client dont `Initialize` a échoué ne se réessaie pas : un neuf.
             drop(client);
-            let client = activer()?;
+            let client = activer(origine)?;
             // SAFETY : client vivant ; le format est alloué par COM et rendu par
             // `MemoireCom` ; ses octets sont lus sur la taille qu'il annonce (18 + cbSize).
             let format = unsafe {
@@ -178,7 +197,7 @@ fn ouvrir_flux() -> Result<Flux, Erreur> {
                 client
                     .Initialize(
                         AUDCLNT_SHAREMODE_SHARED,
-                        0,
+                        boucle,
                         DUREE_TAMPON,
                         0,
                         melange.0,
@@ -280,9 +299,10 @@ fn capturer(
     pret: mpsc::SyncSender<Result<(), Erreur>>,
     arret: Arc<AtomicBool>,
     perdu: Arc<AtomicBool>,
+    origine: Origine,
 ) {
     let _com = Com::initialiser();
-    let mut flux = match ouvrir_flux() {
+    let mut flux = match ouvrir_flux(origine) {
         Ok(flux) => flux,
         Err(e) => {
             let _ = pret.send(Err(e));
@@ -338,14 +358,14 @@ impl Drop for Micro {
     }
 }
 
-pub fn ouvrir(rappel: Rappel) -> Result<Micro, Erreur> {
+pub fn ouvrir(rappel: Rappel, origine: Origine) -> Result<Micro, Erreur> {
     let arret = Arc::new(AtomicBool::new(false));
     let perdu = Arc::new(AtomicBool::new(false));
     let (pret, reponse) = mpsc::sync_channel(1);
     let (a, p) = (Arc::clone(&arret), Arc::clone(&perdu));
     let fil = std::thread::Builder::new()
         .name("film-son".into())
-        .spawn(move || capturer(rappel, pret, a, p))
+        .spawn(move || capturer(rappel, pret, a, p, origine))
         .map_err(|e| Erreur::Autre(format!("fil: {e}")))?;
     match reponse.recv_timeout(DELAI_OUVERTURE) {
         Ok(Ok(())) => Ok(Micro {
@@ -429,6 +449,34 @@ mod tests {
         let e = facade::ouvrir(move |_| a.store(true, Ordering::SeqCst)).unwrap_err();
         assert_eq!(e, Erreur::Absent);
         assert!(!appele.load(Ordering::SeqCst));
+    }
+
+    /// Le son de l'ordinateur : sans point de lecture, `Absent` ; avec, un flux qui s'ouvre
+    /// (ou un refus dit), sans panique, et dont la destruction arrête le fil.
+    #[test]
+    fn ordinateur_ouvre_ou_dit_pourquoi_pas() {
+        let present = facade::ordinateur_present();
+        let recus = Arc::new(Mutex::new(0usize));
+        let r = Arc::clone(&recus);
+        match facade::ouvrir_ordinateur(move |pcm| {
+            *r.lock().unwrap_or_else(|e| e.into_inner()) += pcm.len();
+        }) {
+            Ok(m) => {
+                assert!(present, "ouvert sans point de lecture");
+                std::thread::sleep(Duration::from_millis(300));
+                assert!(!m.perdu());
+                drop(m);
+                let a = *recus.lock().unwrap();
+                std::thread::sleep(Duration::from_millis(100));
+                assert_eq!(*recus.lock().unwrap(), a, "rappel apres la destruction");
+            }
+            Err(e) => {
+                eprintln!("ordinateur: present {present}, pas ouvert : {e:?}");
+                if !present {
+                    assert_eq!(e, Erreur::Absent);
+                }
+            }
+        }
     }
 
     /// Avec un micro (jamais sur GitHub) : le rappel reçoit du PCM au rythme de 48 kHz,

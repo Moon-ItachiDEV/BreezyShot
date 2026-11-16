@@ -751,6 +751,27 @@ pub(super) fn tout_effacer(app: &AppHandle) {
     });
 }
 
+/// « Vider l'historique » des Réglages (Pro) : « Récents », aperçus et `Glisser`, fenêtre de
+/// l'historique ouverte ou non. Ouverte, c'est « Tout effacer » (la liste se vide à l'écran).
+pub(super) fn vider_depuis_les_reglages(app: &AppHandle) {
+    if super::historique_ouvert(app).is_some() {
+        tout_effacer(app);
+        return;
+    }
+    // Une vignette montrée garde un fichier de « Récents » : elle se ferme d'abord.
+    fermer_vignette_de(app, None);
+    let pour = app.clone();
+    dans_un_fil_ou_ici("historique-vidage", move || {
+        let d = dossiers(&pour);
+        let bilan = sortie::vider(&d.recents, &d.apercus, &d.glisser);
+        log::info!(
+            "historique vide depuis les reglages {} echecs {}",
+            bilan.effaces,
+            bilan.echecs
+        );
+    });
+}
+
 // Glisser (§2.2, U3).
 
 /// Glisser de la case `nom` (déjà connue) : le lien est posé dans `Glisser`, puis le

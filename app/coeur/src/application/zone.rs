@@ -14,6 +14,7 @@ use crate::fenetres::selection::{
     FenetreProposee, Mode as ModeSelection, Signal as SignalSelection,
 };
 use crate::fenetres::{Genre, Message};
+use crate::reglages::FormatImage;
 use crate::sortie::{self, Annonce, Bilan, Demande, Etape, EtapeFichier};
 use crate::systeme::gel::{Changement, EcranInfo};
 use crate::systeme::Rect;
@@ -358,6 +359,14 @@ pub fn dossier_enregistrement(reglage: Option<&Path>, images: Option<&Path>) -> 
             images.map(Path::to_path_buf).unwrap_or_default(),
             DOSSIER_PAR_DEFAUT_AFFICHE.into(),
         ),
+    }
+}
+
+/// Le format du fichier enregistré pour le réglage `format_image` (0.7.7).
+pub fn format_fichier(f: FormatImage) -> sortie::FormatFichier {
+    match f {
+        FormatImage::Png => sortie::FormatFichier::Png,
+        FormatImage::Jpg => sortie::FormatFichier::Jpg,
     }
 }
 
@@ -1169,6 +1178,8 @@ mod tests {
             modele_nom: "BreezyShot {date} à {heure}".into(),
             maintenant: chrono::Local::now(),
             transparence: false,
+            format: sortie::FormatFichier::Png,
+            recents_gardes: sortie::RECENTS_GARDES,
         };
         let b = bilan_d_echec(&demande, CAUSE_SORTIE_INTERROMPUE);
         assert_eq!(b.copie, Etape::Echec(CAUSE_SORTIE_INTERROMPUE.into()));

@@ -49,6 +49,8 @@ pub const COTE_MIN: u32 = 64;
 /// Débit moyen visé (F15) : `largeur × hauteur × 4` bits par seconde, dans ces bornes.
 pub const DEBIT_MIN_BIT_S: u32 = 1_000_000;
 pub const DEBIT_MAX_BIT_S: u32 = 16_000_000;
+/// Le plafond du débit d'une vidéo à plus de 30 images par seconde.
+pub const DEBIT_MAX_FLUIDE_BIT_S: u32 = 24_000_000;
 
 /// La piste son (F17) : PCM 48 kHz, mono, 16 bits en entrée ; AAC à 96 kbit/s.
 pub const TAUX_SON: u32 = 48_000;
@@ -90,8 +92,19 @@ pub fn taille_acceptee(largeur: u32, hauteur: u32) -> bool {
 /// borné de 1 à 16 Mbit/s (600 × 450 : 1,08 Mbit/s ; 1920 × 1080 : 8,3 ; 2560 × 1440 :
 /// 14,7). `application::film::debit` peut s'en remettre à elle.
 pub fn debit_vise(largeur: u32, hauteur: u32) -> u32 {
+    debit_vise_a(largeur, hauteur, 30)
+}
+
+/// `debit_vise` pour la cadence `cadence` : au-delà de 30 images par seconde, une moitié
+/// de plus, et le plafond monte à 24 Mbit/s (1920 × 1080 à 60 : 12,4 ; 2560 × 1440 : 22).
+pub fn debit_vise_a(largeur: u32, hauteur: u32, cadence: u32) -> u32 {
     let brut = (u64::from(largeur) * u64::from(hauteur)).saturating_mul(4);
-    brut.clamp(u64::from(DEBIT_MIN_BIT_S), u64::from(DEBIT_MAX_BIT_S)) as u32
+    if cadence > 30 {
+        let max = u64::from(DEBIT_MAX_FLUIDE_BIT_S);
+        (brut.saturating_mul(3) / 2).clamp(u64::from(DEBIT_MIN_BIT_S), max) as u32
+    } else {
+        brut.clamp(u64::from(DEBIT_MIN_BIT_S), u64::from(DEBIT_MAX_BIT_S)) as u32
+    }
 }
 
 /// Le codeur que l'écrivain a pris.

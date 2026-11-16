@@ -141,7 +141,7 @@ pub fn ouvrir(app: &AppHandle) {
     };
     // Le menu de l'icône et la barre ne sont jamais montrés ensemble.
     let _ = menu::cacher(app);
-    let retardateur = lignes_montrees(VIGNETTE_CONSTRUITE, gel::disponible())
+    let retardateur = lignes_montrees(VIGNETTE_CONSTRUITE, gel::disponible(), false)
         .contains(&"retardateur")
         .then(|| reglages_lus(app).capture.retardateur_s);
     barre::ouvrir(

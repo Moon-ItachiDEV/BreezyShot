@@ -8,6 +8,8 @@
       "vignette_duree",
       "vignette_coin",
       "dossier",
+      "format_image",
+      "editeur_apres",
       "enregistrer",
       "modele_nom",
       "impr_ecran",
@@ -28,6 +30,28 @@
     ],
     "copier": true,
     "enregistrer": false,
+    "format_image": "png",
+    "editeur_apres": false,
+    "film": {
+      "fluidite": 30,
+      "fluidites": [
+        30,
+        60
+      ],
+      "son_systeme": false,
+      "clics_visibles": false,
+      "dossier": null
+    },
+    "historique": {
+      "gardes": 50,
+      "choix": [
+        0,
+        25,
+        50,
+        100,
+        200
+      ]
+    },
     "vignette": {
       "afficher": true,
       "duree_s": 6,
@@ -105,11 +129,15 @@
       "vignette_duree",
       "vignette_coin",
       "dossier",
+      "format_image",
+      "editeur_apres",
       "enregistrer",
       "modele_nom",
       "impr_ecran",
       "theme",
       "demarrage",
+      "historique_gardes",
+      "historique_vider",
       "version",
       "licence"
     ],
@@ -125,6 +153,28 @@
     ],
     "copier": true,
     "enregistrer": false,
+    "format_image": "png",
+    "editeur_apres": false,
+    "film": {
+      "fluidite": 30,
+      "fluidites": [
+        30,
+        60
+      ],
+      "son_systeme": false,
+      "clics_visibles": false,
+      "dossier": null
+    },
+    "historique": {
+      "gardes": 50,
+      "choix": [
+        0,
+        25,
+        50,
+        100,
+        200
+      ]
+    },
     "vignette": {
       "afficher": true,
       "duree_s": 6,

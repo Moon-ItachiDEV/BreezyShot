@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-reglages-parcourir-films"
+description = "Enables the reglages_parcourir_films command without any pre-configured scope."
+commands.allow = ["reglages_parcourir_films"]
+
+[[permission]]
+identifier = "deny-reglages-parcourir-films"
+description = "Denies the reglages_parcourir_films command without any pre-configured scope."
+commands.deny = ["reglages_parcourir_films"]

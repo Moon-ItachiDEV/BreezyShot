@@ -55,9 +55,29 @@ pub use historique::{
 };
 pub use licence::{ecrire_licence, effacer_licence, lire_licence};
 pub use nom::{chemin_libre, nom_affiche, nom_fichier};
-pub use png::{encoder_png, sur_blanc};
-pub use recents::{recents_a_supprimer, RECENTS_GARDES};
+pub use png::{encoder_jpg, encoder_png, sur_blanc, COTE_MAX_JPG, QUALITE_JPG};
+pub use recents::{purger_recents, recents_a_supprimer, RECENTS_GARDES, RECENTS_MAX};
 pub use texte::{copier_texte, copier_texte_secret};
+
+/// Le format du fichier enregistré dans le dossier d'enregistrement (0.7.7). « Récents »,
+/// le presse-papiers, le glisser et les aperçus restent toujours en PNG.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum FormatFichier {
+    #[default]
+    Png,
+    /// Sans transparence : un pixel transparent est posé sur du blanc.
+    Jpg,
+}
+
+impl FormatFichier {
+    /// L'extension du fichier : `png`, `jpg`.
+    pub fn extension(self) -> &'static str {
+        match self {
+            FormatFichier::Png => "png",
+            FormatFichier::Jpg => "jpg",
+        }
+    }
+}
 
 /// Ce que l'Application demande de faire d'une capture.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -83,6 +103,12 @@ pub struct Demande {
     /// Garder l'alpha des pixels (capture de fenetre aux coins arrondis).
     /// Faux : alpha force a 255, comme pour une zone.
     pub transparence: bool,
+    /// Format du fichier enregistre (reglage format_image). Un JPG impossible (un cote de
+    /// plus de 65 535 pixels) est enregistre en PNG.
+    pub format: FormatFichier,
+    /// Nombre de captures gardees dans « Recents » (reglage `historique.gardes` ; une au
+    /// moins : la capture qu'on vient de faire).
+    pub recents_gardes: usize,
 }
 
 /// Resultat de la copie dans le presse-papiers.
@@ -141,7 +167,7 @@ pub fn sortir(pixels: &Pixels, demande: &Demande) -> Bilan {
 
         // 3. Pendant ce temps : encoder une fois, Recents, enregistrement.
         let encodage = png::encoder_rgba(largeur, hauteur, &opaques);
-        let (recent, enregistrement) = ecrire(demande, &encodage);
+        let (recent, enregistrement) = ecrire(demande, &encodage, (largeur, hauteur, &opaques));
 
         // 4. Attendre la copie.
         Bilan {
@@ -166,7 +192,7 @@ fn sortir_transparent(pixels: &Pixels, demande: &Demande) -> Bilan {
         let copie = demande
             .copier
             .then(|| thread::Builder::new().spawn_scoped(fils, copier));
-        let (recent, enregistrement) = ecrire(demande, &encodage);
+        let (recent, enregistrement) = ecrire(demande, &encodage, (largeur, hauteur, rgba));
         Bilan {
             copie: attendre_copie(copie, copier),
             recent,
@@ -175,22 +201,38 @@ fn sortir_transparent(pixels: &Pixels, demande: &Demande) -> Bilan {
     })
 }
 
-/// Ecrit « Recents », puis le fichier si demande, a partir du PNG encode.
+/// Ecrit « Recents », puis le fichier si demande, a partir du PNG encode ; un fichier en
+/// JPG est encode ici a partir des pixels `(largeur, hauteur, rgba)`.
 fn ecrire(
     demande: &Demande,
     encodage: &Result<Vec<u8>, String>,
+    (largeur, hauteur, rgba): (u32, u32, &[u8]),
 ) -> (Option<Result<PathBuf, String>>, EtapeFichier) {
     let recent = demande.ranger_recents.then(|| match encodage {
-        Ok(octets) => recents::ecrire(&demande.dossier_recents, demande.maintenant, octets),
+        Ok(octets) => recents::ecrire(
+            &demande.dossier_recents,
+            demande.maintenant,
+            octets,
+            demande.recents_gardes,
+        ),
         Err(cause) => Err(cause.clone()),
     });
     let enregistrement = if !demande.enregistrer {
         EtapeFichier::NonDemande
     } else {
         let dossier = demande.dossier_enregistrement.clone();
-        let resultat = encodage.as_ref().map_err(Clone::clone).and_then(|octets| {
+        let resultat = encodage.as_ref().map_err(Clone::clone).and_then(|png| {
             let nom = nom_fichier(&demande.modele_nom, demande.maintenant);
-            fichier::enregistrer(&dossier, &demande.dossier_affiche, &nom, octets)
+            // Un JPG qui ne peut pas etre fait (cote trop grand) devient un PNG : la capture
+            // n'est jamais perdue.
+            let jpg = (demande.format == FormatFichier::Jpg)
+                .then(|| encoder_jpg(largeur, hauteur, rgba))
+                .and_then(Result::ok);
+            let (extension, octets) = match &jpg {
+                Some(jpg) => (FormatFichier::Jpg.extension(), jpg.as_slice()),
+                None => (FormatFichier::Png.extension(), png.as_slice()),
+            };
+            fichier::enregistrer(&dossier, &demande.dossier_affiche, &nom, extension, octets)
         });
         match resultat {
             Ok(chemin) => EtapeFichier::Fait(chemin),

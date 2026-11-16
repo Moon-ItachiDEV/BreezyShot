@@ -13,7 +13,10 @@ use super::recents::{
     a_supprimer_apres_ecriture, base_recent, chemin_recent_libre, cle_recent, recents_a_supprimer,
     RECENTS_GARDES,
 };
-use super::{fichier, png, presse_papiers, sortir, sur_blanc, Bilan, Demande, Etape, EtapeFichier};
+use super::{
+    fichier, png, presse_papiers, sortir, sur_blanc, Bilan, Demande, Etape, EtapeFichier,
+    FormatFichier,
+};
 use crate::systeme::gel::Pixels;
 
 // ---------- Aides ----------
@@ -72,6 +75,8 @@ fn demande(racine: &Path) -> Demande {
         modele_nom: "BreezyShot {date} à {heure}".to_string(),
         maintenant: instant(),
         transparence: false,
+        format: FormatFichier::Png,
+        recents_gardes: RECENTS_GARDES,
     }
 }
 
@@ -3441,4 +3446,221 @@ mod films {
         );
         assert!(film_a_glisser(&f, &l.glisser, "BreezyShot film", &[]).is_err());
     }
+}
+
+// ---------- Format JPG du fichier enregistré (0.7.7) ----------
+
+/// Relit un JPG : (largeur, hauteur, pixels RGB).
+fn decoder_jpg(octets: &[u8]) -> (u32, u32, Vec<u8>) {
+    let mut d = jpeg_decoder::Decoder::new(octets);
+    let pixels = d.decode().expect("JPG lisible");
+    let info = d.info().expect("en-tete");
+    (u32::from(info.width), u32::from(info.height), pixels)
+}
+
+#[test]
+fn jpg_enregistre_sous_le_nom_en_jpg_recents_reste_png() {
+    let racine = tempfile::tempdir().expect("dossier temporaire");
+    let mut d = demande(racine.path());
+    d.format = FormatFichier::Jpg;
+    let entree = image(16, 8);
+    let bilan = sortir(&entree, &d);
+    let attendu = d
+        .dossier_enregistrement
+        .join("BreezyShot 2026-11-11 à 19.40.12.jpg");
+    assert_eq!(bilan.enregistrement, EtapeFichier::Fait(attendu.clone()));
+    let octets = fs::read(&attendu).expect("lecture");
+    assert_eq!(&octets[..3], &[0xFF, 0xD8, 0xFF], "en-tete JPG");
+    let (l, h, _) = decoder_jpg(&octets);
+    assert_eq!((l, h), (16, 8));
+    // « Récents » : toujours le PNG exact, au format de ses noms.
+    let recent = bilan
+        .recent
+        .clone()
+        .expect("recents demande")
+        .expect("recents ecrit");
+    assert_eq!(recent.extension().and_then(|e| e.to_str()), Some("png"));
+    assert_eq!(decoder(&fs::read(&recent).expect("lecture")), entree);
+    assert_eq!(
+        annonce(&bilan, &d),
+        reussite("Enregistré dans Images › BreezyShot")
+    );
+    sans_temporaire(&d.dossier_enregistrement);
+}
+
+#[test]
+fn jpg_deux_captures_meme_nom_se_numerotent_en_jpg() {
+    let racine = tempfile::tempdir().expect("dossier temporaire");
+    let mut d = demande(racine.path());
+    d.format = FormatFichier::Jpg;
+    d.ranger_recents = false;
+    let _ = sortir(&image(4, 4), &d);
+    let bilan = sortir(&image(4, 4), &d);
+    assert_eq!(
+        bilan.enregistrement,
+        EtapeFichier::Fait(
+            d.dossier_enregistrement
+                .join("BreezyShot 2026-11-11 à 19.40.12 (2).jpg")
+        )
+    );
+}
+
+#[test]
+fn jpg_pose_le_transparent_sur_du_blanc_et_garde_les_couleurs() {
+    // Un pixel rouge opaque, puis un pixel transparent : blanc, pas noir.
+    let mut rgba = Vec::new();
+    for _ in 0..16 * 16 {
+        rgba.extend_from_slice(&[255, 0, 0, 255]);
+    }
+    let octets = png::encoder_jpg(16, 16, &rgba).expect("jpg");
+    let (_, _, px) = decoder_jpg(&octets);
+    assert!(
+        px[0] > 230 && px[1] < 40 && px[2] < 40,
+        "rouge gardé : {:?}",
+        &px[..3]
+    );
+    let transparent = vec![0u8; 16 * 16 * 4];
+    let octets = png::encoder_jpg(16, 16, &transparent).expect("jpg");
+    let (_, _, px) = decoder_jpg(&octets);
+    assert!(
+        px.iter().all(|&c| c > 245),
+        "transparent sur blanc : {:?}",
+        &px[..3]
+    );
+}
+
+#[test]
+fn jpg_fenetre_arrondie_transparence_vers_blanc_dans_le_fichier() {
+    let racine = tempfile::tempdir().expect("dossier temporaire");
+    let mut d = demande(racine.path());
+    d.format = FormatFichier::Jpg;
+    d.transparence = true;
+    let mut entree = image(16, 16);
+    for p in entree.rgba.chunks_exact_mut(4).take(16) {
+        p.copy_from_slice(&[0, 0, 0, 0]);
+    }
+    let bilan = sortir(&entree, &d);
+    let EtapeFichier::Fait(chemin) = bilan.enregistrement else {
+        panic!("enregistrement attendu");
+    };
+    assert_eq!(chemin.extension().and_then(|e| e.to_str()), Some("jpg"));
+    // Récents garde le PNG avec son alpha.
+    let recent = bilan.recent.expect("recents").expect("ecrit");
+    assert_eq!(decoder(&fs::read(&recent).expect("lecture")), entree);
+}
+
+#[test]
+fn jpg_trop_grand_est_enregistre_en_png() {
+    assert!(png::encoder_jpg(65_536, 1, &vec![255u8; 65_536 * 4]).is_err());
+    assert!(png::encoder_jpg(0, 4, &[]).is_err());
+    assert!(
+        png::encoder_jpg(2, 2, &[0u8; 5]).is_err(),
+        "tampon incoherent"
+    );
+    let racine = tempfile::tempdir().expect("dossier temporaire");
+    let mut d = demande(racine.path());
+    d.format = FormatFichier::Jpg;
+    d.ranger_recents = false;
+    let bilan = sortir(
+        &Pixels {
+            largeur: 65_536,
+            hauteur: 1,
+            rgba: vec![200u8; 65_536 * 4],
+        },
+        &d,
+    );
+    let EtapeFichier::Fait(chemin) = bilan.enregistrement else {
+        panic!("enregistrement attendu : {bilan:?}");
+    };
+    assert_eq!(chemin.extension().and_then(|e| e.to_str()), Some("png"));
+}
+
+#[test]
+fn supprimer_efface_aussi_le_jpg_enregistre() {
+    let racine = tempfile::tempdir().expect("dossier temporaire");
+    let dossier = racine.path().join("Images");
+    fs::create_dir_all(&dossier).expect("dossier");
+    let jpg = dossier.join("a.jpg");
+    fs::write(&jpg, b"x").expect("ecriture");
+    let s = super::Suppression {
+        recent: None,
+        enregistre: Some(jpg.clone()),
+        liens: Vec::new(),
+        film: None,
+    };
+    let a = super::a_effacer(
+        &s,
+        &racine.path().join("R"),
+        &racine.path().join("G"),
+        &racine.path().join("F"),
+    );
+    assert_eq!(a, vec![jpg]);
+}
+
+#[test]
+fn nombre_gardes_regle_le_menage_a_l_ecriture() {
+    let d = dossiers();
+    let mut dem = demande(d.local.parent().unwrap());
+    dem.enregistrer = false;
+    dem.dossier_recents = d.recents.clone();
+    dem.recents_gardes = 25;
+    let noms: Vec<String> = (0..30)
+        .map(|i| format!("20250101-0000{i:02}-000.png"))
+        .collect();
+    for nom in &noms {
+        fs::write(d.recents.join(nom), png_de(&image(2, 2))).unwrap();
+        ranger_apercu(&d.apercus, nom, &image(1, 1)).unwrap();
+    }
+    let neuf = sortir(&image(2, 2), &dem).recent.unwrap().expect("recent");
+    let liste = lister_recents(&d.recents);
+    assert_eq!(liste.len(), 25);
+    assert_eq!(liste[0].nom, neuf.file_name().unwrap().to_str().unwrap());
+    assert_eq!(apercus_au_format(&d.apercus), noms[6..]);
+}
+
+#[test]
+fn aucun_ne_garde_que_la_derniere_capture() {
+    let d = dossiers();
+    let mut dem = demande(d.local.parent().unwrap());
+    dem.enregistrer = false;
+    dem.dossier_recents = d.recents.clone();
+    dem.recents_gardes = 1;
+    for i in 0..3 {
+        let nom = format!("20250101-00000{i}-000.png");
+        fs::write(d.recents.join(nom), png_de(&image(2, 2))).unwrap();
+    }
+    let neuf = sortir(&image(2, 2), &dem).recent.unwrap().expect("recent");
+    assert_eq!(lister_recents(&d.recents).len(), 1);
+    assert!(neuf.is_file());
+}
+
+#[test]
+fn purger_recents_ramene_au_nombre_sans_jamais_vider() {
+    let d = dossiers();
+    let noms: Vec<String> = (0..10)
+        .map(|i| format!("20250101-0000{i:02}-000.png"))
+        .collect();
+    for nom in &noms {
+        fs::write(d.recents.join(nom), png_de(&image(2, 2))).unwrap();
+        ranger_apercu(&d.apercus, nom, &image(1, 1)).unwrap();
+    }
+    fs::write(d.recents.join("notes.txt"), b"a moi").unwrap();
+    assert_eq!(super::purger_recents(&d.recents, 4), 6);
+    let liste = lister_recents(&d.recents);
+    assert_eq!(
+        liste.iter().map(|e| e.nom.as_str()).collect::<Vec<_>>(),
+        noms[6..]
+            .iter()
+            .rev()
+            .map(String::as_str)
+            .collect::<Vec<_>>()
+    );
+    assert_eq!(apercus_au_format(&d.apercus), noms[6..]);
+    assert!(d.recents.join("notes.txt").is_file());
+    // Zéro garde la plus récente.
+    assert_eq!(super::purger_recents(&d.recents, 0), 3);
+    assert_eq!(lister_recents(&d.recents).len(), 1);
+    // Rien à purger ou dossier absent : rien, sans erreur.
+    assert_eq!(super::purger_recents(&d.recents, 50), 0);
+    assert_eq!(super::purger_recents(&d.recents.join("absent"), 50), 0);
 }

@@ -12,7 +12,10 @@ use serde::{Deserialize, Serialize};
 use super::decompte::RETARDATEURS_PROPOSES;
 use crate::fenetres::theme::ThemePage;
 use crate::raccourcis::{self, ErreurNotation, Raison};
-use crate::reglages::{self, Coin, ErreurEcriture, Raccourcis, Reglages, Theme};
+use crate::reglages::{
+    self, Coin, ErreurEcriture, FormatImage, Raccourcis, Reglages, Theme, FLUIDITES,
+    HISTORIQUE_CHOIX,
+};
 use crate::sortie;
 use crate::systeme::EtatDemarrage;
 
@@ -29,7 +32,11 @@ pub const AUCUN_RACCOURCI: &str = "Aucun raccourci";
 /// celles qui ont un effet dans cette version sont montrées (`lignes_montrees`) : la
 /// rubrique Capture demande le Gel (`capture_disponible`, sinon aucune photo et la rubrique
 /// se cache seule).
-pub fn lignes_montrees(vignette_construite: bool, capture_disponible: bool) -> Vec<&'static str> {
+pub fn lignes_montrees(
+    vignette_construite: bool,
+    capture_disponible: bool,
+    editeur_construit: bool,
+) -> Vec<&'static str> {
     let mut l = Vec::new();
     if capture_disponible {
         l.push("retardateur");
@@ -40,6 +47,10 @@ pub fn lignes_montrees(vignette_construite: bool, capture_disponible: bool) -> V
         l.extend(["vignette", "vignette_duree", "vignette_coin"]);
     }
     l.push("dossier");
+    l.push("format_image");
+    if editeur_construit {
+        l.push("editeur_apres");
+    }
     // Sans vignette, chaque capture est enregistrée (`zone::doit_enregistrer`) : le
     // réglage n'aurait aucun effet.
     if vignette_construite {
@@ -55,6 +66,24 @@ pub fn lignes_montrees(vignette_construite: bool, capture_disponible: bool) -> V
         "version",
         "licence",
     ]);
+    l
+}
+
+/// Les lignes des rubriques Pro, d'après les actions en vigueur : Enregistrement avec la
+/// vidéo (fluidité, son de l'ordinateur) ou avec la vidéo ou le GIF (clics visibles, dossier
+/// des films), Historique avec l'historique. Aucune action Pro : aucune ligne.
+pub fn lignes_pro(actions: &[&str]) -> Vec<&'static str> {
+    let a = |nom: &str| actions.contains(&nom);
+    let mut l = Vec::new();
+    if a("video") {
+        l.extend(["fluidite", "son_systeme"]);
+    }
+    if a("video") || a("gif") {
+        l.extend(["clics_visibles", "film_dossier"]);
+    }
+    if a("historique") {
+        l.extend(["historique_gardes", "historique_vider"]);
+    }
     l
 }
 
@@ -75,9 +104,34 @@ pub enum Changement {
     Pointeur(bool),
     /// « Impr. écran ouvre BreezyShot » : prendre la touche à l'Outil Capture de Windows.
     ImprEcran(bool),
+    /// « Format » de l'image enregistrée : `png` ou `jpg`.
+    FormatImage(String),
+    /// « Ouvrir dans l'éditeur après la capture ».
+    EditeurApres(bool),
+    /// Pro, rubrique Enregistrement : images par seconde d'une vidéo (30 ou 60).
+    Fluidite(u32),
+    SonSysteme(bool),
+    ClicsVisibles(bool),
+    /// Le dossier des films revient au dossier des images (la seule valeur permise :
+    /// la page ne dit jamais un chemin, elle passe par « Parcourir… »).
+    FilmDossier(String),
+    /// Pro, rubrique Historique : nombre de captures gardées.
+    HistoriqueGardes(u32),
 }
 
 impl Changement {
+    /// Vrai si le réglage est d'une rubrique Pro : refusé sans licence (page forgée).
+    pub fn exige_pro(&self) -> bool {
+        matches!(
+            self,
+            Changement::Fluidite(_)
+                | Changement::SonSysteme(_)
+                | Changement::ClicsVisibles(_)
+                | Changement::FilmDossier(_)
+                | Changement::HistoriqueGardes(_)
+        )
+    }
+
     /// L'identifiant de la ligne de la page.
     pub fn ligne(&self) -> &'static str {
         match self {
@@ -92,6 +146,13 @@ impl Changement {
             Changement::Retardateur(_) => "retardateur",
             Changement::Pointeur(_) => "pointeur",
             Changement::ImprEcran(_) => "impr_ecran",
+            Changement::FormatImage(_) => "format_image",
+            Changement::EditeurApres(_) => "editeur_apres",
+            Changement::Fluidite(_) => "fluidite",
+            Changement::SonSysteme(_) => "son_systeme",
+            Changement::ClicsVisibles(_) => "clics_visibles",
+            Changement::FilmDossier(_) => "film_dossier",
+            Changement::HistoriqueGardes(_) => "historique_gardes",
         }
     }
 }
@@ -134,9 +195,18 @@ pub fn ligne_changement(c: &Changement) -> String {
         | Changement::VignetteAfficher(b)
         | Changement::Demarrage(b)
         | Changement::Pointeur(b)
-        | Changement::ImprEcran(b) => oui_non(*b).to_string(),
-        Changement::VignetteDuree(n) | Changement::Retardateur(n) => n.to_string(),
-        Changement::VignetteCoin(t) | Changement::Theme(t) => t.clone(),
+        | Changement::ImprEcran(b)
+        | Changement::EditeurApres(b)
+        | Changement::SonSysteme(b)
+        | Changement::ClicsVisibles(b) => oui_non(*b).to_string(),
+        Changement::VignetteDuree(n)
+        | Changement::Retardateur(n)
+        | Changement::Fluidite(n)
+        | Changement::HistoriqueGardes(n) => n.to_string(),
+        Changement::VignetteCoin(t)
+        | Changement::Theme(t)
+        | Changement::FormatImage(t)
+        | Changement::FilmDossier(t) => code_pour_journal(t),
         Changement::ModeleNom(_) => return "reglage change: modele_nom".into(),
     };
     format!("reglage change: {} {valeur}", c.ligne())
@@ -231,6 +301,18 @@ pub fn appliquer(r: &Reglages, c: &Changement) -> Result<Reglages, Refus> {
             fixer_candidats(&mut n.raccourcis, "zone", nouveaux);
         }
         Changement::ImprEcran(false) => {}
+        Changement::FormatImage(t) => {
+            n.format_image = FormatImage::depuis_texte(t).ok_or_else(invalide)?
+        }
+        Changement::EditeurApres(b) => n.editeur_apres_capture = *b,
+        Changement::Fluidite(f) if !FLUIDITES.contains(f) => return Err(invalide()),
+        Changement::Fluidite(f) => n.film.fluidite = *f,
+        Changement::SonSysteme(b) => n.film.son_systeme = *b,
+        Changement::ClicsVisibles(b) => n.film.clics_visibles = *b,
+        Changement::FilmDossier(t) if t == "defaut" => n.film.dossier = None,
+        Changement::FilmDossier(_) => return Err(invalide()),
+        Changement::HistoriqueGardes(g) if !HISTORIQUE_CHOIX.contains(g) => return Err(invalide()),
+        Changement::HistoriqueGardes(g) => n.historique.gardes = *g,
     }
     reglages::valider(&n).map_err(|e| refus_validation(c.ligne(), &e, &n))?;
     Ok(n)
@@ -417,13 +499,25 @@ pub fn dossier_choisi(
     Ok(Some(choisi.to_path_buf()))
 }
 
+/// L'extension d'un fichier enregistré dans ce format.
+pub fn extension_du_format(format: FormatImage) -> &'static str {
+    match format {
+        FormatImage::Png => "png",
+        FormatImage::Jpg => "jpg",
+    }
+}
+
 /// L'aperçu du nom d'un fichier enregistré (« BreezyShot 2026-11-12 à 10.42.08.png »),
 /// vide pour un modèle vide. Fonction pure.
-pub fn apercu_nom(modele: &str, maintenant: DateTime<Local>) -> String {
+pub fn apercu_nom(modele: &str, maintenant: DateTime<Local>, format: FormatImage) -> String {
     if modele.trim().is_empty() {
         return String::new();
     }
-    format!("{}.png", sortie::nom_fichier(modele, maintenant))
+    format!(
+        "{}.{}",
+        sortie::nom_fichier(modele, maintenant),
+        extension_du_format(format)
+    )
 }
 
 /// Les candidats d'une action connue, à écrire dans les réglages.
@@ -460,6 +554,26 @@ pub struct VueCapture {
     pub pointeur: bool,
 }
 
+/// La rubrique Enregistrement (Pro) vue par la page.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct VueFilm {
+    pub fluidite: u32,
+    /// Les segments de la fluidité, dans l'ordre de la page.
+    pub fluidites: [u32; 2],
+    pub son_systeme: bool,
+    pub clics_visibles: bool,
+    /// Nom affiché du dossier des films ; `None` : comme les images.
+    pub dossier: Option<String>,
+}
+
+/// La rubrique Historique (Pro) vue par la page.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct VueHistorique {
+    pub gardes: u32,
+    /// Les segments, dans l'ordre de la page (`0` = aucun).
+    pub choix: [u32; 5],
+}
+
 /// Une ligne de la rubrique Raccourcis.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct VueRaccourci {
@@ -483,6 +597,11 @@ pub struct VueReglages {
     pub retardateurs: [u32; 4],
     pub copier: bool,
     pub enregistrer: bool,
+    /// `png` ou `jpg`.
+    pub format_image: &'static str,
+    pub editeur_apres: bool,
+    pub film: VueFilm,
+    pub historique: VueHistorique,
     pub vignette: VueVignette,
     pub durees: [u32; 4],
     /// Nom affiché du dossier d'enregistrement (« Images › BreezyShot »).
@@ -517,6 +636,10 @@ pub struct Contexte<'a> {
     /// Le refus à dire sous chaque raccourci (dernier changement raté), par action.
     pub refus_raccourcis: &'a std::collections::BTreeMap<String, String>,
     pub dossier_affiche: String,
+    /// Le dossier des films à part, d'après le réglage (`None` : comme les images).
+    pub dossier_films_affiche: Option<String>,
+    /// L'éditeur d'annotation existe (`EDITEUR_CONSTRUIT`).
+    pub editeur_construit: bool,
     pub demarrage: EtatDemarrage,
     /// Impr. écran ouvre BreezyShot (Windows ne la garde pas pour l'Outil Capture) ;
     /// `None` hors Windows : la ligne n'est pas montrée.
@@ -541,7 +664,18 @@ pub fn nom_demarrage(e: EtatDemarrage) -> &'static str {
 
 /// La vue complète. Fonction pure.
 pub fn vue(r: &Reglages, c: &Contexte<'_>) -> VueReglages {
-    let mut lignes = lignes_montrees(c.vignette_construite, c.capture_disponible);
+    let mut lignes = lignes_montrees(
+        c.vignette_construite,
+        c.capture_disponible,
+        c.editeur_construit,
+    );
+    // Les rubriques Pro suivent les actions en vigueur (licence, codeur, système) : sans
+    // elles, pas de ligne, donc ni rubrique ni onglet (une fonction fermée est absente).
+    let place = lignes
+        .iter()
+        .position(|l| *l == "version")
+        .unwrap_or(lignes.len());
+    lignes.splice(place..place, lignes_pro(c.actions));
     if c.demarrage == EtatDemarrage::Indisponible {
         lignes.retain(|l| *l != "demarrage");
     }
@@ -578,6 +712,19 @@ pub fn vue(r: &Reglages, c: &Contexte<'_>) -> VueReglages {
         retardateurs: RETARDATEURS_PROPOSES,
         copier: r.copier_apres_capture,
         enregistrer: r.enregistrer_apres_capture,
+        format_image: r.format_image.texte(),
+        editeur_apres: r.editeur_apres_capture,
+        film: VueFilm {
+            fluidite: r.film.fluidite,
+            fluidites: FLUIDITES,
+            son_systeme: r.film.son_systeme,
+            clics_visibles: r.film.clics_visibles,
+            dossier: c.dossier_films_affiche.clone(),
+        },
+        historique: VueHistorique {
+            gardes: r.historique.gardes,
+            choix: HISTORIQUE_CHOIX,
+        },
         vignette: VueVignette {
             afficher: r.vignette.afficher,
             duree_s: r.vignette.duree_s,
@@ -586,7 +733,7 @@ pub fn vue(r: &Reglages, c: &Contexte<'_>) -> VueReglages {
         durees: DUREES_PROPOSEES,
         dossier: c.dossier_affiche.clone(),
         modele_nom: r.modele_nom.clone(),
-        apercu_nom: apercu_nom(&r.modele_nom, c.maintenant),
+        apercu_nom: apercu_nom(&r.modele_nom, c.maintenant, r.format_image),
         theme: r.theme.texte(),
         demarrage: nom_demarrage(c.demarrage),
         impr_ecran: c.impr_ecran.unwrap_or(false),
@@ -623,12 +770,14 @@ mod tests {
 
     #[test]
     fn lignes_selon_la_vignette() {
-        let sans = lignes_montrees(false, false);
+        let sans = lignes_montrees(false, false, true);
         assert_eq!(
             sans,
             [
                 "copier",
                 "dossier",
+                "format_image",
+                "editeur_apres",
                 "modele_nom",
                 "impr_ecran",
                 "theme",
@@ -637,7 +786,9 @@ mod tests {
                 "licence"
             ]
         );
-        let avec = lignes_montrees(true, false);
+        // Sans éditeur, pas de ligne « Ouvrir dans l'éditeur ».
+        assert!(!lignes_montrees(false, false, false).contains(&"editeur_apres"));
+        let avec = lignes_montrees(true, false, true);
         assert_eq!(
             avec,
             [
@@ -646,6 +797,8 @@ mod tests {
                 "vignette_duree",
                 "vignette_coin",
                 "dossier",
+                "format_image",
+                "editeur_apres",
                 "enregistrer",
                 "modele_nom",
                 "impr_ecran",
@@ -697,11 +850,112 @@ mod tests {
     }
 
     #[test]
+    fn lignes_pro_selon_les_actions_en_vigueur() {
+        assert!(
+            lignes_pro(&["zone", "plein_ecran"]).is_empty(),
+            "sans licence"
+        );
+        assert_eq!(
+            lignes_pro(&["zone", "video", "gif", "historique"]),
+            [
+                "fluidite",
+                "son_systeme",
+                "clics_visibles",
+                "film_dossier",
+                "historique_gardes",
+                "historique_vider"
+            ]
+        );
+        // Le GIF seul : ni fluidité ni son (ils ne touchent que la vidéo).
+        assert_eq!(lignes_pro(&["gif"]), ["clics_visibles", "film_dossier"]);
+        assert_eq!(
+            lignes_pro(&["historique"]),
+            ["historique_gardes", "historique_vider"]
+        );
+    }
+
+    #[test]
+    fn changements_pro_et_gratuits() {
+        use crate::reglages::FormatImage;
+        let r = defaut();
+        for c in [
+            Changement::Fluidite(60),
+            Changement::SonSysteme(true),
+            Changement::ClicsVisibles(true),
+            Changement::FilmDossier("defaut".into()),
+            Changement::HistoriqueGardes(100),
+        ] {
+            assert!(c.exige_pro(), "{c:?}");
+        }
+        for c in [
+            Changement::FormatImage("jpg".into()),
+            Changement::EditeurApres(true),
+            Changement::Copier(true),
+        ] {
+            assert!(!c.exige_pro(), "{c:?}");
+        }
+        let n = appliquer(&r, &Changement::FormatImage("jpg".into())).unwrap();
+        assert_eq!(n.format_image, FormatImage::Jpg);
+        assert!(appliquer(&r, &Changement::FormatImage("bmp".into())).is_err());
+        assert!(
+            appliquer(&r, &Changement::EditeurApres(true))
+                .unwrap()
+                .editeur_apres_capture
+        );
+        assert_eq!(
+            appliquer(&r, &Changement::Fluidite(60))
+                .unwrap()
+                .film
+                .fluidite,
+            60
+        );
+        assert!(appliquer(&r, &Changement::Fluidite(45)).is_err());
+        assert!(
+            appliquer(&r, &Changement::SonSysteme(true))
+                .unwrap()
+                .film
+                .son_systeme
+        );
+        assert!(
+            appliquer(&r, &Changement::ClicsVisibles(true))
+                .unwrap()
+                .film
+                .clics_visibles
+        );
+        let mut avec_dossier = r.clone();
+        avec_dossier.film.dossier = Some(PathBuf::from("/films"));
+        let n = appliquer(&avec_dossier, &Changement::FilmDossier("defaut".into())).unwrap();
+        assert_eq!(n.film.dossier, None);
+        assert!(appliquer(&r, &Changement::FilmDossier("/etc".into())).is_err());
+        for g in [0, 25, 50, 100, 200] {
+            assert_eq!(
+                appliquer(&r, &Changement::HistoriqueGardes(g))
+                    .unwrap()
+                    .historique
+                    .gardes,
+                g
+            );
+        }
+        assert!(appliquer(&r, &Changement::HistoriqueGardes(30)).is_err());
+        // Les clés lues depuis la page.
+        let lu: Changement =
+            serde_json::from_str(r#"{"cle":"format_image","valeur":"jpg"}"#).unwrap();
+        assert_eq!(lu, Changement::FormatImage("jpg".into()));
+        let lu: Changement =
+            serde_json::from_str(r#"{"cle":"historique_gardes","valeur":25}"#).unwrap();
+        assert_eq!(lu, Changement::HistoriqueGardes(25));
+        assert_eq!(
+            ligne_changement(&Changement::Fluidite(60)),
+            "reglage change: fluidite 60"
+        );
+    }
+
+    #[test]
     fn lignes_de_la_capture() {
         // En tête, dans l'ordre de la page.
-        let tout = lignes_montrees(true, true);
+        let tout = lignes_montrees(true, true, true);
         assert_eq!(tout[..3], ["retardateur", "pointeur", "copier"]);
-        assert_eq!(tout.len(), 14);
+        assert_eq!(tout.len(), 16);
         // Rien de ce qui n'a pas d'effet en 0.4.
         for absent in ["barre", "format", "mise_a_jour"] {
             assert!(!tout.contains(&absent));
@@ -961,11 +1215,12 @@ mod tests {
     fn apercu() {
         let t = Local.with_ymd_and_hms(2026, 11, 12, 10, 42, 8).unwrap();
         assert_eq!(
-            apercu_nom("BreezyShot {date} à {heure}", t),
+            apercu_nom("BreezyShot {date} à {heure}", t, FormatImage::Png),
             "BreezyShot 2026-11-12 à 10.42.08.png"
         );
-        assert_eq!(apercu_nom("a:b", t), "a-b.png");
-        assert_eq!(apercu_nom(" ", t), "");
+        assert_eq!(apercu_nom("a:b", t, FormatImage::Png), "a-b.png");
+        assert_eq!(apercu_nom("a:b", t, FormatImage::Jpg), "a-b.jpg");
+        assert_eq!(apercu_nom(" ", t, FormatImage::Png), "");
     }
 
     #[test]
@@ -989,6 +1244,8 @@ mod tests {
             defaut: &defaut_r,
             refus_raccourcis: &refus,
             dossier_affiche: "Images › BreezyShot".into(),
+            dossier_films_affiche: None,
+            editeur_construit: true,
             demarrage: EtatDemarrage::DesactiveParWindows,
             impr_ecran: None,
             licence_active: false,
@@ -1109,6 +1366,8 @@ mod tests {
                 defaut: &defaut_r,
                 refus_raccourcis: &refus,
                 dossier_affiche: String::new(),
+                dossier_films_affiche: None,
+                editeur_construit: true,
                 demarrage: EtatDemarrage::Inactif,
                 impr_ecran: None,
                 licence_active,
@@ -1185,6 +1444,8 @@ mod tests {
             defaut: &defaut_r,
             refus_raccourcis: &refus,
             dossier_affiche: String::new(),
+            dossier_films_affiche: None,
+            editeur_construit: true,
             demarrage: EtatDemarrage::Inactif,
             impr_ecran: None,
             licence_active: true,
@@ -1298,6 +1559,8 @@ mod essai_de_page {
             defaut: &defaut,
             refus_raccourcis: &refus,
             dossier_affiche: "Images › BreezyShot".into(),
+            dossier_films_affiche: None,
+            editeur_construit: true,
             demarrage: EtatDemarrage::Inactif,
             impr_ecran: Some(false),
             licence_active: false,
