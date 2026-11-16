@@ -1214,3 +1214,31 @@ fonctions de l'éditeur restent.
 
 - Le socle dans WebView2 (flou du verre, requête de conteneur, glisser natif depuis le
   haut) : essais Windows de la CI, puis à l'utilisateur.
+
+## Barre de capture « Galet » (version 0.7.4)
+
+Piste A « Galet » choisie par l'utilisateur le 16/11/2026 (`design/barre-capture`) ; elle
+remplace la barre de la 0.7.2.
+
+- Des pictogrammes seuls (44 px, carte au rayon 20), le nom dans une étiquette sous la barre au
+  survol et au clavier. Zone, Plein écran, Fenêtre, Retardateur | Capture défilante, Vidéo, GIF
+  (trois boutons directs, plus de menu « Enregistrer l'écran ») | Réglages. Plus de logo.
+- Le retardateur se déplie en étage dans la carte ; armé, le cadran porte le délai en traits
+  (le « 10 » ne dépend pas de la police de Windows).
+- Sans licence, Capture défilante, Vidéo et GIF restent visibles, éteints, avec une puce
+  « Pro » ; un clic ouvre Réglages › Général › Licence (le cœur relit la licence, la page ne
+  décide rien ; journal `barre: licence <id>`, `menu: licence`, `reglages rubrique licence`).
+- Fenêtre : carte de 58 px, marges de 28 px (côtés) et 56 px (bas, ombre et étiquette du nom) ;
+  l'étage grandit la fenêtre avant de se déplier et la rétrécit après son repli.
+- Essais : `barre.cjs` réécrit (mutations vérifiées : les gardes de minuterie, de réponse
+  tardive et de fermeture sont bien contrôlées) ; `reglages.cjs` pour la rubrique demandée ;
+  `01-socle.ps1` repris (noms « …, Pro », clic sur un filet, cinquième lancement : bouton Pro
+  éteint).
+- Relu par un conseiller (plan, puis diff : un bloquant, la Vidéo absente sans licence car le
+  codeur n'est pas cherché sans elle, corrigé) et par un relecteur distinct (aucun bloquant).
+
+### Non vérifié
+
+- Le rendu dans WebView2 sous Windows (police Segoe UI Variable, ombre dans la fenêtre
+  transparente, nom fantôme à la réouverture) et les essais PowerShell : essais Windows de la
+  CI, puis à l'utilisateur.

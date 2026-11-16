@@ -17,6 +17,7 @@
 //   l'autre, la page redemande sa vue (`reglages_lire`), qui dit `licence_active` et les
 //   lignes de Réglages › Raccourcis en vigueur.
 // Reponse = { vue, refus: { ligne, texte } | null }. Événements : `reglages:etat` (une vue),
+// `reglages:rubrique` ("licence" : ouvrir Général et la ligne Licence, depuis la barre),
 // `interface:theme` (commun/theme.js).
 //
 // Les éléments ne sont trouvés que par data-*, rôles et identifiants, jamais par une
@@ -227,6 +228,22 @@ function afficher(v) {
   const alerte = $("[data-alerte]");
   alerte.textContent = v.alerte || "";
   alerte.hidden = !v.alerte;
+  appliquerRubrique();
+}
+
+// Une rubrique demandée par le cœur (`reglages:rubrique`, barre de capture : un bouton Pro
+// éteint) : « licence » ouvre Général, montre la ligne Licence et met le focus sur son
+// contrôle. Gardée jusqu'à ce qu'une vue soit affichée, puis appliquée une seule fois.
+let rubriqueDemandee = null;
+function appliquerRubrique() {
+  if (rubriqueDemandee !== "licence" || !vue) return;
+  rubriqueDemandee = null;
+  montrerRubrique("general");
+  const ligne = $('[data-reglage="licence"]');
+  if (!ligne || ligne.hidden) return;
+  ligne.scrollIntoView({ block: "center" });
+  const cible = vue.licence_active === true ? boutonRetirer : champLicence;
+  if (!cible.closest("[hidden]")) cible.focus();
 }
 
 // Licence : le champ et « Activer » sans licence, « Pro activé » et « Retirer » avec. Le
@@ -535,7 +552,14 @@ addEventListener("contextmenu", (e) => e.preventDefault(), true);
 
 // Branchement : Tauri si présent, sinon un aperçu fixe pour le navigateur.
 if (tauri?.event?.listen) {
-  Promise.all([tauri.event.listen("reglages:etat", (e) => e?.payload && etatPousse(e.payload)), suivreTheme()]).then(
+  Promise.all([
+    tauri.event.listen("reglages:etat", (e) => e?.payload && etatPousse(e.payload)),
+    tauri.event.listen("reglages:rubrique", (e) => {
+      rubriqueDemandee = e?.payload === "licence" ? "licence" : null;
+      appliquerRubrique();
+    }),
+    suivreTheme(),
+  ]).then(
     () => appeler("reglages_lire").then(recevoir),
     (e) => console.warn("reglages : écoute impossible :", e),
   );

@@ -880,6 +880,25 @@ const SANS_VIGNETTE = { ...VUE, lignes: ['copier', 'dossier', 'modele_nom', 'the
     await p.context().close();
   }
 
+  {
+    // La barre de capture (bouton Pro éteint) demande Réglages › Licence : `reglages:rubrique`.
+    const p = await page();
+    await p.evaluate(() => __emettre('reglages:rubrique', 'licence'));
+    await p.waitForTimeout(150);
+    const l = await p.evaluate(() => ({
+      onglet: document.querySelector('[role="tab"][aria-selected="true"]').dataset.rubrique,
+      focus: document.activeElement?.id,
+      vue: document.querySelector('[data-reglage="licence"]').getBoundingClientRect().height > 0,
+    }));
+    verifier(l.onglet === 'general' && l.focus === 'licence-texte' && l.vue, '14 reglages:rubrique « licence » : Général, ligne Licence, focus sur le champ', json(l));
+    // Une demande inconnue est ignorée ; une vue reçue ensuite ne rejoue pas la demande.
+    await p.evaluate(() => { document.querySelector('[role="tab"][data-rubrique="capture"]').click(); __emettre('reglages:rubrique', 'autre'); __emettre('reglages:etat', __vue); });
+    await p.waitForTimeout(100);
+    const autre = await p.evaluate(() => document.querySelector('[role="tab"][aria-selected="true"]').dataset.rubrique);
+    verifier(autre === 'capture', '14 demande inconnue ou déjà jouée : la rubrique ne bouge pas', autre);
+    await p.context().close();
+  }
+
   console.log('ECHECS :', echecs);
   await nav.close(); serveur.close();
   process.exitCode = echecs === 0 ? 0 : 1;

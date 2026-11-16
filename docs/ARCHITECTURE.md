@@ -137,8 +137,8 @@ app/
                             « Terminer », message)
     film/                   page de contrôle du film (0.7) : film.html, .css, .js (cadre,
                             voile, pilule « Pause », « Arrêter », « Micro », durée)
-    barre/                  barre de capture (0.7.2) : barre.html, .css, .js (boutons
-                            d'après les entrées du menu, menus Vidéo/GIF et Retardateur)
+    barre/                  barre de capture « Galet » (0.7.4) : barre.html, .css, .js
+                            (pictogrammes seuls, boutons Pro éteints, étage du retardateur)
 design/                     jetons et icônes Moulinet, copiés du design system
 docs/                       ce fichier, TRAVAIL-VALIDE.md, notices d'essai
 essais/                     scénarios PowerShell joués sur la machine Windows de GitHub
@@ -609,29 +609,48 @@ dans le dossier temporaire du système (`systeme::dossier_secours()`), sous le n
   clic`, `menu fenetre <hwnd>`, `menu page prete`, `menu ouvert`, `menu ferme`, puis
   `menu: <entrée>` comme avant (l'entrée est traitée au tour suivant de la boucle). Sous
   Linux (Tauri n'y rapporte pas les clics sur l'icône), le menu natif reste.
-- **Barre de capture (0.7.2, design `capture` validé le 12/11/2026)** : relancer l'app déjà
+- **Barre de capture (0.7.2 ; refaite en « Galet » en 0.7.4, design `barre-capture`, piste A choisie le 16/11/2026)** : relancer l'app déjà
   ouverte (`Commande::Demarrer`, §3.4) l'ouvre ; Impr. écran, les raccourcis et le menu de
   l'icône ne changent pas. Une petite fenêtre web sans cadre, toujours au premier plan
   (`fenetres::barre`, page `barre/barre.html`, droits `capabilities/barre.json`), construite
   comme le menu : créée cachée à la première ouverture puis réutilisée, `barre_pret`, thème,
   surveillance des clics. Centrée en haut de la zone utile de l'écran sous la souris, la
   carte à 14 px du haut (`barre::placer`, pur, testé : échelles, barre des tâches en haut ou
-  à gauche, écran à coordonnées négatives). Logo, Zone, Plein écran, Fenêtre (avec
-  libellés) | Capture défilante, « Enregistrer l'écran » (un menu Vidéo, GIF), Retardateur
-  (menu Aucun, 3 s, 5 s, 10 s ; badge du délai) | Réglages (icône « Curseurs »). Les boutons
-  sont tirés des entrées du menu de l'icône (`fenetre_barre::boutons(menu_actuel)`, pur,
-  testé) : licence, système et codeur H.264 suivent la même règle (sans Media Foundation,
-  GIF sans Vidéo ; sans licence, rien de Pro). Le retardateur n'y est que si Réglages ›
-  Capture le montre. Un choix poste `Evenement::Menu(id)` comme l'entrée du menu (captures
-  après `ATTENTE_MENU`) et cache la barre ; seul un bouton montré peut être choisi. Le
-  retardateur écrit le réglage par le chemin de la page des Réglages
-  (`fenetre_reglages::changer`), la page des Réglages ouverte suit, la barre reste ouverte.
-  La largeur dépend des boutons et de la police : la page mesure sa carte (`barre_taille`,
-  menu volant ouvert compris) et la fenêtre est reposée sur le même centre ; la première
-  fois, une largeur estimée (`largeur_estimee`), puis la dernière mesurée pour la même
-  forme. Marges transparentes autour de la carte pour l'ombre `shadow-16` : 16 px sur les
-  côtés, 24 px en bas (`MARGE_BAS`, l'ombre descend plus qu'elle ne s'étale ; essai
-  `barre.cjs` « ombre dans la marge »). Fermée sur Échap, au clic ailleurs (perte du focus, surveillance des clics, clic
+  à gauche, écran à coordonnées négatives). Des pictogrammes seuls (44 px, carte au rayon 20,
+  fond plein `--acrylic-solid` : la fenêtre est transparente, pas de flou possible ; bord et
+  ombre renforcés) : Zone, Plein écran, Fenêtre, Retardateur | Capture défilante, Vidéo, GIF
+  (trois boutons directs, plus de menu) | Réglages (icône « Curseurs »). Le nom d'un bouton
+  vient dans une étiquette sous la carte, au survol et au clavier (`aria-label` pour les
+  lecteurs d'écran, jamais de `title`). Le retardateur se déplie en étage dans la même carte
+  (Aucun, 3 s, 5 s, 10 s sur toute la largeur, pastille claire sur le choix en cours, refermé
+  170 ms après un choix) ; armé, le cadran, en couleur d'accent, porte le délai écrit en
+  traits (pas du texte : le « 10 » ne dépend pas de la police de Windows). Les boutons
+  viennent des entrées du menu de l'icône et de ce que le menu montrerait avec une licence
+  (`fenetre_barre::ouverture(menu, actions_avec_licence)`, pur, testé) : système et codeur
+  H.264 suivent la même règle (sans Media Foundation, GIF sans Vidéo ; sans images vivantes,
+  rien de Pro). Sans licence, Capture défilante, Vidéo et GIF restent sur la barre, éteints
+  (`verrouilles`, opacité 0,5, une seule puce « Pro » après GIF ; vrais boutons, jamais
+  `disabled`) ; un clic envoie `barre_choisi` comme un autre, mais le cœur, qui seul lit la
+  licence, cache la barre et poste `Evenement::Menu("licence")` (journal `barre: licence <id>`
+  puis `menu: licence`, jamais `barre choisi`), qui passe par les mêmes gardes que « Réglages »
+  (pas de fenêtre pendant une défilante ou un film) et ouvre Réglages › Général › Licence
+  (`fenetre_reglages::ouvrir_licence` : la demande est retenue, puis envoyée à la page par
+  l'événement `reglages:rubrique` quand elle est prête, journal `reglages rubrique licence` ; la
+  page ouvre Général, montre la ligne et met le focus sur son champ). Le retardateur n'y est que si Réglages › Capture le montre. Un choix poste
+  `Evenement::Menu(id)` comme l'entrée du menu (captures après `ATTENTE_MENU`) et cache la
+  barre ; seul un bouton montré peut être choisi. Le retardateur écrit le réglage par le
+  chemin de la page des Réglages (`fenetre_reglages::changer`), la page des Réglages ouverte
+  suit, la barre reste ouverte. La largeur dépend des boutons et de la police : la page
+  mesure sa carte (`barre_taille`, largeur de la mise en page et non du rectangle à l'écran,
+  la carte entrant à 0,97) et la fenêtre est reposée sur le même centre ; la première fois,
+  une largeur estimée (`largeur_estimee`), puis la dernière mesurée pour la même forme (la
+  puce compte). Étage ouvert, la fenêtre grandit d'abord (`barre_taille` à la hauteur
+  finale), l'étage ne se déplie qu'après ; fermé, elle rétrécit une fois l'étage replié.
+  Marges transparentes autour de la carte pour l'ombre `--bc-ombre` (12 px de décalage, 28 px
+  de flou) : 28 px sur les côtés, 56 px en bas (`MARGE_BAS` : l'ombre et l'étiquette du nom,
+  réservée en permanence ; un clic dedans ferme la barre, comme dans la marge) ; 2 px de la
+  queue de l'ombre passent au-dessus de la fenêtre, invisibles (essai `barre.cjs`). Fermée
+  sur Échap, au clic ailleurs (perte du focus, surveillance des clics, clic
   dans la marge de l'ombre), au choix, et quand une capture démarre (`demarrer_capture`, avec
   le menu). Pendant le délai de double-clic du système après `barre ouverte`
   (`GetDoubleClickTime`, 500 ms sans lui, plafonné à 1 s `DOUBLE_CLIC_MAX` ; `systeme::delai_double_clic`,
@@ -642,10 +661,10 @@ dans le dossier temporaire du système (`systeme::dossier_secours()`), sous le n
   capture (au repos ou vignette montrée seulement ; `refus_etat`, pur). Jamais exclue des
   captures : elle ne s'ouvre ni pendant une défilante ni pendant un film, et chaque capture
   la ferme avant sa photo. Clavier : Tab, Maj + Tab, flèches gauche et droite, Début, Fin
-  (en boucle) ; Flèche bas ouvre un menu ; Entrée, Espace ; Échap ferme le menu, sinon la
-  barre. Info-bulles : le nom seul, sur les boutons sans libellé. Journal : `barre fenetre
+  (en boucle) ; Flèche bas sur Retardateur ouvre l'étage ; Entrée, Espace ; Échap ferme
+  l'étage, sinon la barre. Journal : `barre fenetre
   <hwnd>`, `barre page prete`, `barre ouverte`, `barre fermee`, `barre choisi <id>`, `barre
-  retardateur <s>`, `barre: retardateur refuse` (barre cachée, retardateur non montré ou
+  retardateur <s>`, `barre: licence <id>`, `barre: retardateur refuse` (barre cachée, retardateur non montré ou
   délai non proposé), `barre non ouverte: defilante en cours|film en cours|capture en cours`.
 - Info-bulle : « BreezyShot ».
 
@@ -1423,7 +1442,7 @@ Module pur : il reçoit le dossier où écrire, ne connaît ni Tauri ni les autr
   `reglages_parcourir`, `reglages_saisie`, `reglages_raccourci`, `reglages_retablir`. Chaque
   commande rend `{ vue, refus }` : la vue entière (lignes montrées, valeurs, raccourcis,
   alerte, version du programme) et au plus un refus d'une ligne pour la ligne concernée.
-  Le cœur peut aussi pousser la vue (`reglages:etat`). Une vue reçue ne remplace jamais un
+  Le cœur peut aussi demander une rubrique (`reglages:rubrique`, valeur `"licence"` : Général, la ligne Licence, focus sur son champ ; retenue jusqu'à ce que la page soit prête, jouée une fois). Le cœur peut aussi pousser la vue (`reglages:etat`). Une vue reçue ne remplace jamais un
   élément cliquable dont la valeur n'a pas changé (touches d'un raccourci, segments) : la vue
   relue au retour du focus arrive entre l'appui et le relâchement du premier clic sur la
   fenêtre inactive, et un élément remplacé ferait perdre ce clic (défaut de la 0.3, corrigé
@@ -1515,7 +1534,7 @@ Module pur : il reçoit le dossier où écrire, ne connaît ni Tauri ni les autr
   attributs `data-*`, les rôles et les noms accessibles, pour que le design puisse être
   refait sans y toucher.
 - Lignes du journal (contrat des essais, sans chemin, jamais un texte brut de la page) :
-  `menu: reglages`, `reglages fenetre <hwnd>`, `reglages ramenes devant`,
+  `menu: reglages`, `menu: licence` (bouton Pro éteint de la barre), `reglages rubrique licence` (la rubrique demandée est envoyée à la page), `reglages fenetre <hwnd>`, `reglages ramenes devant`,
   `reglages non ouverts: <erreur>`, `reglages page prete` (une fois par fenêtre créée),
   `reglages fermes`, `demarrage avec le systeme: actif|inactif|desactive par windows|indisponible`,
   `demarrage avec le systeme: echec (<erreur>)`, `reglages relus: <code du constat>`,

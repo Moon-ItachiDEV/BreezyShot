@@ -16,6 +16,9 @@ use crate::systeme;
 pub const ETIQUETTE_REGLAGES: &str = "reglages";
 /// Événement écouté par la page : un nouvel état complet à afficher.
 pub const EVENEMENT_ETAT: &str = "reglages:etat";
+/// Événement écouté par la page : une rubrique à ouvrir (`"licence"` : Général, la ligne
+/// Licence). Envoyé une fois la page prête (`reglages_lire` a répondu une première fois).
+pub const EVENEMENT_RUBRIQUE: &str = "reglages:rubrique";
 /// Titre de la fenêtre (barre de titre, barre des tâches).
 pub const TITRE: &str = "Réglages de BreezyShot";
 /// Taille d'ouverture et taille minimale, en pixels logiques.
@@ -131,6 +134,15 @@ pub fn emettre_etat<S: Serialize + Clone>(app: &AppHandle, etat: S) {
     if fenetre(app).is_some() {
         if let Err(e) = app.emit_to(ETIQUETTE_REGLAGES, EVENEMENT_ETAT, etat) {
             log::warn!("reglages: etat non envoye: {e}");
+        }
+    }
+}
+
+/// Demande à la page d'ouvrir une rubrique, si la fenêtre est ouverte.
+pub fn emettre_rubrique(app: &AppHandle, rubrique: &str) {
+    if fenetre(app).is_some() {
+        if let Err(e) = app.emit_to(ETIQUETTE_REGLAGES, EVENEMENT_RUBRIQUE, rubrique) {
+            log::warn!("reglages: rubrique non envoyee: {e}");
         }
     }
 }

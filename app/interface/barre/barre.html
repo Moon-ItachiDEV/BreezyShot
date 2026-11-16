@@ -10,23 +10,10 @@
 </head>
 <body>
   <!-- La fenêtre est transparente : seule la carte se voit, son ombre dans la marge. La
-       boîte porte la barre et ses menus volants ; la page mesure la boîte (barre_taille). -->
+       boîte porte la carte et l'étiquette du nom ; la page mesure la carte (barre_taille). -->
   <div class="boite" id="boite">
-    <div class="carte barre" id="barre" role="toolbar" aria-label="Barre de capture BreezyShot" hidden>
-      <span class="marque" aria-hidden="true">
-        <svg class="logo" viewBox="0 0 256 256" aria-hidden="true">
-          <defs>
-            <linearGradient id="logo-aurore" gradientUnits="userSpaceOnUse" x1="20" y1="10" x2="236" y2="246"><stop offset="0" class="logo-1"/><stop offset=".55" class="logo-2"/><stop offset="1" class="logo-3"/></linearGradient>
-            <radialGradient id="logo-lumiere" cx=".25" cy=".12" r=".9"><stop offset="0" class="logo-l" stop-opacity=".38"/><stop offset=".6" class="logo-l" stop-opacity="0"/></radialGradient>
-            <mask id="logo-masque" maskUnits="userSpaceOnUse" x="0" y="0" width="256" height="256"><rect width="256" height="256" fill="#fff"/><g fill="none" stroke="#000" stroke-width="9" stroke-linejoin="round"><path d="M98 98Q100 64 80 40.3A100 100 0 0 1 215.7 80Q192 100 158 98Z" transform="rotate(0 128 128)"/><path d="M98 98Q100 64 80 40.3A100 100 0 0 1 215.7 80Q192 100 158 98Z" transform="rotate(90 128 128)"/><path d="M98 98Q100 64 80 40.3A100 100 0 0 1 215.7 80Q192 100 158 98Z" transform="rotate(180 128 128)"/><path d="M98 98Q100 64 80 40.3A100 100 0 0 1 215.7 80Q192 100 158 98Z" transform="rotate(270 128 128)"/></g></mask>
-          </defs>
-          <rect x="8" y="8" width="240" height="240" rx="58" fill="url(#logo-aurore)"/><rect x="8" y="8" width="240" height="240" rx="58" fill="url(#logo-lumiere)"/>
-          <g transform="translate(128 128) scale(.8) translate(-128 -128)"><g mask="url(#logo-masque)" class="logo-pales"><path d="M98 98Q100 64 80 40.3A100 100 0 0 1 215.7 80Q192 100 158 98Z" transform="rotate(0 128 128)" opacity="1"/><path d="M98 98Q100 64 80 40.3A100 100 0 0 1 215.7 80Q192 100 158 98Z" transform="rotate(90 128 128)" opacity="0.86"/><path d="M98 98Q100 64 80 40.3A100 100 0 0 1 215.7 80Q192 100 158 98Z" transform="rotate(180 128 128)" opacity="0.72"/><path d="M98 98Q100 64 80 40.3A100 100 0 0 1 215.7 80Q192 100 158 98Z" transform="rotate(270 128 128)" opacity="0.58"/></g></g>
-        </svg>
-      </span>
-    </div>
-    <div class="carte volet" id="volet-film" role="menu" aria-label="Enregistrer l'écran" hidden></div>
-    <div class="carte volet" id="volet-retardateur" role="radiogroup" aria-label="Retardateur" hidden></div>
+    <div class="carte barre" id="barre" role="toolbar" aria-label="Barre de capture BreezyShot" hidden></div>
+    <div class="nom" id="nom" aria-hidden="true"></div>
   </div>
 </body>
 </html>

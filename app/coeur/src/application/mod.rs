@@ -102,6 +102,10 @@ pub const MENU_QUITTER: &str = "quitter";
 /// Identifiant de l'entrée « Réglages ».
 pub const MENU_REGLAGES: &str = "reglages";
 
+/// Réglages › Licence : jamais une entrée du menu de l'icône, seulement le clic d'un bouton
+/// Pro éteint de la barre de capture (`barre_choisi`).
+pub const MENU_LICENCE: &str = "licence";
+
 /// Si le fil principal ne répond plus pendant ce délai alors que l'écran figé est montré,
 /// l'app s'arrête d'elle-même : l'écran ne doit jamais rester couvert.
 pub const DELAI_BLOCAGE: Duration = Duration::from_secs(5);
@@ -1013,6 +1017,16 @@ pub(super) fn actions_en_vigueur(app: &AppHandle) -> Vec<&'static str> {
     actions_construites(pro(app), texte_disponible(app), video_disponible(app))
 }
 
+/// Les actions qui seraient construites avec une licence Pro (système et langues comme en
+/// ce moment) : la barre de capture montre éteintes celles que la licence manque. Le codeur
+/// H.264 n'est cherché qu'avec une licence (F31) : sans elle, on ne sait pas s'il existe, et
+/// la Vidéo est montrée éteinte comme les autres (le cas « codeur absent » ne se découvre
+/// qu'après l'activation, comme la page des Réglages le dit pour le raccourci).
+pub(super) fn actions_avec_licence(app: &AppHandle) -> Vec<&'static str> {
+    let pro = pro(app);
+    actions_construites(true, texte_disponible(app), video_disponible(app) || !pro)
+}
+
 /// Vrai si le mode `mode` est une action construite en ce moment.
 fn mode_construit(app: &AppHandle, mode: Mode) -> bool {
     actions_en_vigueur(app).contains(&mode.nom())
@@ -1628,6 +1642,10 @@ pub fn traiter(app: &AppHandle, evenement: Evenement) {
             (MENU_REGLAGES, _) => {
                 log::info!("menu: reglages");
                 fenetre_reglages::ouvrir(app);
+            }
+            (MENU_LICENCE, _) => {
+                log::info!("menu: licence");
+                fenetre_reglages::ouvrir_licence(app);
             }
             // Sans `ATTENTE_MENU` : rien n'est photographié.
             (MENU_HISTORIQUE, _) if actions_en_vigueur(app).contains(&ACTION_HISTORIQUE) => {

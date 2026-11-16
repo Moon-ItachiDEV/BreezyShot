@@ -1,4 +1,4 @@
-//! Barre de capture (design `capture`, validé le 12/11/2026) : une petite fenêtre web sans
+//! Barre de capture « Galet » (design `barre-capture`, piste A, choisie le 16/11/2026) : une petite fenêtre web sans
 //! cadre, toujours au premier plan, centrée en haut de la zone utile de l'écran sous la
 //! souris, à `HAUT` px du haut. Relancer l'app déjà ouverte l'ouvre (0.7.2). Comme le menu
 //! de l'icône (`menu.rs`, le modèle) : créée cachée à la première ouverture, puis gardée
@@ -32,23 +32,31 @@ pub const EVENEMENT_VIDER: &str = "barre:vider";
 pub const PAS_SURVEILLANCE: Duration = Duration::from_millis(30);
 
 /// Mesures en pixels logiques, les mêmes que `barre/barre.css`. Écart entre le haut de la
-/// zone utile et la carte (la fenêtre commence au haut de la zone utile).
+/// zone utile et la carte (la fenêtre commence au haut de la zone utile). L'ombre
+/// `--bc-ombre` (12 px de décalage, 28 px de flou) déborde de 16 px en haut : 2 px de sa
+/// queue, invisibles, passent au-dessus de la fenêtre.
 pub const HAUT: f64 = 14.0;
-/// Place de l'ombre à gauche et à droite de la carte, puis en bas : `--shadow-16` du
-/// design descend de 8 px et s'étale sur 16 px, soit 24 px sous la carte.
-pub const MARGE: f64 = 16.0;
-pub const MARGE_BAS: f64 = 24.0;
-/// Hauteur de la carte, menus volants fermés : boutons de 36 px, retrait de 4 px et bord
-/// de 1 px en haut et en bas.
-pub const HAUTEUR_BARRE: f64 = 46.0;
+/// Place de l'ombre à gauche et à droite de la carte (28 px de flou ; le nom de Réglages,
+/// dernier bouton, déborde en plus de 7 px avec sa propre ombre de 14 px, soit 21 px).
+pub const MARGE: f64 = 28.0;
+/// Place sous la carte, réservée en permanence : l'ombre (12 + 28 = 40 px) et l'étiquette du
+/// nom d'un bouton (8 px d'écart, 26 px de haut, ombre de 20 px, soit 54 px).
+pub const MARGE_BAS: f64 = 56.0;
+/// Hauteur de la carte, étage du retardateur fermé : boutons de 44 px, retrait de 6 px et
+/// bord de 1 px en haut et en bas.
+pub const HAUTEUR_BARRE: f64 = 58.0;
 /// Écart minimal entre la carte et les bords gauche et droit de la zone utile.
 pub const ECART: f64 = 8.0;
-/// Largeur estimée (première ouverture, avant la mesure de la page) : les trois boutons
-/// à libellé, le logo, le cadre ; puis chaque bouton à pictogramme seul et chaque
-/// séparateur. Un peu large plutôt qu'étroite : la page, centrée, ne déborde pas.
-pub const LARGEUR_BASE: f64 = 340.0;
-pub const LARGEUR_PICTO: f64 = 40.0;
-pub const LARGEUR_SEPARATEUR: f64 = 12.0;
+/// Largeur estimée (première ouverture, avant la mesure de la page) : le cadre (retrait de
+/// 6 px et bord de 1 px de chaque côté), puis chaque bouton de 44 px (2 px d'écart), chaque
+/// filet (1 px et 7 px de chaque côté) et la puce « Pro ». Un peu large plutôt qu'étroite :
+/// la page, centrée, ne déborde pas.
+pub const LARGEUR_CADRE: f64 = 14.0;
+pub const LARGEUR_BOUTON: f64 = 46.0;
+pub const LARGEUR_FILET: f64 = 17.0;
+pub const LARGEUR_PUCE: f64 = 44.0;
+/// Largeur de la carte à la création de la fenêtre, avant que `ouvrir` la pose à sa mesure.
+pub const LARGEUR_INITIALE: f64 = 460.0;
 /// Bornes d'une taille rendue par la page (une valeur absurde est refusée).
 pub const TAILLE_MAX: f64 = 4000.0;
 
@@ -59,17 +67,21 @@ pub struct Ouverture {
     pub boutons: Vec<String>,
     /// Le retardateur des réglages, en secondes ; `None` : pas de bouton Retardateur.
     pub retardateur_s: Option<u32>,
-    /// Les choix du menu du retardateur (0 = aucun).
+    /// Les choix de l'étage du retardateur (0 = aucun).
     pub retardateurs: Vec<u32>,
+    /// Ceux de `boutons` que la licence n'ouvre pas : montrés éteints, un clic ouvre
+    /// Réglages › Licence.
+    pub verrouilles: Vec<String>,
 }
 
 impl Ouverture {
-    /// Clé d'une forme de barre : mêmes boutons, même largeur.
+    /// Clé d'une forme de barre : mêmes boutons, même largeur (la puce « Pro » compte).
     fn cle(&self) -> String {
         format!(
-            "{}|{}",
+            "{}|{}|{}",
             self.boutons.join(","),
-            self.retardateur_s.is_some()
+            self.retardateur_s.is_some(),
+            !self.verrouilles.is_empty()
         )
     }
 }
@@ -80,6 +92,8 @@ struct EnCours {
     ecran: Ecran,
     place: Rect,
     boutons: Vec<String>,
+    /// Les boutons montrés éteints (Pro sans licence).
+    verrouilles: Vec<String>,
     /// Le bouton Retardateur est montré.
     retardateur: bool,
     forme: String,
@@ -87,7 +101,7 @@ struct EnCours {
 static EN_COURS: Mutex<Option<EnCours>> = Mutex::new(None);
 /// Charge en attente de la page (première ouverture), une seule fois.
 static EN_ATTENTE: Mutex<Option<Ouverture>> = Mutex::new(None);
-/// Dernière largeur mesurée par la page, menus volants fermés, pour une forme de barre.
+/// Dernière largeur mesurée par la page, étage du retardateur fermé, pour une forme de barre.
 static LARGEUR_MESUREE: Mutex<Option<(String, f64)>> = Mutex::new(None);
 /// Heure de la dernière ouverture (`dans_le_double_clic`).
 static OUVERTE_A: Mutex<Option<Instant>> = Mutex::new(None);
@@ -111,21 +125,30 @@ fn echelle_sure(echelle: f64) -> f64 {
 /// page. Fonction pure.
 pub fn largeur_estimee(o: &Ouverture) -> f64 {
     let a_libelle = ["capturer_zone", "capturer_plein_ecran", "capturer_fenetre"];
-    let mut pictos = o
+    let films = ["capturer_defilante", "capturer_video", "capturer_gif"];
+    let n_captures = o
         .boutons
         .iter()
-        .filter(|b| !a_libelle.contains(&b.as_str()))
+        .filter(|b| a_libelle.contains(&b.as_str()))
         .count();
-    // Vidéo et GIF : un seul bouton.
-    if o.boutons.iter().any(|b| b == "capturer_video")
-        && o.boutons.iter().any(|b| b == "capturer_gif")
-    {
-        pictos -= 1;
-    }
-    if o.retardateur_s.is_some() {
-        pictos += 1;
-    }
-    LARGEUR_BASE + pictos as f64 * LARGEUR_PICTO + 2.0 * LARGEUR_SEPARATEUR
+    let n_films = o
+        .boutons
+        .iter()
+        .filter(|b| films.contains(&b.as_str()))
+        .count();
+    let n_reglages = o.boutons.iter().filter(|b| *b == "reglages").count();
+    let boutons = n_captures + n_films + n_reglages + usize::from(o.retardateur_s.is_some());
+    // Les groupes non vides : captures (avec le retardateur), films, Réglages.
+    let groupes = usize::from(n_captures > 0 || o.retardateur_s.is_some())
+        + usize::from(n_films > 0)
+        + usize::from(n_reglages > 0);
+    let filets = groupes.saturating_sub(1);
+    let puce = if o.verrouilles.is_empty() {
+        0.0
+    } else {
+        LARGEUR_PUCE
+    };
+    LARGEUR_CADRE + boutons as f64 * LARGEUR_BOUTON + filets as f64 * LARGEUR_FILET + puce
 }
 
 /// Plafond du délai pendant lequel la barre ignore un clic ailleurs : `GetDoubleClickTime`
@@ -156,7 +179,7 @@ pub fn taille_sensee(largeur: f64, hauteur: f64) -> Option<(f64, f64)> {
 }
 
 /// Place de la fenêtre (pure, pixels réels) pour une carte de `taille_logique` (barre et
-/// menu volant ouvert) : centrée en haut de la zone utile de `ecran`, la carte à `HAUT` du
+/// étage ouvert) : centrée en haut de la zone utile de `ecran`, la carte à `HAUT` du
 /// haut ; la fenêtre comprend la place de l'ombre (`MARGE` à gauche et à droite,
 /// `MARGE_BAS` en bas).
 /// Plus large que la zone utile, la carte reste à `ECART` de son bord gauche.
@@ -187,7 +210,10 @@ pub fn ouverte(app: &AppHandle) -> bool {
 fn creer(app: &AppHandle) -> Result<WebviewWindow, String> {
     let f = WebviewWindowBuilder::new(app, ETIQUETTE_BARRE, WebviewUrl::App(PAGE.into()))
         .title("BreezyShot")
-        .inner_size(LARGEUR_BASE + 2.0 * MARGE, HAUT + HAUTEUR_BARRE + MARGE_BAS)
+        .inner_size(
+            LARGEUR_INITIALE + 2.0 * MARGE,
+            HAUT + HAUTEUR_BARRE + MARGE_BAS,
+        )
         .visible(false)
         .focused(false)
         .decorations(false)
@@ -263,6 +289,7 @@ pub fn ouvrir(app: &AppHandle, charge: Ouverture) -> bool {
             ecran,
             place,
             boutons: charge.boutons.clone(),
+            verrouilles: charge.verrouilles.clone(),
             retardateur: charge.retardateur_s.is_some(),
             forme: cle,
         });
@@ -288,8 +315,8 @@ pub fn ouvrir(app: &AppHandle, charge: Ouverture) -> bool {
     true
 }
 
-/// La page a mesuré sa carte (pixels logiques, menu volant ouvert compris) : la fenêtre
-/// est reposée à cette taille, centrée de même. La largeur, menus fermés, est retenue pour
+/// La page a mesuré sa carte (pixels logiques, étage ouvert compris) : la fenêtre
+/// est reposée à cette taille, centrée de même. La largeur, étage fermé, est retenue pour
 /// les prochaines ouvertures de la même forme.
 pub fn redimensionner(app: &AppHandle, largeur: f64, hauteur: f64) {
     let Some((l, h)) = taille_sensee(largeur, hauteur) else {
@@ -382,6 +409,14 @@ pub fn bouton_montre(id: &str) -> bool {
     })
 }
 
+/// Vrai si `id` est un bouton éteint de l'ouverture en cours (Pro sans licence).
+pub fn bouton_verrouille(id: &str) -> bool {
+    EN_COURS.lock().is_ok_and(|c| {
+        c.as_ref()
+            .is_some_and(|c| c.verrouilles.iter().any(|x| x == id))
+    })
+}
+
 /// Vrai si l'ouverture en cours montre le bouton Retardateur.
 pub fn retardateur_montre() -> bool {
     EN_COURS
@@ -402,6 +437,7 @@ pub fn cacher(app: &AppHandle) -> bool {
     if let Ok(mut c) = EN_COURS.lock() {
         if let Some(c) = c.as_mut() {
             c.boutons.clear();
+            c.verrouilles.clear();
             c.retardateur = false;
         }
     }
@@ -441,6 +477,7 @@ mod tests {
             boutons: boutons.iter().map(|b| b.to_string()).collect(),
             retardateur_s: retardateur.then_some(0),
             retardateurs: vec![0, 3, 5, 10],
+            verrouilles: vec![],
         }
     }
 
@@ -468,7 +505,9 @@ mod tests {
         assert_eq!(p.largeur, ((500.0 + 2.0 * MARGE) * 1.5).round() as u32);
         assert_eq!(
             p.hauteur,
-            (HAUT * 1.5).round() as u32 + (HAUTEUR_BARRE * 1.5).round() as u32 + 36
+            (HAUT * 1.5).round() as u32
+                + (HAUTEUR_BARRE * 1.5).round() as u32
+                + (MARGE_BAS * 1.5).round() as u32
         );
     }
 
@@ -526,28 +565,49 @@ mod tests {
             "capturer_fenetre",
             "reglages",
         ];
+        // Trois captures, Réglages, le retardateur : cinq boutons, un filet.
         let sans = largeur_estimee(&ouverture(&base, true));
+        assert_eq!(sans, LARGEUR_CADRE + 5.0 * LARGEUR_BOUTON + LARGEUR_FILET);
         let mut pro = base.to_vec();
         pro.extend(["capturer_defilante", "capturer_video", "capturer_gif"]);
+        // Défilante, Vidéo et GIF : trois boutons directs et un filet de plus.
         let avec = largeur_estimee(&ouverture(&pro, true));
-        // Défilante, et un seul bouton pour Vidéo et GIF.
-        assert_eq!(avec - sans, 2.0 * LARGEUR_PICTO);
-        let mut gif_seul = base.to_vec();
-        gif_seul.extend(["capturer_defilante", "capturer_gif"]);
-        assert_eq!(largeur_estimee(&ouverture(&gif_seul, true)), avec);
+        assert_eq!(avec - sans, 3.0 * LARGEUR_BOUTON + LARGEUR_FILET);
+        // Sans licence : les mêmes boutons éteints, et la puce « Pro ».
+        let mut eteints = ouverture(&pro, true);
+        eteints.verrouilles = vec!["capturer_defilante".into(), "capturer_video".into()];
+        assert_eq!(largeur_estimee(&eteints) - avec, LARGEUR_PUCE);
+        // Sans retardateur : un bouton de moins.
         assert_eq!(
             sans - largeur_estimee(&ouverture(&base, false)),
-            LARGEUR_PICTO
+            LARGEUR_BOUTON
         );
     }
 
     #[test]
+    fn la_carte_estimee_tient_dans_la_largeur_initiale() {
+        let pro = [
+            "capturer_zone",
+            "capturer_plein_ecran",
+            "capturer_fenetre",
+            "capturer_defilante",
+            "capturer_video",
+            "capturer_gif",
+            "reglages",
+        ];
+        let mut o = ouverture(&pro, true);
+        o.verrouilles = vec!["capturer_defilante".into()];
+        // La barre la plus large (tout, avec la puce) : environ 460 px, la fenêtre créée.
+        assert!((largeur_estimee(&o) - LARGEUR_INITIALE).abs() < 20.0);
+    }
+
+    #[test]
     fn taille_de_la_page_bornee() {
-        assert_eq!(taille_sensee(520.0, 46.0), Some((520.0, 46.0)));
-        assert_eq!(taille_sensee(f64::NAN, 46.0), None);
+        assert_eq!(taille_sensee(520.0, 58.0), Some((520.0, 58.0)));
+        assert_eq!(taille_sensee(f64::NAN, 58.0), None);
         assert_eq!(taille_sensee(520.0, 0.0), None);
-        assert_eq!(taille_sensee(1e9, 46.0), None);
-        assert_eq!(taille_sensee(-3.0, 46.0), None);
+        assert_eq!(taille_sensee(1e9, 58.0), None);
+        assert_eq!(taille_sensee(-3.0, 58.0), None);
     }
 
     #[test]
@@ -598,5 +658,9 @@ mod tests {
         let mut c = a.clone();
         c.retardateur_s = Some(5);
         assert_eq!(a.cle(), c.cle());
+        // La puce « Pro » change la largeur : une autre forme.
+        let mut d = a.clone();
+        d.verrouilles = vec!["capturer_gif".into()];
+        assert_ne!(a.cle(), d.cle());
     }
 }
