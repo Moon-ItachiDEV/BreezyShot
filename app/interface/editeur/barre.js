@@ -558,7 +558,6 @@ export function installerBarre(ed) {
     b.dataset.act = "texte";
     b.appendChild(picto("ocr"));
     if (avecNom) b.appendChild(el("span", null, avecNom));
-    if (avecNom === "Copier le texte") b.removeAttribute("title");
     return b;
   }
   function annulerRetablir(classe) {
@@ -976,7 +975,7 @@ export function installerBarre(ed) {
       !h || (!ed.modele.peutAnnuler(h) && !ed.outils?.saisieOuverte());
     $('[data-act="retablir"]', chrome).disabled =
       !h || !ed.modele.peutRetablir(h) || !!ed.outils?.saisieOuverte();
-    // « Copier le texte » : le bouton n'existe que si la charge le dit ; pendant le calque,
+    // « Copier le texte » : le bouton n'est montré que si la charge le dit ; pendant le calque,
     // Enregistrer, Copier et Glisser sont grisés et le socle s'efface (texte.js).
     const calque = !!ed.texte?.ouvert();
     fenetre.toggleAttribute("data-calque", calque);

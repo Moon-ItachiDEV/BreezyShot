@@ -1979,9 +1979,9 @@ la prise de la garde et sa destruction, repris après le début d'une capture su
 cacherait l'écran figé de celle-ci.
 
 **Dans l'éditeur.** `ChargeEditeur.texte` est vrai si `texte` est une action construite
-(`texte_construit`) au moment de la charge. La page crée alors le bouton « Texte »
-(infobulle « Copier le texte », avant « Enregistrer ») et le calque (`editeur/texte.js`) ;
-sinon rien n'est créé. Le clic exporte l'image composée avec le but `texte` (en-tête
+(`texte_construit`) au moment de la charge. La page montre alors le bouton « Texte »
+(infobulle « Copier le texte », posé par `barre.js` avant « Glisser vers une appli ») et
+crée le calque (`editeur/texte.js`) ; sinon le bouton reste caché. Le clic exporte l'image composée avec le but `texte` (en-tête
 `x-editeur-but: texte`, R7 : ce que l'utilisateur voit, masques compris) : l'export est
 accepté comme un autre (§6.2), mais rien n'est copié ni enregistré, `exportee` n'est pas
 touchée ; les pixels vont à `geste_texte::lire_export`, lus dans le fil `texte` avec la même
@@ -2210,22 +2210,19 @@ non envoye: <e>`, `surlignage sans fil (<e>): fin montree tout de suite`.
   autre contenu (G6),
   `changerVariante` (V) ; `ECHECS : 0` attendu. Étape du job `pages`.
 - `essais/pages/editeur.cjs` (0.4) : la page de l'éditeur dans Chromium, cœur simulé et
-  vrai modèle, 252 points : noms et rôles accessibles (contrat de l'essai 12), chaque
+  vrai modèle, 247 points : noms et rôles accessibles (contrat de l'essai 12), chaque
   outil, flèche choisie après le tracé et courbée à sa poignée, Gomme au pixel (ce qui
   est dessus décide, pile d'une encre sur un numéro sur une flèche, clic qui tremble),
-  Projecteur, recadrage par chaque coin, sélection, la barre C (l'outil déplié, ce que
-  chaque outil déplie, l'objet choisi qui déplie son outil, variante changée sur l'objet,
-  instruments à la couleur de l'encre ; barre plus claire : aucun outil ne répète une de
-  ses variantes, filtre de la tache floue, choix en pastille claire en clair comme en
-  sombre, trait du pli, intensité en trois points, marge du dernier groupe, nuance bordée
-  des outils repliés, Bloc noir noir et bordé dans les deux thèmes, focus de l'intensité
-  qui part rendu à la variante), couleurs, menu « Fermer » et ses issues,
-  « Copier » qui ferme, bouton Glisser, règle de `fermer_demande`, un seul export à la
-  fois, clair, sombre, largeur d'ouverture (chaque outil déplié tient), fenêtre étroite
-  (seuls les outils défilent, Annuler, Rétablir et Plus restent, l'outil pris se montre,
-  même quand son pli s'élargit),
-  texte en saisie qui déplie son outil, focus gardé quand un pli se replie, glissière
-  aller-retour sans pas, aucune erreur ni violation de CSP. Étape du job `pages`.
+  Projecteur, recadrage par chaque coin, sélection, le socle « Étages » (structure et ordre
+  des outils, réglages de l'outil en main ou de l'objet choisi au-dessus, variante changée
+  sur l'objet, aucun outil ne répète une de ses variantes, filtre de la tache floue, choix
+  en pastille claire en clair comme en sombre, intensité en trois points, Bloc noir noir et
+  bordé dans les deux thèmes, focus des réglages qui partent rendu à la variante ou à
+  l'outil), couleurs, menu « Fermer » et ses issues, « Copier » qui ferme, bouton Glisser,
+  règle de `fermer_demande`, un seul export à la fois, clair, sombre, largeur d'ouverture
+  (les réglages de chaque outil tiennent à 1096 px) et fenêtre étroite (à 640 px, le socle
+  et les réglages tiennent sans défiler, les mots des sorties s'effacent),
+  texte en saisie qui règle sans se valider, glissière aller-retour sans pas, aucune erreur ni violation de CSP. Étape du job `pages`.
 - **Tests de la 0.5** (`cargo test --locked` sous Linux : 641 tests de la bibliothèque
   réussis, 2 ignorés, et les 2 de `tests/architecture.rs`, qui refusent aussi un appel à
   `droits::ouverte` ou à `licence::verifier` hors d'`application`). Tests ajoutés, par

@@ -1204,8 +1204,11 @@ fonctions de l'éditeur restent.
   l'image ne passe pas sous le socle.
 - Le focus pris dans des réglages qui partent va au bouton de leur outil.
 - Essais : `editeur.cjs` repris pour le socle (structure, ordre, mesures, focus, fenêtre
-  étroite à 1096 et 640 px) ; l'essai Windows 13 cherche le bouton du haut par son nom
+  étroite à 1096 et 640 px ; 247 points) ; l'essai Windows 13 cherche le bouton du haut par son nom
   « Copier le texte ».
+- Essai 15 (vidéo et GIF) : la mémoire de l'app seule après la vidéo est jugée contre le
+  repos chaud + 15 Mo (et non plus le repos L1 + 15 Mo), avec un repli à L1 + 25 Mo quand le
+  repos chaud manque (commit e59ede2, repris du fil MVP).
 
 ### Non vérifié
 
