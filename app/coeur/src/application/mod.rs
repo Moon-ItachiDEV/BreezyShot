@@ -592,6 +592,8 @@ fn lancer_app(contexte: tauri::Context, commande: Commande, inconnus: Vec<String
             fenetre_reglages::reglages_changer,
             fenetre_reglages::reglages_apercu_nom,
             fenetre_reglages::reglages_parcourir,
+            fenetre_reglages::reglages_parcourir_films,
+            fenetre_reglages::reglages_vider_historique,
             fenetre_reglages::reglages_saisie,
             fenetre_reglages::reglages_raccourci,
             fenetre_reglages::reglages_retablir,
@@ -2666,6 +2668,8 @@ pub(super) fn demande_sortie(app: &AppHandle, transparence: bool) -> sortie::Dem
         modele_nom: reglages.modele_nom,
         maintenant: chrono::Local::now(),
         transparence,
+        format: zone::format_fichier(reglages.format_image),
+        recents_gardes: historique::gardes_en_vigueur(reglages.historique.gardes, pro(app)),
     }
 }
 
@@ -2873,16 +2877,41 @@ fn finir_sortie(app: &AppHandle, fin: FinSortie) {
     }
     let chrono =
         zone::ligne_chrono_sortie(fin.duree_decoupe, fin.duree_sortie, fin.relache.elapsed());
-    let montrer = fin.vignette && app.try_state::<Vignette>().is_some();
+    let vers_editeur = vignette::ouvre_l_editeur(
+        reglages_lus(app).editeur_apres_capture,
+        EDITEUR_CONSTRUIT,
+        editeur::annotable(fin.pixels.largeur, fin.pixels.hauteur),
+    );
+    let montrer = fin.vignette && !vers_editeur && app.try_state::<Vignette>().is_some();
     let declencheur = vignette::issue(montrer, fin.apercu.is_some());
     appliquer(app, declencheur);
     match (declencheur, fin.apercu.clone()) {
         (Declencheur::ImagePrete, Some(apercu)) => montrer_vignette(app, fin, annonce, apercu),
         _ => {
             afficher(app, zone::message_annonce(&annonce));
+            if vers_editeur {
+                ouvrir_apres_capture(app, &fin);
+            }
         }
     }
     log::info!("{chrono}");
+}
+
+/// « Ouvrir dans l'éditeur après la capture » : les pixels de la capture passent à
+/// l'éditeur (mêmes pixels, aucune copie) à un tour suivant de la boucle, jamais dans le
+/// rappel qui a rendu le bilan (création d'une fenêtre Web).
+fn ouvrir_apres_capture(app: &AppHandle, fin: &FinSortie) {
+    let demande_a = Instant::now();
+    let document = editeur::Document {
+        id: fin.numero,
+        pixels: Arc::clone(&fin.pixels),
+        transparence: fin.demande.transparence,
+        maintenant: fin.demande.maintenant,
+    };
+    log::info!("editeur ouvert apres la capture {}", fin.numero);
+    plus_tard(app, Duration::ZERO, move |app| {
+        recevoir_document(app, document, demande_a);
+    });
 }
 
 /// Prépare la vignette de la capture `fin` ; le souffle partira quand la carte sera posée.

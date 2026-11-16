@@ -8,7 +8,10 @@ use std::path::{Path, PathBuf};
 use chrono::{DateTime, Local};
 
 use super::constat::{Constat, ErreurEcriture};
-use super::lecture::{analyser, duree_valide, interpreter, retardateur_valide, TAILLE_MAX};
+use super::lecture::{
+    analyser, duree_valide, fluidite_valide, gardes_valide, interpreter, retardateur_valide,
+    TAILLE_MAX,
+};
 use super::modele::{vers_json, Plateforme, Reglages, VERSION_ACTUELLE};
 
 /// Nom du fichier de réglages dans le dossier donné.
@@ -204,6 +207,23 @@ pub fn valider(reglages: &Reglages) -> Result<(), ErreurEcriture> {
         return Err(ErreurEcriture::ValeurInvalide {
             champ: "capture.retardateur_s",
         });
+    }
+    if fluidite_valide(&reglages.film.fluidite.into()).is_none() {
+        return Err(ErreurEcriture::ValeurInvalide {
+            champ: "film.fluidite",
+        });
+    }
+    if gardes_valide(&reglages.historique.gardes.into()).is_none() {
+        return Err(ErreurEcriture::ValeurInvalide {
+            champ: "historique.gardes",
+        });
+    }
+    if let Some(d) = &reglages.film.dossier {
+        if d.as_os_str().to_string_lossy().trim().is_empty() {
+            return Err(ErreurEcriture::ValeurInvalide {
+                champ: "film.dossier",
+            });
+        }
     }
     if reglages.modele_nom.trim().is_empty() || reglages.modele_nom.chars().count() > MODELE_NOM_MAX
     {

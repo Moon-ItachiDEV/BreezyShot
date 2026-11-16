@@ -35,6 +35,8 @@ fn main() {
         "reglages_changer",
         "reglages_apercu_nom",
         "reglages_parcourir",
+        "reglages_parcourir_films",
+        "reglages_vider_historique",
         "reglages_saisie",
         "reglages_raccourci",
         "reglages_retablir",

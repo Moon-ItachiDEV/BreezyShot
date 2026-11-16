@@ -9,8 +9,12 @@ use super::fichier::{ecrire_sans_ecraser, existe};
 use super::historique::nettoyer_apercus;
 use super::nom::nom_affiche;
 
-/// Nombre de captures gardees dans « Recents ».
+/// Nombre de captures gardees dans « Recents » par defaut (reglage `historique.gardes`).
 pub const RECENTS_GARDES: usize = 50;
+
+/// Le plus grand nombre de captures que « Recents » puisse garder (le plus grand choix du
+/// reglage) : la liste de l'historique ne montre jamais davantage.
+pub const RECENTS_MAX: usize = 200;
 
 /// Longueur de la partie horodatee : `AAAAMMJJ-HHMMSS-mmm`.
 const LONGUEUR_BASE: usize = 19;
@@ -103,22 +107,23 @@ pub(super) fn a_supprimer_apres_ecriture(
     recents_a_supprimer(&autres, garder.saturating_sub(1))
 }
 
-/// Ecrit la capture dans « Recents » puis fait le menage (captures au-dela de 50 et leurs
-/// apercus, apercus orphelins). Un echec du menage n'est pas un echec de l'ecriture.
+/// Ecrit la capture dans « Recents » puis fait le menage (captures au-dela de `gardes` et
+/// leurs apercus, apercus orphelins). Un echec du menage n'est pas un echec de l'ecriture.
 pub(super) fn ecrire(
     dossier: &Path,
     maintenant: DateTime<Local>,
     octets: &[u8],
+    gardes: usize,
 ) -> Result<PathBuf, String> {
     let base = base_recent(maintenant);
     let chemin = ecrire_sans_ecraser(dossier, &nom_affiche(dossier), octets, |d| {
         chemin_recent_libre(d, &base, existe)
     })?;
-    nettoyer(dossier, &chemin);
+    nettoyer(dossier, &chemin, gardes);
     Ok(chemin)
 }
 
-fn nettoyer(dossier: &Path, neuf: &Path) {
+fn nettoyer(dossier: &Path, neuf: &Path, gardes: usize) {
     let Some(nom_neuf) = neuf.file_name().and_then(|n| n.to_str()) else {
         return;
     };
@@ -130,10 +135,30 @@ fn nettoyer(dossier: &Path, neuf: &Path) {
         .filter(|e| e.file_type().map(|t| t.is_file()).unwrap_or(false))
         .filter_map(|e| e.file_name().into_string().ok())
         .collect();
-    let partis: Vec<String> = a_supprimer_apres_ecriture(&noms, nom_neuf, RECENTS_GARDES)
+    let partis: Vec<String> = a_supprimer_apres_ecriture(&noms, nom_neuf, gardes)
         .into_iter()
         .filter(|nom| fs::remove_file(dossier.join(nom)).is_ok())
         .collect();
     // Les apercus des captures parties, et ceux qui n'ont plus de capture (contrat 0.5).
     nettoyer_apercus(dossier, &partis);
+}
+
+/// Le menage de « Recents » sans ecriture (le reglage `historique.gardes` baisse) : ne garde
+/// que les `gardes` plus recentes captures (une au moins, la plus recente), avec leurs
+/// apercus. Rend le nombre de captures parties.
+pub fn purger_recents(dossier: &Path, gardes: usize) -> usize {
+    let Ok(entrees) = fs::read_dir(dossier) else {
+        return 0;
+    };
+    let noms: Vec<String> = entrees
+        .filter_map(|e| e.ok())
+        .filter(|e| e.file_type().map(|t| t.is_file()).unwrap_or(false))
+        .filter_map(|e| e.file_name().into_string().ok())
+        .collect();
+    let partis: Vec<String> = recents_a_supprimer(&noms, gardes.max(1))
+        .into_iter()
+        .filter(|nom| fs::remove_file(dossier.join(nom)).is_ok())
+        .collect();
+    nettoyer_apercus(dossier, &partis);
+    partis.len()
 }

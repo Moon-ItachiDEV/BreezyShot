@@ -16,6 +16,14 @@ pub const DUREE_TOUJOURS: u32 = 0;
 /// Retardateur permis, en secondes entières : 0 (aucun) à `RETARDATEUR_MAX_S` (version 3).
 pub const RETARDATEUR_MAX_S: u32 = 10;
 
+/// Fluidités d'une vidéo permises, en images par seconde (version 7).
+pub const FLUIDITES: [u32; 2] = [30, 60];
+/// Nombres de captures gardées dans l'historique permis (version 7) ; `0` : aucune
+/// (seule la dernière capture reste, le temps de la vignette).
+pub const HISTORIQUE_CHOIX: [u32; 5] = [0, 25, 50, 100, 200];
+/// Nombre de captures gardées par défaut, et sans licence.
+pub const HISTORIQUE_DEFAUT: u32 = 50;
+
 /// Le système pour lequel on choisit les valeurs par défaut. Le module ne le devine pas
 /// lui-même (aucun `cfg` hors de `systeme/`) : l'Application le lui donne.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -48,6 +56,13 @@ pub enum Theme {
     Sombre,
 }
 
+/// Le format du fichier enregistré après une capture (version 7).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FormatImage {
+    Png,
+    Jpg,
+}
+
 /// Fait le lien entre une énumération et son texte dans le fichier.
 macro_rules! texte_enum {
     ($type:ident { $($variante:ident => $texte:literal),+ $(,)? }) => {
@@ -70,6 +85,7 @@ texte_enum!(Coin {
     HautGauche => "haut_gauche",
     HautDroite => "haut_droite",
 });
+texte_enum!(FormatImage { Png => "png", Jpg => "jpg" });
 texte_enum!(Animations { Systeme => "systeme", Normales => "normales", Reduites => "reduites" });
 texte_enum!(Theme { Systeme => "systeme", Clair => "clair", Sombre => "sombre" });
 
@@ -233,14 +249,63 @@ impl Capture {
     }
 }
 
+/// Réglages des films, vidéo et GIF (version 7, Pro).
+#[derive(Debug, Clone, PartialEq)]
+pub struct Film {
+    /// Images par seconde d'une vidéo : une valeur de `FLUIDITES`.
+    pub fluidite: u32,
+    /// Le son de l'ordinateur est mêlé à la vidéo.
+    pub son_systeme: bool,
+    /// Un anneau est dessiné à chaque clic.
+    pub clics_visibles: bool,
+    /// `None` = le dossier d'enregistrement des images.
+    pub dossier: Option<PathBuf>,
+    pub(in crate::reglages) inconnus: Map<String, Value>,
+}
+
+impl Film {
+    pub fn par_defaut() -> Self {
+        Film {
+            fluidite: 30,
+            son_systeme: false,
+            clics_visibles: false,
+            dossier: None,
+            inconnus: Map::new(),
+        }
+    }
+}
+
+/// Réglages de l'historique (version 7, Pro).
+#[derive(Debug, Clone, PartialEq)]
+pub struct Historique {
+    /// Une valeur de `HISTORIQUE_CHOIX`.
+    pub gardes: u32,
+    pub(in crate::reglages) inconnus: Map<String, Value>,
+}
+
+impl Historique {
+    pub fn par_defaut() -> Self {
+        Historique {
+            gardes: HISTORIQUE_DEFAUT,
+            inconnus: Map::new(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct Reglages {
     pub raccourcis: Raccourcis,
     pub copier_apres_capture: bool,
     pub enregistrer_apres_capture: bool,
+    /// Le format du fichier enregistré (version 7) ; « Récents » reste en PNG.
+    pub format_image: FormatImage,
+    /// Ouvrir l'éditeur après chaque capture (version 7).
+    pub editeur_apres_capture: bool,
     pub vignette: Vignette,
     pub selection: Selection,
     pub capture: Capture,
+    pub film: Film,
+    pub historique: Historique,
     pub demarrer_avec_systeme: bool,
     /// `None` = Images › BreezyShot (résolu par `systeme`).
     pub dossier_enregistrement: Option<PathBuf>,
@@ -262,9 +327,13 @@ impl Reglages {
             raccourcis: Raccourcis::par_defaut(plateforme),
             copier_apres_capture: true,
             enregistrer_apres_capture: false,
+            format_image: FormatImage::Png,
+            editeur_apres_capture: false,
             vignette: Vignette::par_defaut(),
             selection: Selection::par_defaut(),
             capture: Capture::par_defaut(),
+            film: Film::par_defaut(),
+            historique: Historique::par_defaut(),
             demarrer_avec_systeme: false,
             dossier_enregistrement: None,
             modele_nom: "BreezyShot {date} à {heure}".to_string(),
@@ -353,6 +422,30 @@ pub(in crate::reglages) fn vers_json(r: &Reglages) -> Result<Value, &'static str
         },
     };
 
+    let mut film = Map::new();
+    film.insert("fluidite".into(), Value::from(r.film.fluidite));
+    film.insert("son_systeme".into(), Value::Bool(r.film.son_systeme));
+    film.insert("clics_visibles".into(), Value::Bool(r.film.clics_visibles));
+    film.insert(
+        "dossier".into(),
+        match &r.film.dossier {
+            None => Value::Null,
+            Some(chemin) => match chemin.to_str() {
+                Some(texte) => Value::from(texte),
+                None => return Err("film.dossier"),
+            },
+        },
+    );
+    for (cle, valeur) in &r.film.inconnus {
+        film.insert(cle.clone(), valeur.clone());
+    }
+
+    let mut historique = Map::new();
+    historique.insert("gardes".into(), Value::from(r.historique.gardes));
+    for (cle, valeur) in &r.historique.inconnus {
+        historique.insert(cle.clone(), valeur.clone());
+    }
+
     let mut m = Map::new();
     m.insert("version".into(), Value::from(r.version_fichier));
     m.insert("raccourcis".into(), Value::Object(raccourcis));
@@ -364,9 +457,16 @@ pub(in crate::reglages) fn vers_json(r: &Reglages) -> Result<Value, &'static str
         "enregistrer_apres_capture".into(),
         Value::Bool(r.enregistrer_apres_capture),
     );
+    m.insert("format_image".into(), Value::from(r.format_image.texte()));
+    m.insert(
+        "editeur_apres_capture".into(),
+        Value::Bool(r.editeur_apres_capture),
+    );
     m.insert("vignette".into(), Value::Object(vignette));
     m.insert("selection".into(), Value::Object(selection));
     m.insert("capture".into(), Value::Object(capture));
+    m.insert("film".into(), Value::Object(film));
+    m.insert("historique".into(), Value::Object(historique));
     m.insert(
         "demarrer_avec_systeme".into(),
         Value::Bool(r.demarrer_avec_systeme),

@@ -6,18 +6,19 @@ use serde_json::{json, Map, Value};
 
 use super::constat::{Constat, Raison};
 use super::modele::{
-    vers_json, Animations, Capture, Coin, Plateforme, Raccourcis, Reglages, Selection, Theme,
-    Vignette, DUREE_MAX_S, DUREE_MIN_S, DUREE_TOUJOURS, RETARDATEUR_MAX_S, VERSION_ACTUELLE,
+    vers_json, Animations, Capture, Coin, Film, FormatImage, Historique, Plateforme, Raccourcis,
+    Reglages, Selection, Theme, Vignette, DUREE_MAX_S, DUREE_MIN_S, DUREE_TOUJOURS, FLUIDITES,
+    HISTORIQUE_CHOIX, RETARDATEUR_MAX_S, VERSION_ACTUELLE,
 };
 
 /// Une mise à niveau d'une version à la suivante. Elle complète l'objet sans rien effacer ;
 /// le numéro de version est tenu par `interpreter`, pas par elle.
 pub(super) type MiseANiveau = fn(&mut Map<String, Value>, Plateforme);
 
-/// `MISES_A_NIVEAU[n]` fait passer de la version `n` à `n + 1`. Pour une version 7 un jour :
-/// ajouter `v6_vers_v7` à la fin, et `VERSION_ACTUELLE` passe à 7 tout seul.
+/// `MISES_A_NIVEAU[n]` fait passer de la version `n` à `n + 1`. Pour une version 8 un jour :
+/// ajouter `v7_vers_v8` à la fin, et `VERSION_ACTUELLE` passe à 8 tout seul.
 pub(super) const MISES_A_NIVEAU: &[MiseANiveau] = &[
-    v0_vers_v1, v1_vers_v2, v2_vers_v3, v3_vers_v4, v4_vers_v5, v5_vers_v6,
+    v0_vers_v1, v1_vers_v2, v2_vers_v3, v3_vers_v4, v4_vers_v5, v5_vers_v6, v6_vers_v7,
 ];
 
 /// Version 0 (aucun champ `version`) vers 1 : ajoute les champs de la version 1 qui manquent,
@@ -100,6 +101,22 @@ fn v5_vers_v6(objet: &mut Map<String, Value>, plateforme: Plateforme) {
     let r = Raccourcis::par_defaut(plateforme);
     for (action, defaut) in [("video", &r.video), ("gif", &r.gif)] {
         ajouter_action(raccourcis, action, defaut);
+    }
+}
+
+/// Version 6 vers 7 (réglages Pro) : le format de l'image, l'éditeur après la capture, les
+/// objets `film` et `historique`, tous à leur valeur d'avant (PNG, éditeur non, 30 images par
+/// seconde, ni son de l'ordinateur ni clics, films dans le dossier des images, 50 captures
+/// gardées). Rien n'est effacé ni remplacé ; écrit aussi sans licence : invisible.
+fn v6_vers_v7(objet: &mut Map<String, Value>, _plateforme: Plateforme) {
+    let modele = json!({
+        "format_image": "png",
+        "editeur_apres_capture": false,
+        "film": { "fluidite": 30, "son_systeme": false, "clics_visibles": false, "dossier": null },
+        "historique": { "gardes": 50 }
+    });
+    if let Value::Object(modele) = modele {
+        completer(objet, &modele);
     }
 }
 
@@ -256,9 +273,27 @@ pub(super) fn interpreter(objet: Map<String, Value>, plateforme: Plateforme) -> 
         Value::as_bool,
         c,
     );
+    let format_image = lire(
+        &mut m,
+        "",
+        "format_image",
+        d.format_image,
+        |v| v.as_str().and_then(FormatImage::depuis_texte),
+        c,
+    );
+    let editeur_apres_capture = lire(
+        &mut m,
+        "",
+        "editeur_apres_capture",
+        false,
+        Value::as_bool,
+        c,
+    );
     let vignette = lire_vignette(&mut m, c);
     let selection = lire_selection(&mut m, c);
     let capture = lire_capture(&mut m, c);
+    let film = lire_film(&mut m, c);
+    let historique = lire_historique(&mut m, c);
     let demarrer_avec_systeme = lire(
         &mut m,
         "",
@@ -290,9 +325,13 @@ pub(super) fn interpreter(objet: Map<String, Value>, plateforme: Plateforme) -> 
         raccourcis,
         copier_apres_capture,
         enregistrer_apres_capture,
+        format_image,
+        editeur_apres_capture,
         vignette,
         selection,
         capture,
+        film,
+        historique,
         demarrer_avec_systeme,
         dossier_enregistrement,
         modele_nom,
@@ -483,6 +522,75 @@ fn lire_capture(m: &mut Map<String, Value>, constats: &mut Vec<Constat>) -> Capt
         pointeur,
         inconnus: objet,
     }
+}
+
+fn lire_film(m: &mut Map<String, Value>, constats: &mut Vec<Constat>) -> Film {
+    let d = Film::par_defaut();
+    let Some(mut objet) = sous_objet(m, "film", constats) else {
+        return d;
+    };
+    let p = "film.";
+    let fluidite = lire(
+        &mut objet,
+        p,
+        "fluidite",
+        d.fluidite,
+        fluidite_valide,
+        constats,
+    );
+    let son_systeme = lire(
+        &mut objet,
+        p,
+        "son_systeme",
+        d.son_systeme,
+        Value::as_bool,
+        constats,
+    );
+    let clics_visibles = lire(
+        &mut objet,
+        p,
+        "clics_visibles",
+        d.clics_visibles,
+        Value::as_bool,
+        constats,
+    );
+    let dossier = lire(&mut objet, p, "dossier", None, lire_dossier, constats);
+    Film {
+        fluidite,
+        son_systeme,
+        clics_visibles,
+        dossier,
+        inconnus: objet,
+    }
+}
+
+fn lire_historique(m: &mut Map<String, Value>, constats: &mut Vec<Constat>) -> Historique {
+    let d = Historique::par_defaut();
+    let Some(mut objet) = sous_objet(m, "historique", constats) else {
+        return d;
+    };
+    let gardes = lire(
+        &mut objet,
+        "historique.",
+        "gardes",
+        d.gardes,
+        gardes_valide,
+        constats,
+    );
+    Historique {
+        gardes,
+        inconnus: objet,
+    }
+}
+
+/// Une fluidité de `FLUIDITES` (`60.0` vaut 60).
+pub(super) fn fluidite_valide(v: &Value) -> Option<u32> {
+    entier_sature(v).filter(|n| FLUIDITES.contains(n))
+}
+
+/// Un nombre de captures gardées de `HISTORIQUE_CHOIX`.
+pub(super) fn gardes_valide(v: &Value) -> Option<u32> {
+    entier_sature(v).filter(|n| HISTORIQUE_CHOIX.contains(n))
 }
 
 /// Un nombre entier de secondes de 0 à `RETARDATEUR_MAX_S` (`3.0` vaut 3, `"3"` est refusé).

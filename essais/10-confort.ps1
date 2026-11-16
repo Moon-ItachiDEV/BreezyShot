@@ -115,7 +115,7 @@ function Horodatage([string]$Ligne) {
 
 # Réglages du cas : Ctrl+Maj+1 (zone), Ctrl+Maj+2 (écran), Ctrl+Maj+4 (dernière zone),
 # copie seule, retardateur et vignette au choix. Version 3 complète : depuis la 0.5, l'app
-# la met à niveau en version 6 au démarrage (historique, texte, défilante, vidéo et GIF) et
+# la met à niveau en version 7 au démarrage (historique, texte, défilante, vidéo et GIF) et
 # réécrit le fichier.
 function Ecrire-Reglages([string]$Dossier, [int]$Retardateur, [bool]$Vignette) {
     $r = [ordered]@{

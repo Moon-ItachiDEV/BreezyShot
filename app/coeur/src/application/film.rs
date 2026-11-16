@@ -16,6 +16,7 @@
 //! - U1 (piste A) : `Ctrl + Maj + 6` et `Ctrl + Maj + 7` (`reglages`, défauts), « Vidéo »
 //!   et « GIF » (`libelle_menu`, `page_reglages::libelle_action`).
 
+use std::path::Path;
 use std::time::{Duration, Instant};
 
 use super::etats::Mode;
@@ -38,6 +39,8 @@ pub const DECOMPTE_DEFAUT_S: u32 = 3;
 /// Images par seconde d'une vidéo et d'un GIF (F13).
 pub const CADENCE_VIDEO: u32 = 30;
 pub const CADENCE_GIF: u32 = 15;
+/// Images par seconde d'une vidéo « fluide » (réglage « Fluidité », Pro).
+pub const CADENCE_VIDEO_FLUIDE: u32 = 60;
 /// La page de contrôle doit avoir posé sa pilule (`film_zone`) dans ce délai après le
 /// relâchement (F5).
 pub const DELAI_PAGE: Duration = Duration::from_secs(2);
@@ -132,14 +135,19 @@ pub fn recherche_selon(construit: bool, pro: bool) -> bool {
 /// La demande de sortie d'un film (F23, choix U4), d'après celle des réglages du moment :
 /// jamais « Récents » (F24) ; avec `TOUJOURS_DANS_LE_DOSSIER`, toujours enregistré. Rend
 /// aussi `deplacer` (`sortie::sortir_film`) : le fichier de travail est déplacé dans le
-/// dossier d'enregistrement au lieu d'y être copié.
-pub fn demande_film(base: &sortie::Demande) -> (sortie::Demande, bool) {
-    let demande = sortie::Demande {
+/// dossier d'enregistrement au lieu d'y être copié. `dossier` : le réglage « Dossier des
+/// films » (Pro) ; absent ou vide, le film va au dossier des images, comme avant.
+pub fn demande_film(base: &sortie::Demande, dossier: Option<&Path>) -> (sortie::Demande, bool) {
+    let mut demande = sortie::Demande {
         enregistrer: base.enregistrer || TOUJOURS_DANS_LE_DOSSIER,
         ranger_recents: false,
         transparence: false,
         ..base.clone()
     };
+    if let Some(d) = dossier.filter(|d| !d.as_os_str().is_empty()) {
+        demande.dossier_enregistrement = d.to_path_buf();
+        demande.dossier_affiche = sortie::nom_affiche(d);
+    }
     (demande, TOUJOURS_DANS_LE_DOSSIER)
 }
 
@@ -189,7 +197,22 @@ impl Sorte {
 
     /// L'écart entre deux images de la grille (une seconde / la cadence).
     pub fn pas(self) -> Duration {
-        Duration::from_secs(1) / self.cadence()
+        self.pas_a(self.cadence())
+    }
+
+    /// L'écart entre deux images pour la cadence `cadence` (jamais nulle).
+    pub fn pas_a(self, cadence: u32) -> Duration {
+        Duration::from_secs(1) / cadence.max(1)
+    }
+
+    /// Images par seconde pour le réglage « Fluidité » : 60 ou 30 pour une vidéo (toute
+    /// autre valeur, 30) ; un GIF reste à 15.
+    pub fn cadence_pour(self, fluidite: u32) -> u32 {
+        match self {
+            Sorte::Video if fluidite == CADENCE_VIDEO_FLUIDE => CADENCE_VIDEO_FLUIDE,
+            Sorte::Video => CADENCE_VIDEO,
+            Sorte::Gif => CADENCE_GIF,
+        }
     }
 
     /// Images par seconde (F13).
@@ -365,9 +388,10 @@ pub fn decompte_s(retardateur_s: u32) -> u32 {
     }
 }
 
-/// Le débit moyen visé d'une vidéo (F15), bits par seconde (`mp4::debit_vise`).
-pub fn debit(largeur: u32, hauteur: u32) -> u32 {
-    mp4::debit_vise(largeur, hauteur)
+/// Le débit moyen visé d'une vidéo (F15), bits par seconde (`mp4::debit_vise`), pour la
+/// cadence `cadence` (une vidéo à 60 images par seconde demande une moitié de plus).
+pub fn debit(largeur: u32, hauteur: u32, cadence: u32) -> u32 {
+    mp4::debit_vise_a(largeur, hauteur, cadence)
 }
 
 /// La file entre le fil `film` et le fil d'écriture pour des images de `octets` (F20) :
@@ -902,6 +926,14 @@ pub fn ligne_micro(etat: &str) -> String {
     format!("film micro {etat}")
 }
 
+/// `film ordinateur <ouvert|indisponible>` : le son de l'ordinateur (0.7.7).
+pub fn ligne_ordinateur(ouvert: bool) -> String {
+    format!(
+        "film ordinateur {}",
+        if ouvert { "ouvert" } else { "indisponible" }
+    )
+}
+
 /// L'instant de départ d'un film (F11) : `film debut (relache <ms> ms, pret <ms> ms,
 /// decompte-premiere <ms> ms)` ; `relache` : du relâchement à la première image, `pret` :
 /// du relâchement à la préparation finie, `decompte-premiere` : de la fin du décompte à la
@@ -1054,6 +1086,13 @@ mod tests {
         assert_eq!(Sorte::Gif.sortie().extension(), "gif");
         assert_eq!(Sorte::Video.cadence(), 30);
         assert_eq!(Sorte::Gif.cadence(), 15);
+        // « Fluidité » : 60 ou 30 pour la vidéo, le GIF reste à 15.
+        assert_eq!(Sorte::Video.cadence_pour(60), 60);
+        assert_eq!(Sorte::Video.cadence_pour(30), 30);
+        assert_eq!(Sorte::Video.cadence_pour(0), 30);
+        assert_eq!(Sorte::Gif.cadence_pour(60), 15);
+        assert_eq!(Sorte::Video.pas_a(60), Duration::from_secs(1) / 60);
+        assert_eq!(Sorte::Video.pas(), Duration::from_secs(1) / 30);
         assert_eq!(Sorte::Video.duree_max(), Duration::from_secs(3600));
         assert_eq!(Sorte::Gif.duree_max(), Duration::from_secs(60));
         for m in Mode::TOUS {
@@ -1093,8 +1132,10 @@ mod tests {
             modele_nom: "BreezyShot {date} à {heure}".into(),
             maintenant: chrono::Local::now(),
             transparence: true,
+            format: sortie::FormatFichier::Png,
+            recents_gardes: sortie::RECENTS_GARDES,
         };
-        let (d, deplacer) = demande_film(&base);
+        let (d, deplacer) = demande_film(&base, None);
         assert!(!d.ranger_recents);
         assert!(!d.transparence);
         assert!(d.copier);
@@ -1102,11 +1143,24 @@ mod tests {
         assert_eq!(deplacer, TOUJOURS_DANS_LE_DOSSIER);
         assert_eq!(d.dossier_enregistrement, base.dossier_enregistrement);
         // « Enregistrer automatiquement » actif : enregistré dans tous les cas.
-        let (d, _) = demande_film(&sortie::Demande {
-            enregistrer: true,
-            ..base
-        });
+        let (d, _) = demande_film(
+            &sortie::Demande {
+                enregistrer: true,
+                ..base.clone()
+            },
+            None,
+        );
         assert!(d.enregistrer);
+        // « Dossier des films » : le film va là, nommé pour l'utilisateur ; vide = images.
+        let (d, _) = demande_film(&base, Some(Path::new("/f/Mes films")));
+        assert_eq!(d.dossier_enregistrement, Path::new("/f/Mes films"));
+        assert_eq!(
+            d.dossier_affiche,
+            sortie::nom_affiche(Path::new("/f/Mes films"))
+        );
+        let (d, _) = demande_film(&base, Some(Path::new("")));
+        assert_eq!(d.dossier_enregistrement, base.dossier_enregistrement);
+        assert_eq!(d.dossier_affiche, base.dossier_affiche);
     }
 
     /// Le filet de la page de sélection ne rend pas la main avant le filet du cœur (F5).
@@ -1134,10 +1188,14 @@ mod tests {
         assert_eq!(decompte_s(0), 3);
         assert_eq!(decompte_s(5), 5);
         assert_eq!(decompte_s(10), 10);
-        assert_eq!(debit(600, 450), 1_080_000);
-        assert_eq!(debit(1920, 1080), 8_294_400);
-        assert_eq!(debit(64, 64), 1_000_000);
-        assert_eq!(debit(4096, 2304), 16_000_000);
+        assert_eq!(debit(600, 450, 30), 1_080_000);
+        assert_eq!(debit(1920, 1080, 30), 8_294_400);
+        assert_eq!(debit(64, 64, 30), 1_000_000);
+        assert_eq!(debit(4096, 2304, 30), 16_000_000);
+        // 60 images par seconde : une moitié de plus, plafond relevé.
+        assert_eq!(debit(1920, 1080, 60), 12_441_600);
+        assert_eq!(debit(64, 64, 60), 1_000_000);
+        assert_eq!(debit(4096, 2304, 60), 24_000_000);
     }
 
     #[test]
@@ -1716,7 +1774,7 @@ mod tests {
             "film source reprise apres 3050 ms"
         );
         assert_eq!(
-            ligne_codeur("logiciel", (600, 450), debit(600, 450)),
+            ligne_codeur("logiciel", (600, 450), debit(600, 450, 30)),
             "film codeur logiciel 600x450 1080 kbit/s"
         );
         assert_eq!(ligne_son(false), "film son non");

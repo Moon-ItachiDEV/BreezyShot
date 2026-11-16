@@ -8,10 +8,10 @@ use std::time::SystemTime;
 use super::fichier::existe;
 use super::film::{cle_film, SorteFilm};
 use super::nom::chemin_libre_ext;
-use super::recents::{cle_recent, RECENTS_GARDES};
+use super::recents::cle_recent;
 
 /// Nombre de fichiers gardes dans `<local>/Glisser` (borne comme « Recents »).
-pub const GLISSER_GARDES: usize = RECENTS_GARDES;
+pub const GLISSER_GARDES: usize = 50;
 
 /// Les fichiers d'une capture que Supprimer efface : son fichier de « Recents », le
 /// fichier enregistre pour elle (chemin rendu par son bilan) et ses fichiers de glisser.
@@ -104,9 +104,9 @@ fn est_png(chemin: &Path) -> bool {
 }
 
 /// Vrai pour un fichier que Supprimer peut effacer hors des dossiers de l'app : une image
-/// `.png`, ou un film `.mp4` ou `.gif` (0.7).
+/// `.png` ou `.jpg` (0.7.7), ou un film `.mp4` ou `.gif` (0.7).
 fn est_capture(chemin: &Path) -> bool {
-    est_png(chemin) || est_film(chemin)
+    est_png(chemin) || a_l_extension(chemin, "jpg") || est_film(chemin)
 }
 
 /// Vrai pour un fichier de film : `.mp4` ou `.gif`.

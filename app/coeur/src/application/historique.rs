@@ -167,12 +167,26 @@ pub fn nom_valide(nom: &str) -> bool {
     sortie::chemin_recent(Path::new("."), nom).is_some()
 }
 
-/// Les cases montrées : la liste sans les noms en attente de suppression, 50 au plus.
+/// Le nombre de captures que « Récents » garde : le réglage (Pro), une au moins (la
+/// dernière, que la vignette et le glisser utilisent : « Aucun » ne garde qu'elle). Sans
+/// licence, jamais moins que 50 ni que le réglage lu : une licence perdue n'efface rien
+/// de plus que le réglage d'alors.
+pub fn gardes_en_vigueur(reglage: u32, pro: bool) -> usize {
+    let voulu = reglage as usize;
+    if pro {
+        voulu.max(1)
+    } else {
+        voulu.max(sortie::RECENTS_GARDES)
+    }
+}
+
+/// Les cases montrées : la liste sans les noms en attente de suppression, 200 au plus
+/// (le plus grand choix du réglage ; le disque est tenu au réglage par la sortie).
 pub fn entrees_vues(liste: &[EntreeRecente], en_attente: &[String]) -> Vec<EntreePage> {
     liste
         .iter()
         .filter(|e| !en_attente.contains(&e.nom))
-        .take(sortie::RECENTS_GARDES)
+        .take(sortie::RECENTS_MAX)
         .map(|e| EntreePage {
             nom: e.nom.clone(),
             horodatage_ms: e.horodatage.timestamp_millis(),
@@ -444,6 +458,19 @@ mod tests {
     }
 
     #[test]
+    fn gardes_en_vigueur_selon_la_licence() {
+        // Avec licence : le réglage, une capture au moins.
+        assert_eq!(gardes_en_vigueur(0, true), 1);
+        assert_eq!(gardes_en_vigueur(25, true), 25);
+        assert_eq!(gardes_en_vigueur(200, true), 200);
+        // Sans licence : jamais moins de 50, jamais moins que le réglage lu.
+        assert_eq!(gardes_en_vigueur(0, false), 50);
+        assert_eq!(gardes_en_vigueur(25, false), 50);
+        assert_eq!(gardes_en_vigueur(50, false), 50);
+        assert_eq!(gardes_en_vigueur(200, false), 200);
+    }
+
+    #[test]
     fn actions_par_nom() {
         for a in ActionCase::TOUTES {
             assert_eq!(ActionCase::depuis_nom(a.nom()), Some(a));
@@ -470,9 +497,9 @@ mod tests {
                  \"hauteur\":1,\"annotable\":true}}"
             )
         );
-        // 50 au plus.
-        let longue: Vec<EntreeRecente> = (0..60).map(|_| entree(A, 10, 10)).collect();
-        assert_eq!(entrees_vues(&longue, &[]).len(), sortie::RECENTS_GARDES);
+        // 200 au plus (le plus grand choix du réglage).
+        let longue: Vec<EntreeRecente> = (0..260).map(|_| entree(A, 10, 10)).collect();
+        assert_eq!(entrees_vues(&longue, &[]).len(), sortie::RECENTS_MAX);
         // Trop grande pour l'éditeur : pas annotable.
         let geante = [entree(A, 100_000, 10)];
         assert!(!entrees_vues(&geante, &[])[0].annotable);

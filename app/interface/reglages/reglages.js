@@ -8,6 +8,8 @@
 // - `reglages_changer` { changement: { cle, valeur } } → Reponse ;
 // - `reglages_apercu_nom` { modele } → { apercu } (rien n'est écrit) ;
 // - `reglages_parcourir` {} → Reponse (sélecteur de dossier du système) ;
+// - `reglages_parcourir_films` {} → Reponse (le même, pour le dossier des films, Pro) ;
+// - `reglages_vider_historique` {} → Reponse (Pro : efface les captures de l'historique) ;
 // - `reglages_saisie` { action, active } → Reponse (le cœur rend ses raccourcis au système
 //   le temps de la saisie, sinon il les recevrait avant la page) ;
 // - `reglages_raccourci` { action, saisie: { ctrl, maj, alt, win, cle, code } } → Reponse ;
@@ -46,6 +48,7 @@ const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => Array.from(r.querySelectorAll(s));
 
 const ATTENTE_NOM_MS = 400;
+const ATTENTE_CONFIRMATION_MS = 4000;
 const THEMES = { systeme: null, clair: "light", sombre: "dark" };
 const MODIFICATEURS = ["Control", "Shift", "Alt", "Meta", "AltGraph", "OS"];
 const LICENCE_REFUSEE = "Licence non valide";
@@ -116,6 +119,10 @@ function poserSegments(nom, valeurs, texte) {
       return b;
     }),
   );
+}
+
+function texteGardes(n) {
+  return n === 0 ? "Aucun" : String(n);
 }
 
 function poserRaccourcis(liste) {
@@ -195,6 +202,15 @@ function afficher(v) {
     const premier = $$('[role="tab"]').find((o) => !o.hidden);
     if (premier) montrerRubrique(premier.dataset.rubrique);
   }
+  poserChoix("format_image", v.format_image);
+  poserInterrupteur("editeur_apres", v.editeur_apres === true);
+  poserChoix("fluidite", v.film.fluidite);
+  poserInterrupteur("son_systeme", v.film.son_systeme);
+  poserInterrupteur("clics_visibles", v.film.clics_visibles);
+  $('[data-valeur="film_dossier"]').textContent = v.film.dossier ?? "Comme les images";
+  $('[data-controle="film_dossier_defaut"]').hidden = v.film.dossier === null;
+  poserSegments("historique_gardes", v.historique.choix, texteGardes);
+  poserChoix("historique_gardes", v.historique.gardes);
   poserInterrupteur("pointeur", v.capture.pointeur);
   poserSegments("retardateur", v.retardateurs, texteRetardateur);
   poserChoix("retardateur", v.capture.retardateur_s);
@@ -322,12 +338,15 @@ for (const b of $$('[role="switch"]')) {
 
 // Groupes de choix : clic et flèches.
 const CLES_CHOIX = {
+  format_image: "format_image",
+  fluidite: "fluidite",
+  historique_gardes: "historique_gardes",
   retardateur: "retardateur",
   vignette_duree: "vignette_duree",
   vignette_coin: "vignette_coin",
   theme: "theme",
 };
-const CHOIX_NOMBRES = ["retardateur", "vignette_duree"];
+const CHOIX_NOMBRES = ["retardateur", "vignette_duree", "fluidite", "historique_gardes"];
 function valeurChoix(nom, b) {
   return CHOIX_NOMBRES.includes(nom) ? Number(b.dataset.valeur) : b.dataset.valeur;
 }
@@ -350,6 +369,35 @@ for (const groupe of $$('[role="radiogroup"]')) {
 
 // Dossier.
 $('[data-controle="parcourir"]').addEventListener("click", () => appeler("reglages_parcourir").then(recevoir));
+
+// Dossier des films (Pro) : « Parcourir… », et le retour à « Comme les images ».
+$('[data-controle="parcourir_films"]').addEventListener("click", () =>
+  appeler("reglages_parcourir_films").then(recevoir));
+$('[data-controle="film_dossier_defaut"]').addEventListener("click", () =>
+  changer("film_dossier", "defaut"));
+
+// Vider l'historique (Pro) : un premier clic demande « Confirmer », le second vide ; le
+// bouton revient à « Vider » seul après un délai, une perte du focus ou un autre geste.
+const boutonVider = $('[data-controle="historique_vider"]');
+let minuteVider = null;
+function reposerVider(texte = "Vider") {
+  clearTimeout(minuteVider);
+  minuteVider = null;
+  boutonVider.textContent = texte;
+  boutonVider.removeAttribute("data-confirme");
+}
+boutonVider.addEventListener("click", () => {
+  if (!boutonVider.hasAttribute("data-confirme")) {
+    boutonVider.textContent = "Confirmer";
+    boutonVider.setAttribute("data-confirme", "");
+    minuteVider = setTimeout(() => reposerVider(), ATTENTE_CONFIRMATION_MS);
+    return;
+  }
+  reposerVider("Vidé");
+  minuteVider = setTimeout(() => reposerVider(), ATTENTE_CONFIRMATION_MS);
+  appeler("reglages_vider_historique").then(recevoir);
+});
+boutonVider.addEventListener("blur", () => reposerVider());
 
 // Nom des fichiers : aperçu à chaque frappe, écriture après une pause et à la sortie du champ.
 const champNom = $('[data-controle="modele_nom"]');
@@ -569,12 +617,16 @@ if (tauri?.event?.listen) {
 } else {
   afficher({
     lignes: ["retardateur", "pointeur", "copier", "vignette", "vignette_duree",
-      "vignette_coin", "dossier", "enregistrer", "modele_nom", "impr_ecran", "theme", "demarrage", "licence",
+      "vignette_coin", "dossier", "format_image", "editeur_apres", "enregistrer", "modele_nom", "impr_ecran", "theme", "demarrage", "licence",
       "version"],
     capture: { retardateur_s: 0, pointeur: false },
     retardateurs: [0, 3, 5, 10],
     copier: true,
     enregistrer: false,
+    format_image: "png",
+    editeur_apres: false,
+    film: { fluidite: 30, fluidites: [30, 60], son_systeme: false, clics_visibles: false, dossier: null },
+    historique: { gardes: 50, choix: [0, 25, 50, 100, 200] },
     vignette: { afficher: true, duree_s: 6, coin: "bas_gauche" },
     durees: [3, 6, 10, 0],
     dossier: "Images › BreezyShot",

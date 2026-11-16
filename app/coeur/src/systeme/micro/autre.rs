@@ -1,11 +1,11 @@
 //! Hors Windows : aucun micro.
 
-use super::Erreur;
+use super::{Erreur, Origine};
 
 /// Le rappel du son, du fil `film-son`.
 pub type Rappel = Box<dyn FnMut(&[i16]) + Send + 'static>;
 
-pub fn present() -> bool {
+pub fn present(_origine: Origine) -> bool {
     false
 }
 
@@ -13,7 +13,7 @@ pub fn present() -> bool {
 #[derive(Debug)]
 pub enum Micro {}
 
-pub fn ouvrir(_rappel: Rappel) -> Result<Micro, Erreur> {
+pub fn ouvrir(_rappel: Rappel, _origine: Origine) -> Result<Micro, Erreur> {
     Err(Erreur::Absent)
 }
 

@@ -113,6 +113,7 @@ struct FauxBureau {
     place: Option<u64>,
     taille: Option<u64>,
     pointeur: Option<Pointeur>,
+    souris: Option<souris::Lecture>,
     micros: usize,
 }
 
@@ -125,6 +126,7 @@ impl Default for FauxBureau {
             place: Some(50 * 1024 * 1024 * 1024),
             taille: Some(0),
             pointeur: None,
+            souris: None,
             micros: 0,
         }
     }
@@ -178,7 +180,8 @@ fn banc_avec(sorte: Sorte, reduite: bool, source: bool, d: Delais) -> Banc {
     let filets = Arc::new(AtomicUsize::new(0));
     let c = cadre(reduite);
     let b = Arc::clone(&bureau);
-    let (b1, b2, b3, b4, b5, b6, b7) = (
+    let (b1, b2, b3, b4, b5, b6, b7, b8) = (
+        Arc::clone(&b),
         Arc::clone(&b),
         Arc::clone(&b),
         Arc::clone(&b),
@@ -197,6 +200,8 @@ fn banc_avec(sorte: Sorte, reduite: bool, source: bool, d: Delais) -> Banc {
         Lancement {
             numero: 5,
             sorte,
+            cadence: sorte.cadence(),
+            clics: None,
             relache: t0,
             cadre: c,
             ecrans: vec![ecran()],
@@ -227,6 +232,7 @@ fn banc_avec(sorte: Sorte, reduite: bool, source: bool, d: Delais) -> Banc {
             place: Box::new(move || b4.lock().unwrap().place),
             taille: Box::new(move |_| b5.lock().unwrap().taille),
             pointeur: Box::new(move || b6.lock().unwrap().pointeur.clone()),
+            souris: Box::new(move || b8.lock().unwrap().souris),
             ouvrir_micro: Box::new(move |_, _| b7.lock().unwrap().micros += 1),
             apercu: |_| None,
         },
@@ -488,6 +494,93 @@ fn le_pointeur_change_l_image() {
     assert!(matches!(e[1], Vu2::Image(..)), "{e:?}");
     assert!(matches!(e[2], Vu2::Image(..)), "{e:?}");
     assert!(matches!(e[3], Vu2::Meme(_)), "{e:?}");
+}
+
+/// Clics visibles : un clic dans la zone, sur une image inchangée, donne une image nouvelle
+/// à chaque pas tant que l'anneau vit (450 ms), une de plus quand il s'éteint, puis « la
+/// même » ; sans le réglage, rien n'est posé et rien ne change.
+#[test]
+fn un_clic_visible_change_l_image_le_temps_de_l_anneau() {
+    let lecture = |enfonce| {
+        Some(souris::Lecture {
+            position: (110, 110),
+            enfonce,
+            appuye: false,
+        })
+    };
+    for avec in [true, false] {
+        let mut b = banc(Sorte::Video);
+        if avec {
+            b.fil.clics = Some(Clics::nouveau(1.0));
+        }
+        b.tour(0);
+        b.en_marche(0);
+        b.script.lock().unwrap().defaut = Some(Rendu::Inchangee);
+        b.bureau.lock().unwrap().souris = lecture(false);
+        b.tours(0, 90, 10);
+        // Le clic, lu au pas de 100 ms (image 3).
+        b.bureau.lock().unwrap().souris = lecture(true);
+        let mut vus = Vec::new();
+        let mut n = 100;
+        while n <= 800 {
+            if n == 130 {
+                b.bureau.lock().unwrap().souris = lecture(false);
+            }
+            b.tour(n);
+            vus.extend(b.vider_file());
+            n += 10;
+        }
+        let images = vus.iter().filter(|v| matches!(v, Vu2::Image(..))).count();
+        if avec {
+            // Images 3 à 17 : l'anneau vit de 100 à 550 ms, et la 17e (566 ms) le perd.
+            assert_eq!(images, 15, "{vus:?}");
+            assert!(matches!(vus.last(), Some(Vu2::Meme(_))), "{vus:?}");
+        } else {
+            assert_eq!(images, 0, "{vus:?}");
+        }
+    }
+}
+
+/// Clics visibles : le dessin est posé dans l'image écrite (au centre de l'anneau, aucun
+/// changement ; sur le trait, le jaune).
+#[test]
+fn l_anneau_est_pose_dans_l_image_ecrite() {
+    let mut b = banc(Sorte::Video);
+    b.fil.clics = Some(Clics::nouveau(1.0));
+    b.tour(0);
+    b.en_marche(0);
+    b.script.lock().unwrap().defaut = Some(Rendu::Inchangee);
+    let clic = |enfonce| {
+        Some(souris::Lecture {
+            position: (132, 124),
+            enfonce,
+            appuye: false,
+        })
+    };
+    b.bureau.lock().unwrap().souris = clic(false);
+    b.tours(0, 60, 10);
+    b.bureau.lock().unwrap().souris = clic(true);
+    b.tour(100);
+    // Le fil d'écriture reçoit l'image du pas de 100 ms.
+    let mut pose = None;
+    while let Ok(e) = b.envois.try_recv() {
+        if let Envoi::Image { pixels, instant } = e {
+            b.fil.liens.en_file.fetch_sub(1, Ordering::SeqCst);
+            if instant >= ms(100) {
+                pose = Some(pixels);
+            }
+        } else if matches!(e, Envoi::Meme { .. }) {
+            b.fil.liens.en_file.fetch_sub(1, Ordering::SeqCst);
+        }
+    }
+    let p = pose.expect("une image au pas du clic");
+    // Centre (132 - 100, 124 - 100) = (32, 24) ; l'anneau de départ a 10 px de rayon.
+    let pixel = |x: usize, y: usize| {
+        let i = (y * p.largeur as usize + x) * 4;
+        [p.rgba[i], p.rgba[i + 1], p.rgba[i + 2]]
+    };
+    assert_ne!(pixel(42, 24), pixel(32, 24), "le trait à 10 px du centre");
+    assert!(pixel(42, 24)[0] > 150, "{:?}", pixel(42, 24));
 }
 
 /// F33 : la source perdue 3 s puis revenue : le film continue (la dernière image
@@ -1179,6 +1272,7 @@ fn atelier(sorte: Sorte, refuser_apres: Option<usize>, paniquer: bool, reelle: b
     let journal = Arc::new(Mutex::new(Journal::default()));
     let e = Ecriture {
         sorte,
+        cadence: sorte.cadence(),
         dossier_films: films.clone(),
         dossier_glisser: dossier.path().join("Glisser"),
         proteges: Vec::new(),
@@ -1370,6 +1464,7 @@ fn ecriture_sans_dossier() {
     let (fini_envoi, fini) = mpsc::channel();
     let e = Ecriture {
         sorte: Sorte::Video,
+        cadence: 30,
         dossier_films: bloque,
         dossier_glisser: dossier.path().join("Glisser"),
         proteges: Vec::new(),
@@ -1396,6 +1491,7 @@ fn ecriture_codeur_refuse() {
     let (fini_envoi, fini) = mpsc::channel();
     let e = Ecriture {
         sorte: Sorte::Video,
+        cadence: 30,
         dossier_films: films.clone(),
         dossier_glisser: dossier.path().join("Glisser"),
         proteges: Vec::new(),

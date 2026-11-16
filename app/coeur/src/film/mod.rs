@@ -19,4 +19,4 @@ pub mod son;
 pub use difference::{moitie, rectangle_change, sous_image, sous_image_dans};
 pub use gif::{delai_cs, opaques_hors_du_transparent, Gif};
 pub use horloge::{Horloge, Pas};
-pub use son::Calage;
+pub use son::{melanger, Calage};

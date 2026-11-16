@@ -10,6 +10,8 @@ use std::time::Duration;
 pub const FREQUENCE: u64 = 48_000;
 /// La file : 2 s au plus ; au-delà, le plus ancien est perdu.
 pub const FILE_MAX: usize = 2 * FREQUENCE as usize;
+/// Le retard gardé par `suivre` : 20 ms.
+pub const RESERVE: usize = FREQUENCE as usize / 50;
 /// Écart toléré entre la piste et l'horloge du film : 100 ms.
 pub const ECART_MAX: u64 = FREQUENCE / 10;
 
@@ -82,6 +84,29 @@ impl Calage {
         debut
     }
 
+    /// Le son d'une seconde source (le son de l'ordinateur) à mêler à celui que `tirer` vient
+    /// de rendre : exactement `n` échantillons, ajoutés à `dest`. La piste suit la première
+    /// source, celle-ci la suit sans horloge à elle :
+    /// - sans le son rangé (source coupée, perdue ou muette) : du silence ;
+    /// - un retard `RESERVE` est gardé (20 ms) pour que la relève par paquets de 10 ms ne
+    ///   laisse jamais de trou entre deux images ; le son rangé qui dépasse `n` + ce retard
+    ///   de plus de 100 ms est abandonné, le plus ancien d'abord.
+    pub fn suivre(&mut self, n: usize, ouvert: bool, dest: &mut Vec<i16>) {
+        if !ouvert {
+            self.ranges.clear();
+            dest.resize(dest.len() + n, 0);
+            return;
+        }
+        let garde = n + RESERVE + ECART_MAX as usize;
+        if self.ranges.len() > garde {
+            let trop = self.ranges.len() - (n + RESERVE);
+            self.ranges.drain(..trop);
+        }
+        let dispo = self.ranges.len().saturating_sub(RESERVE).min(n);
+        dest.extend(self.ranges.drain(..dispo));
+        dest.resize(dest.len() + (n - dispo), 0);
+    }
+
     /// La position de la piste (temps déjà écrit).
     pub fn piste(&self) -> Duration {
         duree(self.ecrits)
@@ -101,6 +126,13 @@ impl Calage {
         let n = (n as usize).min(self.ranges.len());
         dest.extend(self.ranges.drain(..n));
         self.ecrits += n as u64;
+    }
+}
+
+/// Mêle `autre` à `base` (même longueur ou moins) : somme sans dépassement.
+pub fn melanger(base: &mut [i16], autre: &[i16]) {
+    for (a, b) in base.iter_mut().zip(autre) {
+        *a = a.saturating_add(*b);
     }
 }
 
@@ -221,5 +253,69 @@ mod tests {
             let voulu = echantillons(ms(tour * 33 + tour / 3));
             assert!(voulu.abs_diff(total) <= ECART_MAX, "tour {tour}");
         }
+    }
+
+    #[test]
+    fn melange_sans_depassement() {
+        let mut a = vec![100, i16::MAX, i16::MIN, 5];
+        melanger(&mut a, &[1, 1, -1, 0, 9]);
+        assert_eq!(a, [101, i16::MAX, i16::MIN, 5]);
+    }
+
+    #[test]
+    fn suivre_donne_toujours_n_echantillons() {
+        let mut c = Calage::default();
+        let mut d = Vec::new();
+        // Coupée : du silence, la file est vidée.
+        c.ranger(&son(5000, 3));
+        c.suivre(1600, false, &mut d);
+        assert_eq!(d, son(1600, 0));
+        assert_eq!(c.en_attente(), 0);
+        // Rien de rangé : du silence.
+        d.clear();
+        c.suivre(1600, true, &mut d);
+        assert_eq!(d, son(1600, 0));
+    }
+
+    #[test]
+    fn suivre_garde_un_retard_et_ne_laisse_pas_de_trou() {
+        let mut c = Calage::default();
+        let mut d = Vec::new();
+        // Paquets de 10 ms (480) rangés, images de ~33 ms (1600) tirées : après le premier
+        // tour (amorce), tout est du son tant que la source donne le même débit.
+        let mut sons = 0;
+        let mut total = 0;
+        for tour in 0..30 {
+            for _ in 0..3 {
+                c.ranger(&son(480, 7));
+            }
+            d.clear();
+            c.suivre(1440, true, &mut d);
+            assert_eq!(d.len(), 1440);
+            if tour > 0 {
+                sons += d.iter().filter(|&&s| s == 7).count();
+                total += d.len();
+            }
+        }
+        assert_eq!(sons, total, "aucun silence une fois amorcé");
+        // Le retard reste borné : la file garde la réserve, pas davantage.
+        assert_eq!(c.en_attente(), RESERVE);
+    }
+
+    #[test]
+    fn suivre_abandonne_l_avance_excessive() {
+        let mut c = Calage::default();
+        let mut d = Vec::new();
+        // 2 s rangées d'un coup (pause, retard du fil) : seul le plus récent suit.
+        c.ranger(&son(96_000, 1));
+        c.ranger(&son(100, 2));
+        c.suivre(1600, true, &mut d);
+        assert_eq!(d.len(), 1600);
+        // Le retard est ramené à la réserve, et le plus récent (les « 2 ») reste en fin de file.
+        assert_eq!(c.en_attente(), RESERVE);
+        d.clear();
+        c.ranger(&son(1600, 3));
+        c.suivre(1600, true, &mut d);
+        assert_eq!(d.iter().filter(|&&s| s == 2).count(), 100);
     }
 }

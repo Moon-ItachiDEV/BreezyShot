@@ -59,6 +59,9 @@ svg { display: block; }
   font: var(--texte-body-strong-graisse) var(--reglages-pro-texte) / 1 var(--police-ui);
   white-space: nowrap;
 }
+/* La pastille Pro d'un onglet : à droite, plus petite que celle du volet. */
+.onglet-pro { margin-left: auto; }
+.bouton[data-confirme] { color: var(--danger); }
 .logo {
   width: var(--reglages-id-logo);
   height: var(--reglages-id-logo);
@@ -177,6 +180,9 @@ svg { display: block; }
   background: var(--reglages-carte);
 }
 .groupe:not(:has(.ligne:not([hidden]))) { display: none; }
+/* La dernière carte visible d'une rubrique ne laisse pas son écart sous elle (le bas du contenu
+   a déjà sa marge) : « Après la capture » tient sans défiler par défaut. */
+section > .carte:last-of-type { margin-bottom: 0; }
 .ligne {
   position: relative;
   display: flex;
@@ -602,7 +608,7 @@ kbd {
 @media (max-width: 620px) {
   .cadre { grid-template-columns: var(--reglages-volet-etroit) minmax(0, 1fr); }
   .identite { justify-content: center; padding: 0; }
-  .identite .nom, .identite .pro, .pied, .rubriques [role="tab"] span {
+  .identite .nom, .identite .pro, .pied, .rubriques [role="tab"] span, .rubriques .onglet-pro {
     position: absolute;
     width: 1px;
     height: 1px;
