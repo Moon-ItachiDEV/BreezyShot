@@ -173,18 +173,30 @@ const echelleDe = (charge) => {
 };
 
 /** Pose le cadre et la pilule à l'échelle `k`. Le cadre entoure la zone dehors : sa boîte
- *  de bordure dépasse la zone du liseré intérieur et du cadre blanc (pixels logiques). */
+ *  de bordure dépasse la zone du liseré intérieur et du cadre blanc, comptés en pixels
+ *  réels entiers pour que les quatre côtés tombent à la même distance de la zone. */
 function poser(lui) {
   const { zone: z, pilule: p } = lui.charge;
   const k = (lui.k = echelleDe(lui.charge));
   lui.dpr = window.devicePixelRatio;
-  const dehors = px("--film-cadre-epaisseur");
-  const lisere = px("--film-cadre-lisere");
+  // Le cadre est posé en pixels réels entiers : sa boîte vit dans un repère `scale(1 / k)`,
+  // où 1 px vaut un pixel de l'écran. En pixels logiques fractionnaires (à 125 %, 2 px font
+  // 2,5 px réels et un bord tombe en 36,25), le moteur arrondissait chaque côté à sa façon :
+  // cadre à 3 px de la zone à gauche et en haut, à 2 px à droite et en bas (essai 15, F125).
+  // Arrondi vers le bas, comme le moteur pour une bordure : 2,5 px font 2, 1,5 px font 1.
+  const reel = (nom) => Math.max(1, Math.floor(px(nom) * k + 0.001));
+  const dehors = reel("--film-cadre-epaisseur");
+  const lisere = reel("--film-cadre-lisere");
   const s = cadre.style;
-  s.left = `${z.x / k - dehors - lisere}px`;
-  s.top = `${z.y / k - dehors - lisere}px`;
-  s.width = `${z.largeur / k + 2 * lisere}px`;
-  s.height = `${z.hauteur / k + 2 * lisere}px`;
+  s.setProperty("--film-cadre-epaisseur", `${dehors}px`);
+  s.setProperty("--film-cadre-lisere", `${lisere}px`);
+  s.setProperty("--film-cadre-rayon", `${Math.round(px("--film-cadre-rayon") * k)}px`);
+  s.left = "0px";
+  s.top = "0px";
+  s.transformOrigin = "0 0";
+  s.transform = `scale(${1 / k}) translate(${z.x - dehors - lisere}px, ${z.y - dehors - lisere}px)`;
+  s.width = `${z.largeur + 2 * lisere}px`;
+  s.height = `${z.hauteur + 2 * lisere}px`;
   pilule.style.left = `${p.x / k}px`;
   pilule.style.top = `${p.y / k}px`;
 }
@@ -286,7 +298,7 @@ function animerEntree(lui) {
     cadre.animate(
       [
         { boxShadow: depart, borderRadius: "0px" },
-        { boxShadow: fin, borderRadius: jeton("--film-cadre-rayon") },
+        { boxShadow: fin, borderRadius: getComputedStyle(cadre).borderRadius },
       ],
       { duration: d, easing: jeton("--courbe-douce") },
     ),

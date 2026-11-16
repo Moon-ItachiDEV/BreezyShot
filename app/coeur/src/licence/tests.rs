@@ -280,6 +280,8 @@ fn codes_des_refus() {
         Refus::Charge,
         Refus::Edition,
         Refus::Signature,
+        Refus::Essai,
+        Refus::Revoquee,
     ]
     .iter()
     .map(Refus::code)
@@ -292,7 +294,53 @@ fn codes_des_refus() {
             "forme",
             "charge",
             "edition",
-            "signature"
+            "signature",
+            "essai",
+            "revoquee"
         ]
     );
+}
+
+#[test]
+fn version_1_0_refuse_les_essais() {
+    assert!(avant_1_0("0.7.8"));
+    assert!(avant_1_0("0.1.0-essai"));
+    for v in ["1.0.0", "1.2.3", "10.0.0", "0", ""] {
+        assert!(!avant_1_0(v), "{v}");
+    }
+    // Cette version est d'avant la 1.0 : la licence d'essai de l'utilisateur marche.
+    const { assert!(ESSAIS_PERMIS) };
+    assert_eq!(CLES, &[CLE_ESSAI]);
+    // Règles d'une 1.0 : la licence d'essai est refusée, même si la clé est restée…
+    assert_eq!(
+        verifier_selon(ESSAI, &[CLE_ESSAI], false, &[]),
+        Err(Refus::Essai)
+    );
+    // … et même signée par une autre clé (la future clé de vente).
+    let paire = paire();
+    let essai = faire(r#"{"e":"pro","id":"E-2","essai":true}"#, &paire);
+    let vente = faire(r#"{"e":"pro","id":"VENTE-1"}"#, &paire);
+    assert_eq!(
+        verifier_selon(&essai, &[cle(&paire)], false, &[]),
+        Err(Refus::Essai)
+    );
+    assert!(verifier_selon(&vente, &[cle(&paire)], false, &[]).is_ok());
+}
+
+#[test]
+fn id_revoque_refuse() {
+    let paire = paire();
+    let vente = faire(r#"{"e":"pro","id":"VENTE-1"}"#, &paire);
+    assert_eq!(
+        verifier_selon(&vente, &[cle(&paire)], true, &["VENTE-1"]),
+        Err(Refus::Revoquee)
+    );
+    assert!(verifier_selon(&vente, &[cle(&paire)], true, &["VENTE-2"]).is_ok());
+    // La révocation ne passe qu'après la signature : un faux `id` ne dit rien.
+    assert_eq!(
+        verifier_selon(&abimer(&vente, 2), &[cle(&paire)], true, &["VENTE-1"]),
+        Err(Refus::Signature)
+    );
+    assert!(REVOQUEES.is_empty());
+    assert!(!REVOQUEES.contains(&"ESSAI-0001"));
 }

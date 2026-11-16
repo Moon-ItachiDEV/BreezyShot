@@ -164,12 +164,17 @@ function simuler(o) {
           [z0.x - 1, milieuY], [z0.x + z0.largeur, milieuY], [milieuX, z0.y - 1], [milieuX, z0.y + z0.hauteur],
           [z0.x - 3, milieuY], [z0.x + z0.largeur + 2, milieuY], [milieuX, z0.y - 3], [milieuX, z0.y + z0.hauteur + 2],
           [z0.x - Math.round(4 * k) - 1, milieuY], [z0.x - Math.round(20 * k), milieuY], [2, 2], [Math.round(990 * k), Math.round(690 * k)],
+          [z0.x - 2, milieuY], [z0.x + z0.largeur + 1, milieuY], [milieuX, z0.y - 2], [milieuX, z0.y + z0.hauteur + 1],
         ]);
-        const [dedans, lisere, blancs, dehors, voile] = [pts.slice(0, 5), pts.slice(5, 9), pts.slice(9, 13), pts[13], pts.slice(14)];
+        const [dedans, lisere, blancs, dehors, voile, deux] = [pts.slice(0, 5), pts.slice(5, 9), pts.slice(9, 13), pts[13], pts.slice(14, 17), pts.slice(17)];
         verifier(dedans.every(vide), `2 ${nom} : la zone reste claire jusqu'à son bord (rien dedans)`, JSON.stringify(dedans));
         verifier(lisere.every((x) => noir(x, 46)), `2 ${nom} : liseré sombre de 18 % contre la zone, dehors`, JSON.stringify(lisere));
         verifier(blancs.every(blanc), `2 ${nom} : cadre blanc dehors, sur les quatre côtés`, JSON.stringify(blancs));
         verifier(noir(dehors, 46) && voile.every((x) => noir(x, 46)), `2 ${nom} : voile léger (18 %) sur le reste de l'écran`, JSON.stringify([dehors, voile]));
+        // À 125 %, le cadre tombait à 3 px de la zone à gauche et en haut, à 2 px à droite et
+        // en bas (essai 15, F125) : à 2 px de la zone, les quatre côtés sont pareils.
+        verifier(deux.every((x) => JSON.stringify(x) === JSON.stringify(deux[0])) && (k > 1.25 || deux.every(blanc)),
+          `2 ${nom} : cadre à la même distance de la zone sur les quatre côtés${k > 1.25 ? '' : ' (blanc à 2 px)'}`, JSON.stringify(deux));
         const l = sorte === 'gif' ? GIF_L : VIDEO_L;
         const pl = await rect(p, '#pilule');
         const zs = await appels(p, 'film_zone');
@@ -185,6 +190,27 @@ function simuler(o) {
         await fermer(p);
       }
     }
+  }
+
+  // 2 bis. Le cas F125 de l'essai 15 : zone 600 × 450 en (40, 40) à 125 %. Les bords tombent
+  // en 36,25 px réels ; le cadre doit rester à 2 et 3 px de la zone sur les quatre côtés.
+  {
+    const k = 1.25;
+    const p = await ouvrir({ k });
+    const c = charge(12, k, { charge: { zone: { x: 40, y: 40, largeur: 600, hauteur: 450 }, pilule: { x: 460, y: 503 } } });
+    await montrer(p, c);
+    await p.waitForTimeout(450);
+    const png = await cliche(p, { omitBackground: true });
+    const pts = await pixels(png, [
+      [39, 265], [640, 265], [340, 39], [340, 490],
+      [38, 265], [641, 265], [340, 38], [340, 491],
+      [37, 265], [642, 265], [340, 37], [340, 492],
+      [36, 265], [643, 265], [340, 36], [340, 493],
+    ]);
+    const [l1, b2, b3, l4] = [pts.slice(0, 4), pts.slice(4, 8), pts.slice(8, 12), pts.slice(12)];
+    verifier(l1.every((x) => noir(x, 46)) && b2.every(blanc) && b3.every(blanc) && l4.every((x) => noir(x, 104, 6)),
+      '2 bis 125 %, zone en (40, 40) : liseré à 1 px, blanc à 2 et 3 px, liseré sur le voile à 4 px, sur les quatre côtés (F125)', JSON.stringify(pts));
+    await fermer(p);
   }
 
   // 3. Chaque phase : décompte, marche, pause, reprise ; textes du cœur ; micro.

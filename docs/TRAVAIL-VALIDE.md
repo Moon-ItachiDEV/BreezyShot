@@ -1286,17 +1286,24 @@ remplace la barre de la 0.7.2.
   langue de lecture installée « Copier le texte » n'existe pas, donc le QR code non plus.
 - Un QR code qui couvre un dixième de la zone ou plus l'emporte sur le texte de la zone.
 
-## Publication de la 0.7.7 : winmm chargé à la demande
+## Cadre du film à 125 % (version 0.7.9)
 
-Le run de main de la PR 22 était rouge sur l'essai 15. L0 et L1 voyaient `winmm.dll` chargé
-au repos. Il est importé pour `timeBeginPeriod` (`systeme::minuterie`), qui n'est appelé que
-pendant un film à 60 images/s. Il rejoint donc la liste `/DELAYLOAD` de `build.rs`, à côté
-de Media Foundation, et n'est plus chargé avant le premier film à 60. La version reste 0.7.7,
-puisqu'elle n'avait pas été publiée.
+L'essai 15 (cas F125) voyait « cadre 2/4 » à 125 %. Ce n'était pas un hasard : le cadre du
+film était décalé d'un pixel. Les runs verts étaient ceux où F125 n'était pas joué (« échelle
+non suivie »). La page posait le cadre en pixels logiques fractionnaires : à 125 %, la
+bordure de 2 px fait 2,5 px réels et le bord gauche tombe en 36,25. Le moteur arrondissait
+chaque côté à sa façon, et le cadre tombait à 3 px de la zone à gauche et en haut, à 2 px à
+droite et en bas.
 
-Le cas F125 (« cadre 2/4 », intermittent depuis le 16/11) écrit maintenant ses quatre points
-lus, comme A9, pour trouver le côté qui manque.
+`film.js` (`poser`) pose maintenant le cadre en pixels réels entiers, dans un repère
+`scale(1 / k)` : épaisseurs arrondies vers le bas (2,5 font 2, 1,5 font 1), position et taille
+entières, rayon arrondi. À 100 %, le rendu ne change pas. L'essai de page `film.cjs` vérifie
+la même distance sur les quatre côtés à 100, 125 et 150 %, et rejoue le cas F125 (zone 600 ×
+450 en (40, 40) à 125 %). Les deux contrôles échouent sur l'ancienne page et passent sur la
+nouvelle. F125 écrit aussi ses quatre points lus.
 
 ### Non vérifié
 
-- Les essais Windows n'ont pas été joués ici (pas de PowerShell) : ils le seront par la CI.
+- WebView2 sur Windows : vérifié dans Chromium seulement. La CI (F125) le jouera, si son
+  changement d'échelle est suivi.
+- `defilante.js` lit l'échelle de la même façon : pas regardé s'il a le même décalage.
