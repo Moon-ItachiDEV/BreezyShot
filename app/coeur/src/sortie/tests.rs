@@ -76,6 +76,7 @@ fn demande(racine: &Path) -> Demande {
         maintenant: instant(),
         transparence: false,
         format: FormatFichier::Png,
+        recents_gardes: RECENTS_GARDES,
     }
 }
 
@@ -3594,4 +3595,72 @@ fn supprimer_efface_aussi_le_jpg_enregistre() {
         &racine.path().join("F"),
     );
     assert_eq!(a, vec![jpg]);
+}
+
+#[test]
+fn nombre_gardes_regle_le_menage_a_l_ecriture() {
+    let d = dossiers();
+    let mut dem = demande(d.local.parent().unwrap());
+    dem.enregistrer = false;
+    dem.dossier_recents = d.recents.clone();
+    dem.recents_gardes = 25;
+    let noms: Vec<String> = (0..30)
+        .map(|i| format!("20250101-0000{i:02}-000.png"))
+        .collect();
+    for nom in &noms {
+        fs::write(d.recents.join(nom), png_de(&image(2, 2))).unwrap();
+        ranger_apercu(&d.apercus, nom, &image(1, 1)).unwrap();
+    }
+    let neuf = sortir(&image(2, 2), &dem).recent.unwrap().expect("recent");
+    let liste = lister_recents(&d.recents);
+    assert_eq!(liste.len(), 25);
+    assert_eq!(liste[0].nom, neuf.file_name().unwrap().to_str().unwrap());
+    assert_eq!(apercus_au_format(&d.apercus), noms[6..]);
+}
+
+#[test]
+fn aucun_ne_garde_que_la_derniere_capture() {
+    let d = dossiers();
+    let mut dem = demande(d.local.parent().unwrap());
+    dem.enregistrer = false;
+    dem.dossier_recents = d.recents.clone();
+    dem.recents_gardes = 1;
+    for i in 0..3 {
+        let nom = format!("20250101-00000{i}-000.png");
+        fs::write(d.recents.join(nom), png_de(&image(2, 2))).unwrap();
+    }
+    let neuf = sortir(&image(2, 2), &dem).recent.unwrap().expect("recent");
+    assert_eq!(lister_recents(&d.recents).len(), 1);
+    assert!(neuf.is_file());
+}
+
+#[test]
+fn purger_recents_ramene_au_nombre_sans_jamais_vider() {
+    let d = dossiers();
+    let noms: Vec<String> = (0..10)
+        .map(|i| format!("20250101-0000{i:02}-000.png"))
+        .collect();
+    for nom in &noms {
+        fs::write(d.recents.join(nom), png_de(&image(2, 2))).unwrap();
+        ranger_apercu(&d.apercus, nom, &image(1, 1)).unwrap();
+    }
+    fs::write(d.recents.join("notes.txt"), b"a moi").unwrap();
+    assert_eq!(super::purger_recents(&d.recents, 4), 6);
+    let liste = lister_recents(&d.recents);
+    assert_eq!(
+        liste.iter().map(|e| e.nom.as_str()).collect::<Vec<_>>(),
+        noms[6..]
+            .iter()
+            .rev()
+            .map(String::as_str)
+            .collect::<Vec<_>>()
+    );
+    assert_eq!(apercus_au_format(&d.apercus), noms[6..]);
+    assert!(d.recents.join("notes.txt").is_file());
+    // Zéro garde la plus récente.
+    assert_eq!(super::purger_recents(&d.recents, 0), 3);
+    assert_eq!(lister_recents(&d.recents).len(), 1);
+    // Rien à purger ou dossier absent : rien, sans erreur.
+    assert_eq!(super::purger_recents(&d.recents, 50), 0);
+    assert_eq!(super::purger_recents(&d.recents.join("absent"), 50), 0);
 }

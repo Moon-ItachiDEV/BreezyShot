@@ -1179,6 +1179,7 @@ mod tests {
             maintenant: chrono::Local::now(),
             transparence: false,
             format: sortie::FormatFichier::Png,
+            recents_gardes: sortie::RECENTS_GARDES,
         };
         let b = bilan_d_echec(&demande, CAUSE_SORTIE_INTERROMPUE);
         assert_eq!(b.copie, Etape::Echec(CAUSE_SORTIE_INTERROMPUE.into()));

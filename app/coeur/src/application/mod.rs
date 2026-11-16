@@ -593,6 +593,7 @@ fn lancer_app(contexte: tauri::Context, commande: Commande, inconnus: Vec<String
             fenetre_reglages::reglages_apercu_nom,
             fenetre_reglages::reglages_parcourir,
             fenetre_reglages::reglages_parcourir_films,
+            fenetre_reglages::reglages_vider_historique,
             fenetre_reglages::reglages_saisie,
             fenetre_reglages::reglages_raccourci,
             fenetre_reglages::reglages_retablir,
@@ -2664,6 +2665,7 @@ pub(super) fn demande_sortie(app: &AppHandle, transparence: bool) -> sortie::Dem
         maintenant: chrono::Local::now(),
         transparence,
         format: zone::format_fichier(reglages.format_image),
+        recents_gardes: historique::gardes_en_vigueur(reglages.historique.gardes, pro(app)),
     }
 }
 

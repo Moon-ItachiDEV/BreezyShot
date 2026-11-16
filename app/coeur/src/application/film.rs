@@ -1094,6 +1094,7 @@ mod tests {
             maintenant: chrono::Local::now(),
             transparence: true,
             format: sortie::FormatFichier::Png,
+            recents_gardes: sortie::RECENTS_GARDES,
         };
         let (d, deplacer) = demande_film(&base);
         assert!(!d.ranger_recents);

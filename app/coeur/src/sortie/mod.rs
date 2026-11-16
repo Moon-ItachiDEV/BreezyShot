@@ -50,7 +50,7 @@ pub use historique::{
 pub use licence::{ecrire_licence, effacer_licence, lire_licence};
 pub use nom::{chemin_libre, nom_affiche, nom_fichier};
 pub use png::{encoder_jpg, encoder_png, sur_blanc, COTE_MAX_JPG, QUALITE_JPG};
-pub use recents::{recents_a_supprimer, RECENTS_GARDES};
+pub use recents::{purger_recents, recents_a_supprimer, RECENTS_GARDES, RECENTS_MAX};
 pub use texte::copier_texte;
 
 /// Le format du fichier enregistré dans le dossier d'enregistrement (0.7.6). « Récents »,
@@ -100,6 +100,9 @@ pub struct Demande {
     /// Format du fichier enregistre (reglage format_image). Un JPG impossible (un cote de
     /// plus de 65 535 pixels) est enregistre en PNG.
     pub format: FormatFichier,
+    /// Nombre de captures gardees dans « Recents » (reglage `historique.gardes` ; une au
+    /// moins : la capture qu'on vient de faire).
+    pub recents_gardes: usize,
 }
 
 /// Resultat de la copie dans le presse-papiers.
@@ -200,7 +203,12 @@ fn ecrire(
     (largeur, hauteur, rgba): (u32, u32, &[u8]),
 ) -> (Option<Result<PathBuf, String>>, EtapeFichier) {
     let recent = demande.ranger_recents.then(|| match encodage {
-        Ok(octets) => recents::ecrire(&demande.dossier_recents, demande.maintenant, octets),
+        Ok(octets) => recents::ecrire(
+            &demande.dossier_recents,
+            demande.maintenant,
+            octets,
+            demande.recents_gardes,
+        ),
         Err(cause) => Err(cause.clone()),
     });
     let enregistrement = if !demande.enregistrer {

@@ -8,10 +8,10 @@ use std::time::SystemTime;
 use super::fichier::existe;
 use super::film::{cle_film, SorteFilm};
 use super::nom::chemin_libre_ext;
-use super::recents::{cle_recent, RECENTS_GARDES};
+use super::recents::cle_recent;
 
 /// Nombre de fichiers gardes dans `<local>/Glisser` (borne comme « Recents »).
-pub const GLISSER_GARDES: usize = RECENTS_GARDES;
+pub const GLISSER_GARDES: usize = 50;
 
 /// Les fichiers d'une capture que Supprimer efface : son fichier de « Recents », le
 /// fichier enregistre pour elle (chemin rendu par son bilan) et ses fichiers de glisser.

@@ -952,6 +952,7 @@ mod tests {
             maintenant: Local::now(),
             transparence: true,
             format: sortie::FormatFichier::Png,
+            recents_gardes: sortie::RECENTS_GARDES,
         };
         let d = demande_action(&base, true, &c);
         assert!(d.copier && !d.enregistrer && !d.ranger_recents && !d.transparence);

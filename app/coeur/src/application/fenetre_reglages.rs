@@ -463,6 +463,9 @@ pub(super) fn changer(app: &AppHandle, changement: Changement) -> Reponse {
     log::info!("{}", page::ligne_changement(&changement));
     ecrire_et_garder(&app, nouveau.clone());
     appliquer_theme(&app, &nouveau);
+    if matches!(changement, Changement::HistoriqueGardes(_)) {
+        super::geste_historique::purger_selon_le_reglage(&app);
+    }
     if let Changement::ImprEcran(oui) = changement {
         return reponse(&app, reprendre_impr_ecran(&app, &nouveau, oui));
     }
@@ -523,6 +526,17 @@ pub fn reglages_apercu_nom(app: AppHandle, modele: String) -> Apercu {
 #[tauri::command]
 pub async fn reglages_parcourir(app: AppHandle) -> Reponse {
     parcourir(app, false).await
+}
+
+/// « Vider l'historique » (Pro) : les captures de « Récents », leurs aperçus et `Glisser`.
+#[tauri::command]
+pub fn reglages_vider_historique(app: AppHandle) -> Reponse {
+    if !pro(&app) {
+        return refuser(&app, Refus::nouveau("historique_vider", "", "sans_licence"));
+    }
+    log::info!("historique vider demande depuis les reglages");
+    super::geste_historique::vider_depuis_les_reglages(&app);
+    reponse(&app, None)
 }
 
 /// « Parcourir… » du dossier des films (Pro) : le même sélecteur, le choix va à
