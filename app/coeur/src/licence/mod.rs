@@ -6,7 +6,13 @@
 //!
 //! Ordre des refus : vide, trop longue (bornée avant tout décodage), forme (préfixe,
 //! parties, base64 strict, taille de la signature), signature, puis seulement la charge
-//! (JSON, `id`) et l'édition.
+//! (JSON, `id`), la révocation, l'édition et l'essai.
+//!
+//! Sécurité (audit du 16/11/2026) : seule la clé publique est dans le code ; une licence
+//! ne se forge pas sans la clé privée, qui n'est jamais dans le dépôt, la CI ni le binaire.
+//! Le fichier rangé est revérifié à chaque démarrage : le modifier ne donne rien. Ce que
+//! ce module ne peut pas empêcher : un exe patché (toute app hors ligne l'est), et une
+//! licence vendue partagée (d'où `REVOQUEES`, et plus tard l'activation en ligne).
 
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
@@ -32,8 +38,23 @@ pub const LONGUEUR_MAX: usize = 1000;
 /// Longueur permise de l'identifiant (il va au journal).
 const ID_MAX: usize = 40;
 
-/// Les clés publiques acceptées.
-const CLES: [[u8; 32]; 1] = [CLE_ESSAI];
+/// Vrai pour une version d'avant la 1.0 (`0.x.y`), lu à la compilation. Dès la 1.0, la clé
+/// d'essai sort de la liste et toute charge `"essai":true` est refusée, même signée par une
+/// autre clé : la licence d'essai publique (`essais/licence-essai.txt`) ne peut pas devenir
+/// un Pro gratuit dans une version vendue, même si l'on oublie de retirer la clé.
+pub(crate) const ESSAIS_PERMIS: bool = avant_1_0(env!("CARGO_PKG_VERSION"));
+
+const fn avant_1_0(version: &str) -> bool {
+    let o = version.as_bytes();
+    o.len() >= 2 && o[0] == b'0' && o[1] == b'.'
+}
+
+/// Les clés publiques acceptées. La clé de vente s'ajoutera ici au lot « Pro ».
+const CLES: &[[u8; 32]] = if ESSAIS_PERMIS { &[CLE_ESSAI] } else { &[] };
+
+/// Les `id` des licences retirées (une clé vendue qui a fuité, un remboursement) : refusées
+/// à partir de la version qui les liste, et au démarrage suivant si elles étaient actives.
+const REVOQUEES: &[&str] = &[];
 
 /// Une licence acceptée.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -51,6 +72,10 @@ pub enum Refus {
     Charge,
     Edition,
     Signature,
+    /// Une licence d'essai, dans une version 1.0 ou plus.
+    Essai,
+    /// Une licence dont l'`id` est dans `REVOQUEES`.
+    Revoquee,
 }
 
 impl Refus {
@@ -63,13 +88,15 @@ impl Refus {
             Refus::Charge => "charge",
             Refus::Edition => "edition",
             Refus::Signature => "signature",
+            Refus::Essai => "essai",
+            Refus::Revoquee => "revoquee",
         }
     }
 }
 
 /// Lit et vérifie une licence collée. Ne lit aucun fichier.
 pub fn verifier(texte: &str) -> Result<Licence, Refus> {
-    verifier_avec(texte, &CLES)
+    verifier_selon(texte, CLES, ESSAIS_PERMIS, REVOQUEES)
 }
 
 /// Le texte que `verifier` juge : espaces, tabulations et fins de ligne retirés des deux
@@ -78,8 +105,18 @@ pub(crate) fn nettoyer(texte: &str) -> &str {
     texte.trim_matches([' ', '\t', '\r', '\n'])
 }
 
-/// Pour les tests : même chose avec une autre liste de clés.
+/// Pour les tests : même chose avec une autre liste de clés (essais permis, rien révoqué).
+#[cfg(test)]
 pub(crate) fn verifier_avec(texte: &str, cles: &[[u8; 32]]) -> Result<Licence, Refus> {
+    verifier_selon(texte, cles, true, &[])
+}
+
+fn verifier_selon(
+    texte: &str,
+    cles: &[[u8; 32]],
+    essais: bool,
+    revoquees: &[&str],
+) -> Result<Licence, Refus> {
     let texte = nettoyer(texte);
     if texte.is_empty() {
         return Err(Refus::Vide);
@@ -107,7 +144,14 @@ pub(crate) fn verifier_avec(texte: &str, cles: &[[u8; 32]]) -> Result<Licence, R
     if !signee {
         return Err(Refus::Signature);
     }
-    lire_charge(&charge)
+    let licence = lire_charge(&charge)?;
+    if revoquees.contains(&licence.id.as_str()) {
+        return Err(Refus::Revoquee);
+    }
+    if licence.essai && !essais {
+        return Err(Refus::Essai);
+    }
+    Ok(licence)
 }
 
 /// La charge, une fois sa signature vérifiée. Un champ inconnu est ignoré.

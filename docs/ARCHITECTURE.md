@@ -246,7 +246,27 @@ l'icône, raccourcis, lignes de Réglages › Raccourcis, bouton « Texte » de 
   bouts (`nettoyer`), refuse au-delà de 1 000 caractères (`LONGUEUR_MAX`) avant tout
   décodage, puis rend `Licence { id, essai }` ou un `Refus` dans cet ordre : `vide`,
   `trop_longue`, `forme` (préfixe, nombre de parties, base64, taille de la signature),
-  `signature`, `charge`, `edition`. Licence d'essai, publique : `essais/licence-essai.txt`.
+  `signature`, `charge`, `revoquee`, `edition`, `essai`. Licence d'essai, publique :
+  `essais/licence-essai.txt`.
+- **Sécurité** (audit 0.7.8) : seule la clé publique est dans le code et le binaire ; la clé
+  privée d'essai a été jetée, la clé privée de vente ne sera jamais dans le dépôt, la CI ni
+  cette doc (la garder hors ligne, en deux copies : la perdre empêche d'émettre des
+  licences). Le fichier rangé est revérifié à chaque démarrage, l'état Pro ne vit qu'en
+  mémoire côté Rust, chaque commande Pro est permise à sa seule fenêtre et revérifie `pro`
+  (devtools absents en release) : ni la page ni le fichier ne débloquent le Pro.
+  - **Fin des essais à la 1.0** : `ESSAIS_PERMIS` vaut vrai seulement pour une version
+    `0.x` (`CARGO_PKG_VERSION`, lu à la compilation ; `1.0.0-rc` compte déjà comme 1.0).
+    Dès la 1.0, `CLE_ESSAI` sort de `CLES` et toute charge `"essai":true` est refusée
+    (`essai`), même signée par une autre clé. Une licence d'essai déjà rangée est alors
+    refusée au démarrage : l'app repart en gratuit. Les tests qui utilisent la licence
+    d'essai échouent en 1.0 : c'est voulu, ils rappellent d'ajouter la clé de vente.
+  - **Révocation** : `REVOQUEES` (liste d'`id`, vide) refuse une licence vendue qui a fuité,
+    à partir de la version qui la liste (les versions déjà installées l'acceptent encore).
+  - **Hors de portée**, comme toute app hors ligne : un exe patché, et une licence vendue
+    partagée en dehors de la révocation. Pistes pour le lot « Pro » : le nom de l'acheteur
+    dans la charge, montré dans Réglages mais jamais journalisé ; une date « mises à jour
+    jusqu'au » comparée à la date de compilation ; l'activation en ligne du vendeur
+    (limite d'appareils), si l'on accepte un appel réseau à l'activation.
 - **Rangement** (`sortie/licence.rs`) : le texte nettoyé, celui que `verifier` a jugé, est
   rangé dans `<dossier des réglages>/licence.txt`, de façon atomique (`licence.txt.tmp`
   écrit, vidé sur le disque, puis renommé). Au plus 64 Kio sont relus. Au démarrage, avant
