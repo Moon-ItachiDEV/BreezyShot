@@ -926,7 +926,7 @@ pub fn ligne_micro(etat: &str) -> String {
     format!("film micro {etat}")
 }
 
-/// `film ordinateur <ouvert|indisponible>` : le son de l'ordinateur (0.7.6).
+/// `film ordinateur <ouvert|indisponible>` : le son de l'ordinateur (0.7.7).
 pub fn ligne_ordinateur(ouvert: bool) -> String {
     format!(
         "film ordinateur {}",

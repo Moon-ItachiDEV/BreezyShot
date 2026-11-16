@@ -53,7 +53,7 @@ app/
                             liste des fenêtres, partie à découper,
                             rayon et coins à arrondir (étape 8) ; pointeur.rs : le
                             pointeur posé dans l'image (0.4) ; clics.rs : les anneaux
-                            des clics visibles du film (0.7.6) ; aucun code propre à un
+                            des clics visibles du film (0.7.7) ; aucun code propre à un
                             système
       sortie/               presse-papiers, PNG, « Récents », enregistrement (étape 6) ;
                             glisser.rs : fichier donné au glisser, effacement de Supprimer ;
@@ -79,7 +79,9 @@ app/
                             emplacements.rs, parcours.rs, envol.rs ; n'utilise que systeme.
                             Câblage : application/installateur.rs
       texte/                partie commune de Copier le texte (0.5) : préparer l'image,
-                            ramener les boîtes, assembler le texte ; n'utilise que systeme
+                            ramener les boîtes, assembler le texte ; n'utilise que systeme.
+                            qr.rs : lire un QR code (crate rqrr), le classer (lien sûr,
+                            Wi-Fi, texte)
       defilement/           assemblage de la capture défilante (0.6) : mesurer le
                             décalage de deux images, bandes fixes, ajout des lignes,
                             image finale ; pur, n'utilise que systeme
@@ -87,7 +89,7 @@ app/
                             fixe, pas sautés, pauses), difference.rs (rectangle changé,
                             sous-image, moitié), gif.rs (écriture du GIF, crate `gif`),
                             son.rs (calage du micro, `suivre` et `melanger` pour le son
-                            de l'ordinateur, 0.7.6) ; n'utilise que systeme
+                            de l'ordinateur, 0.7.7) ; n'utilise que systeme
       systeme/              tous les gestes propres à un système : mod.rs (façade commune),
                             windows.rs, autre.rs (Linux pour le développement, macos.rs ensuite),
                             composition.rs (attendre le compositeur),
@@ -110,9 +112,9 @@ app/
                             sous un clic, position, écoute de la molette ; 0.6),
                             mp4/ (écriture d'un MP4 H.264 par Media Foundation, garde
                             des DLL chargées à la demande ; 0.7), micro/ (micro par
-                            défaut, WASAPI ; 0.7 ; en 0.7.6 aussi le son de l'ordinateur,
+                            défaut, WASAPI ; 0.7 ; en 0.7.7 aussi le son de l'ordinateur,
                             `Origine::Ordinateur`, loopback WASAPI), souris/ (position et
-                            boutons, `GetCursorPos` et `GetAsyncKeyState` ; 0.7.6) ; dans gel/, depuis la 0.7, les mises
+                            boutons, `GetCursorPos` et `GetAsyncKeyState` ; 0.7.7) ; dans gel/, depuis la 0.7, les mises
                             en veille et la fin de session Windows ; dans mod.rs,
                             `ouvrir_fichier` (un film dans le lecteur de Windows, 0.7)
   interface/                ce qu'on voit (web), partagé entre Windows et Mac
@@ -367,7 +369,7 @@ Lecture    LectureImpossible      -> Repos
 Aucune ligne `DemandeDecompte(Texte)` : Copier le texte n'a pas de retardateur. Les sorties
 de la Sélection (annulée, écrans changés, muette…) servent telles quelles. En Lecture, toute
 demande de capture est ignorée (`capture deja en cours: appui ignore`). `TexteLu` finit une
-lecture qui a rendu un texte ou rien (« Aucun texte trouvé ») ; `LectureImpossible` une
+lecture qui a rendu un texte, un QR code ou rien (« Aucun texte trouvé ») ; `LectureImpossible` une
 lecture sans langue, en échec ou échue. Écrans changés ou session verrouillée pendant la
 Lecture : seuls l'écran figé et la sélection sont libérés, la lecture finit normalement
 (`texte ecran libere: bureau change`, §6.4).
@@ -443,7 +445,7 @@ de même (`film::CONSTRUIT`), `video` de même et si un codeur H.264 a été tro
   `2026-11-11T18:40:12.345+01:00 INFO  raccourcis  message`.
 - Rotation : 1 Mo par fichier, 5 fichiers au plus (`breezyshot.log`, `.1` … `.4`).
 - Jamais d'image, jamais le contenu du presse-papiers, jamais le texte lu par Copier le
-  texte (§6.4) ni le texte d'une licence (§2). Les chemins de fichiers sont permis.
+  texte (§6.4), ni le contenu d'un QR code lu (§6.4), ni le texte d'une licence (§2). Les chemins de fichiers sont permis.
 - Les essais automatiques lisent ce fichier : les lignes citées dans `essais/` sont un contrat,
   on ne les reformule pas sans adapter l'essai.
 
@@ -1159,7 +1161,7 @@ Module pur : il reçoit le dossier où écrire, ne connaît ni Tauri ni les autr
 - Accepté : un très grand nombre dans un champ inconnu peut perdre en précision à la
   réécriture (l'option qui l'éviterait s'applique à tout le programme, Tauri compris).
 
-### 4.1 Réglages de la 0.7.6 (version 7)
+### 4.1 Réglages de la 0.7.7 (version 7)
 
 `v6 -> v7` (`v6_vers_v7`, constat `reglages mis a niveau de la version 6 a la version 7`) ajoute,
 sans rien remplacer, les défauts qui reproduisent l'app d'avant :
@@ -1392,6 +1394,10 @@ sans rien remplacer, les défauts qui reproduisent l'app d'avant :
     actions, et part seul après ce délai, comme une réussite (`bandeau:afficher.duree_ms`).
     Filet du cœur : caché d'office `MARGE_DUREE` (1 s) après la durée si la page ne l'a pas
     fait (`cacher_message_d_office`). Le survol ne suspend pas le délai.
+  - **Réussite à durée** (QR code lu, §6.4) : un message `Reussite` qui porte `duree_ms`
+    (`Message::a_croix`) est une pilule élargie comme l'info, avec son détail, ses actions
+    (« Ouvrir ») et sa croix, et part seule après `duree_ms` ; sans `duree_ms`, la réussite
+    reste la ligne seule (détail et actions ignorés par la page).
   - **Info** (forme de l'erreur A, validée par le fil design le 11/11) : « i » sur `accent`,
     titre seul (sans détail), pas de bouton d'action, reste affichée jusqu'à un clic sur la croix.
   - Titre sur 2 lignes au plus, cause sur 3 lignes au plus : la pilule a une hauteur maximale
@@ -2083,6 +2089,41 @@ texte <id> <n> lu <l> lignes <m> mots en <ms> ms|vide|echec (<code>)`, `editeur 
 lecture impossible: <e>`, `echeance de lecture non armee: <e>`, `fil de copie du texte
 impossible: <e>`, `selection balayage <id> non envoye: <e>`, `selection surlignage <id>
 non envoye: <e>`, `surlignage sans fil (<e>): fin montree tout de suite`.
+
+**Lire un QR code** (`texte/qr.rs`, `Issue::Code`). Le raccourci et le menu lisent aussi un
+QR code : `lire_zone` essaie `qr::lire` avant l'OCR, dans le même fil `texte`, sous la même
+échéance. L'éditeur (bouton « Texte ») ne lit pas les codes (`lire`). Pas de nouvelle action,
+pas de nouveau raccourci : le code suit les droits de Copier le texte (licence et langue de
+lecture, §2), choix de l'utilisateur du 16/11/2026 (Pro).
+- Lecture (`rqrr`, pur Rust, MIT OR Apache-2.0 avec ISC pour `g2p`) : gris de l'image, essais
+  dans l'ordre sur l'image, ses couleurs inversées, réduite de moitié, agrandie ×2 (sous 500
+  px), le premier qui rend un code gagne. Un seul contenu à la fois (deux codes différents :
+  refus définitif, on passe à l'OCR) et le cadre du code doit couvrir un dixième de la zone au moins
+  (`PART_MINIMALE`) : un petit code dans un coin de page rend le texte de la page. Mesuré
+  sur 2560 × 1440 sans code : 116 ms (Linux, release), les quatre essais compris.
+- Genres (`classer`) : `Lien` (http ou https ; de l'ASCII visible seulement, sans `"<>^|{}`,
+  accent grave ni `\` ; pas d'identifiant avant le domaine ; domaine non vide en ASCII, sans
+  point final, port numérique ; ni `localhost`, ni `127.x.x.x`, ni `0.0.0.0` ; une adresse IPv4
+  seulement en quatre nombres décimaux sans zéro devant ; 2 048 octets au plus), sinon `Texte`
+  (donc sans « Ouvrir » : `mailto:`, `javascript:`, `file:`, domaines aux lettres imitées,
+  liens aux accents…) ; `Wifi` (`WIFI:T:…;S:…;P:…;;`, `\;`, `\:`, `\\`, `\"` rendus, paire de
+  guillemets des chiffres retirée) : on copie le mot de passe, ou le nom d'un réseau ouvert.
+  Le mot de passe va au presse-papiers hors de l'historique (Win + V) et du nuage
+  (`sortie::copier_texte_secret`, `exclude_from_monitoring`). Un lien en clair (`http://`) le
+  dit dans le détail du bandeau.
+- Bandeau : réussite à durée (`DUREE_CODE_MS`, 7 s), pilule élargie avec détail (domaine de
+  `qr::domaine_sur`, nom du réseau, début du texte), croix, et « Ouvrir » pour un lien sûr
+  seulement. La page ne reçoit ni n'envoie jamais le lien : `bandeau_action { id, action:
+  "ouvrir_lien" }`, le cœur garde le lien (`LIEN`, avec l'identifiant du message), le prend
+  une fois, le revérifie (`domaine_sur`, puis `systeme::ouvrir_lien` : http ou https
+  seulement) et l'ouvre hors du fil principal (`ShellExecuteW` « open »). Une nouvelle lecture
+  du raccourci, un autre message (l'identifiant ne correspond plus), ou 10 s écoulées
+  (`LIEN_VALIDITE`), l'annule. Une panique de `rqrr` est rattrapée (`lire_zone`) : on lit alors le texte.
+- Journal : `texte code lien|wifi|wifi ouvert|texte en <ms> ms facteur <f>`, `texte lien
+  ouvert`. En WARN : `texte lien non ouvert: <e>`, `texte lien sans fil: <e>`. Jamais le
+  contenu ni le lien (le `Debug` de `Code` ne dit que son genre et sa taille).
+- Pas fait : les codes-barres (EAN, Code 128…), un code lu dans l'éditeur, un QR code en
+  Shift-JIS (la crate ne lit que de l'UTF-8), un code seul sans langue de lecture installée.
 
 ## 7. Vérification
 

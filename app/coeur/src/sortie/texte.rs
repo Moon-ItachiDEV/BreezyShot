@@ -13,6 +13,7 @@ use arboard::{Clipboard, Error};
 
 use super::presse_papiers::{avec_echeance, vaut_reessai, ECHEANCE};
 use super::Etape;
+use crate::systeme::presse_papiers::poser_texte_secret;
 
 /// Ouvert une fois, gardé jusqu'à la fin du processus.
 static OUVERT: Mutex<Option<Clipboard>> = Mutex::new(None);
@@ -20,8 +21,20 @@ static OUVERT: Mutex<Option<Clipboard>> = Mutex::new(None);
 /// Pose `texte` dans le presse-papiers (`arboard`, 250 ms d'essais). Le texte remplace ce
 /// qui y était (l'image comprise). Bloquant au plus 250 ms : hors du fil principal.
 pub fn copier_texte(texte: &str) -> Etape {
+    copier(texte, false)
+}
+
+/// `copier_texte` pour un secret (un mot de passe Wi-Fi lu dans un QR code) : sous
+/// Windows, le texte reste hors de l'historique du presse-papiers (Win + V) et du nuage.
+pub fn copier_texte_secret(texte: &str) -> Etape {
+    copier(texte, true)
+}
+
+fn copier(texte: &str, secret: bool) -> Etape {
     let mut garde = OUVERT.lock().unwrap_or_else(|e| e.into_inner());
-    let resultat = copier_par(Instant::now, thread::sleep, || poser(&mut garde, texte));
+    let resultat = copier_par(Instant::now, thread::sleep, || {
+        poser(&mut garde, texte, secret)
+    });
     if matches!(&resultat, Err(e) if !vaut_reessai(e)) {
         // On repartira d'un presse-papiers neuf la prochaine fois.
         *garde = None;
@@ -39,11 +52,14 @@ fn copier_par(
     avec_echeance(ECHEANCE, horloge, dormir, essai)
 }
 
-fn poser(garde: &mut Option<Clipboard>, texte: &str) -> Result<(), Error> {
+fn poser(garde: &mut Option<Clipboard>, texte: &str, secret: bool) -> Result<(), Error> {
     let presse = match garde {
         Some(presse) => presse,
         None => garde.insert(Clipboard::new()?),
     };
+    if secret {
+        return poser_texte_secret(presse, texte);
+    }
     presse.set_text(texte)
 }
 

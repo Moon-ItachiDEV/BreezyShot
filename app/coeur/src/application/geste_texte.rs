@@ -34,6 +34,15 @@ use crate::texte::{self as lecture, Issue};
 /// La sonde des langues de lecture est partie (une fois par lancement).
 static SONDE_LANCEE: AtomicBool = AtomicBool::new(false);
 
+/// Le lien du dernier QR code lu et montré, avec l'identifiant du message du bandeau qui
+/// propose « Ouvrir » : la page n'envoie que l'action, jamais le lien (QR code). Vidé à chaque
+/// nouvelle lecture et dès qu'il est pris.
+static LIEN: Mutex<Option<(u64, String, Instant)>> = Mutex::new(None);
+
+/// Le lien n'est plus proposé passé ce délai : celui du bandeau (`DUREE_CODE_MS`) et sa
+/// sortie.
+const LIEN_VALIDITE: Duration = Duration::from_secs(10);
+
 /// Dernier numéro de lecture donné (raccourci et menu).
 static NUMERO: AtomicU64 = AtomicU64::new(0);
 
@@ -291,6 +300,10 @@ fn garder_ecran(app: &AppHandle, numero: u64, relache: Instant, minimum: Duratio
 /// `Evenement::TexteLu` ; le fil `texte-echeance` tient `DELAI_LECTURE`. `document` :
 /// l'éditeur (`Some(id)`) ou le raccourci.
 fn lancer_lecture(app: &AppHandle, numero: u64, document: Option<u64>, pixels: Pixels) {
+    // Un nouveau texte à lire : le lien de la lecture d'avant n'est plus proposé.
+    if document.is_none() {
+        retenir_lien(None);
+    }
     let (fini, attente) = mpsc::channel::<()>();
     let pour = app.clone();
     let lance = std::thread::Builder::new()
@@ -302,7 +315,12 @@ fn lancer_lecture(app: &AppHandle, numero: u64, document: Option<u64>, pixels: P
                 pixels.hauteur,
                 systeme::texte::dimension_max(),
             );
-            let issue = lecture::lire(&pixels);
+            // Le raccourci lit aussi un QR code (QR code) ; l'éditeur, que le texte.
+            let issue = if document.is_none() {
+                lecture::lire_zone(&pixels)
+            } else {
+                lecture::lire(&pixels)
+            };
             let duree = debut.elapsed();
             drop(pixels);
             if let Some(d) = systeme::texte::derniere_creation() {
@@ -320,6 +338,10 @@ fn lancer_lecture(app: &AppHandle, numero: u64, document: Option<u64>, pixels: P
                     lu,
                     systeme::texte::fin_de_ligne(),
                 ))),
+                (Issue::Code(code), None) if code.est_secret() => {
+                    Some(sortie::copier_texte_secret(code.a_copier()))
+                }
+                (Issue::Code(code), None) => Some(sortie::copier_texte(code.a_copier())),
                 _ => None,
             };
             let fin = FinLecture {
@@ -523,8 +545,66 @@ fn conclure(app: &AppHandle, fin: FinLecture) {
         log::info!("{ligne}");
     }
     super::appliquer(app, texte::declencheur(&fin.issue));
-    super::afficher(app, texte::message_fin(&fin));
+    let lien = match (&fin.issue, &fin.copie) {
+        (Issue::Code(code), Some(Etape::Faite)) => code.lien().map(str::to_owned),
+        _ => None,
+    };
+    let id = super::afficher(app, texte::message_fin(&fin));
+    retenir_lien(id.zip(lien));
     log::info!("{}", texte::ligne_chrono(gel_cache, x.relache.elapsed()));
+}
+
+/// Garde le lien à ouvrir (ou l'oublie : `None`) avec l'identifiant de son message.
+fn retenir_lien(lien: Option<(u64, String)>) {
+    *LIEN.lock().unwrap_or_else(|e| e.into_inner()) =
+        lien.map(|(id, lien)| (id, lien, Instant::now()));
+}
+
+/// Prend le lien gardé s'il est celui du message `message` et encore valable à `maintenant`
+/// (pure, testée) ; dans tous les cas la place est vidée : un lien ne s'ouvre qu'une fois, et
+/// le lien d'un autre message, ou trop ancien, n'est plus proposé.
+fn prendre_lien(
+    place: &mut Option<(u64, String, Instant)>,
+    message: u64,
+    maintenant: Instant,
+) -> Option<String> {
+    match place.take() {
+        Some((id, lien, depuis))
+            if id == message && maintenant.saturating_duration_since(depuis) <= LIEN_VALIDITE =>
+        {
+            Some(lien)
+        }
+        _ => None,
+    }
+}
+
+/// « Ouvrir » du bandeau d'un lien lu (fil principal) : seulement le lien du message dont
+/// l'action vient (`message`), pris une fois, ouvert hors du fil principal. Le journal dit
+/// le résultat, jamais le lien.
+pub fn ouvrir_lien(message: u64) {
+    let lien = prendre_lien(
+        &mut LIEN.lock().unwrap_or_else(|e| e.into_inner()),
+        message,
+        Instant::now(),
+    );
+    let Some(lien) = lien else {
+        log::info!("texte lien: ouverture ignoree (message {message} perime)");
+        return;
+    };
+    // Jugé de nouveau ici : seul un lien sûr part au système.
+    if crate::texte::qr::domaine_sur(&lien).is_none() {
+        log::warn!("texte lien non ouvert: lien refuse");
+        return;
+    }
+    let lance = std::thread::Builder::new()
+        .name("texte-lien".into())
+        .spawn(move || match systeme::ouvrir_lien(&lien) {
+            Ok(()) => log::info!("texte lien ouvert"),
+            Err(e) => log::warn!("texte lien non ouvert: {e}"),
+        });
+    if let Err(e) = lance {
+        log::warn!("texte lien sans fil: {e}");
+    }
 }
 
 /// Écrans changés ou session verrouillée pendant la Lecture (fil principal) : l'écran
@@ -783,6 +863,35 @@ mod tests {
             fin_du_balayage(&None::<EcranGarde<&str>>, &mut lecture, 5),
             None
         );
+    }
+
+    #[test]
+    fn le_lien_garde_ne_s_ouvre_qu_une_fois_pour_son_message() {
+        let t0 = Instant::now();
+        let garde = || Some((7, "https://exemple.fr".to_string(), t0));
+        // Le bon message, une fois seulement.
+        let mut place = garde();
+        assert_eq!(
+            prendre_lien(&mut place, 7, t0 + Duration::from_secs(3)).as_deref(),
+            Some("https://exemple.fr")
+        );
+        assert!(place.is_none());
+        assert_eq!(prendre_lien(&mut place, 7, t0), None);
+        // Le message d'un autre lien : rien, et le lien gardé est oublié.
+        let mut place = garde();
+        assert_eq!(prendre_lien(&mut place, 8, t0), None);
+        assert!(place.is_none());
+        // Trop ancien : rien.
+        let mut place = garde();
+        assert_eq!(
+            prendre_lien(&mut place, 7, t0 + LIEN_VALIDITE + Duration::from_millis(1)),
+            None
+        );
+        // À la limite : encore valable.
+        let mut place = garde();
+        assert!(prendre_lien(&mut place, 7, t0 + LIEN_VALIDITE).is_some());
+        // Rien de gardé.
+        assert_eq!(prendre_lien(&mut None, 7, t0), None);
     }
 
     #[test]

@@ -1,7 +1,7 @@
 //! Le micro (contrat 0.7, §13.1, F17, F18) : WASAPI, le point de capture par défaut du rôle
 //! `eConsole` (celui de « Son › Entrée »), en mode partagé, converti par Windows en PCM
 //! 48 kHz mono 16 bits. L'appareil n'est ouvert que pendant que « Micro » est actif. Le son
-//! de l'ordinateur (0.7.6, réglage « Son de l'ordinateur », Pro) se prend par le même
+//! de l'ordinateur (0.7.7, réglage « Son de l'ordinateur », Pro) se prend par le même
 //! chemin sur le point de lecture par défaut (`Origine::Ordinateur`) ; sans ce réglage, le
 //! son du système n'est jamais pris.
 //!
@@ -24,7 +24,7 @@ mod plateforme;
 mod plateforme;
 
 /// Ce qu'on capte : le micro (point de capture par défaut) ou le son de l'ordinateur (ce
-/// que le point de lecture par défaut joue, en « loopback » WASAPI, 0.7.6).
+/// que le point de lecture par défaut joue, en « loopback » WASAPI, 0.7.7).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Origine {
     Micro,

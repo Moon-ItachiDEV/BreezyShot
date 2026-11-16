@@ -833,7 +833,7 @@ const SANS_VIGNETTE = { ...VUE, lignes: ['copier', 'dossier', 'modele_nom', 'the
     await poser('Après la capture');
     const deborde = await p.$eval('.contenu', e => e.scrollHeight - e.clientHeight);
     const nom = await visible(p, '[data-reglage="modele_nom"]');
-    // 0.7.6 : « Format » et « Ouvrir dans l'éditeur » s'ajoutent ; Nom des fichiers déplié,
+    // 0.7.7 : « Format » et « Ouvrir dans l'éditeur » s'ajoutent ; Nom des fichiers déplié,
     // la rubrique défile d'une ligne ou deux au plus (la page défile déjà) ; par défaut
     // (Nom des fichiers replié), tout tient sans défiler.
     verifier(nom && deborde <= 80, `13 ${theme} « Après la capture » : Nom des fichiers déplié, au plus une ligne ou deux à défiler`, json([nom, deborde]));
@@ -936,7 +936,7 @@ const SANS_VIGNETTE = { ...VUE, lignes: ['copier', 'dossier', 'modele_nom', 'the
     await p.context().close();
   }
 
-  // 17. Réglages Pro (0.7.6) : « Format » et « Ouvrir dans l'éditeur » (gratuits, Après la
+  // 17. Réglages Pro (0.7.7) : « Format » et « Ouvrir dans l'éditeur » (gratuits, Après la
   // capture) ; rubriques Enregistrement et Historique, absentes sans licence (le cœur ne
   // nomme pas leurs lignes), avec une pastille Pro à leur onglet.
   {

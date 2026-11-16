@@ -104,7 +104,7 @@ fn est_png(chemin: &Path) -> bool {
 }
 
 /// Vrai pour un fichier que Supprimer peut effacer hors des dossiers de l'app : une image
-/// `.png` ou `.jpg` (0.7.6), ou un film `.mp4` ou `.gif` (0.7).
+/// `.png` ou `.jpg` (0.7.7), ou un film `.mp4` ou `.gif` (0.7).
 fn est_capture(chemin: &Path) -> bool {
     est_png(chemin) || a_l_extension(chemin, "jpg") || est_film(chemin)
 }

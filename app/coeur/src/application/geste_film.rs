@@ -1934,7 +1934,7 @@ fn filmer(d: Depart, app: AppHandle) {
             },
         );
     }
-    // Le son de l'ordinateur (0.7.6) : ouvert tout de suite, gardé jusqu'à la fin du film
+    // Le son de l'ordinateur (0.7.7) : ouvert tout de suite, gardé jusqu'à la fin du film
     // (sa destruction rend l'appareil). Absent ou refusé : la vidéo se fait sans.
     let calage_ordinateur = Arc::new(Mutex::new(Calage::default()));
     let ordinateur = (d.ordinateur && micro::ordinateur_present())
@@ -2242,7 +2242,7 @@ struct Fil<P: Prise> {
     /// Pour poser le pointeur avant la réduction de moitié.
     tampon: Pixels,
     pointeur: Option<Pointeur>,
-    /// Les clics visibles (0.7.6), s'ils sont voulus.
+    /// Les clics visibles (0.7.7), s'ils sont voulus.
     clics: Option<Clics>,
     sautees: u64,
     premiere_dite: bool,

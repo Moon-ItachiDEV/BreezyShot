@@ -49,8 +49,8 @@ try {
     $attenduZone = if ($IsMacOS) { 'Cmd+Maj+1' } else { 'ImprEcran,Ctrl+Maj+1' }
     $attenduDerniere = if ($IsMacOS) { 'Cmd+Maj+7' } else { 'Ctrl+Maj+4' }
     Verifier 'valeurs par défaut : version 7' ($lu.version -eq 7) "version $($lu.version)" | Out-Null
-    # 0.7.6 : format PNG, éditeur non, film à 30 i/s sans son ni clics, 50 captures gardées.
-    Verifier 'valeurs par défaut : format, éditeur, film et historique (0.7.6)' (($lu.format_image -eq 'png') -and ($lu.editeur_apres_capture -eq $false) -and ($lu.film.fluidite -eq 30) -and ($lu.film.son_systeme -eq $false) -and ($lu.film.clics_visibles -eq $false) -and ($null -eq $lu.film.dossier) -and ($lu.historique.gardes -eq 50)) "format $($lu.format_image), editeur $($lu.editeur_apres_capture), film $($lu.film | ConvertTo-Json -Compress), historique $($lu.historique.gardes)" | Out-Null
+    # 0.7.7 : format PNG, éditeur non, film à 30 i/s sans son ni clics, 50 captures gardées.
+    Verifier 'valeurs par défaut : format, éditeur, film et historique (0.7.7)' (($lu.format_image -eq 'png') -and ($lu.editeur_apres_capture -eq $false) -and ($lu.film.fluidite -eq 30) -and ($lu.film.son_systeme -eq $false) -and ($lu.film.clics_visibles -eq $false) -and ($null -eq $lu.film.dossier) -and ($lu.historique.gardes -eq 50)) "format $($lu.format_image), editeur $($lu.editeur_apres_capture), film $($lu.film | ConvertTo-Json -Compress), historique $($lu.historique.gardes)" | Out-Null
     Verifier 'valeurs par défaut : raccourcis de zone' (($lu.raccourcis.zone -join ',') -eq $attenduZone) ($lu.raccourcis.zone -join ',') | Out-Null
     Verifier 'valeurs par défaut : raccourci de la dernière zone' (($lu.raccourcis.derniere_zone -join ',') -eq $attenduDerniere) ($lu.raccourcis.derniere_zone -join ',') | Out-Null
     $attenduHistorique = if ($IsMacOS) { 'Cmd+Maj+8' } else { 'Ctrl+Maj+H' }

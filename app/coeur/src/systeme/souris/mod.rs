@@ -1,4 +1,4 @@
-//! La souris, lue sans rien changer (0.7.6, « Clics visibles » du film) : la position du
+//! La souris, lue sans rien changer (0.7.7, « Clics visibles » du film) : la position du
 //! pointeur et l'état des boutons physiques (gauche, droit, milieu).
 //!
 //! Façade commune : `windows.rs` lit `GetCursorPos` et `GetAsyncKeyState` (aucun crochet,

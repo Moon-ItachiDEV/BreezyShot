@@ -1,4 +1,4 @@
-//! Les clics visibles du film (0.7.6, réglage « Clics visibles », Pro) : un anneau qui
+//! Les clics visibles du film (0.7.7, réglage « Clics visibles », Pro) : un anneau qui
 //! s'ouvre et s'efface autour du pointeur à chaque clic, posé dans les pixels de chaque
 //! image du film (vidéo comme GIF), comme le pointeur.
 //!

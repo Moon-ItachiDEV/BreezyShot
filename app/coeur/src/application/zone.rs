@@ -362,7 +362,7 @@ pub fn dossier_enregistrement(reglage: Option<&Path>, images: Option<&Path>) -> 
     }
 }
 
-/// Le format du fichier enregistré pour le réglage `format_image` (0.7.6).
+/// Le format du fichier enregistré pour le réglage `format_image` (0.7.7).
 pub fn format_fichier(f: FormatImage) -> sortie::FormatFichier {
     match f {
         FormatImage::Png => sortie::FormatFichier::Png,

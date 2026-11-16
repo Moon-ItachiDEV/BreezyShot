@@ -51,9 +51,9 @@ pub use licence::{ecrire_licence, effacer_licence, lire_licence};
 pub use nom::{chemin_libre, nom_affiche, nom_fichier};
 pub use png::{encoder_jpg, encoder_png, sur_blanc, COTE_MAX_JPG, QUALITE_JPG};
 pub use recents::{purger_recents, recents_a_supprimer, RECENTS_GARDES, RECENTS_MAX};
-pub use texte::copier_texte;
+pub use texte::{copier_texte, copier_texte_secret};
 
-/// Le format du fichier enregistré dans le dossier d'enregistrement (0.7.6). « Récents »,
+/// Le format du fichier enregistré dans le dossier d'enregistrement (0.7.7). « Récents »,
 /// le presse-papiers, le glisser et les aperçus restent toujours en PNG.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum FormatFichier {

@@ -19,7 +19,9 @@
 //   disque ; un décompte efface la pilule sans `bandeau_termine`.
 // - `bandeau:message_cache` { id } : le cœur a caché le message `id` (avant une capture) ;
 //   la pilule est effacée tout de suite, sans `bandeau_termine`. Un autre `id` : rien.
-// Réussite : part seule après --duree-bandeau-reussite. Info et erreur : restent jusqu'au clic,
+// Réussite : part seule après --duree-bandeau-reussite ; avec `duree_ms` (un QR code lu :
+// détail et « Ouvrir »), elle est élargie comme l'info, garde sa croix et part après `duree_ms`.
+// Info et erreur : restent jusqu'au clic,
 // sauf avec `duree_ms` (entier > 0, 0.5 : « Aucun texte trouvé ») : elles gardent leur croix
 // et leurs actions, et partent seules après `duree_ms` (puis `bandeau_termine`).
 // Sans window.__TAURI__ (aperçu dans un navigateur) : ?demo=reussite|info|erreur
@@ -90,8 +92,12 @@ function valider(m) {
   if (!GENRES.includes(m.genre)) return rejeter("genre inconnu");
   if (typeof m.titre !== "string" || m.titre.trim() === "") return rejeter("titre vide");
   const actions = [];
-  // Seule l'erreur porte des actions ; l'info n'a que la croix.
-  if (m.genre === "erreur" && Array.isArray(m.actions)) {
+  // Une réussite à durée (un QR code lu : son détail et « Ouvrir » pour un lien) est une
+  // pilule élargie qui part seule après `duree_ms` ; sans durée, c'est la réussite d'une ligne.
+  const dureeValide = Number.isSafeInteger(m.duree_ms) && m.duree_ms > 0;
+  const simple = m.genre === "reussite" && !dureeValide;
+  // L'erreur porte des actions ; l'info n'a que la croix ; la réussite élargie en a aussi.
+  if ((m.genre === "erreur" || (m.genre === "reussite" && !simple)) && Array.isArray(m.actions)) {
     for (const a of m.actions) {
       if (!a || typeof a.id !== "string" || a.id === "" || typeof a.libelle !== "string" || a.libelle.trim() === "") {
         console.warn("bandeau : action rejetée (id ou libellé non textuel)");
@@ -105,20 +111,18 @@ function valider(m) {
   return {
     id: m.id,
     genre: m.genre,
+    simple,
     titre: m.titre,
-    detail: m.genre !== "reussite" && typeof m.detail === "string" ? m.detail : "",
+    detail: !simple && typeof m.detail === "string" ? m.detail : "",
     actions,
     tenir: m.tenir === true,
     // Absent, null ou invalide : le message reste jusqu'au clic (règle de la 0.4).
-    dureeMs:
-      m.genre !== "reussite" && Number.isSafeInteger(m.duree_ms) && m.duree_ms > 0
-        ? m.duree_ms
-        : 0,
+    dureeMs: !simple && dureeValide ? m.duree_ms : 0,
   };
 }
 
 function envoyerZone() {
-  if (!courant || courant.ferme || courant.genre === "reussite" || el.hidden) return;
+  if (!courant || courant.ferme || courant.simple || el.hidden) return;
   // Rectangle de mise en page, sans la translation de l'animation d'entrée.
   const r = el.getBoundingClientRect();
   const t = new DOMMatrixReadOnly(getComputedStyle(el).transform === "none" ? undefined : getComputedStyle(el).transform);
@@ -183,14 +187,14 @@ export function afficher(brut) {
   courant = { ...message, minuterie: 0, animation: null, ferme: false, zoneEnvoyee: null };
   const lui = courant;
 
-  el.className = `bandeau ${lui.genre}${lui.genre === "reussite" ? "" : " large"}`;
+  el.className = `bandeau ${lui.genre}${lui.simple ? "" : " large"}`;
   pastille.replaceChildren(picto(lui.genre));
   titre.textContent = lui.titre;
   titre.title = lui.titre;
   detail.textContent = lui.detail;
   detail.title = lui.detail;
   boutons.replaceChildren();
-  if (lui.genre !== "reussite") {
+  if (!lui.simple) {
     for (const a of lui.actions) boutons.append(creerBouton("act", a.id, a.libelle));
     boutons.append(creerCroix());
   }
@@ -208,7 +212,7 @@ export function afficher(brut) {
   });
   envoyerZone();
 
-  if (lui.genre === "reussite" && !lui.tenir) {
+  if (lui.simple && !lui.tenir) {
     lui.minuterie = setTimeout(() => cacher(lui), duree("--duree-bandeau-reussite"));
   } else if (lui.dureeMs && !lui.tenir) {
     lui.minuterie = setTimeout(() => cacher(lui), lui.dureeMs);

@@ -3448,7 +3448,7 @@ mod films {
     }
 }
 
-// ---------- Format JPG du fichier enregistré (0.7.6) ----------
+// ---------- Format JPG du fichier enregistré (0.7.7) ----------
 
 /// Relit un JPG : (largeur, hauteur, pixels RGB).
 fn decoder_jpg(octets: &[u8]) -> (u32, u32, Vec<u8>) {
