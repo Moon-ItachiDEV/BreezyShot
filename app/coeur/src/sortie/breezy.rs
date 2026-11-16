@@ -1,4 +1,4 @@
-//! Le fichier « .breezy » (0.7.8, Pro) : une capture et ses annotations, gardées séparément
+//! Le fichier « .breezy » (0.7.9, Pro) : une capture et ses annotations, gardées séparément
 //! pour qu'on puisse rouvrir l'éditeur plus tard et tout modifier. Ce module est pur
 //! (octets contre octets, aucun chemin, aucun journal) ; l'écriture sur le disque est dans
 //! `fichier.rs` (`enregistrer_breezy_a`) et la lecture dans `lire_breezy_a`.
@@ -6,7 +6,7 @@
 //! Format (version 1) : une archive ZIP, entrées « stockées » (sans compression : le PNG
 //! l'est déjà, le JSON est petit), sans ZIP64, sans chiffrement, écrite et lue ici, à la main :
 //!
-//! - `breezy.json` : le manifeste `{ "format": "breezy", "version": 1, "app": "0.7.8",
+//! - `breezy.json` : le manifeste `{ "format": "breezy", "version": 1, "app": "0.7.9",
 //!   "largeur": L, "hauteur": H, "transparence": bool, "cree": "AAAA-MM-JJTHH:MM:SS±HH:MM" }` ;
 //! - `image.png` : les pixels d'origine (RGBA 8 bits, alpha gardé), sans annotation ;
 //! - `annotations.json` : le document de l'éditeur (`interface/editeur/document.js`), opaque

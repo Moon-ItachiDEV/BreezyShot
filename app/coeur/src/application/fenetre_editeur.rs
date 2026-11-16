@@ -205,7 +205,7 @@ pub fn editeur_copier_texte(app: AppHandle, id: u64, numero: u64, debut: u32, fi
     geste_texte::copier_extrait(&app, id, numero, choix);
 }
 
-/// Enregistrer en `.breezy` (0.7.8, Pro) : corps brut = le JSON des annotations, en-têtes
+/// Enregistrer en `.breezy` (0.7.9, Pro) : corps brut = le JSON des annotations, en-têtes
 /// `x-editeur-id` et `-version`. Rend le numéro, ou le code du refus (`pro` : Réglages ›
 /// Licence s'ouvre). La fin arrive par `editeur:breezy`.
 #[tauri::command]

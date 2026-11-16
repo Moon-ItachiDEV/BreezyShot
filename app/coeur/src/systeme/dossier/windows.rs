@@ -91,7 +91,7 @@ pub fn choisir_fichier_png(
     )
 }
 
-/// Le même dialogue pour un fichier `.breezy` (0.7.8).
+/// Le même dialogue pour un fichier `.breezy` (0.7.9).
 pub fn choisir_fichier_breezy(
     proprietaire: Option<isize>,
     depart: Option<&Path>,

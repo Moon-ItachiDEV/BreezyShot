@@ -1,4 +1,4 @@
-//! Les fichiers `.breezy` côté Application (0.7.8, Pro) : décisions pures de l'enregistrement
+//! Les fichiers `.breezy` côté Application (0.7.9, Pro) : décisions pures de l'enregistrement
 //! depuis l'éditeur et de la réouverture d'un fichier. Les gestes sont dans
 //! `geste_breezy.rs`, le format dans `sortie/breezy.rs`, le document et son dessin dans la
 //! page (`interface/editeur/`). Jamais de chemin, de nom de fichier ni de contenu dans les

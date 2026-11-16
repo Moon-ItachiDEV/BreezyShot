@@ -23,7 +23,7 @@ fn fichier() -> Vec<u8> {
         &image(3, 2, 255),
         false,
         ANNOT.as_bytes(),
-        "0.7.8",
+        "0.7.9",
         "2026-11-16T10:00:00+01:00",
     )
     .expect("ecrire")
@@ -32,7 +32,7 @@ fn fichier() -> Vec<u8> {
 #[test]
 fn aller_retour_garde_les_pixels_et_les_annotations_tels_quels() {
     let p = image(5, 4, 255);
-    let octets = ecrire(&p, false, ANNOT.as_bytes(), "0.7.8", "x").unwrap();
+    let octets = ecrire(&p, false, ANNOT.as_bytes(), "0.7.9", "x").unwrap();
     let lu = lire(&octets).unwrap();
     assert_eq!(lu.pixels, p);
     assert_eq!(lu.annotations, ANNOT);

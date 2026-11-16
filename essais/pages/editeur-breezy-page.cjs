@@ -2,7 +2,7 @@ const { chromium } = require('playwright');
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
-// Essai de la page de l'éditeur pour les fichiers .breezy (0.7.8) dans Chromium : la
+// Essai de la page de l'éditeur pour les fichiers .breezy (0.7.9) dans Chromium : la
 // réouverture d'un fichier (annotations lues, jugées, prises pour document de départ),
 // l'enregistrement (corps et en-têtes), l'entrée de menu Pro éteinte sans licence, et un
 // fichier hostile. Le cœur est simulé ; le modèle et la page sont les vrais. Sort avec 1 si

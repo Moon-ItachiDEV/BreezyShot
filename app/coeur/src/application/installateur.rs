@@ -510,7 +510,7 @@ fn inscrire(etat: &Etat) -> Result<(), ErreurInstallation> {
     Ok(())
 }
 
-/// L'association des fichiers `.breezy` à l'app (0.7.8) : double-clic dans l'Explorateur. Un
+/// L'association des fichiers `.breezy` à l'app (0.7.9) : double-clic dans l'Explorateur. Un
 /// échec n'empêche pas l'installation (l'app marche sans) ; il est écrit au journal.
 fn associer(e: &Emplacements) {
     for (cle, valeurs) in installation::association(e) {

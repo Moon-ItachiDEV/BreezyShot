@@ -24,7 +24,7 @@ pub enum Commande {
     Capturer(String),
     /// Désinstaller BreezyShot (« Applications installées »).
     Desinstaller,
-    /// Un fichier `.breezy` donné en argument (double-clic dans l'Explorateur, 0.7.8) : le
+    /// Un fichier `.breezy` donné en argument (double-clic dans l'Explorateur, 0.7.9) : le
     /// rouvrir dans l'éditeur. Le chemin tel que Windows l'a donné.
     Ouvrir(String),
 }
@@ -320,7 +320,7 @@ mod tests {
     fn un_fichier_breezy_donne_a_l_exe_telecharge_lance_l_installateur() {
         let o = Commande::Ouvrir("a.breezy".into());
         assert_eq!(
-            lancement(Some("BreezyShot-0.7.8-essai.exe"), &o),
+            lancement(Some("BreezyShot-0.7.9-essai.exe"), &o),
             Lancement::Installateur
         );
         assert_eq!(

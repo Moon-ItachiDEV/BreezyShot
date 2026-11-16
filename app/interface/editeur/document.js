@@ -936,7 +936,7 @@ export function vide(doc) {
   return doc.objets.length === 0 && doc.recadrage === null;
 }
 
-// ---------- lecture d'un fichier .breezy (0.7.8) ----------
+// ---------- lecture d'un fichier .breezy (0.7.9) ----------
 //
 // Un fichier .breezy vient du disque : il peut être faux, abîmé ou fait pour nuire. Le
 // document n'est donc jamais « repris » tel que le JSON le donne : chaque objet est

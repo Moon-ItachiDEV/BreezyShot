@@ -44,7 +44,7 @@ pub const NOMS_VALEURS: [&str; 11] = [
 
 /// Racine des classes de fichiers, sous HKCU (l'association d'un type de fichier à l'app).
 pub const CLE_CLASSES: &str = r"Software\Classes";
-/// L'extension des fichiers modifiables (0.7.8).
+/// L'extension des fichiers modifiables (0.7.9).
 pub const EXTENSION_BREEZY: &str = ".breezy";
 /// Le type de fichier que l'extension désigne.
 pub const PROGID: &str = "BreezyShot.Fichier";

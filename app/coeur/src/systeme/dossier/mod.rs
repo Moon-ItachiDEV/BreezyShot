@@ -38,7 +38,7 @@ pub fn choisir_fichier_png(
     plateforme::choisir_fichier_png(proprietaire, depart, nom)
 }
 
-/// Le dialogue « Enregistrer sous » pour un fichier `.breezy` (0.7.8) : comme
+/// Le dialogue « Enregistrer sous » pour un fichier `.breezy` (0.7.9) : comme
 /// `choisir_fichier_png`, filtre « Fichier BreezyShot », extension `.breezy` imposee.
 pub fn choisir_fichier_breezy(
     proprietaire: Option<isize>,
