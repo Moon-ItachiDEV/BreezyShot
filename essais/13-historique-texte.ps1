@@ -962,9 +962,9 @@ public static uint Crc32(byte[] o) {
         }
         function Ecran-X($Vue, [double]$X) { return [int][math]::Round($Vue.X + $X * $Vue.S) }
         function Ecran-Y($Vue, [double]$Y) { return [int][math]::Round($Vue.Y + $Y * $Vue.S) }
-        # Le bouton « Texte » de la barre du haut de l'éditeur : un bouton de ce nom à la
-        # hauteur de « Enregistrer » (barre du haut). L'outil « Texte » de la barre
-        # d'annotation porte le même nom, mais pas à cette hauteur.
+        # Le bouton « Texte » de la barre du haut de l'éditeur (nommé « Copier le texte »
+        # depuis la 0.7.3, son mot pouvant être caché en fenêtre étroite), à la hauteur de
+        # « Enregistrer » (barre du haut).
         function Bouton-Texte([IntPtr]$H, [double]$DelaiS = 5) {
             $enr = Element $H 'Enregistrer' $CT::Button 5
             if ($null -eq $enr) { throw "éditeur : bouton « Enregistrer » introuvable ; $(Elements-Vus $H)" }
@@ -972,7 +972,7 @@ public static uint Crc32(byte[] o) {
             $yBarre = $re.Y + $re.Height / 2
             $limite = [DateTime]::UtcNow.AddSeconds($DelaiS)
             do {
-                $b = @(Elements $H 'Texte' $CT::Button | Where-Object {
+                $b = @(Elements $H 'Copier le texte' $CT::Button | Where-Object {
                         $rb = $_.Current.BoundingRectangle
                         (-not $rb.IsEmpty) -and ([math]::Abs($rb.Y + $rb.Height / 2 - $yBarre) -le 8)
                     })
@@ -1577,10 +1577,9 @@ public static uint Crc32(byte[] o) {
                 $pp = Lire-Texte
                 Verifier '(14) Espace, Maj+Droite × 2, Entrée : presse-papiers = « BreezyShot reads this »' (($l -match ' 3 mots$') -and ($pp -ceq 'BreezyShot reads this')) "$l ; lu « $(Montrer $pp) »" | Out-Null
                 # Bloc noir sur la deuxième ligne (outil Flou, variante Bloc noir), puis tout.
-                # Le calque s'est fermé à la copie. Barre C (0.5.4) : l'outil Flou se prend au
-                # clavier (B : Flou, Pixeliser), car dans une fenêtre étroite son bouton peut
-                # être hors de la partie visible des outils ; Flou déplié, la barre tient et
-                # « Bloc noir » se voit. Pas d'Échap : sans sélection ni menu, il fermerait
+                # Le calque s'est fermé à la copie. Socle « Étages » (0.7.3) : l'outil Flou se
+                # prend au clavier (B : Flou, Pixeliser) ; Flou déplié, ses réglages tiennent
+                # et « Bloc noir » se voit. Pas d'Échap : sans sélection ni menu, il fermerait
                 # l'éditeur.
                 $v = Ajuster $db $vid $largeur
                 $E::Touche($VK_B)

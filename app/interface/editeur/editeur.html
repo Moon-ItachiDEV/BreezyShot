@@ -10,29 +10,28 @@
 </head>
 <body>
 <!--
-  Structure seulement (avenant « Éditeur épuré », piste B « Fenêtre » ; barre C et
-  instruments B choisis le 13/11, design/annotation-instruments) : la barre du haut, qui est
-  aussi la barre de la fenêtre sans cadre, la scène, la barre d'annotation (ses outils et
-  leurs réglages dépliés sont posés par barre.js), les menus. Le comportement (editeur.js,
-  barre.js, outils.js) ne vise que les identifiants, les data-*, les rôles et les noms ;
-  l'habillage est dans editeur.css (jetons seulement). Pictogrammes : ceux de
-  design/editeur-epure/index.html (`i-ocr` : design/historique ; ceux du Flou et la lampe
-  du Projecteur : design/barre-claire, piste A « Calme »). Le bouton « Texte » et le
-  calque « Choisir le texte » sont créés par texte.js, seulement si la charge le permet.
+  Structure seulement (piste C « Étages », choisie le 16/11, design/annotation-v3) : la barre
+  du haut, qui est aussi la barre de la fenêtre sans cadre, la scène, le socle d'annotation
+  en bas, les menus. Le contenu de la barre du haut (Fermer ; Texte, Glisser, Enregistrer,
+  Copier) et du socle (les réglages de l'outil déplié au-dessus de la rangée des outils) est
+  posé par barre.js. Le comportement (editeur.js, barre.js, outils.js, texte.js) ne vise que
+  les identifiants, les data-*, les rôles et les noms ; l'habillage est dans editeur.css
+  (jetons seulement). Pictogrammes : ceux de design/editeur-epure/index.html (`i-ocr` :
+  design/historique ; ceux du Flou et la lampe du Projecteur : design/barre-claire, piste A
+  « Calme » ; flèche, stylo, surligneur, gomme et chevron : design/annotation-v3). Le bouton
+  « Texte » n'est montré que si la charge le permet ; le calque « Choisir le texte » est créé
+  par texte.js.
 -->
 <svg width="0" height="0" class="defs" aria-hidden="true">
   <defs>
-    <!-- Instruments B : dégradés du thème (classes, jetons editeur-inst-*), reflet commun. -->
-    <linearGradient id="i-corps" x1="0" x2="1" y1="0" y2="0"><stop offset="0" class="corps-0"/>
-      <stop offset=".3" class="corps-1"/><stop offset=".64" class="corps-2"/>
-      <stop offset="1" class="corps-3"/></linearGradient>
-    <linearGradient id="i-prise" x1="0" x2="1" y1="0" y2="0"><stop offset="0" class="prise-0"/>
-      <stop offset=".34" class="prise-1"/><stop offset="1" class="prise-2"/></linearGradient>
-    <linearGradient id="i-reflet" x1="0" x2="1" y1="0" y2="0">
-      <stop offset="0" stop-color="#000" stop-opacity=".14"/>
-      <stop offset=".27" stop-color="#fff" stop-opacity=".42"/>
-      <stop offset=".5" stop-color="#fff" stop-opacity="0"/>
-      <stop offset="1" stop-color="#000" stop-opacity=".26"/></linearGradient>
+    <symbol id="i-fleche" viewBox="0 0 20 20"><path d="M4.5 15.5 15 5M8.2 5H15v6.8"/></symbol>
+    <symbol id="i-stylo" viewBox="0 0 20 20"><path d="M4 16l.9-3.6 8.7-8.7a1.5 1.5 0 0 1 2.1 0l.6.6a1.5 1.5 0 0 1 0 2.1l-8.7 8.7L4 16Z"/>
+      <path d="M12.2 5.1l2.7 2.7"/></symbol>
+    <symbol id="i-surligneur" viewBox="0 0 20 20"><path d="M8 11.2l5.3-6.9a1.3 1.3 0 0 1 1.9-.1l.8.8a1.3 1.3 0 0 1-.1 1.9L9 12.2"/>
+      <path d="M8 11.2l-1.5 2.1 1.4 1.4L10 13.2l-2-2Z"/><path d="M3.5 17h13" opacity=".5"/></symbol>
+    <symbol id="i-gomme" viewBox="0 0 20 20"><path d="M8.3 16.2l-4.2-4.2a1.4 1.4 0 0 1 0-2l6.3-6.3a1.4 1.4 0 0 1 2 0l3.9 3.9a1.4 1.4 0 0 1 0 2l-6.6 6.6Z"/>
+      <path d="M6.9 6.9l6.2 6.2M8.3 16.2h8.2"/></symbol>
+    <symbol id="i-chevron" viewBox="0 0 20 20"><path d="M5 7.5l5 5 5-5"/></symbol>
     <symbol id="i-x" viewBox="0 0 20 20"><path d="M5.5 5.5l9 9M14.5 5.5l-9 9"/></symbol>
     <symbol id="i-ocr" viewBox="0 0 20 20"><path d="M3 7V4.5A1.5 1.5 0 0 1 4.5 3H7M13 3h2.5A1.5
       1.5 0 0 1 17 4.5V7M17 13v2.5a1.5 1.5 0 0 1-1.5 1.5H13M7 17H4.5A1.5 1.5 0 0 1 3 15.5V13"/>
@@ -114,18 +113,7 @@
 </svg>
 
 <div class="fenetre" id="fenetre">
-  <header class="tbar" id="barre-haut" data-tauri-drag-region>
-    <button class="rb" type="button" data-act="fermer" aria-label="Fermer" title="Fermer"
-      aria-haspopup="menu" aria-expanded="false"><svg class="ico"><use href="#i-x"/></svg>
-    </button>
-    <div class="sp" data-tauri-drag-region></div>
-    <button class="rb prise" type="button" id="bouton-glisser" aria-label="Glisser vers une appli"
-      title="Glisser vers une appli"><svg class="ico"><use href="#i-drag"/></svg></button>
-    <button class="rb" type="button" data-act="enregistrer" aria-label="Enregistrer"
-      title="Enregistrer"><svg class="ico"><use href="#i-save"/></svg></button>
-    <button class="ok" type="button" data-act="copier" aria-label="Copier" title="Copier"><svg
-      viewBox="0 0 24 24" aria-hidden="true"><path d="M5.5 12.5l4.2 4.2L18.5 7.5"/></svg></button>
-  </header>
+  <header class="hc" id="barre-haut" data-tauri-drag-region></header>
 
   <main class="scene" id="scene" tabindex="-1" aria-label="Annoter la capture">
     <div class="ombre-image" id="ombre-image" hidden></div>
@@ -135,24 +123,12 @@
       spellcheck="false"></textarea>
   </main>
 
-  <!-- La barre d'annotation : l'outil en main (ou celui de l'objet choisi) se déplie avec
-       ses variantes, ses tailles, ses couleurs et son opacité ; elle défile si la fenêtre est
-       trop étroite. -->
-  <div class="pal" id="palette" role="toolbar" aria-label="Annotation">
-    <button class="pb" type="button" data-act="annuler" aria-label="Annuler" title="Annuler"
-      disabled><svg class="ico"><use href="#i-undo"/></svg></button>
-    <button class="pb" type="button" data-act="retablir" aria-label="Rétablir" title="Rétablir"
-      disabled><svg class="ico"><use href="#i-redo"/></svg></button>
-    <div class="dv"></div>
-    <div class="tools" id="outils"></div>
-    <div class="dv"></div>
-    <button class="pb" type="button" id="bouton-plus" aria-label="Plus" title="Plus"
-      aria-haspopup="menu" aria-expanded="false"><svg class="ico"><use href="#i-more"/></svg>
-    </button>
-  </div>
+  <!-- Le socle : les réglages de l'outil déplié (celui de l'objet choisi, sinon l'outil en
+       main), au-dessus de Annuler, Rétablir et la rangée des outils. -->
+  <div class="socle" id="socle" role="toolbar" aria-label="Annotation"></div>
   <input type="color" class="cc" id="autre-couleur" tabindex="-1" aria-hidden="true">
 
-  <div class="pop" id="menu-plus" role="menu" aria-label="Plus">
+  <div class="pop" id="menu-enregistrer" role="menu" aria-label="Enregistrer">
     <button class="mi" type="button" role="menuitem" data-act="enregistrer_sous"><svg
       class="ico"><use href="#i-saveas"/></svg>Enregistrer sous…</button>
   </div>

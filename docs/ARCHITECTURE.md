@@ -126,8 +126,8 @@ app/
                             l'export) ; la page : editeur.html (structure, rôles,
                             noms), editeur.css (habillage, jetons seulement),
                             editeur.js (entrée : charge, image, vue, sorties,
-                            fermeture), barre.js (barre du haut, barre
-                            d'annotation et ses plis, instruments, menus),
+                            fermeture), barre.js (barre du haut, socle
+                            d'annotation et ses réglages, menus),
                             outils.js (gestes sur la scène) ; texte.js
                             (0.5, §6.4 : bouton « Texte », calque « Choisir le texte »)
     historique/             fenêtre de l'historique (0.5) : historique.html, .css, .js,
@@ -1562,11 +1562,11 @@ droite et en bas ; `round(dpi / 96)` en haut sous Windows 11, 2 px à 150 %, 0 s
 10) qui portent le
 redimensionnement ; le haut est pris par `WM_NCHITTEST` (`HTTOP`), et tauri-runtime-wry
 ajoute son propre gestionnaire de bords (`undecorated_resizing`) au-dessus de la webview.
-`placer` (pure) : l'image à la taille réelle plus `MARGES` 72 × 180 px logiques (36 de
-chaque côté ; barre 52, réserve 14, barre d'annotation 80 et sa réserve 34), au moins
-`LARGEUR_OUVERTURE` 1096 px logiques de large (jeton `editeur-ouverture-largeur`, essai
-d'égalité : la barre d'annotation y tient sans défiler quel que soit l'outil déplié, la
-plus large, Forme avec le trait de son pli, faisant 1078 px plus 16 de retrait) et 440 de
+`placer` (pure) : l'image à la taille réelle plus `MARGES` 72 × 217 px logiques (36 de
+chaque côté ; barre 52, réserve 14, socle d'annotation 104 à 12 du bord, sa réserve 34 et 1 px d'aise,
+depuis la 0.7.3), au moins `LARGEUR_OUVERTURE` 1096 px logiques de large (jeton
+`editeur-ouverture-largeur`, essai d'égalité : la barre du haut y montre le mot de chaque
+sortie ; le socle, 624 px au plus, tient jusqu'à la taille minimale) et 440 de
 haut, au plus `PART_MAX` (90 %) de la zone utile de l'écran sous la souris, centrée ; `ouvrir`
 pose la position, puis la taille, puis décale la fenêtre de l'écart entre position
 intérieure et extérieure : la zone cliente tombe exactement sur la place. La barre du haut
@@ -1680,44 +1680,36 @@ formule ; pour un secret, l'outil sûr est Bloc noir.
 remplace la v2 depuis le 12/11/2026)
 
 - La barre du haut (52 px) est la barre de la fenêtre sans cadre : `data-tauri-drag-region`
-  partout sauf sur les boutons. À gauche « Fermer » ; à droite « Glisser vers une appli »,
-  « Enregistrer » et « Copier » (copier PUIS fermer : coche, puis le chemin « copier et fermer » ; en échec la fenêtre
+  partout sauf sur les boutons. À gauche « Fermer » ; à droite (0.7.3) « Copier le texte »
+  (mot « Texte », caché sans Copier le texte), « Glisser vers une appli », « Enregistrer »
+  avec sa flèche (menu « Enregistrer », entrée « Enregistrer sous… ») et « Copier » ; sous
+  940 px de large (requête de conteneur), les sorties ne gardent que leur pictogramme ;
+  « Copier » (copier PUIS fermer : coche, puis le chemin « copier et fermer » ; en échec la fenêtre
   reste). `Ctrl + C` copie sans fermer.
-- Barre d'annotation du bas (barre C et instruments B, choisis le 13/11/2026 :
-  `design/annotation-pistes`, `design/annotation-instruments`) : « Annuler », « Rétablir »,
-  les neuf outils (« Flèche », « Stylo », « Surligneur », « Gomme » dessinés, un
-  séparateur, « Texte », « Forme », « Numéro », « Flou », « Projecteur »), « Plus »
-  (« Enregistrer sous »). L'outil en main se déplie dans la
-  barre : ses variantes (Forme : Rectangle, Ellipse, Ligne ; Flou : Pixeliser, Flouter,
-  Bloc noir ; Projecteur : Rectangle, Ovale), ses trois tailles, ses six couleurs et
-  « Autre couleur », son opacité (20 à 100 % par 5 ; une glissière tirée = un pas) ; rien
-  ne s'ouvre par-dessus l'image. Barre plus claire (piste A « Calme », `design/barre-claire`,
-  retour du 13/11 sur la 0.5.4) : le choix d'un groupe est une pastille claire en relief
-  (jetons `editeur-choix-*`), un trait fin sépare les variantes des réglages (caché avec
-  l'intensité pour Bloc noir), le dernier groupe visible garde une marge au bord du pli,
-  aucun outil ne répète le dessin d'une de ses variantes (Flou : une goutte ; Pixeliser :
-  une mosaïque ; Flouter : une tache floue ; Bloc noir : une bande toujours noire, jeton
-  `editeur-bloc-noir` ; Projecteur : une lampe, ses variantes gardant la forme de sa
-  lumière) et l'intensité se règle en trois points, comme les épaisseurs. Les outils
-  repliés gardent une petite nuance bordée de leur couleur sous leur pictogramme
-  (`data-encre` ; rien pour le Projecteur, sans couleur) ; un instrument a le corps à la
-  couleur de son encre (liseré marqué pour une encre très foncée ou très pâle) et saute
-  quand elle ou sa taille change. Un objet choisi déplie
+- Socle d'annotation du bas (piste C « Étages », `design/annotation-v3`, choisie le
+  16/11/2026, 0.7.3 ; remplace la barre C et les instruments B du 13/11) : une carte
+  centrée à 12 px du bas, `min(624px, 100% - 24px)` de large, en deux étages. En bas, la
+  rangée fixe : « Annuler », « Rétablir », un filet, puis les neuf outils toujours à la
+  même place (« Flèche », « Forme », « Texte », « Numéro » | « Stylo », « Surligneur » |
+  « Flou », « Projecteur » | « Gomme », filets entre les groupes), chacun à son
+  pictogramme ; un point d'encre de 5 px sous l'outil en main seulement. Au-dessus, la
+  zone des réglages (46 px) montre ceux de l'outil en main, ou de l'objet choisi :
+  variantes (Forme : Rectangle, Ellipse, Ligne ; Flou : Pixeliser, Flouter, Bloc noir ;
+  Projecteur : Rectangle, Ovale), trois tailles ou trois intensités, six couleurs et
+  « Autre couleur », opacité (20 à 100 % par 5 ; une glissière tirée = un pas), groupes
+  séparés d'un trait fin (`.rg-sep`) ; rien ne s'ouvre par-dessus l'image. Bloc noir n'a
+  pas d'intensité ; Gomme, ses tailles seules. Un objet choisi montre les réglages de
   l'outil qui l'a fait, à ses valeurs : ce qu'on y règle va à lui et à la préférence de
   son outil, pas à l'outil en main (un pas, aucun si rien ne change) ; une variante prise
-  dans son pli le change (`changerVariante`). Prendre un autre outil, la touche d'une
-  variante (« L » : Ligne, prise pour le tracé suivant, l'objet n'est pas changé), ou
-  Stylo, Surligneur, Gomme, défait la sélection ; reprendre l'outil de l'objet choisi la
-  garde. Un texte en saisie déplie l'outil Texte, quel que soit l'outil
-  en main. Le focus ne se perd jamais dans un pli qui se replie : il revient au bouton de
-  l'outil ; ni quand l'intensité du Flou part (Bloc noir rendu à la zone par Rétablir) : il
-  va à la variante prise. L'anneau de focus d'un outil, comme celui d'un instrument, est
-  une ombre intérieure, sous la nuance de sa couleur. Fenêtre étroite (sous 1096 px) :
-  seuls les outils défilent (molette comprise, même sur Annuler ou Plus), estompés du côté
-  caché ; Annuler, Rétablir et Plus restent en entier, le fond et l'ombre de la barre
-  aussi ; l'outil pris s'y montre en entier, ou son début s'il est plus large que la place,
-  même quand son pli s'élargit (Bloc noir puis Pixeliser). Les préférences d'avant
-  (variante « Courbe », emplacement) sont ignorées.
+  le change (`changerVariante`). Prendre un autre outil, la touche d'une variante (« L » :
+  Ligne, prise pour le tracé suivant, l'objet n'est pas changé), ou Stylo, Surligneur,
+  Gomme, défait la sélection ; reprendre l'outil de l'objet choisi la garde. Un texte en
+  saisie montre les réglages de Texte, quel que soit l'outil en main. Le focus ne se perd
+  jamais dans des réglages qui partent : il va au bouton de l'outil dont ils étaient ; ni
+  quand l'intensité du Flou part (Bloc noir rendu à la zone par Rétablir) : il va à la
+  variante prise. Rien ne défile : socle et réglages tiennent en entier jusqu'à la taille
+  minimale (640 × 440). Le socle est caché pendant le calque de Copier le texte. Les
+  préférences d'avant (variante « Courbe », emplacement) sont ignorées.
 - Gestes : un appui sur un objet le sélectionne et le déplace (sauf Stylo, Surligneur,
   Gomme) ; emmené puis ramené à sa place, aucun pas. Une flèche tracée reste choisie : sa
   poignée du milieu (pleine, à la couleur d'accent) la courbe, le trait passant par la
@@ -1987,9 +1979,9 @@ la prise de la garde et sa destruction, repris après le début d'une capture su
 cacherait l'écran figé de celle-ci.
 
 **Dans l'éditeur.** `ChargeEditeur.texte` est vrai si `texte` est une action construite
-(`texte_construit`) au moment de la charge. La page crée alors le bouton « Texte »
-(infobulle « Copier le texte », avant « Enregistrer ») et le calque (`editeur/texte.js`) ;
-sinon rien n'est créé. Le clic exporte l'image composée avec le but `texte` (en-tête
+(`texte_construit`) au moment de la charge. La page montre alors le bouton « Texte »
+(infobulle « Copier le texte », posé par `barre.js` avant « Glisser vers une appli ») et
+crée le calque (`editeur/texte.js`) ; sinon le bouton reste caché. Le clic exporte l'image composée avec le but `texte` (en-tête
 `x-editeur-but: texte`, R7 : ce que l'utilisateur voit, masques compris) : l'export est
 accepté comme un autre (§6.2), mais rien n'est copié ni enregistré, `exportee` n'est pas
 touchée ; les pixels vont à `geste_texte::lire_export`, lus dans le fil `texte` avec la même
@@ -2218,22 +2210,19 @@ non envoye: <e>`, `surlignage sans fil (<e>): fin montree tout de suite`.
   autre contenu (G6),
   `changerVariante` (V) ; `ECHECS : 0` attendu. Étape du job `pages`.
 - `essais/pages/editeur.cjs` (0.4) : la page de l'éditeur dans Chromium, cœur simulé et
-  vrai modèle, 252 points : noms et rôles accessibles (contrat de l'essai 12), chaque
+  vrai modèle, 247 points : noms et rôles accessibles (contrat de l'essai 12), chaque
   outil, flèche choisie après le tracé et courbée à sa poignée, Gomme au pixel (ce qui
   est dessus décide, pile d'une encre sur un numéro sur une flèche, clic qui tremble),
-  Projecteur, recadrage par chaque coin, sélection, la barre C (l'outil déplié, ce que
-  chaque outil déplie, l'objet choisi qui déplie son outil, variante changée sur l'objet,
-  instruments à la couleur de l'encre ; barre plus claire : aucun outil ne répète une de
-  ses variantes, filtre de la tache floue, choix en pastille claire en clair comme en
-  sombre, trait du pli, intensité en trois points, marge du dernier groupe, nuance bordée
-  des outils repliés, Bloc noir noir et bordé dans les deux thèmes, focus de l'intensité
-  qui part rendu à la variante), couleurs, menu « Fermer » et ses issues,
-  « Copier » qui ferme, bouton Glisser, règle de `fermer_demande`, un seul export à la
-  fois, clair, sombre, largeur d'ouverture (chaque outil déplié tient), fenêtre étroite
-  (seuls les outils défilent, Annuler, Rétablir et Plus restent, l'outil pris se montre,
-  même quand son pli s'élargit),
-  texte en saisie qui déplie son outil, focus gardé quand un pli se replie, glissière
-  aller-retour sans pas, aucune erreur ni violation de CSP. Étape du job `pages`.
+  Projecteur, recadrage par chaque coin, sélection, le socle « Étages » (structure et ordre
+  des outils, réglages de l'outil en main ou de l'objet choisi au-dessus, variante changée
+  sur l'objet, aucun outil ne répète une de ses variantes, filtre de la tache floue, choix
+  en pastille claire en clair comme en sombre, intensité en trois points, Bloc noir noir et
+  bordé dans les deux thèmes, focus des réglages qui partent rendu à la variante ou à
+  l'outil), couleurs, menu « Fermer » et ses issues, « Copier » qui ferme, bouton Glisser,
+  règle de `fermer_demande`, un seul export à la fois, clair, sombre, largeur d'ouverture
+  (les réglages de chaque outil tiennent à 1096 px) et fenêtre étroite (à 640 px, le socle
+  et les réglages tiennent sans défiler, les mots des sorties s'effacent),
+  texte en saisie qui règle sans se valider, glissière aller-retour sans pas, aucune erreur ni violation de CSP. Étape du job `pages`.
 - **Tests de la 0.5** (`cargo test --locked` sous Linux : 641 tests de la bibliothèque
   réussis, 2 ignorés, et les 2 de `tests/architecture.rs`, qui refusent aussi un appel à
   `droits::ouverte` ou à `licence::verifier` hors d'`application`). Tests ajoutés, par

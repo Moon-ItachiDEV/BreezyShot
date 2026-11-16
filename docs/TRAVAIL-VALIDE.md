@@ -1181,3 +1181,36 @@ Corrections de la relecture de la 0.7.2 :
   second clic sur l'icône de la zone de notification dans WebView2, et la première
   ouverture de session après une mise à jour : à l'utilisateur.
 
+
+## Nouvel éditeur d'annotation, piste C « Étages » (version 0.7.3)
+
+Trois pistes repensées de zéro le 15/11/2026 (`design/annotation-v3` : A « Volet »,
+B « Bulle », C « Étages ») ; l'utilisateur a choisi C le 16/11 par carte. Toutes les
+fonctions de l'éditeur restent.
+
+- En bas, un socle centré à 12 px du bord (624 px au plus) : Annuler, Rétablir, puis les
+  neuf outils toujours à la même place, en groupes séparés d'un filet (Flèche, Forme,
+  Texte, Numéro | Stylo, Surligneur | Flou, Projecteur | Gomme). Juste au-dessus, les
+  réglages de l'outil en main ou de l'objet choisi : variantes, tailles ou intensité,
+  couleurs et « Autre couleur », opacité. Rien ne défile plus : le socle et les réglages de
+  chaque outil tiennent jusqu'à la taille minimale (640 × 440). Les instruments dessinés
+  (barre B du 13/11) laissent place à des pictogrammes ; l'encre de l'outil en main est un
+  point sous lui.
+- En haut : Fermer à gauche ; à droite Texte (Copier le texte, s'il est là), Glisser,
+  Enregistrer et sa flèche (le menu « Enregistrer » : « Enregistrer sous… »), Copier. Le
+  menu « … » du bas disparaît. Sous 940 px de large, ces sorties ne gardent que leur
+  pictogramme.
+- La fenêtre s'ouvre un peu plus haute (marges 72 × 217 au lieu de 72 × 180) pour que
+  l'image ne passe pas sous le socle.
+- Le focus pris dans des réglages qui partent va au bouton de leur outil.
+- Essais : `editeur.cjs` repris pour le socle (structure, ordre, mesures, focus, fenêtre
+  étroite à 1096 et 640 px ; 247 points) ; l'essai Windows 13 cherche le bouton du haut par son nom
+  « Copier le texte ».
+- Essai 15 (vidéo et GIF) : la mémoire de l'app seule après la vidéo est jugée contre le
+  repos chaud + 15 Mo (et non plus le repos L1 + 15 Mo), avec un repli à L1 + 25 Mo quand le
+  repos chaud manque (commit e59ede2, repris du fil MVP).
+
+### Non vérifié
+
+- Le socle dans WebView2 (flou du verre, requête de conteneur, glisser natif depuis le
+  haut) : essais Windows de la CI, puis à l'utilisateur.
