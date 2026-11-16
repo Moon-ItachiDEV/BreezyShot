@@ -23,7 +23,7 @@ pub mod presse_papiers;
 pub mod texte;
 pub mod vivant;
 pub use composition::attendre_composition;
-pub use demarrage::{demarrage_avec_systeme, mettre_a_jour_chemin, EtatDemarrage};
+pub use demarrage::{demarrage_avec_systeme, mettre_a_jour_chemin, EtatDemarrage, OPTION_DISCRET};
 pub use dossier::{choisir_dossier, choisir_fichier_png};
 pub use gel::Rect;
 pub use texte::fin_de_ligne;
@@ -284,6 +284,11 @@ pub const CLICS_ICONE_RAPPORTES: bool = !cfg!(target_os = "linux");
 /// Vrai si le bouton gauche ou droit de la souris est enfoncé (Windows ; faux ailleurs).
 pub fn bouton_souris_enfonce() -> bool {
     plateforme::bouton_souris_enfonce()
+}
+
+/// Délai du double-clic du système (Windows : `GetDoubleClickTime`), sinon 500 ms.
+pub fn delai_double_clic() -> std::time::Duration {
+    std::time::Duration::from_millis(u64::from(plateforme::delai_double_clic_ms().unwrap_or(500)))
 }
 
 /// Position de la souris en pixels réels, lue directement (`None` : demander à Tauri).

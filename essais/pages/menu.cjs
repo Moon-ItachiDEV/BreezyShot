@@ -175,6 +175,16 @@ const LIGNES_FILM = [
   await p.keyboard.press('Escape');
   await p.waitForTimeout(50);
   verifier((await appels(p, 'menu_fermer')).length === 1 && (await appels(p, 'menu_choisi')).length === 2, 'Échap : menu_fermer, rien de choisi');
+  // Clic dans la marge transparente (le coin de la carte est au pointeur : un second clic
+  // sans bouger tombe là) : menu_fermer ; dans le retrait de la carte : rien.
+  // La carte entre en glissant de 8 px : attendre qu'elle soit posée avant de viser son bord.
+  await p.evaluate((lignes) => __emettre('menu:ouvrir', { lignes }), LIGNES);
+  await p.waitForFunction((m) => Math.abs(document.querySelector('.menu').getBoundingClientRect().top - m) < 0.5, MARGE, { timeout: 2000 });
+  await p.mouse.click(MARGE / 2, MARGE + HAUTEUR - 4);
+  await p.waitForTimeout(50);
+  await p.mouse.click(MARGE + LARGEUR / 2, MARGE + 2);
+  await p.waitForTimeout(50);
+  verifier((await appels(p, 'menu_fermer')).length === 2 && (await appels(p, 'menu_choisi')).length === 2, 'clic dans la marge : menu_fermer ; dans la carte hors ligne : rien', JSON.stringify([(await appels(p, 'menu_fermer')).length, (await appels(p, 'menu_choisi')).length]));
   // Pendant une défilante, le cœur n'envoie que Quitter : une seule ligne.
   await p.evaluate(() => __emettre('menu:ouvrir', { lignes: [{ id: 'quitter', libelle: 'Quitter BreezyShot', raccourci: null, separateur: false }] }));
   verifier(JSON.stringify(await p.evaluate(() => [...document.querySelectorAll('.ligne')].map(b => b.dataset.id))) === '["quitter"]', 'pendant une défilante : Quitter seul');

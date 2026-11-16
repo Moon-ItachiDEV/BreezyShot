@@ -1,4 +1,5 @@
-# Étape 1, socle : démarrage, échelle par écran, icône, instance unique, --quitter.
+# Étape 1, socle : démarrage, échelle par écran, icône, instance unique (la relance ouvre la
+# barre de capture), --quitter.
 
 param(
     [Parameter(Mandatory)][string]$Exe,
@@ -38,13 +39,15 @@ try {
         Write-Host "[note]  icone visible : $visible (non exigé hors Windows)"
     }
     Verifier 'démarrage complet (pret)' (Attendre-Ligne -Texte ' pret' -FinDeLigne -DelaiS 15) | Out-Null
+    # Lancée avec --discret (comme à l'ouverture de session) : rien de visible.
+    Verifier 'lancement discret : aucune barre de capture' (((Compter-Lignes -Texte 'lancement discret' -FinDeLigne) -eq 1) -and ((Compter-Lignes -Texte 'barre ouverte' -FinDeLigne) -eq 0)) | Out-Null
 
     # 4. Mémoire privée au repos, après quelques secondes sans rien faire.
     Start-Sleep -Seconds 5
     Noter-Mesure -Nom 'mémoire privée au repos' -Valeur (Memoire-Privee-Mo -Processus $premiere) -Unite 'Mo'
 
     # 5. Une seconde instance sort avec 0 en moins de 10 s ; la première ouvre la barre de
-    # capture (comme Impr. écran) ; un seul processus.
+    # capture ; un clic sur « Zone » ouvre la sélection ; un seul processus.
     $seconde = Lancer-Et-Attendre -DelaiS 10 -LaisserVivant
     # Compter tout de suite, avant de tuer quoi que ce soit : une seconde instance restée
     # en vie au-delà du délai compte comme un second processus.
@@ -53,6 +56,17 @@ try {
     Verifier 'seconde instance : code de sortie 0' ($seconde.Code -eq 0) "code $($seconde.Code)" | Out-Null
     Verifier 'la première écrit « seconde instance: barre de capture »' (Attendre-Ligne -Texte 'seconde instance: barre de capture' -DelaiS 5) | Out-Null
     if ($IsWindows) {
+        # La barre montrée, ses boutons lus ; sans licence, rien de Pro.
+        $barre = Attendre-Barre -Dossier $script:Essai.Dossier -Quoi 'seconde instance'
+        $M = [BreezyShotEssai.MenuIcone]
+        Verifier 'la seconde instance ouvre la barre de capture' ($M::IsWindowVisible($barre.Fenetre)) "boutons : $($barre.Noms -join ', ')" | Out-Null
+        $attendus = @('Zone', 'Plein écran', 'Fenêtre', 'Retardateur', 'Réglages')
+        Verifier 'barre : Zone, Plein écran, Fenêtre, Retardateur, Réglages (sans licence)' (($barre.Noms -join '|') -eq ($attendus -join '|')) ($barre.Noms -join ', ') | Out-Null
+        # Un clic sur « Zone » : la barre se ferme, la sélection s'ouvre (après ATTENTE_MENU).
+        Cliquer-Bouton-Barre $barre 'Zone' 'seconde instance'
+        Verifier 'clic sur Zone : « barre choisi capturer_zone »' (Attendre-Ligne -Texte 'barre choisi capturer_zone' -DelaiS 5) | Out-Null
+        Verifier 'la barre se ferme au choix' (Attendre-Ligne -Texte 'barre fermee' -FinDeLigne -DelaiS 5) | Out-Null
+        Verifier 'puis « menu: capturer zone »' (Attendre-Ligne -Texte 'menu: capturer zone' -DelaiS 5) | Out-Null
         # La sélection vraiment montrée (pas « selection montree … impossible »), puis Échap
         # la referme et l'app revient au repos avant la suite.
         $montree = $false; $repos = $false
@@ -61,13 +75,58 @@ try {
             $montree = (Lire-Journal) -match 'selection montree \d+ voulu'
             if (-not $montree) { Start-Sleep -Milliseconds 100 }
         } while (-not $montree -and [DateTime]::UtcNow -lt $limite)
-        Verifier 'la seconde instance ouvre la sélection et sa barre' $montree | Out-Null
+        Verifier 'Zone ouvre la sélection et sa barre' $montree | Out-Null
+        Verifier 'la barre de capture n''est plus montrée' (-not $M::IsWindowVisible($barre.Fenetre)) | Out-Null
         $reposAvant = Compter-Lignes -Texte 'etat Selection -> Repos'
-        Initialiser-Menu-Icone
         Start-Sleep -Milliseconds 300
-        [BreezyShotEssai.MenuIcone]::Touche(0x1B)
+        $M::Touche(0x1B)
         $repos = Attendre-Ligne -Texte 'etat Selection -> Repos' -Fois ($reposAvant + 1) -DelaiS 5
         Verifier 'Échap referme la sélection (retour au repos)' $repos | Out-Null
+
+        # Relancée de nouveau : la barre se rouvre ; Échap la ferme sans rien lancer.
+        $encore = Lancer-Et-Attendre -DelaiS 10
+        Verifier 'troisième lancement : code de sortie 0' ($encore.Fini -and $encore.Code -eq 0) "code $($encore.Code)" | Out-Null
+        $barre = Attendre-Barre -Dossier $script:Essai.Dossier -Quoi 'troisième lancement' -Fois 2
+        $fermees = Compter-Lignes -Texte 'barre fermee' -FinDeLigne
+        # Un clic sur le logo (aucune action) lui donne le clavier et la laisse ouverte. Le
+        # bouton « Zone » mesure 36 px logiques ; le logo est centré 18 px à sa gauche, la
+        # carte finit 5 px sous lui, et la marge de l'ombre 24 px plus bas. Attendre d'abord
+        # la fin du délai du double-clic (un clic ailleurs y serait ignoré).
+        Start-Sleep -Milliseconds 600
+        $r = $barre.Boutons['Zone'].Current.BoundingRectangle
+        $k = $r.Height / 36
+        $x = [int]($r.X - 18 * $k); $y = [int]($r.Y + $r.Height / 2)
+        if ($M::RacineSous($x, $y) -ne $barre.Fenetre) { throw "troisième lancement : le logo de la barre n'est pas sous le point $x,$y" }
+        $M::Cliquer($x, $y)
+        Start-Sleep -Milliseconds 300
+        Verifier 'un clic sur le logo laisse la barre ouverte' (($M::IsWindowVisible($barre.Fenetre)) -and ((Compter-Lignes -Texte 'barre fermee' -FinDeLigne) -eq $fermees)) | Out-Null
+        # Après ce clic, la barre est au premier plan : sinon, l'essai échoue (jamais de
+        # touche envoyée hors des fenêtres de l'app).
+        $limite = [DateTime]::UtcNow.AddSeconds(2)
+        while ($M::GetForegroundWindow() -ne $barre.Fenetre -and [DateTime]::UtcNow -lt $limite) { Start-Sleep -Milliseconds 30 }
+        $devant = $M::GetForegroundWindow() -eq $barre.Fenetre
+        Verifier 'la barre au premier plan après un clic sur elle' $devant "premier plan : $($M::GetForegroundWindow())" | Out-Null
+        if ($devant) {
+            $M::Touche(0x1B)
+            Verifier 'Échap ferme la barre' (Attendre-Ligne -Texte 'barre fermee' -FinDeLigne -Fois ($fermees + 1) -DelaiS 5) | Out-Null
+        }
+        else {
+            Verifier 'Échap ferme la barre' $false 'non essayé : la barre n''est pas au premier plan' | Out-Null
+        }
+
+        # Quatrième lancement : un clic dans la marge de l'ombre, sous la carte, la ferme.
+        $encore = Lancer-Et-Attendre -DelaiS 10
+        Verifier 'quatrième lancement : code de sortie 0' ($encore.Fini -and $encore.Code -eq 0) "code $($encore.Code)" | Out-Null
+        $barre = Attendre-Barre -Dossier $script:Essai.Dossier -Quoi 'quatrième lancement' -Fois 3
+        $fermees = Compter-Lignes -Texte 'barre fermee' -FinDeLigne
+        Start-Sleep -Milliseconds 600
+        $r = $barre.Boutons['Zone'].Current.BoundingRectangle
+        $k = $r.Height / 36
+        $x = [int]($r.X + $r.Width / 2); $y = [int]($r.Y + $r.Height + 14 * $k)
+        if ($M::RacineSous($x, $y) -ne $barre.Fenetre) { throw "quatrième lancement : la marge de la barre n'est pas sous le point $x,$y" }
+        $M::Cliquer($x, $y)
+        Verifier 'un clic dans la marge, hors de la carte, ferme la barre' (Attendre-Ligne -Texte 'barre fermee' -FinDeLigne -Fois ($fermees + 1) -DelaiS 5) | Out-Null
+        Verifier 'rien de lancé : un seul « barre choisi »' ((Compter-Lignes -Texte 'barre choisi') -eq 1) | Out-Null
     }
     Verifier 'un seul processus BreezyShot' ($restants.Count -eq 1) "$($restants.Count) processus" | Out-Null
     if (-not $seconde.Fini) { try { $seconde.Processus.Kill() } catch { } }
@@ -94,6 +153,20 @@ try {
     Verifier '--quitter sans instance : sort en moins de 5 s' ($seul.Fini -and $seul.DureeS -lt 5) "$($seul.DureeS) s" | Out-Null
     Verifier '--quitter sans instance : code de sortie 0' ($seul.Code -eq 0) "code $($seul.Code)" | Out-Null
     Verifier 'une seule ligne « arret propre » au total' ((Compter-Lignes -Texte 'arret propre') -eq 1) | Out-Null
+
+    # 8. Premier lancement à la main (sans option, l'app pas encore lancée) : la barre de
+    # capture s'ouvre à « pret ». Puis --quitter.
+    $ouvertes = Compter-Lignes -Texte 'barre ouverte' -FinDeLigne
+    $nu = Demarrer-App -Nu
+    Verifier 'lancement à la main : « lancement a la main: barre de capture a pret »' (Attendre-Ligne -Texte 'lancement a la main: barre de capture a pret' -DelaiS 30) | Out-Null
+    if ($IsWindows) {
+        # « barre ouverte » suit « pret » (la demande attend la fin du démarrage).
+        $barre = Attendre-Barre -Dossier $script:Essai.Dossier -Quoi 'lancement à la main' -Fois ($ouvertes + 1) -DelaiS 30
+        Verifier 'lancement à la main : la barre de capture montrée' ([BreezyShotEssai.MenuIcone]::IsWindowVisible($barre.Fenetre)) "boutons : $($barre.Noms -join ', ')" | Out-Null
+    }
+    $q = Quitter-App -DelaiS 10
+    Verifier 'lancement à la main : --quitter, code de sortie 0' ($q.Fini -and $q.Code -eq 0) "code $($q.Code)" | Out-Null
+    Verifier 'lancement à la main : l''app se ferme' ($nu.WaitForExit(10000)) | Out-Null
 }
 catch {
     Verifier "déroulement de l'essai" $false "$_" | Out-Null

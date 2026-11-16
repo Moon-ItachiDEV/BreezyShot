@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-barre-choisi"
+description = "Enables the barre_choisi command without any pre-configured scope."
+commands.allow = ["barre_choisi"]
+
+[[permission]]
+identifier = "deny-barre-choisi"
+description = "Denies the barre_choisi command without any pre-configured scope."
+commands.deny = ["barre_choisi"]

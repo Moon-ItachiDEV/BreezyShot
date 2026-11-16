@@ -74,10 +74,15 @@ pub fn cles(essai: bool) -> (&'static str, &'static str) {
     }
 }
 
+/// L'option qui démarre l'app sans rien montrer (0.7.2) : écrite dans `Run`, l'app lancée
+/// par Windows à l'ouverture de session n'ouvre pas la barre de capture. Lue par
+/// `application::arguments`.
+pub const OPTION_DISCRET: &str = "--discret";
+
 /// Le texte écrit dans `Run` : le chemin de l'exe entre guillemets (un chemin avec des
-/// espaces reste un seul programme). Fonction pure.
+/// espaces reste un seul programme), puis `OPTION_DISCRET`. Fonction pure.
 pub fn commande(exe: &Path) -> String {
-    format!("\"{}\"", exe.display())
+    format!("\"{}\" {OPTION_DISCRET}", exe.display())
 }
 
 /// Règle pure : `run` est la valeur de `Run` si elle existe, `approuve` celle de
@@ -92,8 +97,9 @@ pub fn etat_depuis(run: Option<&str>, approuve: Option<&[u8]>) -> EtatDemarrage 
 }
 
 /// Règle pure : faut-il réécrire la valeur `Run` vers l'exe en cours ? Seulement si elle
-/// existe (jamais d'inscription que l'utilisateur n'a pas demandée) et pointe ailleurs
-/// (copie lancée hors installation, puis installée). Un chemin Windows ne tient pas compte
+/// existe (jamais d'inscription que l'utilisateur n'a pas demandée) et diffère de
+/// `attendue` : elle pointe ailleurs (copie lancée hors installation, puis installée), ou
+/// c'est l'ancienne valeur sans `OPTION_DISCRET` (jusqu'à la 0.7.1). Un chemin Windows ne tient pas compte
 /// de la casse. La désactivation par le gestionnaire des tâches ne compte pas : elle vit
 /// dans `StartupApproved\Run` sous le même nom, que la réécriture ne touche pas, et reste
 /// donc telle quelle.
@@ -163,8 +169,25 @@ mod tests {
     }
 
     #[test]
+    fn reecrire_l_ancienne_valeur_sans_option() {
+        let exe = Path::new("C:\\Programs\\BreezyShot\\breezyshot.exe");
+        let attendue = commande(exe);
+        assert_eq!(
+            attendue,
+            "\"C:\\Programs\\BreezyShot\\breezyshot.exe\" --discret"
+        );
+        assert!(doit_reecrire(
+            Some("\"C:\\Programs\\BreezyShot\\breezyshot.exe\""),
+            &attendue
+        ));
+        assert!(!doit_reecrire(Some(&attendue), &attendue));
+        assert!(!doit_reecrire(None, &attendue));
+    }
+
+    #[test]
     fn reecrire_seulement_une_valeur_qui_pointe_ailleurs() {
-        let moi = "\"C:\\Users\\a\\AppData\\Local\\Programs\\BreezyShot\\breezyshot.exe\"";
+        let moi =
+            "\"C:\\Users\\a\\AppData\\Local\\Programs\\BreezyShot\\breezyshot.exe\" --discret";
         assert!(
             !doit_reecrire(None, moi),
             "absente : jamais inscrite d'office"
@@ -185,7 +208,7 @@ mod tests {
     #[test]
     fn commande_entre_guillemets() {
         let exe = Path::new("/opt/Breezy Shot/breezyshot");
-        assert_eq!(commande(exe), "\"/opt/Breezy Shot/breezyshot\"");
+        assert_eq!(commande(exe), "\"/opt/Breezy Shot/breezyshot\" --discret");
     }
 
     #[test]

@@ -9,7 +9,8 @@
 //!   ouverture suivante ; `menu:vider` quand le menu est caché.
 //! - `menu_choisi` { id } : une ligne choisie ; le menu se cache, l'entrée est traitée au
 //!   tour suivant de la boucle (jamais une fenêtre créée dans la commande d'une page).
-//! - `menu_fermer` : Échap ou Tab ; le menu se cache.
+//! - `menu_fermer` : Échap ou Tab, ou un clic dans la marge transparente autour de la
+//!   carte ; le menu se cache.
 
 use tauri::AppHandle;
 
@@ -18,6 +19,7 @@ use super::{
     entrees_pendant_defilante, geste_defilante, geste_film, menu_actuel, poster_plus_tard,
     Evenement,
 };
+use crate::fenetres::barre;
 use crate::fenetres::menu::{self, Ligne, Ouverture};
 use crate::fenetres::{theme, Rect};
 
@@ -49,9 +51,9 @@ pub fn lignes(entrees: &[EntreeMenu]) -> Vec<Ligne> {
         .collect()
 }
 
-/// Clic sur l'icône : ouvre le menu au-dessus d'elle, ou le ferme s'il est ouvert. Un clic
+/// Clic sur l'icône : ouvre le menu au pointeur, ou le ferme s'il est ouvert. Un clic
 /// qui vient de le fermer (le menu perd le focus au même clic) ne le rouvre pas.
-pub fn clic_icone(app: &AppHandle, rect: Rect) {
+pub fn clic_icone(app: &AppHandle, rect: Rect, pointeur: Option<(i32, i32)>) {
     log::info!("icone: clic");
     if menu::ouvert(app) {
         let _ = menu::cacher(app);
@@ -60,6 +62,8 @@ pub fn clic_icone(app: &AppHandle, rect: Rect) {
     if menu::vient_de_fermer() {
         return;
     }
+    // La barre de capture et le menu ne sont jamais montrés ensemble.
+    let _ = barre::cacher(app);
     let pendant_defilante = geste_defilante::fenetres_bloquees(app);
     let pendant_film = geste_film::fenetres_bloquees(app);
     let entrees = if pendant_defilante {
@@ -81,6 +85,7 @@ pub fn clic_icone(app: &AppHandle, rect: Rect) {
     if menu::ouvrir(
         app,
         Some(rect),
+        pointeur,
         lignes(&entrees),
         pendant_defilante || pendant_film,
     ) {

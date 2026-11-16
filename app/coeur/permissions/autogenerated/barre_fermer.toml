@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-barre-fermer"
+description = "Enables the barre_fermer command without any pre-configured scope."
+commands.allow = ["barre_fermer"]
+
+[[permission]]
+identifier = "deny-barre-fermer"
+description = "Denies the barre_fermer command without any pre-configured scope."
+commands.deny = ["barre_fermer"]

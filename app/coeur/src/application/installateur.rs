@@ -22,6 +22,14 @@ use crate::installation::{
 };
 use crate::systeme::installation as sys;
 use crate::systeme::installation::{ErreurFichier, Valeur, Verrou};
+use crate::systeme::OPTION_DISCRET;
+
+/// Les arguments de l'app lancée par l'installateur (fin d'installation, « plus récente
+/// installée ») : `--discret`, rien de visible. L'installateur dit lui-même que l'app est
+/// prête ; la barre de capture ne s'ouvre pas par-dessus.
+pub const ARGUMENTS_APP: &[&str] = &[OPTION_DISCRET];
+/// Les arguments de « Essayer une capture » : une capture de zone, sans barre.
+pub const ARGUMENTS_ESSAYER: &[&str] = &["--capturer", "zone"];
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -503,7 +511,7 @@ fn inscrire(etat: &Etat) -> Result<(), ErreurInstallation> {
 
 fn lancer_etape(app: &AppHandle, etat: &Etat) -> Result<(), ErreurInstallation> {
     sys::permettre_premier_plan();
-    sys::lancer(&etat.emplacements.exe, &[]).map_err(|d| {
+    sys::lancer(&etat.emplacements.exe, ARGUMENTS_APP).map_err(|d| {
         log::info!("etape lancement: erreur {d}");
         ErreurInstallation::Lancement
     })?;
@@ -569,7 +577,7 @@ fn finir(app: &AppHandle, etat: &Etat, geste: Geste, erreur: Option<ErreurInstal
 fn essayer_capture(app: &AppHandle, etat: &Etat) {
     lancer_app_installee(app, etat);
     sys::permettre_premier_plan();
-    let _ = sys::lancer(&etat.emplacements.exe, &["--capturer", "zone"]);
+    let _ = sys::lancer(&etat.emplacements.exe, ARGUMENTS_ESSAYER);
     log::info!("essayer: capture zone demandee");
 }
 
@@ -580,7 +588,7 @@ fn lancer_app_installee(app: &AppHandle, etat: &Etat) {
         return;
     }
     if !sys::verrou_existe(&nom_verrou_app(IDENTIFIANT)) {
-        let _ = sys::lancer(&etat.emplacements.exe, &[]);
+        let _ = sys::lancer(&etat.emplacements.exe, ARGUMENTS_APP);
     }
     let _ = app;
 }
@@ -891,5 +899,26 @@ fn si(cond: bool, oui: &'static str, non: &'static str) -> &'static str {
         oui
     } else {
         non
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{ARGUMENTS_APP, ARGUMENTS_ESSAYER};
+    use crate::application::arguments::{lancement, lire, Commande, Lancement};
+
+    #[test]
+    fn l_installateur_ne_lance_jamais_la_barre() {
+        // Fin d'installation, « plus récente installée » : l'app sans rien de visible.
+        assert_eq!(lire(ARGUMENTS_APP), (Commande::Discret, vec![]));
+        assert_eq!(
+            lancement(Some("breezyshot.exe"), &Commande::Discret),
+            Lancement::App(Commande::Discret)
+        );
+        // « Essayer une capture » : la capture de zone, pas la barre.
+        assert_eq!(
+            lire(ARGUMENTS_ESSAYER),
+            (Commande::Capturer("zone".into()), vec![])
+        );
     }
 }

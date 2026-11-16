@@ -389,6 +389,14 @@ pub fn bouton_souris_enfonce() -> bool {
     }
 }
 
+/// Délai du double-clic du système, en millisecondes (`GetDoubleClickTime`).
+pub fn delai_double_clic_ms() -> Option<u32> {
+    use windows::Win32::UI::Input::KeyboardAndMouse::GetDoubleClickTime;
+    // SAFETY : sans paramètre.
+    let ms = unsafe { GetDoubleClickTime() };
+    (ms > 0).then_some(ms)
+}
+
 pub fn position_souris() -> Option<(f64, f64)> {
     let mut p = POINT::default();
     // SAFETY : `p` reçoit la position.

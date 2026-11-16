@@ -1093,3 +1093,91 @@ très pâles ou très foncées et « Autre couleur », la CSP.
 - Rien n'a été essayé sur un vrai Windows par une personne : à l'utilisateur, d'après la
   liste unique des tests à faire.
 - Les pages sont essayées dans Chromium sous Linux, pas dans WebView2.
+
+## Retours des premiers essais de la 0.7 (version 0.7.2)
+
+Retours de l'utilisateur le 15/11/2026, sur la 0.7.1 :
+
+- Le menu de l'icône s'ouvrait au-dessus de l'icône, bord droit à 44 px à droite de son
+  centre : dans le panneau des icônes cachées, il partait loin à gauche et au-dessus du
+  panneau. Il se pose maintenant comme un menu de Windows : le coin bas gauche de la carte
+  au pointeur, la carte vers la droite, ou vers la gauche sans place ; pour un clic dans la
+  barre des tâches, au-dessus de la barre. Le pointeur ne compte que s'il est sur l'icône
+  (à 4 px près) ; sinon (clavier, automatisation) le menu part du haut de l'icône.
+- Éditeur : « Enregistrer » et « Enregistrer sous » semblaient en double. Ils ne font pas
+  la même chose : le premier range l'image dans le dossier des captures sans rien
+  demander, le second demande le dossier et le nom. L'entrée du menu « … » s'écrit
+  maintenant « Enregistrer sous… » : les points disent, comme partout dans Windows, qu'une
+  fenêtre s'ouvre pour choisir. Les info-bulles restent le nom seul (règle de l'éditeur).
+- « Je fais comment une vidéo ? », et Vidéo absente de Réglages › Raccourcis : la licence
+  d'essai n'était pas activée ; sans elle, les fonctions Pro sont cachées partout. Rien
+  ne change dans l'app ; la licence lui a été redonnée.
+- « Clic sur l'icône épinglée : toujours pas la barre en haut avec le choix du type de
+  capture. » Depuis la 0.5.3, relancer l'app n'ouvrait que la sélection de zone. Relancer
+  l'app déjà ouverte ouvre maintenant la barre de capture du design validé le 12/11 : en
+  haut de l'écran sous la souris, Zone, Plein écran, Fenêtre | Capture défilante, Vidéo ou
+  GIF, Retardateur | Réglages (icône « Curseurs »). Ses boutons sont ceux du menu de
+  l'icône (rien de Pro sans licence). Un choix lance l'action comme le menu ; le
+  retardateur change le réglage de Réglages › Capture et la barre reste ouverte. Elle se
+  ferme sur Échap, au clic ailleurs, au choix et quand une capture démarre ; relancée
+  ouverte, elle reste ouverte. Impr. écran, les raccourcis et le menu ne changent pas.
+
+Corrections de la relecture de la 0.7.2 :
+
+- Menu de l'icône : un second clic sur l'icône sans bouger tombait dans la marge
+  transparente de la fenêtre du menu (le coin de la carte est au pointeur) et le menu
+  restait ouvert. Tout clic hors de la carte le ferme maintenant. Un clic sur l'icône
+  cache la barre de capture avant d'ouvrir le menu. Le journal donne la place retenue
+  (`menu place: icone …, pointeur …, point …`).
+- La barre ne s'ouvrait pas au tout premier lancement, l'app pas encore ouverte. Un
+  lancement à la main l'ouvre maintenant à la fin du démarrage. Pour que l'ouverture de
+  session ne montre rien, la valeur « Démarrer avec Windows » de la clé `Run` porte
+  l'option `--discret` (démarrer sans rien montrer) ; l'ancienne valeur sans option est
+  réécrite au démarrage. L'installateur relance l'app (avec `--discret`) à la fin d'une
+  mise à jour : la valeur est réécrite à ce moment-là ; la barre ne s'ouvrirait à
+  l'ouverture de session que si l'app n'avait pas démarré depuis la mise à jour. L'installateur lance l'app avec `--discret` ; « Essayer une
+  capture » (`--capturer zone`) et `--quitter` n'ouvrent pas la barre. Une capture en
+  attente du démarrage n'est jamais remplacée par la barre. Les essais lancent l'app avec
+  `--discret` par défaut, et `Demarrer-App -Nu` pour un lancement à la main.
+- Double-clic sur l'icône épinglée : le second clic refermait la barre que le premier
+  venait d'ouvrir. Pendant le délai de double-clic de Windows après l'ouverture, la perte
+  du focus et les clics hors de la barre sont ignorés.
+- Ombre de la barre coupée en bas : la marge basse passe à 24 px.
+- Le retardateur de la barre est refusé si la barre est cachée ou ne le montre pas.
+
+### Vérifié
+
+- Tests du placement (`menu::placer`, `menu::point_d_ancrage`) : barre en bas et en
+  haut, bords gauche et droit, panneau des icônes cachées, échelle 150 %, écran à gauche,
+  pointeur loin de l'icône.
+- Page de l'éditeur : l'entrée « Enregistrer sous… » du menu « … ».
+- Barre de capture : tests de sa place (`barre::placer` : échelles, barre des tâches en
+  haut et à gauche, écran à coordonnées négatives, zone plus étroite que la barre), de
+  ses boutons tirés du menu (sans licence, avec, sans Media Foundation, sans images
+  vivantes, pendant une défilante) et des états où elle ne s'ouvre pas ; page
+  `essais/pages/barre.cjs` (boutons selon la charge, taille rendue, choix, menus Vidéo/GIF
+  et Retardateur, clavier, Échap, clic dans la marge, thèmes, mouvement réduit, CSP).
+- Relecture : tests purs de `--discret` (`arguments::lire`, priorités, option inconnue),
+  de la valeur `Run` et de la réécriture de l'ancienne (`demarrage::commande`,
+  `doit_reecrire`), de `attente_avec_barre`, du délai de double-clic
+  (`barre::dans_le_double_clic`) et de la ligne `menu place` ; page `menu.cjs` (clic dans
+  la marge : `menu_fermer` ; clic dans la carte : rien) ; page `barre.cjs` (l'ombre tient
+  dans les marges : côtés 16, bas 24, haut 8 px pour 14 de marge).
+- Seconde relecture : délai du double-clic plafonné à 1 s (`GetDoubleClickTime` peut
+  valoir 5 s ; test `delai_du_double_clic`) ; arguments des lancements de l'installateur
+  fixés (`ARGUMENTS_APP` : `--discret`, `ARGUMENTS_ESSAYER` : `--capturer zone`, test
+  `l_installateur_ne_lance_jamais_la_barre`).
+
+### Non vérifié
+
+- Le menu dans le vrai panneau des icônes cachées : à l'utilisateur.
+- La barre dans WebView2 : premier plan à la relance, redimensionnement à la mesure de la
+  page, menus volants, sur plusieurs écrans et à 150 % ; l'essai `01-socle.ps1` (barre
+  montrée, clic sur « Zone », sélection ouverte, Échap) n'a pas été joué ici.
+- Relecture : les essais Windows modifiés (`01-socle.ps1` : lancement discret sans barre,
+  clic sur la barre, Échap, clic dans la marge, premier lancement à la main ;
+  `08-reglages-fenetre.ps1` : valeur `Run` avec `--discret` ; `09` : app installée
+  lancée discrète, sans barre) n'ont pas été joués ici. Le double-clic réel sur l'icône épinglée, le
+  second clic sur l'icône de la zone de notification dans WebView2, et la première
+  ouverture de session après une mise à jour : à l'utilisateur.
+

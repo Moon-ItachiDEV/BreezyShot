@@ -6,7 +6,7 @@
 // - écoute `menu:ouvrir` { lignes: [{ id, libelle, raccourci, separateur }] }, et
 //   `menu:vider` (menu caché : la carte se vide, rien d'ancien à la prochaine ouverture).
 // - `menu_choisi` { id } au clic (ou Entrée, Espace) sur une ligne.
-// - `menu_fermer` sur Échap ou Tab.
+// - `menu_fermer` sur Échap ou Tab, ou au clic dans la marge transparente hors de la carte.
 // Flèches haut et bas (la première pression prend la première ou la dernière ligne),
 // Début, Fin : d'une ligne à l'autre.
 // Sans window.__TAURI__ (aperçu dans un navigateur) : un menu de démonstration.
@@ -110,6 +110,13 @@ document.addEventListener("keydown", (e) => {
     e.preventDefault();
     choisir(tous[i].dataset.id);
   }
+});
+// La marge transparente autour de la carte (place de l'ombre) : un clic là est un clic
+// ailleurs, le menu se ferme. Le coin de la carte est au pointeur : un second clic sans
+// bouger, pour refermer, tombe dans cette marge.
+document.addEventListener("pointerdown", (e) => {
+  if (!menu.children.length || menu.contains(e.target)) return;
+  appeler("menu_fermer").catch(() => {});
 });
 // Pas de menu du navigateur dans le menu.
 document.addEventListener("contextmenu", (e) => e.preventDefault());

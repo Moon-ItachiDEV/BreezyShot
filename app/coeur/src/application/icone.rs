@@ -4,7 +4,8 @@
 //! un module ou un lot futur ajoute une entrée à la liste, jamais un cas écrit ici.
 //!
 //! Sous Windows et macOS, le menu est la fenêtre web `fenetres::menu` (piste A « Liste ») :
-//! un clic gauche ou droit sur l'icône appelle `au_clic` avec le rectangle de l'icône, et
+//! un clic gauche ou droit sur l'icône appelle `au_clic` avec le rectangle de l'icône et la
+//! place du pointeur, et
 //! le moulinet fait un quart de tour (`tourner`). Sous Linux, où Tauri ne rapporte pas les
 //! clics sur l'icône, le menu natif reste.
 
@@ -106,9 +107,15 @@ fn rect_physique(r: &tauri::Rect) -> Rect {
     }
 }
 
+/// La place du pointeur au clic, en pixels réels ; `None` si elle est absurde.
+fn point(p: tauri::PhysicalPosition<f64>) -> Option<(i32, i32)> {
+    let dans = |v: f64| v.is_finite() && v.abs() < 1.0e6;
+    (dans(p.x) && dans(p.y)).then(|| (p.x.round() as i32, p.y.round() as i32))
+}
+
 /// Installe l'icône. `au_menu` reçoit l'identifiant de l'entrée choisie dans le menu natif
-/// (Linux) ; `au_clic`, le rectangle de l'icône à chaque clic gauche ou droit relâché
-/// (Windows, macOS : le menu web).
+/// (Linux) ; `au_clic`, le rectangle de l'icône et la place du pointeur (pixels réels) à
+/// chaque clic gauche ou droit relâché (Windows, macOS : le menu web).
 pub fn installer<F, C>(
     app: &AppHandle,
     theme: Theme,
@@ -119,7 +126,7 @@ pub fn installer<F, C>(
 ) -> Result<(), String>
 where
     F: Fn(&AppHandle, String) + Send + Sync + 'static,
-    C: Fn(&AppHandle, Rect) + Send + Sync + 'static,
+    C: Fn(&AppHandle, Rect, Option<(i32, i32)>) + Send + Sync + 'static,
 {
     let image = Image::from_bytes(image_png(theme, taille)).map_err(|e| format!("image: {e}"))?;
     let menu = if MENU_WEB {
@@ -140,10 +147,11 @@ where
                     button: MouseButton::Left | MouseButton::Right,
                     button_state: MouseButtonState::Up,
                     rect,
+                    position,
                     ..
                 } = evenement
                 {
-                    au_clic(icone.app_handle(), rect_physique(&rect));
+                    au_clic(icone.app_handle(), rect_physique(&rect), point(position));
                 }
             });
         if let Some(menu) = &menu {
