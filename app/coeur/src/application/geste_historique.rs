@@ -570,6 +570,8 @@ fn annoter_lu(
                 pixels: Arc::new(pixels),
                 transparence,
                 maintenant: heure,
+                annotations: None,
+                breezy: None,
             };
             app.run_on_main_thread(move || super::recevoir_document(&pour, document, demande_a))
         }

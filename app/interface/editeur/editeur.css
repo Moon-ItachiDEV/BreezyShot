@@ -233,6 +233,21 @@ input {
 .mi.danger {
   color: var(--editeur-danger);
 }
+/* Sans licence, « Enregistrer en .breezy » reste visible, éteint, avec sa mention Pro : un
+   clic ouvre Réglages › Licence. */
+.mi.pro {
+  opacity: 0.6;
+}
+.mi.pro::after {
+  content: "Pro";
+  margin-left: auto;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--editeur-survol);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
 /* Message, étiquette du zoom */
 .msg,
 .etiquette-zoom {

@@ -10,8 +10,8 @@ pub mod parcours;
 pub mod version;
 
 pub use emplacements::{
-    dossier_webview_a_nous, ecritures, emplacements, retraits, valeurs_desinstallation, Ecriture,
-    Emplacements, Retrait,
+    association, cles_association, dossier_webview_a_nous, ecritures, emplacements, retraits,
+    valeurs_desinstallation, Ecriture, Emplacements, Retrait,
 };
 pub use envol::{cible_envol, place_fenetre, position_envol};
 pub use parcours::{

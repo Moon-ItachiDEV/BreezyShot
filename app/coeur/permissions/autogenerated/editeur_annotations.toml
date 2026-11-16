@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-editeur-annotations"
+description = "Enables the editeur_annotations command without any pre-configured scope."
+commands.allow = ["editeur_annotations"]
+
+[[permission]]
+identifier = "deny-editeur-annotations"
+description = "Denies the editeur_annotations command without any pre-configured scope."
+commands.deny = ["editeur_annotations"]

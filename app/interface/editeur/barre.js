@@ -728,6 +728,11 @@ export function installerBarre(ed) {
       fermerMenus();
       exporter("enregistrer_sous");
     },
+    enregistrerBreezy: () => {
+      fermerMenus();
+      if (ed.exportEnCours()) return;
+      ed.enregistrerBreezy();
+    },
   };
   function glisserEnCours(oui) {
     for (const b of $$("[data-glisser]", haut)) b.classList.toggle("glisse", oui);
@@ -750,6 +755,7 @@ export function installerBarre(ed) {
       fermerMenus();
       ed.actions.enregistrer();
     } else if (a === "enregistrer_sous") ed.actions.enregistrerSous();
+    else if (a === "enregistrer_breezy") ed.actions.enregistrerBreezy();
     else if (a === "texte") {
       fermerMenus();
       ed.texte?.lancer();
@@ -987,6 +993,16 @@ export function installerBarre(ed) {
     const grises =
       '[data-act="enregistrer"], [data-act="copier"], [data-glisser], [data-menu="enregistrer"]';
     for (const b of $$(grises, haut)) b.disabled = calque;
+    $('[data-act="enregistrer_breezy"]', menuEnregistrer).disabled = calque;
+  }
+  // « Enregistrer en .breezy » est une fonction Pro : sans licence l'entrée reste visible,
+  // éteinte, avec sa mention ; son clic ouvre Réglages › Licence (c'est le cœur qui décide).
+  function poserBreezy(pro) {
+    const b = $('[data-act="enregistrer_breezy"]', menuEnregistrer);
+    if (!b) return;
+    b.classList.toggle("pro", !pro);
+    // La mention « Pro » est peinte par la feuille de style ; le nom accessible la dit aussi.
+    b.setAttribute("aria-label", pro ? "Enregistrer en .breezy" : "Enregistrer en .breezy, Pro");
   }
   function remiseAZero() {
     fermerMenus(false);
@@ -1001,6 +1017,7 @@ export function installerBarre(ed) {
   return {
     synchroniser,
     remiseAZero,
+    poserBreezy,
     fait,
     message,
     copierReussi,

@@ -38,11 +38,29 @@ pub fn choisir_fichier_png(
     plateforme::choisir_fichier_png(proprietaire, depart, nom)
 }
 
+/// Le dialogue « Enregistrer sous » pour un fichier `.breezy` (0.7.5) : comme
+/// `choisir_fichier_png`, filtre « Fichier BreezyShot », extension `.breezy` imposee.
+pub fn choisir_fichier_breezy(
+    proprietaire: Option<isize>,
+    depart: Option<&Path>,
+    nom: &str,
+) -> Result<Option<PathBuf>, String> {
+    plateforme::choisir_fichier_breezy(proprietaire, depart, nom)
+}
+
 // ---------- Ce qui se decide sans ouvrir le dialogue (teste partout, servi a Windows) ----------
 
 /// Le seul filtre du dialogue « Enregistrer sous » : son nom montre et son motif.
 #[cfg_attr(not(windows), allow(dead_code))]
 const FILTRE_PNG: (&str, &str) = ("Image PNG", "*.png");
+
+/// Le filtre du dialogue pour un fichier `.breezy`.
+#[cfg_attr(not(windows), allow(dead_code))]
+const FILTRE_BREEZY: (&str, &str) = ("Fichier BreezyShot", "*.breezy");
+
+/// L'extension d'un fichier `.breezy`, sans point.
+#[cfg_attr(not(windows), allow(dead_code))]
+const EXTENSION_BREEZY: &str = "breezy";
 
 /// L'extension imposee, sans point (`SetDefaultExtension`).
 #[cfg_attr(not(windows), allow(dead_code))]
@@ -57,38 +75,54 @@ fn large(texte: &str) -> Vec<u16> {
 /// Le nom propose dans le dialogue : le dernier element de `nom` (jamais un dossier),
 /// sans blancs autour, avec `.png` s'il ne l'a pas deja (casse ignoree). `None` : rien a
 /// proposer, le dialogue garde son champ vide.
-#[cfg_attr(not(windows), allow(dead_code))]
+#[cfg_attr(not(test), allow(dead_code))]
 fn nom_propose(nom: &str) -> Option<String> {
+    nom_propose_avec(nom, EXTENSION_PNG)
+}
+
+/// `nom_propose` pour l'extension `extension` (sans point).
+#[cfg_attr(not(windows), allow(dead_code))]
+fn nom_propose_avec(nom: &str, extension: &str) -> Option<String> {
     let dernier = nom.rsplit(['/', '\\']).next().unwrap_or("").trim();
     if dernier.is_empty() || dernier.chars().all(|c| c == '.') {
         return None;
     }
-    if a_extension_png(Path::new(dernier)) {
+    if a_extension(Path::new(dernier), extension) {
         Some(dernier.to_string())
     } else {
-        Some(format!("{dernier}.{EXTENSION_PNG}"))
+        Some(format!("{dernier}.{extension}"))
     }
 }
 
-/// Vrai si le chemin finit par `.png`, quelle que soit la casse.
+/// Vrai si le chemin finit par `.extension`, quelle que soit la casse.
 #[cfg_attr(not(windows), allow(dead_code))]
-fn a_extension_png(chemin: &Path) -> bool {
+fn a_extension(chemin: &Path, extension: &str) -> bool {
     chemin
         .extension()
-        .is_some_and(|e| e.eq_ignore_ascii_case(EXTENSION_PNG))
+        .is_some_and(|e| e.eq_ignore_ascii_case(extension))
 }
 
 /// Le chemin rendu par le dialogue, avec `.png` impose. Le systeme l'ajoute deja (extension
 /// par defaut, types stricts) ; s'il manquait quand meme, il est ajoute ici, sauf si le nom
 /// ainsi forme existe deja : son remplacement n'a pas ete confirme, on refuse.
-#[cfg_attr(not(windows), allow(dead_code))]
+#[cfg_attr(not(test), allow(dead_code))]
 fn chemin_png(choisi: PathBuf, existe: impl Fn(&Path) -> bool) -> Result<PathBuf, String> {
-    if a_extension_png(&choisi) {
+    chemin_avec_extension(choisi, EXTENSION_PNG, existe)
+}
+
+/// `chemin_png` pour l'extension `extension` (sans point).
+#[cfg_attr(not(windows), allow(dead_code))]
+fn chemin_avec_extension(
+    choisi: PathBuf,
+    extension: &str,
+    existe: impl Fn(&Path) -> bool,
+) -> Result<PathBuf, String> {
+    if a_extension(&choisi, extension) {
         return Ok(choisi);
     }
     let mut texte = OsString::from(choisi);
     texte.push(".");
-    texte.push(EXTENSION_PNG);
+    texte.push(extension);
     let chemin = PathBuf::from(texte);
     if existe(&chemin) {
         Err("extension: remplacement non confirme".into())
@@ -203,5 +237,26 @@ mod tests {
             chemin_depuis_large(&[67, 0xD800, 0]),
             Err("chemin: non unicode".into())
         );
+    }
+
+    #[test]
+    fn fichier_breezy_nom_extension_et_filtre() {
+        assert_eq!(
+            large(FILTRE_BREEZY.0),
+            "Fichier BreezyShot\0".encode_utf16().collect::<Vec<_>>()
+        );
+        assert_eq!(FILTRE_BREEZY.1, "*.breezy");
+        assert_eq!(
+            nom_propose_avec("Capture", EXTENSION_BREEZY).as_deref(),
+            Some("Capture.breezy")
+        );
+        assert_eq!(
+            nom_propose_avec(r"C:\x\Capture.BREEZY", EXTENSION_BREEZY).as_deref(),
+            Some("Capture.BREEZY")
+        );
+        assert_eq!(nom_propose_avec("...", EXTENSION_BREEZY), None);
+        let chemin = chemin_avec_extension("/d/a".into(), EXTENSION_BREEZY, |_| false);
+        assert_eq!(chemin, Ok(PathBuf::from("/d/a.breezy")));
+        assert!(chemin_avec_extension("/d/a".into(), EXTENSION_BREEZY, |_| true).is_err());
     }
 }

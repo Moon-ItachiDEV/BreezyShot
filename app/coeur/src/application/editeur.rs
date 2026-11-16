@@ -40,6 +40,11 @@ pub struct Document {
     pub transparence: bool,
     /// L'heure de la capture (nom du fichier enregistré, R8).
     pub maintenant: DateTime<Local>,
+    /// Les annotations d'un fichier `.breezy` rouvert (JSON, tel que le fichier le porte) :
+    /// la page les reçoit par `editeur_annotations`. `None` : une capture neuve.
+    pub annotations: Option<Arc<String>>,
+    /// Le fichier `.breezy` d'où vient le document (son nom est proposé à l'enregistrement).
+    pub breezy: Option<PathBuf>,
 }
 
 /// L'éditeur ouvert, tenu par l'Application (`Application.editeur`, fil principal).
@@ -76,6 +81,9 @@ pub struct EtatEditeur {
     /// remplacée par la suivante, oubliée avec le document. Le texte ne quitte le cœur que
     /// par `editeur_copier_texte`.
     pub texte: Option<(u64, Lu)>,
+    /// Un enregistrement `.breezy` est en cours (dialogue compris) : aucun autre export, ni
+    /// autre enregistrement `.breezy`, n'est accepté pendant ce temps (0.7.5).
+    pub breezy_en_cours: bool,
 }
 
 /// Un export parti dans le fil `editeur-sortie`.
@@ -240,6 +248,11 @@ pub struct ChargeEditeur {
     pub preferences: Option<String>,
     /// Le bouton « Texte » est montré (Copier le texte est une action construite, R10).
     pub texte: bool,
+    /// Une licence ouvre « Enregistrer en .breezy » (sinon l'entrée est montrée éteinte).
+    pub pro: bool,
+    /// Le document vient d'un fichier `.breezy` : la page lit ses annotations par
+    /// `editeur_annotations` avant de montrer l'image.
+    pub depuis_breezy: bool,
 }
 
 /// Pourquoi le cœur demande à la page de fermer (`editeur:fermer_demande`).
@@ -355,13 +368,19 @@ pub fn accepter_export(
     }
     // Un export n'est oublié que par son échéance (son résultat d'échec est alors émis) ou
     // par `export_perime`, qui le rend pour son résultat : jamais en silence.
-    let en_cours = etat.export.is_some_and(|x| {
-        x.dialogue || maintenant.saturating_duration_since(x.debut) < OUBLI_EXPORT
-    });
-    if en_cours {
+    if etat.breezy_en_cours {
+        return Err(Refus::DejaEnCours);
+    }
+    if export_en_cours(etat, maintenant) {
         return Err(Refus::DejaEnCours);
     }
     Ok(())
+}
+
+/// Un export est encore attendu : en dialogue, ou plus jeune que `OUBLI_EXPORT`.
+pub fn export_en_cours(etat: &EtatEditeur, maintenant: Instant) -> bool {
+    etat.export
+        .is_some_and(|x| x.dialogue || maintenant.saturating_duration_since(x.debut) < OUBLI_EXPORT)
 }
 
 /// Un export sans bilan ni échéance après ce délai (fil d'échéance impossible) est oublié
@@ -724,6 +743,7 @@ pub fn charge(
     reduites: bool,
     preferences: Option<String>,
     texte: bool,
+    pro: bool,
 ) -> ChargeEditeur {
     ChargeEditeur {
         id: etat.document.id,
@@ -733,6 +753,8 @@ pub fn charge(
         reduites,
         preferences,
         texte,
+        pro,
+        depuis_breezy: etat.document.annotations.is_some(),
     }
 }
 
@@ -776,13 +798,14 @@ impl EtatEditeur {
     /// L'éditeur qui s'ouvre sur `document` (fenêtre numéro `fenetre`).
     pub fn nouveau(document: Document, demande_a: Instant, fenetre: u64) -> EtatEditeur {
         EtatEditeur {
-            document,
             en_attente: None,
             demande_a,
             page_prete: false,
             version: 0,
             vide: true,
-            exportee: None,
+            // Un fichier .breezy rouvert est propre tant que la page n'y touche pas (sa
+            // version de départ est 0) ; remplacé par un autre document, il l'est aussi.
+            exportee: document.annotations.is_some().then_some(0),
             enregistree: None,
             rangee: None,
             export: None,
@@ -792,6 +815,8 @@ impl EtatEditeur {
             sans_reponse: false,
             affichee: false,
             texte: None,
+            breezy_en_cours: false,
+            document,
         }
     }
 
@@ -963,6 +988,8 @@ mod tests {
             }),
             transparence: false,
             maintenant: Local::now(),
+            annotations: None,
+            breezy: None,
         }
     }
 
@@ -1787,7 +1814,7 @@ mod tests {
     #[test]
     fn charge_et_preferences() {
         let e = etat();
-        let c = charge(&e, true, Some("{}".into()), false);
+        let c = charge(&e, true, Some("{}".into()), false, false);
         assert_eq!(
             (c.id, c.largeur, c.hauteur, c.transparence, c.reduites),
             (7, 40, 30, false, true)
@@ -1796,7 +1823,8 @@ mod tests {
             serde_json::to_string(&c).unwrap(),
             concat!(
                 r#"{"id":7,"largeur":40,"hauteur":30,"transparence":false,"#,
-                r#""reduites":true,"preferences":"{}","texte":false}"#
+                r#""reduites":true,"preferences":"{}","texte":false,"#,
+                r#""pro":false,"depuis_breezy":false}"#
             )
         );
         let a = Some("a".to_string());

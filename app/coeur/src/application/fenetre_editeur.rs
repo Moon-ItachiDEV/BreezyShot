@@ -13,11 +13,11 @@ use tauri::AppHandle;
 
 use super::editeur::{self, ChargeEditeur, RaisonFermeture, ReponseFermer};
 use super::{
-    afficher, avec_editeur, desarmer_filet_page, exporter_editeur, fermer_editeur,
+    afficher, avec_editeur, breezy_ouvert, desarmer_filet_page, exporter_editeur, fermer_editeur,
     fermer_ou_suivant, garder_preferences_editeur, preferences_editeur, reduites_editeur,
     texte_construit,
 };
-use super::{geste_texte, texte};
+use super::{geste_breezy, geste_texte, texte};
 use crate::fenetres::editeur as fenetre;
 use crate::fenetres::theme;
 
@@ -35,10 +35,11 @@ pub fn editeur_pret(app: AppHandle) -> Result<ChargeEditeur, String> {
     let reduites = reduites_editeur(&app);
     let preferences = preferences_editeur(&app);
     let texte = texte_construit(&app);
+    let breezy = breezy_ouvert(&app);
     let Some((charge, demande_a)) = avec_editeur(&app, None, |e| {
         e.page_prete = true;
         (
-            editeur::charge(e, reduites, preferences, texte),
+            editeur::charge(e, reduites, preferences, texte, breezy),
             e.demande_a,
         )
     }) else {
@@ -202,4 +203,21 @@ pub fn editeur_copier_texte(app: AppHandle, id: u64, numero: u64, debut: u32, fi
         return;
     };
     geste_texte::copier_extrait(&app, id, numero, choix);
+}
+
+/// Enregistrer en `.breezy` (0.7.5, Pro) : corps brut = le JSON des annotations, en-têtes
+/// `x-editeur-id` et `-version`. Rend le numéro, ou le code du refus (`pro` : Réglages ›
+/// Licence s'ouvre). La fin arrive par `editeur:breezy`.
+#[tauri::command]
+pub fn editeur_breezy_enregistrer(
+    app: AppHandle,
+    requete: tauri::ipc::Request<'_>,
+) -> Result<u64, String> {
+    geste_breezy::enregistrer(&app, &requete)
+}
+
+/// Les annotations (JSON, octets bruts) du fichier `.breezy` que le document `id` rouvre.
+#[tauri::command]
+pub fn editeur_annotations(app: AppHandle, id: u64) -> Result<tauri::ipc::Response, String> {
+    geste_breezy::annotations(&app, id)
 }

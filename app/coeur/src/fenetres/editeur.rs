@@ -46,6 +46,8 @@ pub const EVENEMENT_CHARGER: &str = "editeur:charger";
 pub const EVENEMENT_FERMER_DEMANDE: &str = "editeur:fermer_demande";
 pub const EVENEMENT_RESULTAT: &str = "editeur:resultat";
 pub const EVENEMENT_GLISSER: &str = "editeur:glisser";
+/// Fin d'un enregistrement `.breezy` (0.7.5).
+pub const EVENEMENT_BREEZY: &str = "editeur:breezy";
 
 /// Ce qu'a fait `ouvrir`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

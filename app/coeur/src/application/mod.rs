@@ -39,6 +39,7 @@
 //! fait sur le fil principal ; la sortie (disque, presse-papiers) part dans un fil à part.
 
 pub mod arguments;
+pub mod breezy;
 pub mod decompte;
 pub mod defilante;
 pub mod editeur;
@@ -52,6 +53,7 @@ pub mod fenetre_historique;
 pub mod fenetre_menu;
 pub mod fenetre_reglages;
 pub mod film;
+pub mod geste_breezy;
 pub mod geste_defilante;
 pub mod geste_film;
 pub mod geste_historique;
@@ -208,6 +210,8 @@ pub enum EnAttente {
     Capture(String),
     /// L'app relancée : la barre de capture.
     Barre,
+    /// Un fichier `.breezy` à rouvrir (double-clic, 0.7.5).
+    Ouvrir(String),
 }
 
 /// La demande en attente après une demande de barre : une capture en attente
@@ -215,6 +219,8 @@ pub enum EnAttente {
 pub fn attente_avec_barre(avant: Option<EnAttente>) -> Option<EnAttente> {
     match avant {
         Some(EnAttente::Capture(mode)) => Some(EnAttente::Capture(mode)),
+        // Un fichier à rouvrir passe avant la barre : l'ouvrir est ce qu'on a demandé.
+        Some(EnAttente::Ouvrir(chemin)) => Some(EnAttente::Ouvrir(chemin)),
         _ => Some(EnAttente::Barre),
     }
 }
@@ -224,6 +230,9 @@ pub fn attente_avec_barre(avant: Option<EnAttente>) -> Option<EnAttente> {
 pub enum Evenement {
     /// Une autre instance a été lancée, avec ses arguments (le premier est le programme).
     SecondeInstance(Vec<String>),
+    /// Rouvrir un fichier `.breezy` dans l'éditeur (0.7.5, Pro ; le chemin n'est jamais
+    /// écrit au journal).
+    OuvrirBreezy(String),
     /// Le thème de la barre des tâches a changé.
     ThemeBarre(Theme),
     /// Une entrée du menu de l'icône a été choisie (son identifiant).
@@ -573,7 +582,10 @@ fn lancer_app(contexte: tauri::Context, commande: Commande, inconnus: Vec<String
     let construction = tauri::Builder::default()
         // L'instance unique en premier : une seconde instance confie ses arguments à la
         // première et sort avec le code 0 avant d'aller plus loin.
-        .plugin(tauri_plugin_single_instance::init(|app, argv, _dossier| {
+        .plugin(tauri_plugin_single_instance::init(|app, argv, dossier| {
+            // Un chemin `.breezy` relatif se lit depuis le dossier de l'instance qui l'a
+            // reçu, pas depuis le nôtre.
+            let argv = arguments::absolus(argv, std::path::Path::new(&dossier));
             traiter(app, Evenement::SecondeInstance(argv));
         }))
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
@@ -613,6 +625,8 @@ fn lancer_app(contexte: tauri::Context, commande: Commande, inconnus: Vec<String
             fenetre_editeur::editeur_fermer,
             fenetre_editeur::editeur_garder,
             fenetre_editeur::editeur_copier_texte,
+            fenetre_editeur::editeur_breezy_enregistrer,
+            fenetre_editeur::editeur_annotations,
             fenetre_historique::historique_pret,
             fenetre_historique::historique_apercu,
             fenetre_historique::historique_action,
@@ -733,6 +747,12 @@ fn demarrer(app: &AppHandle, commande: Commande, inconnus: &[String]) {
             log::info!("lancement a la main: barre de capture a pret");
             if let Ok(mut attente) = app.state::<Application>().capture_en_attente.lock() {
                 *attente = attente_avec_barre(attente.take());
+            }
+        }
+        Commande::Ouvrir(chemin) => {
+            log::info!("lancement avec un fichier .breezy");
+            if let Ok(mut attente) = app.state::<Application>().capture_en_attente.lock() {
+                *attente = Some(EnAttente::Ouvrir(chemin.clone()));
             }
         }
         Commande::Discret => log::info!("lancement discret"),
@@ -909,6 +929,7 @@ fn demarrer(app: &AppHandle, commande: Commande, inconnus: &[String]) {
     match en_attente {
         Some(EnAttente::Capture(mode)) => poster_plus_tard(app, Evenement::CaptureCli(mode)),
         Some(EnAttente::Barre) => poster_plus_tard(app, Evenement::OuvrirBarre),
+        Some(EnAttente::Ouvrir(chemin)) => poster_plus_tard(app, Evenement::OuvrirBreezy(chemin)),
         None => {}
     }
 }
@@ -1036,6 +1057,12 @@ fn mode_construit(app: &AppHandle, mode: Mode) -> bool {
 /// découle de la même liste que le menu et les raccourcis (avenant 0.5, §2.2).
 pub(super) fn texte_construit(app: &AppHandle) -> bool {
     mode_construit(app, Mode::Texte)
+}
+
+/// Vrai si la licence ouvre les fichiers `.breezy` (enregistrer et rouvrir, 0.7.5). Le seul
+/// point qui le dit : `droits::ouverte`.
+pub(super) fn breezy_ouvert(app: &AppHandle) -> bool {
+    droits::ouverte(droits::Fonction::Breezy, pro(app))
 }
 
 /// Les entrées du menu en ce moment : actions construites, raccourcis tenus.
@@ -1579,6 +1606,7 @@ pub fn traiter(app: &AppHandle, evenement: Evenement) {
         return;
     }
     match evenement {
+        Evenement::OuvrirBreezy(chemin) => geste_breezy::ouvrir(app, chemin),
         Evenement::SecondeInstance(argv) => {
             let (commande, _) = arguments::lire(argv.iter().skip(1));
             match commande {
@@ -1607,6 +1635,17 @@ pub fn traiter(app: &AppHandle, evenement: Evenement) {
                     } else if let Ok(mut a) = app.state::<Application>().capture_en_attente.lock() {
                         log::info!("seconde instance: en attente du demarrage");
                         *a = attente_avec_barre(a.take());
+                    }
+                }
+                // Un fichier `.breezy` double-cliqué (0.7.5) : il s'ouvre dans l'éditeur de
+                // l'instance qui tourne, au tour suivant de la boucle.
+                Commande::Ouvrir(chemin) => {
+                    log::info!("seconde instance: fichier .breezy");
+                    if app.state::<Application>().demarree.load(Ordering::SeqCst) {
+                        poster_plus_tard(app, Evenement::OuvrirBreezy(chemin));
+                    } else if let Ok(mut a) = app.state::<Application>().capture_en_attente.lock() {
+                        log::info!("seconde instance: en attente du demarrage");
+                        *a = Some(EnAttente::Ouvrir(chemin));
                     }
                 }
                 // `--discret` reçu par une instance qui tourne : rien à montrer.
@@ -3627,6 +3666,8 @@ fn annoter(app: &AppHandle, id: u64) {
         pixels,
         transparence,
         maintenant,
+        annotations: None,
+        breezy: None,
     };
     // Annoter arrive dans une commande de la page de la vignette. Sous Windows, créer une
     // fenêtre Web dans le rappel d'une autre vue Web bloque le fil principal pour
@@ -3909,8 +3950,9 @@ fn charger_editeur(app: &AppHandle) {
     let reduites = reduites_editeur(app);
     let preferences = preferences_editeur(app);
     let texte = texte_construit(app);
+    let breezy = breezy_ouvert(app);
     if let Some(c) = avec_editeur(app, None, |e| {
-        editeur::charge(e, reduites, preferences, texte)
+        editeur::charge(e, reduites, preferences, texte, breezy)
     }) {
         fenetres::editeur::emettre(app, fenetres::editeur::EVENEMENT_CHARGER, c);
     }

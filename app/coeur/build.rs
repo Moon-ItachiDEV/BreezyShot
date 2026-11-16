@@ -56,6 +56,8 @@ fn main() {
         "editeur_fermer",
         "editeur_garder",
         "editeur_copier_texte",
+        "editeur_breezy_enregistrer",
+        "editeur_annotations",
         "historique_pret",
         "historique_apercu",
         "historique_action",

@@ -504,6 +504,15 @@ async function charger(charge) {
     return;
   }
   ed.base = base;
+  // Un fichier .breezy rouvert : ses annotations sont le document de départ (version 0).
+  if (charge.depuis_breezy === true) {
+    await lireAnnotations(charge, id);
+    if (ed.charge?.id !== id) {
+      base.close();
+      return;
+    }
+  }
+  ed.barre?.poserBreezy(charge.pro === true);
   ed.fond = document.createElement("canvas");
   ed.fond.width = charge.largeur;
   ed.fond.height = charge.hauteur;
@@ -516,6 +525,40 @@ async function charger(charge) {
   ed.barre?.synchroniser();
   placer();
   envoyerVue();
+}
+
+// Les annotations d'un fichier .breezy : lues du cœur, jugées strictement (`lireDocument`),
+// puis prises pour document de départ. Illisibles : l'image seule, avec un message.
+async function lireAnnotations(charge, id) {
+  const echec = (e) => {
+    console.info("annotations :", e?.message ?? e);
+    ed.barre?.message("Impossible de lire les annotations de ce fichier");
+  };
+  let octets;
+  try {
+    octets = await appeler("editeur_annotations", { id });
+  } catch (e) {
+    echec(e);
+    return;
+  }
+  if (ed.charge?.id !== id) return;
+  try {
+    const vue =
+      octets instanceof ArrayBuffer
+        ? new Uint8Array(octets)
+        : ArrayBuffer.isView(octets)
+          ? new Uint8Array(octets.buffer, octets.byteOffset, octets.byteLength)
+          : Array.isArray(octets)
+            ? Uint8Array.from(octets)
+            : null;
+    if (!vue) throw new Error("octets");
+    const texte = new TextDecoder("utf-8", { fatal: true }).decode(vue);
+    const { doc, ecartes } = modele.lireDocument(texte, charge.largeur, charge.hauteur);
+    ed.h = modele.creerHistorique(doc);
+    if (ecartes > 0) ed.barre?.message("Certains éléments de ce fichier n'ont pas pu être lus");
+  } catch (e) {
+    echec(e);
+  }
 }
 
 // ---------- sorties ----------
@@ -566,6 +609,40 @@ ed.exporter = async (but) => {
     return null;
   }
 };
+
+// Enregistrer en .breezy (Pro) : le JSON des annotations part en corps brut ; le cœur y joint
+// l'image d'origine, ouvre « Enregistrer sous… » et répond par `editeur:breezy`. Sans licence,
+// il ouvre Réglages › Licence et refuse (`pro`) : rien à montrer de plus.
+ed.enregistrerBreezy = async () => {
+  if (!ed.charge || !ed.h || !ed.fond || exportEnCours) return null;
+  poserExport(true);
+  ed.outils?.validerSaisie();
+  await envoyerEtat();
+  if (!ed.charge || !ed.fond) {
+    poserExport(false);
+    return null;
+  }
+  const version = ed.h.version;
+  const corps = new TextEncoder().encode(JSON.stringify(ed.h.doc));
+  try {
+    return await appeler("editeur_breezy_enregistrer", corps, {
+      headers: { "x-editeur-id": String(ed.charge.id), "x-editeur-version": String(version) },
+    });
+  } catch (e) {
+    poserExport(false);
+    console.info("editeur_breezy_enregistrer :", e);
+    return null;
+  }
+};
+
+function breezyFini(r) {
+  if (!r || !ed.charge || r.id !== ed.charge.id) return;
+  poserExport(false);
+  if (r.etat === "fait") {
+    ed.exportee = r.version;
+    ed.barre?.message("Enregistré en .breezy");
+  } else if (r.etat === "echec" && r.message) ed.barre?.message(r.message);
+}
 
 function resultat(r) {
   if (!r || !ed.charge || r.id !== ed.charge.id) return;
@@ -649,6 +726,7 @@ async function demarrer() {
         else if (id === ed.charge?.id) fermer(false);
       }),
       ecoute("editeur:resultat", (e) => resultat(e?.payload)),
+      ecoute("editeur:breezy", (e) => breezyFini(e?.payload)),
       ecoute("editeur:texte", (e) => ed.texte.recu(e?.payload)),
       ecoute("editeur:texte_copie", (e) => ed.texte.copie(e?.payload)),
       ecoute("editeur:glisser", (e) => {

@@ -11,6 +11,7 @@
 //! Ce module n'ecrit jamais au journal : il rend un `Bilan`.
 
 mod annonce;
+mod breezy;
 mod fichier;
 mod film;
 mod glisser;
@@ -33,7 +34,12 @@ use chrono::{DateTime, Local};
 use crate::systeme::gel::Pixels;
 
 pub use annonce::{annonce, Annonce};
-pub use fichier::enregistrer_a;
+pub use breezy::{
+    ContenuBreezy, ErreurBreezy, ANNOTATIONS_OCTETS_MAX, COTE_MAX as COTE_MAX_BREEZY,
+    EXTENSION as EXTENSION_BREEZY, PIXELS_MAX as PIXELS_MAX_BREEZY,
+    VERSION_FORMAT as VERSION_BREEZY,
+};
+pub use fichier::{enregistrer_a, enregistrer_breezy_a, lire_breezy_a};
 pub use film::{
     annonce_film, chemin_film, copier_film, effacer_film, enregistrer_film, film_a_glisser,
     films_a_ranger, films_a_retirer, nettoyer_films, noter_film_ferme, oublier_film, ranger_film,

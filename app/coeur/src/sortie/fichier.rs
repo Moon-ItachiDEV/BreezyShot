@@ -69,6 +69,56 @@ pub fn enregistrer_a(pixels: &Pixels, chemin: &Path, transparence: bool) -> Etap
     }
 }
 
+/// Enregistre une capture et ses annotations en .breezy exactement a `chemin` (0.7.5, Pro) :
+/// meme methode et memes garanties que `enregistrer_a` (temporaire du meme dossier, puis
+/// remplacement confirme dans le dialogue ; le dossier n'est jamais cree ; aucune cause ne
+/// nomme un chemin). `version_app` et `cree` vont au manifeste.
+pub fn enregistrer_breezy_a(
+    pixels: &Pixels,
+    transparence: bool,
+    annotations: &[u8],
+    chemin: &Path,
+    version_app: &str,
+    cree: &str,
+) -> EtapeFichier {
+    let dossier = chemin.parent().map(Path::to_path_buf).unwrap_or_default();
+    let ecrit = (|| {
+        let octets = super::breezy::ecrire(pixels, transparence, annotations, version_app, cree)?;
+        if chemin.file_name().is_none() || !dossier_utilisable(&dossier) || !dossier.is_dir() {
+            return Err(cause_disque(ErrorKind::NotFound, ""));
+        }
+        remplacer_par(&octets, chemin, &dossier)
+    })();
+    match ecrit {
+        Ok(()) => EtapeFichier::Fait(chemin.to_path_buf()),
+        Err(cause) => EtapeFichier::Echec { dossier, cause },
+    }
+}
+
+/// Lit un fichier .breezy : sa taille est jugee avant la lecture (`FICHIER_OCTETS_MAX`),
+/// puis son contenu, verifie par `breezy::lire`. Jamais de panique ; l'erreur ne contient
+/// ni chemin ni contenu.
+pub fn lire_breezy_a(
+    chemin: &Path,
+) -> Result<super::breezy::ContenuBreezy, super::breezy::ErreurBreezy> {
+    use super::breezy::{ErreurBreezy, FICHIER_OCTETS_MAX};
+    use std::io::Read;
+    let f = fs::File::open(chemin).map_err(|_| ErreurBreezy::Abime)?;
+    let meta = f.metadata().map_err(|_| ErreurBreezy::Abime)?;
+    if !meta.is_file() {
+        return Err(ErreurBreezy::Abime);
+    }
+    if meta.len() > FICHIER_OCTETS_MAX {
+        return Err(ErreurBreezy::TropGros);
+    }
+    // `take` : un fichier qui grossit pendant la lecture ne depasse pas la borne.
+    let mut octets = Vec::with_capacity(meta.len() as usize);
+    f.take(FICHIER_OCTETS_MAX + 1)
+        .read_to_end(&mut octets)
+        .map_err(|_| ErreurBreezy::Abime)?;
+    super::breezy::lire(&octets)
+}
+
 fn ecrire_a(
     pixels: &Pixels,
     chemin: &Path,
@@ -85,15 +135,19 @@ fn ecrire_a(
     } else {
         png::encoder_rgba(largeur, hauteur, &png::opaques(&pixels.rgba))?
     };
+    remplacer_par(&octets, chemin, dossier)
+}
+
+/// Ecrit `octets` dans un temporaire de `dossier`, puis le met a la place de `chemin` (le
+/// remplace s'il existe). Meme garanties que `enregistrer_a`.
+fn remplacer_par(octets: &[u8], chemin: &Path, dossier: &Path) -> Result<(), String> {
     nettoyer_temporaires(dossier);
 
     let (temporaire, mut f) =
         creer_temporaire(dossier).map_err(|e| cause_temporaire(e.kind(), ""))?;
     // Sur le disque avant le remplacement : un ancien fichier n'est jamais remplace par un
     // fichier a moitie ecrit, meme si la machine s'arrete juste apres.
-    let ecrit = f
-        .write_all(&octets)
-        .and_then(|()| sync_tolere(f.sync_all()));
+    let ecrit = f.write_all(octets).and_then(|()| sync_tolere(f.sync_all()));
     drop(f);
     if let Err(e) = ecrit {
         let _ = fs::remove_file(&temporaire);

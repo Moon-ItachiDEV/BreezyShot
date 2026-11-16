@@ -91,3 +91,5 @@ pub fn rect_fenetre(_identifiant: isize) -> Option<Rect> {
 pub fn ramener_fenetre(_titre: &str) -> bool {
     false
 }
+
+pub fn notifier_associations() {}

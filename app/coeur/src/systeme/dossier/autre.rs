@@ -18,3 +18,11 @@ pub fn choisir_fichier_png(
     // Hors Windows : comme un dialogue annulé (contrat 0.4 « Éditeur », §7.3, §14).
     Ok(None)
 }
+
+pub fn choisir_fichier_breezy(
+    _proprietaire: Option<isize>,
+    _depart: Option<&Path>,
+    _nom: &str,
+) -> Result<Option<PathBuf>, String> {
+    Ok(None)
+}
