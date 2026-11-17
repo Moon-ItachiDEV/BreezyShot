@@ -804,7 +804,11 @@ fn demarrer(app: &AppHandle, commande: Commande, inconnus: &[String]) {
     if let Ok(mut suivies) = app.state::<Application>().actions_suivies.lock() {
         *suivies = actions_construites(pro, false, false);
     }
-    let candidats = table_candidats(&reglages, &actions_construites(pro, false, false));
+    let candidats = table_candidats(
+        &reglages,
+        &actions_construites(pro, false, false),
+        impr_ecran_existe(systeme::systeme()),
+    );
     fenetre_reglages::retenir_theme(&reglages);
     log::info!("theme interface: {}", reglages.theme.texte());
     if systeme::demarrage::cle_d_essai() {
@@ -1393,15 +1397,33 @@ pub fn plateforme_reglages(s: Systeme) -> Plateforme {
 }
 
 /// La table `action → candidats` donnée au choix des raccourcis : seulement les actions
-/// construites (`actions`).
-pub fn table_candidats(reglages: &Reglages, actions: &[&str]) -> BTreeMap<String, Vec<String>> {
-    actions
+/// construites (`actions`), et la pseudo-action d'Impr. écran (`impr_ecran`, candidate
+/// `ImprEcran` seule) quand la touche existe (`avec_impr_ecran` : jamais sur Mac).
+pub fn table_candidats(
+    reglages: &Reglages,
+    actions: &[&str],
+    avec_impr_ecran: bool,
+) -> BTreeMap<String, Vec<String>> {
+    let mut table: BTreeMap<String, Vec<String>> = actions
         .iter()
         .map(|a| {
             let liste = reglages.raccourcis.candidats(a).unwrap_or_default();
             (a.to_string(), liste.to_vec())
         })
-        .collect()
+        .collect();
+    if avec_impr_ecran {
+        table.insert(
+            raccourcis::ACTION_IMPR_ECRAN.to_string(),
+            vec![page_reglages::IMPR_ECRAN.to_string()],
+        );
+    }
+    table
+}
+
+/// La touche Impr. écran existe sur ce système : tout sauf macOS, où elle ne se déclenche
+/// jamais (`raccourcis::conversion`).
+pub fn impr_ecran_existe(s: Systeme) -> bool {
+    s != Systeme::Mac
 }
 
 /// Ligne de journal d'une décision d'annonce (rien si tout est normal).
@@ -1766,6 +1788,25 @@ pub fn traiter(app: &AppHandle, evenement: Evenement) {
                 log::info!("raccourci ignore pendant la defilante");
                 return;
             }
+            // Impr. écran se traduit en l'action choisie dans les réglages, puis suit le
+            // chemin de celle-ci (un film en cours s'arrête si la cible est la vidéo). La
+            // barre, ou une cible fermée (licence, codeur, langue), ouvre la barre.
+            let action = if action == raccourcis::ACTION_IMPR_ECRAN {
+                let cible = reglages_lus(app).impr_ecran_ouvre;
+                match page_reglages::action_de_l_appui(cible, &actions_en_vigueur(app)) {
+                    Some(a) => {
+                        log::info!("impr ecran: {a}");
+                        a.to_string()
+                    }
+                    None => {
+                        log::info!("impr ecran: barre");
+                        fenetre_barre::ouvrir(app);
+                        return;
+                    }
+                }
+            } else {
+                action
+            };
             // Pendant un film : son propre raccourci l'arrête (choix B1) ; ceux qui
             // ouvriraient une fenêtre sont ignorés (F30) ; ceux de capture vont à la table,
             // qui les ignore.
@@ -4788,12 +4829,45 @@ mod tests {
     #[test]
     fn seules_les_actions_construites_sont_proposees() {
         let r = Reglages::par_defaut(Plateforme::Windows);
-        let t = table_candidats(&r, &ACTIONS_DE_CAPTURE);
+        let t = table_candidats(&r, &ACTIONS_DE_CAPTURE, false);
         assert_eq!(t.len(), 4);
-        assert_eq!(t["zone"], ["ImprEcran", "Ctrl+Maj+1"]);
+        // Impr. écran n'est dans la liste d'aucune action (0.8.0).
+        assert_eq!(t["zone"], ["Ctrl+Maj+1"]);
         assert_eq!(t["plein_ecran"], ["Ctrl+Maj+2"]);
         assert_eq!(t["fenetre"], ["Ctrl+Maj+3"]);
         assert_eq!(t["derniere_zone"], ["Ctrl+Maj+4"]);
+    }
+
+    /// La pseudo-action d'Impr. écran s'ajoute à la table, seule candidate `ImprEcran`, sauf
+    /// sur Mac où la touche ne se déclenche jamais ; elle ne dépend pas des actions en
+    /// vigueur (licence, langue, codeur).
+    #[test]
+    fn la_table_reserve_impr_ecran_hors_mac() {
+        let r = Reglages::par_defaut(Plateforme::Windows);
+        for actions in [&ACTIONS_DE_CAPTURE[..], &["zone"][..], &[][..]] {
+            let t = table_candidats(&r, actions, true);
+            assert_eq!(t.len(), actions.len() + 1);
+            assert_eq!(t[raccourcis::ACTION_IMPR_ECRAN], ["ImprEcran"]);
+        }
+        assert!(impr_ecran_existe(Systeme::Windows));
+        assert!(impr_ecran_existe(Systeme::Autre));
+        assert!(!impr_ecran_existe(Systeme::Mac));
+        // Zone et Impr. écran n'entrent jamais en conflit : chacune garde sa touche.
+        let t = table_candidats(&r, &ACTIONS_DE_CAPTURE, true);
+        let b = choisir(&t, false, |_| true);
+        assert_eq!(
+            b.retenu("zone").map(|x| x.canonique()).as_deref(),
+            Some("Ctrl+Maj+1")
+        );
+        assert_eq!(
+            b.action_de(&raccourcis::analyser("ImprEcran").unwrap()),
+            Some(raccourcis::ACTION_IMPR_ECRAN)
+        );
+        // Windows garde la touche : rien d'annoncé, la zone garde sa touche.
+        let b = choisir(&t, true, |_| true);
+        assert_eq!(b.retenu(raccourcis::ACTION_IMPR_ECRAN), None);
+        assert_eq!(b.annonce(), None);
+        assert_eq!(b.libelle_menu("zone").as_deref(), Some("Ctrl + Maj + 1"));
     }
 
     /// Ctrl + Maj + 4 pris par une autre application : la dernière zone reste au menu sans
@@ -4803,6 +4877,7 @@ mod tests {
         let t = table_candidats(
             &Reglages::par_defaut(Plateforme::Windows),
             &ACTIONS_DE_CAPTURE,
+            true,
         );
         let b = choisir(&t, false, |r| r.canonique() != "Ctrl+Maj+4");
         assert_eq!(b.libelle_menu("derniere_zone"), None);
@@ -4826,7 +4901,11 @@ mod tests {
     #[test]
     fn raccourcis_reserves_a_plus_tard_jamais_pris() {
         for p in [Plateforme::Windows, Plateforme::Mac, Plateforme::Autre] {
-            let t = table_candidats(&Reglages::par_defaut(p), &ACTIONS_DE_CAPTURE);
+            let t = table_candidats(
+                &Reglages::par_defaut(p),
+                &ACTIONS_DE_CAPTURE,
+                p != Plateforme::Mac,
+            );
             let b = choisir(&t, false, |_| true);
             for a in &b.actions {
                 let retenu = a.retenu.as_ref().map(|r| r.canonique());
@@ -4844,14 +4923,15 @@ mod tests {
         let t = table_candidats(
             &Reglages::par_defaut(Plateforme::Windows),
             &ACTIONS_DE_CAPTURE,
+            true,
         );
         let b = choisir(&t, false, |r| r.canonique() != "Ctrl+Maj+2");
-        assert_eq!(b.libelle_menu("zone").as_deref(), Some("Impr. écran"));
+        assert_eq!(b.libelle_menu("zone").as_deref(), Some("Ctrl + Maj + 1"));
         assert_eq!(b.libelle_menu("plein_ecran"), None);
         let m = entrees_menu(&ACTIONS_DE_CAPTURE, |a| b.libelle_menu(a));
         assert_eq!(
             m[0],
-            action("capturer_zone", "Capturer une zone\tImpr. écran")
+            action("capturer_zone", "Capturer une zone\tCtrl + Maj + 1")
         );
         assert_eq!(m[1], action("capturer_plein_ecran", "Capturer l'écran"));
         // L'annonce du démarrage (§5) : une info qui nomme l'action, pas une erreur.
@@ -5073,10 +5153,10 @@ mod tests {
                     entrees_menu(&sans, |_| None),
                     entrees_menu(&ACTIONS_DE_CAPTURE, |_| None)
                 );
-                let table = table_candidats(&reglages, &sans);
+                let table = table_candidats(&reglages, &sans, true);
                 assert_eq!(
                     table.keys().map(String::as_str).collect::<Vec<_>>(),
-                    table_candidats(&reglages, &ACTIONS_DE_CAPTURE)
+                    table_candidats(&reglages, &ACTIONS_DE_CAPTURE, true)
                         .keys()
                         .map(String::as_str)
                         .collect::<Vec<_>>()
@@ -5086,7 +5166,7 @@ mod tests {
                 assert_eq!(avec.contains(&"gif"), vivant);
                 assert_eq!(avec.contains(&"video"), vivant && codeur);
                 if vivant {
-                    let t = table_candidats(&reglages, &avec);
+                    let t = table_candidats(&reglages, &avec, true);
                     assert!(t.contains_key("gif"));
                 }
             }
@@ -5119,18 +5199,23 @@ mod tests {
         let t = table_candidats(
             &Reglages::par_defaut(Plateforme::Windows),
             &ACTIONS_DE_CAPTURE,
+            true,
         );
         let normal = choisir(&t, false, |_| true);
         assert_eq!(ligne_annonce(&decider_annonce(None, &normal)), None);
+        // Windows garde Impr. écran : un choix de la liste des Réglages, rien à annoncer.
         let reserve = choisir(&t, true, |_| true);
-        let d = decider_annonce(None, &reserve);
+        assert_eq!(ligne_annonce(&decider_annonce(None, &reserve)), None);
+        // Une vraie action refusée par le système : annoncée une fois, puis « déjà faite ».
+        let refuse = choisir(&t, false, |r| r.canonique() != "Ctrl+Maj+4");
+        let d = decider_annonce(None, &refuse);
         assert_eq!(
             ligne_annonce(&d).as_deref(),
-            Some("annonce raccourci: reserve_par_le_systeme")
+            Some("annonce raccourci: action_sans_raccourci")
         );
         let deja: Option<&Situation> = d.a_retenir.as_ref();
         assert_eq!(
-            ligne_annonce(&decider_annonce(deja, &reserve)).as_deref(),
+            ligne_annonce(&decider_annonce(deja, &refuse)).as_deref(),
             Some("annonce raccourci: deja faite")
         );
         let rien = choisir(&t, false, |_| false);

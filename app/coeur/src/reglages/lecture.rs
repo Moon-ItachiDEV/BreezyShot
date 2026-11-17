@@ -6,19 +6,19 @@ use serde_json::{json, Map, Value};
 
 use super::constat::{Constat, Raison};
 use super::modele::{
-    vers_json, Animations, Capture, Coin, Film, FormatImage, Historique, Plateforme, Raccourcis,
-    Reglages, Selection, Theme, Vignette, DUREE_MAX_S, DUREE_MIN_S, DUREE_TOUJOURS, FLUIDITES,
-    HISTORIQUE_CHOIX, RETARDATEUR_MAX_S, VERSION_ACTUELLE,
+    vers_json, Animations, Capture, CibleImprEcran, Coin, Film, FormatImage, Historique,
+    Plateforme, Raccourcis, Reglages, Selection, Theme, Vignette, DUREE_MAX_S, DUREE_MIN_S,
+    DUREE_TOUJOURS, FLUIDITES, HISTORIQUE_CHOIX, RETARDATEUR_MAX_S, VERSION_ACTUELLE,
 };
 
 /// Une mise à niveau d'une version à la suivante. Elle complète l'objet sans rien effacer ;
 /// le numéro de version est tenu par `interpreter`, pas par elle.
 pub(super) type MiseANiveau = fn(&mut Map<String, Value>, Plateforme);
 
-/// `MISES_A_NIVEAU[n]` fait passer de la version `n` à `n + 1`. Pour une version 8 un jour :
-/// ajouter `v7_vers_v8` à la fin, et `VERSION_ACTUELLE` passe à 8 tout seul.
+/// `MISES_A_NIVEAU[n]` fait passer de la version `n` à `n + 1`. Pour une version 9 un jour :
+/// ajouter `v8_vers_v9` à la fin, et `VERSION_ACTUELLE` passe à 9 tout seul.
 pub(super) const MISES_A_NIVEAU: &[MiseANiveau] = &[
-    v0_vers_v1, v1_vers_v2, v2_vers_v3, v3_vers_v4, v4_vers_v5, v5_vers_v6, v6_vers_v7,
+    v0_vers_v1, v1_vers_v2, v2_vers_v3, v3_vers_v4, v4_vers_v5, v5_vers_v6, v6_vers_v7, v7_vers_v8,
 ];
 
 /// Version 0 (aucun champ `version`) vers 1 : ajoute les champs de la version 1 qui manquent,
@@ -119,6 +119,51 @@ fn v6_vers_v7(objet: &mut Map<String, Value>, _plateforme: Plateforme) {
         completer(objet, &modele);
     }
 }
+
+/// Version 7 vers 8 (Impr. écran au choix) : `impr_ecran_ouvre` reçoit l'action qui avait
+/// `ImprEcran` parmi ses candidats (la première, dans l'ordre de réservation, comme avant :
+/// c'est elle qui tenait la touche), sinon la zone ; `ImprEcran` est retirée des listes de
+/// raccourcis, la cible la porte seule. Un `impr_ecran_ouvre` déjà là est gardé ; un objet
+/// `raccourcis` absent n'est pas créé. Les autres candidats ne bougent pas.
+fn v7_vers_v8(objet: &mut Map<String, Value>, _plateforme: Plateforme) {
+    let mut cible = "zone";
+    if let Some(Value::Object(raccourcis)) = objet.get_mut("raccourcis") {
+        let est_impr = |c: &Value| c.as_str().map(forme_simple) == Some(forme_simple("ImprEcran"));
+        let a_impr = |raccourcis: &Map<String, Value>, action: &str| {
+            raccourcis
+                .get(action)
+                .and_then(Value::as_array)
+                .is_some_and(|l| l.iter().any(est_impr))
+        };
+        // L'ordre de réservation (`ACTIONS_PRIORITAIRES`), la zone d'abord.
+        if let Some(premiere) = ORDRE_RESERVATION.iter().find(|a| a_impr(raccourcis, a)) {
+            cible = premiere;
+        }
+        for action in Raccourcis::ACTIONS {
+            if let Some(Value::Array(liste)) = raccourcis.get_mut(action) {
+                liste.retain(|c| !est_impr(c));
+            }
+        }
+    }
+    let modele = json!({ "impr_ecran_ouvre": cible });
+    if let Value::Object(modele) = modele {
+        completer(objet, &modele);
+    }
+}
+
+/// L'ordre dans lequel les actions se partageaient les raccourcis avant la version 8
+/// (`raccourcis::ACTIONS_PRIORITAIRES`, sans la réservation d'Impr. écran).
+const ORDRE_RESERVATION: [&str; 9] = [
+    "zone",
+    "plein_ecran",
+    "fenetre",
+    "derniere_zone",
+    "historique",
+    "texte",
+    "defilante",
+    "video",
+    "gif",
+];
 
 /// Ajoute `action` si elle manque : son défaut, ou une liste vide si l'un de ses candidats
 /// est déjà donné à une autre action.
@@ -264,6 +309,14 @@ pub(super) fn interpreter(objet: Map<String, Value>, plateforme: Plateforme) -> 
     let d = Reglages::par_defaut(plateforme);
     let c = &mut constats;
     let raccourcis = lire_raccourcis(&mut m, d.raccourcis, c);
+    let impr_ecran_ouvre = lire(
+        &mut m,
+        "",
+        "impr_ecran_ouvre",
+        d.impr_ecran_ouvre,
+        |v| v.as_str().and_then(CibleImprEcran::depuis_texte),
+        c,
+    );
     let copier_apres_capture = lire(&mut m, "", "copier_apres_capture", true, Value::as_bool, c);
     let enregistrer_apres_capture = lire(
         &mut m,
@@ -323,6 +376,7 @@ pub(super) fn interpreter(objet: Map<String, Value>, plateforme: Plateforme) -> 
 
     let mut reglages = Reglages {
         raccourcis,
+        impr_ecran_ouvre,
         copier_apres_capture,
         enregistrer_apres_capture,
         format_image,

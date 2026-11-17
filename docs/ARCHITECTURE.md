@@ -1078,7 +1078,7 @@ Module pur : il reçoit le dossier où écrire, ne connaît ni Tauri ni les autr
 {
   "version": 5,
   "raccourcis": {
-    "zone": ["ImprEcran", "Ctrl+Maj+1"],
+    "zone": ["Ctrl+Maj+1"],
     "plein_ecran": ["Ctrl+Maj+2"],
     "fenetre": ["Ctrl+Maj+3"],
     "derniere_zone": ["Ctrl+Maj+4"],
@@ -1086,6 +1086,7 @@ Module pur : il reçoit le dossier où écrire, ne connaît ni Tauri ni les autr
     "texte": ["Ctrl+Maj+T"],
     "defilante": ["Ctrl+Maj+5"]
   },
+  "impr_ecran_ouvre": "zone",
   "copier_apres_capture": true,
   "enregistrer_apres_capture": false,
   "vignette": { "afficher": true, "duree_s": 6, "coin": "bas_gauche" },
@@ -1102,12 +1103,23 @@ Module pur : il reçoit le dossier où écrire, ne connaît ni Tauri ni les autr
 - `raccourcis` : par **nom d'action**, une liste de candidats par ordre de préférence. Le
   premier qui peut être réservé est utilisé : le repli n'est pas un cas particulier. Les
   réglages gardent des chaînes sans les interpréter (c'est le module `raccourcis` qui les lit).
-  Les valeurs par défaut dépendent du système (`ImprEcran` n'existe pas sur Mac ; la
+  Impr. écran n'est dans aucune liste depuis la version 8 (0.8.0) : voir `impr_ecran_ouvre`
+  plus bas. Les valeurs par défaut dépendent du système (la
   dernière zone : `Ctrl+Maj+4` sous Windows, `Cmd+Maj+7` sur Mac, provisoire).
   `historique` et `texte` (version 4, 0.5) : `Ctrl+Maj+H` et `Ctrl+Maj+T` sous Windows,
   `Cmd+Maj+8` et `Cmd+Maj+9` sur Mac (provisoires). `defilante` (version 5, 0.6) :
   `Ctrl+Maj+5` sous Windows, `Cmd+Maj+0` sur Mac (provisoire). Ils sont toujours écrits
   dans le fichier, licence ou non : seule la réservation dépend des actions construites (§5).
+- `impr_ecran_ouvre` (version 8, 0.8.0) : ce que lance la touche Impr. écran quand
+  BreezyShot la tient (`CibleImprEcran`) : `barre` (la barre de capture, qui n'est pas une
+  action), `zone` (le défaut), `plein_ecran`, `fenetre`, `derniere_zone`, `defilante`,
+  `texte`, `video`, `gif`, `historique`. « Outil Capture de Windows » n'est pas une valeur :
+  c'est le registre (`PrintScreenKeyForSnippingEnabled`, §5), le fichier garde sa cible pour le
+  jour où la touche est reprise. Une valeur inconnue est remplacée par `zone`, avec un
+  avertissement. Mise à niveau `v7_vers_v8` (complète, n'efface rien) : la cible est la première
+  action, dans l'ordre de `ACTIONS_PRIORITAIRES`, qui avait `ImprEcran` parmi ses candidats
+  (sinon `zone`), et `ImprEcran` seule est retirée des listes (`Ctrl+ImprEcran` reste). Un
+  fichier de version 8 lu par une 0.7.x est « plus récent » : protégé en écriture.
 - `duree_s` : 1 à 60 s, ou `0` = toujours (`DUREE_TOUJOURS`, version 2 ; la page propose
   3, 6, 10 et Toujours).
 - `capture` (version 3) : `retardateur_s` vaut 0 (aucun) ou 1 à 10 s entières
@@ -1259,6 +1271,18 @@ sans rien remplacer, les défauts qui reproduisent l'app d'avant :
   nouvelles actions se traitent après les quatre captures (`ACTIONS_PRIORITAIRES` : zone,
   plein écran, fenêtre, dernière zone, historique, texte). BreezyShot ne
   prend jamais à une autre application un raccourci qui ne ferait rien.
+- **Impr. écran : la pseudo-action `impr_ecran` (0.8.0).** La touche n'est dans la liste
+  d'aucune action : une pseudo-action `impr_ecran` (`ACTION_IMPR_ECRAN`), candidate `ImprEcran`
+  seule, passe la première de `ACTIONS_PRIORITAIRES` et entre dans la table
+  (`table_candidats`) sauf sur Mac, où la touche ne se déclenche jamais. Elle ne dépend pas des
+  actions en vigueur et n'est ni dans le menu, ni dans Réglages › Raccourcis, ni dans les
+  annonces (Windows qui garde la touche est un choix de la liste ; une autre application qui la
+  tient est dite sur la ligne). À l'appui, `Signal::Presse("impr_ecran")` est traduit
+  en l'action de `impr_ecran_ouvre` (`page_reglages::action_de_l_appui`) avant le chemin
+  habituel (un film en cours s'arrête si la cible est la vidéo) ; la cible `barre` ouvre la
+  barre (`fenetre_barre::ouvrir`) ; une cible qui n'est pas en vigueur (licence retirée, codeur
+  ou langue absents) ouvre aussi la barre, sans toucher au fichier. Chaque action garde son
+  propre `Ctrl+Maj`.
 - Le module ne connaît pas le type des réglages : l'Application lui passe une table
   `action → candidats` construite à partir d'eux.
 - **`systeme::impr_ecran_reserve()`** (Windows) : valeur `PrintScreenKeyForSnippingEnabled` de
@@ -1277,8 +1301,9 @@ sans rien remplacer, les défauts qui reproduisent l'app d'avant :
   candidat, coupé à 40 caractères, `Y` = affichage du raccourci retenu). La raison précise
   (réservée par Windows, prise par une autre application…) reste dans le journal et dans
   `Situation.raison`, pas dans le message :
-  - Impr. écran réservée par Windows ou refusée par le système : « Impr. écran est prise.
-    Raccourci : Y » ;
+  - Impr. écran réservée par Windows ou refusée par le système, pour une action qui l'aurait
+    en premier candidat (fichier écrit à la main ; la pseudo-action `impr_ecran` n'annonce
+    rien) : « Impr. écran est prise. Raccourci : Y » ;
   - autre candidat refusé par le système ou déjà pris par une autre action : « X est pris.
     Raccourci : Y » ;
   - candidat invalide : « « X » n'est pas un raccourci valide. Raccourci : Y » ;
@@ -1299,7 +1324,8 @@ sans rien remplacer, les défauts qui reproduisent l'app d'avant :
   (`unregister_all`).
 - Lignes du journal (contrat des essais) : `raccourci zone: <forme canonique>` ou
   `raccourci zone: aucun`, `raccourci zone ecarte: <candidat> (<raison>)` par candidat écarté,
-  `raccourci presse: zone`, `raccourcis liberes`, `annonce raccourci: <raison>` (code de la
+  `raccourci presse: zone` (`raccourci presse: impr_ecran` puis `impr ecran: <action>|barre`
+  pour Impr. écran, ligne `raccourci impr_ecran: …` au démarrage), `raccourcis liberes`, `annonce raccourci: <raison>` (code de la
   situation : `reserve_par_le_systeme`, `refuse_par_le_systeme`…) ou
   `annonce raccourci: deja faite`, rien si tout est normal. `etat.json` :
   `{ "annonce_raccourci": { "action", "candidat", "raison" } }`, les autres champs gardés.
@@ -1507,13 +1533,30 @@ sans rien remplacer, les défauts qui reproduisent l'app d'avant :
   le menu), puis Copier le texte avant Historique (`page_reglages::ORDRE_RACCOURCIS`,
   affichage seulement ; l'ordre de réservation des raccourcis ne change pas). La fenêtre
   prend au plus 90 % de la zone utile (`reglages::taille_sur`), cadre compris.
-- **« Impr. écran ouvre BreezyShot » (0.5.3)**, en tête de Raccourcis, sous Windows
-  seulement (`systeme::impr_ecran_pour_breezyshot`) : allumée, l'app écrit
-  `PrintScreenKeyForSnippingEnabled = 0` (HKCU, la valeur de Paramètres › Accessibilité ›
-  Clavier), met Impr. écran en tête des candidats de la zone s'il n'y est pas, puis la zone
-  reprend ses candidats ; éteinte, la valeur repasse à 1 et la zone passe au candidat
-  suivant. Si la touche n'est pas tenue après coup, la ligne dit où Windows la garde
-  (`REFUS_IMPR_ECRAN`). Journal : `impr ecran: breezyshot oui|non, touche tenue|non tenue`.
+- **« Touche Impr. écran » (0.8.0)**, en tête de Raccourcis, sous Windows seulement
+  (`systeme::impr_ecran_pour_breezyshot`) : une ligne et une liste déroulante (bouton
+  `aria-haspopup="listbox"`, options `role="option"`, flèches, Entrée, Échap, Tab). Les choix,
+  dans l'ordre et par groupes séparés d'un trait : « Outil Capture de Windows » ; « Barre de
+  capture », Zone, Plein écran, Fenêtre, Refaire la dernière zone ; Capture défilante, Copier
+  le texte, Vidéo, GIF, Historique (`page_reglages::choix_impr_ecran`). Une action fermée
+  (licence, codeur, langue de lecture) est absente de la liste, comme une rubrique Pro sans
+  licence ; la valeur montrée (`vue.impr_ecran.valeur`) est `windows` si le registre garde la
+  touche, sinon la cible, ou `barre` quand la cible est fermée. La demande
+  `{ cle: "impr_ecran", valeur: <id du choix> }` est refusée par le cœur hors des choix en
+  vigueur (`impr_ecran_permis`) et, pour une action Pro, sans licence (`exige_pro` selon la
+  valeur). Choisir « Outil Capture de Windows » écrit `PrintScreenKeyForSnippingEnabled = 1`
+  (HKCU, la valeur de Paramètres › Accessibilité › Clavier) et lâche la réservation de
+  `impr_ecran` (liste vide : `Reservations::changer` garderait sinon l'ancienne) ; choisir autre
+  chose depuis cet état écrit `0`, réserve `impr_ecran` et écrit `impr_ecran_ouvre`. D'une
+  action de BreezyShot à une autre, seul le champ change : le registre n'est pas réécrit, et la
+  réservation n'est retentée que si la touche n'est pas tenue (`page_reglages::geste_impr_ecran` :
+  le registre d'après le registre, la réservation d'après le bilan). Choisir la valeur déjà en
+  vigueur n'écrit pas le fichier. À chaque lecture de la page (ouverture, retour du focus), hors
+  saisie et une fois les raccourcis réservés, `synchroniser_impr_ecran` remet la réservation
+  d'accord sur le registre (touche rendue ou reprise dans Paramètres de Windows, lâchée par une
+  autre application). Si la touche n'est pas tenue après coup, la ligne dit où Windows la garde (`REFUS_IMPR_ECRAN`) ou
+  qu'une autre application la tient. Journal : `impr ecran: breezyshot oui|non, touche
+  tenue|non tenue`, à l'appui `impr ecran: <action>|barre`.
 - **La page ne décide rien.** Elle appelle `reglages_lire` (à l'ouverture et à chaque retour
   du focus), `reglages_changer { changement: { cle, valeur } }`, `reglages_apercu_nom`,
   `reglages_parcourir`, `reglages_saisie`, `reglages_raccourci`, `reglages_retablir`. Chaque

@@ -722,34 +722,179 @@ const SANS_VIGNETTE = { ...VUE, lignes: ['copier', 'dossier', 'modele_nom', 'the
     await p.context().close();
   }
 
-  // 14. « Impr. écran ouvre BreezyShot » (0.5.3), en tête de Raccourcis : l'interrupteur
-  // suit la vue, un clic demande le changement au cœur, un refus du cœur est dit sur la
-  // ligne ; sans la ligne dans la vue (hors Windows), rien n'est montré.
-  {
-    const p = await page({ vue: REEL.vue });
-    await onglet(p, 'Raccourcis');
-    const inter = p.getByRole('switch', { name: 'Impr. écran ouvre BreezyShot' });
-    const avant = await inter.getAttribute('aria-checked');
+  // 14. « Touche Impr. écran » (0.8.0), en tête de Raccourcis : une ligne, une liste
+  // déroulante (bouton aria-haspopup, listbox, options aria-selected) qui suit la vue ; un
+  // choix, au clic ou au clavier, demande le changement au cœur ; un refus du cœur est dit
+  // sur la ligne ; sans la ligne dans la vue (hors Windows), rien n'est montré.
+  const NOM_IMPR = /^Touche Impr\. écran/;
+  const optionsImpr = (p) => p.getByRole('listbox', { name: 'Touche Impr. écran' }).getByRole('option').allTextContents();
+  const choisiImpr = (p) => p.$$eval('[role="listbox"] [role="option"][aria-selected="true"]', os => os.map(o => o.textContent));
+  const enFocus = (p) => p.evaluate(() => document.activeElement && (document.activeElement.dataset.valeur || document.activeElement.dataset.controle || document.activeElement.tagName));
+  for (const theme of ['light', 'dark']) {
+    const p = await page({ theme, vue: REEL.vue });
+    await onglet(p, 'Raccourcis'); await p.waitForTimeout(450);
+    const bouton = p.getByRole('button', { name: NOM_IMPR });
     const enTete = await p.evaluate(() => {
       const l = document.querySelector('[data-reglage="impr_ecran"]');
       const r = document.querySelector('[data-reglage="raccourci"]');
       return !!l && !l.hidden && !!r && (l.compareDocumentPosition(r) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0;
     });
+    const texte = await bouton.textContent();
+    const attrs = await bouton.evaluate(e => [e.getAttribute('aria-haspopup'), e.getAttribute('aria-expanded')]);
+    const interrupteur = await p.getByRole('switch', { name: /Impr\. écran/ }).count();
+    const ferme = await p.getByRole('listbox').count();
+    verifier(enTete && texte === 'Outil Capture de Windows' && json(attrs) === json(['listbox', 'false']) && interrupteur === 0 && ferme === 0,
+      `14 ${theme} Impr. écran : une ligne en tête de Raccourcis, une liste fermée qui dit « Outil Capture de Windows », plus d’interrupteur`, json([enTete, texte, attrs, interrupteur, ferme]));
+    // Ouverte : les choix de la vue dans l'ordre, un trait entre les groupes, le choix coché.
+    await bouton.click(); await p.waitForTimeout(250);
+    const noms = await optionsImpr(p);
+    const traits = await p.$$eval('[role="listbox"] .trait', ts => ts.length);
+    const ouvert = await bouton.getAttribute('aria-expanded');
+    verifier(json(noms) === json(REEL.vue.impr_ecran.choix.map(c => c.libelle)) && noms.length === 6 && traits === 1
+      && ouvert === 'true' && json(await choisiImpr(p)) === json(['Outil Capture de Windows']) && await enFocus(p) === 'windows',
+    `14 ${theme} liste ouverte : six choix dans l’ordre, un trait avant « Barre de capture » (aucun entre elle et Zone), « Outil Capture de Windows » coché et au focus`, json([noms, traits, ouvert]));
+    const contenu = await p.evaluate(() => {
+      const m = document.querySelector('[role="listbox"]').getBoundingClientRect();
+      const b = document.querySelector('[data-controle="impr_ecran"]').getBoundingClientRect();
+      return [Math.round(m.right - b.right), m.top >= b.bottom, m.left >= 0 && m.right <= innerWidth && m.bottom <= innerHeight];
+    });
+    verifier(contenu[0] === 0 && contenu[1] && contenu[2], `14 ${theme} la liste s’ouvre sous le bouton, alignée à droite, dans la fenêtre`, json(contenu));
+    await p.screenshot({ path: `${SORTIE}/reglages-impr-ecran-${theme}.png` });
+    await p.context().close();
+  }
+  {
+    const p = await page({ vue: REEL.vue });
+    await onglet(p, 'Raccourcis');
+    const bouton = p.getByRole('button', { name: NOM_IMPR });
+    // Clic sur un choix : la demande part au cœur avec l'identifiant du choix, la liste se
+    // ferme, le focus revient au bouton ; le refus du cœur est dit sur la ligne.
     await vider(p);
     await p.evaluate(() => { window.__refus = { ligne: 'impr_ecran', texte: 'Windows garde la touche' }; });
-    await inter.click(); await p.waitForTimeout(50);
+    await bouton.click();
+    await p.getByRole('option', { name: 'Plein écran' }).click(); await p.waitForTimeout(50);
     const a = await appels(p);
     const refus = await p.$eval('[data-reglage="impr_ecran"] [data-refus]', e => e.hidden ? null : e.textContent);
-    verifier(avant === 'false' && enTete && json(a[0]) === json(['reglages_changer', { changement: { cle: 'impr_ecran', valeur: true } }])
-      && refus === 'Windows garde la touche',
-    '14 Impr. écran : éteinte, en tête de Raccourcis ; clic → impr_ecran oui ; refus dit sur la ligne', json([avant, enTete, a, refus]));
-    await p.evaluate((v) => __emettre('reglages:etat', { ...v, impr_ecran: true }), REEL.vue); await p.waitForTimeout(30);
-    const allumee = await inter.getAttribute('aria-checked');
-    await p.evaluate((v) => __emettre('reglages:etat', { ...v, lignes: v.lignes.filter(l => l !== 'impr_ecran') }), REEL.vue); await p.waitForTimeout(30);
+    verifier(json(a) === json([['reglages_changer', { changement: { cle: 'impr_ecran', valeur: 'plein_ecran' } }]])
+      && await p.getByRole('listbox').count() === 0 && await bouton.getAttribute('aria-expanded') === 'false'
+      && await enFocus(p) === 'impr_ecran' && refus === 'Windows garde la touche',
+    '14 clic sur « Plein écran » : reglages_changer impr_ecran plein_ecran, liste fermée, focus au bouton, refus dit sur la ligne', json([a, refus]));
+    // « Outil Capture de Windows » est un choix comme un autre : l'identifiant `windows`.
+    await vider(p);
+    await bouton.click(); await p.getByRole('option', { name: 'Outil Capture de Windows' }).click(); await p.waitForTimeout(50);
+    verifier(json(await appels(p)) === json([['reglages_changer', { changement: { cle: 'impr_ecran', valeur: 'windows' } }]]),
+      '14 « Outil Capture de Windows » : impr_ecran windows', json(await appels(p)));
+    // La vue suit : le choix en vigueur et le refus d'une autre application, redits à chaque vue.
+    const autre = { ...REEL.vue.impr_ecran, valeur: 'derniere_zone', refus: 'Pris par une autre application' };
+    await p.evaluate((v) => __emettre('reglages:etat', v), { ...REEL.vue, impr_ecran: autre }); await p.waitForTimeout(30);
+    const suit = [await bouton.textContent(), await p.$eval('[data-reglage="impr_ecran"] [data-refus]', e => e.hidden ? null : e.textContent)];
+    await bouton.click();
+    const coche = await choisiImpr(p);
+    await p.keyboard.press('Escape');
+    verifier(json(suit) === json(['Refaire la dernière zone', 'Pris par une autre application']) && json(coche) === json(['Refaire la dernière zone']),
+      '14 la vue change le choix en vigueur et dit le refus sur la ligne', json([suit, coche]));
+    await p.evaluate((v) => __emettre('reglages:etat', v), { ...REEL.vue, lignes: REEL.vue.lignes.filter(l => l !== 'impr_ecran') }); await p.waitForTimeout(30);
     const cachee = await p.$eval('[data-reglage="impr_ecran"]', e => e.hidden);
     const carte = await p.$eval('[data-reglage="impr_ecran"]', e => getComputedStyle(e.closest('.carte')).display);
-    verifier(allumee === 'true' && cachee && carte === 'none', '14 Impr. écran : suit la vue ; hors Windows, ni ligne ni carte', json([allumee, cachee, carte]));
+    verifier(cachee && carte === 'none', '14 hors Windows : ni ligne ni carte', json([cachee, carte]));
     verifier(p.erreurs.length === 0, '14 aucune erreur de console', json(p.erreurs));
+    await p.context().close();
+  }
+  // 14 bis. Clavier : flèches, Entrée, Échap, Tab ; un clic ailleurs ferme aussi.
+  {
+    const p = await page({ vue: REEL.vue });
+    await onglet(p, 'Raccourcis');
+    const bouton = p.getByRole('button', { name: NOM_IMPR });
+    await bouton.focus(); await vider(p);
+    await p.keyboard.press('ArrowDown'); await p.waitForTimeout(30);
+    const ouverte = [await bouton.getAttribute('aria-expanded'), await enFocus(p)];
+    await p.keyboard.press('ArrowDown'); await p.keyboard.press('ArrowDown');
+    const trois = await enFocus(p);
+    await p.keyboard.press('ArrowUp');
+    const retour = await enFocus(p);
+    await p.keyboard.press('Home'); const debut = await enFocus(p);
+    await p.keyboard.press('ArrowUp'); const bouclee = await enFocus(p);
+    await p.keyboard.press('End'); const fin = await enFocus(p);
+    verifier(json(ouverte) === json(['true', 'windows']) && trois === 'zone' && retour === 'barre' && debut === 'windows' && bouclee === 'derniere_zone' && fin === 'derniere_zone'
+      && json(await appels(p)) === '[]',
+    '14 clavier : ↓ ouvre au choix en vigueur, ↓ ↑ Début Fin déplacent le focus (en boucle), rien n’est demandé au cœur', json([ouverte, trois, retour, debut, bouclee, fin]));
+    // Entrée choisit l'option au focus.
+    await p.keyboard.press('ArrowUp');
+    await p.keyboard.press('Enter'); await p.waitForTimeout(50);
+    verifier(json(await appels(p)) === json([['reglages_changer', { changement: { cle: 'impr_ecran', valeur: 'fenetre' } }]])
+      && await p.getByRole('listbox').count() === 0 && await enFocus(p) === 'impr_ecran',
+    '14 clavier : Entrée choisit « Fenêtre », la liste se ferme, le focus revient au bouton', json(await appels(p)));
+    // Échap ferme sans rien demander, et ne ferme rien d'autre.
+    await vider(p);
+    await bouton.press('ArrowUp'); await p.keyboard.press('ArrowDown'); await p.keyboard.press('Escape'); await p.waitForTimeout(30);
+    verifier(await p.getByRole('listbox').count() === 0 && await bouton.getAttribute('aria-expanded') === 'false' && await enFocus(p) === 'impr_ecran'
+      && json(await appels(p)) === '[]', '14 clavier : Échap ferme la liste sans rien changer, focus au bouton', json(await appels(p)));
+    // Tab ferme.
+    await bouton.press('ArrowDown'); await p.keyboard.press('Tab'); await p.waitForTimeout(30);
+    verifier(await p.getByRole('listbox').count() === 0 && await bouton.getAttribute('aria-expanded') === 'false' && json(await appels(p)) === '[]',
+      '14 clavier : Tab ferme la liste sans rien changer', json(await appels(p)));
+    // Un clic ailleurs ferme ; un second clic sur le bouton referme.
+    await bouton.click(); const ouvertAvant = await p.getByRole('listbox').count();
+    await p.getByRole('heading', { name: 'Raccourcis' }).click(); await p.waitForTimeout(30);
+    const fermeeAilleurs = await p.getByRole('listbox').count();
+    await bouton.click(); await bouton.click();
+    verifier(ouvertAvant === 1 && fermeeAilleurs === 0 && await p.getByRole('listbox').count() === 0 && json(await appels(p)) === '[]',
+      '14 clic ailleurs ferme la liste, un second clic sur le bouton aussi', json([ouvertAvant, fermeeAilleurs]));
+    verifier(p.erreurs.length === 0, '14 clavier : aucune erreur de console', json(p.erreurs));
+    await p.context().close();
+  }
+  // 14 ter. Avec la licence, le groupe des actions Pro s'ajoute après un trait (défilante,
+  // texte, historique ici : le codeur manque) ; sans elle il disparaît, liste ouverte comprise.
+  {
+    const p = await page({ vue: REEL.vue_pro });
+    await onglet(p, 'Raccourcis');
+    const bouton = p.getByRole('button', { name: NOM_IMPR });
+    await bouton.click();
+    const noms = await optionsImpr(p);
+    const traits = await p.$$eval('[role="listbox"] .trait', ts => ts.length);
+    verifier(json(noms.slice(2)) === json(['Zone', 'Plein écran', 'Fenêtre', 'Refaire la dernière zone', 'Capture défilante', 'Copier le texte', 'Historique'])
+      && traits === 2, '14 avec la licence : un second trait avant « Capture défilante » ; un choix fermé (Vidéo) est absent', json([noms, traits]));
+    await p.evaluate((v) => __emettre('reglages:etat', v), REEL.vue); await p.waitForTimeout(30);
+    const apres = await optionsImpr(p);
+    verifier(apres.length === 6 && await p.$$eval('[role="listbox"] .trait', ts => ts.length) === 1,
+      '14 licence retirée : les choix Pro disparaissent de la liste', json(apres));
+    verifier(p.erreurs.length === 0, '14 licence : aucune erreur de console', json(p.erreurs));
+    await p.context().close();
+  }
+  // 14 quater. Licence retirée pendant que la liste est ouverte sur une option Pro : la liste
+  // se ferme et le focus revient au bouton (Échap et Tab ne se perdent pas).
+  {
+    const p = await page({ vue: REEL.vue_pro });
+    await onglet(p, 'Raccourcis');
+    const bouton = p.getByRole('button', { name: NOM_IMPR });
+    await bouton.click();
+    await p.getByRole('option', { name: 'Capture défilante' }).focus();
+    const avant = await enFocus(p);
+    await p.evaluate((v) => __emettre('reglages:etat', v), REEL.vue); await p.waitForTimeout(30);
+    verifier(avant === 'defilante' && await p.getByRole('listbox').count() === 0 && await bouton.getAttribute('aria-expanded') === 'false' && await enFocus(p) === 'impr_ecran',
+      '14 licence retirée liste ouverte sur une option Pro : liste fermée, focus au bouton', json([avant, await enFocus(p)]));
+    // Une option qui reste garde le focus, liste ouverte.
+    await p.evaluate((v) => __emettre('reglages:etat', v), REEL.vue_pro); await p.waitForTimeout(30);
+    await bouton.click(); await p.getByRole('option', { name: 'Zone', exact: true }).focus();
+    await p.evaluate((v) => __emettre('reglages:etat', v), REEL.vue); await p.waitForTimeout(30);
+    verifier(await p.getByRole('listbox').count() === 1 && await enFocus(p) === 'zone', '14 option conservée : liste ouverte, focus gardé', await enFocus(p));
+    await p.keyboard.press('Escape'); await p.waitForTimeout(30);
+    verifier(await p.getByRole('listbox').count() === 0, '14 Échap ferme encore la liste');
+    await p.context().close();
+  }
+  // 14 quinquies. Petite fenêtre (600 × 420) avec la liste complète : elle reste dans la
+  // fenêtre, défile au besoin, et la dernière option est atteignable.
+  {
+    const p = await page({ vue: REEL.vue_pro, largeur: 600, hauteur: 420 });
+    await onglet(p, 'Raccourcis');
+    await p.getByRole('button', { name: NOM_IMPR }).click(); await p.waitForTimeout(250);
+    const m = await p.evaluate(() => {
+      const l = document.querySelector('[role="listbox"]'), r = l.getBoundingClientRect();
+      return [r.bottom <= innerHeight, l.scrollHeight >= l.clientHeight, getComputedStyle(l).overflowY];
+    });
+    await p.keyboard.press('End');
+    const dernier = await enFocus(p);
+    const visible = await p.evaluate(() => { const o = document.activeElement.getBoundingClientRect(); const l = document.querySelector('[role="listbox"]').getBoundingClientRect(); return o.bottom <= l.bottom + 1 && o.top >= l.top - 1; });
+    verifier(m[0] && m[2] === 'auto' && dernier === 'historique' && visible, '14 600 × 420 : liste bornée à la fenêtre, défile, dernière option visible', json([m, dernier, visible]));
     await p.context().close();
   }
 

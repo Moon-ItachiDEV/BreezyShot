@@ -1,11 +1,16 @@
-# Étape 3, raccourci et bandeau (ARCHITECTURE.md §5, §6).
-# (a) Impr. écran libre : retenue, appui simulé, sélection ouverte puis fermée par Échap
-#     (la capture elle-même et son bandeau de réussite sont dans l'essai 04) ;
-# (b) Impr. écran réservée par Windows : Ctrl+Maj+1, annonce (raison réservée), appui ; relance :
-#     annonce déjà faite ;
-# (c) Impr. écran tenue par une autre application : Ctrl+Maj+1, annonce (raison refusée) ;
-# (d) clic sur la croix d'une info, sans changer la fenêtre au premier plan ; clic à côté
-#     de la pilule sans effet ;
+# Étape 3, raccourci et bandeau (ARCHITECTURE.md §5, §6). Depuis la 0.8.0, Impr. écran est
+# tenue par la pseudo-action `impr_ecran` (candidate ImprEcran seule), qui lance l'action
+# choisie dans les réglages (`impr_ecran_ouvre`, la zone par défaut) ; la zone garde Ctrl+Maj+1.
+# (a) Impr. écran libre : retenue par `impr_ecran`, appui simulé traduit en zone, sélection
+#     ouverte puis fermée par Échap (la capture elle-même et son bandeau de réussite sont
+#     dans l'essai 04) ;
+# (b) Impr. écran réservée par Windows : rien tenu par `impr_ecran`, aucune annonce (c'est un
+#     choix de la liste des Réglages), Ctrl+Maj+1 lance la zone ;
+# (b2) Ctrl+Maj+1 tenu par une autre application : la zone n'a aucun raccourci, annonce
+#     « Aucun raccourci pour la zone » (info) ; relance : annonce déjà faite ;
+# (c) Impr. écran tenue par une autre application : refusée, rien tenu, aucune annonce ;
+# (d) clic sur la croix d'une info (celle de (b2)), sans changer la fenêtre au premier plan ;
+#     clic à côté de la pilule sans effet ;
 # (e) après --quitter, le raccourci est libéré.
 # C'est l'ESSAI qui écrit PrintScreenKeyForSnippingEnabled dans HKCU de la machine d'essai
 # (l'app ne l'écrit jamais) ; la valeur d'origine est remise dans le finally.
@@ -100,7 +105,7 @@ try {
     Verifier 'raccourcis libérés à l''arrêt' ((Compter-Lignes -Texte 'raccourcis liberes' -Dossier $commun) -eq 1) | Out-Null
 
     if (-not $IsWindows) {
-        foreach ($cas in '(a) Impr. écran libre', '(b) Impr. écran réservée', '(c) Impr. écran prise', '(d) clics sur le bandeau', '(e) raccourci libéré') {
+        foreach ($cas in '(a) Impr. écran libre', '(b) Impr. écran réservée', '(b2) Ctrl+Maj+1 prise', '(c) Impr. écran prise', '(d) clics sur le bandeau', '(e) raccourci libéré') {
             Write-Host "[saute] $cas : sauté hors Windows"
         }
     }
@@ -303,7 +308,8 @@ public static extern IntPtr GetWindowLongPtr(IntPtr h, int index);
             Poser-Valeur 0
             $da = Dossier-Cas 'a'
             $p = Demarrer-Cas -Dossier $da -Quoi '(a)'
-            Verifier '(a) raccourci zone: ImprEcran' ((Compter-Lignes -Texte 'raccourci zone: ImprEcran' -Dossier $da) -eq 1) | Out-Null
+            Verifier '(a) raccourci impr_ecran: ImprEcran' ((Compter-Lignes -Texte 'raccourci impr_ecran: ImprEcran' -Dossier $da) -eq 1) | Out-Null
+            Verifier '(a) raccourci zone: Ctrl+Maj+1 (Impr. écran n''est plus dans sa liste)' ((Compter-Lignes -Texte 'raccourci zone: Ctrl+Maj+1' -Dossier $da) -eq 1) | Out-Null
             Verifier '(a) aucune annonce' ((Compter-Lignes -Texte 'annonce raccourci' -Dossier $da) -eq 0) | Out-Null
             $hwnd = Fenetre-Bandeau $da
             $ex = [long][BreezyShotEssai.Entree]::GetWindowLongPtr($hwnd, -20)   # GWL_EXSTYLE
@@ -315,8 +321,9 @@ public static extern IntPtr GetWindowLongPtr(IntPtr h, int index);
             Verifier '(e) tenu par BreezyShot : une autre application ne peut pas le prendre' ((Tenir-Raccourci -Vk $VK_SNAPSHOT -Mods 0 -Quoi '(e) avant') -eq 'refuse') | Out-Null
             Fermer-Auxiliaires
             [BreezyShotEssai.Entree]::Touches([byte[]]@($VK_SNAPSHOT))
-            $null = Attendre-Motif -Motif 'raccourci presse: zone$' -Dossier $da -DelaiS 5 -Quoi '(a) appui sur Impr. écran'
-            Verifier '(a) raccourci presse: zone' $true | Out-Null
+            $null = Attendre-Motif -Motif 'raccourci presse: impr_ecran$' -Dossier $da -DelaiS 5 -Quoi '(a) appui sur Impr. écran'
+            $null = Attendre-Motif -Motif 'impr ecran: zone$' -Dossier $da -DelaiS 5 -Quoi '(a) Impr. écran traduite en zone'
+            Verifier '(a) raccourci presse: impr_ecran, traduit en zone' $true | Out-Null
             # Depuis l'étape 4, l'appui lance une vraie capture (essai 04) : la sélection
             # s'ouvre, Échap la ferme, retour au Repos sans message.
             $null = Attendre-Motif -Motif 'selection montree \d+ ' -Dossier $da -DelaiS 5 -Quoi '(a) sélection ouverte'
@@ -332,24 +339,42 @@ public static extern IntPtr GetWindowLongPtr(IntPtr h, int index);
             Verifier '(e) après --quitter, une autre application prend Impr. écran' ((Tenir-Raccourci -Vk $VK_SNAPSHOT -Mods 0 -Quoi '(e) après') -eq 'tenu') | Out-Null
             Fermer-Auxiliaires
 
-            # (b) Impr. écran réservée par Windows, puis (d) clics, puis relance.
+            # (b) Impr. écran réservée par Windows : `impr_ecran` ne tient rien, aucune annonce.
             Poser-Valeur 1
             $db = Dossier-Cas 'b'
-            $temoinCote = Lancer-Temoin-Cote
             $p = Demarrer-Cas -Dossier $db -Quoi '(b)'
             Verifier '(b) raccourci zone: Ctrl+Maj+1' ((Compter-Lignes -Texte 'raccourci zone: Ctrl+Maj+1' -Dossier $db) -eq 1) | Out-Null
-            Verifier '(b) annonce (raison : réservée par Windows)' ((Compter-Lignes -Texte 'annonce raccourci: reserve_par_le_systeme' -Dossier $db) -eq 1) | Out-Null
-            $info = Lire-Affiche (Attendre-Motif -Motif 'bandeau affiche \d+ info ' -Dossier $db -DelaiS 10 -Quoi '(b) info affichée')
-            Verifier '(b) bandeau affiche … info' ($info.Genre -eq 'info') | Out-Null
+            Verifier '(b) ImprEcran écartée : réservée par Windows' ((Compter-Lignes -Texte 'raccourci impr_ecran ecarte: ImprEcran (reserve par le systeme)' -Dossier $db) -eq 1) | Out-Null
+            Verifier '(b) rien tenu par impr_ecran' ((Compter-Lignes -Texte 'raccourci impr_ecran: aucun' -Dossier $db) -eq 1) | Out-Null
+            Verifier '(b) aucune annonce' ((Compter-Lignes -Texte 'annonce raccourci' -Dossier $db) -eq 0) | Out-Null
+            [BreezyShotEssai.Entree]::Touches($CTRL_MAJ_1)
+            $null = Attendre-Motif -Motif 'raccourci presse: zone$' -Dossier $db -DelaiS 5 -Quoi '(b) appui sur Ctrl+Maj+1'
+            Verifier '(b) raccourci presse: zone' $true | Out-Null
+            $null = Attendre-Motif -Motif 'chrono selection prete \d+' -Dossier $db -DelaiS 5 -Quoi '(b) sélection prête'
+            [BreezyShotEssai.Entree]::Touches([byte[]]@(0x1B))
+            $null = Attendre-Motif -Motif 'etat Selection -> Repos' -Dossier $db -DelaiS 5 -Quoi '(b) Échap'
+            Fermer-Cas $p $db '(b)'
+
+            # (b2) Ctrl+Maj+1 tenu par une autre application : la zone n'a aucun raccourci, d'où
+            # une info « Aucun raccourci pour la zone » ; puis (d) clics, puis relance.
+            Poser-Valeur 1
+            $db = Dossier-Cas 'b2'
+            Verifier '(b2) l''aide tient Ctrl+Maj+1' ((Tenir-Raccourci -Vk 0x31 -Mods 6 -Quoi '(b2)') -eq 'tenu') | Out-Null
+            $temoinCote = Lancer-Temoin-Cote
+            $p = Demarrer-Cas -Dossier $db -Quoi '(b2)'
+            Verifier '(b2) raccourci zone: aucun' ((Compter-Lignes -Texte 'raccourci zone: aucun' -Dossier $db) -eq 1) | Out-Null
+            Verifier '(b2) annonce (raison : action sans raccourci)' ((Compter-Lignes -Texte 'annonce raccourci: action_sans_raccourci' -Dossier $db) -eq 1) | Out-Null
+            $info = Lire-Affiche (Attendre-Motif -Motif 'bandeau affiche \d+ info ' -Dossier $db -DelaiS 10 -Quoi '(b2) info affichée')
+            Verifier '(b2) bandeau affiche … info' ($info.Genre -eq 'info') | Out-Null
             # (d) La zone de la pilule, une fois l'animation d'entrée finie.
             $hwnd = Fenetre-Bandeau $db
             $z = Lire-Zone -Id $info.Id -Dossier $db
             $zx = $z.X; $zy = $z.Y; $zl = $z.L; $zh = $z.H
             $e = $info.Echelle
             # Exclu des captures : la copie d'écran ne montre PAS la pilule.
-            Verifier '(b) bandeau exclu des captures: oui' ((Compter-Lignes -Texte 'bandeau exclu des captures: oui' -Dossier $db) -eq 1) | Out-Null
+            Verifier '(b2) bandeau exclu des captures: oui' ((Compter-Lignes -Texte 'bandeau exclu des captures: oui' -Dossier $db) -eq 1) | Out-Null
             $vu = Lire-Pilule $zx $zy $zl $zh $e 'bandeau-windows-exclu'
-            Verifier '(b) exclu des captures : la copie d''écran ne montre pas la pilule' ($vu.Fond -eq 0) $vu.Detail | Out-Null
+            Verifier '(b2) exclu des captures : la copie d''écran ne montre pas la pilule' ($vu.Fond -eq 0) $vu.Detail | Out-Null
             # Croix : bouton de 24 px, à 8 px du bord droit (jetons --bandeau-bouton, --bandeau-marge-large).
             $croixX = [int]($zx + $zl - (8 + 12) * $e)
             $croixY = [int]($zy + $zh / 2)
@@ -396,24 +421,18 @@ public static extern IntPtr GetWindowLongPtr(IntPtr h, int index);
             Verifier '(d) bandeau termine <id>' $true | Out-Null
             Start-Sleep -Milliseconds 200
             Verifier '(d) après bandeau termine, la fenêtre est cachée' (-not [BreezyShotEssai.Entree]::IsWindowVisible($hwnd)) | Out-Null
-            Verifier '(b) annonce retenue une fois montrée' ((Compter-Lignes -Texte "annonce montree $($info.Id): situation retenue" -Dossier $db) -eq 1) | Out-Null
+            Verifier '(b2) annonce retenue une fois montrée' ((Compter-Lignes -Texte "annonce montree $($info.Id): situation retenue" -Dossier $db) -eq 1) | Out-Null
             $premierPlanApres = [BreezyShotEssai.Entree]::GetForegroundWindow()
             Verifier '(d) fenêtre au premier plan inchangée' ($premierPlanAvant -eq $premierPlanApres) "avant $premierPlanAvant, après $premierPlanApres" | Out-Null
             if ($null -ne $temoinCote) { try { $temoinCote.Aide.Kill(); $null = $temoinCote.Aide.WaitForExit(5000) } catch { } }
-            # (b) Appui sur Ctrl+Maj+1.
-            [BreezyShotEssai.Entree]::Touches($CTRL_MAJ_1)
-            $null = Attendre-Motif -Motif 'raccourci presse: zone$' -Dossier $db -DelaiS 5 -Quoi '(b) appui sur Ctrl+Maj+1'
-            Verifier '(b) raccourci presse: zone' $true | Out-Null
-            $null = Attendre-Motif -Motif 'chrono selection prete \d+' -Dossier $db -DelaiS 5 -Quoi '(b) sélection prête'
-            [BreezyShotEssai.Entree]::Touches([byte[]]@(0x1B))
-            $null = Attendre-Motif -Motif 'etat Selection -> Repos' -Dossier $db -DelaiS 5 -Quoi '(b) Échap'
-            Fermer-Cas $p $db '(b)'
+            Fermer-Cas $p $db '(b2)'
             # Relance : la même situation n'est pas annoncée deux fois.
-            $p = Demarrer-Cas -Dossier $db -Quoi '(b) relance'
-            Verifier '(b) relance : deux démarrages complets dans ce dossier' ((Compter-Motif -Motif 'application pret$' -Dossier $db) -eq 2) | Out-Null
-            Verifier '(b) relance : annonce raccourci: deja faite' ((Compter-Lignes -Texte 'annonce raccourci: deja faite' -Dossier $db) -eq 1) | Out-Null
-            Verifier '(b) relance : une seule annonce affichée en tout' ((Compter-Lignes -Texte 'annonce raccourci: reserve_par_le_systeme' -Dossier $db) -eq 1) | Out-Null
-            Fermer-Cas $p $db '(b) relance'
+            $p = Demarrer-Cas -Dossier $db -Quoi '(b2) relance'
+            Verifier '(b2) relance : deux démarrages complets dans ce dossier' ((Compter-Motif -Motif 'application pret$' -Dossier $db) -eq 2) | Out-Null
+            Verifier '(b2) relance : annonce raccourci: deja faite' ((Compter-Lignes -Texte 'annonce raccourci: deja faite' -Dossier $db) -eq 1) | Out-Null
+            Verifier '(b2) relance : une seule annonce affichée en tout' ((Compter-Lignes -Texte 'annonce raccourci: action_sans_raccourci' -Dossier $db) -eq 1) | Out-Null
+            Fermer-Cas $p $db '(b2) relance'
+            Fermer-Auxiliaires
 
             # (c) Impr. écran tenue par une autre application.
             Poser-Valeur 0
@@ -421,16 +440,18 @@ public static extern IntPtr GetWindowLongPtr(IntPtr h, int index);
             $dc = Dossier-Cas 'c'
             $p = Demarrer-Cas -Dossier $dc -Quoi '(c)'
             Verifier '(c) raccourci zone: Ctrl+Maj+1' ((Compter-Lignes -Texte 'raccourci zone: Ctrl+Maj+1' -Dossier $dc) -eq 1) | Out-Null
-            Verifier '(c) ImprEcran écarté : refusé par le système' ((Compter-Lignes -Texte 'raccourci zone ecarte: ImprEcran (refuse par le systeme)' -Dossier $dc) -eq 1) | Out-Null
-            Verifier '(c) annonce (raison : refusée par le système)' ((Compter-Lignes -Texte 'annonce raccourci: refuse_par_le_systeme' -Dossier $dc) -eq 1) | Out-Null
-            $null = Attendre-Motif -Motif 'bandeau affiche \d+ info ' -Dossier $dc -DelaiS 10 -Quoi '(c) info affichée'
+            Verifier '(c) ImprEcran écartée : refusée par le système' ((Compter-Lignes -Texte 'raccourci impr_ecran ecarte: ImprEcran (refuse par le systeme)' -Dossier $dc) -eq 1) | Out-Null
+            Verifier '(c) rien tenu par impr_ecran' ((Compter-Lignes -Texte 'raccourci impr_ecran: aucun' -Dossier $dc) -eq 1) | Out-Null
+            Verifier '(c) aucune annonce (dite sur la ligne des Réglages)' ((Compter-Lignes -Texte 'annonce raccourci' -Dossier $dc) -eq 0) | Out-Null
             Fermer-Cas $p $dc '(c)'
             Fermer-Auxiliaires
 
             # (f) Le bandeau est réellement peint : avec BREEZYSHOT_ESSAI_CAPTURABLE=1, la
             # copie d'écran montre le fond de la pilule.
+            # L'info vient de Ctrl+Maj+1 tenu par une autre application (la zone sans raccourci).
             Poser-Valeur 1
             $df = Dossier-Cas 'f'
+            Verifier '(f) l''aide tient Ctrl+Maj+1' ((Tenir-Raccourci -Vk 0x31 -Mods 6 -Quoi '(f)') -eq 'tenu') | Out-Null
             $env:BREEZYSHOT_ESSAI_CAPTURABLE = '1'
             try { $p = Demarrer-Cas -Dossier $df -Quoi '(f)' }
             finally { Remove-Item Env:BREEZYSHOT_ESSAI_CAPTURABLE -ErrorAction SilentlyContinue }
@@ -442,6 +463,7 @@ public static extern IntPtr GetWindowLongPtr(IntPtr h, int index);
             Verifier '(f) capture : le fond de la pilule a la couleur attendue (4 points sur 4)' ($vu.Fond -eq 4) $vu.Detail | Out-Null
             Verifier '(f) capture : hors de la pilule, pas cette couleur' (-not $vu.Dehors) $vu.Detail | Out-Null
             Fermer-Cas $p $df '(f)'
+            Fermer-Auxiliaires
         }
         finally {
             Fermer-Auxiliaires

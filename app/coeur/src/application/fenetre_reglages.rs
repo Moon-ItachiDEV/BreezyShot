@@ -18,8 +18,9 @@ use super::page_reglages::{
     ALERTE_NON_ENREGISTRES,
 };
 use super::{
-    actions_en_vigueur, plateforme_reglages, pro, refaire_menu as refaire_menu_actuel, zone,
-    Application, EDITEUR_CONSTRUIT, VERSION, VIGNETTE_CONSTRUITE,
+    actions_en_vigueur, impr_ecran_existe, plateforme_reglages, pro,
+    refaire_menu as refaire_menu_actuel, zone, Application, EDITEUR_CONSTRUIT, VERSION,
+    VIGNETTE_CONSTRUITE,
 };
 use crate::fenetres::{reglages as fenetre, theme};
 use crate::raccourcis::{self, Raison};
@@ -403,6 +404,7 @@ pub fn reglages_lire(app: AppHandle) -> Reponse {
         log::info!("reglages page prete");
     }
     relire(&app);
+    synchroniser_impr_ecran(&app);
     let r = reponse(&app, None);
     envoyer_rubrique(&app);
     r
@@ -421,6 +423,16 @@ pub(super) fn changer(app: &AppHandle, changement: Changement) -> Reponse {
     // Une page forgée ne peut pas écrire un réglage Pro sans licence.
     if changement.exige_pro() && !pro(&app) {
         return refuser(&app, Refus::nouveau(changement.ligne(), "", "sans_licence"));
+    }
+    // Impr. écran : seul un choix de la liste en vigueur passe (action fermée par la licence,
+    // le codeur ou la langue de lecture, valeur forgée), et seulement là où la ligne existe.
+    if let Changement::ImprEcran(t) = &changement {
+        if systeme::impr_ecran_pour_breezyshot().is_none() {
+            return refuser(&app, Refus::nouveau("impr_ecran", "", "sans_objet"));
+        }
+        if !page::impr_ecran_permis(t, &actions_en_vigueur(&app)) {
+            return refuser(&app, Refus::nouveau("impr_ecran", "", "invalide"));
+        }
     }
     let base = relire(&app);
     let nouveau = match page::appliquer(&base, &changement) {
@@ -447,57 +459,87 @@ pub(super) fn changer(app: &AppHandle, changement: Changement) -> Reponse {
             }
         }
     }
-    if let Changement::ImprEcran(oui) = changement {
-        let impossible =
-            || Refus::nouveau("impr_ecran", "Impossible de changer Impr. écran", "echec");
-        match systeme::donner_impr_ecran(oui) {
-            Ok(true) => {}
-            // Hors Windows : rien à changer (la ligne n'est pas montrée).
-            Ok(false) => return refuser(&app, Refus::nouveau("impr_ecran", "", "sans_objet")),
-            Err(e) => {
-                log::warn!("impr ecran: echec ({e})");
-                return refuser(&app, impossible());
+    // Impr. écran : le registre d'après le registre, la réservation d'après le bilan. Choisir
+    // ce qui est déjà en vigueur ne réécrit rien (fichier compris) ; une touche voulue par
+    // BreezyShot et pas tenue est retentée.
+    let mut geste = None;
+    if let Changement::ImprEcran(t) = &changement {
+        let g = page::geste_impr_ecran(
+            t == page::CHOIX_WINDOWS,
+            systeme::impr_ecran_pour_breezyshot() == Some(true),
+            impr_ecran_tenue(&app),
+        );
+        if let Some(a_breezyshot) = g.registre {
+            match systeme::donner_impr_ecran(a_breezyshot) {
+                Ok(true) => {}
+                // Hors Windows : rien à changer (la ligne n'est pas montrée).
+                Ok(false) => return refuser(&app, Refus::nouveau("impr_ecran", "", "sans_objet")),
+                Err(e) => {
+                    log::warn!("impr ecran: echec ({e})");
+                    return refuser(
+                        &app,
+                        Refus::nouveau("impr_ecran", "Impossible de changer Impr. écran", "echec"),
+                    );
+                }
             }
         }
+        geste = g.reserver;
     }
-    log::info!("{}", page::ligne_changement(&changement));
-    ecrire_et_garder(&app, nouveau.clone());
-    appliquer_theme(&app, &nouveau);
-    if let Changement::ImprEcran(oui) = changement {
-        return reponse(&app, reprendre_impr_ecran(&app, &nouveau, oui));
+    let inchange = matches!(changement, Changement::ImprEcran(_)) && nouveau == base;
+    if !inchange || geste.is_some() {
+        log::info!("{}", page::ligne_changement(&changement));
     }
-    reponse(&app, None)
+    if !inchange {
+        ecrire_et_garder(&app, nouveau.clone());
+        appliquer_theme(&app, &nouveau);
+    }
+    let refus = geste.and_then(|prise| reserver_impr_ecran(&app, prise));
+    reponse(&app, refus)
 }
 
-/// Après « Impr. écran ouvre BreezyShot » : la zone reprend ses candidats avec la règle de
-/// Windows à jour (Impr. écran prise, ou rendue et remplacée par le candidat suivant).
-/// Allumée sans que la touche soit tenue : le refus dit où Windows la garde.
-fn reprendre_impr_ecran(app: &AppHandle, r: &Reglages, oui: bool) -> Option<Refus> {
-    let mut candidats = r.raccourcis.candidats("zone").unwrap_or_default().to_vec();
-    if !oui {
-        // Rendue à Windows : la zone ne la propose plus, l'ancienne réservation est lâchée
-        // même si aucun autre candidat n'est libre.
-        candidats.retain(|c| !page::est_impr_ecran(c));
+/// La pseudo-action d'Impr. écran tient la touche en ce moment.
+fn impr_ecran_tenue(app: &AppHandle) -> bool {
+    reservations(app).is_some_and(|r| r.bilan().retenu(raccourcis::ACTION_IMPR_ECRAN).is_some())
+}
+
+/// Remet la réservation d'Impr. écran d'accord sur le registre (lecture de la page) : la
+/// touche rendue ou reprise dans Paramètres de Windows pendant que l'app tourne, ou lâchée
+/// par une autre application. Pas pendant une saisie (les raccourcis sont rendus).
+fn synchroniser_impr_ecran(app: &AppHandle) {
+    let Some(registre) = systeme::impr_ecran_pour_breezyshot() else {
+        return;
+    };
+    if !etat(app).raccourcis_reserves.load(Ordering::SeqCst)
+        || etat(app).saisie.lock().map(|s| s.is_some()).unwrap_or(true)
+    {
+        return;
     }
-    let choix = changer_raccourci_choix(app, "zone", &candidats);
-    let tenue = choix
-        .as_ref()
-        .and_then(|c| c.retenu)
-        .is_some_and(|x| x.est_impr_ecran_seule());
+    if let Some(prise) = page::synchro_impr_ecran(registre, impr_ecran_tenue(app)) {
+        reserver_impr_ecran(app, prise);
+    }
+}
+
+/// Après le passage de la touche entre Windows et BreezyShot : la pseudo-action d'Impr.
+/// écran la réserve (`prise`, la règle de Windows relue) ou la lâche (liste vide, sinon
+/// `Reservations::changer` garderait l'ancienne). Prise sans être tenue : le refus dit
+/// pourquoi, et où Windows la garde.
+fn reserver_impr_ecran(app: &AppHandle, prise: bool) -> Option<Refus> {
+    let candidats: Vec<String> = if prise {
+        vec![page::IMPR_ECRAN.to_string()]
+    } else {
+        Vec::new()
+    };
+    let choix = changer_raccourci_choix(app, raccourcis::ACTION_IMPR_ECRAN, &candidats);
+    let tenue = choix.as_ref().is_some_and(|c| c.retenu.is_some());
     log::info!(
         "impr ecran: breezyshot {}, touche {}",
-        if oui { "oui" } else { "non" },
+        if prise { "oui" } else { "non" },
         if tenue { "tenue" } else { "non tenue" }
     );
-    if !oui || tenue {
+    if !prise || tenue {
         return None;
     }
-    // Allumée sans être tenue : la raison de l'écart d'Impr. écran, dite telle quelle.
-    let raison = choix?
-        .ecartes
-        .into_iter()
-        .find(|e| page::est_impr_ecran(&e.candidat))
-        .map(|e| e.raison)?;
+    let raison = choix?.ecartes.into_iter().next().map(|e| e.raison)?;
     Some(match raison {
         Raison::ReserveParLeSysteme => {
             Refus::nouveau("impr_ecran", page::REFUS_IMPR_ECRAN, "gardee")
@@ -671,6 +713,13 @@ pub fn reglages_raccourci(app: AppHandle, action: String, saisie: Saisie) -> Rep
             return reponse(&app, None);
         }
     };
+    if let Some(refus) =
+        page::refus_saisie_impr_ecran(&notation, impr_ecran_existe(systeme::systeme()))
+    {
+        log::info!("raccourci {action} refuse: impr_ecran ({})", refus.code);
+        noter_refus(&app, &action, Some(refus.texte));
+        return reponse(&app, None);
+    }
     let mut base = relire(&app);
     if !changer_raccourci(&app, &action, std::slice::from_ref(&notation)) {
         return reponse(&app, None);

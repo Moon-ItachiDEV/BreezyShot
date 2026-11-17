@@ -25,7 +25,8 @@ mod reservation;
 
 pub use annonces::{decider_annonce, Annonce, Decision, Situation};
 pub use choix::{
-    choisir, choisir_action, Bilan, ChoixAction, Ecarte, Raison, ACTIONS_PRIORITAIRES,
+    choisir, choisir_action, echec_a_poser, Bilan, ChoixAction, Ecarte, Raison,
+    ACTIONS_PRIORITAIRES, ACTION_IMPR_ECRAN,
 };
 pub use conversion::vers_systeme;
 pub use notation::{

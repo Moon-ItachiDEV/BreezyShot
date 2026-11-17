@@ -63,6 +63,63 @@ pub enum FormatImage {
     Jpg,
 }
 
+/// Ce que lance la touche Impr. écran quand BreezyShot la tient (version 8). L'Outil Capture
+/// de Windows n'y figure pas : rendre la touche à Windows, c'est le registre
+/// (`systeme::donner_impr_ecran`), pas ce fichier.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CibleImprEcran {
+    /// La barre de capture (ce n'est pas une action : aucune ligne dans Raccourcis).
+    Barre,
+    Zone,
+    PleinEcran,
+    Fenetre,
+    DerniereZone,
+    Defilante,
+    Texte,
+    Video,
+    Gif,
+    Historique,
+}
+
+impl CibleImprEcran {
+    /// Les cibles dans l'ordre de la liste de la page.
+    pub const TOUTES: [CibleImprEcran; 10] = [
+        CibleImprEcran::Barre,
+        CibleImprEcran::Zone,
+        CibleImprEcran::PleinEcran,
+        CibleImprEcran::Fenetre,
+        CibleImprEcran::DerniereZone,
+        CibleImprEcran::Defilante,
+        CibleImprEcran::Texte,
+        CibleImprEcran::Video,
+        CibleImprEcran::Gif,
+        CibleImprEcran::Historique,
+    ];
+
+    /// Le nom de l'action lancée, `None` pour la barre (qui n'est pas une action).
+    pub fn action(self) -> Option<&'static str> {
+        match self {
+            CibleImprEcran::Barre => None,
+            CibleImprEcran::Zone => Some("zone"),
+            CibleImprEcran::PleinEcran => Some("plein_ecran"),
+            CibleImprEcran::Fenetre => Some("fenetre"),
+            CibleImprEcran::DerniereZone => Some("derniere_zone"),
+            CibleImprEcran::Defilante => Some("defilante"),
+            CibleImprEcran::Texte => Some("texte"),
+            CibleImprEcran::Video => Some("video"),
+            CibleImprEcran::Gif => Some("gif"),
+            CibleImprEcran::Historique => Some("historique"),
+        }
+    }
+
+    /// L'inverse de `action`.
+    pub fn depuis_action(action: &str) -> Option<Self> {
+        Self::TOUTES
+            .into_iter()
+            .find(|c| c.action() == Some(action))
+    }
+}
+
 /// Fait le lien entre une énumération et son texte dans le fichier.
 macro_rules! texte_enum {
     ($type:ident { $($variante:ident => $texte:literal),+ $(,)? }) => {
@@ -87,6 +144,18 @@ texte_enum!(Coin {
 });
 texte_enum!(FormatImage { Png => "png", Jpg => "jpg" });
 texte_enum!(Animations { Systeme => "systeme", Normales => "normales", Reduites => "reduites" });
+texte_enum!(CibleImprEcran {
+    Barre => "barre",
+    Zone => "zone",
+    PleinEcran => "plein_ecran",
+    Fenetre => "fenetre",
+    DerniereZone => "derniere_zone",
+    Defilante => "defilante",
+    Texte => "texte",
+    Video => "video",
+    Gif => "gif",
+    Historique => "historique",
+});
 texte_enum!(Theme { Systeme => "systeme", Clair => "clair", Sombre => "sombre" });
 
 /// Raccourcis rangés par nom d'action : pour chacune, les candidats par ordre de préférence.
@@ -157,12 +226,13 @@ impl Raccourcis {
         }
     }
 
-    /// Valeurs par défaut : `ImprEcran` n'existe pas sur Mac.
+    /// Valeurs par défaut. `ImprEcran` n'est dans aucune liste (version 8) : c'est la cible
+    /// `Reglages::impr_ecran_ouvre` qui la tient ; elle n'existe pas sur Mac.
     pub fn par_defaut(plateforme: Plateforme) -> Self {
         let liste = |l: &[&str]| l.iter().map(|s| s.to_string()).collect::<Vec<_>>();
         match plateforme {
             Plateforme::Windows | Plateforme::Autre => Raccourcis {
-                zone: liste(&["ImprEcran", "Ctrl+Maj+1"]),
+                zone: liste(&["Ctrl+Maj+1"]),
                 plein_ecran: liste(&["Ctrl+Maj+2"]),
                 fenetre: liste(&["Ctrl+Maj+3"]),
                 derniere_zone: liste(&["Ctrl+Maj+4"]),
@@ -295,6 +365,9 @@ impl Historique {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Reglages {
     pub raccourcis: Raccourcis,
+    /// Ce que lance Impr. écran quand BreezyShot la tient (version 8). Sans effet tant que
+    /// Windows garde la touche pour l'Outil Capture (le registre, pas ce fichier).
+    pub impr_ecran_ouvre: CibleImprEcran,
     pub copier_apres_capture: bool,
     pub enregistrer_apres_capture: bool,
     /// Le format du fichier enregistré (version 7) ; « Récents » reste en PNG.
@@ -325,6 +398,7 @@ impl Reglages {
     pub fn par_defaut(plateforme: Plateforme) -> Self {
         Reglages {
             raccourcis: Raccourcis::par_defaut(plateforme),
+            impr_ecran_ouvre: CibleImprEcran::Zone,
             copier_apres_capture: true,
             enregistrer_apres_capture: false,
             format_image: FormatImage::Png,
@@ -449,6 +523,10 @@ pub(in crate::reglages) fn vers_json(r: &Reglages) -> Result<Value, &'static str
     let mut m = Map::new();
     m.insert("version".into(), Value::from(r.version_fichier));
     m.insert("raccourcis".into(), Value::Object(raccourcis));
+    m.insert(
+        "impr_ecran_ouvre".into(),
+        Value::from(r.impr_ecran_ouvre.texte()),
+    );
     m.insert(
         "copier_apres_capture".into(),
         Value::Bool(r.copier_apres_capture),

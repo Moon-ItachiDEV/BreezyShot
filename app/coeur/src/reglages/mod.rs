@@ -25,7 +25,7 @@ mod tests;
 pub use constat::{Constat, ErreurEcriture, Raison};
 pub use fichier::{charger, ecrire, valider, MODELE_NOM_MAX, NOM_FICHIER};
 pub use modele::{
-    Animations, Capture, Coin, Film, FormatImage, Historique, Plateforme, Raccourcis, Reglages,
-    Selection, Theme, Vignette, DUREE_MAX_S, DUREE_MIN_S, DUREE_TOUJOURS, FLUIDITES,
-    HISTORIQUE_CHOIX, HISTORIQUE_DEFAUT, RETARDATEUR_MAX_S, VERSION_ACTUELLE,
+    Animations, Capture, CibleImprEcran, Coin, Film, FormatImage, Historique, Plateforme,
+    Raccourcis, Reglages, Selection, Theme, Vignette, DUREE_MAX_S, DUREE_MIN_S, DUREE_TOUJOURS,
+    FLUIDITES, HISTORIQUE_CHOIX, HISTORIQUE_DEFAUT, RETARDATEUR_MAX_S, VERSION_ACTUELLE,
 };

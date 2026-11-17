@@ -87,11 +87,12 @@ function Fichiers-Png([string]$Dossier) {
     return @(Get-ChildItem -LiteralPath $Dossier -File -Filter '*.png' | Sort-Object LastWriteTimeUtc, Name)
 }
 
-# Réglages du cas (version 7 du fichier, complète : rien à réécrire ; durée « toujours » non essayée ici).
+# Réglages du cas (version 8 du fichier, complète : rien à réécrire ; durée « toujours » non essayée ici).
 function Ecrire-Reglages([string]$Dossier, [bool]$Afficher = $true, [string]$Coin = 'bas_gauche', [string]$Animations = 'normales', $DossierEnregistrement = $null) {
     $r = [ordered]@{
-        version                   = 7
+        version                   = 8
         raccourcis                = [ordered]@{ zone = @(); plein_ecran = @('Ctrl+Maj+2'); fenetre = @(); derniere_zone = @(); historique = @(); texte = @(); defilante = @(); video = @(); gif = @() }
+        impr_ecran_ouvre          = 'zone'
         copier_apres_capture      = $true
         enregistrer_apres_capture = $false
         format_image              = 'png'

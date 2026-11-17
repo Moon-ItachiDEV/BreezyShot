@@ -10,11 +10,12 @@ use chrono::{DateTime, Local};
 use serde::{Deserialize, Serialize};
 
 use super::decompte::RETARDATEURS_PROPOSES;
+use crate::droits::{self, Fonction};
 use crate::fenetres::theme::ThemePage;
-use crate::raccourcis::{self, ErreurNotation, Raison};
+use crate::raccourcis::{self, ErreurNotation, Raison, ACTION_IMPR_ECRAN};
 use crate::reglages::{
-    self, Coin, ErreurEcriture, FormatImage, Raccourcis, Reglages, Theme, FLUIDITES,
-    HISTORIQUE_CHOIX,
+    self, CibleImprEcran, Coin, ErreurEcriture, FormatImage, Raccourcis, Reglages, Theme,
+    FLUIDITES, HISTORIQUE_CHOIX,
 };
 use crate::sortie;
 use crate::systeme::EtatDemarrage;
@@ -102,8 +103,9 @@ pub enum Changement {
     Demarrage(bool),
     Retardateur(u32),
     Pointeur(bool),
-    /// « Impr. écran ouvre BreezyShot » : prendre la touche à l'Outil Capture de Windows.
-    ImprEcran(bool),
+    /// « Touche Impr. écran » : `windows` (l'Outil Capture, la touche lui est rendue) ou ce
+    /// que lance BreezyShot (`CibleImprEcran`, la touche est prise à Windows).
+    ImprEcran(String),
     /// « Format » de l'image enregistrée : `png` ou `jpg`.
     FormatImage(String),
     /// « Ouvrir dans l'éditeur après la capture ».
@@ -129,7 +131,7 @@ impl Changement {
                 | Changement::ClicsVisibles(_)
                 | Changement::FilmDossier(_)
                 | Changement::HistoriqueGardes(_)
-        )
+        ) || matches!(self, Changement::ImprEcran(t) if cible_pro(t))
     }
 
     /// L'identifiant de la ligne de la page.
@@ -195,7 +197,6 @@ pub fn ligne_changement(c: &Changement) -> String {
         | Changement::VignetteAfficher(b)
         | Changement::Demarrage(b)
         | Changement::Pointeur(b)
-        | Changement::ImprEcran(b)
         | Changement::EditeurApres(b)
         | Changement::SonSysteme(b)
         | Changement::ClicsVisibles(b) => oui_non(*b).to_string(),
@@ -205,6 +206,7 @@ pub fn ligne_changement(c: &Changement) -> String {
         | Changement::HistoriqueGardes(n) => n.to_string(),
         Changement::VignetteCoin(t)
         | Changement::Theme(t)
+        | Changement::ImprEcran(t)
         | Changement::FormatImage(t)
         | Changement::FilmDossier(t) => code_pour_journal(t),
         Changement::ModeleNom(_) => return "reglage change: modele_nom".into(),
@@ -262,13 +264,99 @@ pub fn code_pour_journal(texte: &str) -> String {
 /// La touche Impr. écran seule, dans la notation des réglages.
 pub const IMPR_ECRAN: &str = "ImprEcran";
 
-/// Vrai si `candidat` est la touche Impr. écran seule (notation lue par `raccourcis`).
-pub fn est_impr_ecran(candidat: &str) -> bool {
-    raccourcis::analyser(candidat).is_ok_and(|r| r.est_impr_ecran_seule())
+/// Le choix « Outil Capture de Windows » de la liste d'Impr. écran : la touche est rendue à
+/// Windows (le registre), rien n'est écrit dans `impr_ecran_ouvre`.
+pub const CHOIX_WINDOWS: &str = "windows";
+
+/// Vrai si le choix lance une action Pro (refusé sans licence : page forgée).
+fn cible_pro(texte: &str) -> bool {
+    CibleImprEcran::depuis_texte(texte)
+        .and_then(CibleImprEcran::action)
+        .and_then(fonction_de)
+        .is_some_and(|f| !droits::ouverte(f, false))
 }
 
-/// Refus de « Impr. écran ouvre BreezyShot » quand Windows garde la touche : la phrase dit
-/// où la lui reprendre.
+/// Le droit que demande une action, `None` pour une capture libre.
+fn fonction_de(action: &str) -> Option<Fonction> {
+    match action {
+        "historique" => Some(Fonction::Historique),
+        "texte" => Some(Fonction::Texte),
+        "defilante" => Some(Fonction::Defilante),
+        "video" => Some(Fonction::Video),
+        "gif" => Some(Fonction::Gif),
+        _ => None,
+    }
+}
+
+/// L'action que lance Impr. écran pour la cible choisie, si elle est en vigueur ; `None` :
+/// la barre (la barre elle-même, ou une cible que la licence, le codeur ou la langue de
+/// lecture ferment : le fichier n'est pas touché, la barre montre ces boutons éteints).
+/// Fonction pure.
+pub fn action_de_l_appui(cible: CibleImprEcran, actions: &[&str]) -> Option<&'static str> {
+    cible.action().filter(|a| actions.contains(a))
+}
+
+/// Vrai si le cœur accepte ce choix de la liste : `windows`, la barre, ou une action en
+/// vigueur (une valeur forgée, ou devenue fermée entre-temps, est refusée). Fonction pure.
+pub fn impr_ecran_permis(texte: &str, actions: &[&str]) -> bool {
+    texte == CHOIX_WINDOWS
+        || CibleImprEcran::depuis_texte(texte)
+            .is_some_and(|c| c.action().is_none() || action_de_l_appui(c, actions).is_some())
+}
+
+/// Ce que le choix d'Impr. écran demande au système : écrire le registre (`Some(true)` :
+/// BreezyShot prend la touche, `Some(false)` : Windows la reprend) et réserver (`Some(true)`)
+/// ou lâcher (`Some(false)`) la pseudo-action. Le registre se décide d'après le registre, la
+/// réservation d'après le bilan : une touche voulue par BreezyShot et pas tenue est retentée
+/// même sans passage par le registre (une autre application l'a lâchée, Windows aussi).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GesteImprEcran {
+    pub registre: Option<bool>,
+    pub reserver: Option<bool>,
+}
+
+/// `rendre` : le choix est « Outil Capture de Windows » ; `registre_breezyshot` : le registre
+/// laisse la touche à BreezyShot ; `tenue` : la pseudo-action tient la touche. Fonction pure.
+pub fn geste_impr_ecran(rendre: bool, registre_breezyshot: bool, tenue: bool) -> GesteImprEcran {
+    if rendre {
+        GesteImprEcran {
+            registre: registre_breezyshot.then_some(false),
+            reserver: (registre_breezyshot || tenue).then_some(false),
+        }
+    } else {
+        GesteImprEcran {
+            registre: (!registre_breezyshot).then_some(true),
+            reserver: (!registre_breezyshot || !tenue).then_some(true),
+        }
+    }
+}
+
+/// Remise d'accord de la réservation sur le registre, à la lecture de la page (la touche a
+/// pu être rendue ou reprise dans les paramètres de Windows) : `Some(true)` réserver,
+/// `Some(false)` lâcher, `None` rien. Fonction pure.
+pub fn synchro_impr_ecran(registre_breezyshot: bool, tenue: bool) -> Option<bool> {
+    (registre_breezyshot != tenue).then_some(registre_breezyshot)
+}
+
+/// Impr. écran seule tapée dans la ligne d'une vraie action : toujours refusée là où la touche
+/// existe, elle appartient à la pseudo-action (même quand celle-ci ne la tient pas à cet
+/// instant : la liste de l'action ne doit jamais la contenir). Fonction pure.
+pub fn refus_saisie_impr_ecran(notation: &str, touche_existe: bool) -> Option<Refus> {
+    if touche_existe && raccourcis::analyser(notation).is_ok_and(|r| r.est_impr_ecran_seule()) {
+        Some(Refus::nouveau(
+            "raccourci",
+            &texte_refus(&Raison::DejaPrisParUneAutreAction(
+                ACTION_IMPR_ECRAN.to_string(),
+            )),
+            "deja_pris",
+        ))
+    } else {
+        None
+    }
+}
+
+/// Refus de « Touche Impr. écran » quand Windows garde la touche après qu'elle lui a été prise :
+/// la phrase dit où la lui reprendre.
 pub const REFUS_IMPR_ECRAN: &str =
     "Windows garde la touche : Paramètres › Accessibilité › Clavier, désactivez « Utiliser le bouton Impr. écran pour ouvrir la capture d'écran »";
 
@@ -291,16 +379,12 @@ pub fn appliquer(r: &Reglages, c: &Changement) -> Result<Reglages, Refus> {
         Changement::Retardateur(s) if *s > reglages::RETARDATEUR_MAX_S => return Err(invalide()),
         Changement::Retardateur(s) => n.capture.retardateur_s = *s,
         Changement::Pointeur(b) => n.capture.pointeur = *b,
-        // Allumée : Impr. écran devient le premier raccourci de la zone (déplacée en tête si
-        // elle y était plus bas). Éteinte : les raccourcis restent ; Windows reprenant la
-        // touche, la zone passe au candidat suivant.
-        Changement::ImprEcran(true) => {
-            let zone = n.raccourcis.candidats("zone").unwrap_or_default().to_vec();
-            let mut nouveaux = vec![IMPR_ECRAN.to_string()];
-            nouveaux.extend(zone.into_iter().filter(|c| !est_impr_ecran(c)));
-            fixer_candidats(&mut n.raccourcis, "zone", nouveaux);
+        // `windows` : la touche revient à Windows (le registre), le fichier garde sa cible
+        // pour le jour où elle est reprise. Sinon la cible change, rien d'autre.
+        Changement::ImprEcran(t) if t == CHOIX_WINDOWS => {}
+        Changement::ImprEcran(t) => {
+            n.impr_ecran_ouvre = CibleImprEcran::depuis_texte(t).ok_or_else(invalide)?
         }
-        Changement::ImprEcran(false) => {}
         Changement::FormatImage(t) => {
             n.format_image = FormatImage::depuis_texte(t).ok_or_else(invalide)?
         }
@@ -330,6 +414,8 @@ pub fn theme_page(theme: Theme) -> Option<ThemePage> {
 /// Libellé d'une action dans la rubrique Raccourcis.
 pub fn libelle_action(action: &str) -> &'static str {
     match action {
+        // Jamais une ligne de la liste : le nom dit dans « Déjà pris par … ».
+        ACTION_IMPR_ECRAN => "Impr. écran",
         "zone" => "Zone",
         "plein_ecran" => "Plein écran",
         "fenetre" => "Fenêtre",
@@ -574,6 +660,66 @@ pub struct VueHistorique {
     pub choix: [u32; 5],
 }
 
+/// Un choix de la liste « Touche Impr. écran ».
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct VueChoixImprEcran {
+    /// `windows`, `barre` ou le nom de l'action (`zone`, `plein_ecran`…).
+    pub id: &'static str,
+    pub libelle: &'static str,
+    /// Un trait sépare deux groupes consécutifs (maquette : un trait avant la barre, un autre
+    /// avant les actions Pro) : Windows ; la barre et les captures ; les actions Pro.
+    pub groupe: u8,
+}
+
+/// La ligne « Touche Impr. écran » vue par la page.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct VueImprEcran {
+    /// Les choix offerts, dans l'ordre de la liste : une action fermée (licence, codeur,
+    /// langue de lecture) est absente, comme une rubrique Pro sans licence.
+    pub choix: Vec<VueChoixImprEcran>,
+    /// Le choix en vigueur : `windows` si le registre garde la touche à l'Outil Capture,
+    /// sinon la cible ; `barre` quand la cible est fermée (c'est ce que fait l'appui).
+    pub valeur: &'static str,
+    /// Une ligne sous la liste (une autre application tient la touche), ou rien.
+    pub refus: Option<String>,
+}
+
+/// Les choix de la liste d'Impr. écran pour les actions en vigueur. Fonction pure.
+pub fn choix_impr_ecran(actions: &[&str]) -> Vec<VueChoixImprEcran> {
+    let mut l = vec![
+        VueChoixImprEcran {
+            id: CHOIX_WINDOWS,
+            libelle: "Outil Capture de Windows",
+            groupe: 0,
+        },
+        VueChoixImprEcran {
+            id: "barre",
+            libelle: "Barre de capture",
+            groupe: 1,
+        },
+    ];
+    for (action, groupe) in [
+        ("zone", 1),
+        ("plein_ecran", 1),
+        ("fenetre", 1),
+        ("derniere_zone", 1),
+        ("defilante", 2),
+        ("texte", 2),
+        ("video", 2),
+        ("gif", 2),
+        ("historique", 2),
+    ] {
+        if actions.contains(&action) {
+            l.push(VueChoixImprEcran {
+                id: action,
+                libelle: libelle_action(action),
+                groupe,
+            });
+        }
+    }
+    l
+}
+
 /// Une ligne de la rubrique Raccourcis.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct VueRaccourci {
@@ -610,7 +756,7 @@ pub struct VueReglages {
     pub apercu_nom: String,
     pub theme: &'static str,
     pub demarrage: &'static str,
-    pub impr_ecran: bool,
+    pub impr_ecran: VueImprEcran,
     /// Une ligne par action en vigueur (`Contexte.actions`), dans l'ordre de
     /// `ORDRE_RACCOURCIS` : « Capture défilante », « Copier le texte », « Vidéo », « GIF »
     /// et « Historique » seulement avec une licence (et, pour le texte, une langue de
@@ -641,7 +787,7 @@ pub struct Contexte<'a> {
     /// L'éditeur d'annotation existe (`EDITEUR_CONSTRUIT`).
     pub editeur_construit: bool,
     pub demarrage: EtatDemarrage,
-    /// Impr. écran ouvre BreezyShot (Windows ne la garde pas pour l'Outil Capture) ;
+    /// BreezyShot tient Impr. écran (Windows ne la garde pas pour l'Outil Capture) ;
     /// `None` hors Windows : la ligne n'est pas montrée.
     pub impr_ecran: Option<bool>,
     pub licence_active: bool,
@@ -659,6 +805,32 @@ pub fn nom_demarrage(e: EtatDemarrage) -> &'static str {
         // est éteint ; BreezyShot ne touche pas à ce choix.
         EtatDemarrage::Inactif | EtatDemarrage::DesactiveParWindows => "non",
         EtatDemarrage::Indisponible => "indisponible",
+    }
+}
+
+/// La ligne d'Impr. écran : la liste, le choix en vigueur, et le refus quand la touche
+/// voulue par BreezyShot est tenue par une autre application. Fonction pure.
+fn vue_impr_ecran(r: &Reglages, c: &Contexte<'_>) -> VueImprEcran {
+    let cible = r.impr_ecran_ouvre;
+    let en_vigueur = match action_de_l_appui(cible, c.actions) {
+        Some(_) => cible,
+        None => CibleImprEcran::Barre,
+    };
+    let valeur = if c.impr_ecran == Some(false) {
+        CHOIX_WINDOWS
+    } else {
+        en_vigueur.texte()
+    };
+    let refus = c
+        .bilan
+        .action(ACTION_IMPR_ECRAN)
+        .filter(|a| c.impr_ecran == Some(true) && a.nb_candidats > 0 && a.retenu.is_none())
+        .and_then(|a| a.ecartes.last())
+        .map(|e| texte_refus(&e.raison));
+    VueImprEcran {
+        choix: choix_impr_ecran(c.actions),
+        valeur,
+        refus,
     }
 }
 
@@ -682,6 +854,7 @@ pub fn vue(r: &Reglages, c: &Contexte<'_>) -> VueReglages {
     if c.impr_ecran.is_none() {
         lignes.retain(|l| *l != "impr_ecran");
     }
+    let impr_ecran = vue_impr_ecran(r, c);
     let raccourcis = actions_dans_l_ordre(c.actions)
         .iter()
         .map(|a| {
@@ -736,7 +909,7 @@ pub fn vue(r: &Reglages, c: &Contexte<'_>) -> VueReglages {
         apercu_nom: apercu_nom(&r.modele_nom, c.maintenant, r.format_image),
         theme: r.theme.texte(),
         demarrage: nom_demarrage(c.demarrage),
-        impr_ecran: c.impr_ecran.unwrap_or(false),
+        impr_ecran,
         raccourcis,
         licence_active: c.licence_active,
         version: c.version,
@@ -814,39 +987,362 @@ mod tests {
         }
     }
 
+    /// « Touche Impr. écran » : le changement porte un choix de la liste ; `windows` ne
+    /// touche pas au fichier (c'est le registre), une cible ne change que `impr_ecran_ouvre`
+    /// et jamais une liste de raccourcis.
     #[test]
-    fn impr_ecran_seulement_sous_windows_et_premier_raccourci_de_la_zone() {
+    fn impr_ecran_au_choix_ne_change_que_la_cible() {
         let r = Reglages::par_defaut(Plateforme::Windows);
-        // Allumée sans Impr. écran dans la zone : elle passe en tête, le reste suit.
-        let mut sans = r.clone();
-        fixer_candidats(&mut sans.raccourcis, "zone", vec!["Ctrl+Maj+1".into()]);
-        let n = appliquer(&sans, &Changement::ImprEcran(true)).unwrap();
+        assert_eq!(r.impr_ecran_ouvre, CibleImprEcran::Zone);
+        let choisir_cible = |t: &str| appliquer(&r, &Changement::ImprEcran(t.into()));
+        for (texte, cible) in [
+            ("barre", CibleImprEcran::Barre),
+            ("plein_ecran", CibleImprEcran::PleinEcran),
+            ("derniere_zone", CibleImprEcran::DerniereZone),
+            ("video", CibleImprEcran::Video),
+            ("historique", CibleImprEcran::Historique),
+        ] {
+            let n = choisir_cible(texte).unwrap();
+            assert_eq!(n.impr_ecran_ouvre, cible, "{texte}");
+            assert_eq!(n.raccourcis, r.raccourcis, "{texte} : listes intactes");
+        }
+        // « Outil Capture de Windows » : rien n'est écrit dans le fichier.
+        assert_eq!(choisir_cible(CHOIX_WINDOWS).unwrap(), r);
+        let mut autre = r.clone();
+        autre.impr_ecran_ouvre = CibleImprEcran::Gif;
         assert_eq!(
-            n.raccourcis.candidats("zone").unwrap(),
-            ["ImprEcran".to_string(), "Ctrl+Maj+1".to_string()]
+            appliquer(&autre, &Changement::ImprEcran(CHOIX_WINDOWS.into())).unwrap(),
+            autre
         );
-        // Plus bas, sous une autre écriture : remise en tête, sans doublon.
-        let mut bas = r.clone();
-        fixer_candidats(
-            &mut bas.raccourcis,
+        // Une valeur forgée est refusée, sur la ligne d'Impr. écran.
+        for faux in ["", "Zone", "impr_ecran", "ImprEcran", "windows ", "rien"] {
+            let e = choisir_cible(faux).unwrap_err();
+            assert_eq!(
+                (e.ligne.as_str(), e.code),
+                ("impr_ecran", "invalide"),
+                "{faux}"
+            );
+        }
+        // La page envoie { cle, valeur } : lu tel quel ; une valeur booléenne (page de la
+        // 0.7) est refusée par serde avant d'arriver ici.
+        let c: Changement =
+            serde_json::from_str(r#"{"cle":"impr_ecran","valeur":"derniere_zone"}"#).unwrap();
+        assert_eq!(c, Changement::ImprEcran("derniere_zone".into()));
+        assert!(
+            serde_json::from_str::<Changement>(r#"{"cle":"impr_ecran","valeur":true}"#).is_err()
+        );
+        assert_eq!(c.ligne(), "impr_ecran");
+        assert_eq!(
+            ligne_changement(&Changement::ImprEcran("barre".into())),
+            "reglage change: impr_ecran barre"
+        );
+        assert_eq!(
+            ligne_changement(&Changement::ImprEcran("a\u{e9}\n".into())),
+            "reglage change: impr_ecran a??"
+        );
+    }
+
+    /// Seuls les choix qui lancent une action Pro demandent une licence ; une valeur forgée
+    /// n'en demande pas (elle est refusée comme invalide).
+    #[test]
+    fn impr_ecran_exige_pro_selon_la_valeur() {
+        let pro = |t: &str| Changement::ImprEcran(t.into()).exige_pro();
+        for libre in [
+            "windows",
+            "barre",
             "zone",
-            vec!["F9".into(), "Impr. écran".into()],
-        );
-        let n = appliquer(&bas, &Changement::ImprEcran(true)).unwrap();
+            "plein_ecran",
+            "fenetre",
+            "derniere_zone",
+            "rien",
+        ] {
+            assert!(!pro(libre), "{libre}");
+        }
+        for ferme in ["defilante", "texte", "video", "gif", "historique"] {
+            assert!(pro(ferme), "{ferme}");
+        }
+        // Chaque cible dont l'action est Pro dans `droits` l'est ici, et inversement.
+        for cible in CibleImprEcran::TOUTES {
+            let attendu = cible.action().is_some_and(|a| {
+                matches!(a, "defilante" | "texte" | "video" | "gif" | "historique")
+            });
+            assert_eq!(pro(cible.texte()), attendu, "{}", cible.texte());
+        }
+    }
+
+    /// La liste, dans l'ordre et par groupes ; une action fermée est absente.
+    #[test]
+    fn choix_d_impr_ecran_selon_les_actions_en_vigueur() {
+        let ids = |actions: &[&str]| {
+            choix_impr_ecran(actions)
+                .iter()
+                .map(|c| (c.id, c.groupe))
+                .collect::<Vec<_>>()
+        };
         assert_eq!(
-            n.raccourcis.candidats("zone").unwrap(),
-            ["ImprEcran".to_string(), "F9".to_string()]
+            ids(&["zone", "plein_ecran", "fenetre", "derniere_zone"]),
+            [
+                ("windows", 0),
+                ("barre", 1),
+                ("zone", 1),
+                ("plein_ecran", 1),
+                ("fenetre", 1),
+                ("derniere_zone", 1),
+            ]
         );
-        // Éteinte : rien ne bouge.
-        assert_eq!(appliquer(&bas, &Changement::ImprEcran(false)).unwrap(), bas);
-        // La page envoie { cle, valeur } : lu tel quel.
-        let c: Changement = serde_json::from_str(r#"{"cle":"impr_ecran","valeur":true}"#).unwrap();
-        assert_eq!(c, Changement::ImprEcran(true));
+        let tout = [
+            "zone",
+            "plein_ecran",
+            "fenetre",
+            "derniere_zone",
+            "historique",
+            "texte",
+            "defilante",
+            "video",
+            "gif",
+        ];
+        let l = choix_impr_ecran(&tout);
         assert_eq!(
-            ligne_changement(&Changement::ImprEcran(true)),
-            "reglage change: impr_ecran oui"
+            l.iter().map(|c| c.libelle).collect::<Vec<_>>(),
+            [
+                "Outil Capture de Windows",
+                "Barre de capture",
+                "Zone",
+                "Plein écran",
+                "Fenêtre",
+                "Refaire la dernière zone",
+                "Capture défilante",
+                "Copier le texte",
+                "Vidéo",
+                "GIF",
+                "Historique",
+            ]
         );
-        assert!(est_impr_ecran("ImprEcran") && !est_impr_ecran("Ctrl+ImprEcran"));
+        assert_eq!(l.iter().filter(|c| c.groupe == 2).count(), 5);
+        assert_eq!(l.iter().filter(|c| c.groupe == 0).count(), 1);
+        // Sans codeur ni langue : ni vidéo ni texte.
+        let sans = ids(&["zone", "plein_ecran", "fenetre", "derniere_zone", "gif"]);
+        assert!(!sans.iter().any(|(id, _)| matches!(*id, "video" | "texte")));
+        assert_eq!(sans.last(), Some(&("gif", 2)));
+        // Chaque choix est accepté par le cœur, et lui seul.
+        for c in &l {
+            assert!(impr_ecran_permis(c.id, &tout), "{}", c.id);
+        }
+        assert!(impr_ecran_permis("barre", &[]) && impr_ecran_permis(CHOIX_WINDOWS, &[]));
+        assert!(!impr_ecran_permis("video", &["zone"]) && !impr_ecran_permis("rien", &tout));
+    }
+
+    /// L'appui : l'action de la cible si elle est en vigueur, sinon la barre (la barre
+    /// elle-même, ou une cible fermée par la licence, le codeur ou la langue).
+    #[test]
+    fn l_appui_traduit_la_cible_ou_ouvre_la_barre() {
+        let base = ["zone", "plein_ecran", "fenetre", "derniere_zone"];
+        let pro = [
+            "zone",
+            "plein_ecran",
+            "fenetre",
+            "derniere_zone",
+            "historique",
+            "texte",
+            "defilante",
+            "video",
+            "gif",
+        ];
+        assert_eq!(action_de_l_appui(CibleImprEcran::Zone, &base), Some("zone"));
+        assert_eq!(
+            action_de_l_appui(CibleImprEcran::DerniereZone, &base),
+            Some("derniere_zone")
+        );
+        assert_eq!(action_de_l_appui(CibleImprEcran::Barre, &pro), None);
+        for ferme in [
+            CibleImprEcran::Defilante,
+            CibleImprEcran::Texte,
+            CibleImprEcran::Video,
+            CibleImprEcran::Gif,
+            CibleImprEcran::Historique,
+        ] {
+            assert_eq!(action_de_l_appui(ferme, &base), None, "{ferme:?}");
+            assert_eq!(action_de_l_appui(ferme, &pro), ferme.action(), "{ferme:?}");
+        }
+        // Chaque action de la liste se retrouve (aucune cible oubliée).
+        for cible in CibleImprEcran::TOUTES {
+            if let Some(a) = cible.action() {
+                assert!(pro.contains(&a), "{a}");
+                assert_eq!(CibleImprEcran::depuis_action(a), Some(cible));
+            }
+        }
+        assert_eq!(CibleImprEcran::depuis_action("barre"), None);
+    }
+
+    /// La valeur montrée : l'Outil Capture si le registre garde la touche, sinon la cible,
+    /// ou la barre quand la cible est fermée (le fichier garde sa cible). Le refus se dit
+    /// quand une autre application tient la touche voulue.
+    #[test]
+    fn vue_de_la_ligne_impr_ecran() {
+        let defaut_r = Raccourcis::par_defaut(Plateforme::Windows);
+        let refus = BTreeMap::new();
+        let base = ["zone", "plein_ecran", "fenetre", "derniere_zone"];
+        let ligne =
+            |r: &Reglages, actions: &[&str], impr: Option<bool>, bilan: &raccourcis::Bilan| {
+                let c = Contexte {
+                    vignette_construite: true,
+                    capture_disponible: true,
+                    actions,
+                    bilan,
+                    defaut: &defaut_r,
+                    refus_raccourcis: &refus,
+                    dossier_affiche: "Images › BreezyShot".into(),
+                    dossier_films_affiche: None,
+                    editeur_construit: true,
+                    demarrage: EtatDemarrage::Inactif,
+                    impr_ecran: impr,
+                    licence_active: false,
+                    version: "9.9.9",
+                    alerte: None,
+                    maintenant: Local.with_ymd_and_hms(2026, 11, 12, 10, 42, 8).unwrap(),
+                    saisie_en_cours: false,
+                };
+                let v = vue(r, &c);
+                (v.impr_ecran, v.lignes.contains(&"impr_ecran"))
+            };
+        let tenue = choisir(
+            &BTreeMap::from([(ACTION_IMPR_ECRAN.to_string(), vec!["ImprEcran".to_string()])]),
+            false,
+            |_| true,
+        );
+        let mut r = defaut();
+        // BreezyShot tient la touche : la cible, sans refus.
+        let (v, montree) = ligne(&r, &base, Some(true), &tenue);
+        assert!(montree);
+        assert_eq!((v.valeur, v.refus), ("zone", None));
+        assert_eq!(v.choix.len(), 6);
+        // Windows la garde : « Outil Capture de Windows », quelle que soit la cible.
+        let (v, _) = ligne(&r, &base, Some(false), &raccourcis::Bilan::default());
+        assert_eq!(v.valeur, "windows");
+        // Cible fermée (licence retirée) : la barre est montrée, le fichier garde la cible.
+        r.impr_ecran_ouvre = CibleImprEcran::Video;
+        let (v, _) = ligne(&r, &base, Some(true), &tenue);
+        assert_eq!(v.valeur, "barre");
+        assert!(!v.choix.iter().any(|c| c.id == "video"));
+        assert_eq!(r.impr_ecran_ouvre, CibleImprEcran::Video);
+        let avec_video = [&base[..], &["video"][..]].concat();
+        assert_eq!(ligne(&r, &avec_video, Some(true), &tenue).0.valeur, "video");
+        // Une autre application tient la touche : dit sur la ligne.
+        let prise = choisir(
+            &BTreeMap::from([(ACTION_IMPR_ECRAN.to_string(), vec!["ImprEcran".to_string()])]),
+            false,
+            |_| false,
+        );
+        let (v, _) = ligne(&r, &avec_video, Some(true), &prise);
+        assert_eq!(v.refus.as_deref(), Some("Pris par une autre application"));
+        // Hors Windows : la ligne n'est pas montrée.
+        assert!(!ligne(&r, &base, None, &tenue).1);
+    }
+
+    /// Le registre se décide d'après le registre, la réservation d'après le bilan : une touche
+    /// voulue par BreezyShot et pas tenue est retentée sans réécrire le registre (1), « Outil
+    /// Capture de Windows » lâche une réservation encore tenue quand le registre dit déjà
+    /// Windows (4), et ce qui est déjà en vigueur ne fait rien.
+    #[test]
+    fn geste_d_impr_ecran_registre_et_reservation() {
+        let g = |rendre, registre_bs, tenue| geste_impr_ecran(rendre, registre_bs, tenue);
+        let geste = |registre, reserver| GesteImprEcran { registre, reserver };
+        // Prendre la touche à Windows : registre à 0, réservation.
+        assert_eq!(g(false, false, false), geste(Some(true), Some(true)));
+        // D'une action à une autre, touche tenue : rien du tout.
+        assert_eq!(g(false, true, true), geste(None, None));
+        // 1 : BreezyShot l'a au registre mais ne la tient pas (autre application, Windows
+        // tardif, touche rendue dans les paramètres puis reprise) : réservation retentée,
+        // registre intact.
+        assert_eq!(g(false, true, false), geste(None, Some(true)));
+        // Registre à Windows mais réservation encore tenue, puis choix d'une action : le
+        // registre est repris, la réservation est refaite.
+        assert_eq!(g(false, false, true), geste(Some(true), Some(true)));
+        // Rendre la touche : registre à 1 et réservation lâchée.
+        assert_eq!(g(true, true, true), geste(Some(false), Some(false)));
+        assert_eq!(g(true, true, false), geste(Some(false), Some(false)));
+        // 4 : le registre dit déjà Windows, la pseudo-action tient encore la touche : lâchée.
+        assert_eq!(g(true, false, true), geste(None, Some(false)));
+        // Déjà à Windows et rien de tenu : rien à faire.
+        assert_eq!(g(true, false, false), geste(None, None));
+        // Remise d'accord à la lecture de la page.
+        assert_eq!(synchro_impr_ecran(true, false), Some(true));
+        assert_eq!(synchro_impr_ecran(false, true), Some(false));
+        assert_eq!(synchro_impr_ecran(true, true), None);
+        assert_eq!(synchro_impr_ecran(false, false), None);
+    }
+
+    /// 3 : Impr. écran seule tapée dans la ligne d'une action est toujours refusée (la
+    /// pseudo-action peut ne pas la tenir à cet instant), sauf là où la touche n'existe pas.
+    #[test]
+    fn saisie_d_impr_ecran_toujours_refusee_dans_une_action() {
+        let refus = refus_saisie_impr_ecran("ImprEcran", true).unwrap();
+        assert_eq!(refus.texte, "Déjà pris par « Impr. écran »");
+        assert_eq!(refus.ligne, "raccourci");
+        assert!(refus_saisie_impr_ecran("ImprEcran", false).is_none());
+        assert!(refus_saisie_impr_ecran("Ctrl+ImprEcran", true).is_none());
+        assert!(refus_saisie_impr_ecran("Ctrl+Maj+1", true).is_none());
+        // La notation canonique de la saisie passe par ce contrôle.
+        let n =
+            notation_saisie(&saisie(false, false, false, "PrintScreen", "PrintScreen")).unwrap();
+        assert!(refus_saisie_impr_ecran(&n, true).is_some());
+    }
+
+    /// 2 : après un échec de reprise, le bilan dit l'état réel et la vue le montre : la
+    /// raison est celle du dernier essai, jamais périmée ni absente.
+    #[test]
+    fn la_vue_dit_l_etat_reel_apres_un_echec_de_reprise() {
+        let table =
+            BTreeMap::from([(ACTION_IMPR_ECRAN.to_string(), vec!["ImprEcran".to_string()])]);
+        let defaut_r = Raccourcis::par_defaut(Plateforme::Windows);
+        let refus = BTreeMap::new();
+        let base = ["zone"];
+        let r = defaut();
+        let texte = |bilan: &raccourcis::Bilan, registre: Option<bool>| {
+            let c = Contexte {
+                vignette_construite: true,
+                capture_disponible: true,
+                actions: &base,
+                bilan,
+                defaut: &defaut_r,
+                refus_raccourcis: &refus,
+                dossier_affiche: String::new(),
+                dossier_films_affiche: None,
+                editeur_construit: true,
+                demarrage: EtatDemarrage::Inactif,
+                impr_ecran: registre,
+                licence_active: false,
+                version: "1",
+                alerte: None,
+                maintenant: Local.with_ymd_and_hms(2026, 11, 12, 10, 42, 8).unwrap(),
+                saisie_en_cours: false,
+            };
+            vue(&r, &c).impr_ecran.refus
+        };
+        // Rien n'a été tenté : pas de refus. Reprise refusée par une autre application :
+        // dit sur la ligne.
+        assert_eq!(texte(&raccourcis::Bilan::default(), Some(true)), None);
+        let refusee = choisir(&table, false, |_| false);
+        assert_eq!(
+            texte(&refusee, Some(true)).as_deref(),
+            Some("Pris par une autre application")
+        );
+        // Le registre dit Windows : pas de refus, quelle que soit la raison gardée.
+        assert_eq!(texte(&refusee, Some(false)), None);
+        // Puis la reprise réussit : plus de refus.
+        let tenue = choisir(&table, false, |_| true);
+        assert_eq!(texte(&tenue, Some(true)), None);
+    }
+
+    #[test]
+    fn libelle_de_la_pseudo_action_pour_les_refus() {
+        assert_eq!(libelle_action(ACTION_IMPR_ECRAN), "Impr. écran");
+        assert_eq!(
+            texte_refus(&Raison::DejaPrisParUneAutreAction(
+                ACTION_IMPR_ECRAN.to_string()
+            )),
+            "Déjà pris par « Impr. écran »"
+        );
     }
 
     #[test]
@@ -1391,7 +1887,7 @@ mod tests {
         assert_eq!(
             lignes(&avec),
             [
-                ("Zone", "Impr. écran".to_string()),
+                ("Zone", "Ctrl+Maj+1".to_string()),
                 ("Plein écran", "Ctrl+Maj+2".to_string()),
                 ("Fenêtre", "Ctrl+Maj+3".to_string()),
                 ("Refaire la dernière zone", "Ctrl+Maj+4".to_string()),

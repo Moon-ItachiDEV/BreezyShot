@@ -5,7 +5,8 @@
 // Contrat avec le cœur (commandes permises à la seule fenêtre `reglages`) :
 // - `reglages_lire` {} → Reponse, au chargement et au retour du focus (le cœur relit le
 //   fichier) ;
-// - `reglages_changer` { changement: { cle, valeur } } → Reponse ;
+// - `reglages_changer` { changement: { cle, valeur } } → Reponse (« impr_ecran » : valeur =
+//   l'identifiant d'un choix de `vue.impr_ecran.choix`) ;
 // - `reglages_apercu_nom` { modele } → { apercu } (rien n'est écrit) ;
 // - `reglages_parcourir` {} → Reponse (sélecteur de dossier du système) ;
 // - `reglages_parcourir_films` {} → Reponse (le même, pour le dossier des films, Pro) ;
@@ -191,6 +192,12 @@ function afficher(v) {
     p.textContent = "";
     p.hidden = true;
   }
+  // Le refus d'Impr. écran vient de la vue (une autre application tient la touche).
+  if (v.impr_ecran?.refus) {
+    const p = $('[data-reglage="impr_ecran"] [data-refus]');
+    p.textContent = v.impr_ecran.refus;
+    p.hidden = false;
+  }
   // Une rubrique sans ligne montrée disparaît, onglet compris.
   for (const s of $$('section[data-rubrique]')) {
     const vide = s.dataset.rubrique !== "raccourcis" && !$$("[data-reglage]", s).some((l) => !l.hidden);
@@ -218,7 +225,7 @@ function afficher(v) {
   poserInterrupteur("enregistrer", v.enregistrer);
   poserInterrupteur("vignette", v.vignette.afficher);
   poserInterrupteur("demarrage", v.demarrage === "oui");
-  poserInterrupteur("impr_ecran", v.impr_ecran === true);
+  poserListeImpr(v.impr_ecran);
   poserSegments("vignette_duree", v.durees, texteDuree);
   poserChoix("vignette_duree", v.vignette.duree_s);
   poserChoix("vignette_coin", v.vignette.coin);
@@ -326,6 +333,110 @@ boutonRetirer.addEventListener("click", () => {
 function changer(cle, valeur) {
   return appeler("reglages_changer", { changement: { cle, valeur } }).then(recevoir);
 }
+
+// Liste « Touche Impr. écran » : un bouton qui ouvre une liste d'options. Flèches, Début et
+// Fin déplacent le focus, Entrée ou Espace choisit, Échap ferme et rend le focus au bouton,
+// Tab ferme ; un clic ailleurs ferme aussi. Les options viennent de la vue (`impr_ecran`).
+const boutonImpr = $('[data-controle="impr_ecran"]');
+const listeImpr = $('[data-menu="impr_ecran"]');
+const optionsImpr = () => $$('[role="option"]', listeImpr);
+function poserListeImpr(l) {
+  if (!l) return;
+  const cle = JSON.stringify(l.choix);
+  if (listeImpr.dataset.choix !== cle) {
+    const ouverte = !listeImpr.hidden;
+    const focus = document.activeElement?.dataset?.valeur;
+    listeImpr.dataset.choix = cle;
+    listeImpr.replaceChildren(
+      ...l.choix.flatMap((c, i) => {
+        const o = document.createElement("div");
+        o.setAttribute("role", "option");
+        o.tabIndex = -1;
+        o.dataset.valeur = c.id;
+        o.textContent = c.libelle;
+        if (i === 0 || l.choix[i - 1].groupe === c.groupe) return [o];
+        const trait = document.createElement("div");
+        trait.className = "trait";
+        trait.setAttribute("aria-hidden", "true");
+        return [trait, o];
+      }),
+    );
+    // Liste ouverte : le focus suit l'option qu'il avait ; si elle a disparu (licence retirée),
+    // la liste se ferme et le focus revient au bouton.
+    if (ouverte) {
+      const meme = focus && optionsImpr().find((o) => o.dataset.valeur === focus);
+      if (meme) meme.focus();
+      else {
+        ouvrirListeImpr(false);
+        boutonImpr.focus();
+      }
+    }
+  }
+  for (const o of optionsImpr()) {
+    o.setAttribute("aria-selected", o.dataset.valeur === l.valeur ? "true" : "false");
+  }
+  $('[data-valeur="impr_ecran"]').textContent =
+    l.choix.find((c) => c.id === l.valeur)?.libelle ?? "";
+}
+function ouvrirListeImpr(oui) {
+  listeImpr.hidden = !oui;
+  boutonImpr.setAttribute("aria-expanded", oui ? "true" : "false");
+  if (!oui) return;
+  // Bornée à la place sous le bouton : au-delà, la liste défile.
+  listeImpr.style.maxHeight = "";
+  const place = innerHeight - listeImpr.getBoundingClientRect().top - 8;
+  if (listeImpr.offsetHeight > place) listeImpr.style.maxHeight = `${Math.max(place, 96)}px`;
+  const options = optionsImpr();
+  (options.find((o) => o.getAttribute("aria-selected") === "true") ?? options[0])?.focus();
+}
+function choisirImpr(valeur) {
+  ouvrirListeImpr(false);
+  boutonImpr.focus();
+  if (vue) changer("impr_ecran", valeur);
+}
+boutonImpr.addEventListener("click", (e) => {
+  e.stopPropagation();
+  ouvrirListeImpr(listeImpr.hidden);
+});
+boutonImpr.addEventListener("keydown", (e) => {
+  if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
+  e.preventDefault();
+  if (listeImpr.hidden) ouvrirListeImpr(true);
+});
+listeImpr.addEventListener("click", (e) => {
+  const o = e.target.closest('[role="option"]');
+  if (!o) return;
+  e.stopPropagation();
+  choisirImpr(o.dataset.valeur);
+});
+listeImpr.addEventListener("keydown", (e) => {
+  const options = optionsImpr();
+  const i = options.indexOf(document.activeElement);
+  const pas = { ArrowDown: 1, ArrowUp: -1 }[e.key];
+  if (pas) {
+    e.preventDefault();
+    options[(i + pas + options.length) % options.length].focus();
+  } else if (e.key === "Home" || e.key === "End") {
+    e.preventDefault();
+    options[e.key === "Home" ? 0 : options.length - 1].focus();
+  } else if (e.key === "Enter" || e.key === " ") {
+    e.preventDefault();
+    if (i >= 0) choisirImpr(options[i].dataset.valeur);
+  } else if (e.key === "Escape") {
+    e.preventDefault();
+    e.stopPropagation();
+    ouvrirListeImpr(false);
+    boutonImpr.focus();
+  } else if (e.key === "Tab") {
+    e.preventDefault();
+    ouvrirListeImpr(false);
+    boutonImpr.focus();
+  }
+});
+document.addEventListener("click", (e) => {
+  if (!listeImpr.hidden && !listeImpr.contains(e.target)) ouvrirListeImpr(false);
+});
+window.addEventListener("blur", () => ouvrirListeImpr(false));
 
 // Interrupteurs.
 for (const b of $$('[role="switch"]')) {
@@ -646,7 +757,18 @@ if (tauri?.event?.listen) {
         refus: null,
       },
     ],
-    impr_ecran: false,
+    impr_ecran: {
+      choix: [
+        { id: "windows", libelle: "Outil Capture de Windows", groupe: 0 },
+        { id: "barre", libelle: "Barre de capture", groupe: 1 },
+        { id: "zone", libelle: "Zone", groupe: 1 },
+        { id: "plein_ecran", libelle: "Plein écran", groupe: 1 },
+        { id: "fenetre", libelle: "Fenêtre", groupe: 1 },
+        { id: "derniere_zone", libelle: "Refaire la dernière zone", groupe: 1 },
+      ],
+      valeur: "zone",
+      refus: null,
+    },
     licence_active: false,
     version: "0.0.0",
     alerte: null,

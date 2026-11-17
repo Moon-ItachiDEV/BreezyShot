@@ -163,9 +163,9 @@ function Nombre-Texte([string]$Texte) {
     return [double]::NaN
 }
 
-# Réglages en version 7 (complets : rien à réécrire) ou 5 (sans `video` ni `gif` : l'app
-# les passe en version 7). Vignette « toujours », en bas à droite, animations réduites.
-function Ecrire-Reglages([string]$Dossier, [int]$Version = 7, [bool]$Copier = $true, [bool]$Vignette = $true) {
+# Réglages en version 8 (complets : rien à réécrire) ou 5 (sans `video` ni `gif` : l'app
+# les passe en version 8). Vignette « toujours », en bas à droite, animations réduites.
+function Ecrire-Reglages([string]$Dossier, [int]$Version = 8, [bool]$Copier = $true, [bool]$Vignette = $true) {
     $racc = [ordered]@{ zone = @(); plein_ecran = @('Ctrl+Maj+2'); fenetre = @(); derniere_zone = @(); historique = @(); texte = @(); defilante = @() }
     if ($Version -ge 6) { $racc['video'] = @('Ctrl+Maj+6'); $racc['gif'] = @('Ctrl+Maj+7') }
     $r = [ordered]@{
@@ -182,6 +182,7 @@ function Ecrire-Reglages([string]$Dossier, [int]$Version = 7, [bool]$Copier = $t
         modele_nom                = 'BreezyShot {date} à {heure}'
         theme                     = 'systeme'
     }
+    if ($Version -ge 8) { $r['impr_ecran_ouvre'] = 'zone' }
     if ($Version -ge 7) {
         $r['format_image'] = 'png'
         $r['editeur_apres_capture'] = $false
@@ -247,7 +248,7 @@ try {
     if (-not $IsWindows) {
         # --- Hors Windows : démarrage seulement -------------------------------------------
         $d = Dossier-Cas 'linux'
-        Ecrire-Reglages $d 7
+        Ecrire-Reglages $d 8
         $script:proc = Demarrer-Cas $d 'hors Windows'
         Verifier 'démarrage, licence absente' ((Compter-Motif 'licence absente' $d) -ge 1) | Out-Null
         Fermer-Cas $script:proc $d 'hors Windows'
@@ -736,7 +737,7 @@ try {
         # Un cas avec licence : dossier, réglages v6, licence, app lancée.
         function Ouvrir-Cas([string]$Nom, [string]$Quoi, [switch]$Capturable, [switch]$SansCodeur, [bool]$Copier = $true, [bool]$Vignette = $true) {
             $d = Dossier-Cas $Nom
-            Ecrire-Reglages $d 7 $Copier $Vignette
+            Ecrire-Reglages $d 8 $Copier $Vignette
             Poser-Licence $d
             $script:Cas = [pscustomobject]@{ Nom = $Nom; Dossier = $d; Images = (Join-Path $d 'images'); Films = (Join-Path $d 'local/Films')
                 Recents = (Join-Path $d 'local/Recents'); Glisser = (Join-Path $d 'local/Glisser'); Capturable = [bool]$Capturable; SansCodeur = [bool]$SansCodeur
@@ -1204,8 +1205,8 @@ try {
                 $f = Lire-Reglages $d0
                 $video = if ($f.raccourcis.PSObject.Properties.Name -contains 'video') { @($f.raccourcis.video) -join ',' } else { '<absent>' }
                 $gif = if ($f.raccourcis.PSObject.Properties.Name -contains 'gif') { @($f.raccourcis.gif) -join ',' } else { '<absent>' }
-                $mises = Compter-Motif 'reglages mis a niveau de la version 5 a la version 7$' $d0
-                Verifier '(L0) réglages réécrits en v7 : video = Ctrl+Maj+6, gif = Ctrl+Maj+7, une ligne « de la version 5 a la version 7 »' (($f.version -eq 7) -and ($video -eq 'Ctrl+Maj+6') -and ($gif -eq 'Ctrl+Maj+7') -and ($mises -eq 1)) "version $($f.version), video $video, gif $gif, lignes $mises" | Out-Null
+                $mises = Compter-Motif 'reglages mis a niveau de la version 5 a la version 8$' $d0
+                Verifier '(L0) réglages réécrits en v8 : video = Ctrl+Maj+6, gif = Ctrl+Maj+7, une ligne « de la version 5 a la version 8 »' (($f.version -eq 8) -and ($video -eq 'Ctrl+Maj+6') -and ($gif -eq 'Ctrl+Maj+7') -and ($mises -eq 1)) "version $($f.version), video $video, gif $gif, lignes $mises" | Out-Null
                 Verifier '(L0) aucune fenêtre « film »' ((Compter-Motif 'film fenetre \d+' $d0) -eq 0) | Out-Null
                 Fermer-Cas $script:proc $d0 '(L0)'
             }
@@ -1928,7 +1929,7 @@ try {
                 }
                 $libre = @($script:Natif::Disque("$films\"))
                 Noter-Mesure -Nom '(K4) disque virtuel posé (diskpart) ; place libre avant le film' -Valeur "$($x.Ms) ms ; $([math]::Round($libre[0] / 1MB, 2)) Mo libres sur $([math]::Round($libre[1] / 1MB, 1)) Mo"
-                Ecrire-Reglages $dk 7
+                Ecrire-Reglages $dk 8
                 Poser-Licence $dk
                 $script:Cas = [pscustomobject]@{ Nom = 'k4'; Dossier = $dk; Images = (Join-Path $dk 'images'); Films = $films; Recents = (Join-Path $dk 'local/Recents'); Glisser = (Join-Path $dk 'local/Glisser')
                     Capturable = $false; SansCodeur = $false; Vignette = $true; Temoin = $null }

@@ -527,6 +527,79 @@ section > .carte:last-of-type { margin-bottom: 0; }
 .menu [role="menuitem"]:hover, .menu [role="menuitem"]:focus-visible { background: var(--subtle-hover); }
 .menu [role="menuitem"]:focus-visible { outline-offset: calc(-1 * var(--reglages-focus)); }
 
+/* Liste déroulante (Touche Impr. écran) : un bouton, et une liste d'options dessous, alignée
+   à droite de la ligne ; un trait sépare les groupes, un repère d'accent marque le choix. */
+.liste { position: relative; flex: none; }
+.liste-bouton {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  min-width: var(--reglages-champ-largeur);
+  height: var(--reglages-bouton-hauteur);
+  padding: 0 var(--space-3);
+  border-radius: var(--radius-md);
+  border: var(--reglages-filet) solid var(--stroke-strong);
+  background: none;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background-color var(--duree-survol);
+}
+.liste-bouton:hover, .liste-bouton[aria-expanded="true"] { background: var(--subtle-hover); }
+.liste-bouton:active { background: var(--subtle-press); }
+.liste-valeur { overflow: hidden; text-overflow: ellipsis; }
+.liste-fleche {
+  flex: none;
+  width: var(--space-3);
+  height: var(--space-3);
+  fill: none;
+  stroke: var(--text-2);
+  stroke-width: 1.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  transition: transform var(--duree-reglages-menu) var(--courbe-douce);
+}
+.liste-bouton[aria-expanded="true"] .liste-fleche { transform: rotate(180deg); }
+.liste-menu {
+  position: absolute;
+  right: 0;
+  top: calc(var(--reglages-bouton-hauteur) + var(--space-1));
+  z-index: 20;
+  min-width: 100%;
+  width: max-content;
+  padding: var(--space-1);
+  border-radius: var(--radius-md);
+  border: var(--reglages-filet) solid var(--stroke);
+  background: var(--acrylic-solid);
+  box-shadow: var(--shadow-16);
+  overflow-y: auto;
+  transform-origin: top right;
+  animation: menu var(--duree-reglages-menu) var(--courbe-douce);
+}
+.liste-menu [role="option"] {
+  position: relative;
+  display: flex;
+  align-items: center;
+  height: var(--reglages-bouton-hauteur);
+  padding: 0 var(--space-3) 0 var(--space-4);
+  border-radius: var(--radius-sm);
+  white-space: nowrap;
+  cursor: pointer;
+}
+.liste-menu [role="option"]:hover, .liste-menu [role="option"]:focus-visible { background: var(--subtle-hover); }
+.liste-menu [role="option"]:focus-visible { outline-offset: calc(-1 * var(--reglages-focus)); }
+.liste-menu [role="option"][aria-selected="true"] { font-weight: var(--texte-body-strong-graisse); }
+.liste-menu [role="option"][aria-selected="true"]::before {
+  content: "";
+  position: absolute;
+  left: var(--space-1);
+  width: var(--reglages-focus);
+  height: var(--space-4);
+  border-radius: var(--radius-sm);
+  background: var(--accent);
+}
+.liste-menu .trait { height: var(--reglages-filet); margin: var(--space-1) var(--space-2); background: var(--divider); }
+
 /* Raccourcis : pictogramme du menu de l'icône, touches en relief. */
 .ic { display: grid; place-items: center; flex: none; color: var(--text-2); }
 .ic svg {
@@ -627,6 +700,7 @@ kbd {
 }
 
 @media (forced-colors: active) {
+  .liste-menu [role="option"][aria-selected="true"]::before { background: Highlight; }
   .rubriques .repere, .choix[data-choisi]::before, .coins .pouce { background: Highlight; }
   .sw-bouton { background: ButtonText; }
   [role="switch"][aria-checked="true"] { background: Highlight; }

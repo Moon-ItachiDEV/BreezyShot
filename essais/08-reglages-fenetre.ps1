@@ -108,7 +108,8 @@ function Ecrire-Reglages([string]$Dossier, $Objet) {
     [System.IO.File]::WriteAllText((Join-Path $d 'reglages.json'), $texte, [System.Text.UTF8Encoding]::new($false))
 }
 
-# Réglages du cas : un raccourci par action, sans Impr. écran (pas d'annonce), la copie
+# Réglages du cas : un raccourci par action (pas d'annonce ; depuis 0.8 la migration donne
+# Impr. écran à la zone), la copie
 # seule allumée : pas de vignette (elle couvrirait un coin et garderait l'état Vignette
 # entre deux points), pas d'enregistrement. Le point 4 allume la vignette par la fenêtre
 # le temps d'une capture, le point 8 allume l'enregistrement.
