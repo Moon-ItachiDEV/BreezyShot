@@ -42,6 +42,7 @@ pub fn lignes_montrees(
     if capture_disponible {
         l.push("retardateur");
         l.push("pointeur");
+        l.push("son_capture");
     }
     l.push("copier");
     if vignette_construite {
@@ -52,7 +53,6 @@ pub fn lignes_montrees(
     if editeur_construit {
         l.push("editeur_apres");
     }
-    l.push("son_capture");
     // Sans vignette, chaque capture est enregistrée (`zone::doit_enregistrer`) : le
     // réglage n'aurait aucun effet.
     if vignette_construite {
@@ -959,7 +959,6 @@ mod tests {
                 "dossier",
                 "format_image",
                 "editeur_apres",
-                "son_capture",
                 "modele_nom",
                 "impr_ecran",
                 "theme",
@@ -981,7 +980,6 @@ mod tests {
                 "dossier",
                 "format_image",
                 "editeur_apres",
-                "son_capture",
                 "enregistrer",
                 "modele_nom",
                 "impr_ecran",
@@ -992,7 +990,7 @@ mod tests {
             ]
         );
         // Sans Gel, la rubrique Capture n'a aucun effet : aucune de ses lignes.
-        for absent in ["retardateur", "pointeur"] {
+        for absent in ["retardateur", "pointeur", "son_capture"] {
             assert!(!avec.contains(&absent));
         }
     }
@@ -1475,7 +1473,10 @@ mod tests {
     fn lignes_de_la_capture() {
         // En tête, dans l'ordre de la page.
         let tout = lignes_montrees(true, true, true);
-        assert_eq!(tout[..3], ["retardateur", "pointeur", "copier"]);
+        assert_eq!(
+            tout[..4],
+            ["retardateur", "pointeur", "son_capture", "copier"]
+        );
         assert_eq!(tout.len(), 17);
         // Rien de ce qui n'a pas d'effet en 0.4.
         for absent in ["barre", "format", "mise_a_jour"] {

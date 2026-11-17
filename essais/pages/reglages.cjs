@@ -372,14 +372,14 @@ const SANS_VIGNETTE = { ...VUE, lignes: ['copier', 'dossier', 'modele_nom', 'the
     const sections = await p.$$eval('section[role="tabpanel"]', ss => ss.filter(s => !s.hidden).map(s => s.dataset.rubrique));
     verifier(JSON.stringify(sections) === '["capture"]', '10 seule la rubrique Capture est montrée', JSON.stringify(sections));
     const lignes = await p.$$eval('[data-rubrique="capture"] [data-reglage]', ls => ls.filter(l => !l.hidden && l.offsetParent).map(l => l.dataset.reglage));
-    verifier(JSON.stringify(lignes) === '["retardateur","pointeur"]', '10 deux lignes d’après la vue, dans l’ordre', JSON.stringify(lignes));
+    verifier(JSON.stringify(lignes) === '["retardateur","pointeur","son_capture"]', '10 trois lignes d’après la vue, dans l’ordre', JSON.stringify(lignes));
     const libelles = await p.$$eval('[data-rubrique="capture"] .ligne .libelle', ls => ls.map(l => l.textContent));
-    verifier(JSON.stringify(libelles) === JSON.stringify(['Retardateur', 'Inclure le pointeur']), '10 libellés du design', JSON.stringify(libelles));
+    verifier(JSON.stringify(libelles) === JSON.stringify(['Retardateur', 'Inclure le pointeur', 'Son de la capture']), '10 libellés du design', JSON.stringify(libelles));
     const segments = () => p.$$eval('[data-controle="retardateur"] [role="radio"]', bs => bs.map(b => [b.textContent, b.getAttribute('aria-checked')]));
     verifier(JSON.stringify(await segments()) === JSON.stringify([['Aucun', 'true'], ['3 s', 'false'], ['5 s', 'false'], ['10 s', 'false']]),
       '10 segments de vue.retardateurs, « Aucun » coché', JSON.stringify(await segments()));
     const inter = await p.$$eval('[data-rubrique="capture"] [role="switch"]', bs => bs.map(b => [b.dataset.controle, b.getAttribute('aria-checked')]));
-    verifier(JSON.stringify(inter) === JSON.stringify([['pointeur', 'false']]), '10 pointeur éteint d’après la vue', JSON.stringify(inter));
+    verifier(JSON.stringify(inter) === JSON.stringify([['pointeur', 'false'], ['son_capture', 'true']]), '10 pointeur éteint et son allumé d’après la vue', JSON.stringify(inter));
     await vider(p);
     await p.getByRole('radio', { name: '5 s' }).click(); await p.waitForTimeout(50);
     verifier(JSON.stringify((await dernier(p, 'reglages_changer'))?.[1]) === JSON.stringify({ changement: { cle: 'retardateur', valeur: 5 } }), '10 « 5 s » → retardateur 5 (un nombre)');
@@ -406,7 +406,7 @@ const SANS_VIGNETTE = { ...VUE, lignes: ['copier', 'dossier', 'modele_nom', 'the
     await p.evaluate(() => { __vue = window.__vueAvant7; });
     await p.evaluate(() => __emettre('reglages:etat', { ...__vue, capture: { retardateur_s: 10, pointeur: true } })); await p.waitForTimeout(50);
     const allume = [await segments(), await p.$$eval('[data-rubrique="capture"] [role="switch"]', bs => bs.map(b => b.getAttribute('aria-checked')))];
-    verifier(allume[0][3][1] === 'true' && JSON.stringify(allume[1]) === '["true"]', '10 vue poussée : « 10 s », pointeur allumé', JSON.stringify(allume));
+    verifier(allume[0][3][1] === 'true' && JSON.stringify(allume[1]) === '["true","true"]', '10 vue poussée : « 10 s », pointeur allumé', JSON.stringify(allume));
     await p.evaluate(() => __emettre('reglages:etat', __vue)); await p.waitForTimeout(50);
     // Interrupteurs : bons appels ; refusés (sans texte), la vue les remet éteints.
     for (const [nom, cle] of [['Inclure le pointeur', 'pointeur']]) {
