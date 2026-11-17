@@ -3,6 +3,7 @@
     "lignes": [
       "retardateur",
       "pointeur",
+      "son_capture",
       "copier",
       "vignette",
       "vignette_duree",
@@ -32,6 +33,7 @@
     "enregistrer": false,
     "format_image": "png",
     "editeur_apres": false,
+    "son_capture": true,
     "film": {
       "fluidite": 30,
       "fluidites": [
@@ -159,6 +161,7 @@
     "lignes": [
       "retardateur",
       "pointeur",
+      "son_capture",
       "copier",
       "vignette",
       "vignette_duree",
@@ -190,6 +193,7 @@
     "enregistrer": false,
     "format_image": "png",
     "editeur_apres": false,
+    "son_capture": true,
     "film": {
       "fluidite": 30,
       "fluidites": [

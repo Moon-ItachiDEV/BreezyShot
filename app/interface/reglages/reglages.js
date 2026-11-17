@@ -211,6 +211,7 @@ function afficher(v) {
   }
   poserChoix("format_image", v.format_image);
   poserInterrupteur("editeur_apres", v.editeur_apres === true);
+  poserInterrupteur("son_capture", v.son_capture === true);
   poserChoix("fluidite", v.film.fluidite);
   poserInterrupteur("son_systeme", v.film.son_systeme);
   poserInterrupteur("clics_visibles", v.film.clics_visibles);
@@ -728,7 +729,7 @@ if (tauri?.event?.listen) {
 } else {
   afficher({
     lignes: ["retardateur", "pointeur", "copier", "vignette", "vignette_duree",
-      "vignette_coin", "dossier", "format_image", "editeur_apres", "enregistrer", "modele_nom", "impr_ecran", "theme", "demarrage", "licence",
+      "vignette_coin", "dossier", "format_image", "editeur_apres", "son_capture", "enregistrer", "modele_nom", "impr_ecran", "theme", "demarrage", "licence",
       "version"],
     capture: { retardateur_s: 0, pointeur: false },
     retardateurs: [0, 3, 5, 10],
@@ -736,6 +737,7 @@ if (tauri?.event?.listen) {
     enregistrer: false,
     format_image: "png",
     editeur_apres: false,
+    son_capture: true,
     film: { fluidite: 30, fluidites: [30, 60], son_systeme: false, clics_visibles: false, dossier: null },
     historique: { gardes: 50, choix: [0, 25, 50, 100, 200] },
     vignette: { afficher: true, duree_s: 6, coin: "bas_gauche" },

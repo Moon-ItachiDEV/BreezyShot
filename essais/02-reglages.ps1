@@ -48,7 +48,7 @@ try {
     $lu = Get-Content -LiteralPath $fichier -Raw | ConvertFrom-Json
     $attenduZone = if ($IsMacOS) { 'Cmd+Maj+1' } else { 'Ctrl+Maj+1' }
     $attenduDerniere = if ($IsMacOS) { 'Cmd+Maj+7' } else { 'Ctrl+Maj+4' }
-    Verifier 'valeurs par défaut : version 8' ($lu.version -eq 8) "version $($lu.version)" | Out-Null
+    Verifier 'valeurs par défaut : version 9' ($lu.version -eq 9) "version $($lu.version)" | Out-Null
     # 0.8.0 : Impr. écran n'est plus dans la liste de la zone, la cible est un champ à part.
     Verifier 'valeurs par défaut : Impr. écran ouvre la zone (0.8.0)' ($lu.impr_ecran_ouvre -eq 'zone') "impr_ecran_ouvre $($lu.impr_ecran_ouvre)" | Out-Null
     # 0.7.7 : format PNG, éditeur non, film à 30 i/s sans son ni clics, 50 captures gardées.
@@ -111,7 +111,7 @@ try {
     $avant = Empreinte $fichier
     Cycle 'version plus récente'
     Verifier 'version plus récente : identique octet pour octet' ((Empreinte $fichier) -eq $avant) | Out-Null
-    Verifier 'ligne « plus recente que la version 8 connue »' ((Compter-Lignes -Texte 'plus recente que la version 8 connue') -eq 1) | Out-Null
+    Verifier 'ligne « plus recente que la version 9 connue »' ((Compter-Lignes -Texte 'plus recente que la version 9 connue') -eq 1) | Out-Null
 
     Verifier 'cinq démarrages complets' ($script:Demarrages -eq 5) | Out-Null
 }
