@@ -1120,6 +1120,14 @@ Module pur : il reçoit le dossier où écrire, ne connaît ni Tauri ni les autr
   action, dans l'ordre de `ACTIONS_PRIORITAIRES`, qui avait `ImprEcran` parmi ses candidats
   (sinon `zone`), et `ImprEcran` seule est retirée des listes (`Ctrl+ImprEcran` reste). Un
   fichier de version 8 lu par une 0.7.x est « plus récent » : protégé en écriture.
+- `son_capture` (version 9, 0.8.5) : joue le son « Goutte » (0,4 s, WAV mono 44,1 kHz de
+  `app/coeur/assets/son-capture.wav`, synthétisé par `outils/son/synth.py`, aucun échantillon
+  tiers) à chaque capture d'image, au début de `finir_sortie`. Allumé par défaut, libre
+  (jamais Pro), ligne « Son de la capture » de la rubrique « Après la capture ». Mise à niveau `v8_vers_v9`
+  (ajoute `son_capture: true`, n'efface rien). Lecture : `systeme/son/` (`PlaySoundW` en
+  mémoire et en asynchrone sous Windows, rien ailleurs) ; `winmm.dll` reste à la demande
+  (`build.rs`), chargée au premier son seulement. Joué aussi à la fin d'une capture
+  défilante (même sortie) ; ni la vidéo ni le GIF.
 - `duree_s` : 1 à 60 s, ou `0` = toujours (`DUREE_TOUJOURS`, version 2 ; la page propose
   3, 6, 10 et Toujours).
 - `capture` (version 3) : `retardateur_s` vaut 0 (aucun) ou 1 à 10 s entières

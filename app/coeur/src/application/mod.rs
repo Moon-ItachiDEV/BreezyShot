@@ -2953,6 +2953,11 @@ fn lancer_sortie(
 /// Bilan de la sortie (fil principal) : journal, puis la vignette (souffle d'abord) ou,
 /// sans elle, retour au Repos et annonce au bandeau.
 fn finir_sortie(app: &AppHandle, fin: FinSortie) {
+    // Le son « Goutte » (0.8.5) : à chaque capture d'image (la défilante y passe aussi), dès
+    // que la sortie est rendue ; sans attente, aucun effet sur la suite.
+    if reglages_lus(app).son_capture {
+        systeme::son::capture();
+    }
     log::info!("{}", zone::ligne_sortie(&fin.bilan));
     if let Some(Err(cause)) = &fin.bilan.recent {
         log::warn!("recents: echec ({cause})");

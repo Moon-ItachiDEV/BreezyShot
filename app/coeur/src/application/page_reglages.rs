@@ -52,6 +52,7 @@ pub fn lignes_montrees(
     if editeur_construit {
         l.push("editeur_apres");
     }
+    l.push("son_capture");
     // Sans vignette, chaque capture est enregistrée (`zone::doit_enregistrer`) : le
     // réglage n'aurait aucun effet.
     if vignette_construite {
@@ -110,6 +111,8 @@ pub enum Changement {
     FormatImage(String),
     /// « Ouvrir dans l'éditeur après la capture ».
     EditeurApres(bool),
+    /// « Son de la capture » (0.8.5).
+    SonCapture(bool),
     /// Pro, rubrique Enregistrement : images par seconde d'une vidéo (30 ou 60).
     Fluidite(u32),
     SonSysteme(bool),
@@ -150,6 +153,7 @@ impl Changement {
             Changement::ImprEcran(_) => "impr_ecran",
             Changement::FormatImage(_) => "format_image",
             Changement::EditeurApres(_) => "editeur_apres",
+            Changement::SonCapture(_) => "son_capture",
             Changement::Fluidite(_) => "fluidite",
             Changement::SonSysteme(_) => "son_systeme",
             Changement::ClicsVisibles(_) => "clics_visibles",
@@ -198,6 +202,7 @@ pub fn ligne_changement(c: &Changement) -> String {
         | Changement::Demarrage(b)
         | Changement::Pointeur(b)
         | Changement::EditeurApres(b)
+        | Changement::SonCapture(b)
         | Changement::SonSysteme(b)
         | Changement::ClicsVisibles(b) => oui_non(*b).to_string(),
         Changement::VignetteDuree(n)
@@ -389,6 +394,7 @@ pub fn appliquer(r: &Reglages, c: &Changement) -> Result<Reglages, Refus> {
             n.format_image = FormatImage::depuis_texte(t).ok_or_else(invalide)?
         }
         Changement::EditeurApres(b) => n.editeur_apres_capture = *b,
+        Changement::SonCapture(b) => n.son_capture = *b,
         Changement::Fluidite(f) if !FLUIDITES.contains(f) => return Err(invalide()),
         Changement::Fluidite(f) => n.film.fluidite = *f,
         Changement::SonSysteme(b) => n.film.son_systeme = *b,
@@ -746,6 +752,7 @@ pub struct VueReglages {
     /// `png` ou `jpg`.
     pub format_image: &'static str,
     pub editeur_apres: bool,
+    pub son_capture: bool,
     pub film: VueFilm,
     pub historique: VueHistorique,
     pub vignette: VueVignette,
@@ -887,6 +894,7 @@ pub fn vue(r: &Reglages, c: &Contexte<'_>) -> VueReglages {
         enregistrer: r.enregistrer_apres_capture,
         format_image: r.format_image.texte(),
         editeur_apres: r.editeur_apres_capture,
+        son_capture: r.son_capture,
         film: VueFilm {
             fluidite: r.film.fluidite,
             fluidites: FLUIDITES,
@@ -951,6 +959,7 @@ mod tests {
                 "dossier",
                 "format_image",
                 "editeur_apres",
+                "son_capture",
                 "modele_nom",
                 "impr_ecran",
                 "theme",
@@ -972,6 +981,7 @@ mod tests {
                 "dossier",
                 "format_image",
                 "editeur_apres",
+                "son_capture",
                 "enregistrer",
                 "modele_nom",
                 "impr_ecran",
@@ -1386,6 +1396,7 @@ mod tests {
         for c in [
             Changement::FormatImage("jpg".into()),
             Changement::EditeurApres(true),
+            Changement::SonCapture(false),
             Changement::Copier(true),
         ] {
             assert!(!c.exige_pro(), "{c:?}");
@@ -1397,6 +1408,20 @@ mod tests {
             appliquer(&r, &Changement::EditeurApres(true))
                 .unwrap()
                 .editeur_apres_capture
+        );
+        // Le son de la capture : allumé d'origine, libre, son changement est écrit.
+        assert!(r.son_capture);
+        assert!(
+            !appliquer(&r, &Changement::SonCapture(false))
+                .unwrap()
+                .son_capture
+        );
+        let lu: Changement =
+            serde_json::from_str(r#"{"cle":"son_capture","valeur":false}"#).unwrap();
+        assert_eq!(lu, Changement::SonCapture(false));
+        assert_eq!(
+            ligne_changement(&Changement::SonCapture(false)),
+            "reglage change: son_capture non"
         );
         assert_eq!(
             appliquer(&r, &Changement::Fluidite(60))
@@ -1451,7 +1476,7 @@ mod tests {
         // En tête, dans l'ordre de la page.
         let tout = lignes_montrees(true, true, true);
         assert_eq!(tout[..3], ["retardateur", "pointeur", "copier"]);
-        assert_eq!(tout.len(), 16);
+        assert_eq!(tout.len(), 17);
         // Rien de ce qui n'a pas d'effet en 0.4.
         for absent in ["barre", "format", "mise_a_jour"] {
             assert!(!tout.contains(&absent));

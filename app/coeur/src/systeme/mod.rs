@@ -21,6 +21,7 @@ pub mod micro;
 pub mod minuterie;
 pub mod mp4;
 pub mod presse_papiers;
+pub mod son;
 pub mod souris;
 pub mod texte;
 pub mod vivant;

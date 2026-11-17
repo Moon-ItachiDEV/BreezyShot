@@ -374,6 +374,8 @@ pub struct Reglages {
     pub format_image: FormatImage,
     /// Ouvrir l'éditeur après chaque capture (version 7).
     pub editeur_apres_capture: bool,
+    /// Jouer le son « Goutte » à chaque capture d'image (version 9).
+    pub son_capture: bool,
     pub vignette: Vignette,
     pub selection: Selection,
     pub capture: Capture,
@@ -403,6 +405,7 @@ impl Reglages {
             enregistrer_apres_capture: false,
             format_image: FormatImage::Png,
             editeur_apres_capture: false,
+            son_capture: true,
             vignette: Vignette::par_defaut(),
             selection: Selection::par_defaut(),
             capture: Capture::par_defaut(),
@@ -540,6 +543,7 @@ pub(in crate::reglages) fn vers_json(r: &Reglages) -> Result<Value, &'static str
         "editeur_apres_capture".into(),
         Value::Bool(r.editeur_apres_capture),
     );
+    m.insert("son_capture".into(), Value::Bool(r.son_capture));
     m.insert("vignette".into(), Value::Object(vignette));
     m.insert("selection".into(), Value::Object(selection));
     m.insert("capture".into(), Value::Object(capture));
