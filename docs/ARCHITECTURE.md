@@ -31,8 +31,8 @@ app/
                             fenetre_reglages.rs : ses commandes (étape 10) ;
                             decompte.rs : décisions du retardateur (pures, 0.4) ;
                             editeur.rs : décisions de l'éditeur d'annotation (pures,
-                            et leurs tests), fenetre_editeur.rs : ses neuf commandes
-                            (0.4, §6.2) ; les gestes de l'éditeur sont dans mod.rs ;
+                            et leurs tests), geste_editeur.rs : ses gestes,
+                            fenetre_editeur.rs : ses neuf commandes (0.4, §6.2) ;
                             historique.rs : décisions de l'historique (pures, 0.5),
                             breezy.rs : décisions des fichiers `.breezy` (pures, 0.7.9),
                             geste_breezy.rs : enregistrer, rouvrir, annotations (§6.5) ;
@@ -1692,7 +1692,7 @@ déclencheurs). L'image va à la page en RGBA brut (`editeur_image` →
 `x-editeur-id`, `-version`, `-but`, `-largeur`, `-hauteur`) : Tauri ne prête le corps que
 par référence, d'où une seule copie, exacte, après toutes les vérifications. Les
 décisions sont dans `application/editeur.rs` (pures), les commandes dans
-`application/fenetre_editeur.rs`, les gestes dans `application/mod.rs`, la fenêtre dans
+`application/fenetre_editeur.rs`, les gestes dans `application/geste_editeur.rs`, la fenêtre dans
 `fenetres/editeur.rs`. L'état (`Mutex<Option<EtatEditeur>>`) n'est jamais tenu pendant
 un appel à Tauri.
 
@@ -1713,7 +1713,7 @@ ajoute son propre gestionnaire de bords (`undecorated_resizing`) au-dessus de la
 chaque côté ; barre 52, réserve 14, socle d'annotation 104 à 12 du bord, sa réserve 34 et 1 px d'aise,
 depuis la 0.7.3), au moins `LARGEUR_OUVERTURE` 1096 px logiques de large (jeton
 `editeur-ouverture-largeur`, essai d'égalité : la barre du haut y montre le mot de chaque
-sortie ; le socle, 624 px au plus, tient jusqu'à la taille minimale) et 440 de
+sortie ; le socle, 672 px au plus, se compacte sous 700 px et tient jusqu'à la taille minimale) et 440 de
 haut, au plus `PART_MAX` (90 %) de la zone utile de l'écran sous la souris, centrée ; `ouvrir`
 pose la position, puis la taille, puis décale la fenêtre de l'écart entre position
 intérieure et extérieure : la zone cliente tombe exactement sur la place. La barre du haut
@@ -1755,9 +1755,10 @@ pas comme une croix : après lui, le premier CloseRequested redemande. L'arrêt 
 demander, avant les Réglages et les raccourcis (`ferme <id> (arret)`, capture en attente
 abandonnée). Une fermeture décidée avec une capture en attente la charge à la place.
 
-**Export.** `accepter_export` : bon id, but connu, `annotable` puis taille par
-`checked_mul`, au plus l'image, corps de `largeur × hauteur × 4` octets, aucun autre export
-en cours. `plan_export` en tire la `sortie::Demande` (Copier : copie ; Enregistrer :
+**Export.** `accepter_export` : bon id, but connu, dimensions valides (`1..=COTE_MAX + 2 × MARGE_FOND_MAX`,
+surface bornée, avec `MARGE_FOND_MAX` = 88 px pour le fond d'éditeur), au plus l'image plus
+`2 × MARGE_FOND_MAX` par côté, taille par `checked_mul`, corps de `largeur × hauteur × 4`
+octets, aucun autre export en cours. `plan_export` en tire la `sortie::Demande` (Copier : copie ; Enregistrer :
 fichier au modèle, ou `deja fait` si cette version l'est ; « Récents » une fois par
 version ; Enregistrer sous : dialogue puis `enregistrer_a`). Le travail part dans le fil
 `editeur-sortie` ; le fil `editeur-echeance` attend le premier signal (après le dialogue)
@@ -1794,9 +1795,13 @@ en codes courts sans chemin (`com:`, `dialogue:`, `options:`, `filtre:`, `extens
 `resultat:`, `chemin:` suivis du HRESULT). Hors Windows : toujours `Ok(None)`.
 
 **Modèle et dessin (B).** `interface/editeur/document.js` est le modèle pur, sans DOM ni
-import : document, objets (`ajouter`, `normaliser`, `lisser`, `recadrer`, `touche`,
-`deplacer`, `redimensionner`, `changerVariante`, `dupliquer`, `gommer`, `gommeTouche`),
-historique de 200 pas borné à 32 Mo de JSON, restauré en place. Le numéro de version du
+import : document, objets (`ajouter`, `normaliser`, `lisser`, `recadrer`, `changerFond`,
+`margeFond`, `cadreExport`, `touche`, `deplacer`, `redimensionner`, `changerVariante`,
+`dupliquer`, `gommer`, `gommeTouche`), historique de 200 pas borné à 32 Mo de JSON, restauré
+en place. Le champ optionnel `fond` (absent ou `null` par défaut, compatible avec les
+anciens `.breezy` et assaini dans `lireDocument`) porte l'habillage de l'image : `actif`,
+`style` (`degrade` | `uni`), `degrade` (`0..5`), `couleur`, `marge` (`0..2` → 32 / 56 / 88 px),
+`arrondi` (`0..2` → 0 / 12 / 20 px) et `ombre`. Le numéro de version du
 document (`h.version`) n'est jamais repris pour un autre contenu : le cœur s'en sert pour
 « déjà copié », « déjà enregistré » et « déjà rangé » ; un geste abandonné (`abandonner`)
 rend celui d'avant son pas. La flèche se courbe à sa
@@ -1815,7 +1820,9 @@ dupliquer) ; texte, numéro, masque et projecteur sont entiers. Une encre reste 
 (`encreRestePres`), ce qui garde un surligneur gommé dans sa longueur, même par 2 px de
 bord. `dessin.js` peint la vue (`peindreVue`, options `cacher`, `ajout`,
 `rayon` pour les coins arrondis à l'écran seulement) et compose l'export (`composer`,
-toile de l'image entière puis le cadre). Masques : Pixeliser (avec un écart de luminosité
+toile de l'image entière puis le cadre, ou cadre étendu de `margeFond` quand un fond est
+actif : dégradé parmi `DEGRADES_FOND` ou couleur unie, ombre portée découpée hors de la
+capture, capture découpée aux coins arrondis). Masques : Pixeliser (avec un écart de luminosité
 tiré d'une `graine` par masque), Flouter (source entière), Bloc noir (rectangle plein).
 Projecteur : voile `rgba(8,10,16,.55)` sur toute l'image percé de la réunion des
 projecteurs (rectangle de rayon 8 ou ovale), peint après tous les autres objets, à
@@ -1829,19 +1836,21 @@ remplace la v2 depuis le 12/11/2026)
 - La barre du haut (52 px) est la barre de la fenêtre sans cadre : `data-tauri-drag-region`
   partout sauf sur les boutons. À gauche « Fermer » ; à droite (0.7.3) « Copier le texte »
   (mot « Texte », caché sans Copier le texte), « Glisser vers une appli », « Enregistrer »
-  avec sa flèche (menu « Enregistrer », entrée « Enregistrer sous… ») et « Copier » ; sous
+  avec sa flèche (menu « Enregistrer », entrées « Enregistrer sous… » et `.breezy`) et « Copier » ; sous
   940 px de large (requête de conteneur), les sorties ne gardent que leur pictogramme ;
   « Copier » (copier PUIS fermer : coche, puis le chemin « copier et fermer » ; en échec la fenêtre
   reste). `Ctrl + C` copie sans fermer.
 - Socle d'annotation du bas (piste C « Étages », `design/annotation-v3`, choisie le
   16/11/2026, 0.7.3 ; remplace la barre C et les instruments B du 13/11) : une carte
-  centrée à 12 px du bas, `min(624px, 100% - 24px)` de large, en deux étages. En bas, la
-  rangée fixe : « Annuler », « Rétablir », un filet, puis les neuf outils toujours à la
+  centrée à 12 px du bas, `min(672px, 100% - 24px)` de large, en deux étages. En bas, la
+  rangée fixe : « Annuler », « Rétablir », un filet, les neuf outils toujours à la
   même place (« Flèche », « Forme », « Texte », « Numéro » | « Stylo », « Surligneur » |
-  « Flou », « Projecteur » | « Gomme », filets entre les groupes), chacun à son
+  « Flou », « Projecteur » | « Gomme »), puis un filet et le bouton « Fond » (touche `F`,
+  `data-panneau="fond"`, point d'accent quand un fond est actif), chacun à son
   pictogramme ; un point d'encre de 5 px sous l'outil en main seulement. Au-dessus, la
-  zone des réglages (46 px) montre ceux de l'outil en main, ou de l'objet choisi :
-  variantes (Forme : Rectangle, Ellipse, Ligne ; Flou : Pixeliser, Flouter, Bloc noir ;
+  zone des réglages (46 px) montre ceux de l'outil en main, de l'objet choisi, ou du Fond
+  (Sans fond, 6 dégradés, Couleur unie via la roue, marge P/M/G, arrondi 0/12/20, ombre
+  portée) : variantes (Forme : Rectangle, Ellipse, Ligne ; Flou : Pixeliser, Flouter, Bloc noir ;
   Projecteur : Rectangle, Ovale), trois tailles ou trois intensités, six couleurs et
   « Autre couleur », opacité (20 à 100 % par 5 ; une glissière tirée = un pas), groupes
   séparés d'un trait fin (`.rg-sep`) ; rien ne s'ouvre par-dessus l'image. Bloc noir n'a
