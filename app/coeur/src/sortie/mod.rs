@@ -165,9 +165,8 @@ pub fn sortir(pixels: &Pixels, demande: &Demande) -> Bilan {
             .copier
             .then(|| thread::Builder::new().spawn_scoped(fils, copier));
 
-        // 3. Pendant ce temps : encoder une fois, Recents, enregistrement.
-        let encodage = png::encoder_rgba(largeur, hauteur, &opaques);
-        let (recent, enregistrement) = ecrire(demande, &encodage, (largeur, hauteur, &opaques));
+        // 3. Pendant ce temps : Recents et enregistrement (le PNG n'est encode que s'il sert).
+        let (recent, enregistrement) = ecrire(demande, None, (largeur, hauteur, &opaques));
 
         // 4. Attendre la copie.
         Bilan {
@@ -179,20 +178,26 @@ pub fn sortir(pixels: &Pixels, demande: &Demande) -> Bilan {
 }
 
 /// `sortir` avec transparence : l'alpha des pixels est garde. Le PNG est encode
-/// d'abord, une fois : il sert au presse-papiers, a « Recents » et au fichier.
+/// une fois au plus, quand le presse-papiers, « Recents » ou le fichier en ont besoin.
 /// La copie part ensuite dans un fil a part pendant les ecritures.
 fn sortir_transparent(pixels: &Pixels, demande: &Demande) -> Bilan {
     let (largeur, hauteur) = (pixels.largeur, pixels.hauteur);
     let rgba = pixels.rgba.as_slice();
-    let encodage = png::encoder_rgba(largeur, hauteur, rgba);
-    let octets = encodage.as_ref().ok().map(Vec::as_slice);
+    let encodage = (demande.copier
+        || demande.ranger_recents
+        || (demande.enregistrer && demande.format == FormatFichier::Png))
+        .then(|| png::encoder_rgba(largeur, hauteur, rgba));
+    let octets = encodage
+        .as_ref()
+        .and_then(|r| r.as_ref().ok())
+        .map(Vec::as_slice);
 
     thread::scope(|fils| {
         let copier = || presse_papiers::copier_transparent(largeur, hauteur, rgba, octets);
         let copie = demande
             .copier
             .then(|| thread::Builder::new().spawn_scoped(fils, copier));
-        let (recent, enregistrement) = ecrire(demande, &encodage, (largeur, hauteur, rgba));
+        let (recent, enregistrement) = ecrire(demande, encodage.as_ref(), (largeur, hauteur, rgba));
         Bilan {
             copie: attendre_copie(copie, copier),
             recent,
@@ -201,39 +206,68 @@ fn sortir_transparent(pixels: &Pixels, demande: &Demande) -> Bilan {
     })
 }
 
-/// Ecrit « Recents », puis le fichier si demande, a partir du PNG encode ; un fichier en
-/// JPG est encode ici a partir des pixels `(largeur, hauteur, rgba)`.
+/// Encode le PNG au premier besoin et le met en cache pour les etapes suivantes.
+fn png_octets<'a>(
+    deja_encode: Option<&'a Result<Vec<u8>, String>>,
+    cache: &'a mut Option<Result<Vec<u8>, String>>,
+    (largeur, hauteur, rgba): (u32, u32, &[u8]),
+) -> Result<&'a [u8], String> {
+    if let Some(r) = deja_encode {
+        return r.as_deref().map_err(Clone::clone);
+    }
+    cache
+        .get_or_insert_with(|| png::encoder_rgba(largeur, hauteur, rgba))
+        .as_deref()
+        .map_err(Clone::clone)
+}
+
+/// Ecrit « Recents », puis le fichier si demande ; le PNG n'est encode que s'il sert
+/// (Recents, fichier PNG, ou repli d'un JPG impossible).
 fn ecrire(
     demande: &Demande,
-    encodage: &Result<Vec<u8>, String>,
-    (largeur, hauteur, rgba): (u32, u32, &[u8]),
+    deja_encode: Option<&Result<Vec<u8>, String>>,
+    image: (u32, u32, &[u8]),
 ) -> (Option<Result<PathBuf, String>>, EtapeFichier) {
-    let recent = demande.ranger_recents.then(|| match encodage {
-        Ok(octets) => recents::ecrire(
-            &demande.dossier_recents,
-            demande.maintenant,
-            octets,
-            demande.recents_gardes,
-        ),
-        Err(cause) => Err(cause.clone()),
+    let (largeur, hauteur, rgba) = image;
+    let mut cache: Option<Result<Vec<u8>, String>> = None;
+    let recent = demande.ranger_recents.then(|| {
+        png_octets(deja_encode, &mut cache, image).and_then(|octets| {
+            recents::ecrire(
+                &demande.dossier_recents,
+                demande.maintenant,
+                octets,
+                demande.recents_gardes,
+            )
+        })
     });
     let enregistrement = if !demande.enregistrer {
         EtapeFichier::NonDemande
     } else {
         let dossier = demande.dossier_enregistrement.clone();
-        let resultat = encodage.as_ref().map_err(Clone::clone).and_then(|png| {
-            let nom = nom_fichier(&demande.modele_nom, demande.maintenant);
-            // Un JPG qui ne peut pas etre fait (cote trop grand) devient un PNG : la capture
-            // n'est jamais perdue.
-            let jpg = (demande.format == FormatFichier::Jpg)
-                .then(|| encoder_jpg(largeur, hauteur, rgba))
-                .and_then(Result::ok);
-            let (extension, octets) = match &jpg {
-                Some(jpg) => (FormatFichier::Jpg.extension(), jpg.as_slice()),
-                None => (FormatFichier::Png.extension(), png.as_slice()),
-            };
-            fichier::enregistrer(&dossier, &demande.dossier_affiche, &nom, extension, octets)
-        });
+        let nom = nom_fichier(&demande.modele_nom, demande.maintenant);
+        // Un JPG qui ne peut pas etre fait (cote trop grand) devient un PNG : la capture
+        // n'est jamais perdue.
+        let jpg = (demande.format == FormatFichier::Jpg)
+            .then(|| encoder_jpg(largeur, hauteur, rgba))
+            .and_then(Result::ok);
+        let resultat = match &jpg {
+            Some(jpg) => fichier::enregistrer(
+                &dossier,
+                &demande.dossier_affiche,
+                &nom,
+                FormatFichier::Jpg.extension(),
+                jpg.as_slice(),
+            ),
+            None => png_octets(deja_encode, &mut cache, image).and_then(|png| {
+                fichier::enregistrer(
+                    &dossier,
+                    &demande.dossier_affiche,
+                    &nom,
+                    FormatFichier::Png.extension(),
+                    png,
+                )
+            }),
+        };
         match resultat {
             Ok(chemin) => EtapeFichier::Fait(chemin),
             Err(cause) => EtapeFichier::Echec { dossier, cause },

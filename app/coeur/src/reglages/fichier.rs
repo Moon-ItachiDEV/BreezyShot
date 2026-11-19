@@ -14,13 +14,23 @@ use super::lecture::{
 };
 use super::modele::{vers_json, Plateforme, Reglages, VERSION_ACTUELLE};
 
+use std::sync::atomic::{AtomicU64, Ordering};
+
 /// Nom du fichier de réglages dans le dossier donné.
 pub const NOM_FICHIER: &str = "reglages.json";
-const NOM_TEMPORAIRE: &str = "reglages.json.tmp";
+/// Ancien nom de fichier temporaire (nettoyé après une écriture réussie s'il reste d'une coupure).
+const NOM_ANCIEN_TEMPORAIRE: &str = "reglages.json.tmp";
 const PREFIXE_ABIME: &str = "reglages.abime-";
 const SUFFIXE_ABIME: &str = ".json";
 /// Nombre de fichiers abîmés gardés au plus.
 const ABIMES_GARDES: usize = 3;
+
+static COMPTEUR_TEMP: AtomicU64 = AtomicU64::new(0);
+
+fn chemin_temporaire(dossier: &Path) -> PathBuf {
+    let n = COMPTEUR_TEMP.fetch_add(1, Ordering::Relaxed);
+    dossier.join(format!("reglages.{}.{n}.tmp", std::process::id()))
+}
 
 /// Lit les réglages de `dossier/reglages.json`, en les créant, réparant ou mettant à niveau
 /// au besoin. Ne panique jamais et ne renvoie jamais d'erreur : au pire, valeurs par défaut
@@ -107,7 +117,7 @@ pub(super) fn charger_a(
 }
 
 /// Écrit les réglages dans `dossier/reglages.json` (dossier créé au besoin) : JSON indenté,
-/// UTF-8, fin de ligne finale, par un fichier temporaire renommé ensuite. Refuse une
+/// UTF-8, fin de ligne finale, par un fichier temporaire unique renommé ensuite. Refuse une
 /// combinaison sans sortie active, une valeur invalide, un fichier en lecture seule et un
 /// fichier venu d'une version plus récente. En cas d'échec, l'ancien fichier reste intact.
 pub fn ecrire(dossier: &Path, reglages: &Reglages) -> Result<(), ErreurEcriture> {
@@ -128,8 +138,7 @@ pub fn ecrire(dossier: &Path, reglages: &Reglages) -> Result<(), ErreurEcriture>
             return Err(ErreurEcriture::LectureSeule { chemin });
         }
     }
-    let temporaire = dossier.join(NOM_TEMPORAIRE);
-    let _ = fs::remove_file(&temporaire);
+    let temporaire = chemin_temporaire(dossier);
     let resultat = ecrire_temporaire(&temporaire, texte.as_bytes())
         .map_err(|erreur| ErreurEcriture::Disque {
             etape: "ecriture du fichier temporaire",
@@ -141,7 +150,9 @@ pub fn ecrire(dossier: &Path, reglages: &Reglages) -> Result<(), ErreurEcriture>
                 erreur,
             })
         });
-    if resultat.is_err() {
+    if resultat.is_ok() {
+        let _ = fs::remove_file(dossier.join(NOM_ANCIEN_TEMPORAIRE));
+    } else {
         let _ = fs::remove_file(&temporaire);
     }
     resultat
@@ -157,9 +168,16 @@ fn lire_limite(chemin: &Path) -> io::Result<Vec<u8>> {
 }
 
 fn ecrire_temporaire(chemin: &Path, octets: &[u8]) -> io::Result<()> {
-    let mut f = fs::File::create(chemin)?;
+    let mut f = fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(chemin)?;
     f.write_all(octets)?;
-    f.sync_all()
+    match f.sync_all() {
+        Ok(()) => Ok(()),
+        Err(e) if e.kind() == io::ErrorKind::Unsupported => Ok(()),
+        Err(e) => Err(e),
+    }
 }
 
 /// Vérifie les réglages et donne le texte exact du fichier. Fonction pure.

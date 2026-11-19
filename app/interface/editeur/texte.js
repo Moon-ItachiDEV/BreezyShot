@@ -70,7 +70,7 @@ export function installerTexte(ed, { appeler, message, reduites }) {
 
   // ---------- géométrie : pixels de l'image composée → pixels CSS du calque ----------
   function geometrie() {
-    const c = ed.modele.cadre(ed.h.doc);
+    const c = ed.modele.cadreExport(ed.h.doc);
     const { x, y, echelle, dpr } = ed.vue;
     const t = ed.toile.getBoundingClientRect();
     const k = l.calque.getBoundingClientRect();

@@ -40,6 +40,7 @@ const verifier = (ok, quoi, info = '') => {
     D.ajouter(d, { type: 'masque', x1: 0, y1: 0, x2: 40, y2: 40, sorte: 'flouter', intensite: 2 });
     D.ajouter(d, { type: 'projecteur', x1: 20, y1: 20, x2: 90, y2: 90, forme: 'ovale' });
     D.recadrer(d, { x: 10, y: 10, largeur: 200, hauteur: 100 });
+    D.changerFond(d, { actif: true, style: 'degrade', degrade: 2, couleur: '#1E293B', marge: 2, arrondi: 1, ombre: false });
   });
   const original = JSON.parse(JSON.stringify(h.doc));
   const { doc, ecartes } = lire(JSON.stringify(h.doc));
@@ -118,7 +119,7 @@ const verifier = (ok, quoi, info = '') => {
   // 8. Noms inventés : jamais copiés ; __proto__ sans effet.
   const proto = lire('{"objets":[{"type":"ligne","__proto__":{"x":1},"constructor":{"a":2},"evil":"x"}],"__proto__":{"polluee":true},"extra":1}');
   verifier(!('evil' in proto.doc.objets[0]) && !Object.hasOwn(proto.doc.objets[0], 'constructor') && !Object.hasOwn(proto.doc.objets[0], '__proto__') && ({}).polluee === undefined && proto.doc.polluee === undefined, 'champs inventés ignorés, rien ne pollue');
-  verifier(Object.keys(proto.doc).sort().join() === 'hauteur,largeur,objets,recadrage,suivant', 'le document n\'a que ses champs', Object.keys(proto.doc).join());
+  verifier(Object.keys(proto.doc).sort().join() === 'fond,hauteur,largeur,objets,recadrage,suivant', 'le document n\'a que ses champs', Object.keys(proto.doc).join());
 
   // 9. La taille de l'image fait foi ; recadrage borné ; faux recadrage ignoré.
   const taille = lire({ largeur: 9, hauteur: 9, objets: [] }, 400, 300).doc;
@@ -128,6 +129,32 @@ const verifier = (ok, quoi, info = '') => {
   verifier(lire({ objets: [], recadrage: 'x' }).doc.recadrage === null, 'recadrage faux ignoré');
   verifier(lire({ objets: [], recadrage: { x: 0, y: 0, largeur: 0, hauteur: 0 } }).doc.recadrage === null, 'recadrage vide retiré');
   verifier(lire({ objets: 'x' }).doc.objets.length === 0, 'objets pas une liste : document vide');
+
+  // 9 bis. Fond : absent ou inactif → null ; valeurs fausses ou injectées bornées/ignorées.
+  verifier(lire({ objets: [] }).doc.fond === null, 'ancien .breezy sans champ fond → null');
+  verifier(lire({ objets: [], fond: { actif: false, style: 'degrade', degrade: 2 } }).doc.fond === null, 'fond inactif → null');
+  verifier(lire({ objets: [], fond: 'mauvais' }).doc.fond === null, 'fond non-objet → null');
+  const fondSale = lire('{"objets":[],"fond":{"actif":true,"style":"script","degrade":99,"couleur":"javascript:x","marge":-5,"arrondi":99,"ombre":"oui","__proto__":{"pollueeFond":true},"extra":1}}').doc.fond;
+  verifier(
+    fondSale
+      && fondSale.actif === true
+      && fondSale.style === 'degrade'
+      && fondSale.degrade === D.DEGRADES_FOND_NB - 1
+      && fondSale.couleur === D.FOND_DEFAUT.couleur
+      && fondSale.marge === 0
+      && fondSale.arrondi === D.ARRONDIS_FOND.length - 1
+      && fondSale.ombre === true
+      && !('extra' in fondSale)
+      && ({}).pollueeFond === undefined,
+    'fond sale nettoyé et borné sans pollution',
+    JSON.stringify(fondSale),
+  );
+  const fondUni = lire({ objets: [], fond: { actif: true, style: 'uni', couleur: '#12abef', marge: 1, arrondi: 0, ombre: false } }).doc.fond;
+  verifier(
+    fondUni && fondUni.style === 'uni' && fondUni.couleur === '#12ABEF' && fondUni.marge === 1 && fondUni.arrondi === 0 && fondUni.ombre === false,
+    'fond uni valide conservé',
+    JSON.stringify(fondUni),
+  );
 
   // 10. Le document lu s'utilise : l'historique, l'annulation, l'ajout.
   const lu = lire(JSON.stringify(h.doc)).doc;

@@ -1600,28 +1600,40 @@ fn choisir_dans_le_groupe(cx: &Contexte, groupe: &[Jugement], attendu: Option<i3
 }
 
 /// Deux images comparées ligne à ligne sans description (assemblage, bandes fixes).
+/// Garde deux tampons de ligne réutilisés pour éviter une allocation par ligne sur les
+/// zones larges (`pas > 1`).
 struct Paire<'a> {
     a: Vue<'a>,
     b: Vue<'a>,
     t: &'a Tolerance,
+    tampon_a: Vec<u8>,
+    tampon_b: Vec<u8>,
 }
 
 impl<'a> Paire<'a> {
     fn de(avant: &'a Pixels, apres: &'a Pixels, t: &'a Tolerance) -> Option<Paire<'a>> {
         let (a, b) = (Vue::de(avant)?, Vue::de(apres)?);
-        (a.l == b.l && a.h == b.h).then_some(Paire { a, b, t })
+        (a.l == b.l && a.h == b.h).then_some(Paire {
+            a,
+            b,
+            t,
+            tampon_a: Vec::new(),
+            tampon_b: Vec::new(),
+        })
     }
 
     /// La ligne `yb` de l'image d'après est égale à la ligne `ya` de l'image d'avant (les
     /// colonnes lues par la mesure, échantillonnées ligne par ligne : peu de lignes sont
     /// comparées).
-    fn egales(&self, yb: usize, ya: usize) -> bool {
-        lignes_egales(&ligne_lue(self.b, yb), &ligne_lue(self.a, ya), self.t)
+    fn egales(&mut self, yb: usize, ya: usize) -> bool {
+        let lb = ligne_lue_dans(self.b, yb, &mut self.tampon_b);
+        let la = ligne_lue_dans(self.a, ya, &mut self.tampon_a);
+        lignes_egales(lb, la, self.t)
     }
 
-    fn encre(&self, yb: usize) -> u32 {
-        let l = ligne_lue(self.b, yb);
-        encre_de(&l, fond(&l), self.t)
+    fn encre(&mut self, yb: usize) -> u32 {
+        let l = ligne_lue_dans(self.b, yb, &mut self.tampon_b);
+        encre_de(l, fond(l), self.t)
     }
 
     /// Les lignes `y` de l'image d'après qui ne diffèrent de la ligne `y + d` d'avant que
@@ -1630,7 +1642,7 @@ impl<'a> Paire<'a> {
     /// plus) est jugée d'un bloc : est teintée la version dont le fond n'est pas celui des
     /// lignes voisines, égales dans les deux images (vote des lignes au fond net : une
     /// ligne de texte dense n'a pas de fond qui domine). Un drapeau par ligne de l'image.
-    fn teintes(&self, d: usize) -> Vec<Teinte> {
+    fn teintes(&mut self, d: usize) -> Vec<Teinte> {
         let h = self.b.h;
         let n = h.saturating_sub(d);
         let mut sortie = vec![Teinte::Non; h];
@@ -1653,9 +1665,10 @@ impl<'a> Paire<'a> {
             }
             let (b, a) = fonds(y);
             if ecart(&b.c, &a.c) > canal {
-                let (lb, la) = (ligne_lue(self.b, y), ligne_lue(self.a, y + d));
-                let (b, a) = (fond(&lb), fond(&la));
-                *c = encre_en_place(&lb, b, &la, a, self.t);
+                let lb = ligne_lue_dans(self.b, y, &mut self.tampon_b);
+                let la = ligne_lue_dans(self.a, y + d, &mut self.tampon_a);
+                let (b, a) = (fond(lb), fond(la));
+                *c = encre_en_place(lb, b, la, a, self.t);
             }
         }
         let mut y = 0;
@@ -1728,17 +1741,19 @@ pub(crate) enum Teinte {
     Ancienne,
 }
 
-/// Les colonnes lues de la ligne `y` (les mêmes qu'`echantillonner`).
-fn ligne_lue(v: Vue<'_>, y: usize) -> Cow<'_, [u8]> {
+/// Les colonnes lues de la ligne `y` (les mêmes qu'`echantillonner`), sans réallouer quand
+/// `pas > 1` grâce au tampon réutilisé.
+fn ligne_lue_dans<'a>(v: Vue<'a>, y: usize, tampon: &'a mut Vec<u8>) -> &'a [u8] {
     let lc = (v.l - bande_droite(v.l)).max(1);
     let pas = pas_des_colonnes(lc);
     let ligne = &v.rgba[y * v.l * 4..y * v.l * 4 + lc * 4];
     if pas == 1 {
-        return Cow::Borrowed(ligne);
+        return ligne;
     }
-    let mut vers = vec![0u8; lc.div_ceil(pas) * 4];
-    copier_les_colonnes(&mut vers, ligne, pas);
-    Cow::Owned(vers)
+    let taille = lc.div_ceil(pas) * 4;
+    tampon.resize(taille, 0);
+    copier_les_colonnes(tampon, ligne, pas);
+    tampon.as_slice()
 }
 
 /// Une colonne sur `pas` de `ligne` (pixels entiers) dans `vers`.
@@ -1753,12 +1768,12 @@ fn copier_les_colonnes(vers: &mut [u8], ligne: &[u8], pas: usize) {
 /// jusqu'à leur dernière ligne qui ne suit pas l'avance (unies comprises, sans minimum :
 /// un pied manqué perdrait des lignes). Elles ne peuvent pas couvrir l'avance.
 pub fn fixes(avant: &Pixels, apres: &Pixels, avance: u32, t: &Tolerance) -> Fixes {
-    Paire::de(avant, apres, t).map_or_else(Fixes::default, |p| p.fixes(avance))
+    Paire::de(avant, apres, t).map_or_else(Fixes::default, |mut p| p.fixes(avance))
 }
 
 impl Paire<'_> {
     /// `fixes` sur une paire.
-    fn fixes(&self, avance: u32) -> Fixes {
+    fn fixes(&mut self, avance: u32) -> Fixes {
         let (h, d) = (self.b.h, avance as usize);
         if d == 0 || d >= h {
             return Fixes::default();
@@ -1796,7 +1811,7 @@ impl Paire<'_> {
     /// `d` : jusqu'à la dernière ligne qui ne montre pas la ligne `y + d` d'avant, avant
     /// quatre lignes d'encre égales de suite (en-tête fixe, en-tête qui apparaît, ombre
     /// sous l'en-tête). Une ligne qui ne diffère que par une teinte ne compte pas.
-    fn haut_a_garder(&self, d: u32, teintes: &[Teinte]) -> u32 {
+    fn haut_a_garder(&mut self, d: u32, teintes: &[Teinte]) -> u32 {
         let (h, d) = (self.b.h, d as usize);
         let (mut garder, mut suite) = (0usize, 0);
         for y in 0..h.saturating_sub(d).min(h / 2 + BORD_MAX) {
@@ -1819,19 +1834,28 @@ impl Paire<'_> {
     }
 
     /// Les bandes après une nouvelle avance `d` (D11 : elles ne peuvent que rétrécir). Une
-    /// ligne quitte une bande quand elle n'est plus à la même place mais suit la page
-    /// (égale à la ligne `y + d` de l'image d'avant) ; une ligne qui change sans suivre la
-    /// page (une animation dans le pied) reste dans la bande.
-    fn retrecir(&self, d: u32, f: Fixes) -> Fixes {
+    /// ligne quitte la bande du haut quand elle n'est plus à la même place mais suit la
+    /// page (égale à `y + d` dans l'image d'avant) ; elle quitte la bande du bas quand la
+    /// ligne `y` d'avant se retrouve remontée à `y - d` dans l'image d'après ; une ligne
+    /// qui change sans suivre la page (une animation dans le pied) reste dans la bande.
+    fn retrecir(&mut self, d: u32, f: Fixes) -> Fixes {
         let (h, d) = (self.b.h, d as usize);
-        let bouge = |y: usize| y + d < h && !self.egales(y, y) && self.egales(y, y + d);
         let haut = (f.haut as usize).min(h);
         let bas = (f.bas as usize).min(h - haut);
-        let nouveau_haut = (0..haut).find(|&y| bouge(y)).unwrap_or(haut);
-        let nouveau_bas = (h - bas..h)
-            .rev()
-            .find(|&y| bouge(y))
-            .map_or(bas, |y| h - 1 - y);
+        let mut nouveau_haut = haut;
+        for y in 0..haut {
+            if y + d < h && !self.egales(y, y) && self.egales(y, y + d) {
+                nouveau_haut = y;
+                break;
+            }
+        }
+        let mut nouveau_bas = bas;
+        for y in (h - bas..h).rev() {
+            if y >= d && !self.egales(y, y) && self.egales(y - d, y) {
+                nouveau_bas = h - 1 - y;
+                break;
+            }
+        }
         Fixes {
             haut: nouveau_haut as u32,
             bas: nouveau_bas as u32,

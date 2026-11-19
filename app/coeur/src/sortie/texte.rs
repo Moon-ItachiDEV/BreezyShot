@@ -5,18 +5,13 @@
 //! Le presse-papiers du texte est gardé ouvert pour toute la vie du processus, comme celui
 //! de l'image (sous X11, c'est notre processus qui sert le texte aux autres applications).
 
-use std::sync::Mutex;
-use std::thread;
-use std::time::{Duration, Instant};
+use arboard::Error;
 
-use arboard::{Clipboard, Error};
-
-use super::presse_papiers::{avec_echeance, vaut_reessai, ECHEANCE};
+use super::presse_papiers::avec_presse_papiers;
+#[cfg(test)]
+use super::presse_papiers::{avec_echeance, ECHEANCE};
 use super::Etape;
 use crate::systeme::presse_papiers::poser_texte_secret;
-
-/// Ouvert une fois, gardé jusqu'à la fin du processus.
-static OUVERT: Mutex<Option<Clipboard>> = Mutex::new(None);
 
 /// Pose `texte` dans le presse-papiers (`arboard`, 250 ms d'essais). Le texte remplace ce
 /// qui y était (l'image comprise). Bloquant au plus 250 ms : hors du fil principal.
@@ -31,36 +26,25 @@ pub fn copier_texte_secret(texte: &str) -> Etape {
 }
 
 fn copier(texte: &str, secret: bool) -> Etape {
-    let mut garde = OUVERT.lock().unwrap_or_else(|e| e.into_inner());
-    let resultat = copier_par(Instant::now, thread::sleep, || {
-        poser(&mut garde, texte, secret)
+    let resultat = avec_presse_papiers(|presse| {
+        if secret {
+            poser_texte_secret(presse, texte)
+        } else {
+            presse.set_text(texte)
+        }
     });
-    if matches!(&resultat, Err(e) if !vaut_reessai(e)) {
-        // On repartira d'un presse-papiers neuf la prochaine fois.
-        *garde = None;
-    }
     etape(resultat)
 }
 
 /// Les essais de `copier_texte`, avec l'échéance commune (pour les tests : horloge et
 /// attente données).
+#[cfg(test)]
 fn copier_par(
-    horloge: impl Fn() -> Instant,
-    dormir: impl FnMut(Duration),
+    horloge: impl Fn() -> std::time::Instant,
+    dormir: impl FnMut(std::time::Duration),
     essai: impl FnMut() -> Result<(), Error>,
 ) -> Result<(), Error> {
     avec_echeance(ECHEANCE, horloge, dormir, essai)
-}
-
-fn poser(garde: &mut Option<Clipboard>, texte: &str, secret: bool) -> Result<(), Error> {
-    let presse = match garde {
-        Some(presse) => presse,
-        None => garde.insert(Clipboard::new()?),
-    };
-    if secret {
-        return poser_texte_secret(presse, texte);
-    }
-    presse.set_text(texte)
 }
 
 /// L'étape de la copie, avec sa cause en clair (jamais le message de la crate).
@@ -80,8 +64,11 @@ fn etape(resultat: Result<(), Error>) -> Etape {
 #[cfg(test)]
 mod tests {
     use std::cell::Cell;
+    use std::thread;
+    use std::time::{Duration, Instant};
 
     use super::*;
+    use crate::sortie::presse_papiers;
     use crate::systeme::presse_papiers::VERROU_ESSAIS;
 
     #[test]
@@ -163,13 +150,11 @@ mod tests {
         // Relu par le même objet gardé (sous X11, c'est lui qui sert le texte).
         let debut = Instant::now();
         let relu = loop {
-            let mut garde = OUVERT.lock().unwrap_or_else(|e| e.into_inner());
-            match garde.as_mut().map(Clipboard::get_text) {
-                Some(Ok(t)) => break t,
+            match presse_papiers::relire_texte() {
+                Ok(t) => break t,
                 _ if debut.elapsed() >= Duration::from_secs(1) => panic!("texte non relu en 1 s"),
                 _ => {}
             }
-            drop(garde);
             thread::sleep(Duration::from_millis(50));
         };
         assert_eq!(relu, texte);

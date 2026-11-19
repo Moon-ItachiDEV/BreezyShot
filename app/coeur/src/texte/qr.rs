@@ -112,23 +112,31 @@ pub fn lire(pixels: &Pixels) -> Option<Code> {
     let gris = Gris::depuis(pixels)?;
     // L'image comme elle est, puis ses couleurs inversées (un code clair sur fond sombre),
     // puis réduite de moitié (un code aux modules gros, ou un écran en 125 ou 150 %), puis
-    // agrandie ×2 (une petite zone).
+    // agrandie ×2 (une petite zone). Chaque variante n'est construite que si la précédente
+    // n'a rien vu.
     //
     // Un refus (plusieurs codes différents, ou un code trop petit) arrête tout : les essais
     // suivants ne verraient qu'une partie de ce qui est là.
     let cote = gris.l.max(gris.h);
-    let mut essais = vec![gris.clone(), gris.inverser()];
+    let tenter = |g: &Gris| match essayer(g) {
+        Passage::Rien => Ok(()),
+        Passage::Refuse => Err(None),
+        Passage::Code(code) => Err(Some(code)),
+    };
+    if let Err(resultat) = tenter(&gris) {
+        return resultat;
+    }
+    if let Err(resultat) = tenter(&gris.inverser()) {
+        return resultat;
+    }
     if cote >= 200 {
-        essais.push(gris.reduire_de_moitie());
+        if let Err(resultat) = tenter(&gris.reduire_de_moitie()) {
+            return resultat;
+        }
     }
     if cote <= PETIT_COTE {
-        essais.push(gris.doubler());
-    }
-    for essai in &essais {
-        match essayer(essai) {
-            Passage::Rien => {}
-            Passage::Refuse => return None,
-            Passage::Code(code) => return Some(code),
+        if let Err(resultat) = tenter(&gris.doubler()) {
+            return resultat;
         }
     }
     None
@@ -323,7 +331,7 @@ pub fn domaine_sur(contenu: &str) -> Option<String> {
     if contenu.len() > LIEN_MAX
         || !contenu
             .bytes()
-            .all(|b| (0x21..=0x7e).contains(&b) && !b"\"<>^|{}`".contains(&b))
+            .all(|b| (0x21..=0x7e).contains(&b) && !b"\"<>^|{}`\\".contains(&b))
     {
         return None;
     }
@@ -343,7 +351,11 @@ pub fn domaine_sur(contenu: &str) -> Option<String> {
         None => (autorite, None),
     };
     if let Some(p) = port {
-        if p.is_empty() || p.len() > 5 || !p.bytes().all(|b| b.is_ascii_digit()) {
+        if p.is_empty()
+            || p.len() > 5
+            || !p.bytes().all(|b| b.is_ascii_digit())
+            || p.parse::<u16>().ok().filter(|&n| n > 0).is_none()
+        {
             return None;
         }
     }
@@ -711,6 +723,7 @@ mod tests {
             ("https://github.com/Moon-ItachiDEV", "github.com"),
             ("HTTP://Exemple.FR/Chemin", "exemple.fr"),
             ("https://exemple.fr:8443/x", "exemple.fr:8443"),
+            ("https://exemple.fr:65535/x", "exemple.fr:65535"),
             ("http://192.168.1.10/admin", "192.168.1.10"),
             ("https://a.b-c.fr?x=1#y", "a.b-c.fr"),
         ] {
@@ -724,6 +737,9 @@ mod tests {
         for lien in [
             "http://banque.fr@pirate.site/connexion",
             "https://exemple.fr\\@pirate.site",
+            "https://exemple.fr/a\\b",
+            "https://exemple.fr:0/x",
+            "https://exemple.fr:99999/x",
             "https://раураl.com/x",
             "https://xn--80ak6aa92e.com",
             "https:///x",

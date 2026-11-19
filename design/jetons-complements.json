@@ -330,12 +330,6 @@
     "origine": "design/editeur-epure/index.html, piste B (.mi.danger)."
    },
    {
-    "name": "editeur-instrument-neutre",
-    "value": "#9EA3AA",
-    "usage": "Couleur des instruments sans couleur (Gomme, Flou, Projecteur).",
-    "origine": "design/editeur-epure/index.html, piste B (syncTools)."
-   },
-   {
     "name": "editeur-gomme-cercle",
     "value": "rgba(20,20,22,0.72)",
     "usage": "Rond de la gomme sous le pointeur : trait (sur l'image, sans thème).",
@@ -409,18 +403,6 @@
     "value": "rgba(0,0,0,0.3)",
     "usage": "Ombre des poignées.",
     "origine": "design/editeur-epure/index.html, piste B (contrat 0.4 (poignées gardées))."
-   },
-   {
-    "name": "editeur-roue",
-    "value": "conic-gradient(#E5484D, #FFD43B, #30A46C, #4CC2FF, #0067C0, #8E4EC6, #E5484D)",
-    "usage": "Pastille « Autre couleur ».",
-    "origine": "design/editeur-epure/index.html, piste B (.dot.wheel)."
-   },
-   {
-    "name": "editeur-roue-centre-bord",
-    "value": "0 0 0 1.5px #FFFFFF",
-    "usage": "Bord de la couleur libre au centre de la roue.",
-    "origine": "design/editeur-epure/index.html, piste B (.dot.wheel i)."
    },
    {
     "name": "editeur-image-ombre",
@@ -520,159 +502,6 @@
     },
     "usage": "Fond de la pastille Pro du volet.",
     "origine": "design/reglages-v2/index.html, piste B « Volet » (choix du 13/11/2026), --pro-fond."
-   },
-   {
-    "name": "editeur-inst-corps-0",
-    "value": {
-     "light": "#CDD4DE",
-     "dark": "#33373D"
-    },
-    "usage": "Corps de la gomme : dégradé, bord gauche.",
-    "origine": "design/annotation-instruments/index.html, dessin B « Couleur » choisi le 13/11 (--i-c0)."
-   },
-   {
-    "name": "editeur-inst-corps-1",
-    "value": {
-     "light": "#F7F9FB",
-     "dark": "#6A707A"
-    },
-    "usage": "Corps de la gomme : dégradé, reflet.",
-    "origine": "design/annotation-instruments/index.html, dessin B « Couleur » choisi le 13/11 (--i-c1)."
-   },
-   {
-    "name": "editeur-inst-corps-2",
-    "value": {
-     "light": "#E1E6EC",
-     "dark": "#4A4F57"
-    },
-    "usage": "Corps de la gomme : dégradé, milieu.",
-    "origine": "design/annotation-instruments/index.html, dessin B « Couleur » choisi le 13/11 (--i-c2)."
-   },
-   {
-    "name": "editeur-inst-corps-3",
-    "value": {
-     "light": "#AEB8C5",
-     "dark": "#2A2D32"
-    },
-    "usage": "Corps de la gomme : dégradé, bord droit.",
-    "origine": "design/annotation-instruments/index.html, dessin B « Couleur » choisi le 13/11 (--i-c3)."
-   },
-   {
-    "name": "editeur-inst-prise-0",
-    "value": {
-     "light": "#B1BAC6",
-     "dark": "#27292E"
-    },
-    "usage": "Bouts gris et manchon : dégradé, bord gauche.",
-    "origine": "design/annotation-instruments/index.html, dessin B « Couleur » choisi le 13/11 (--i-p0)."
-   },
-   {
-    "name": "editeur-inst-prise-1",
-    "value": {
-     "light": "#E6EAEF",
-     "dark": "#5A616B"
-    },
-    "usage": "Bouts gris et manchon : dégradé, reflet.",
-    "origine": "design/annotation-instruments/index.html, dessin B « Couleur » choisi le 13/11 (--i-p1)."
-   },
-   {
-    "name": "editeur-inst-prise-2",
-    "value": {
-     "light": "#929CA9",
-     "dark": "#222428"
-    },
-    "usage": "Bouts gris et manchon : dégradé, bord droit.",
-    "origine": "design/annotation-instruments/index.html, dessin B « Couleur » choisi le 13/11 (--i-p2)."
-   },
-   {
-    "name": "editeur-inst-trait",
-    "value": {
-     "light": "rgba(28,34,44,0.32)",
-     "dark": "rgba(255,255,255,0.18)"
-    },
-    "usage": "Contour des pièces grises des instruments.",
-    "origine": "design/annotation-instruments/index.html, dessin B « Couleur » choisi le 13/11 (--i-trait)."
-   },
-   {
-    "name": "editeur-inst-trait-encre",
-    "value": {
-     "light": "rgba(0,0,0,0.22)",
-     "dark": "rgba(255,255,255,0.24)"
-    },
-    "usage": "Contour des pièces à la couleur de l'encre.",
-    "origine": "design/annotation-instruments/index.html, dessin B « Couleur » choisi le 13/11 (--i-trait-encre)."
-   },
-   {
-    "name": "editeur-inst-trait-fonce",
-    "value": {
-     "light": "rgba(0,0,0,0.22)",
-     "dark": "rgba(255,255,255,0.62)"
-    },
-    "usage": "Liseré d'une encre très foncée (noir).",
-    "origine": "design/annotation-instruments/index.html, dessin B « Couleur » choisi le 13/11 (--i-trait-fonce)."
-   },
-   {
-    "name": "editeur-inst-trait-pale",
-    "value": {
-     "light": "rgba(28,34,44,0.55)",
-     "dark": "rgba(255,255,255,0.24)"
-    },
-    "usage": "Liseré d'une encre très pâle (blanc).",
-    "origine": "design/annotation-instruments/index.html, dessin B « Couleur » choisi le 13/11 (--i-trait-pale)."
-   },
-   {
-    "name": "editeur-inst-facette",
-    "value": {
-     "light": "rgba(30,40,55,0.09)",
-     "dark": "rgba(0,0,0,0.24)"
-    },
-    "usage": "Facette des bouts gris et biseau de la gomme.",
-    "origine": "design/annotation-instruments/index.html, dessin B « Couleur » choisi le 13/11 (--i-facette)."
-   },
-   {
-    "name": "editeur-inst-facette-encre",
-    "value": {
-     "light": "rgba(0,0,0,0.14)",
-     "dark": "rgba(0,0,0,0.2)"
-    },
-    "usage": "Facette de la pointe de la flèche.",
-    "origine": "design/annotation-instruments/index.html, dessin B « Couleur » choisi le 13/11 (--i-facette-encre)."
-   },
-   {
-    "name": "editeur-inst-entaille",
-    "value": {
-     "light": "rgba(0,0,0,0.12)",
-     "dark": "rgba(0,0,0,0.2)"
-    },
-    "usage": "Arête du biseau et rainures du manchon.",
-    "origine": "design/annotation-instruments/index.html, dessin B « Couleur » choisi le 13/11 (--i-entaille)."
-   },
-   {
-    "name": "editeur-inst-gomme",
-    "value": {
-     "light": "#FCFCFD",
-     "dark": "#E9EBEF"
-    },
-    "usage": "Gomme.",
-    "origine": "design/annotation-instruments/index.html, dessin B « Couleur » choisi le 13/11 (--i-gomme)."
-   },
-   {
-    "name": "editeur-inst-bague",
-    "value": {
-     "light": "#F5F6F8",
-     "dark": "#D3D7DD"
-    },
-    "usage": "Bague blanche.",
-    "origine": "design/annotation-instruments/index.html, dessin B « Couleur » choisi le 13/11 (--i-bague)."
-   },
-   {
-    "name": "editeur-inst-ombre",
-    "value": {
-     "light": "rgba(0,0,0,0.22)",
-     "dark": "rgba(0,0,0,0.45)"
-    },
-    "usage": "Ombre portée des instruments.",
-    "origine": "design/annotation-instruments/index.html, dessin B « Couleur » choisi le 13/11 (--i-ombre)."
    },
    {
     "name": "editeur-choix-fond",
@@ -1015,22 +844,10 @@
     "origine": "design/editeur-epure/index.html, piste B (copyClose 250)."
    },
    {
-    "name": "duree-editeur-instrument",
-    "value": "340ms",
-    "usage": "Instrument qui se soulève.",
-    "origine": "design/editeur-epure/index.html, piste B (.tl .inst)."
-   },
-   {
     "name": "duree-editeur-pop",
     "value": "220ms",
     "usage": "Ouverture des menus.",
     "origine": "design/editeur-epure/index.html, piste B (.pop.open)."
-   },
-   {
-    "name": "duree-editeur-vignette",
-    "value": "260ms",
-    "usage": "Apparition de la vignette.",
-    "origine": "design/editeur-epure/index.html, piste B (.ghost)."
    },
    {
     "name": "duree-editeur-message",
@@ -1205,30 +1022,6 @@
     "value": "120ms",
     "usage": "Copier le texte, animations réduites : fondu des lignes, à l'arrivée et au départ (SURLIGNE_REDUIT du cœur).",
     "origine": "design/copier-texte-animation/index.html, choix A « Surligné » du 13/11 (animations réduites)."
-   },
-   {
-    "name": "duree-editeur-pli",
-    "value": "360ms",
-    "usage": "L'outil choisi se déplie (ressort).",
-    "origine": "design/annotation-instruments/index.html, dessin B « Couleur » choisi le 13/11 (.pli .in)."
-   },
-   {
-    "name": "duree-editeur-encre",
-    "value": "220ms",
-    "usage": "L'instrument prend sa nouvelle couleur.",
-    "origine": "design/annotation-instruments/index.html, dessin B « Couleur » choisi le 13/11 (.inst .ie)."
-   },
-   {
-    "name": "duree-editeur-saut",
-    "value": "340ms",
-    "usage": "Saut de l'instrument quand sa couleur ou sa taille change.",
-    "origine": "design/annotation-instruments/index.html, dessin B « Couleur » choisi le 13/11 (.inst.saute)."
-   },
-   {
-    "name": "duree-editeur-bout",
-    "value": "260ms",
-    "usage": "Le bout de l'instrument suit la taille choisie.",
-    "origine": "design/annotation-instruments/index.html, dessin B « Couleur » choisi le 13/11 (.inst .tp)."
    },
    {
     "name": "duree-film-point",
@@ -2124,12 +1917,6 @@
     "origine": "design/editeur-epure/index.html, piste B (.ico)."
    },
    {
-    "name": "editeur-picto-petit",
-    "value": "18px",
-    "usage": "Pictogramme de l'opacité.",
-    "origine": "design/editeur-epure/index.html, piste B (.rng .ico)."
-   },
-   {
     "name": "editeur-barre-hauteur",
     "value": "52px",
     "usage": "Barre du haut (et de la fenêtre).",
@@ -2166,28 +1953,10 @@
     "origine": "design/editeur-epure/index.html, piste B (.dir-b .rb, .dir-b .ok)."
    },
    {
-    "name": "editeur-copier-largeur",
-    "value": "44px",
-    "usage": "Bouton Copier, largeur.",
-    "origine": "design/editeur-epure/index.html, piste B (.dir-b .ok)."
-   },
-   {
     "name": "editeur-copier-hauteur",
     "value": "32px",
     "usage": "Bouton Copier, hauteur.",
     "origine": "design/editeur-epure/index.html, piste B (.dir-b .ok)."
-   },
-   {
-    "name": "editeur-copier-picto",
-    "value": "18px",
-    "usage": "Coche de Copier.",
-    "origine": "design/editeur-epure/index.html, piste B (.dir-b .ok svg)."
-   },
-   {
-    "name": "editeur-copier-focus",
-    "value": "3px",
-    "usage": "Écart du focus de Copier.",
-    "origine": "design/editeur-epure/index.html, piste B (.ok:focus-visible)."
    },
    {
     "name": "editeur-image-rayon",
@@ -2202,28 +1971,10 @@
     "origine": "design/editeur-epure/index.html, piste B (.pal)."
    },
    {
-    "name": "editeur-separateur-hauteur",
-    "value": "28px",
-    "usage": "Séparateurs de la palette.",
-    "origine": "design/editeur-epure/index.html, piste B (.dv)."
-   },
-   {
-    "name": "editeur-outils-ecart",
-    "value": "2px",
-    "usage": "Écart entre les instruments.",
-    "origine": "design/editeur-epure/index.html, piste B (.tools)."
-   },
-   {
     "name": "editeur-instrument-rayon",
     "value": "8px",
     "usage": "Rayon du focus d'un instrument.",
     "origine": "design/editeur-epure/index.html, piste B (.tl)."
-   },
-   {
-    "name": "editeur-roue-centre",
-    "value": "6px",
-    "usage": "Retrait de la couleur libre dans la roue.",
-    "origine": "design/editeur-epure/index.html, piste B (.dot.wheel i)."
    },
    {
     "name": "editeur-pop-rayon",
@@ -2286,78 +2037,6 @@
     "origine": "design/editeur-epure/index.html, piste B (.mi, .opt)."
    },
    {
-    "name": "editeur-taille-0",
-    "value": "4px",
-    "usage": "Option Fin.",
-    "origine": "design/editeur-epure/index.html, piste B (openToolPop)."
-   },
-   {
-    "name": "editeur-taille-1",
-    "value": "7px",
-    "usage": "Option Moyen.",
-    "origine": "design/editeur-epure/index.html, piste B (openToolPop)."
-   },
-   {
-    "name": "editeur-taille-2",
-    "value": "11px",
-    "usage": "Option Épais.",
-    "origine": "design/editeur-epure/index.html, piste B (openToolPop)."
-   },
-   {
-    "name": "editeur-taille-surligneur-0",
-    "value": "8px",
-    "usage": "Surligneur, Fin.",
-    "origine": "design/editeur-epure/index.html, piste B (openToolPop)."
-   },
-   {
-    "name": "editeur-taille-surligneur-1",
-    "value": "12px",
-    "usage": "Surligneur, Moyen.",
-    "origine": "design/editeur-epure/index.html, piste B (openToolPop)."
-   },
-   {
-    "name": "editeur-taille-surligneur-2",
-    "value": "16px",
-    "usage": "Surligneur, Épais.",
-    "origine": "design/editeur-epure/index.html, piste B (openToolPop)."
-   },
-   {
-    "name": "editeur-taille-numero-0",
-    "value": "10px",
-    "usage": "Numéro, Fin.",
-    "origine": "design/editeur-epure/index.html, piste B (openToolPop)."
-   },
-   {
-    "name": "editeur-taille-numero-1",
-    "value": "13px",
-    "usage": "Numéro, Moyen.",
-    "origine": "design/editeur-epure/index.html, piste B (openToolPop)."
-   },
-   {
-    "name": "editeur-taille-numero-2",
-    "value": "16px",
-    "usage": "Numéro, Épais.",
-    "origine": "design/editeur-epure/index.html, piste B (openToolPop)."
-   },
-   {
-    "name": "editeur-taille-gomme-0",
-    "value": "8px",
-    "usage": "Gomme, Petite (bulle de l'outil).",
-    "origine": "Fil « Rendre l'annotation plus naturelle » (13/11/2026) : gomme au pixel."
-   },
-   {
-    "name": "editeur-taille-gomme-1",
-    "value": "13px",
-    "usage": "Gomme, Moyenne (bulle de l'outil).",
-    "origine": "Fil « Rendre l'annotation plus naturelle » (13/11/2026) : gomme au pixel."
-   },
-   {
-    "name": "editeur-taille-gomme-2",
-    "value": "18px",
-    "usage": "Gomme, Grande (bulle de l'outil).",
-    "origine": "Fil « Rendre l'annotation plus naturelle » (13/11/2026) : gomme au pixel."
-   },
-   {
     "name": "editeur-gomme-rayon-0",
     "value": "5px",
     "usage": "Gomme, Petite : rayon (écran).",
@@ -2380,36 +2059,6 @@
     "value": "1.5px",
     "usage": "Rond de la gomme : trait.",
     "origine": "Fil « Rendre l'annotation plus naturelle » (13/11/2026) : gomme au pixel."
-   },
-   {
-    "name": "editeur-taille-texte-0",
-    "value": "12px",
-    "usage": "Texte, premier A.",
-    "origine": "design/editeur-epure/index.html, piste B (openToolPop)."
-   },
-   {
-    "name": "editeur-taille-texte-1",
-    "value": "16px",
-    "usage": "Texte, deuxième A.",
-    "origine": "design/editeur-epure/index.html, piste B (openToolPop)."
-   },
-   {
-    "name": "editeur-taille-texte-2",
-    "value": "21px",
-    "usage": "Texte, troisième A.",
-    "origine": "design/editeur-epure/index.html, piste B (openToolPop)."
-   },
-   {
-    "name": "editeur-glissiere-ecart",
-    "value": "10px",
-    "usage": "Écart picto-glissière.",
-    "origine": "design/editeur-epure/index.html, piste B (.rng)."
-   },
-   {
-    "name": "editeur-glissiere-hauteur",
-    "value": "24px",
-    "usage": "Hauteur de la glissière.",
-    "origine": "design/editeur-epure/index.html, piste B (input[type=range])."
    },
    {
     "name": "editeur-message-haut",
@@ -2518,12 +2167,6 @@
     "value": "620px",
     "usage": "Fenêtre étroite en dessous de cette largeur.",
     "origine": "design/editeur-epure/index.html, piste B (narrow())."
-   },
-   {
-    "name": "editeur-ombre-flou",
-    "value": "18px",
-    "usage": "Flou de l'ombre de l'image.",
-    "origine": "design/editeur-epure/index.html, piste B (draw())."
    },
    {
     "name": "editeur-equerre-trait",
@@ -3234,244 +2877,10 @@
     "origine": "design/reglages-v2/index.html, piste B « Volet » (choix du 13/11/2026), icônes des lignes de raccourcis et des rubriques."
    },
    {
-    "name": "editeur-dock-hauteur",
-    "value": "80px",
-    "usage": "Hauteur de la barre d'annotation.",
-    "origine": "design/annotation-pistes/index.html, barre C « Souffle » gardée le 13/11 (.dock)."
-   },
-   {
-    "name": "editeur-dock-rayon",
-    "value": "8px",
-    "usage": "Rayon de la barre d'annotation.",
-    "origine": "design/annotation-pistes/index.html, barre C « Souffle » gardée le 13/11 (.dock)."
-   },
-   {
-    "name": "editeur-dock-marge",
-    "value": "8px",
-    "usage": "Marge intérieure de la barre, sur les côtés.",
-    "origine": "design/annotation-pistes/index.html, barre C « Souffle » gardée le 13/11 (.dock)."
-   },
-   {
-    "name": "editeur-dock-bas",
-    "value": "14px",
-    "usage": "Écart entre la barre et le bas de la fenêtre.",
-    "origine": "design/annotation-pistes/index.html, barre C « Souffle » gardée le 13/11 (.dock)."
-   },
-   {
-    "name": "editeur-dock-min",
-    "value": "784px",
-    "usage": "Largeur minimale de la barre (si la fenêtre le permet).",
-    "origine": "design/annotation-pistes/index.html, barre C « Souffle » gardée le 13/11 (.dock)."
-   },
-   {
-    "name": "editeur-dock-retrait",
-    "value": "16px",
-    "usage": "La barre laisse au moins cette place sur les côtés de la fenêtre.",
-    "origine": "design/annotation-pistes/index.html, barre C « Souffle » gardée le 13/11 (.dock)."
-   },
-   {
-    "name": "editeur-dock-fondu",
-    "value": "44px",
-    "usage": "Fondu du côté qui cache des outils quand la barre défile.",
-    "origine": "design/annotation-pistes/index.html, barre C « Souffle » gardée le 13/11 (.dock[data-suite])."
-   },
-   {
     "name": "editeur-ouverture-largeur",
     "value": "1096px",
     "usage": "Fenêtre de l'éditeur : largeur à l'ouverture, au moins, quand la zone utile le permet (LARGEUR_OUVERTURE du cœur) : la barre y tient sans défiler, quel que soit l'outil déplié.",
     "origine": "Relecture du 13/11 (éditeur) puis barre plus claire, piste A : la barre la plus large, Forme dépliée avec le trait du pli, fait 1078 px, plus le retrait de 16 px."
-   },
-   {
-    "name": "editeur-outils-ecart-v",
-    "value": "5px",
-    "usage": "Marge du haut et du bas de la rangée d'outils.",
-    "origine": "design/annotation-pistes/index.html, barre C « Souffle » gardée le 13/11 (.tools)."
-   },
-   {
-    "name": "editeur-outil-largeur",
-    "value": "38px",
-    "usage": "Bouton d'outil (pictogramme), largeur.",
-    "origine": "design/annotation-pistes/index.html, barre C « Souffle » gardée le 13/11 (.b)."
-   },
-   {
-    "name": "editeur-outil-hauteur",
-    "value": "36px",
-    "usage": "Bouton d'outil (pictogramme), hauteur.",
-    "origine": "design/annotation-pistes/index.html, barre C « Souffle » gardée le 13/11 (.b)."
-   },
-   {
-    "name": "editeur-outil-rayon",
-    "value": "4px",
-    "usage": "Rayon d'un bouton d'outil.",
-    "origine": "design/annotation-pistes/index.html, barre C « Souffle » gardée le 13/11 (.b)."
-   },
-   {
-    "name": "editeur-pli-rayon",
-    "value": "6px",
-    "usage": "Rayon de l'outil déplié.",
-    "origine": "design/annotation-pistes/index.html, barre C « Souffle » gardée le 13/11 (.pli)."
-   },
-   {
-    "name": "editeur-encre-nuance",
-    "value": "8px",
-    "usage": "Nuance de la couleur de l'outil sous son pictogramme (outil replié), côté.",
-    "origine": "design/barre-claire/index.html, piste A « Calme » (barre plus claire, retour du 13/11 sur la 0.5.4) (.ip::after)."
-   },
-   {
-    "name": "editeur-encre-nuance-rayon",
-    "value": "2px",
-    "usage": "Rayon de la nuance de la couleur de l'outil.",
-    "origine": "design/barre-claire/index.html, piste A « Calme » (barre plus claire, retour du 13/11 sur la 0.5.4) (.ip::after)."
-   },
-   {
-    "name": "editeur-encre-bas",
-    "value": "1px",
-    "usage": "Nuance de la couleur de l'outil, écart au bas du bouton.",
-    "origine": "design/barre-claire/index.html, piste A « Calme » (barre plus claire, retour du 13/11 sur la 0.5.4) (.ip::after)."
-   },
-   {
-    "name": "editeur-inst-boite",
-    "value": "40px",
-    "usage": "Place d'un instrument dessiné.",
-    "origine": "design/annotation-instruments/index.html, dessin B « Couleur » choisi le 13/11 (.ib)."
-   },
-   {
-    "name": "editeur-inst-largeur",
-    "value": "30px",
-    "usage": "Instrument dessiné, largeur.",
-    "origine": "design/annotation-instruments/index.html, dessin B « Couleur » choisi le 13/11 (.ib .inst)."
-   },
-   {
-    "name": "editeur-inst-hauteur",
-    "value": "90px",
-    "usage": "Instrument dessiné, hauteur.",
-    "origine": "design/annotation-instruments/index.html, dessin B « Couleur » choisi le 13/11 (.ib .inst)."
-   },
-   {
-    "name": "editeur-inst-ombre-y",
-    "value": "1px",
-    "usage": "Instrument dessiné : décalage vertical de son ombre portée.",
-    "origine": "design/annotation-instruments/index.html, dessin B « Couleur » choisi le 13/11 (.inst, drop-shadow)."
-   },
-   {
-    "name": "editeur-inst-ombre-flou",
-    "value": "1.5px",
-    "usage": "Instrument dessiné : flou de son ombre portée.",
-    "origine": "design/annotation-instruments/index.html, dessin B « Couleur » choisi le 13/11 (.inst, drop-shadow)."
-   },
-   {
-    "name": "editeur-inst-gauche",
-    "value": "5px",
-    "usage": "Instrument dessiné, retrait à gauche dans sa place.",
-    "origine": "design/annotation-instruments/index.html, dessin B « Couleur » choisi le 13/11 (.ib .inst)."
-   },
-   {
-    "name": "editeur-inst-repos",
-    "value": "9px",
-    "usage": "Instrument au repos : descente.",
-    "origine": "design/annotation-instruments/index.html, dessin B « Couleur » choisi le 13/11 (.ib .inst)."
-   },
-   {
-    "name": "editeur-inst-survol",
-    "value": "6px",
-    "usage": "Instrument survolé : descente.",
-    "origine": "design/annotation-instruments/index.html, dessin B « Couleur » choisi le 13/11 (.ib:hover .inst)."
-   },
-   {
-    "name": "editeur-inst-leve",
-    "value": "1px",
-    "usage": "Instrument en main : descente.",
-    "origine": "design/annotation-instruments/index.html, dessin B « Couleur » choisi le 13/11 (.ib[aria-pressed] .inst)."
-   },
-   {
-    "name": "editeur-inst-fondu",
-    "value": "80%",
-    "usage": "L'instrument s'efface dans la barre à partir de cette hauteur.",
-    "origine": "design/annotation-instruments/index.html, dessin B « Couleur » choisi le 13/11 (.ib mask-image)."
-   },
-   {
-    "name": "editeur-inst-saut",
-    "value": "-4px",
-    "usage": "Saut de l'instrument quand sa couleur ou sa taille change.",
-    "origine": "design/annotation-instruments/index.html, dessin B « Couleur » choisi le 13/11 (@keyframes saute)."
-   },
-   {
-    "name": "editeur-nuance",
-    "value": "22px",
-    "usage": "Pastille de couleur de l'outil déplié.",
-    "origine": "design/annotation-instruments/index.html, dessin B « Couleur » choisi le 13/11 (.sw)."
-   },
-   {
-    "name": "editeur-nuance-rayon",
-    "value": "4px",
-    "usage": "Rayon d'une pastille de couleur.",
-    "origine": "design/annotation-instruments/index.html, dessin B « Couleur » choisi le 13/11 (.sw)."
-   },
-   {
-    "name": "editeur-nuances-ecart",
-    "value": "7px",
-    "usage": "Écart entre les pastilles de couleur.",
-    "origine": "design/annotation-instruments/index.html, dessin B « Couleur » choisi le 13/11 (.grp.cols)."
-   },
-   {
-    "name": "editeur-nuance-anneau",
-    "value": "2px",
-    "usage": "Anneau de la couleur choisie : écart et trait.",
-    "origine": "design/annotation-instruments/index.html, dessin B « Couleur » choisi le 13/11 (.sw[aria-pressed])."
-   },
-   {
-    "name": "editeur-nuance-anneau-ecart",
-    "value": "3px",
-    "usage": "Contour de focus d'une pastille : écart.",
-    "origine": "design/annotation-instruments/index.html, dessin B « Couleur » choisi le 13/11 (.sw:focus-visible)."
-   },
-   {
-    "name": "editeur-nuance-bord",
-    "value": "34%",
-    "usage": "Bord d'une pastille de couleur : part de la couleur du texte (le blanc et le noir se voient dans les deux thèmes).",
-    "origine": "design/annotation-pistes/index.html, barre C « Souffle » gardée le 13/11 (.sw)."
-   },
-   {
-    "name": "editeur-cran",
-    "value": "30px",
-    "usage": "Bouton de taille ou de variante de l'outil déplié.",
-    "origine": "design/annotation-instruments/index.html, dessin B « Couleur » choisi le 13/11 (.sz)."
-   },
-   {
-    "name": "editeur-cran-rayon",
-    "value": "4px",
-    "usage": "Rayon d'un bouton de taille.",
-    "origine": "design/annotation-instruments/index.html, dessin B « Couleur » choisi le 13/11 (.sz)."
-   },
-   {
-    "name": "editeur-pli-separateur",
-    "value": "18px",
-    "usage": "Trait qui sépare, dans le pli, les variantes des réglages : hauteur.",
-    "origine": "design/barre-claire/index.html, piste A « Calme » (barre plus claire, retour du 13/11 sur la 0.5.4) (.sep)."
-   },
-   {
-    "name": "editeur-pli-marge",
-    "value": "4px",
-    "usage": "Marge des groupes de l'outil déplié.",
-    "origine": "design/annotation-pistes/index.html, barre C « Souffle » gardée le 13/11 (.pli .in .grp)."
-   },
-   {
-    "name": "editeur-pli-marge-couleurs",
-    "value": "10px",
-    "usage": "Marge à droite des pastilles de l'outil déplié.",
-    "origine": "design/annotation-pistes/index.html, barre C « Souffle » gardée le 13/11 (.pli .in .grp.cols)."
-   },
-   {
-    "name": "editeur-opacite-largeur",
-    "value": "72px",
-    "usage": "Glissière de l'opacité dans l'outil déplié.",
-    "origine": "design/annotation-pistes/index.html, barre C « Souffle » gardée le 13/11 (opacité, gardée de l'éditeur 0.4)."
-   },
-   {
-    "name": "editeur-separateur-marge-dock",
-    "value": "6px",
-    "usage": "Écart de part et d'autre d'un séparateur de la barre.",
-    "origine": "design/annotation-pistes/index.html, barre C « Souffle » gardée le 13/11 (.dv)."
    },
    {
     "name": "defilante-apercu-largeur",
@@ -3562,12 +2971,6 @@
     "value": "1px",
     "usage": "Épaisseur des deux liserés sombres du cadre.",
     "origine": "design/capture/index.html, .sel.frame box-shadow (1px)."
-   },
-   {
-    "name": "film-ecart",
-    "value": "10px",
-    "usage": "Écart entre la zone et la pilule (placement fait par le cœur, §10).",
-    "origine": "design/capture/index.html, startRec : y=r.y+r.h+10 ; Contrat 0.7 « Vidéo et GIF », §12."
    },
    {
     "name": "film-pilule-marge",

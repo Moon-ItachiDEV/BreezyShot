@@ -212,6 +212,7 @@ export function installerBarre(ed) {
     return rangDe(t);
   }
   // L'outil de la sélection (le texte en saisie, sinon le premier objet choisi), ou null.
+  let panneauFond = false;
   function outilChoisi() {
     if (ed.outils?.objetEnSaisie()) return "texte";
     for (const o of ed.objetsChoisis()) {
@@ -220,7 +221,15 @@ export function installerBarre(ed) {
     }
     return null;
   }
-  const deplie = () => outilChoisi() ?? prefs().outil;
+  function deplie() {
+    const choisi = outilChoisi();
+    if (choisi) {
+      panneauFond = false;
+      return choisi;
+    }
+    if (panneauFond) return "fond";
+    return prefs().outil;
+  }
   const deCetOutil = (t) => ed.objetsChoisis().filter((o) => OUTIL_DE_TYPE[o.type] === t);
   const rendreFocus = (e) => {
     if (ed.outils?.saisieOuverte()) ed.outils.reprendreSaisie();
@@ -316,6 +325,109 @@ export function installerBarre(ed) {
   }
   let marqueGlissiere = 0;
 
+  function modifierFond(patch, marque = null) {
+    if (!ed.h) return;
+    if (patch === null) {
+      if (!ed.h.doc.fond?.actif) return;
+      ed.modifier((doc) => ed.modele.changerFond(doc, null), marque);
+      return;
+    }
+    const actuel = ed.h.doc.fond?.actif ? ed.h.doc.fond : ed.modele.FOND_DEFAUT;
+    const suivant = ed.modele.normaliserFond({ ...actuel, ...patch, actif: true });
+    if (JSON.stringify(ed.h.doc.fond) === JSON.stringify(suivant)) return;
+    ed.modifier((doc) => ed.modele.changerFond(doc, suivant), marque);
+  }
+  function basculerFond(ouvrir = !panneauFond) {
+    ed.texte?.fermer();
+    ed.outils?.validerSaisie();
+    fermerMenus();
+    panneauFond = !!ouvrir;
+    if (panneauFond && ed.selection.length) ed.selection = [];
+    synchroniser();
+    ed.dessiner();
+  }
+  function reglagesFond() {
+    const racine = el("div", "rg rg-fond");
+    const poser = (contenu) => {
+      if (racine.childElementCount) racine.appendChild(el("i", "rg-sep"));
+      racine.appendChild(contenu);
+    };
+    const gStyle = groupe("rg-grp rg-couleurs", "Style");
+    const bSans = bouton("rg-c rg-sans", "Sans fond");
+    bSans.dataset.fondSans = "";
+    bSans.appendChild(el("i"));
+    bSans.addEventListener("click", (e) => {
+      modifierFond(null);
+      rendreFocus(e);
+    });
+    gStyle.appendChild(bSans);
+    ed.dessin.DEGRADES_FOND.forEach(([nom, c1, c2, deg], i) => {
+      const b = bouton("rg-c rg-deg", nom);
+      b.dataset.degrade = String(i);
+      b.style.setProperty("--c", `linear-gradient(${deg}deg, ${c1}, ${c2})`);
+      b.appendChild(el("i"));
+      b.addEventListener("click", (e) => {
+        modifierFond({ style: "degrade", degrade: i });
+        rendreFocus(e);
+      });
+      gStyle.appendChild(b);
+    });
+    const bUni = bouton("rg-c rg-roue", "Couleur unie");
+    bUni.dataset.fondCouleur = "";
+    bUni.appendChild(el("i"));
+    bUni.addEventListener("click", () => choisirAutre("fond", bUni));
+    gStyle.appendChild(bUni);
+    poser(gStyle);
+
+    const gMarge = groupe("rg-grp", "Marge");
+    [
+      ["Marge petite", "P"],
+      ["Marge moyenne", "M"],
+      ["Marge grande", "G"],
+    ].forEach(([nom, txt], i) => {
+      const b = bouton("rg-b rg-txt", nom);
+      b.dataset.fondMarge = String(i);
+      b.textContent = txt;
+      b.addEventListener("click", (e) => {
+        modifierFond({ marge: i });
+        rendreFocus(e);
+      });
+      gMarge.appendChild(b);
+    });
+    poser(gMarge);
+
+    const gArrondi = groupe("rg-grp", "Arrondi");
+    [
+      ["Coins droits", "coin-0"],
+      ["Coins arrondis", "coin-1"],
+      ["Coins très arrondis", "coin-2"],
+    ].forEach(([nom, ic], i) => {
+      const b = bouton("rg-b rg-coin", nom);
+      b.dataset.fondArrondi = String(i);
+      b.appendChild(picto(ic));
+      b.addEventListener("click", (e) => {
+        modifierFond({ arrondi: i });
+        rendreFocus(e);
+      });
+      gArrondi.appendChild(b);
+    });
+    poser(gArrondi);
+
+    const gOmbre = groupe("rg-grp", "Ombre");
+    const bOmbre = bouton("rg-b", "Ombre portée");
+    bOmbre.dataset.fondOmbre = "";
+    bOmbre.appendChild(picto("ombre"));
+    bOmbre.addEventListener("click", (e) => {
+      const actif = ed.h?.doc.fond?.actif ? ed.h.doc.fond.ombre : ed.modele.FOND_DEFAUT.ombre;
+      modifierFond({ ombre: !actif });
+      rendreFocus(e);
+    });
+    gOmbre.appendChild(bOmbre);
+    poser(gOmbre);
+
+    return racine;
+  }
+
   // La zone des réglages montre ceux de l'outil déplié ; elle n'est refaite que s'il change.
   // Le focus qui était sur un réglage (pris au clavier) va au bouton de l'outil dont les
   // réglages partent, pas à la page.
@@ -323,16 +435,39 @@ export function installerBarre(ed) {
     const t = deplie();
     if (zone.dataset.pour !== t) {
       if (zone.contains(document.activeElement)) {
-        const b = zone.dataset.pour && $(`[data-outil="${zone.dataset.pour}"]`, chrome);
+        const b =
+          zone.dataset.pour === "fond"
+            ? $('[data-panneau="fond"]', chrome)
+            : zone.dataset.pour && $(`[data-outil="${zone.dataset.pour}"]`, chrome);
         (b ?? scene).focus({ preventScroll: true });
       }
       zone.dataset.pour = t;
-      zone.replaceChildren(reglages(t));
+      zone.replaceChildren(t === "fond" ? reglagesFond() : reglages(t));
     }
     synchroniserReglages(zone, t);
     return t;
   }
   function synchroniserReglages(zone, t) {
+    if (t === "fond") {
+      const f = ed.h?.doc.fond?.actif ? ed.h.doc.fond : null;
+      presser($("[data-fond-sans]", zone), !f);
+      for (const b of $$("[data-degrade]", zone)) {
+        presser(b, !!f && f.style === "degrade" && f.degrade === Number(b.dataset.degrade));
+      }
+      const roue = $("[data-fond-couleur]", zone);
+      const uni = !!f && f.style === "uni";
+      roue.classList.toggle("a", uni);
+      if (uni) roue.style.setProperty("--c", f.couleur);
+      presser(roue, uni);
+      for (const b of $$("[data-fond-marge]", zone)) {
+        presser(b, !!f && f.marge === Number(b.dataset.fondMarge));
+      }
+      for (const b of $$("[data-fond-arrondi]", zone)) {
+        presser(b, !!f && f.arrondi === Number(b.dataset.fondArrondi));
+      }
+      presser($("[data-fond-ombre]", zone), !!f && f.ombre);
+      return;
+    }
     const r = PLIS[t];
     if (OUTILS[t].variantes) {
       const v = varianteDe(t);
@@ -383,6 +518,7 @@ export function installerBarre(ed) {
   // ---------- outils, variantes, réglages (règles de barre.js) ----------
   function choisirOutil(id, variante) {
     if (!OUTILS[id]) return;
+    panneauFond = false;
     // Reprendre un outil referme « Copier le texte ».
     ed.texte?.fermer();
     ed.outils?.validerSaisie();
@@ -424,7 +560,10 @@ export function installerBarre(ed) {
       autre.style.top = `${Math.round(r.bottom - f.top)}px`;
       autre.style.bottom = "auto";
     }
-    const c = prefs().autre || ed.dessin.COULEURS[0][0];
+    const c =
+      t === "fond"
+        ? ed.h?.doc.fond?.couleur || ed.modele.FOND_DEFAUT.couleur
+        : prefs().autre || ed.dessin.COULEURS[0][0];
     autre.value = c.toLowerCase();
     try {
       if (autre.showPicker) autre.showPicker();
@@ -435,7 +574,12 @@ export function installerBarre(ed) {
   }
   let marqueAutre = 0;
   autre.addEventListener("input", () => {
-    prefs().autre = autre.value.toUpperCase();
+    const val = autre.value.toUpperCase();
+    if (autrePour === "fond") {
+      modifierFond({ style: "uni", couleur: val }, `fond-autre-${marqueAutre}`);
+      return;
+    }
+    prefs().autre = val;
     regler("couleur", prefs().autre, `autre-${marqueAutre}`, autrePour ?? deplie());
   });
   autre.addEventListener("change", () => {
@@ -548,7 +692,7 @@ export function installerBarre(ed) {
       b.classList.remove("secoue");
       void b.offsetWidth;
       b.classList.add("secoue");
-      message("Fais-le glisser vers une appli", true);
+      message("Faites-le glisser vers une appli", true);
     });
     b.addEventListener("animationend", () => b.classList.remove("secoue"));
     return b;
@@ -602,6 +746,16 @@ export function installerBarre(ed) {
       conteneur.appendChild(boutonOutil(t, classe));
     });
   }
+  function boutonFond(classe) {
+    const b = bouton(classe, "Fond");
+    b.dataset.panneau = "fond";
+    b.appendChild(picto("fond"));
+    b.addEventListener("click", (e) => {
+      basculerFond();
+      rendreFocus(e);
+    });
+    return b;
+  }
 
   // ---------- construction : la barre du haut et le socle ----------
   haut.append(boutonFermer("h-b"), el("div", "h-vide"), sorties());
@@ -609,6 +763,7 @@ export function installerBarre(ed) {
   const rangee = el("div", "c-outils");
   rangee.append(...annulerRetablir("outil"), el("i", "filet"));
   rangeeOutils(rangee, "outil");
+  rangee.append(el("i", "filet"), boutonFond("outil"));
   const zoneReglages = el("div", "rg-zone");
   chrome.append(zoneReglages, rangee);
 
@@ -919,6 +1074,8 @@ export function installerBarre(ed) {
         const o = ouvreur;
         fermerMenus();
         o?.focus({ preventScroll: true });
+      } else if (panneauFond) {
+        basculerFond(false);
       } else if (ed.selection.length) {
         ed.selection = [];
         synchroniser();
@@ -943,6 +1100,10 @@ export function installerBarre(ed) {
       return;
     }
     if (pop) return;
+    if (k === "f" && !e.repeat) {
+      basculerFond();
+      return;
+    }
     const m = TOUCHES[k];
     if (m && !e.repeat) {
       fermerMenus();
@@ -968,14 +1129,19 @@ export function installerBarre(ed) {
   // ---------- synchronisation ----------
   function synchroniser() {
     const p = prefs();
+    const d = majReglages(zoneReglages);
     for (const b of $$("[data-outil]", chrome)) {
       const t = b.dataset.outil;
-      presser(b, t === p.outil);
+      presser(b, d !== "fond" && t === p.outil);
       const c = couleurDe(t);
       if (c) b.style.setProperty("--encre", c);
       b.toggleAttribute("data-encre", !!c);
     }
-    majReglages(zoneReglages);
+    const bFond = $('[data-panneau="fond"]', chrome);
+    if (bFond) {
+      presser(bFond, d === "fond");
+      bFond.toggleAttribute("data-actif", !!ed.h?.doc.fond?.actif);
+    }
     const h = ed.h;
     $('[data-act="annuler"]', chrome).disabled =
       !h || (!ed.modele.peutAnnuler(h) && !ed.outils?.saisieOuverte());
@@ -1005,6 +1171,7 @@ export function installerBarre(ed) {
     b.setAttribute("aria-label", pro ? "Enregistrer en .breezy" : "Enregistrer en .breezy, Pro");
   }
   function remiseAZero() {
+    panneauFond = false;
     fermerMenus(false);
     appui = null;
     parti = false;

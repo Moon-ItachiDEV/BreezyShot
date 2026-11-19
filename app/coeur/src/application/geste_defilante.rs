@@ -1825,7 +1825,7 @@ impl<S: Source, P: Pilote, A: Atelier> Fil<S, P, A> {
             if ecoule {
                 return Posee::Prise;
             }
-            self.precedente.clone_from(&self.image);
+            std::mem::swap(&mut self.precedente, &mut self.image);
         }
     }
 

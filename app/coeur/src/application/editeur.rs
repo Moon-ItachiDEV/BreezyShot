@@ -1,7 +1,7 @@
 //! Décisions de l'éditeur d'annotation (fonctions pures, contrat 0.4 « Éditeur », §4 à §8) :
 //! quand Annoter est possible, ce que vaut un export reçu de la page, ce qu'il faut sortir,
 //! s'il faut demander avant de fermer, que faire d'une nouvelle capture, et les lignes du
-//! journal. Les gestes sont dans `application/mod.rs` et `fenetre_editeur.rs`, la fenêtre
+//! journal. Les gestes sont dans `geste_editeur.rs` et `fenetre_editeur.rs`, la fenêtre
 //! dans `fenetres/editeur.rs`, le document et le dessin dans la page (`interface/editeur/`).
 
 use std::path::PathBuf;
@@ -22,6 +22,9 @@ use crate::texte::Lu;
 pub const COTE_MAX: u32 = 16_384;
 /// Nombre maximal de pixels d'une capture annotable (un peu plus que 3 × 4K, R11).
 pub const PIXELS_MAX: u64 = 25_000_000;
+/// Marge maximale ajoutée de chaque côté par le fond d'éditeur, en pixels de l'image
+/// (doit correspondre au dernier palier de `MARGES_FOND` dans `interface/editeur/document.js`).
+pub const MARGE_FOND_MAX: u32 = 88;
 /// Délai donné à la page pour dire `editeur_pret` après la création de la fenêtre. Le
 /// contrat dit 5 s ; WebView2 a mis plus de 15 s à charger une page sur la machine lente
 /// des essais : 30 s, pour qu'un PC lent ne perde jamais l'éditeur (le filet ne sert qu'à
@@ -81,10 +84,21 @@ pub struct EtatEditeur {
     /// remplacée par la suivante, oubliée avec le document. Le texte ne quitte le cœur que
     /// par `editeur_copier_texte`.
     pub texte: Option<(u64, Lu)>,
-    /// Le début d'un enregistrement `.breezy` en cours (dialogue compris) : aucun autre export,
-    /// ni autre enregistrement `.breezy`, n'est accepté pendant ce temps (0.7.9), sauf s'il
-    /// dure plus que `OUBLI_BREEZY` (écriture figée) : il est alors oublié.
-    pub breezy_en_cours: Option<Instant>,
+    /// Un enregistrement `.breezy` en cours (dialogue compris) : aucun autre export,
+    /// ni autre enregistrement `.breezy`, n'est accepté pendant ce temps (0.7.9). Hors
+    /// dialogue, s'il dure plus que `OUBLI_BREEZY` (écriture figée), il est oublié.
+    pub breezy_en_cours: Option<BreezyEnCours>,
+}
+
+/// Un enregistrement `.breezy` parti dans le fil `editeur-breezy`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BreezyEnCours {
+    /// Début de l'écriture (après le dialogue « Enregistrer sous… » : `OUBLI_BREEZY` ne
+    /// court qu'à partir de là).
+    pub debut: Instant,
+    /// Le dialogue « Enregistrer sous… » est ouvert : il bloque sans limite, aucun autre
+    /// export n'est accepté pendant ce temps.
+    pub dialogue: bool,
 }
 
 /// Un export parti dans le fil `editeur-sortie`.
@@ -344,9 +358,9 @@ pub fn lire_en_tete(
 }
 
 /// Accepte un export lu (`octets` : longueur du corps) : le document en cours, une taille
-/// de cadre possible (annotable, dans l'image), exactement `l × h × 4` octets, et aucun
-/// autre export en cours (un export n'est oublié que par son échéance, ou par
-/// `export_perime` au-delà de `OUBLI_EXPORT`).
+/// de cadre possible (annotable, dans l'image augmentée au plus de `2 × MARGE_FOND_MAX`
+/// pour le fond), exactement `l × h × 4` octets, et aucun autre export en cours (un export
+/// n'est oublié que par son échéance, ou par `export_perime` au-delà de `OUBLI_EXPORT`).
 pub fn accepter_export(
     etat: &EtatEditeur,
     e: &EnTete,
@@ -357,8 +371,23 @@ pub fn accepter_export(
         return Err(Refus::Id);
     }
     let image = &etat.document.pixels;
-    // `annotable` d'abord : des en-têtes à 4 294 967 295 ne font jamais déborder le calcul.
-    if !annotable(e.largeur, e.hauteur) || e.largeur > image.largeur || e.hauteur > image.hauteur {
+    let marge_totale = 2 * MARGE_FOND_MAX;
+    let l_max = image.largeur.saturating_add(marge_totale);
+    let h_max = image.hauteur.saturating_add(marge_totale);
+    let cote_max = COTE_MAX + marge_totale;
+    // Borne supérieure des pixels d'une image annotable élargie de `2 × MARGE_FOND_MAX`
+    // (évite de refuser un export avec fond sur une grande capture déjà proche de `PIXELS_MAX`).
+    let pixels_max =
+        PIXELS_MAX + u64::from(marge_totale) * (2 * u64::from(COTE_MAX) + u64::from(marge_totale));
+    // Vérifications de bornes d'abord : des en-têtes à u32::MAX ne font jamais déborder.
+    if e.largeur == 0
+        || e.hauteur == 0
+        || e.largeur > l_max
+        || e.hauteur > h_max
+        || e.largeur > cote_max
+        || e.hauteur > cote_max
+        || u64::from(e.largeur) * u64::from(e.hauteur) > pixels_max
+    {
         return Err(Refus::Taille);
     }
     let attendu = u64::from(e.largeur)
@@ -378,10 +407,11 @@ pub fn accepter_export(
     Ok(())
 }
 
-/// Un enregistrement `.breezy` est encore attendu : parti depuis moins de `OUBLI_BREEZY`.
+/// Un enregistrement `.breezy` est encore attendu : en dialogue, ou parti depuis moins
+/// de `OUBLI_BREEZY`.
 pub fn breezy_en_cours(etat: &EtatEditeur, maintenant: Instant) -> bool {
     etat.breezy_en_cours
-        .is_some_and(|debut| maintenant.saturating_duration_since(debut) < OUBLI_BREEZY)
+        .is_some_and(|b| b.dialogue || maintenant.saturating_duration_since(b.debut) < OUBLI_BREEZY)
 }
 
 /// Au-delà, un enregistrement `.breezy` sans bilan (écriture figée, bilan non rendu) ne
@@ -891,6 +921,15 @@ impl EtatEditeur {
         }
     }
 
+    /// Le dialogue de l'enregistrement `.breezy` est fermé : l'écriture commence,
+    /// `OUBLI_BREEZY` court à partir de là.
+    pub fn dialogue_breezy_ferme(&mut self, maintenant: Instant) {
+        if let Some(b) = self.breezy_en_cours.as_mut() {
+            b.dialogue = false;
+            b.debut = maintenant;
+        }
+    }
+
     /// Le fichier « Récents » de la version `version`, s'il est connu (glisser).
     pub fn recent_de(&self, version: u64) -> Option<&PathBuf> {
         self.recent
@@ -1188,13 +1227,35 @@ mod tests {
             accepter_export(&e, &en_tete(40, 30), juste - 1, t),
             Err(Refus::Taille)
         );
-        // Taille impossible : plus grande que l'image, nulle.
+        // Un cadre élargi par le fond d'éditeur est accepté jusqu'à + 2 × MARGE_FOND_MAX.
+        let l_fond = 40 + 2 * MARGE_FOND_MAX;
+        let h_fond = 30 + 2 * MARGE_FOND_MAX;
         assert_eq!(
-            accepter_export(&e, &en_tete(41, 30), 41 * 30 * 4, t),
+            accepter_export(
+                &e,
+                &en_tete(l_fond, h_fond),
+                (l_fond * h_fond * 4) as usize,
+                t
+            ),
+            Ok(())
+        );
+        // Taille impossible : au-delà de l'image + marge de fond, nulle.
+        assert_eq!(
+            accepter_export(
+                &e,
+                &en_tete(l_fond + 1, 30),
+                ((l_fond + 1) * 30 * 4) as usize,
+                t
+            ),
             Err(Refus::Taille)
         );
         assert_eq!(
-            accepter_export(&e, &en_tete(40, 31), 40 * 31 * 4, t),
+            accepter_export(
+                &e,
+                &en_tete(40, h_fond + 1),
+                (40 * (h_fond + 1) * 4) as usize,
+                t
+            ),
             Err(Refus::Taille)
         );
         assert_eq!(

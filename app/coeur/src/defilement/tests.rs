@@ -2119,3 +2119,33 @@ fn n3_sans_ligne_porteuse_le_lu_exact_seul() {
         }
     }
 }
+
+#[test]
+fn retrecir_reduit_un_pied_qui_defile_et_garde_un_pied_anime() {
+    let t = &TOLERANCE;
+    let page = page_texte(400, 1200, 0, 400, 7);
+    // Avance d = 100 > ancien pied (40 px) : seul le vrai pied (15 px en bas) reste fixe.
+    let mut a = z(&page, 0, 500);
+    let mut b = z(&page, 100, 500);
+    rectangle(&mut a, 0, 485, 400, 15, [20, 60, 120]);
+    rectangle(&mut b, 0, 485, 400, 15, [20, 60, 120]);
+    let mut paire = Paire::de(&a, &b, t).unwrap();
+    let f = paire.retrecir(100, Fixes { haut: 0, bas: 40 });
+    assert_eq!(f.bas, 15);
+
+    // Si tout le pied disparaît (aucune barre fixe en bas), `bas` retombe à 0.
+    let a2 = z(&page, 0, 500);
+    let b2 = z(&page, 100, 500);
+    let mut paire2 = Paire::de(&a2, &b2, t).unwrap();
+    let f2 = paire2.retrecir(100, Fixes { haut: 0, bas: 40 });
+    assert_eq!(f2.bas, 0);
+
+    // Un pied qui s'anime sur place (change sans remonter à y - d) reste dans la bande.
+    let mut a3 = z(&page, 0, 500);
+    let mut b3 = z(&page, 100, 500);
+    rectangle(&mut a3, 0, 470, 400, 30, [20, 60, 120]);
+    rectangle(&mut b3, 0, 470, 400, 30, [140, 40, 20]);
+    let mut paire3 = Paire::de(&a3, &b3, t).unwrap();
+    let f3 = paire3.retrecir(100, Fixes { haut: 0, bas: 30 });
+    assert_eq!(f3.bas, 30);
+}

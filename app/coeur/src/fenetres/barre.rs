@@ -9,7 +9,7 @@
 //! boutons et de la police : la page la mesure et la rend (`barre_taille`), la fenêtre est
 //! alors reposée sur le même centre ; d'ici là (première ouverture), une largeur estimée.
 
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
@@ -105,11 +105,18 @@ static EN_ATTENTE: Mutex<Option<Ouverture>> = Mutex::new(None);
 static LARGEUR_MESUREE: Mutex<Option<(String, f64)>> = Mutex::new(None);
 /// Heure de la dernière ouverture (`dans_le_double_clic`).
 static OUVERTE_A: Mutex<Option<Instant>> = Mutex::new(None);
+/// Vrai tant que la barre est montrée (évite un appel inter-fils `is_visible()` toutes les 30 ms).
+static VISIBLE: AtomicBool = AtomicBool::new(false);
 /// Numéro de l'ouverture : une surveillance des clics d'une ouverture passée s'arrête.
 static NUMERO: AtomicU64 = AtomicU64::new(0);
 
 fn fenetre(app: &AppHandle) -> Option<WebviewWindow> {
     app.get_webview_window(ETIQUETTE_BARRE)
+}
+
+/// Identifiant système de la fenêtre si elle existe (HWND sous Windows).
+pub fn identifiant(app: &AppHandle) -> Option<isize> {
+    fenetre(app).and_then(|f| systeme::identifiant_fenetre(&f))
 }
 
 /// Échelle utilisable : une valeur absurde vaut 1.
@@ -230,16 +237,20 @@ fn creer(app: &AppHandle) -> Result<WebviewWindow, String> {
         log::warn!("barre: style outil non pose: {e}");
     }
     let pour_focus = app.clone();
-    f.on_window_event(move |e| {
+    f.on_window_event(move |e| match e {
         // Un clic ailleurs (ou Alt+Tab) : la barre se ferme, sauf dans le délai du
         // double-clic après l'ouverture.
-        if let tauri::WindowEvent::Focused(false) = e {
+        tauri::WindowEvent::Focused(false) => {
             if vient_d_ouvrir() {
                 log::info!("barre: perte du focus ignoree (double-clic)");
             } else {
                 let _ = cacher(&pour_focus);
             }
         }
+        tauri::WindowEvent::Destroyed => {
+            VISIBLE.store(false, Ordering::SeqCst);
+        }
+        _ => {}
     });
     match systeme::identifiant_fenetre(&f) {
         Some(h) => log::info!("barre fenetre {h}"),
@@ -305,6 +316,7 @@ pub fn ouvrir(app: &AppHandle, charge: Ouverture) -> bool {
     if let Ok(mut o) = OUVERTE_A.lock() {
         *o = Some(Instant::now());
     }
+    VISIBLE.store(true, Ordering::SeqCst);
     let _ = f.show();
     if !matches!(systeme::prendre_premier_plan(&f), Ok(true)) {
         let _ = f.set_focus();
@@ -357,7 +369,7 @@ fn surveiller_clics(app: &AppHandle, numero: u64) {
             let mut relache = !systeme::bouton_souris_enfonce();
             loop {
                 std::thread::sleep(PAS_SURVEILLANCE);
-                if NUMERO.load(Ordering::SeqCst) != numero || !ouverte(&app) {
+                if NUMERO.load(Ordering::SeqCst) != numero || !VISIBLE.load(Ordering::SeqCst) {
                     return;
                 }
                 let enfonce = systeme::bouton_souris_enfonce();
@@ -428,11 +440,14 @@ pub fn retardateur_montre() -> bool {
 /// Rend vrai si elle était montrée.
 pub fn cacher(app: &AppHandle) -> bool {
     let Some(f) = fenetre(app) else {
+        VISIBLE.store(false, Ordering::SeqCst);
         return false;
     };
     if !f.is_visible().unwrap_or(false) {
+        VISIBLE.store(false, Ordering::SeqCst);
         return false;
     }
+    VISIBLE.store(false, Ordering::SeqCst);
     let _ = f.hide();
     if let Ok(mut c) = EN_COURS.lock() {
         if let Some(c) = c.as_mut() {
@@ -446,6 +461,15 @@ pub fn cacher(app: &AppHandle) -> bool {
     }
     log::info!("barre fermee");
     true
+}
+
+/// Ferme la fenêtre si elle existe (arrêt de l'application).
+pub fn fermer(app: &AppHandle) {
+    VISIBLE.store(false, Ordering::SeqCst);
+    NUMERO.fetch_add(1, Ordering::SeqCst);
+    if let Some(f) = fenetre(app) {
+        let _ = f.destroy();
+    }
 }
 
 #[cfg(test)]

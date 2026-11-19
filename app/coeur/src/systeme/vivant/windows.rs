@@ -2162,12 +2162,18 @@ mod source {
         }
         let (largeur, hauteur) = (z.largeur as u32, z.hauteur as u32);
         let pas = lecture.carte.RowPitch as usize;
-        let octets = pas * (hauteur as usize - 1) + largeur as usize * 4;
+        let ligne = (largeur as usize).checked_mul(4);
+        let octets = ligne
+            .filter(|&l| hauteur > 0 && l > 0 && pas >= l)
+            .and_then(|l| pas.checked_mul(hauteur as usize - 1)?.checked_add(l));
+        let Some(octets) = octets else {
+            return Acquis::Perte(format!("pas {pas} pour {largeur}x{hauteur}"), false);
+        };
         if lecture.carte.pData.is_null() {
             return Acquis::Perte("lecture vide".into(), false);
         }
-        // SAFETY : `Map` rend `hauteur` lignes de `RowPitch` octets, la dernière au moins
-        // de la largeur de la texture ; lues pendant que la texture est ouverte.
+        // SAFETY : `Map` rend `hauteur` lignes de `RowPitch` octets (`pas >= largeur * 4`),
+        // la dernière au moins de la largeur de la texture ; lues pendant que la texture est ouverte.
         let source =
             unsafe { std::slice::from_raw_parts(lecture.carte.pData as *const u8, octets) };
         match copier_bgra(source, pas, largeur, hauteur, dest) {

@@ -258,6 +258,28 @@ function simuler(o) {
     await fermer(p);
   }
 
+  // 3 quater. Coordonnées physiques impaires à 125 % : pas de bavement subpixel dans la zone.
+  {
+    const k = 1.25;
+    const p = await ouvrir({ k });
+    const z0 = { x: 123, y: 77, largeur: 201, hauteur: 151 };
+    const c = charge(24, k, { zone: z0 });
+    await p.evaluate((c) => __emettre('defilante:montrer', c), c);
+    await p.waitForTimeout(350);
+    const png = await p.screenshot({ omitBackground: true });
+    const my = z0.y + Math.floor(z0.hauteur / 2), mx = z0.x + Math.floor(z0.largeur / 2);
+    const [inG, outG, inH, outH, inB, outB, inD, outD] = await pixels(png, [
+      [z0.x, my], [z0.x - 1, my],
+      [mx, z0.y], [mx, z0.y - 1],
+      [mx, z0.y + z0.hauteur - 1], [mx, z0.y + z0.hauteur],
+      [z0.x + z0.largeur - 1, my], [z0.x + z0.largeur, my],
+    ]);
+    verifier([inG, inH, inB, inD].every(vide) && [outG, outH, outB, outD].every(blanc),
+      '3 quater 125 % coordonnées impaires : intérieur transparent, bord blanc net dehors',
+      JSON.stringify({ in: [inG, inH, inB, inD], out: [outG, outH, outB, outD] }));
+    await fermer(p);
+  }
+
   // 4. « Terminer » : un clic → defilante_terminer une fois ; focus jamais pris.
   {
     const p = await ouvrir();

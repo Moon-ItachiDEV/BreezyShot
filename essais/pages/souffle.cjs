@@ -92,6 +92,8 @@ const serveur = http.createServer((q, r) => {
   await p.waitForTimeout(500);
   verifier(JSON.stringify((await appels(p, 'souffle_termine')).map(x => x[1])) === JSON.stringify([{ id: 3 }]), 'souffle_termine une fois après la fin');
   verifier(await p.evaluate(() => !document.getElementById('envol').hidden), 'dernière image tenue jusqu\'à l\'effacement');
+  await p.evaluate(() => __emettre('souffle:effacer', { id: 99 }));
+  verifier(await p.evaluate(() => !document.getElementById('envol').hidden), 'effacer avec un autre id : ignoré');
   await p.evaluate(() => __emettre('souffle:effacer', { id: 3 }));
   verifier(await p.evaluate(() => document.getElementById('envol').hidden && document.getElementById('flash').hidden), 'effacer : page vide');
   await p.evaluate(() => __emettre('souffle:jouer', { id: 4, depart: { x: 0, y: 0, largeur: 0, hauteur: 10 }, arrivee: {} }));

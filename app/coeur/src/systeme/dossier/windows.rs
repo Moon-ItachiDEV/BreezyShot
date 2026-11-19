@@ -66,10 +66,9 @@ pub fn choisir_dossier(
         let texte = element
             .GetDisplayName(SIGDN_FILESYSPATH)
             .map_err(|e| format!("chemin: {e}"))?;
-        let chemin = texte.to_string();
+        let chemin = super::chemin_depuis_large(texte.as_wide());
         CoTaskMemFree(Some(texte.0 as *const core::ffi::c_void));
-        let chemin = chemin.map_err(|e| format!("chemin: {e}"))?;
-        Ok(Some(PathBuf::from(chemin)))
+        Ok(Some(chemin?))
     }
 }
 

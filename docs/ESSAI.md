@@ -11,14 +11,15 @@ installées.
 
 Enregistrer dans Images › BreezyShot : bouton « Enregistrer » de la vignette, ou par le réglage.
 
-Annoter : bouton « Annoter » de la vignette. En bas, le socle : Annuler, Rétablir et les
-outils (flèche, forme, texte, numéro, stylo, surligneur, flou, projecteur, gomme), toujours
-à la même place ; les réglages de l'outil pris juste au-dessus. Courber une flèche : tirer
-son point du milieu. La gomme efface là où elle passe. Recadrer : tirer un coin de l'image.
-En haut : Fermer à gauche ; à droite Texte, Glisser (s'attrape pour glisser l'image vers une
-appli), Enregistrer (Ctrl + S, range l'image dans le dossier des captures sans rien
-demander ; sa flèche : Enregistrer sous…, Ctrl + Maj + S, demande le dossier et le nom) et
-Copier (copie et ferme).
+Annoter : bouton « Annoter » de la vignette. En bas, le socle : Annuler, Rétablir, les
+outils (flèche, forme, texte, numéro, stylo, surligneur, flou, projecteur, gomme) et Fond
+(touche F), toujours à la même place ; les réglages de l'outil pris — ou du fond (dégradé,
+couleur unie, marge, coins arrondis, ombre portée) — juste au-dessus. Courber une flèche :
+tirer son point du milieu. La gomme efface là où elle passe. Recadrer : tirer un coin de
+l'image. En haut : Fermer à gauche ; à droite Texte, Glisser (s'attrape pour glisser l'image
+vers une appli), Enregistrer (Ctrl + S, range l'image dans le dossier des captures sans rien
+demander ; sa flèche : Enregistrer sous…, Ctrl + Maj + S, et Enregistrer en .breezy modifiable
+avec la licence) et Copier (copie et ferme).
 
 Échap ou clic droit annule. L'icône près de l'horloge (clic gauche ou droit) ouvre le menu au
 pointeur, d'où Réglages et Quitter ; un second clic sur l'icône le ferme. Lancer BreezyShot à la
@@ -30,12 +31,13 @@ mention « Pro » ; un clic dessus ouvre Réglages › Général › Licence. Au
 après l'installation, BreezyShot démarre sans l'ouvrir.
 
 Réglages › Capture : retardateur (3, 5 ou 10 s ; Échap ou la croix l'annule), Inclure le
-pointeur dans l'image.
+pointeur dans l'image, son de capture (« Goutte »), ouvrir directement dans l'éditeur.
 
-Réglages (menu de l'icône, « Réglages ») : rubriques dans le volet de gauche. Copie, dossier,
-nom des fichiers, raccourcis (cliquer puis taper le nouveau), thème, lancement au démarrage de
-Windows. Raccourcis › « Impr. écran ouvre BreezyShot » : la touche Impr. écran lance BreezyShot
-au lieu de l'Outil Capture de Windows. Tout s'applique tout de suite.
+Réglages (menu de l'icône, « Réglages ») : rubriques dans le volet de gauche. Copie, format
+d'image (PNG, JPG ou WebP), dossier, nom des fichiers, raccourcis (cliquer puis taper le
+nouveau), thème, lancement au démarrage de Windows. Raccourcis › « Impr. écran ouvre
+BreezyShot » : la touche Impr. écran lance BreezyShot au lieu de l'Outil Capture de Windows.
+Tout s'applique tout de suite.
 
 Licence (0.5) : Réglages › Général, dernière ligne « Licence » : coller la licence, puis
 « Activer ». La licence d'essai est dans le fichier `essais/licence-essai.txt`. La ligne dit

@@ -261,6 +261,7 @@ function envoyerZone() {
     clearTimeout(lui.attenteEchelle);
     lui.attenteEchelle = 0;
   }
+  if (window.devicePixelRatio !== lui.dpr) poser(lui);
   const z = { id: lui.id, ...rectPilule() };
   const cle = JSON.stringify([z, window.devicePixelRatio]);
   if (cle === lui.zoneEnvoyee) return;

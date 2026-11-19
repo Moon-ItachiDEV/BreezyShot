@@ -60,6 +60,7 @@ function signaler(commande, args) {
 }
 
 const jeton = (nom) => getComputedStyle(racine).getPropertyValue(nom).trim();
+const px = (nom) => parseFloat(jeton(nom)) || 0;
 /** Lit une durée de jetons.css (« 260ms », « 0.3s ») en millisecondes. */
 function duree(nom) {
   const v = jeton(nom);
@@ -111,12 +112,23 @@ function poserRect(el, x, y, largeur, hauteur, k) {
   if (hauteur !== null) el.style.height = `${hauteur / k}px`;
 }
 
-/** Pose tout ce que dit la charge, à l'échelle `k`. */
+/** Pose tout ce que dit la charge, à l'échelle `k`. La zone vit dans un repère
+ *  `scale(1 / k)` en pixels réels entiers afin que le trait blanc reste toujours dehors
+ *  aux échelles fractionnaires (125 %, 150 %, etc.). */
 function poser(lui) {
   const { zone: z, apercu: a, pilule: p } = lui.charge;
   const k = (lui.k = echelleDe(lui.charge));
   lui.dpr = window.devicePixelRatio;
-  poserRect(zone, z.x, z.y, z.largeur, z.hauteur, k);
+  const trait = Math.max(1, Math.floor(px("--defilante-trait") * k + 0.001));
+  const zs = zone.style;
+  zs.setProperty("--defilante-trait", `${trait}px`);
+  zs.setProperty("--defilante-voile-portee", `${200 * k}vmax`);
+  zs.left = "0px";
+  zs.top = "0px";
+  zs.transformOrigin = "0 0";
+  zs.transform = `scale(${1 / k}) translate(${z.x}px, ${z.y}px)`;
+  zs.width = `${z.largeur}px`;
+  zs.height = `${z.hauteur}px`;
   poserRect(apercu, a.x, a.y, a.largeur, null, k);
   if (lui.apercu.montre) poserHauteurApercu(lui);
   poserRect(pilule, p.x, p.y, null, null, k);
@@ -144,6 +156,7 @@ function envoyerZone() {
     clearTimeout(lui.attenteEchelle);
     lui.attenteEchelle = 0;
   }
+  if (window.devicePixelRatio !== lui.dpr) poser(lui);
   const r = pilule.getBoundingClientRect();
   const t = getComputedStyle(pilule).transform;
   const m = new DOMMatrixReadOnly(t === "none" ? undefined : t);
@@ -354,6 +367,7 @@ bouton.addEventListener("click", (e) => {
 addEventListener("focusin", (e) => {
   if (e.target instanceof HTMLElement) e.target.blur();
 });
+addEventListener("keydown", (e) => e.preventDefault(), true);
 addEventListener("contextmenu", (e) => e.preventDefault(), true);
 
 if (tauri?.event?.listen) {

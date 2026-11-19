@@ -32,7 +32,7 @@ body {
 .zone {
   position: absolute;
   box-sizing: border-box;
-  box-shadow: 0 0 0 200vmax var(--scrim);
+  box-shadow: 0 0 0 var(--defilante-voile-portee, 200vmax) var(--scrim);
   outline: var(--defilante-trait) solid var(--selection-stroke);
   outline-offset: 0;
 }

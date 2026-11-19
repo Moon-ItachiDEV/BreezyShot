@@ -153,7 +153,10 @@ export async function jouer(charge) {
 if (tauri?.event?.listen) {
   Promise.all([
     tauri.event.listen("souffle:jouer", (e) => jouer(e?.payload)),
-    tauri.event.listen("souffle:effacer", () => effacer()),
+    tauri.event.listen("souffle:effacer", (e) => {
+      const id = e?.payload?.id;
+      if (courant && (id === undefined || id === null || id === courant.id)) effacer();
+    }),
     suivreTheme(),
   ]).then(
     () => direPret("souffle_pret"),

@@ -6,7 +6,7 @@
 //! Le module crée, place, montre et cache ; il ne décide de rien. L'Application lui donne
 //! les lignes et reçoit le choix (`menu_choisi`).
 
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
@@ -66,9 +66,18 @@ static EN_ATTENTE: Mutex<Option<Ouverture>> = Mutex::new(None);
 /// Vrai tant que la fenêtre du menu est exclue des captures (posé par `ouvrir`, remis à
 /// faux à chaque création de la fenêtre).
 static EXCLU: AtomicBool = AtomicBool::new(false);
+/// Vrai tant que le menu est montré (évite un appel inter-fils `is_visible()` toutes les 30 ms).
+static VISIBLE: AtomicBool = AtomicBool::new(false);
+/// Numéro de l'ouverture : une surveillance des clics d'une ouverture passée s'arrête.
+static NUMERO: AtomicU64 = AtomicU64::new(0);
 
 fn fenetre(app: &AppHandle) -> Option<WebviewWindow> {
     app.get_webview_window(ETIQUETTE_MENU)
+}
+
+/// Identifiant système de la fenêtre si elle existe (HWND sous Windows).
+pub fn identifiant(app: &AppHandle) -> Option<isize> {
+    fenetre(app).and_then(|f| systeme::identifiant_fenetre(&f))
 }
 
 /// Échelle utilisable : une valeur absurde vaut 1.
@@ -210,11 +219,15 @@ fn creer(app: &AppHandle) -> Result<WebviewWindow, String> {
         log::warn!("menu web: style outil non pose: {e}");
     }
     let pour_focus = app.clone();
-    f.on_window_event(move |e| {
+    f.on_window_event(move |e| match e {
         // Un clic ailleurs (ou Alt+Tab) : le menu se ferme, comme un menu natif.
-        if let tauri::WindowEvent::Focused(false) = e {
+        tauri::WindowEvent::Focused(false) => {
             let _ = cacher(&pour_focus);
         }
+        tauri::WindowEvent::Destroyed => {
+            VISIBLE.store(false, Ordering::SeqCst);
+        }
+        _ => {}
     });
     match systeme::identifiant_fenetre(&f) {
         Some(h) => log::info!("menu fenetre {h}"),
@@ -259,11 +272,20 @@ pub fn ouvrir(
     ));
     let place = placer(point, &ecran, hauteur_carte(&lignes));
     let charge = Ouverture { lignes };
-    let (f, nouvelle) = match fenetre(app) {
+    let existante = fenetre(app);
+    if existante.is_none() {
+        // La page n'écoute pas encore : elle prendra les lignes à `menu_pret` (posées avant
+        // la création, que WebView2 peut faire tourner dans une boucle imbriquée).
+        if let Ok(mut a) = EN_ATTENTE.lock() {
+            *a = Some(charge.clone());
+        }
+    }
+    let (f, nouvelle) = match existante {
         Some(f) => (f, false),
         None => match creer(app) {
             Ok(f) => (f, true),
             Err(e) => {
+                let _ = prendre_en_attente();
                 log::warn!("menu non ouvert: {e}");
                 return false;
             }
@@ -272,23 +294,20 @@ pub fn ouvrir(
     regler_exclusion(&f, exclu);
     let _ = f.set_position(tauri::PhysicalPosition::new(place.x, place.y));
     let _ = f.set_size(tauri::PhysicalSize::new(place.largeur, place.hauteur));
-    if nouvelle {
-        // La page n'écoute pas encore : elle prendra les lignes à `menu_pret`.
-        if let Ok(mut a) = EN_ATTENTE.lock() {
-            *a = Some(charge);
-        }
-    } else {
+    if !nouvelle {
         theme::envoyer_a(app, ETIQUETTE_MENU);
         if let Err(e) = app.emit_to(ETIQUETTE_MENU, EVENEMENT_OUVRIR, charge) {
             log::warn!("menu web: lignes non envoyees: {e}");
         }
     }
+    VISIBLE.store(true, Ordering::SeqCst);
     let _ = f.show();
     if !matches!(systeme::prendre_premier_plan(&f), Ok(true)) {
         let _ = f.set_focus();
     }
     log::info!("menu ouvert");
-    surveiller_clics(app, place);
+    let numero = NUMERO.fetch_add(1, Ordering::SeqCst) + 1;
+    surveiller_clics(app, place, numero);
     true
 }
 
@@ -322,8 +341,8 @@ fn regler_exclusion(f: &WebviewWindow, exclu: bool) {
 
 /// Ferme le menu au premier clic hors de lui, même s'il n'a jamais reçu le focus
 /// (Windows peut refuser le premier plan : `Focused(false)` n'arriverait jamais). Un fil
-/// regarde les boutons de la souris tant que le menu est montré.
-fn surveiller_clics(app: &AppHandle, place: Rect) {
+/// regarde les boutons de la souris tant que le menu de cette ouverture est montré.
+fn surveiller_clics(app: &AppHandle, place: Rect, numero: u64) {
     let app = app.clone();
     let lance = std::thread::Builder::new()
         .name("menu-clics".into())
@@ -332,7 +351,7 @@ fn surveiller_clics(app: &AppHandle, place: Rect) {
             let mut relache = !systeme::bouton_souris_enfonce();
             loop {
                 std::thread::sleep(PAS_SURVEILLANCE);
-                if !ouvert(&app) {
+                if NUMERO.load(Ordering::SeqCst) != numero || !VISIBLE.load(Ordering::SeqCst) {
                     return;
                 }
                 let enfonce = systeme::bouton_souris_enfonce();
@@ -368,11 +387,14 @@ pub fn prendre_en_attente() -> Option<Ouverture> {
 /// montré.
 pub fn cacher(app: &AppHandle) -> bool {
     let Some(f) = fenetre(app) else {
+        VISIBLE.store(false, Ordering::SeqCst);
         return false;
     };
     if !f.is_visible().unwrap_or(false) {
+        VISIBLE.store(false, Ordering::SeqCst);
         return false;
     }
+    VISIBLE.store(false, Ordering::SeqCst);
     if let Ok(mut t) = FERME_A.lock() {
         *t = Some(Instant::now());
     }
@@ -382,6 +404,15 @@ pub fn cacher(app: &AppHandle) -> bool {
     }
     log::info!("menu ferme");
     true
+}
+
+/// Ferme la fenêtre si elle existe (arrêt de l'application).
+pub fn fermer(app: &AppHandle) {
+    VISIBLE.store(false, Ordering::SeqCst);
+    NUMERO.fetch_add(1, Ordering::SeqCst);
+    if let Some(f) = fenetre(app) {
+        let _ = f.destroy();
+    }
 }
 
 #[cfg(test)]

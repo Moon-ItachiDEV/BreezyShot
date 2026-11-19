@@ -235,6 +235,9 @@ pub fn systeme() -> Systeme {
     plateforme::systeme()
 }
 
+/// Nom court du système courant pour le journal (hors Windows, où `version_windows` répond).
+pub const NOM_OS: &str = std::env::consts::OS;
+
 /// Gestes sur une fenêtre de l'interface que Tauri ne fait pas sans risque de focus.
 /// Chaque fonction rend `Ok(true)` si le geste a été fait ici, `Ok(false)` si l'appelant
 /// doit passer par Tauri (hors Windows).

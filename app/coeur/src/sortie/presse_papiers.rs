@@ -190,6 +190,23 @@ pub(super) fn copier_fichier(chemin: &std::path::Path) -> Result<(), String> {
     }
 }
 
+/// Exécute `f` sur le presse-papiers partagé du processus, en réessayant jusqu'à
+/// l'échéance si le presse-papiers est occupé. Une erreur définitive réinitialise l'objet
+/// gardé pour repartir d'une connexion neuve la prochaine fois.
+pub(super) fn avec_presse_papiers<T>(
+    mut f: impl FnMut(&mut Clipboard) -> Result<T, Error>,
+) -> Result<T, Error> {
+    let mut garde = OUVERT.lock().unwrap_or_else(|e| e.into_inner());
+    let resultat = avec_echeance(ECHEANCE, Instant::now, thread::sleep, || {
+        f(ouvrir(&mut garde)?)
+    });
+    if matches!(&resultat, Err(e) if !vaut_reessai(e)) {
+        // On repartira d'un presse-papiers neuf la prochaine fois.
+        *garde = None;
+    }
+    resultat
+}
+
 fn poser(garde: &mut Option<Clipboard>, image: ImageData<'_>) -> Result<(), Error> {
     ouvrir(garde)?.set_image(image)
 }
@@ -217,6 +234,13 @@ pub(super) fn sonder() -> Result<(), Error> {
 pub(super) fn relire() -> Result<ImageData<'static>, Error> {
     let mut garde = OUVERT.lock().unwrap_or_else(|e| e.into_inner());
     ouvrir(&mut garde)?.get_image()
+}
+
+/// Pour les tests : relit le texte par l'objet garde.
+#[cfg(test)]
+pub(super) fn relire_texte() -> Result<String, Error> {
+    let mut garde = OUVERT.lock().unwrap_or_else(|e| e.into_inner());
+    ouvrir(&mut garde)?.get_text()
 }
 
 /// Pour les tests : relit la liste de fichiers par l'objet garde.

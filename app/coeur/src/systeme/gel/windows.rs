@@ -933,7 +933,9 @@ fn cacher_et_prevenir(hwnd: HWND, changement: Changement) {
     }
     let rappel = verrouiller(&RAPPEL_CHANGEMENT).clone();
     if let Some(rappel) = rappel {
-        rappel(changement);
+        if std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| rappel(changement))).is_err() {
+            log::warn!("ecran fige: rappel de changement arrete (panique)");
+        }
     }
 }
 

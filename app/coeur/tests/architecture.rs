@@ -113,6 +113,12 @@ impl Controle<'_> {
                     self.faute(format!("crate {premier} hors de systeme/"));
                 }
             }
+            if segments
+                .windows(2)
+                .any(|w| w[0] == "consts" && w[1] == "OS")
+            {
+                self.faute("std::env::consts::OS hors de systeme/".into());
+            }
         }
     }
 

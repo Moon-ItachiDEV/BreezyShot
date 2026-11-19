@@ -11,7 +11,9 @@ use ::windows::Win32::Foundation::{GlobalFree, HANDLE, HGLOBAL};
 use ::windows::Win32::System::DataExchange::{
     CloseClipboard, EmptyClipboard, OpenClipboard, RegisterClipboardFormatW, SetClipboardData,
 };
-use ::windows::Win32::System::Memory::{GlobalAlloc, GlobalLock, GlobalUnlock, GMEM_MOVEABLE};
+use ::windows::Win32::System::Memory::{
+    GlobalAlloc, GlobalLock, GlobalUnlock, GMEM_MOVEABLE, GMEM_ZEROINIT,
+};
 
 use super::{ecrire_dib, taille_dib, ErreurPressePapiers};
 
@@ -48,11 +50,11 @@ impl Bloc {
         if taille == 0 {
             return Err(ErreurPressePapiers::Refuse);
         }
-        // SAFETY : allocation sans pointeur ; le bloc est rendu par `Drop`.
-        let poignee = unsafe { GlobalAlloc(GMEM_MOVEABLE, taille) }
+        // SAFETY : allocation initialisée à zéro sans pointeur ; le bloc est rendu par `Drop`.
+        let poignee = unsafe { GlobalAlloc(GMEM_MOVEABLE | GMEM_ZEROINIT, taille) }
             .map_err(|_| ErreurPressePapiers::Refuse)?;
         let bloc = Bloc(Some(poignee));
-        // SAFETY : bloc de `taille` octets au moins, verrouillé le temps du remplissage
+        // SAFETY : bloc de `taille` octets initialisés, verrouillé le temps du remplissage
         // puis déverrouillé ; la tranche ne sort pas de ce bloc.
         let rempli = unsafe {
             let destination = GlobalLock(poignee) as *mut u8;
