@@ -217,10 +217,24 @@ mod tests {
             Err(Refus::Taille)
         );
         assert_eq!(accepter(&e, 7, ANNOTATIONS_OCTETS_MAX, true, t), Ok(()));
-        e.breezy_en_cours = Some(t);
+        e.breezy_en_cours = Some(editeur::BreezyEnCours {
+            debut: t,
+            dialogue: true,
+        });
         assert_eq!(accepter(&e, 7, 10, true, t), Err(Refus::DejaEnCours));
-        // Oublié au-delà de OUBLI_BREEZY (écriture figée).
-        assert_eq!(accepter(&e, 7, 10, true, t + editeur::OUBLI_BREEZY), Ok(()));
+        // Tant que le dialogue est ouvert, jamais oublié, même après OUBLI_BREEZY.
+        assert_eq!(
+            accepter(&e, 7, 10, true, t + editeur::OUBLI_BREEZY),
+            Err(Refus::DejaEnCours)
+        );
+        // Une fois le dialogue fermé, OUBLI_BREEZY court à partir de sa fermeture.
+        let apres = t + editeur::OUBLI_BREEZY;
+        e.dialogue_breezy_ferme(apres);
+        assert_eq!(accepter(&e, 7, 10, true, apres), Err(Refus::DejaEnCours));
+        assert_eq!(
+            accepter(&e, 7, 10, true, apres + editeur::OUBLI_BREEZY),
+            Ok(())
+        );
         // Et un export de pixels en cours bloque aussi.
         e.breezy_en_cours = None;
         e.export = Some(editeur::ExportEnCours {
@@ -247,7 +261,10 @@ mod tests {
             editeur::accepter_export(&e, &en_tete, 48, Instant::now()),
             Ok(())
         );
-        e.breezy_en_cours = Some(Instant::now());
+        e.breezy_en_cours = Some(editeur::BreezyEnCours {
+            debut: Instant::now(),
+            dialogue: false,
+        });
         assert_eq!(
             editeur::accepter_export(&e, &en_tete, 48, Instant::now()),
             Err(editeur::Refus::DejaEnCours)

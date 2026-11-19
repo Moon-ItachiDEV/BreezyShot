@@ -70,7 +70,7 @@ pub fn lancer_installateur(contexte: tauri::Context) -> i32 {
     log::info!("installateur BreezyShot {VERSION}");
     match crate::systeme::version_windows() {
         Some(build) => log::info!("systeme windows build {build}"),
-        None => log::info!("systeme {}", std::env::consts::OS),
+        None => log::info!("systeme {}", crate::systeme::NOM_OS),
     }
 
     // Un seul installateur à la fois.
@@ -357,13 +357,13 @@ fn agir(app: &AppHandle, etat: &Arc<Etat>, action: Action) {
 
 /// Lance les étapes dans un fil d'installation.
 fn lancer_installation(app: &AppHandle, etat: &Arc<Etat>) {
-    let app = app.clone();
-    let etat = Arc::clone(etat);
+    let app_fil = app.clone();
+    let etat_fil = Arc::clone(etat);
     let lance = std::thread::Builder::new()
         .name("installation".into())
         .spawn(move || {
             let debut = Instant::now();
-            let resultat = installer(&app, &etat);
+            let resultat = installer(&app_fil, &etat_fil);
             match &resultat {
                 Ok(()) => log::info!(
                     "installation finie {VERSION} en {} ms",
@@ -372,12 +372,16 @@ fn lancer_installation(app: &AppHandle, etat: &Arc<Etat>) {
                 Err(e) => log::info!("installation erreur: {}", e.code()),
             }
             // Décidé sous le verrou : un « Fermer » arrivé pendant les étapes est vu ici.
-            let geste = transition(&etat, |e| Some(apres_etapes(e, &resultat)))
+            let geste = transition(&etat_fil, |e| Some(apres_etapes(e, &resultat)))
                 .unwrap_or(Geste::MontrerErreur);
-            finir(&app, &etat, geste, resultat.err());
+            finir(&app_fil, &etat_fil, geste, resultat.err());
         });
     if let Err(e) = lance {
         log::error!("installation: fil impossible: {e}");
+        let resultat: Result<(), ErreurInstallation> = Err(ErreurInstallation::Copie);
+        let geste = transition(etat, |et| Some(apres_etapes(et, &resultat)))
+            .unwrap_or(Geste::MontrerErreur);
+        finir(app, etat, geste, resultat.err());
     }
 }
 

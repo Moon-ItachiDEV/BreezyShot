@@ -1,7 +1,7 @@
-//! L'éditeur d'annotation, côté Application (contrat 0.4 « Éditeur », §6) : les neuf
+//! L'éditeur d'annotation, côté Application (contrat 0.4 « Éditeur », §6) : les onze
 //! commandes de la page (fil principal, sans `async`), permises à la seule fenêtre
 //! `editeur` (`capabilities/editeur.json`). Les décisions sont dans `editeur.rs`, les
-//! gestes communs dans `mod.rs` ; ici, seulement des gestes.
+//! gestes dans `geste_editeur.rs` et `geste_breezy.rs` ; ici, seulement les commandes IPC.
 //!
 //! Un `id` qui n'est pas celui du document en cours est ignoré (`editeur <commande> <id>
 //! ignoree`).
@@ -12,12 +12,11 @@ use std::time::Instant;
 use tauri::AppHandle;
 
 use super::editeur::{self, ChargeEditeur, RaisonFermeture, ReponseFermer};
-use super::{
-    afficher, avec_editeur, breezy_ouvert, desarmer_filet_page, exporter_editeur, fermer_editeur,
-    fermer_ou_suivant, garder_preferences_editeur, preferences_editeur, reduites_editeur,
-    texte_construit,
+use super::geste_editeur::{
+    avec_editeur, desarmer_filet_page, exporter_editeur, fermer_editeur, fermer_ou_suivant,
+    garder_preferences_editeur, preferences_editeur, reduites_editeur,
 };
-use super::{geste_breezy, geste_texte, texte};
+use super::{afficher, breezy_ouvert, geste_breezy, geste_texte, texte, texte_construit};
 use crate::fenetres::editeur as fenetre;
 use crate::fenetres::theme;
 

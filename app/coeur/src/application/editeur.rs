@@ -81,10 +81,21 @@ pub struct EtatEditeur {
     /// remplacée par la suivante, oubliée avec le document. Le texte ne quitte le cœur que
     /// par `editeur_copier_texte`.
     pub texte: Option<(u64, Lu)>,
-    /// Le début d'un enregistrement `.breezy` en cours (dialogue compris) : aucun autre export,
-    /// ni autre enregistrement `.breezy`, n'est accepté pendant ce temps (0.7.9), sauf s'il
-    /// dure plus que `OUBLI_BREEZY` (écriture figée) : il est alors oublié.
-    pub breezy_en_cours: Option<Instant>,
+    /// Un enregistrement `.breezy` en cours (dialogue compris) : aucun autre export,
+    /// ni autre enregistrement `.breezy`, n'est accepté pendant ce temps (0.7.9). Hors
+    /// dialogue, s'il dure plus que `OUBLI_BREEZY` (écriture figée), il est oublié.
+    pub breezy_en_cours: Option<BreezyEnCours>,
+}
+
+/// Un enregistrement `.breezy` parti dans le fil `editeur-breezy`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BreezyEnCours {
+    /// Début de l'écriture (après le dialogue « Enregistrer sous… » : `OUBLI_BREEZY` ne
+    /// court qu'à partir de là).
+    pub debut: Instant,
+    /// Le dialogue « Enregistrer sous… » est ouvert : il bloque sans limite, aucun autre
+    /// export n'est accepté pendant ce temps.
+    pub dialogue: bool,
 }
 
 /// Un export parti dans le fil `editeur-sortie`.
@@ -378,10 +389,11 @@ pub fn accepter_export(
     Ok(())
 }
 
-/// Un enregistrement `.breezy` est encore attendu : parti depuis moins de `OUBLI_BREEZY`.
+/// Un enregistrement `.breezy` est encore attendu : en dialogue, ou parti depuis moins
+/// de `OUBLI_BREEZY`.
 pub fn breezy_en_cours(etat: &EtatEditeur, maintenant: Instant) -> bool {
     etat.breezy_en_cours
-        .is_some_and(|debut| maintenant.saturating_duration_since(debut) < OUBLI_BREEZY)
+        .is_some_and(|b| b.dialogue || maintenant.saturating_duration_since(b.debut) < OUBLI_BREEZY)
 }
 
 /// Au-delà, un enregistrement `.breezy` sans bilan (écriture figée, bilan non rendu) ne
@@ -888,6 +900,15 @@ impl EtatEditeur {
         if let Some(x) = self.export.as_mut().filter(|x| x.numero == numero) {
             x.dialogue = false;
             x.debut = maintenant;
+        }
+    }
+
+    /// Le dialogue de l'enregistrement `.breezy` est fermé : l'écriture commence,
+    /// `OUBLI_BREEZY` court à partir de là.
+    pub fn dialogue_breezy_ferme(&mut self, maintenant: Instant) {
+        if let Some(b) = self.breezy_en_cours.as_mut() {
+            b.dialogue = false;
+            b.debut = maintenant;
         }
     }
 

@@ -705,6 +705,7 @@ impl Ecrivain {
             let r = if p.is_null() || (max as usize) < n {
                 Err(format!("Lock {max} octets"))
             } else {
+                std::ptr::write_bytes(p, 0, n);
                 remplir(std::slice::from_raw_parts_mut(p, n))
             };
             let _ = b.Unlock();

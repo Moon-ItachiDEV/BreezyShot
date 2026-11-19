@@ -254,8 +254,15 @@ const DOS_DATE: u16 = 0x0021;
 const DRAPEAU_UTF8: u16 = 0x0800;
 
 fn zip_ecrire(entrees: &[(&str, &[u8])]) -> Result<Vec<u8>, String> {
-    let mut sortie: Vec<u8> = Vec::new();
-    let mut centrale: Vec<u8> = Vec::new();
+    let taille_centrale_estimee: usize = entrees.iter().map(|(n, _)| 46 + n.len()).sum();
+    let taille_totale_estimee: usize = entrees
+        .iter()
+        .map(|(n, d)| 30 + n.len() + d.len())
+        .sum::<usize>()
+        .saturating_add(taille_centrale_estimee)
+        .saturating_add(22);
+    let mut sortie: Vec<u8> = Vec::with_capacity(taille_totale_estimee);
+    let mut centrale: Vec<u8> = Vec::with_capacity(taille_centrale_estimee);
     for (nom, donnees) in entrees {
         let taille = u32::try_from(donnees.len()).map_err(|_| CAUSE_TROP_GROS.to_string())?;
         let decalage = u32::try_from(sortie.len()).map_err(|_| CAUSE_TROP_GROS.to_string())?;
@@ -327,13 +334,16 @@ fn u32_a(octets: &[u8], i: usize) -> Option<u32> {
 /// non chiffrées, d'une archive sans ZIP64 et sans commentaire trop long sont lues.
 fn zip_lire(octets: &[u8]) -> Result<Vec<(String, &[u8])>, ErreurBreezy> {
     // Fin du répertoire central : dans les 22 derniers octets, ou plus loin si l'archive
-    // porte un commentaire (65 535 octets au plus).
+    // porte un commentaire (65 535 octets au plus) dont la longueur correspond exactement
+    // aux octets restants.
     let loin = octets.len().saturating_sub(22 + 65_535);
     let mut fin = None;
     if octets.len() >= 22 {
         let mut i = octets.len() - 22;
         loop {
-            if u32_a(octets, i) == Some(SIG_FIN) {
+            if u32_a(octets, i) == Some(SIG_FIN)
+                && u16_a(octets, i + 20).is_some_and(|c| i + 22 + usize::from(c) == octets.len())
+            {
                 fin = Some(i);
                 break;
             }

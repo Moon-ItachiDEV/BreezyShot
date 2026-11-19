@@ -45,13 +45,24 @@ pub fn fichier_a_glisser(recent: &Path, dossier: &Path, nom: &str) -> Result<Pat
         .and_then(|e| e.to_str())
         .filter(|e| !e.is_empty())
         .unwrap_or("png");
-    let chemin = chemin_libre_ext(dossier, nom, extension, existe);
-    let fait = fs::hard_link(recent, &chemin).or_else(|_| fs::copy(recent, &chemin).map(|_| ()));
-    if fait.is_err() {
-        return Ok(recent.to_path_buf());
+    for _ in 0..8 {
+        let chemin = chemin_libre_ext(dossier, nom, extension, existe);
+        match fs::hard_link(recent, &chemin) {
+            Ok(()) => {
+                nettoyer(dossier, &chemin);
+                return Ok(chemin);
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(_) => {
+                if fs::copy(recent, &chemin).is_ok() {
+                    nettoyer(dossier, &chemin);
+                    return Ok(chemin);
+                }
+                return Ok(recent.to_path_buf());
+            }
+        }
     }
-    nettoyer(dossier, &chemin);
-    Ok(chemin)
+    Ok(recent.to_path_buf())
 }
 
 fn nettoyer(dossier: &Path, neuf: &Path) {

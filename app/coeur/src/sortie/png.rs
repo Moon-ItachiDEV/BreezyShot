@@ -92,11 +92,17 @@ pub fn encoder_jpg(largeur: u32, hauteur: u32, rgba: &[u8]) -> Result<Vec<u8>, S
     if l == 0 || h == 0 || rgba.len() as u64 != u64::from(largeur) * u64::from(hauteur) * 4 {
         return Err(CAUSE_JPG.to_string());
     }
-    let sur_fond = sur_blanc(rgba);
+    let sur_fond;
+    let source = if rgba.chunks_exact(4).all(|p| p[3] == 255) {
+        rgba
+    } else {
+        sur_fond = sur_blanc(rgba);
+        &sur_fond
+    };
     let mut sortie = Vec::new();
     let encodeur = jpeg_encoder::Encoder::new(&mut sortie, QUALITE_JPG);
     encodeur
-        .encode(&sur_fond, l, h, jpeg_encoder::ColorType::Rgba)
+        .encode(source, l, h, jpeg_encoder::ColorType::Rgba)
         .map_err(|_| CAUSE_JPG.to_string())?;
     Ok(sortie)
 }

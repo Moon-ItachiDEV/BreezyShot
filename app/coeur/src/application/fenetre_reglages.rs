@@ -639,20 +639,35 @@ async fn parcourir(app: AppHandle, films: bool) -> Reponse {
     let Ok(dossier) = page::dossier_choisi(&choisi, par_defaut) else {
         return refuser(&app, Refus::nouveau(ligne, "", "invalide"));
     };
-    let mut nouveau = relire(&app);
-    if films {
-        nouveau.film.dossier = dossier;
-    } else {
-        nouveau.dossier_enregistrement = dossier;
+    let pour = app.clone();
+    let (tx_fin, rx_fin) = std::sync::mpsc::channel();
+    if let Err(e) = app.run_on_main_thread(move || {
+        let mut nouveau = relire(&pour);
+        if films {
+            nouveau.film.dossier = dossier;
+        } else {
+            nouveau.dossier_enregistrement = dossier;
+        }
+        let rep = match reglages::valider(&nouveau) {
+            Ok(()) => {
+                log::info!("reglage change: {ligne}");
+                ecrire_et_garder(&pour, nouveau);
+                let rep = reponse(&pour, None);
+                fenetre::emettre_etat(&pour, rep.vue.clone());
+                rep
+            }
+            Err(e) => refuser(&pour, Refus::nouveau(ligne, "", e.code())),
+        };
+        let _ = tx_fin.send(rep);
+    }) {
+        log::warn!("dossier: mise a jour non postee ({e})");
+        return refuser(&app, Refus::nouveau(ligne, "", "dialogue_impossible"));
     }
-    if let Err(e) = reglages::valider(&nouveau) {
-        return refuser(&app, Refus::nouveau(ligne, "", e.code()));
-    }
-    log::info!("reglage change: {ligne}");
-    ecrire_et_garder(&app, nouveau);
-    let rep = reponse(&app, None);
-    fenetre::emettre_etat(&app, rep.vue.clone());
-    rep
+    tauri::async_runtime::spawn_blocking(move || rx_fin.recv())
+        .await
+        .ok()
+        .and_then(Result::ok)
+        .unwrap_or_else(|| refuser(&app, Refus::nouveau(ligne, "", "dialogue_impossible")))
 }
 
 /// Début (les raccourcis sont rendus au système, pour que la page reçoive les touches) ou

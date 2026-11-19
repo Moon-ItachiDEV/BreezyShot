@@ -291,7 +291,13 @@ pub fn supprimer_recent(
     nom: &str,
 ) -> Result<(), String> {
     let recent = chemin_recent(dossier_recents, nom).ok_or("nom refuse")?;
-    if lister_recents(dossier_recents).iter().any(|e| e.nom == nom) {
+    let present = horodatage_du_nom(nom).is_some()
+        && noms_au_format(dossier_recents)
+            .noms
+            .iter()
+            .any(|n| n == nom)
+        && taille_png(&recent).is_some();
+    if present {
         effacer(&recent).map_err(|_| "suppression refusee".to_string())?;
     }
     if let Some(apercu) = chemin_apercu(dossier_apercus, nom) {

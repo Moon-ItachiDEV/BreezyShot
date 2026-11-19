@@ -159,11 +159,15 @@ fn ouvrir_flux(origine: Origine) -> Result<Flux, Erreur> {
         wBitsPerSample: 16,
         cbSize: 0,
     };
-    let direct = if origine == Origine::Ordinateur {
-        Err(::windows::core::Error::from(E_INVALIDARG))
+    enum EssaiDirect {
+        Pret(IAudioClient),
+        Melange(Option<IAudioClient>),
+    }
+    let essai = if origine == Origine::Ordinateur {
+        EssaiDirect::Melange(Some(client))
     } else {
         // SAFETY : format décrit en entier ; mode partagé ; sans session nommée.
-        unsafe {
+        let direct = unsafe {
             client.Initialize(
                 AUDCLNT_SHAREMODE_SHARED,
                 AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM | AUDCLNT_STREAMFLAGS_SRC_DEFAULT_QUALITY,
@@ -172,14 +176,24 @@ fn ouvrir_flux(origine: Origine) -> Result<Flux, Erreur> {
                 &voulu,
                 None,
             )
+        };
+        match direct {
+            Ok(()) => EssaiDirect::Pret(client),
+            Err(e) if e.code() == AUDCLNT_E_UNSUPPORTED_FORMAT || e.code() == E_INVALIDARG => {
+                // Un client dont `Initialize` a échoué ne se réessaie pas : un neuf.
+                drop(client);
+                EssaiDirect::Melange(None)
+            }
+            Err(e) => return Err(echec(&e)),
         }
     };
-    let (client, conversion, bloc) = match direct {
-        Ok(()) => (client, None, 2),
-        Err(e) if e.code() == AUDCLNT_E_UNSUPPORTED_FORMAT || e.code() == E_INVALIDARG => {
-            // Un client dont `Initialize` a échoué ne se réessaie pas : un neuf.
-            drop(client);
-            let client = activer(origine)?;
+    let (client, conversion, bloc) = match essai {
+        EssaiDirect::Pret(client) => (client, None, 2),
+        EssaiDirect::Melange(existant) => {
+            let client = match existant {
+                Some(c) => c,
+                None => activer(origine)?,
+            };
             // SAFETY : client vivant ; le format est alloué par COM et rendu par
             // `MemoireCom` ; ses octets sont lus sur la taille qu'il annonce (18 + cbSize).
             let format = unsafe {
@@ -208,7 +222,6 @@ fn ouvrir_flux(origine: Origine) -> Result<Flux, Erreur> {
             };
             (client, Some(Conversion::nouvelle(format)), format.bloc)
         }
-        Err(e) => return Err(echec(&e)),
     };
     // SAFETY : client initialisé ; le service de capture est rendu par son compte.
     let capture: IAudioCaptureClient = unsafe { client.GetService() }.map_err(|e| echec(&e))?;

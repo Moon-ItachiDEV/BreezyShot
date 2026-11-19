@@ -106,7 +106,7 @@ impl Assemblage {
             _ => return Ajout::Rien,
         };
         let h = self.zone;
-        let Some(paire) = Paire::de(&self.precedente, image, &TOLERANCE) else {
+        let Some(mut paire) = Paire::de(&self.precedente, image, &TOLERANCE) else {
             return Ajout::Rien;
         };
         self.fixes = if self.fixes_connues {

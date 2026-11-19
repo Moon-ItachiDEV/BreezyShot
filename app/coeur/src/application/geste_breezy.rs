@@ -14,10 +14,13 @@ use std::time::Instant;
 use tauri::{AppHandle, Manager};
 
 use super::breezy::{self, Issue, Refus};
-use super::editeur::Document;
+use super::editeur::{BreezyEnCours, Document};
+use super::geste_editeur::{
+    avec_editeur, recevoir_document, GardeDialogueEditeur, DIALOGUE_EDITEUR,
+};
 use super::{
-    afficher, avec_editeur, breezy_ouvert, demande_sortie, poster_plus_tard, recevoir_document,
-    Application, Evenement, GardeDialogueEditeur, DIALOGUE_EDITEUR, MENU_LICENCE, VERSION,
+    afficher, breezy_ouvert, demande_sortie, poster_plus_tard, Application, Evenement,
+    MENU_LICENCE, VERSION,
 };
 use crate::fenetres;
 use crate::sortie::{self, EtapeFichier};
@@ -52,7 +55,10 @@ pub fn enregistrer(app: &AppHandle, requete: &tauri::ipc::Request<'_>) -> Result
     let maintenant = Instant::now();
     let decision = avec_editeur(app, None, |e| {
         breezy::accepter(e, id, corps.len(), pro, maintenant).map(|()| {
-            e.breezy_en_cours = Some(maintenant);
+            e.breezy_en_cours = Some(BreezyEnCours {
+                debut: maintenant,
+                dialogue: true,
+            });
             (
                 Arc::clone(&e.document.pixels),
                 e.document.transparence,
@@ -101,6 +107,13 @@ pub fn enregistrer(app: &AppHandle, requete: &tauri::ipc::Request<'_>) -> Result
         .name("editeur-breezy".into())
         .spawn(move || {
             let debut = Instant::now();
+            let pour_dialogue = pour_fil.clone();
+            let dialogue_ferme = move || {
+                let pour = pour_dialogue.clone();
+                let _ = pour_dialogue.run_on_main_thread(move || {
+                    avec_editeur(&pour, Some(id), |e| e.dialogue_breezy_ferme(Instant::now()));
+                });
+            };
             // Une panique du fil rend le drapeau et la page : jamais un éditeur bloqué.
             let issue = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 travail(
@@ -109,6 +122,7 @@ pub fn enregistrer(app: &AppHandle, requete: &tauri::ipc::Request<'_>) -> Result
                     proprietaire,
                     &depart,
                     &nom,
+                    dialogue_ferme,
                 )
             }))
             .unwrap_or_else(|_| {
@@ -138,14 +152,18 @@ fn travail(
     proprietaire: Option<isize>,
     depart: &Path,
     nom: &str,
+    dialogue_ferme: impl FnOnce(),
 ) -> (Issue, Option<PathBuf>) {
     let choisi = if DIALOGUE_EDITEUR.swap(true, Ordering::SeqCst) {
         log::info!("editeur breezy: dialogue deja ouvert");
+        dialogue_ferme();
         return (Issue::Annule, None);
     } else {
         let _garde = GardeDialogueEditeur;
         let depart = Some(depart).filter(|d| !d.as_os_str().is_empty());
-        systeme::choisir_fichier_breezy(proprietaire, depart, nom)
+        let r = systeme::choisir_fichier_breezy(proprietaire, depart, nom);
+        dialogue_ferme();
+        r
     };
     let chemin = match choisi {
         Ok(Some(c)) => c,
