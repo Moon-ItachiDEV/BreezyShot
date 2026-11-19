@@ -18,6 +18,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 /// Nom du fichier de réglages dans le dossier donné.
 pub const NOM_FICHIER: &str = "reglages.json";
+/// Ancien nom de fichier temporaire (nettoyé après une écriture réussie s'il reste d'une coupure).
+const NOM_ANCIEN_TEMPORAIRE: &str = "reglages.json.tmp";
 const PREFIXE_ABIME: &str = "reglages.abime-";
 const SUFFIXE_ABIME: &str = ".json";
 /// Nombre de fichiers abîmés gardés au plus.
@@ -148,7 +150,9 @@ pub fn ecrire(dossier: &Path, reglages: &Reglages) -> Result<(), ErreurEcriture>
                 erreur,
             })
         });
-    if resultat.is_err() {
+    if resultat.is_ok() {
+        let _ = fs::remove_file(dossier.join(NOM_ANCIEN_TEMPORAIRE));
+    } else {
         let _ = fs::remove_file(&temporaire);
     }
     resultat
