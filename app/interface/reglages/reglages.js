@@ -471,7 +471,8 @@ for (const groupe of $$('[role="radiogroup"]')) {
   groupe.addEventListener("keydown", (e) => {
     const radios = $$('[role="radio"]', groupe);
     const i = radios.indexOf(document.activeElement);
-    const pas = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 }[e.key];
+    const vertical = nom === "vignette_coin" ? 2 : 1;
+    const pas = { ArrowRight: 1, ArrowDown: vertical, ArrowLeft: -1, ArrowUp: -vertical }[e.key];
     if (i < 0 || !pas || !vue) return;
     e.preventDefault();
     const b = radios[(i + pas + radios.length) % radios.length];
@@ -505,14 +506,24 @@ boutonVider.addEventListener("click", () => {
     minuteVider = setTimeout(() => reposerVider(), ATTENTE_CONFIRMATION_MS);
     return;
   }
-  reposerVider("Vidé");
-  minuteVider = setTimeout(() => reposerVider(), ATTENTE_CONFIRMATION_MS);
-  appeler("reglages_vider_historique").then(recevoir);
+  clearTimeout(minuteVider);
+  minuteVider = null;
+  boutonVider.removeAttribute("data-confirme");
+  appeler("reglages_vider_historique").then((r) => {
+    recevoir(r);
+    if (r !== null && !r?.refus) {
+      reposerVider("Vidé");
+      minuteVider = setTimeout(() => reposerVider(), ATTENTE_CONFIRMATION_MS);
+    } else {
+      reposerVider();
+    }
+  });
 });
 boutonVider.addEventListener("blur", () => reposerVider());
 
 // Nom des fichiers : aperçu à chaque frappe, écriture après une pause et à la sortie du champ.
 const champNom = $('[data-controle="modele_nom"]');
+let seqApercu = 0;
 function ecrireNom() {
   if (attenteNom === null) return;
   clearTimeout(attenteNom);
@@ -520,8 +531,11 @@ function ecrireNom() {
   changer("modele_nom", champNom.value);
 }
 champNom.addEventListener("input", () => {
+  const seq = ++seqApercu;
   appeler("reglages_apercu_nom", { modele: champNom.value }).then((r) => {
-    if (r && typeof r.apercu === "string") $('[data-valeur="apercu_nom"]').textContent = r.apercu;
+    if (seq === seqApercu && r && typeof r.apercu === "string") {
+      $('[data-valeur="apercu_nom"]').textContent = r.apercu;
+    }
   });
   clearTimeout(attenteNom);
   attenteNom = setTimeout(ecrireNom, ATTENTE_NOM_MS);
@@ -616,6 +630,28 @@ function envoyerTouche(e) {
   const touche = { ctrl: e.ctrlKey, maj: e.shiftKey, alt: e.altKey, win: e.metaKey, cle: e.key, code: e.code };
   appeler("reglages_raccourci", { action, saisie: touche }).then(recevoir);
 }
+function afficherModificateurs(e) {
+  const ligne = ligneDe(saisie);
+  if (!ligne) return;
+  const bouton = $('[data-controle="saisie"]', ligne);
+  const tenus = [];
+  if (e.ctrlKey) tenus.push("Ctrl");
+  if (e.shiftKey) tenus.push("Maj");
+  if (e.altKey) tenus.push("Alt");
+  if (e.metaKey) tenus.push("Win");
+  delete bouton.dataset.touches;
+  if (tenus.length) {
+    bouton.replaceChildren(
+      ...tenus.map((t) => {
+        const k = document.createElement("kbd");
+        k.textContent = t;
+        return k;
+      }),
+    );
+  } else {
+    bouton.textContent = "Appuyez…";
+  }
+}
 conteneurRaccourcis.addEventListener("click", (e) => {
   const ligne = e.target.closest('[data-reglage="raccourci"]');
   if (!ligne) return;
@@ -646,22 +682,7 @@ window.addEventListener(
       return;
     }
     if (MODIFICATEURS.includes(e.key)) {
-      const tenus = [];
-      if (e.ctrlKey) tenus.push("Ctrl");
-      if (e.shiftKey) tenus.push("Maj");
-      if (e.altKey) tenus.push("Alt");
-      if (e.metaKey) tenus.push("Win");
-      const bouton = $('[data-controle="saisie"]', ligneDe(saisie));
-      if (tenus.length) {
-        delete bouton.dataset.touches;
-        bouton.replaceChildren(
-          ...tenus.map((t) => {
-            const k = document.createElement("kbd");
-            k.textContent = t;
-            return k;
-          }),
-        );
-      }
+      afficherModificateurs(e);
       return;
     }
     // Windows n'envoie pas d'appui pour Impr. écran, seulement le relâchement.
@@ -673,9 +694,12 @@ window.addEventListener(
 window.addEventListener(
   "keyup",
   (e) => {
-    if (saisie && e.code === "PrintScreen") {
+    if (!saisie) return;
+    if (e.code === "PrintScreen") {
       e.preventDefault();
       envoyerTouche(e);
+    } else if (MODIFICATEURS.includes(e.key)) {
+      afficherModificateurs(e);
     }
   },
   true,

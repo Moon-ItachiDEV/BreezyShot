@@ -361,7 +361,7 @@ function envoyerZone() {
     console.warn("vignette : la carte dépasse la fenêtre");
   }
   const boutons = [...carte.querySelectorAll("button[data-action]")]
-    .filter((b) => b.offsetParent !== null)
+    .filter((b) => b.offsetParent !== null && (!courant.supprimee || b.closest(".annulation")))
     .map((b) => ({ action: b.dataset.action, ...rectPage(b) }));
   appeler("vignette_zone", { id: courant.id, ...z, boutons });
 }
@@ -551,8 +551,10 @@ function partir(m) {
 
 // Infobulles des boutons ronds (450 ms de survol).
 let infobulleMinuterie = 0;
+let infobulleBouton = null;
 function cacherInfobulle() {
   clearTimeout(infobulleMinuterie);
+  infobulleBouton = null;
   infobulle.classList.remove("on");
 }
 function montrerInfobulle(b) {
@@ -562,13 +564,17 @@ function montrerInfobulle(b) {
   const h = infobulle.offsetHeight;
   const gauche = Math.min(innerWidth - l - 4, r.left + r.width / 2 - l / 2);
   infobulle.style.left = `${Math.max(4, gauche)}px`;
-  infobulle.style.top = `${Math.max(4, r.top - h - 6)}px`;
+  const haut = r.top - h - 6;
+  const top = haut >= 4 ? haut : Math.min(innerHeight - h - 4, r.bottom + 6);
+  infobulle.style.top = `${Math.max(4, top)}px`;
   infobulle.classList.add("on");
 }
 carte.addEventListener("pointerover", (e) => {
   const b = e.target instanceof Element ? e.target.closest("[data-infobulle]") : null;
   if (!b || courant?.supprimee) return cacherInfobulle();
-  clearTimeout(infobulleMinuterie);
+  if (b === infobulleBouton) return;
+  cacherInfobulle();
+  infobulleBouton = b;
   infobulleMinuterie = setTimeout(() => montrerInfobulle(b), 450);
 });
 carte.addEventListener("pointerleave", cacherInfobulle);

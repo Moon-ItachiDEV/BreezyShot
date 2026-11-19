@@ -149,8 +149,8 @@ const charge = (o = {}) => ({ id: 5, coin: 'bas_gauche', retrait: { haut: 0, bas
   verifier(JSON.stringify(await visibles(p)) === JSON.stringify(['annuler']), '5 supprimée : seul Annuler', JSON.stringify(await visibles(p)));
   const zones5 = await appels(p, 'vignette_zone');
   const derniere5 = zones5[zones5.length - 1]?.[1];
-  verifier(zones5.length > zonesAvant && derniere5 && derniere5.boutons.some(b => b.action === 'annuler'),
-    '5 supprimée : vignette_zone renvoyé, avec « annuler »', JSON.stringify(derniere5 && derniere5.boutons.map(b => b.action)));
+  verifier(zones5.length > zonesAvant && derniere5 && JSON.stringify(derniere5.boutons.map(b => b.action)) === JSON.stringify(['annuler']),
+    '5 supprimée : vignette_zone renvoyé avec uniquement « annuler »', JSON.stringify(derniere5 && derniere5.boutons.map(b => b.action)));
   await p.screenshot({ path: `${SORTIE}/vignette-supprimee-clair.png` });
   await emettre(p, 'vignette:supprimee', { id: 5, oui: false });
   await p.waitForTimeout(450);
@@ -209,6 +209,22 @@ const charge = (o = {}) => ({ id: 5, coin: 'bas_gauche', retrait: { haut: 0, bas
     await prete(p, charge({ coin, retrait }));
     z = (await appels(p, 'vignette_zone'))[0]?.[1];
     verifier(z && attendu(z), `8 ${coin} (retrait en pixels réels à 150 %)`, JSON.stringify(z && [z.x, z.y, z.largeur, z.hauteur]));
+    if (coin === 'haut_gauche') {
+      await emettre(p, 'vignette:entrer', { id: 5 });
+      await emettre(p, 'vignette:survol', { id: 5, dedans: true });
+      await p.waitForTimeout(350);
+      const fb = await rect(p, '[data-action=fermer]');
+      await p.mouse.move(fb.x + fb.l / 2, fb.y + fb.h / 2);
+      await p.waitForTimeout(550);
+      const tip = await p.evaluate(() => {
+        const t = document.getElementById('infobulle');
+        const b = document.querySelector('[data-action=fermer]').getBoundingClientRect();
+        const r = t.getBoundingClientRect();
+        return { visible: t.classList.contains('on'), texte: t.textContent, top: r.top, btnBottom: b.bottom };
+      });
+      verifier(tip.visible && tip.texte === 'Fermer' && tip.top >= tip.btnBottom,
+        '8 haut_gauche : infobulle basculée sous le bouton du haut', JSON.stringify(tip));
+    }
     if (coin === 'haut_droite') {
       await emettre(p, 'vignette:entrer', { id: 5 });
       await p.waitForTimeout(40);

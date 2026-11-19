@@ -261,9 +261,17 @@ function ajusterToile() {
   ed.vue.dpr = dpr;
   placer();
 }
-matchMedia(`(resolution: ${window.devicePixelRatio}dppx)`).addEventListener?.("change", () =>
-  ajusterToile(),
-);
+function suivreDpr() {
+  matchMedia(`(resolution: ${window.devicePixelRatio}dppx)`).addEventListener?.(
+    "change",
+    () => {
+      ajusterToile();
+      suivreDpr();
+    },
+    { once: true },
+  );
+}
+suivreDpr();
 
 // Zone utile de la scène pour l'image ajustée (pixels CSS) : les réserves de la maquette
 // (reserve(), piste b), au-dessus du socle d'annotation.
@@ -405,6 +413,7 @@ function optionsVue() {
   if (ed.gommes?.size) options.gommes = ed.gommes;
   // Sans poignées (stylo, surligneur, gomme en main), une flèche choisie reçoit un cadre.
   if (ed.outils && !ed.outils.poignees()) options.cadres = true;
+  if (ed.h) options.version = ed.h.version;
   return options;
 }
 function peindre() {

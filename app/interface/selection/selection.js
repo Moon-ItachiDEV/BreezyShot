@@ -712,8 +712,11 @@ addEventListener(
       planifier(); // défilante : de nouveau le contour sous la pointe
       return;
     }
-    // Rien n'est redessiné : le cœur cache la fenêtre (en mode défilante, il la garde
-    // jusqu'à la fenêtre de contrôle, comme en mode film : la zone reste telle quelle).
+    // Rien n'est redessiné ensuite : le cœur cache la fenêtre (en mode défilante, il la garde
+    // jusqu'à la fenêtre de contrôle, comme en mode film : on pose donc le dernier rectangle).
+    if (mode === "defilante" || mode === "film") {
+      poserZone(Math.min(a.x, b.x), Math.min(a.y, b.y), Math.max(a.x, b.x) + 1, Math.max(a.y, b.y) + 1);
+    }
     const ms = mode === "defilante" ? FILET_DEFILANTE_MS : mode === "film" ? FILET_FILM_MS : FILET_MS;
     envoyer("selection_terminee", { id, numero, depart: { x: a.x, y: a.y }, arrivee: { x: b.x, y: b.y } }, ms);
   },
@@ -767,6 +770,7 @@ addEventListener(
 
 addEventListener("blur", () => {
   espace = false;
+  maj = false;
 });
 // La taille change : l'échelle n'est plus sûre. Le glisser en cours est abandonné, la page
 // n'est plus prête jusqu'à la charge suivante, et elle mesure de nouveau (puis renvoie

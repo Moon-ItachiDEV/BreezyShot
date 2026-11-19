@@ -294,6 +294,21 @@ const TOTAL = 15519744; // 14,8 Mo
   verifier(await p.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), '13 échelle 1,5 : pas de débordement');
   await p.context().close();
 
+  // 14. Au repos sur l'accueil : aucune boucle requestAnimationFrame inutile.
+  p = await page();
+  await emettre(p, 'installateur:etat', { etat: 'accueil', cause: '', total: TOTAL, direct: false });
+  await p.waitForTimeout(100);
+  const rafs = await p.evaluate(async () => {
+    let n = 0;
+    const orig = window.requestAnimationFrame;
+    window.requestAnimationFrame = (cb) => { n++; return orig.call(window, cb); };
+    await new Promise(ok => setTimeout(ok, 200));
+    window.requestAnimationFrame = orig;
+    return n;
+  });
+  verifier(rafs === 0, '14 accueil au repos : pas de boucle requestAnimationFrame active', String(rafs));
+  await p.context().close();
+
   console.log('ECHECS :', echecs);
   console.log('ERREURS PAGE :', JSON.stringify(erreurs));
   await nav.close(); serveur.close();

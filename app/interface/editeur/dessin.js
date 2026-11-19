@@ -320,9 +320,10 @@ function prendre(nom, l, h) {
 // ne se prend qu'à un rendu qui n'a pas servi à la peinture en cours (sinon une vue pleine
 // d'encres gommées chasserait à chaque peinture ce qu'elle va reposer).
 const MEMOIRE_PX = 16e6;
-const memoire = new Map(); // id → { cle, rendu, px, tour }
+const memoire = new Map(); // id → { geom, emp, version, ref, rendu, px, tour }
 let memoirePx = 0;
 let tour = 0; // peintures de la vue
+let versionVue = null; // version du document pendant peindreVue (null hors vue)
 // Cadre de l'image dans la toile, en px de la toile [x0, y0, x1, y1] (posé par la vue et
 // l'export le temps de dessiner les objets) : le calque d'une encre gommée s'y borne.
 let bornes = null;
@@ -340,12 +341,83 @@ function placer(px) {
   }
   return memoirePx + px <= MEMOIRE_PX;
 }
+function purgerMemoire(doc) {
+  if (!memoire.size) return;
+  const actifs = new Set();
+  for (const o of doc.objets) {
+    if (o.gommes?.length) actifs.add(o.id);
+  }
+  for (const id of [...memoire.keys()]) {
+    if (!actifs.has(id)) oublier(id);
+  }
+}
 export function relacherCalque() {
   for (const nom of Object.keys(travail)) {
     if (travail[nom]) travail[nom].width = travail[nom].height = 0;
     travail[nom] = null;
   }
   for (const id of [...memoire.keys()]) oublier(id);
+}
+
+// Empreinte 64 bits sans allocation d'une encre et de ses passages de gomme.
+const _f64 = new Float64Array(1);
+const _u32 = new Uint32Array(_f64.buffer);
+function empreinteObjet(o) {
+  let h1 = 0x811c9dc5;
+  let h2 = 0x9e3779b1;
+  const meler = (v) => {
+    h1 = Math.imul(h1 ^ v, 0x01000193);
+    h2 = Math.imul(h2 ^ (v + 0x9e3779b9), 0x85ebca6b);
+  };
+  const texte = (s) => {
+    if (!s) {
+      meler(0);
+      return;
+    }
+    meler(s.length);
+    for (let i = 0; i < s.length; i++) meler(s.charCodeAt(i));
+  };
+  const num = (n) => {
+    if (n === undefined || n === null) {
+      meler(0x7fffffff);
+      return;
+    }
+    _f64[0] = n;
+    meler(_u32[0]);
+    meler(_u32[1]);
+  };
+  texte(o.type);
+  texte(o.couleur);
+  num(o.opacite);
+  num(o.epaisseur);
+  meler(o.plein ? 1 : 0);
+  num(o.arrondi);
+  meler(o.double ? 1 : 0);
+  num(o.x1);
+  num(o.y1);
+  num(o.x2);
+  num(o.y2);
+  num(o.cx);
+  num(o.cy);
+  if (o.points) {
+    meler(o.points.length);
+    for (const p of o.points) {
+      num(p[0]);
+      num(p[1]);
+    }
+  }
+  if (o.gommes) {
+    meler(o.gommes.length);
+    for (const g of o.gommes) {
+      num(g.largeur);
+      meler(g.points.length);
+      for (const p of g.points) {
+        num(p[0]);
+        num(p[1]);
+      }
+    }
+  }
+  return `${h1 >>> 0}:${h2 >>> 0}`;
 }
 
 // Efface de `k` les passages de gomme : traits ronds, en ligne brisée (celle que le geste a
@@ -392,14 +464,27 @@ function dessinerGomme(c, doc, o, gommes, garder) {
   const y1 = Math.min(by1 + marge, Math.ceil(m.f + (b.y + b.hauteur) * m.d) + 1);
   const l = x1 - x0, h = y1 - y0;
   if (l <= 0 || h <= 0) return;
-  const cle = garder ? JSON.stringify([o, m.a, m.d, m.e, m.f, bx0, by0, bx1, by1]) : "";
+  const geom = garder ? `${m.a}|${m.d}|${m.e}|${m.f}|${bx0}|${by0}|${bx1}|${by1}` : "";
   const vu = garder ? memoire.get(o.id) : null;
-  let rendu;
-  if (vu && vu.cle === cle) {
-    vu.tour = tour;
-    rendu = vu.rendu;
-  } else {
+  let rendu = null;
+  let emp = "";
+  if (vu && vu.geom === geom) {
+    if (versionVue !== null && vu.version === versionVue && vu.ref === o) {
+      vu.tour = tour;
+      rendu = vu.rendu;
+    } else {
+      emp = empreinteObjet(o);
+      if (vu.emp === emp) {
+        vu.version = versionVue;
+        vu.ref = o;
+        vu.tour = tour;
+        rendu = vu.rendu;
+      }
+    }
+  }
+  if (!rendu) {
     if (vu) oublier(o.id);
+    if (garder && !emp) emp = empreinteObjet(o);
     const k = prendre("calque", l, h);
     k.save();
     k.setTransform(m.a, 0, 0, m.d, m.e - x0, m.f - y0);
@@ -423,7 +508,7 @@ function dessinerGomme(c, doc, o, gommes, garder) {
     r.shadowColor = "transparent";
     rendu = r.canvas;
     if (garde) {
-      memoire.set(o.id, { cle, rendu, px: l * h, tour });
+      memoire.set(o.id, { geom, emp, version: versionVue, ref: o, rendu, px: l * h, tour });
       memoirePx += l * h;
     }
   }
@@ -799,13 +884,16 @@ export function peindreVue(ctx, doc, fond, vue, selection, options = {}) {
   const gommes = options.gommes || null;
   bornes = [Math.max(0, x0), Math.max(0, y0), Math.min(c.canvas.width, x1),
     Math.min(c.canvas.height, y1)];
+  versionVue = options.version ?? null;
   try {
     for (const o of doc.objets) {
       if (o.id !== options.cacher) dessinerObjet(c, doc, o, gommes?.get(o.id), true);
     }
     if (ajout && ajout.type !== "masque") dessinerObjet(c, doc, ajout);
+    purgerMemoire(doc);
   } finally {
     bornes = null;
+    versionVue = null;
   }
   peindreVoile(c, projecteurs(doc.objets, ajout, options.cacher), doc.largeur, doc.hauteur);
   c.restore();

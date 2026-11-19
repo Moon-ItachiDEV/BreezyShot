@@ -786,6 +786,27 @@ async function partieDocument() {
       && l[0][0] === 0 && l[11][1] === 10 && l[1][0] === 0.63, '11 normaliser, lisser',
     JSON.stringify(l));
   }
+  // Régression : ellipse de largeur/hauteur nulle ne produit pas NaN ; gommes sans point ignorées.
+  {
+    const ell = { type: 'ellipse', x1: 50, y1: 50, x2: 50, y2: 50, couleur: '#E5484D',
+      epaisseur: 1, plein: false, opacite: 1 };
+    const ellPleine = { ...ell, plein: true };
+    const okEll = typeof D.touche(ell, { x: 50, y: 50 }, 4) === 'boolean'
+      && typeof D.touche(ellPleine, { x: 50, y: 50 }, 4) === 'boolean'
+      && D.touche(ell, { x: 200, y: 200 }, 4) === false;
+    const { doc: docLu } = D.lireDocument(JSON.stringify({
+      version: 1, largeur: 200, hauteur: 150, recadrage: null,
+      objets: [{
+        id: 1, type: 'crayon', points: [[10, 10], [80, 10]], couleur: '#E5484D',
+        epaisseur: 1, opacite: 1,
+        gommes: [{ largeur: 12, points: [] }, { largeur: 12, points: [[40, 10]] }],
+      }],
+    }), 200, 150);
+    const okGomme = docLu && docLu.objets[0].gommes?.length === 1
+      && docLu.objets[0].gommes[0].points.length === 1;
+    verifier(okEll && okGomme, '11b ellipse nulle sans NaN et gommes vides écartées à la lecture',
+      JSON.stringify({ okEll, okGomme, gommes: docLu?.objets[0]?.gommes }));
+  }
 }
 
 // ---------- partie 2 : dessin.js dans Chromium ----------

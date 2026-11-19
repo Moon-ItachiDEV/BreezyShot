@@ -97,14 +97,18 @@ function cibleCourbe(t) {
 }
 
 // --- Écrans --------------------------------------------------------------------------------
+let tourEcran = 0;
 function show(n) {
+  tourEcran++;
   steps.forEach((s, i) => { s.hidden = i !== n; s.classList.remove("in-r", "out-l"); });
   cur = n; void steps[n].offsetWidth; steps[n].classList.add("in-r");
 }
 function go(n) {
+  const tour = ++tourEcran;
   const a = steps[cur], b = steps[n];
   a.classList.remove("in-r"); a.classList.add("out-l");
   later(() => {
+    if (tour !== tourEcran) return;
     a.hidden = true; a.classList.remove("out-l");
     b.hidden = false; b.classList.remove("in-r"); void b.offsetWidth; b.classList.add("in-r");
     cur = n;
@@ -112,18 +116,39 @@ function go(n) {
 }
 
 // --- Moulinet piloté image par image -------------------------------------------------------
-let angle = 0, vel = 0, spinning = false, settle = null;
+let angle = 0, vel = 0, spinning = false, settle = null, raf = 0;
 const backOut = (u) => { const c1 = 1.3, c3 = c1 + 1; return 1 + c3 * Math.pow(u - 1, 3) + c1 * Math.pow(u - 1, 2); };
+function majBarre() {
+  const px = Math.round(p * BARRE_PX * 100) / 100;
+  if (px === shown) return;
+  shown = px;
+  fill.style.width = (p * 100) + "%";
+  pbar.setAttribute("aria-valuenow", Math.round(p * 100));
+  pctEl.textContent = Math.floor(p * 100) + "\u00a0%";
+  const mo = (v) => (v / (1 << 20)).toFixed(1).replace(".", ",");
+  moEl.textContent = `${mo(p * total)}\u00a0Mo sur ${mo(total)}\u00a0Mo`;
+}
+function animer() {
+  if (raf) return;
+  lastFrame = performance.now();
+  raf = requestAnimationFrame(frame);
+}
 function stopSpin() {
   spinning = false;
   if (rm()) { vel = 0; return; }
   const cible = Math.ceil((angle + Math.max(60, vel * 0.09)) / 90) * 90;
   settle = { t0: performance.now(), d: D.arretMoulinet, a0: angle, da: cible - angle }; vel = 0;
+  animer();
 }
 function frame(t) {
-  const dt = Math.min(0.05, (t - lastFrame) / 1000); lastFrame = t;
+  raf = 0;
+  const dt = Math.max(0, Math.min(0.05, (t - lastFrame) / 1000)); lastFrame = t;
   if (spinning) { vel += (900 - vel) * Math.min(1, dt * 2.2); angle += vel * dt; }
-  else if (settle) { const u = Math.min(1, (t - settle.t0) / settle.d); angle = settle.a0 + settle.da * backOut(u); if (u >= 1) { settle = null; angle %= 360; } }
+  else if (settle) {
+    const u = Math.max(0, Math.min(1, (t - settle.t0) / settle.d));
+    angle = settle.a0 + settle.da * backOut(u);
+    if (u >= 1) { settle = null; angle %= 360; }
+  }
   const g = blades();
   if (g) g.setAttribute("transform", `rotate(${angle.toFixed(2)} 128 128)`);
   if (etat === "installing") {
@@ -136,21 +161,12 @@ function frame(t) {
     if (pret && p > 0.997) p = 1;
     if (pret && p >= 1) finir();
   }
-  const px = Math.round(p * BARRE_PX * 100) / 100;
-  if (px !== shown) {
-    shown = px;
-    fill.style.width = (p * 100) + "%";
-    pbar.setAttribute("aria-valuenow", Math.round(p * 100));
-    pctEl.textContent = Math.floor(p * 100) + "\u00a0%";
-    const mo = (v) => (v / (1 << 20)).toFixed(1).replace(".", ",");
-    moEl.textContent = `${mo(p * total)}\u00a0Mo sur ${mo(total)}\u00a0Mo`;
-  }
-  requestAnimationFrame(frame);
+  majBarre();
+  if (spinning || settle || etat === "installing") raf = requestAnimationFrame(frame);
 }
-requestAnimationFrame(frame);
 
 // --- Parcours ------------------------------------------------------------------------------
-function accueil(t) { total = t; reel = 0; pret = false; p = 0; elapsed = 0; shown = -1; set("idle"); show(0); $("#install").focus(); }
+function accueil(t) { total = t; reel = 0; pret = false; p = 0; elapsed = 0; shown = -1; majBarre(); set("idle"); show(0); $("#install").focus(); }
 
 function installer() {
   if (etat !== "idle") return;
@@ -161,8 +177,9 @@ function installer() {
   }, rm() ? D.reduite : D.versProgression);
 }
 function lancerBarre() {
-  reel = 0; pret = false; p = 0; elapsed = 0; shown = -1;
+  reel = 0; pret = false; p = 0; elapsed = 0; shown = -1; majBarre();
   set("installing"); spinning = !rm(); settle = null;
+  animer();
 }
 
 function erreur(texte) {
@@ -174,7 +191,7 @@ function erreur(texte) {
 
 function finir() {
   if (etat === "done" || etat === "flying" || etat === "closing-ring") return;
-  set("closing-ring"); stopSpin(); p = 1;
+  set("closing-ring"); stopSpin(); p = 1; majBarre();
   laterEn("closing-ring", () => {
     go(2); set("done");
     laterEn("done", () => $("#done").focus(), D.focus);
@@ -199,9 +216,15 @@ function envol(duree) {
 
 function fermer() {
   set("closed");
+  spinning = false;
+  settle = null;
+  if (raf) { cancelAnimationFrame(raf); raf = 0; }
   timers.forEach(clearTimeout);
-  win.animate([{ opacity: 1, transform: "scale(1)" }, { opacity: 0, transform: "scale(.96)" }],
-    { duration: rm() ? D.reduite : D.sortie, fill: "forwards" }).onfinish = () => win.classList.add("gone");
+  win.animate(
+    rm() ? [{ opacity: 1 }, { opacity: 0 }]
+      : [{ opacity: 1, transform: "scale(1)" }, { opacity: 0, transform: "scale(.96)" }],
+    { duration: rm() ? D.reduite : D.sortie, fill: "forwards" }
+  ).onfinish = () => win.classList.add("gone");
 }
 
 // --- Liaison au cœur -----------------------------------------------------------------------
@@ -230,7 +253,7 @@ $("#min").onclick = () => action("reduire");
 
 function recevoirEtat(d) {
   if (!d || typeof d !== "object") return;
-  total = Number(d.total) || total; shown = -1;
+  total = Number(d.total) || total; shown = -1; majBarre();
   if (d.etat === "accueil") accueil(total);
   else if (d.etat === "installation") { if (etat === "idle") installer(); }
   else if (d.etat === "erreur") erreur(String(d.cause || ""));

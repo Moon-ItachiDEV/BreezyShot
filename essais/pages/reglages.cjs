@@ -204,6 +204,8 @@ const SANS_VIGNETTE = { ...VUE, lignes: ['copier', 'dossier', 'modele_nom', 'the
     verifier(JSON.stringify((await dernier(p, 'reglages_changer'))[1]) === JSON.stringify({ changement: { cle: 'vignette_coin', valeur: 'haut_droite' } }), '4 coin à la souris');
     await p.getByRole('radio', { name: 'En bas à gauche' }).focus(); await p.keyboard.press('ArrowRight'); await p.waitForTimeout(50);
     verifier(JSON.stringify((await dernier(p, 'reglages_changer'))[1]) === JSON.stringify({ changement: { cle: 'vignette_coin', valeur: 'bas_droite' } }), '4 coin aux flèches');
+    await p.getByRole('radio', { name: 'En haut à gauche' }).focus(); await p.keyboard.press('ArrowDown'); await p.waitForTimeout(50);
+    verifier(JSON.stringify((await dernier(p, 'reglages_changer'))[1]) === JSON.stringify({ changement: { cle: 'vignette_coin', valeur: 'bas_gauche' } }), '4 coin grille 2×2 : flèche bas passe en bas à gauche');
     await onglet(p, 'Général');
     await p.getByRole('radio', { name: 'Sombre' }).click(); await p.waitForTimeout(50);
     verifier(JSON.stringify((await dernier(p, 'reglages_changer'))[1]) === JSON.stringify({ changement: { cle: 'theme', valeur: 'sombre' } }), '4 thème Sombre');
@@ -265,6 +267,10 @@ const SANS_VIGNETTE = { ...VUE, lignes: ['copier', 'dossier', 'modele_nom', 'the
     verifier(!a.some(x => x[0] === 'reglages_raccourci'), '7 modificateurs seuls : rien n’est envoyé');
     const tenus = await p.$$eval('[data-action="plein_ecran"] [data-controle="saisie"] kbd', ks => ks.map(k => k.textContent));
     verifier(JSON.stringify(tenus) === JSON.stringify(['Ctrl', 'Maj']), '7 modificateurs tenus montrés', JSON.stringify(tenus));
+    await p.keyboard.up('Shift'); await p.keyboard.up('Control'); await p.waitForTimeout(30);
+    const relache = await p.$eval('[data-action="plein_ecran"] [data-controle="saisie"]', e => e.textContent);
+    verifier(relache === 'Appuyez…', '7 modificateurs relâchés : retour à « Appuyez… »', JSON.stringify(relache));
+    await p.keyboard.down('Control'); await p.keyboard.down('Shift'); await p.waitForTimeout(20);
     // Une touche « A » à la place physique de Q (clavier AZERTY).
     await p.evaluate(() => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'A', code: 'KeyQ', ctrlKey: true, shiftKey: true, bubbles: true })));
     await p.keyboard.up('Shift'); await p.keyboard.up('Control');

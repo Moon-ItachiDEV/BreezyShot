@@ -40,6 +40,7 @@ const titre = el.querySelector(".titre");
 const detail = el.querySelector(".detail");
 const boutons = el.querySelector(".boutons");
 const reduit = matchMedia("(prefers-reduced-motion: reduce)");
+const estReduit = (m) => reduit.matches || m?.reduites === true || "reduites" in document.documentElement.dataset;
 const GENRES = ["reussite", "info", "erreur"];
 
 // Pictogrammes : constantes seulement.
@@ -116,6 +117,7 @@ function valider(m) {
     detail: !simple && typeof m.detail === "string" ? m.detail : "",
     actions,
     tenir: m.tenir === true,
+    reduites: m.reduites === true,
     // Absent, null ou invalide : le message reste jusqu'au clic (règle de la 0.4).
     dureeMs: !simple && dureeValide ? m.duree_ms : 0,
   };
@@ -200,15 +202,16 @@ export function afficher(brut) {
   }
   el.hidden = false;
 
-  const entree = reduit.matches
+  const r = estReduit(lui);
+  const entree = r
     ? [{ opacity: 0 }, { opacity: 1 }]
     : [
         { opacity: 0, transform: `translateY(${jeton("--bandeau-entree-decalage")})` },
         { opacity: 1, transform: "none" },
       ];
   lui.animation = el.animate(entree, {
-    duration: duree(reduit.matches ? "--duree-reduite" : "--duree-bandeau-entree"),
-    easing: reduit.matches ? "linear" : jeton("--courbe-ressort"),
+    duration: duree(r ? "--duree-reduite" : "--duree-bandeau-entree"),
+    easing: r ? "linear" : jeton("--courbe-ressort"),
   });
   envoyerZone();
 
@@ -225,7 +228,7 @@ function cacher(message) {
   message.ferme = true;
   el.classList.add("sortie");
   const fin = el.animate([{ opacity: 1 }, { opacity: 0 }], {
-    duration: duree(reduit.matches ? "--duree-reduite" : "--duree-sortie"),
+    duration: duree(estReduit(message) ? "--duree-reduite" : "--duree-sortie"),
     fill: "forwards",
   });
   message.animation = fin;

@@ -537,7 +537,7 @@ function toucheForme(o, p, tol) {
   }
   if (o.type === "ellipse") {
     const rx = b.largeur / 2, ry = b.hauteur / 2;
-    const d = Math.hypot((p.x - b.x - rx) / rx, (p.y - b.y - ry) / ry);
+    const d = Math.hypot((p.x - b.x - rx) / (rx || 1), (p.y - b.y - ry) / (ry || 1));
     return o.plein ? d <= 1.05 : Math.abs(d - 1) * Math.min(rx, ry) < Math.max(trait(o), tol);
   }
   return true;
@@ -988,7 +988,8 @@ function gommesLues(v, budget) {
   for (const g of v) {
     if (sortie.length >= BREEZY_GOMMES_MAX || budget.points <= 0) break;
     if (g && typeof g === "object") {
-      sortie.push({ largeur: nombre(g.largeur, 1, 2000, 10), points: pointsLus(g.points, budget) });
+      const points = pointsLus(g.points, budget);
+      if (points.length) sortie.push({ largeur: nombre(g.largeur, 1, 2000, 10), points });
     }
   }
   return sortie.length ? sortie : undefined;

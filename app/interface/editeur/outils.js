@@ -71,7 +71,8 @@ export function installerOutils(ed) {
     }
     return null;
   }
-  // L'équerre d'un coin de l'image sous le pointeur (zone de prise de 22 px), ou null.
+  // L'équerre d'un coin de l'image sous le pointeur (zone de prise de 22 px, sans voler
+  // les clics franchement à l'intérieur de l'image), ou null.
   function equerreSous(e) {
     if (!ed.h || !ed.fond) return null;
     const r = toile.getBoundingClientRect();
@@ -82,12 +83,14 @@ export function installerOutils(ed) {
     const [ax, ay] = versToile(k.x, k.y);
     const [bx, by] = versToile(k.x + k.largeur, k.y + k.hauteur);
     const prise = jetonNombre("editeur-equerre-prise") * dpr;
-    for (const [nom, x, y] of [
-      ["nw", ax, ay],
-      ["ne", bx, ay],
-      ["sw", ax, by],
-      ["se", bx, by],
+    const interieur = 6 * dpr;
+    for (const [nom, x, y, sx, sy] of [
+      ["nw", ax, ay, 1, 1],
+      ["ne", bx, ay, -1, 1],
+      ["sw", ax, by, 1, -1],
+      ["se", bx, by, -1, -1],
     ]) {
+      if (sx * (mx - x) > interieur && sy * (my - y) > interieur) continue;
       if (Math.hypot(mx - x, my - y) < prise) return nom;
     }
     return null;
@@ -438,14 +441,24 @@ export function installerOutils(ed) {
     if (g.mode === "gomme") {
       placerRond(e);
       const seuil = jetonNombre("editeur-deplacement-seuil");
-      if (Math.hypot(e.clientX - g.ecran[0], e.clientY - g.ecran[1]) >= seuil) g.bouge = true;
-      // Posée sur un objet entier, elle ne gomme les encres qu'une fois vraiment partie : un
-      // clic qui tremble enlève l'objet sans trouer ce qu'il couvrait.
-      if (g.entier != null && !g.bouge) return;
-      if (Math.hypot(p.x - g.p.x, p.y - g.p.y) < PAS_GOMME / echelleCss()) return;
-      passer(g.p, p);
-      g.p = p;
-      ed.dessiner();
+      const pasMin = PAS_GOMME / echelleCss();
+      const evs = e.getCoalescedEvents?.();
+      const liste = evs?.length ? evs : [e];
+      let change = false;
+      for (const ev of liste) {
+        if (!g.bouge && Math.hypot(ev.clientX - g.ecran[0], ev.clientY - g.ecran[1]) >= seuil) {
+          g.bouge = true;
+        }
+        // Posée sur un objet entier, elle ne gomme les encres qu'une fois vraiment partie : un
+        // clic qui tremble enlève l'objet sans trouer ce qu'il couvrait.
+        if (g.entier != null && !g.bouge) continue;
+        const q = ev === e ? p : versImage(ev);
+        if (Math.hypot(q.x - g.p.x, q.y - g.p.y) < pasMin) continue;
+        passer(g.p, q);
+        g.p = q;
+        change = true;
+      }
+      if (change) ed.dessiner();
       return;
     }
     if (g.mode === "deplacer") {
@@ -472,9 +485,18 @@ export function installerOutils(ed) {
     const c = ed.enCours;
     if (!c) return;
     if (c.points) {
-      const l = g.libre[g.libre.length - 1];
-      const avance = Math.hypot(p.x - l[0], p.y - l[1]) > 2 / echelleCss();
-      if (avance) g.libre.push([p.x, p.y]);
+      const pasMin = 2 / echelleCss();
+      const evs = e.getCoalescedEvents?.();
+      const liste = evs?.length ? evs : [e];
+      let avance = false;
+      for (const ev of liste) {
+        const q = ev === e ? p : versImage(ev);
+        const l = g.libre[g.libre.length - 1];
+        if (Math.hypot(q.x - l[0], q.y - l[1]) > pasMin) {
+          g.libre.push([q.x, q.y]);
+          avance = true;
+        }
+      }
       // Maj tenue, ou trait redressé : un segment du départ à la pointe (Maj : par 15°).
       if (e.shiftKey || g.droit) {
         const d = g.libre[0];

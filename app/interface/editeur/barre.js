@@ -548,7 +548,7 @@ export function installerBarre(ed) {
       b.classList.remove("secoue");
       void b.offsetWidth;
       b.classList.add("secoue");
-      message("Fais-le glisser vers une appli", true);
+      message("Faites-le glisser vers une appli", true);
     });
     b.addEventListener("animationend", () => b.classList.remove("secoue"));
     return b;

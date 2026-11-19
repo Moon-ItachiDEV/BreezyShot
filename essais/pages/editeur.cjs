@@ -2177,7 +2177,7 @@ const CHARGE = {
       document.querySelector('#message span').textContent,
     ]);
     verifier(
-      JSON.stringify(r3) === '[1,true,"Fais-le glisser vers une appli"]',
+      JSON.stringify(r3) === '[1,true,"Faites-le glisser vers une appli"]',
       '13 simple clic : aucun export, le message dit quoi faire',
       JSON.stringify(r3),
     );
@@ -3525,6 +3525,17 @@ const CHARGE = {
       x1 > 380 && x1 <= 388.5,
       '22 objet tiré hors de l’image : 12 px y restent',
       String(x1),
+    );
+    // Un clic à 14 px dedans du coin haut gauche dessine (ne saisit pas l'équerre de recadrage).
+    await outil(p, 'Forme');
+    const nbAvant = (await objets(p, 'rectangle')).length;
+    await glisser(p, [14, 14], [70, 60]);
+    const rec = await p.evaluate(() => __ed.h.doc.recadrage);
+    const nbApres = (await objets(p, 'rectangle')).length;
+    verifier(
+      rec === null && nbApres === nbAvant + 1,
+      '22 clic à 14 px dans le coin : dessine une forme sans déclencher le recadrage',
+      JSON.stringify({ rec, nbAvant, nbApres }),
     );
     await fin(p, '22');
   }
