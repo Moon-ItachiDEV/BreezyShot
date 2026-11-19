@@ -630,6 +630,22 @@ input {
 .outil[data-encre][aria-pressed="true"]::after {
   opacity: 1;
 }
+.outil[data-panneau="fond"]::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  bottom: 4px;
+  width: 5px;
+  height: 5px;
+  margin-left: -2.5px;
+  border-radius: 50%;
+  background: var(--accent);
+  opacity: 0;
+  transition: opacity var(--duree-editeur-survol);
+}
+.outil[data-panneau="fond"][data-actif]::after {
+  opacity: 1;
+}
 
 /* Réglages : variantes, tailles, couleurs, opacité. */
 .rg-zone {
@@ -770,6 +786,25 @@ input {
   background:
     radial-gradient(circle, var(--c) 0 46%, transparent 50%),
     conic-gradient(#e5484d, #ffd43b, #30a46c, #0090ff, #8e4ec6, #e5484d);
+}
+.rg-sans i {
+  background:
+    linear-gradient(
+      -45deg,
+      transparent 43%,
+      var(--editeur-danger) 43%,
+      var(--editeur-danger) 57%,
+      transparent 57%
+    ),
+    var(--editeur-pop);
+}
+.rg-txt {
+  min-width: 28px;
+  font-size: 12px;
+  font-weight: 600;
+}
+.rg-coin {
+  min-width: 30px;
 }
 .rg-op {
   display: flex;
@@ -948,7 +983,7 @@ input {
   left: 50%;
   bottom: 12px;
   z-index: 5;
-  width: min(624px, calc(100% - 24px));
+  width: min(672px, calc(100% - 24px));
   transform: translateX(-50%);
   display: grid;
   border-radius: 20px;
@@ -1005,6 +1040,16 @@ input {
   }
   .s-b {
     padding: 0 8px;
+  }
+}
+/* Très étroite (640 px) : les boutons du socle se resserrent pour tenir sans défiler. */
+@container fen (max-width: 700px) {
+  .c-outils .outil {
+    width: 40px;
+    height: 40px;
+  }
+  .c-outils .filet {
+    margin: 0 4px;
   }
 }
 

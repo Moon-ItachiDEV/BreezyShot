@@ -164,7 +164,7 @@ let cleCadre = "";
 function apresChangement() {
   const doc = ed.h.doc;
   ed.selection = ed.selection.filter((id) => doc.objets.some((o) => o.id === id));
-  const c = modele.cadre(doc);
+  const c = modele.cadreExport(doc);
   const cle = `${c.x},${c.y},${c.largeur},${c.hauteur}`;
   if (cle !== cleCadre) {
     cleCadre = cle;
@@ -290,7 +290,7 @@ function zoneUtile() {
 
 ed.echelleAjuster = () => {
   if (!ed.h) return 1;
-  const c = modele.cadre(ed.h.doc);
+  const c = modele.cadreExport(ed.h.doc);
   const z = zoneUtile();
   const dpr = ed.vue.dpr;
   return Math.min((z.al * dpr) / c.largeur, (z.ah * dpr) / c.hauteur, 1);
@@ -300,7 +300,7 @@ ed.echelleAjuster = () => {
 function placer() {
   if (!ed.h) return;
   const dpr = ed.vue.dpr;
-  const c = modele.cadre(ed.h.doc);
+  const c = modele.cadreExport(ed.h.doc);
   let { x, y, echelle } = ed.cadrage;
   if (ed.cadrage.mode === "ajuster") {
     const z = zoneUtile();
@@ -345,7 +345,7 @@ ed.ajuster = () => {
   envoyerVue();
 };
 ed.tailleReelle = () => {
-  const c = modele.cadre(ed.h.doc);
+  const c = modele.cadreExport(ed.h.doc);
   const z = zoneUtile();
   const dpr = ed.vue.dpr;
   const x = ((z.l - c.largeur / dpr) / 2) * dpr - c.x;
@@ -377,7 +377,7 @@ function envoyerVue() {
   clearTimeout(minuterieVue);
   minuterieVue = setTimeout(() => {
     if (!ed.charge || !ed.h) return;
-    const c = modele.cadre(ed.h.doc);
+    const c = modele.cadreExport(ed.h.doc);
     const { x, y, echelle, dpr } = ed.vue;
     // `ed.vue` est dans la toile ; la toile commence sous la barre du haut.
     const t = toile.getBoundingClientRect();
@@ -422,9 +422,9 @@ function peindre() {
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.clearRect(0, 0, toile.width, toile.height);
   if (!ed.h || !ed.fond) return;
-  // Pendant un recadrage, toute l'image à l'échelle du début du geste, coins droits.
+  // Pendant un recadrage, toute l'image à l'échelle du début du geste, coins droits, sans fond.
   const recadrage = ed.outils?.recadrageEnCours();
-  const doc = recadrage ? { ...ed.h.doc, recadrage: null } : ed.h.doc;
+  const doc = recadrage ? { ...ed.h.doc, recadrage: null, fond: null } : ed.h.doc;
   const options = optionsVue();
   options.rayon = recadrage ? 0 : jetonNombre("editeur-image-rayon") * ed.vue.dpr;
   dessin.peindreVue(ctx, doc, ed.fond, ed.vue, recadrage ? [] : ed.selection, options);
@@ -528,7 +528,7 @@ async function charger(charge) {
   ed.ctxFond = ed.fond.getContext("2d", { willReadFrequently: true });
   repeindreFond(true);
   cleCadre = (() => {
-    const c = modele.cadre(ed.h.doc);
+    const c = modele.cadreExport(ed.h.doc);
     return `${c.x},${c.y},${c.largeur},${c.hauteur}`;
   })();
   ed.barre?.synchroniser();

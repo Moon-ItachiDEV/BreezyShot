@@ -3,9 +3,11 @@
 // prend un `OffscreenCanvas` s'il existe, une estimation sinon), essayé sous Node et dans
 // Chromium (`essais/pages/editeur-modele.cjs`). Formes et formules : celles du design.
 //
-// Document : { largeur, hauteur, objets: Objet[], recadrage: Rect|null, suivant: number }
+// Document : { largeur, hauteur, objets: Objet[], recadrage: Rect|null, fond: Fond|null, suivant: number }
 // Rect : { x, y, largeur, hauteur } ; l'ordre de `objets` est l'ordre de dessin (les masques
 // sont toujours peints sous les autres objets, dans leur ordre entre eux).
+// Fond : null | { actif: true, style: "degrade"|"uni", degrade: 0..5, couleur: "#RRGGBB",
+//                 marge: 0..2, arrondi: 0..2, ombre: boolean }
 // Objet (champ commun `id` entier > 0, `type`) :
 //   fleche     { x1, y1, x2, y2, cx?, cy?, double, couleur, epaisseur, opacite }
 //   rectangle  { x1, y1, x2, y2, couleur, epaisseur, plein, arrondi, opacite }
@@ -39,6 +41,22 @@ export const POLICE = '"Segoe UI Variable Text","Segoe UI",system-ui,-apple-syst
 // dépende pas de `dessin.js`.
 export const TRAITS = [3, 5, 8]; // Fin, Moyen, Épais
 export const TRAITS_SURLIGNEUR = [16, 24, 34];
+// Fond d'éditeur : marges et arrondis en px de l'image. Le dernier palier de `MARGES_FOND`
+// doit correspondre à `MARGE_FOND_MAX` dans `app/coeur/src/application/editeur.rs`.
+export const MARGES_FOND = [32, 56, 88]; // Petite, Moyenne, Grande
+export const ARRONDIS_FOND = [0, 12, 20]; // Droits, Arrondis, Très arrondis
+export const DEGRADES_FOND_NB = 6;
+export const FOND_DEFAUT = {
+  actif: true,
+  style: "degrade",
+  degrade: 0,
+  couleur: "#E8ECF2",
+  marge: 1,
+  arrondi: 1,
+  ombre: true,
+};
+const STYLES_FOND = ["degrade", "uni"];
+const COULEUR = /^#[0-9a-fA-F]{6}$/;
 const PAS_MAX = 200;
 const OCTETS_MAX = 32 * 1024 * 1024; // JSON de l'historique (passé et futur) au plus
 const DECALAGE_COPIE = 16;
@@ -59,7 +77,7 @@ const trait = (o) => TRAITS[o.epaisseur] ?? TRAITS[1];
 const traitSurligneur = (o) => TRAITS_SURLIGNEUR[o.epaisseur] ?? TRAITS_SURLIGNEUR[1];
 
 export function nouveauDocument(largeur, hauteur) {
-  return { largeur, hauteur, objets: [], recadrage: null, suivant: 1 };
+  return { largeur, hauteur, objets: [], recadrage: null, fond: null, suivant: 1 };
 }
 
 // ---------- historique ----------
@@ -931,9 +949,49 @@ export function cadre(doc) {
   return { x, y, largeur: x2 - x, hauteur: y2 - y };
 }
 
-// Aucun objet et aucun recadrage.
+// Normalise un fond d'éditeur (ou rend null s'il est inactif / invalide).
+export function normaliserFond(f) {
+  if (!f || typeof f !== "object" || Array.isArray(f) || f.actif !== true) return null;
+  const style = STYLES_FOND.includes(f.style) ? f.style : FOND_DEFAUT.style;
+  const degrade = typeof f.degrade === "number" && Number.isFinite(f.degrade)
+    ? Math.round(borne(f.degrade, 0, DEGRADES_FOND_NB - 1)) : FOND_DEFAUT.degrade;
+  const couleur = typeof f.couleur === "string" && COULEUR.test(f.couleur)
+    ? f.couleur.toUpperCase() : FOND_DEFAUT.couleur;
+  const marge = typeof f.marge === "number" && Number.isFinite(f.marge)
+    ? Math.round(borne(f.marge, 0, MARGES_FOND.length - 1)) : FOND_DEFAUT.marge;
+  const arrondi = typeof f.arrondi === "number" && Number.isFinite(f.arrondi)
+    ? Math.round(borne(f.arrondi, 0, ARRONDIS_FOND.length - 1)) : FOND_DEFAUT.arrondi;
+  const ombre = typeof f.ombre === "boolean" ? f.ombre : FOND_DEFAUT.ombre;
+  return { actif: true, style, degrade, couleur, marge, arrondi, ombre };
+}
+
+// Pose ou retire le fond d'éditeur (null : sans fond). À appeler dans `modifier`.
+export function changerFond(doc, fond) {
+  doc.fond = normaliserFond(fond);
+}
+
+// Marge en pixels de l'image ajoutée de chaque côté par le fond actif (0 sinon).
+export function margeFond(doc) {
+  if (!doc.fond?.actif) return 0;
+  return MARGES_FOND[doc.fond.marge] ?? MARGES_FOND[1];
+}
+
+// Cadre composé à l'export et affiché dans la scène : le recadrage élargi de la marge du fond.
+export function cadreExport(doc) {
+  const k = cadre(doc);
+  const m = margeFond(doc);
+  return {
+    x: k.x - m,
+    y: k.y - m,
+    largeur: k.largeur + 2 * m,
+    hauteur: k.hauteur + 2 * m,
+    marge: m,
+  };
+}
+
+// Aucun objet, aucun recadrage et aucun fond actif.
 export function vide(doc) {
-  return doc.objets.length === 0 && doc.recadrage === null;
+  return doc.objets.length === 0 && doc.recadrage === null && !doc.fond?.actif;
 }
 
 // ---------- lecture d'un fichier .breezy (0.7.9) ----------
@@ -954,7 +1012,6 @@ const BREEZY_GOMMES_MAX = 2000;
 const BREEZY_TEXTE_MAX = 5000;
 // Coordonnées : un peu au-delà de l'image (un objet peut dépasser un bord).
 const COORD_MAX = 65536;
-const COULEUR = /^#[0-9a-fA-F]{6}$/;
 
 const nombre = (v, min, max, defaut) =>
   typeof v === "number" && Number.isFinite(v) ? borne(v, min, max) : defaut;
@@ -1112,6 +1169,9 @@ export function lireDocument(texte, largeur, hauteur) {
   if (c && typeof c === "object" && !Array.isArray(c)) {
     recadrer(doc, { x: nombre(c.x, 0, largeur, 0), y: nombre(c.y, 0, hauteur, 0),
       largeur: nombre(c.largeur, 0, largeur, 0), hauteur: nombre(c.hauteur, 0, hauteur, 0) });
+  }
+  if (brut.fond && typeof brut.fond === "object" && !Array.isArray(brut.fond)) {
+    changerFond(doc, brut.fond);
   }
   return { doc, ecartes };
 }

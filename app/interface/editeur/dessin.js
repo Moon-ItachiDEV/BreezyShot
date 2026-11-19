@@ -5,12 +5,22 @@
 // poignées et le recadrage en cours sont dessinés par la page, par-dessus la vue.
 
 import {
-  boite, boiteForme, cadre, entreePointe, longueurPointe, mesureTexte, numeroAffiche,
-  policeTexte, POLICE, TRAITS, TRAITS_SURLIGNEUR,
+  ARRONDIS_FOND, boite, boiteForme, cadre, cadreExport, entreePointe, longueurPointe, margeFond,
+  mesureTexte, numeroAffiche, policeTexte, POLICE, TRAITS, TRAITS_SURLIGNEUR,
 } from "./document.js";
 
 // Épaisseurs : valeurs tenues par `document.js` (qui ne dépend pas de ce module).
 export { TRAITS, TRAITS_SURLIGNEUR };
+
+// Six dégradés du fond d'éditeur : [nom, couleur départ, couleur arrivée, angle CSS°].
+export const DEGRADES_FOND = [
+  ["Aurore", "#6366F1", "#EC4899", 135],
+  ["Océan", "#0EA5E9", "#2563EB", 135],
+  ["Crépuscule", "#F97316", "#DB2777", 135],
+  ["Menthe", "#10B981", "#06B6D4", 135],
+  ["Ardoise", "#334155", "#0F172A", 135],
+  ["Sable", "#FDE68A", "#F59E0B", 135],
+];
 
 // Les six de la maquette « Éditeur épuré », dans son ordre.
 export const COULEURS = [
@@ -698,13 +708,96 @@ export function peindreMasques(ctxFond, base, doc) {
   for (const o of doc.objets) if (o.type === "masque") masquer(c, o, doc.largeur, doc.hauteur);
 }
 
-// L'image exportée, à la taille du cadre : { largeur, hauteur, rgba } (Uint8ClampedArray).
-// La toile a la taille de l'image entière, et le cadre en est lu : le lissage des bords d'un
-// tracé par Chromium dépend de la taille de la toile (un trait coupé par son bord ne tombe
-// pas aux mêmes pixels), et l'export recadré doit être au bit près le morceau de l'image
-// entière. La mémoire est celle d'un export sans recadrage.
+// ---------- fond d'éditeur (dégradé / couleur unie, arrondi, ombre portée) ----------
+
+function peindreFond(c, fondCfg, x, y, w, h) {
+  c.save();
+  c.globalAlpha = 1;
+  c.globalCompositeOperation = "source-over";
+  if (fondCfg.style === "uni") {
+    c.fillStyle = fondCfg.couleur || "#E8ECF2";
+  } else {
+    const [, c1, c2, deg] = DEGRADES_FOND[fondCfg.degrade] ?? DEGRADES_FOND[0];
+    const rad = ((deg - 90) * Math.PI) / 180;
+    const dx = Math.cos(rad);
+    const dy = Math.sin(rad);
+    const hl = (Math.abs(w * dx) + Math.abs(h * dy)) / 2;
+    const cx = x + w / 2;
+    const cy = y + h / 2;
+    const g = c.createLinearGradient(cx - dx * hl, cy - dy * hl, cx + dx * hl, cy + dy * hl);
+    g.addColorStop(0, c1);
+    g.addColorStop(1, c2);
+    c.fillStyle = g;
+  }
+  c.fillRect(x, y, w, h);
+  c.restore();
+}
+
+// Ombre portée de la capture sur le fond : découpée en pair-impair hors de la capture
+// arrondie, et remplissage rentré de 1 px de la toile pour ne jamais laisser de frange
+// noire ni teinter les pixels transparents d'une capture.
+function peindreOmbreFond(c, fx0, fy0, fw, fh, x0, y0, iw, ih, r, e) {
+  const d = Math.min(1, iw / 4, ih / 4);
+  c.save();
+  c.globalAlpha = 1;
+  c.globalCompositeOperation = "source-over";
+  c.beginPath();
+  c.rect(fx0, fy0, fw, fh);
+  rectArrondiSuite(c, x0, y0, iw, ih, r);
+  c.clip("evenodd");
+  c.shadowColor = "rgba(8, 12, 24, 0.28)";
+  c.shadowBlur = 32 * e;
+  c.shadowOffsetX = 0;
+  c.shadowOffsetY = 12 * e;
+  c.fillStyle = "#000000";
+  rectArrondi(c, x0 + d, y0 + d, iw - 2 * d, ih - 2 * d, Math.max(0, r - d));
+  c.fill();
+  c.restore();
+}
+
+// L'image exportée, à la taille du cadre (ou élargie de la marge du fond actif) :
+// { largeur, hauteur, rgba } (Uint8ClampedArray). Sans fond, la toile a la taille de
+// l'image entière, et le cadre en est lu : le lissage des bords d'un tracé par Chromium
+// dépend de la taille de la toile, et l'export recadré doit être au bit près le morceau de
+// l'image entière.
 export function composer(doc, fond) {
   const k = cadre(doc);
+  if (doc.fond?.actif) {
+    const m = margeFond(doc);
+    const l = k.largeur + 2 * m;
+    const h = k.hauteur + 2 * m;
+    const r = Math.min(ARRONDIS_FOND[doc.fond.arrondi] ?? ARRONDIS_FOND[1],
+      k.largeur / 2, k.hauteur / 2);
+    const t = typeof document !== "undefined" ? document.createElement("canvas") : toile(l, h);
+    t.width = l;
+    t.height = h;
+    const c = t.getContext("2d", { willReadFrequently: true });
+    c.beginPath();
+    c.rect(0, 0, l, h);
+    c.clip();
+    peindreFond(c, doc.fond, 0, 0, l, h);
+    if (doc.fond.ombre) peindreOmbreFond(c, 0, 0, l, h, m, m, k.largeur, k.hauteur, r, 1);
+    if (r > 0) rectArrondi(c, m, m, k.largeur, k.hauteur, r);
+    else {
+      c.beginPath();
+      c.rect(m, m, k.largeur, k.hauteur);
+    }
+    c.clip();
+    c.imageSmoothingEnabled = false;
+    c.drawImage(fond, k.x, k.y, k.largeur, k.hauteur, m, m, k.largeur, k.hauteur);
+    c.setTransform(1, 0, 0, 1, m - k.x, m - k.y);
+    bornes = [m, m, m + k.largeur, m + k.hauteur];
+    try {
+      for (const o of doc.objets) dessinerObjet(c, doc, o);
+    } finally {
+      bornes = null;
+    }
+    peindreVoile(c, projecteurs(doc.objets), doc.largeur, doc.hauteur);
+    const rgba = c.getImageData(0, 0, l, h).data;
+    t.width = 0;
+    t.height = 0;
+    return { largeur: l, hauteur: h, rgba };
+  }
   // Une toile du document comme la vue quand il y en a un : Chromium ne lisse pas le bord
   // d'une découpe pareil sur un `OffscreenCanvas` (bord des projecteurs).
   const t = typeof document !== "undefined" ? document.createElement("canvas")
@@ -868,15 +961,41 @@ export function peindreVue(ctx, doc, fond, vue, selection, options = {}) {
   c.imageSmoothingEnabled = e < 1;
   c.imageSmoothingQuality = "high";
   const rayon = Math.max(0, options.rayon || 0);
-  if (rayon) {
-    rectArrondi(c, x0, y0, x1 - x0, y1 - y0, rayon);
+  if (doc.fond?.actif) {
+    const ce = cadreExport(doc);
+    const fx0 = Math.round(vue.x + ce.x * e), fy0 = Math.round(vue.y + ce.y * e);
+    const fx1 = Math.round(vue.x + (ce.x + ce.largeur) * e);
+    const fy1 = Math.round(vue.y + (ce.y + ce.hauteur) * e);
+    const fw = fx1 - fx0, fh = fy1 - fy0;
+    const iw = x1 - x0, ih = y1 - y0;
+    const r = Math.min((ARRONDIS_FOND[doc.fond.arrondi] ?? ARRONDIS_FOND[1]) * e,
+      iw / 2, ih / 2);
+    if (rayon) rectArrondi(c, fx0, fy0, fw, fh, rayon);
+    else {
+      c.beginPath();
+      c.rect(fx0, fy0, fw, fh);
+    }
     c.clip();
-  }
-  c.drawImage(fond, k.x, k.y, k.largeur, k.hauteur, x0, y0, x1 - x0, y1 - y0);
-  if (!rayon) {
-    c.beginPath();
-    c.rect(x0, y0, x1 - x0, y1 - y0);
+    peindreFond(c, doc.fond, fx0, fy0, fw, fh);
+    if (doc.fond.ombre) peindreOmbreFond(c, fx0, fy0, fw, fh, x0, y0, iw, ih, r, e);
+    if (r > 0) rectArrondi(c, x0, y0, iw, ih, r);
+    else {
+      c.beginPath();
+      c.rect(x0, y0, iw, ih);
+    }
     c.clip();
+    c.drawImage(fond, k.x, k.y, k.largeur, k.hauteur, x0, y0, iw, ih);
+  } else {
+    if (rayon) {
+      rectArrondi(c, x0, y0, x1 - x0, y1 - y0, rayon);
+      c.clip();
+    }
+    c.drawImage(fond, k.x, k.y, k.largeur, k.hauteur, x0, y0, x1 - x0, y1 - y0);
+    if (!rayon) {
+      c.beginPath();
+      c.rect(x0, y0, x1 - x0, y1 - y0);
+      c.clip();
+    }
   }
   const ajout = options.ajout || null;
   if (ajout && ajout.type === "masque") masqueEnCours(c, doc, fond, ajout, vue);

@@ -377,14 +377,14 @@ const CHARGE = {
       ok &&
         !manque.length &&
         JSON.stringify(barre.rangee) ===
-          '["Annuler","Rétablir","|","Flèche","Forme","Texte","Numéro","|","Stylo","Surligneur","|","Flou","Projecteur","|","Gomme"]' &&
+          '["Annuler","Rétablir","|","Flèche","Forme","Texte","Numéro","|","Stylo","Surligneur","|","Flou","Projecteur","|","Gomme","|","Fond"]' &&
         barre.reglagesAuDessus &&
         barre.deplie === 'fleche' &&
         JSON.stringify(barre.haut) ===
           '["Fermer","Glisser vers une appli","Enregistrer","Enregistrer sous…","Copier"]' &&
         JSON.stringify(barre.mots) === '["Glisser","Enregistrer","Copier"]' &&
         barre.anciens.length === 0,
-      '2 socle « Annotation » : Annuler, Rétablir, neuf outils dans l’ordre, les réglages de la Flèche au-dessus ; en haut Fermer, Glisser, Enregistrer et sa flèche, Copier',
+      '2 socle « Annotation » : Annuler, Rétablir, neuf outils et Fond dans l’ordre, les réglages de la Flèche au-dessus ; en haut Fermer, Glisser, Enregistrer et sa flèche, Copier',
       JSON.stringify([manque, barre]),
     );
     const c = await contenuPli(p);
@@ -426,7 +426,6 @@ const CHARGE = {
       const textes = document.body.innerText;
       const interdits = [
         'Copier le texte',
-        'Fond',
         'Épingler',
         'Pipette',
         'Zoom',
@@ -456,7 +455,7 @@ const CHARGE = {
     });
     verifier(
       r.trouves.length === 0 && !r.ocr,
-      '2 absents : Copier le texte, Fond, Épingler, Pipette, Zoom, Sélection, Recadrer…',
+      '2 absents : Copier le texte, Épingler, Pipette, Zoom, Sélection, Recadrer…',
       JSON.stringify(r),
     );
     verifier(
@@ -480,8 +479,8 @@ const CHARGE = {
       };
     });
     verifier(
-      t.h === 52 && t.bas === 12 && t.centre < 1 && t.largeur === 624,
-      '2 barre 52 px ; socle de 624 px centré, à 12 px du bas',
+      t.h === 52 && t.bas === 12 && t.centre < 1 && t.largeur === 672,
+      '2 barre 52 px ; socle de 672 px centré, à 12 px du bas',
       JSON.stringify(t),
     );
     await fin(p, '2');
@@ -2335,8 +2334,13 @@ const CHARGE = {
     ]) {
       const p = await page({ largeur: l, hauteur: h });
       const tiennent = [];
-      for (const n of ['Flèche', 'Stylo', 'Surligneur', 'Gomme', 'Texte', 'Forme', 'Numéro', 'Flou', 'Projecteur']) {
-        await outil(p, n);
+      for (const n of ['Flèche', 'Stylo', 'Surligneur', 'Gomme', 'Texte', 'Forme', 'Numéro', 'Flou', 'Projecteur', 'Fond']) {
+        if (n === 'Fond') {
+          await bouton(p, 'Fond').click();
+          await uneImage(p);
+        } else {
+          await outil(p, n);
+        }
         await calme(p);
         const m = await p.evaluate(() => {
           const s = document.querySelector('#socle').getBoundingClientRect();
@@ -3538,6 +3542,91 @@ const CHARGE = {
       JSON.stringify({ rec, nbAvant, nbApres }),
     );
     await fin(p, '22');
+  }
+
+  // ---------- 23. fond d'éditeur : dégradé, couleur unie, marge, arrondi, ombre, export ----------
+  {
+    const p = await page({ charge: { largeur: 400, hauteur: 300 } });
+    await vider(p);
+    // Raccourci F ouvre le panneau Fond ; Échap le referme sans fermer l'éditeur.
+    await p.keyboard.press('f');
+    await uneImage(p);
+    const ouvertF = await deplie(p);
+    await p.keyboard.press('Escape');
+    await uneImage(p);
+    const fermeEchap = await p.evaluate(() => ({
+      deplie: document.querySelector('#socle .rg-zone').dataset.pour,
+      fermes: __appels.filter((a) => a[0] === 'editeur_fermer').length,
+    }));
+    verifier(
+      JSON.stringify(ouvertF) === '["fond"]' &&
+        fermeEchap.deplie === 'fleche' &&
+        fermeEchap.fermes === 0,
+      '23 F ouvre le panneau Fond et Échap le referme sans fermer l’éditeur',
+      JSON.stringify([ouvertF, fermeEchap]),
+    );
+
+    // Clic sur Fond → choix d'un dégradé, changement de marge, arrondi, ombre, export.
+    await bouton(p, 'Fond').click();
+    await uneImage(p);
+    await reglage(p, 'Océan');
+    await reglage(p, 'Marge grande');
+    await reglage(p, 'Coins très arrondis');
+    await reglage(p, 'Ombre portée'); // désactive l'ombre (active par défaut)
+    const etat1 = await p.evaluate(() => ({
+      fond: __ed.h.doc.fond,
+      vide: __ed.modele.vide(__ed.h.doc),
+      actifAttr: document.querySelector('[data-panneau="fond"]').hasAttribute('data-actif'),
+    }));
+    await p.keyboard.press('Control+c');
+    await p.waitForFunction(() => window.__exports.length === 1);
+    const exp1 = await p.evaluate(() => window.__exports[0].entetes);
+    verifier(
+      etat1.fond?.actif === true &&
+        etat1.fond.style === 'degrade' &&
+        etat1.fond.degrade === 1 &&
+        etat1.fond.marge === 2 &&
+        etat1.fond.arrondi === 2 &&
+        etat1.fond.ombre === false &&
+        !etat1.vide &&
+        etat1.actifAttr &&
+        exp1['x-editeur-largeur'] === String(400 + 2 * 88) &&
+        exp1['x-editeur-hauteur'] === String(300 + 2 * 88),
+      '23 dégradé Océan + Marge grande + Coins très arrondis + sans ombre : document et export 576 × 476',
+      JSON.stringify([etat1, exp1]),
+    );
+
+    // Couleur unie via le sélecteur #autre-couleur + Sans fond + Annuler / Rétablir.
+    await p.evaluate(() => {
+      document.querySelector('[data-fond-couleur]').click();
+      const inp = document.querySelector('#autre-couleur');
+      inp.value = '#223344';
+      inp.dispatchEvent(new Event('input', { bubbles: true }));
+      inp.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    await uneImage(p);
+    const etatUni = await p.evaluate(() => __ed.h.doc.fond);
+    await reglage(p, 'Sans fond');
+    const etatSans = await p.evaluate(() => ({
+      fond: __ed.h.doc.fond,
+      vide: __ed.modele.vide(__ed.h.doc),
+      actifAttr: document.querySelector('[data-panneau="fond"]').hasAttribute('data-actif'),
+    }));
+    await p.keyboard.press('Control+z');
+    await uneImage(p);
+    const etatAnnule = await p.evaluate(() => __ed.h.doc.fond);
+    verifier(
+      etatUni?.style === 'uni' &&
+        etatUni.couleur === '#223344' &&
+        etatSans.fond === null &&
+        etatSans.vide === true &&
+        !etatSans.actifAttr &&
+        etatAnnule?.style === 'uni' &&
+        etatAnnule.couleur === '#223344',
+      '23 couleur unie, Sans fond (document vide), puis Ctrl+Z rétablit le fond',
+      JSON.stringify([etatUni, etatSans, etatAnnule]),
+    );
+    await fin(p, '23');
   }
 
   await nav.close();

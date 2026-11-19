@@ -807,6 +807,29 @@ async function partieDocument() {
     verifier(okEll && okGomme, '11b ellipse nulle sans NaN et gommes vides écartées à la lecture',
       JSON.stringify({ okEll, okGomme, gommes: docLu?.objets[0]?.gommes }));
   }
+  // Fond d'éditeur : normalisation, marge, cadreExport, vide, annuler/rétablir.
+  {
+    const h = D.creerHistorique(D.nouveauDocument(400, 300));
+    verifier(h.doc.fond === null && D.margeFond(h.doc) === 0 && D.vide(h.doc),
+      '11c fond nul par défaut, document vide');
+    D.modifier(h, (d) => D.changerFond(d, { actif: true, style: 'degrade', degrade: 1, marge: 2, arrondi: 2, ombre: true }));
+    const ce = D.cadreExport(h.doc);
+    const okActif = h.doc.fond?.actif === true && D.margeFond(h.doc) === 88
+      && ce.x === -88 && ce.y === -88 && ce.largeur === 576 && ce.hauteur === 476 && !D.vide(h.doc);
+    D.modifier(h, (d) => D.recadrer(d, { x: 50, y: 40, largeur: 200, hauteur: 100 }));
+    const ceRec = D.cadreExport(h.doc);
+    const okRec = ceRec.x === -38 && ceRec.y === -48 && ceRec.largeur === 376 && ceRec.hauteur === 276;
+    D.annuler(h);
+    D.annuler(h);
+    const okAnnule = h.doc.fond === null && D.vide(h.doc);
+    D.retablir(h);
+    const okRetabli = h.doc.fond?.degrade === 1 && h.doc.fond?.marge === 2;
+    D.modifier(h, (d) => D.changerFond(d, null));
+    const okRetire = h.doc.fond === null && D.vide(h.doc);
+    verifier(okActif && okRec && okAnnule && okRetabli && okRetire,
+      '11c fond d\'éditeur : marge, cadreExport, recadrage, vide, annuler/rétablir',
+      JSON.stringify({ okActif, okRec, okAnnule, okRetabli, okRetire, ce, ceRec }));
+  }
 }
 
 // ---------- partie 2 : dessin.js dans Chromium ----------
@@ -1927,6 +1950,71 @@ async function partieDessin(nav) {
     + `l'image : ${r.pixeliser} ms (borne 3 000 ms)`, JSON.stringify(r));
   verifier(r.export === '5760x1080' && r.composer <= 1000,
     `21 composer 5760 × 1080, 50 objets : ${r.composer} ms (borne 1 000 ms)`);
+
+  // (21b) Fond d'éditeur : dimensions, couleur unie, dégradé, coins arrondis, ombre,
+  // égalité au bit près peindreVue === composer (uni + ombre + arrondi + objets + projecteur)
+  // et ± 1 LSB en dégradé (tramage Skia par coordonnées de la toile).
+  r = await p.evaluate(async () => {
+    const im = await preparer(200, 140);
+    const objets = [
+      { type: 'fleche', x1: 30, y1: 30, x2: 140, y2: 90, double: false, couleur: '#E5484D', epaisseur: 1, opacite: 1 },
+      { type: 'projecteur', x1: 50, y1: 35, x2: 150, y2: 105, forme: 'rectangle' },
+    ];
+    const comparerVue = (doc) => {
+      const s = exporter(im, doc);
+      const ce = D.cadreExport(doc);
+      const tv = document.createElement('canvas');
+      tv.width = ce.largeur + 40;
+      tv.height = ce.hauteur + 40;
+      const cv = tv.getContext('2d', { willReadFrequently: true });
+      M.peindreVue(cv, doc, im.fond, { x: 20 - ce.x, y: 20 - ce.y, echelle: 1, dpr: 1 }, [], { rayon: 0 });
+      const vu = cv.getImageData(20, 20, ce.largeur, ce.hauteur).data;
+      let ecarts = 0, maxD = 0;
+      for (let i = 0; i < s.rgba.length; i++) {
+        const d = Math.abs(s.rgba[i] - vu[i]);
+        if (d) { ecarts++; if (d > maxD) maxD = d; }
+      }
+      tv.width = 0;
+      return { s, ecarts, maxD };
+    };
+    const docUni = docAvec(200, 140, objets, { x: 20, y: 15, largeur: 140, hauteur: 90 });
+    D.changerFond(docUni, { actif: true, style: 'uni', couleur: '#102030', marge: 0, arrondi: 2, ombre: true });
+    const resUni = comparerVue(docUni);
+    // Coin (0, 0) = couleur unie exacte #102030, alpha 255 ; dimensions = 140+64 × 90+64.
+    const coinUni = [resUni.s.rgba[0], resUni.s.rgba[1], resUni.s.rgba[2], resUni.s.rgba[3]];
+
+    const docDeg = docAvec(200, 140, objets, { x: 20, y: 15, largeur: 140, hauteur: 90 });
+    D.changerFond(docDeg, { actif: true, style: 'degrade', degrade: 0, marge: 1, arrondi: 1, ombre: true });
+    const resDeg = comparerVue(docDeg);
+    // Vérifie que l'ombre modifie bien les pixels autour de la capture par rapport à sans ombre.
+    const docSansOmbre = docAvec(200, 140, objets, { x: 20, y: 15, largeur: 140, hauteur: 90 });
+    D.changerFond(docSansOmbre, { actif: true, style: 'degrade', degrade: 0, marge: 1, arrondi: 1, ombre: false });
+    const sSans = exporter(im, docSansOmbre);
+    let diffOmbre = 0;
+    for (let i = 0; i < resDeg.s.rgba.length; i += 4) {
+      if (resDeg.s.rgba[i] !== sSans.rgba[i] || resDeg.s.rgba[i + 1] !== sSans.rgba[i + 1]
+        || resDeg.s.rgba[i + 2] !== sSans.rgba[i + 2]) diffOmbre++;
+    }
+    im.fond.width = 0;
+    im.base.close();
+    return {
+      uniTaille: [resUni.s.largeur, resUni.s.hauteur],
+      coinUni,
+      ecartsUni: resUni.ecarts,
+      degTaille: [resDeg.s.largeur, resDeg.s.hauteur],
+      maxDDeg: resDeg.maxD,
+      diffOmbre,
+    };
+  });
+  verifier(
+    r.uniTaille[0] === 204 && r.uniTaille[1] === 154
+      && JSON.stringify(r.coinUni) === '[16,32,48,255]'
+      && r.ecartsUni === 0
+      && r.degTaille[0] === 252 && r.degTaille[1] === 202
+      && r.maxDDeg <= 1 && r.diffOmbre > 500,
+    '21b fond d\'éditeur : dimensions, couleur unie (0 écart), dégradé (±1 LSB), ombre',
+    JSON.stringify(r),
+  );
 
   const refus = await p.evaluate(() => window.refus);
   verifier(erreurs.length === 0 && refus.length === 0, '22 aucune erreur ni violation de CSP',
