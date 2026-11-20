@@ -87,10 +87,10 @@ function Fichiers-Png([string]$Dossier) {
     return @(Get-ChildItem -LiteralPath $Dossier -File -Filter '*.png' | Sort-Object LastWriteTimeUtc, Name)
 }
 
-# Réglages du cas (version 9 du fichier, complète : rien à réécrire ; durée « toujours » non essayée ici).
+# Réglages du cas (version 10 du fichier, complète : rien à réécrire ; durée « toujours » non essayée ici).
 function Ecrire-Reglages([string]$Dossier, [bool]$Afficher = $true, [string]$Coin = 'bas_gauche', [string]$Animations = 'normales', $DossierEnregistrement = $null) {
     $r = [ordered]@{
-        version                   = 9
+        version                   = 10
         raccourcis                = [ordered]@{ zone = @(); plein_ecran = @('Ctrl+Maj+2'); fenetre = @(); derniere_zone = @(); historique = @(); texte = @(); defilante = @(); video = @(); gif = @() }
         impr_ecran_ouvre          = 'zone'
         copier_apres_capture      = $true
@@ -104,7 +104,7 @@ function Ecrire-Reglages([string]$Dossier, [bool]$Afficher = $true, [string]$Coi
         vignette                  = [ordered]@{ afficher = $Afficher; duree_s = 3; coin = $Coin }
         animations                = $Animations
         selection                 = [ordered]@{ loupe = $false }
-        capture                   = [ordered]@{ retardateur_s = 0; pointeur = $false }
+        capture                   = [ordered]@{ retardateur_s = 0; pointeur = $false; masquer_icones_bureau = $false }
         demarrer_avec_systeme     = $false
         modele_nom                = 'BreezyShot {date} à {heure}'
         theme                     = 'systeme'

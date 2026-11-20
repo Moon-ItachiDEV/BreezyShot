@@ -43,6 +43,7 @@ pub fn lignes_montrees(
         l.push("retardateur");
         l.push("pointeur");
         l.push("son_capture");
+        l.push("masquer_icones_bureau");
     }
     l.push("copier");
     if vignette_construite {
@@ -104,6 +105,8 @@ pub enum Changement {
     Demarrage(bool),
     Retardateur(u32),
     Pointeur(bool),
+    /// Masquer temporairement les icônes du bureau pendant un plein écran ou un film.
+    MasquerIconesBureau(bool),
     /// « Touche Impr. écran » : `windows` (l'Outil Capture, la touche lui est rendue) ou ce
     /// que lance BreezyShot (`CibleImprEcran`, la touche est prise à Windows).
     ImprEcran(String),
@@ -150,6 +153,7 @@ impl Changement {
             Changement::Demarrage(_) => "demarrage",
             Changement::Retardateur(_) => "retardateur",
             Changement::Pointeur(_) => "pointeur",
+            Changement::MasquerIconesBureau(_) => "masquer_icones_bureau",
             Changement::ImprEcran(_) => "impr_ecran",
             Changement::FormatImage(_) => "format_image",
             Changement::EditeurApres(_) => "editeur_apres",
@@ -201,6 +205,7 @@ pub fn ligne_changement(c: &Changement) -> String {
         | Changement::VignetteAfficher(b)
         | Changement::Demarrage(b)
         | Changement::Pointeur(b)
+        | Changement::MasquerIconesBureau(b)
         | Changement::EditeurApres(b)
         | Changement::SonCapture(b)
         | Changement::SonSysteme(b)
@@ -384,6 +389,7 @@ pub fn appliquer(r: &Reglages, c: &Changement) -> Result<Reglages, Refus> {
         Changement::Retardateur(s) if *s > reglages::RETARDATEUR_MAX_S => return Err(invalide()),
         Changement::Retardateur(s) => n.capture.retardateur_s = *s,
         Changement::Pointeur(b) => n.capture.pointeur = *b,
+        Changement::MasquerIconesBureau(b) => n.capture.masquer_icones_bureau = *b,
         // `windows` : la touche revient à Windows (le registre), le fichier garde sa cible
         // pour le jour où elle est reprise. Sinon la cible change, rien d'autre.
         Changement::ImprEcran(t) if t == CHOIX_WINDOWS => {}
@@ -644,6 +650,7 @@ pub struct VueCapture {
     /// Une valeur du fichier hors de `retardateurs` (7) s'affiche sans segment coché.
     pub retardateur_s: u32,
     pub pointeur: bool,
+    pub masquer_icones_bureau: bool,
 }
 
 /// La rubrique Enregistrement (Pro) vue par la page.
@@ -888,6 +895,7 @@ pub fn vue(r: &Reglages, c: &Contexte<'_>) -> VueReglages {
         capture: VueCapture {
             retardateur_s: r.capture.retardateur_s,
             pointeur: r.capture.pointeur,
+            masquer_icones_bureau: r.capture.masquer_icones_bureau,
         },
         retardateurs: RETARDATEURS_PROPOSES,
         copier: r.copier_apres_capture,
@@ -990,7 +998,12 @@ mod tests {
             ]
         );
         // Sans Gel, la rubrique Capture n'a aucun effet : aucune de ses lignes.
-        for absent in ["retardateur", "pointeur", "son_capture"] {
+        for absent in [
+            "retardateur",
+            "pointeur",
+            "son_capture",
+            "masquer_icones_bureau",
+        ] {
             assert!(!avec.contains(&absent));
         }
     }
@@ -1474,10 +1487,16 @@ mod tests {
         // En tête, dans l'ordre de la page.
         let tout = lignes_montrees(true, true, true);
         assert_eq!(
-            tout[..4],
-            ["retardateur", "pointeur", "son_capture", "copier"]
+            tout[..5],
+            [
+                "retardateur",
+                "pointeur",
+                "son_capture",
+                "masquer_icones_bureau",
+                "copier"
+            ]
         );
-        assert_eq!(tout.len(), 17);
+        assert_eq!(tout.len(), 18);
         // Rien de ce qui n'a pas d'effet en 0.4.
         for absent in ["barre", "format", "mise_a_jour"] {
             assert!(!tout.contains(&absent));
@@ -1494,6 +1513,9 @@ mod tests {
         assert_eq!(c, Changement::Retardateur(5));
         let c: Changement = serde_json::from_str(r#"{"cle":"pointeur","valeur":true}"#).unwrap();
         assert_eq!(c, Changement::Pointeur(true));
+        let c: Changement =
+            serde_json::from_str(r#"{"cle":"masquer_icones_bureau","valeur":true}"#).unwrap();
+        assert_eq!(c, Changement::MasquerIconesBureau(true));
         for faux in [
             r#"{"cle":"barre","valeur":true}"#,
             r#"{"cle":"loupe","valeur":true}"#,
@@ -1803,12 +1825,14 @@ mod tests {
         let mut r3 = r.clone();
         r3.capture.retardateur_s = 7;
         r3.capture.pointeur = true;
+        r3.capture.masquer_icones_bureau = true;
         let v3 = vue(&r3, &ailleurs);
         assert_eq!(
             v3.capture,
             VueCapture {
                 retardateur_s: 7,
-                pointeur: true
+                pointeur: true,
+                masquer_icones_bureau: true,
             }
         );
         let sans_gel = Contexte {
@@ -1816,7 +1840,9 @@ mod tests {
             ..ailleurs
         };
         let l = vue(&r, &sans_gel).lignes;
-        assert!(!l.iter().any(|x| ["retardateur", "pointeur"].contains(x)));
+        assert!(!l
+            .iter()
+            .any(|x| ["retardateur", "pointeur", "masquer_icones_bureau"].contains(x)));
     }
 
     #[test]

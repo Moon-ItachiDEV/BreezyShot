@@ -2338,7 +2338,16 @@ fn poser_pointeur(gel_pris: &capture::Gel, pixels: &mut gel::Pixels, zone: syste
 /// montré : ni écran figé, ni sélection, ni Échap réservé, ni garde.
 fn capturer_plein_ecran(app: &AppHandle, recu_a: Instant, bandeau_cache: bool) {
     let souris = souris_bureau(app);
-    let Some(gel_pris) = photographier(app, bandeau_cache, Mode::PleinEcran) else {
+    let garde_icones = reglages_lus(app)
+        .capture
+        .masquer_icones_bureau
+        .then(systeme::bureau::masquer_icones);
+    let icones_cachees = garde_icones
+        .as_ref()
+        .is_some_and(systeme::bureau::GardeIcones::actif);
+    let gel_pris = photographier(app, bandeau_cache || icones_cachees, Mode::PleinEcran);
+    drop(garde_icones);
+    let Some(gel_pris) = gel_pris else {
         return;
     };
     let Some((ecran, origine)) = capture::ecran_de_capture(souris, &gel_pris.ecrans) else {

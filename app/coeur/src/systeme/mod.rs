@@ -10,6 +10,7 @@
 
 use std::path::{Path, PathBuf};
 
+pub mod bureau;
 mod composition;
 pub mod defiler;
 pub mod demarrage;

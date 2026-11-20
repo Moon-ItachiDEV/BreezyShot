@@ -1206,8 +1206,8 @@ try {
                 $f = Lire-Reglages $d0
                 $video = if ($f.raccourcis.PSObject.Properties.Name -contains 'video') { @($f.raccourcis.video) -join ',' } else { '<absent>' }
                 $gif = if ($f.raccourcis.PSObject.Properties.Name -contains 'gif') { @($f.raccourcis.gif) -join ',' } else { '<absent>' }
-                $mises = Compter-Motif 'reglages mis a niveau de la version 5 a la version 9$' $d0
-                Verifier '(L0) réglages réécrits en v9 : video = Ctrl+Maj+6, gif = Ctrl+Maj+7, une ligne « de la version 5 a la version 9 »' (($f.version -eq 9) -and ($video -eq 'Ctrl+Maj+6') -and ($gif -eq 'Ctrl+Maj+7') -and ($mises -eq 1)) "version $($f.version), video $video, gif $gif, lignes $mises" | Out-Null
+                $mises = Compter-Motif 'reglages mis a niveau de la version 5 a la version 10$' $d0
+                Verifier '(L0) réglages réécrits en v10 : video = Ctrl+Maj+6, gif = Ctrl+Maj+7, une ligne « de la version 5 a la version 10 »' (($f.version -eq 10) -and ($video -eq 'Ctrl+Maj+6') -and ($gif -eq 'Ctrl+Maj+7') -and ($mises -eq 1)) "version $($f.version), video $video, gif $gif, lignes $mises" | Out-Null
                 Verifier '(L0) aucune fenêtre « film »' ((Compter-Motif 'film fenetre \d+' $d0) -eq 0) | Out-Null
                 Fermer-Cas $script:proc $d0 '(L0)'
             }

@@ -4,6 +4,7 @@
       "retardateur",
       "pointeur",
       "son_capture",
+      "masquer_icones_bureau",
       "copier",
       "vignette",
       "vignette_duree",
@@ -21,7 +22,8 @@
     ],
     "capture": {
       "retardateur_s": 0,
-      "pointeur": false
+      "pointeur": false,
+      "masquer_icones_bureau": false
     },
     "retardateurs": [
       0,
@@ -162,6 +164,7 @@
       "retardateur",
       "pointeur",
       "son_capture",
+      "masquer_icones_bureau",
       "copier",
       "vignette",
       "vignette_duree",
@@ -181,7 +184,8 @@
     ],
     "capture": {
       "retardateur_s": 0,
-      "pointeur": false
+      "pointeur": false,
+      "masquer_icones_bureau": false
     },
     "retardateurs": [
       0,

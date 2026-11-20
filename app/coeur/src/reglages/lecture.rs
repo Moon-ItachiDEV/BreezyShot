@@ -15,11 +15,19 @@ use super::modele::{
 /// le numéro de version est tenu par `interpreter`, pas par elle.
 pub(super) type MiseANiveau = fn(&mut Map<String, Value>, Plateforme);
 
-/// `MISES_A_NIVEAU[n]` fait passer de la version `n` à `n + 1`. Pour une version 10 un jour :
-/// ajouter `v9_vers_v10` à la fin, et `VERSION_ACTUELLE` passe à 10 tout seul.
+/// `MISES_A_NIVEAU[n]` fait passer de la version `n` à `n + 1`. Pour une version 11 un jour :
+/// ajouter `v10_vers_v11` à la fin, et `VERSION_ACTUELLE` passe à 11 tout seul.
 pub(super) const MISES_A_NIVEAU: &[MiseANiveau] = &[
-    v0_vers_v1, v1_vers_v2, v2_vers_v3, v3_vers_v4, v4_vers_v5, v5_vers_v6, v6_vers_v7, v7_vers_v8,
+    v0_vers_v1,
+    v1_vers_v2,
+    v2_vers_v3,
+    v3_vers_v4,
+    v4_vers_v5,
+    v5_vers_v6,
+    v6_vers_v7,
+    v7_vers_v8,
     v8_vers_v9,
+    v9_vers_v10,
 ];
 
 /// Version 0 (aucun champ `version`) vers 1 : ajoute les champs de la version 1 qui manquent,
@@ -156,6 +164,15 @@ fn v7_vers_v8(objet: &mut Map<String, Value>, _plateforme: Plateforme) {
 /// copie. Un `son_capture` déjà là est gardé (même invalide : la validation s'en charge).
 fn v8_vers_v9(objet: &mut Map<String, Value>, _plateforme: Plateforme) {
     let modele = json!({ "son_capture": true });
+    if let Value::Object(modele) = modele {
+        completer(objet, &modele);
+    }
+}
+
+/// Version 9 vers 10 (icônes du bureau) : `capture.masquer_icones_bureau` arrive éteint.
+/// Une valeur déjà présente est gardée ; un `capture` qui n'est pas un objet reste tel quel.
+fn v9_vers_v10(objet: &mut Map<String, Value>, _plateforme: Plateforme) {
+    let modele = json!({ "capture": { "masquer_icones_bureau": false } });
     if let Value::Object(modele) = modele {
         completer(objet, &modele);
     }
@@ -583,9 +600,18 @@ fn lire_capture(m: &mut Map<String, Value>, constats: &mut Vec<Constat>) -> Capt
         Value::as_bool,
         constats,
     );
+    let masquer_icones_bureau = lire(
+        &mut objet,
+        p,
+        "masquer_icones_bureau",
+        d.masquer_icones_bureau,
+        Value::as_bool,
+        constats,
+    );
     Capture {
         retardateur_s,
         pointeur,
+        masquer_icones_bureau,
         inconnus: objet,
     }
 }

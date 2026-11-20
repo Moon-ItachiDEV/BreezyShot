@@ -299,13 +299,15 @@ impl Selection {
     }
 }
 
-/// Réglages de la capture (version 3) : retardateur et pointeur dans l'image.
+/// Réglages de la capture (version 3) : retardateur, pointeur et icônes du bureau.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Capture {
     /// 0 (aucun) ou 1 à `RETARDATEUR_MAX_S` secondes entières.
     pub retardateur_s: u32,
     /// Le pointeur est dessiné dans l'image.
     pub pointeur: bool,
+    /// Masquer temporairement les icônes du bureau pendant un plein écran ou un film.
+    pub masquer_icones_bureau: bool,
     pub(in crate::reglages) inconnus: Map<String, Value>,
 }
 
@@ -314,6 +316,7 @@ impl Capture {
         Capture {
             retardateur_s: 0,
             pointeur: false,
+            masquer_icones_bureau: false,
             inconnus: Map::new(),
         }
     }
@@ -487,6 +490,10 @@ pub(in crate::reglages) fn vers_json(r: &Reglages) -> Result<Value, &'static str
     let mut capture = Map::new();
     capture.insert("retardateur_s".into(), Value::from(r.capture.retardateur_s));
     capture.insert("pointeur".into(), Value::Bool(r.capture.pointeur));
+    capture.insert(
+        "masquer_icones_bureau".into(),
+        Value::Bool(r.capture.masquer_icones_bureau),
+    );
     for (cle, valeur) in &r.capture.inconnus {
         capture.insert(cle.clone(), valeur.clone());
     }

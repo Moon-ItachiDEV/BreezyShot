@@ -220,6 +220,7 @@ function afficher(v) {
   poserSegments("historique_gardes", v.historique.choix, texteGardes);
   poserChoix("historique_gardes", v.historique.gardes);
   poserInterrupteur("pointeur", v.capture.pointeur);
+  poserInterrupteur("masquer_icones_bureau", v.capture.masquer_icones_bureau === true);
   poserSegments("retardateur", v.retardateurs, texteRetardateur);
   poserChoix("retardateur", v.capture.retardateur_s);
   poserInterrupteur("copier", v.copier);
@@ -752,10 +753,10 @@ if (tauri?.event?.listen) {
   });
 } else {
   afficher({
-    lignes: ["retardateur", "pointeur", "copier", "vignette", "vignette_duree",
-      "vignette_coin", "dossier", "format_image", "editeur_apres", "son_capture", "enregistrer", "modele_nom", "impr_ecran", "theme", "demarrage", "licence",
+    lignes: ["retardateur", "pointeur", "son_capture", "masquer_icones_bureau", "copier", "vignette", "vignette_duree",
+      "vignette_coin", "dossier", "format_image", "editeur_apres", "enregistrer", "modele_nom", "impr_ecran", "theme", "demarrage", "licence",
       "version"],
-    capture: { retardateur_s: 0, pointeur: false },
+    capture: { retardateur_s: 0, pointeur: false, masquer_icones_bureau: false },
     retardateurs: [0, 3, 5, 10],
     copier: true,
     enregistrer: false,

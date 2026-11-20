@@ -306,6 +306,8 @@ struct Lancee {
     finalisation: bool,
     /// `Finir` ou `Annuler` est parti au fil `film`.
     ordre_final: bool,
+    /// Garde RAII : restaure les icônes du bureau masquées pendant le film.
+    garde_icones: Option<systeme::bureau::GardeIcones>,
 }
 
 impl Drop for Lancee {
@@ -552,6 +554,7 @@ pub fn zone_choisie(app: &AppHandle, zone: Rect) {
         en_retard: false,
         finalisation: false,
         ordre_final: false,
+        garde_icones: None,
     };
     let rangee = {
         let mut g = super::film_en_cours(app);
@@ -887,6 +890,21 @@ fn demarrer(app: &AppHandle, numero: u64) {
     let id = prendre_decompte(app, numero);
     cacher_decompte(app, id);
     super::liberer_echap(app);
+    if super::reglages_lus(app).capture.masquer_icones_bureau {
+        let garde = systeme::bureau::masquer_icones();
+        if garde.actif() {
+            let _ = systeme::attendre_composition(super::ATTENTE_COMPOSITION);
+        }
+        let mut g = super::film_en_cours(app);
+        if let Some(l) = g
+            .as_mut()
+            .filter(|e| e.numero == numero)
+            .and_then(|e| e.lancee.as_mut())
+            .filter(|l| !l.ordre_final)
+        {
+            l.garde_icones = Some(garde);
+        }
+    }
     ordonner(app, numero, Ordre::Demarrer(Instant::now()));
 }
 
@@ -902,19 +920,26 @@ fn finir(app: &AppHandle, numero: u64, fin: Fin) {
         let Some(l) = e.lancee.as_mut().filter(|l| !l.ordre_final) else {
             return;
         };
+        let garde_icones = l.garde_icones.take();
         if l.envoyees.load(Ordering::SeqCst) == 0 {
+            drop(garde_icones);
             None
         } else {
             l.ordre_final = true;
             l.finalisation = true;
             let _ = l.envoi.send(Courrier::Ordre(Ordre::Finir(fin, a)));
-            Some((e.controle.take(), std::mem::take(&mut l.decompte)))
+            Some((
+                e.controle.take(),
+                std::mem::take(&mut l.decompte),
+                garde_icones,
+            ))
         }
     };
-    let Some((c, decompte)) = pris else {
+    let Some((c, decompte, garde_icones)) = pris else {
         rendre_impossible(app, numero, "source");
         return;
     };
+    drop(garde_icones);
     if let Some(c) = c {
         let _ = c.emettre(controle::EVENEMENT_CACHER, ChargeCacher { id: numero });
         c.pilule(None);
@@ -961,6 +986,7 @@ fn fermer(app: &AppHandle, e: EnCours) {
     } = e;
     if let Some(mut l) = lancee {
         cacher_decompte(app, std::mem::take(&mut l.decompte));
+        drop(l.garde_icones.take());
         // La garde (non faite) cache l'écran figé et la sélection en tombant.
         drop(l.garde.take());
         drop(l);
