@@ -382,6 +382,9 @@ pub struct Reglages {
     /// Ce que lance Impr. écran quand BreezyShot la tient (version 8). Sans effet tant que
     /// Windows garde la touche pour l'Outil Capture (le registre, pas ce fichier).
     pub impr_ecran_ouvre: CibleImprEcran,
+    /// Ce que lance `Win + Maj + S` sous Windows (version 12). `None` : laisser le raccourci à
+    /// l'Outil Capture de Windows (aucun crochet clavier posé).
+    pub win_maj_s_ouvre: Option<CibleImprEcran>,
     pub copier_apres_capture: bool,
     pub enregistrer_apres_capture: bool,
     /// Le format du fichier enregistré (version 7) ; « Récents » reste en PNG.
@@ -415,6 +418,7 @@ impl Reglages {
         Reglages {
             raccourcis: Raccourcis::par_defaut(plateforme),
             impr_ecran_ouvre: CibleImprEcran::Zone,
+            win_maj_s_ouvre: None,
             copier_apres_capture: true,
             enregistrer_apres_capture: false,
             format_image: FormatImage::Png,
@@ -547,6 +551,13 @@ pub(in crate::reglages) fn vers_json(r: &Reglages) -> Result<Value, &'static str
     m.insert(
         "impr_ecran_ouvre".into(),
         Value::from(r.impr_ecran_ouvre.texte()),
+    );
+    m.insert(
+        "win_maj_s_ouvre".into(),
+        match r.win_maj_s_ouvre {
+            None => Value::Null,
+            Some(c) => Value::from(c.texte()),
+        },
     );
     m.insert(
         "copier_apres_capture".into(),

@@ -1136,6 +1136,12 @@ Module pur : il reçoit le dossier où écrire, ne connaît ni Tauri ni les autr
 - `raccourcis.pipette` et `CibleImprEcran::Pipette` (version 11) : raccourci gratuit de la
   pipette de couleur (`Ctrl+Maj+C` sous Windows, `Cmd+Maj+C` sur macOS), cible possible de
   la touche `Impr. écran`. Mise à niveau `v10_vers_v11`.
+- `win_maj_s_ouvre` (version 12) : `null` par défaut (« Outil Capture de Windows », aucun
+  crochet clavier posé), ou une cible `CibleImprEcran` lancée par `Win + Maj + S` sous
+  Windows via `systeme::raccourci_win` (`WH_KEYBOARD_LL` dans un fil dédié
+  `raccourci-win` de priorité temps critique ; touche virtuelle `0xE8` envoyée hors crochet
+  pour masquer le menu Démarrer au relâchement de `Win` ; sans droits administrateur, les
+  fenêtres élevées restent hors portée par UIPI). Mise à niveau `v11_vers_v12`.
 - `duree_s` : 1 à 60 s, ou `0` = toujours (`DUREE_TOUJOURS`, version 2 ; la page propose
   3, 6, 10 et Toujours).
 - `capture` (version 3) : `retardateur_s` vaut 0 (aucun) ou 1 à 10 s entières
@@ -1573,6 +1579,14 @@ sans rien remplacer, les défauts qui reproduisent l'app d'avant :
   autre application). Si la touche n'est pas tenue après coup, la ligne dit où Windows la garde (`REFUS_IMPR_ECRAN`) ou
   qu'une autre application la tient. Journal : `impr ecran: breezyshot oui|non, touche
   tenue|non tenue`, à l'appui `impr ecran: <action>|barre`.
+- **« Raccourci Win + Maj + S »**, juste sous « Touche Impr. écran » dans la même carte, sous
+  Windows seulement (`systeme::raccourci_win::disponible`) : même liste déroulante
+  (`choix_impr_ecran`), valeur `windows` par défaut (`win_maj_s_ouvre: null`, aucun crochet
+  clavier installé). Choisir une cible BreezyShot écrit `win_maj_s_ouvre` et active
+  `systeme::raccourci_win::ecouter` (crochet `WH_KEYBOARD_LL` posé dans un fil dédié, suspendu
+  pendant la saisie d'un raccourci et retiré proprement à l'arrêt ou au retour sur « Outil
+  Capture de Windows »). Journal : `raccourci win maj s: actif|arrete|echec`, à l'appui
+  `raccourci presse: win_maj_s` puis `win maj s: <action>|barre`.
 - **La page ne décide rien.** Elle appelle `reglages_lire` (à l'ouverture et à chaque retour
   du focus), `reglages_changer { changement: { cle, valeur } }`, `reglages_apercu_nom`,
   `reglages_parcourir`, `reglages_saisie`, `reglages_raccourci`, `reglages_retablir`. Chaque

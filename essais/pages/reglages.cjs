@@ -735,7 +735,7 @@ const SANS_VIGNETTE = { ...VUE, lignes: ['copier', 'dossier', 'modele_nom', 'the
   // sur la ligne ; sans la ligne dans la vue (hors Windows), rien n'est montré.
   const NOM_IMPR = /^Touche Impr\. écran/;
   const optionsImpr = (p) => p.getByRole('listbox', { name: 'Touche Impr. écran' }).getByRole('option').allTextContents();
-  const choisiImpr = (p) => p.$$eval('[role="listbox"] [role="option"][aria-selected="true"]', os => os.map(o => o.textContent));
+  const choisiImpr = (p) => p.$$eval('[data-menu="impr_ecran"] [role="option"][aria-selected="true"]', os => os.map(o => o.textContent));
   const enFocus = (p) => p.evaluate(() => document.activeElement && (document.activeElement.dataset.valeur || document.activeElement.dataset.controle || document.activeElement.tagName));
   for (const theme of ['light', 'dark']) {
     const p = await page({ theme, vue: REEL.vue });
@@ -755,13 +755,13 @@ const SANS_VIGNETTE = { ...VUE, lignes: ['copier', 'dossier', 'modele_nom', 'the
     // Ouverte : les choix de la vue dans l'ordre, un trait entre les groupes, le choix coché.
     await bouton.click(); await p.waitForTimeout(250);
     const noms = await optionsImpr(p);
-    const traits = await p.$$eval('[role="listbox"] .trait', ts => ts.length);
+    const traits = await p.$$eval('[data-menu="impr_ecran"] .trait', ts => ts.length);
     const ouvert = await bouton.getAttribute('aria-expanded');
     verifier(json(noms) === json(REEL.vue.impr_ecran.choix.map(c => c.libelle)) && noms.length === 7 && traits === 1
       && ouvert === 'true' && json(await choisiImpr(p)) === json(['Outil Capture de Windows']) && await enFocus(p) === 'windows',
     `14 ${theme} liste ouverte : sept choix dans l’ordre, un trait avant « Barre de capture » (aucun entre elle et Zone), « Outil Capture de Windows » coché et au focus`, json([noms, traits, ouvert]));
     const contenu = await p.evaluate(() => {
-      const m = document.querySelector('[role="listbox"]').getBoundingClientRect();
+      const m = document.querySelector('[data-menu="impr_ecran"]').getBoundingClientRect();
       const b = document.querySelector('[data-controle="impr_ecran"]').getBoundingClientRect();
       return [Math.round(m.right - b.right), m.top >= b.bottom, m.left >= 0 && m.right <= innerWidth && m.bottom <= innerHeight];
     });
@@ -799,10 +799,11 @@ const SANS_VIGNETTE = { ...VUE, lignes: ['copier', 'dossier', 'modele_nom', 'the
     await p.keyboard.press('Escape');
     verifier(json(suit) === json(['Refaire la dernière zone', 'Pris par une autre application']) && json(coche) === json(['Refaire la dernière zone']),
       '14 la vue change le choix en vigueur et dit le refus sur la ligne', json([suit, coche]));
-    await p.evaluate((v) => __emettre('reglages:etat', v), { ...REEL.vue, lignes: REEL.vue.lignes.filter(l => l !== 'impr_ecran') }); await p.waitForTimeout(30);
+    await p.evaluate((v) => __emettre('reglages:etat', v), { ...REEL.vue, lignes: REEL.vue.lignes.filter(l => l !== 'impr_ecran' && l !== 'win_maj_s') }); await p.waitForTimeout(30);
     const cachee = await p.$eval('[data-reglage="impr_ecran"]', e => e.hidden);
+    const cacheeWin = await p.$eval('[data-reglage="win_maj_s"]', e => e.hidden);
     const carte = await p.$eval('[data-reglage="impr_ecran"]', e => getComputedStyle(e.closest('.carte')).display);
-    verifier(cachee && carte === 'none', '14 hors Windows : ni ligne ni carte', json([cachee, carte]));
+    verifier(cachee && cacheeWin && carte === 'none', '14 hors Windows : ni lignes ni carte', json([cachee, cacheeWin, carte]));
     verifier(p.erreurs.length === 0, '14 aucune erreur de console', json(p.erreurs));
     await p.context().close();
   }
@@ -857,12 +858,12 @@ const SANS_VIGNETTE = { ...VUE, lignes: ['copier', 'dossier', 'modele_nom', 'the
     const bouton = p.getByRole('button', { name: NOM_IMPR });
     await bouton.click();
     const noms = await optionsImpr(p);
-    const traits = await p.$$eval('[role="listbox"] .trait', ts => ts.length);
+    const traits = await p.$$eval('[data-menu="impr_ecran"] .trait', ts => ts.length);
     verifier(json(noms.slice(2)) === json(['Zone', 'Plein écran', 'Fenêtre', 'Refaire la dernière zone', 'Pipette de couleur', 'Capture défilante', 'Copier le texte', 'Historique'])
       && traits === 2, '14 avec la licence : un second trait avant « Capture défilante » ; un choix fermé (Vidéo) est absent', json([noms, traits]));
     await p.evaluate((v) => __emettre('reglages:etat', v), REEL.vue); await p.waitForTimeout(30);
     const apres = await optionsImpr(p);
-    verifier(apres.length === 7 && await p.$$eval('[role="listbox"] .trait', ts => ts.length) === 1,
+    verifier(apres.length === 7 && await p.$$eval('[data-menu="impr_ecran"] .trait', ts => ts.length) === 1,
       '14 licence retirée : les choix Pro disparaissent de la liste', json(apres));
     verifier(p.erreurs.length === 0, '14 licence : aucune erreur de console', json(p.erreurs));
     await p.context().close();
@@ -895,13 +896,58 @@ const SANS_VIGNETTE = { ...VUE, lignes: ['copier', 'dossier', 'modele_nom', 'the
     await onglet(p, 'Raccourcis');
     await p.getByRole('button', { name: NOM_IMPR }).click(); await p.waitForTimeout(250);
     const m = await p.evaluate(() => {
-      const l = document.querySelector('[role="listbox"]'), r = l.getBoundingClientRect();
+      const l = document.querySelector('[data-menu="impr_ecran"]'), r = l.getBoundingClientRect();
       return [r.bottom <= innerHeight, l.scrollHeight >= l.clientHeight, getComputedStyle(l).overflowY];
     });
     await p.keyboard.press('End');
     const dernier = await enFocus(p);
-    const visible = await p.evaluate(() => { const o = document.activeElement.getBoundingClientRect(); const l = document.querySelector('[role="listbox"]').getBoundingClientRect(); return o.bottom <= l.bottom + 1 && o.top >= l.top - 1; });
+    const visible = await p.evaluate(() => { const o = document.activeElement.getBoundingClientRect(); const l = document.querySelector('[data-menu="impr_ecran"]').getBoundingClientRect(); return o.bottom <= l.bottom + 1 && o.top >= l.top - 1; });
     verifier(m[0] && m[2] === 'auto' && dernier === 'historique' && visible, '14 600 × 420 : liste bornée à la fenêtre, défile, dernière option visible', json([m, dernier, visible]));
+    await p.context().close();
+  }
+  // 14 sexies. « Raccourci Win + Maj + S » : même carte qu'Impr. écran, ouvrir l'une ferme
+  // l'autre, clic et clavier envoient `win_maj_s`, refus affiché sur la ligne.
+  {
+    const p = await page({ vue: REEL.vue });
+    await onglet(p, 'Raccourcis'); await p.waitForTimeout(350);
+    const boutonImpr = p.getByRole('button', { name: NOM_IMPR });
+    const boutonWin = p.getByRole('button', { name: /^Raccourci Win \+ Maj \+ S/ });
+    const memeCarte = await p.evaluate(() => {
+      const a = document.querySelector('[data-reglage="impr_ecran"]');
+      const b = document.querySelector('[data-reglage="win_maj_s"]');
+      return !!a && !!b && !b.hidden && a.closest('.carte') === b.closest('.carte');
+    });
+    verifier(memeCarte && await boutonWin.textContent() === 'Outil Capture de Windows',
+      '14 sexies Win + Maj + S : dans la même carte qu’Impr. écran, « Outil Capture de Windows » par défaut', json([memeCarte, await boutonWin.textContent()]));
+    // Ouvrir Impr. écran referme la liste Win + Maj + S déjà ouverte.
+    await boutonWin.click();
+    await boutonImpr.click(); await p.waitForTimeout(100);
+    verifier(await boutonWin.getAttribute('aria-expanded') === 'false'
+      && await boutonImpr.getAttribute('aria-expanded') === 'true'
+      && await p.getByRole('listbox').count() === 1,
+      '14 sexies ouvrir Impr. écran referme la liste Win + Maj + S');
+    await p.keyboard.press('Escape');
+    await boutonWin.click(); await p.waitForTimeout(150);
+    await p.screenshot({ path: `${SORTIE}/reglages-win-maj-s-light.png` });
+    await vider(p);
+    await p.getByRole('option', { name: 'Zone', exact: true }).click(); await p.waitForTimeout(50);
+    verifier(json(await appels(p)) === json([['reglages_changer', { changement: { cle: 'win_maj_s', valeur: 'zone' } }]])
+      && await enFocus(p) === 'win_maj_s',
+      '14 sexies clic « Zone » → reglages_changer win_maj_s zone', json(await appels(p)));
+    // Vue poussée avec cible et refus.
+    const maj = { ...REEL.vue.win_maj_s, valeur: 'barre', refus: "Impossible d'intercepter Win + Maj + S" };
+    await p.evaluate((v) => __emettre('reglages:etat', v), { ...REEL.vue, win_maj_s: maj }); await p.waitForTimeout(30);
+    const etatWin = [await boutonWin.textContent(), await p.$eval('[data-reglage="win_maj_s"] [data-refus]', e => e.hidden ? null : e.textContent)];
+    verifier(json(etatWin) === json(['Barre de capture', "Impossible d'intercepter Win + Maj + S"]),
+      '14 sexies la vue met à jour la valeur et affiche le refus sur la ligne', json(etatWin));
+    await vider(p);
+    await boutonWin.focus();
+    await p.keyboard.press('ArrowDown');
+    await p.keyboard.press('Home');
+    await p.keyboard.press('Enter'); await p.waitForTimeout(50);
+    verifier(json(await appels(p)) === json([['reglages_changer', { changement: { cle: 'win_maj_s', valeur: 'windows' } }]]),
+      '14 sexies clavier → retour à « Outil Capture de Windows » (win_maj_s windows)', json(await appels(p)));
+    verifier(p.erreurs.length === 0, '14 sexies aucune erreur de console', json(p.erreurs));
     await p.context().close();
   }
 

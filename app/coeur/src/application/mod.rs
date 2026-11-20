@@ -252,6 +252,8 @@ pub enum Evenement {
     ClicIcone(fenetres::Rect, Option<(i32, i32)>),
     /// Signal du module des raccourcis (appui).
     Raccourci(raccourcis::Signal),
+    /// Raccourci `Win + Maj + S` intercepté par le crochet Windows.
+    WinMajS,
     /// Signal du module des fenêtres (clic dans le bandeau).
     Fenetres(fenetres::Signal),
     /// Signal de la sélection de zone.
@@ -456,6 +458,10 @@ pub struct Application {
     page_reglages_prete: AtomicBool,
     /// Vrai si des raccourcis ont été réservés (à libérer à l'arrêt).
     raccourcis_reserves: AtomicBool,
+    /// Crochet `Win + Maj + S` actif tant que l'utilisateur l'attribue à BreezyShot.
+    ecoute_win_maj_s: Mutex<Option<systeme::raccourci_win::Ecoute>>,
+    /// Refus de pose du crochet `Win + Maj + S`, affiché sur sa ligne des Réglages.
+    refus_win_maj_s: Mutex<Option<String>>,
     /// Annonce affichée mais pas encore vue : `(id du message, dossier local, situation)`.
     /// La situation n'est retenue dans `etat.json` qu'une fois le message montré.
     annonce_en_attente: Mutex<Option<AnnonceEnAttente>>,
@@ -881,6 +887,7 @@ fn demarrer(app: &AppHandle, commande: Commande, inconnus: &[String]) {
     app.state::<Application>()
         .raccourcis_reserves
         .store(true, Ordering::SeqCst);
+    synchroniser_win_maj_s(app);
 
     // Icône et menu.
     let theme = systeme::theme_barre();
@@ -1701,6 +1708,7 @@ pub fn traiter(app: &AppHandle, evenement: Evenement) {
             | Evenement::SortieEchue(_)
             | Evenement::Raccourci(raccourcis::Signal::Echap)
             | Evenement::Raccourci(raccourcis::Signal::Entree)
+            | Evenement::WinMajS
             | Evenement::Defilante(_)
             | Evenement::Film(_)
             | Evenement::VideoDisponible(_)
@@ -1903,22 +1911,35 @@ pub fn traiter(app: &AppHandle, evenement: Evenement) {
             } else {
                 action
             };
-            // Pendant un film : son propre raccourci l'arrête (choix B1) ; ceux qui
-            // ouvriraient une fenêtre sont ignorés (F30) ; ceux de capture vont à la table,
-            // qui les ignore.
-            let mode = Mode::depuis_nom(&action);
-            if mode.is_some_and(|m| geste_film::raccourci(app, m)) {
+            declencher_action_raccourci(app, &action);
+        }
+        Evenement::WinMajS => {
+            log::info!("raccourci presse: win_maj_s");
+            if app
+                .state::<Application>()
+                .saisie
+                .lock()
+                .map(|s| s.is_some())
+                .unwrap_or(false)
+            {
                 return;
             }
-            if mode.is_none() && geste_film::fenetres_bloquees(app) {
-                log::info!("raccourci ignore pendant le film");
+            if geste_defilante::fenetres_bloquees(app) {
+                log::info!("raccourci ignore pendant la defilante");
                 return;
             }
-            let construite = actions_en_vigueur(app).contains(&action.as_str());
-            match Mode::depuis_nom(&action) {
-                Some(mode) if construite => lancer_capture(app, mode),
-                None if construite && action == ACTION_HISTORIQUE => geste_historique::ouvrir(app),
-                _ => log::warn!("raccourci: action inconnue {action}"),
+            let Some(cible) = reglages_lus(app).win_maj_s_ouvre else {
+                return;
+            };
+            match page_reglages::action_de_l_appui(cible, &actions_en_vigueur(app)) {
+                Some(a) => {
+                    log::info!("win maj s: {a}");
+                    declencher_action_raccourci(app, a);
+                }
+                None => {
+                    log::info!("win maj s: barre");
+                    fenetre_barre::ouvrir(app);
+                }
             }
         }
         Evenement::Fenetres(fenetres::Signal::MessageMontre { id }) => {
@@ -3969,6 +3990,7 @@ fn arreter(app: &AppHandle) {
             Err(e) => log::warn!("raccourcis non liberes: {e}"),
         }
     }
+    arreter_win_maj_s(app);
     if let Some(bandeau) = app.try_state::<Bandeau>() {
         bandeau.fermer();
     }
@@ -3977,6 +3999,98 @@ fn arreter(app: &AppHandle) {
     }
     log::info!("arret propre");
     journal::vider();
+}
+
+/// Exécute une action déclenchée par un raccourci (`Raccourci::Presse` ou `WinMajS`).
+fn declencher_action_raccourci(app: &AppHandle, action: &str) {
+    // Pendant un film : son propre raccourci l'arrête (choix B1) ; ceux qui
+    // ouvriraient une fenêtre sont ignorés (F30) ; ceux de capture vont à la table,
+    // qui les ignore.
+    let mode = Mode::depuis_nom(action);
+    if mode.is_some_and(|m| geste_film::raccourci(app, m)) {
+        return;
+    }
+    if mode.is_none() && geste_film::fenetres_bloquees(app) {
+        log::info!("raccourci ignore pendant le film");
+        return;
+    }
+    let construite = actions_en_vigueur(app).contains(&action);
+    match mode {
+        Some(mode) if construite => lancer_capture(app, mode),
+        None if construite && action == ACTION_HISTORIQUE => geste_historique::ouvrir(app),
+        _ => log::warn!("raccourci: action inconnue {action}"),
+    }
+}
+
+/// Retire le crochet `Win + Maj + S` s'il est actif (hors verrou, pour ne jamais retenir
+/// `ecoute_win_maj_s` pendant l'attente du fil).
+pub(super) fn arreter_win_maj_s(app: &AppHandle) {
+    let garde = app
+        .state::<Application>()
+        .ecoute_win_maj_s
+        .lock()
+        .ok()
+        .and_then(|mut g| g.take());
+    if garde.is_some() {
+        drop(garde);
+        log::info!("raccourci win maj s: arrete");
+    }
+}
+
+/// Aligne le crochet `Win + Maj + S` sur les réglages : posé seulement quand l'utilisateur a
+/// choisi une cible BreezyShot, sous Windows, raccourcis actifs et hors saisie. Rend le texte
+/// d'un refus éventuel si la pose a échoué.
+pub(super) fn synchroniser_win_maj_s(app: &AppHandle) -> Option<String> {
+    let etat = app.state::<Application>();
+    let cible = reglages_lus(app).win_maj_s_ouvre;
+    let actif = systeme::raccourci_win::disponible()
+        && cible.is_some()
+        && etat.raccourcis_reserves.load(Ordering::SeqCst)
+        && etat.saisie.lock().map(|s| s.is_none()).unwrap_or(false);
+    if !actif {
+        arreter_win_maj_s(app);
+        if cible.is_none() {
+            if let Ok(mut r) = etat.refus_win_maj_s.lock() {
+                *r = None;
+            }
+        }
+        return None;
+    }
+    if etat
+        .ecoute_win_maj_s
+        .lock()
+        .map(|g| g.is_some())
+        .unwrap_or(false)
+    {
+        if let Ok(mut r) = etat.refus_win_maj_s.lock() {
+            *r = None;
+        }
+        return None;
+    }
+    let pour = app.clone();
+    match systeme::raccourci_win::ecouter(move || traiter(&pour, Evenement::WinMajS)) {
+        Ok(ecoute) => {
+            let ancien = etat
+                .ecoute_win_maj_s
+                .lock()
+                .ok()
+                .and_then(|mut g| g.replace(ecoute));
+            drop(ancien);
+            if let Ok(mut r) = etat.refus_win_maj_s.lock() {
+                *r = None;
+            }
+            log::info!("raccourci win maj s: actif");
+            None
+        }
+        Err(e) => {
+            log::warn!("raccourci win maj s: echec ({e})");
+            let texte = "Impossible d'intercepter Win + Maj + S".to_string();
+            if let Ok(mut r) = etat.refus_win_maj_s.lock() {
+                *r = Some(texte.clone());
+            }
+            Some(texte)
+        }
+    }
 }
 
 #[cfg(test)]

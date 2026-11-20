@@ -47,9 +47,10 @@ restaurées automatiquement ensuite), son de capture (« Goutte »), ouvrir dire
 
 Réglages (menu de l'icône, « Réglages ») : rubriques dans le volet de gauche. Copie, format
 d'image (PNG, JPG ou WebP), dossier, nom des fichiers, raccourcis (cliquer puis taper le
-nouveau), thème, lancement au démarrage de Windows. Raccourcis › « Impr. écran ouvre
-BreezyShot » : la touche Impr. écran lance BreezyShot au lieu de l'Outil Capture de Windows.
-Tout s'applique tout de suite.
+nouveau), thème, lancement au démarrage de Windows. Dans **Raccourcis**, deux listes dédiées
+sous Windows 11 — **Touche Impr. écran** et **Raccourci Win + Maj + S** — permettent de
+choisir entre **l'Outil Capture de Windows** et **BreezyShot** (Zone, Barre de capture, Plein
+écran, Fenêtre, Pipette, etc.). Tout s'applique tout de suite.
 
 Licence (0.5) : Réglages › Général, dernière ligne « Licence » : coller la licence, puis
 « Activer ». La licence d'essai est dans le fichier `essais/licence-essai.txt`. La ligne dit

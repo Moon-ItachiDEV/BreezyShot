@@ -189,6 +189,9 @@ fn relire(app: &AppHandle) -> Reglages {
     }
     garder(app, relu.clone());
     appliquer_theme(app, &relu);
+    if avant.win_maj_s_ouvre != relu.win_maj_s_ouvre {
+        super::synchroniser_win_maj_s(app);
+    }
     relu
 }
 
@@ -243,6 +246,11 @@ fn vue(app: &AppHandle) -> VueReglages {
         .lock()
         .ok()
         .and_then(|a| a.clone());
+    let refus_win_maj_s = etat(app)
+        .refus_win_maj_s
+        .lock()
+        .ok()
+        .and_then(|x| x.clone());
     let contexte = Contexte {
         vignette_construite: VIGNETTE_CONSTRUITE,
         capture_disponible: gel::disponible(),
@@ -255,6 +263,8 @@ fn vue(app: &AppHandle) -> VueReglages {
         editeur_construit: EDITEUR_CONSTRUIT,
         demarrage: systeme::demarrage_avec_systeme(None).unwrap_or(EtatDemarrage::Indisponible),
         impr_ecran: systeme::impr_ecran_pour_breezyshot(),
+        win_maj_s_disponible: systeme::raccourci_win::disponible(),
+        refus_win_maj_s,
         licence_active: pro(app),
         version: VERSION,
         alerte,
@@ -388,6 +398,7 @@ fn finir_saisie(app: &AppHandle, ligne: &str) {
             refaire_menu(app);
         }
     }
+    super::synchroniser_win_maj_s(app);
 }
 
 fn action_connue(app: &AppHandle, action: &str) -> bool {
@@ -405,6 +416,7 @@ pub fn reglages_lire(app: AppHandle) -> Reponse {
     }
     relire(&app);
     synchroniser_impr_ecran(&app);
+    super::synchroniser_win_maj_s(&app);
     let r = reponse(&app, None);
     envoyer_rubrique(&app);
     r
@@ -432,6 +444,14 @@ pub(super) fn changer(app: &AppHandle, changement: Changement) -> Reponse {
         }
         if !page::impr_ecran_permis(t, &actions_en_vigueur(&app)) {
             return refuser(&app, Refus::nouveau("impr_ecran", "", "invalide"));
+        }
+    }
+    if let Changement::WinMajS(t) = &changement {
+        if !systeme::raccourci_win::disponible() {
+            return refuser(&app, Refus::nouveau("win_maj_s", "", "sans_objet"));
+        }
+        if !page::impr_ecran_permis(t, &actions_en_vigueur(&app)) {
+            return refuser(&app, Refus::nouveau("win_maj_s", "", "invalide"));
         }
     }
     let base = relire(&app);
@@ -485,7 +505,10 @@ pub(super) fn changer(app: &AppHandle, changement: Changement) -> Reponse {
         }
         geste = g.reserver;
     }
-    let inchange = matches!(changement, Changement::ImprEcran(_)) && nouveau == base;
+    let inchange = matches!(
+        changement,
+        Changement::ImprEcran(_) | Changement::WinMajS(_)
+    ) && nouveau == base;
     if !inchange || geste.is_some() {
         log::info!("{}", page::ligne_changement(&changement));
     }
@@ -493,7 +516,12 @@ pub(super) fn changer(app: &AppHandle, changement: Changement) -> Reponse {
         ecrire_et_garder(&app, nouveau.clone());
         appliquer_theme(&app, &nouveau);
     }
-    let refus = geste.and_then(|prise| reserver_impr_ecran(&app, prise));
+    let mut refus = geste.and_then(|prise| reserver_impr_ecran(&app, prise));
+    if matches!(changement, Changement::WinMajS(_)) {
+        if let Some(texte) = super::synchroniser_win_maj_s(&app) {
+            refus = Some(Refus::nouveau("win_maj_s", &texte, "echec"));
+        }
+    }
     reponse(&app, refus)
 }
 
@@ -685,6 +713,7 @@ pub fn reglages_saisie(app: AppHandle, action: String, active: bool) -> Reponse 
         return reponse(&app, None);
     };
     r.suspendre(&app);
+    super::arreter_win_maj_s(&app);
     log::info!("raccourcis suspendus (saisie {action})");
     let numero = etat(&app).numero_saisie.fetch_add(1, Ordering::SeqCst) + 1;
     if let Ok(mut s) = etat(&app).saisie.lock() {

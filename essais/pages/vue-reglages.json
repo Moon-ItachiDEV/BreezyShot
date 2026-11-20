@@ -15,6 +15,7 @@
       "enregistrer",
       "modele_nom",
       "impr_ecran",
+      "win_maj_s",
       "theme",
       "demarrage",
       "version",
@@ -73,6 +74,47 @@
     "theme": "systeme",
     "demarrage": "non",
     "impr_ecran": {
+      "choix": [
+        {
+          "id": "windows",
+          "libelle": "Outil Capture de Windows",
+          "groupe": 0
+        },
+        {
+          "id": "barre",
+          "libelle": "Barre de capture",
+          "groupe": 1
+        },
+        {
+          "id": "zone",
+          "libelle": "Zone",
+          "groupe": 1
+        },
+        {
+          "id": "plein_ecran",
+          "libelle": "Plein écran",
+          "groupe": 1
+        },
+        {
+          "id": "fenetre",
+          "libelle": "Fenêtre",
+          "groupe": 1
+        },
+        {
+          "id": "derniere_zone",
+          "libelle": "Refaire la dernière zone",
+          "groupe": 1
+        },
+        {
+          "id": "pipette",
+          "libelle": "Pipette de couleur",
+          "groupe": 1
+        }
+      ],
+      "valeur": "windows",
+      "refus": null
+    },
+    "win_maj_s": {
       "choix": [
         {
           "id": "windows",
@@ -191,6 +233,7 @@
       "enregistrer",
       "modele_nom",
       "impr_ecran",
+      "win_maj_s",
       "theme",
       "demarrage",
       "historique_gardes",
@@ -251,6 +294,62 @@
     "theme": "systeme",
     "demarrage": "non",
     "impr_ecran": {
+      "choix": [
+        {
+          "id": "windows",
+          "libelle": "Outil Capture de Windows",
+          "groupe": 0
+        },
+        {
+          "id": "barre",
+          "libelle": "Barre de capture",
+          "groupe": 1
+        },
+        {
+          "id": "zone",
+          "libelle": "Zone",
+          "groupe": 1
+        },
+        {
+          "id": "plein_ecran",
+          "libelle": "Plein écran",
+          "groupe": 1
+        },
+        {
+          "id": "fenetre",
+          "libelle": "Fenêtre",
+          "groupe": 1
+        },
+        {
+          "id": "derniere_zone",
+          "libelle": "Refaire la dernière zone",
+          "groupe": 1
+        },
+        {
+          "id": "pipette",
+          "libelle": "Pipette de couleur",
+          "groupe": 1
+        },
+        {
+          "id": "defilante",
+          "libelle": "Capture défilante",
+          "groupe": 2
+        },
+        {
+          "id": "texte",
+          "libelle": "Copier le texte",
+          "groupe": 2
+        },
+        {
+          "id": "historique",
+          "libelle": "Historique",
+          "groupe": 2
+        }
+      ],
+      "valeur": "windows",
+      "refus": null
+    },
+    "win_maj_s": {
       "choix": [
         {
           "id": "windows",

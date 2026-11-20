@@ -64,6 +64,7 @@ pub fn lignes_montrees(
     l.extend([
         "modele_nom",
         "impr_ecran",
+        "win_maj_s",
         "theme",
         "demarrage",
         "version",
@@ -110,6 +111,9 @@ pub enum Changement {
     /// « Touche Impr. écran » : `windows` (l'Outil Capture, la touche lui est rendue) ou ce
     /// que lance BreezyShot (`CibleImprEcran`, la touche est prise à Windows).
     ImprEcran(String),
+    /// « Raccourci Win + Maj + S » : `windows` (Outil Capture de Windows, crochet retiré) ou
+    /// une cible BreezyShot (`CibleImprEcran`, crochet `WH_KEYBOARD_LL` actif).
+    WinMajS(String),
     /// « Format » de l'image enregistrée : `png` ou `jpg`.
     FormatImage(String),
     /// « Ouvrir dans l'éditeur après la capture ».
@@ -137,7 +141,7 @@ impl Changement {
                 | Changement::ClicsVisibles(_)
                 | Changement::FilmDossier(_)
                 | Changement::HistoriqueGardes(_)
-        ) || matches!(self, Changement::ImprEcran(t) if cible_pro(t))
+        ) || matches!(self, Changement::ImprEcran(t) | Changement::WinMajS(t) if cible_pro(t))
     }
 
     /// L'identifiant de la ligne de la page.
@@ -155,6 +159,7 @@ impl Changement {
             Changement::Pointeur(_) => "pointeur",
             Changement::MasquerIconesBureau(_) => "masquer_icones_bureau",
             Changement::ImprEcran(_) => "impr_ecran",
+            Changement::WinMajS(_) => "win_maj_s",
             Changement::FormatImage(_) => "format_image",
             Changement::EditeurApres(_) => "editeur_apres",
             Changement::SonCapture(_) => "son_capture",
@@ -217,6 +222,7 @@ pub fn ligne_changement(c: &Changement) -> String {
         Changement::VignetteCoin(t)
         | Changement::Theme(t)
         | Changement::ImprEcran(t)
+        | Changement::WinMajS(t)
         | Changement::FormatImage(t)
         | Changement::FilmDossier(t) => code_pour_journal(t),
         Changement::ModeleNom(_) => return "reglage change: modele_nom".into(),
@@ -395,6 +401,10 @@ pub fn appliquer(r: &Reglages, c: &Changement) -> Result<Reglages, Refus> {
         Changement::ImprEcran(t) if t == CHOIX_WINDOWS => {}
         Changement::ImprEcran(t) => {
             n.impr_ecran_ouvre = CibleImprEcran::depuis_texte(t).ok_or_else(invalide)?
+        }
+        Changement::WinMajS(t) if t == CHOIX_WINDOWS => n.win_maj_s_ouvre = None,
+        Changement::WinMajS(t) => {
+            n.win_maj_s_ouvre = Some(CibleImprEcran::depuis_texte(t).ok_or_else(invalide)?)
         }
         Changement::FormatImage(t) => {
             n.format_image = FormatImage::depuis_texte(t).ok_or_else(invalide)?
@@ -775,6 +785,7 @@ pub struct VueReglages {
     pub theme: &'static str,
     pub demarrage: &'static str,
     pub impr_ecran: VueImprEcran,
+    pub win_maj_s: VueImprEcran,
     /// Une ligne par action en vigueur (`Contexte.actions`), dans l'ordre de
     /// `ORDRE_RACCOURCIS` : « Capture défilante », « Copier le texte », « Vidéo », « GIF »
     /// et « Historique » seulement avec une licence (et, pour le texte, une langue de
@@ -808,6 +819,10 @@ pub struct Contexte<'a> {
     /// BreezyShot tient Impr. écran (Windows ne la garde pas pour l'Outil Capture) ;
     /// `None` hors Windows : la ligne n'est pas montrée.
     pub impr_ecran: Option<bool>,
+    /// Vrai sous Windows : la ligne « Raccourci Win + Maj + S » est montrée.
+    pub win_maj_s_disponible: bool,
+    /// Refus à dire sous « Raccourci Win + Maj + S » (échec de pose du crochet), ou rien.
+    pub refus_win_maj_s: Option<String>,
     pub licence_active: bool,
     pub version: &'static str,
     pub alerte: Option<String>,
@@ -852,6 +867,23 @@ fn vue_impr_ecran(r: &Reglages, c: &Contexte<'_>) -> VueImprEcran {
     }
 }
 
+/// La ligne « Raccourci Win + Maj + S » : même liste qu'Impr. écran, valeur `windows` par
+/// défaut (`None`), ou la cible choisie (repliée sur la barre si l'action est fermée).
+fn vue_win_maj_s(r: &Reglages, c: &Contexte<'_>) -> VueImprEcran {
+    let valeur = match r.win_maj_s_ouvre {
+        None => CHOIX_WINDOWS,
+        Some(cible) => match action_de_l_appui(cible, c.actions) {
+            Some(_) => cible.texte(),
+            None => CibleImprEcran::Barre.texte(),
+        },
+    };
+    VueImprEcran {
+        choix: choix_impr_ecran(c.actions),
+        valeur,
+        refus: r.win_maj_s_ouvre.and_then(|_| c.refus_win_maj_s.clone()),
+    }
+}
+
 /// La vue complète. Fonction pure.
 pub fn vue(r: &Reglages, c: &Contexte<'_>) -> VueReglages {
     let mut lignes = lignes_montrees(
@@ -872,7 +904,11 @@ pub fn vue(r: &Reglages, c: &Contexte<'_>) -> VueReglages {
     if c.impr_ecran.is_none() {
         lignes.retain(|l| *l != "impr_ecran");
     }
+    if !c.win_maj_s_disponible {
+        lignes.retain(|l| *l != "win_maj_s");
+    }
     let impr_ecran = vue_impr_ecran(r, c);
+    let win_maj_s = vue_win_maj_s(r, c);
     let raccourcis = actions_dans_l_ordre(c.actions)
         .iter()
         .map(|a| {
@@ -930,6 +966,7 @@ pub fn vue(r: &Reglages, c: &Contexte<'_>) -> VueReglages {
         theme: r.theme.texte(),
         demarrage: nom_demarrage(c.demarrage),
         impr_ecran,
+        win_maj_s,
         raccourcis,
         licence_active: c.licence_active,
         version: c.version,
@@ -973,6 +1010,7 @@ mod tests {
                 "editeur_apres",
                 "modele_nom",
                 "impr_ecran",
+                "win_maj_s",
                 "theme",
                 "demarrage",
                 "version",
@@ -995,6 +1033,7 @@ mod tests {
                 "enregistrer",
                 "modele_nom",
                 "impr_ecran",
+                "win_maj_s",
                 "theme",
                 "demarrage",
                 "version",
@@ -1010,6 +1049,68 @@ mod tests {
         ] {
             assert!(!avec.contains(&absent));
         }
+    }
+
+    #[test]
+    fn win_maj_s_au_choix_et_vue() {
+        let r = Reglages::par_defaut(Plateforme::Windows);
+        assert_eq!(r.win_maj_s_ouvre, None);
+        let c: Changement = serde_json::from_str(r#"{"cle":"win_maj_s","valeur":"zone"}"#).unwrap();
+        assert_eq!(c, Changement::WinMajS("zone".into()));
+        assert_eq!(c.ligne(), "win_maj_s");
+        assert!(!c.exige_pro());
+        assert_eq!(ligne_changement(&c), "reglage change: win_maj_s zone");
+        assert!(Changement::WinMajS("video".into()).exige_pro());
+        assert!(!Changement::WinMajS(CHOIX_WINDOWS.into()).exige_pro());
+
+        let n = appliquer(&r, &Changement::WinMajS("barre".into())).unwrap();
+        assert_eq!(n.win_maj_s_ouvre, Some(CibleImprEcran::Barre));
+        let n2 = appliquer(&n, &Changement::WinMajS("pipette".into())).unwrap();
+        assert_eq!(n2.win_maj_s_ouvre, Some(CibleImprEcran::Pipette));
+        let retour = appliquer(&n2, &Changement::WinMajS(CHOIX_WINDOWS.into())).unwrap();
+        assert_eq!(retour.win_maj_s_ouvre, None);
+        let err = appliquer(&r, &Changement::WinMajS("inconnu".into())).unwrap_err();
+        assert_eq!((err.ligne.as_str(), err.code), ("win_maj_s", "invalide"));
+
+        let defaut_r = Raccourcis::par_defaut(Plateforme::Windows);
+        let refus = BTreeMap::new();
+        let bilan = raccourcis::Bilan::default();
+        let base = ["zone", "plein_ecran", "fenetre", "derniere_zone", "pipette"];
+        let ctx = |dispo: bool, refus_win: Option<String>| Contexte {
+            vignette_construite: true,
+            capture_disponible: true,
+            actions: &base,
+            bilan: &bilan,
+            defaut: &defaut_r,
+            refus_raccourcis: &refus,
+            dossier_affiche: "Images › BreezyShot".into(),
+            dossier_films_affiche: None,
+            editeur_construit: true,
+            demarrage: EtatDemarrage::Inactif,
+            impr_ecran: Some(false),
+            win_maj_s_disponible: dispo,
+            refus_win_maj_s: refus_win,
+            licence_active: false,
+            version: "9.9.9",
+            alerte: None,
+            maintenant: Local.with_ymd_and_hms(2026, 11, 12, 10, 42, 8).unwrap(),
+            saisie_en_cours: false,
+        };
+        // Par défaut : Outil Capture de Windows, sans refus même si un texte traîne.
+        let v = vue(&r, &ctx(true, Some("erreur".into())));
+        assert!(v.lignes.contains(&"win_maj_s"));
+        assert_eq!(v.win_maj_s.valeur, CHOIX_WINDOWS);
+        assert_eq!(v.win_maj_s.refus, None);
+        // Cible active : valeur montrée et refus transmis si présent.
+        let v = vue(&n2, &ctx(true, Some("refus crochet".into())));
+        assert_eq!(v.win_maj_s.valeur, "pipette");
+        assert_eq!(v.win_maj_s.refus.as_deref(), Some("refus crochet"));
+        // Cible Pro fermée : repli visuel sur `barre`.
+        let mut r_pro = r.clone();
+        r_pro.win_maj_s_ouvre = Some(CibleImprEcran::Video);
+        assert_eq!(vue(&r_pro, &ctx(true, None)).win_maj_s.valeur, "barre");
+        // Hors Windows : ligne absente.
+        assert!(!vue(&r, &ctx(false, None)).lignes.contains(&"win_maj_s"));
     }
 
     /// « Touche Impr. écran » : le changement porte un choix de la liste ; `windows` ne
@@ -1226,6 +1327,8 @@ mod tests {
                     editeur_construit: true,
                     demarrage: EtatDemarrage::Inactif,
                     impr_ecran: impr,
+                    win_maj_s_disponible: impr.is_some(),
+                    refus_win_maj_s: None,
                     licence_active: false,
                     version: "9.9.9",
                     alerte: None,
@@ -1341,6 +1444,8 @@ mod tests {
                 editeur_construit: true,
                 demarrage: EtatDemarrage::Inactif,
                 impr_ecran: registre,
+                win_maj_s_disponible: registre.is_some(),
+                refus_win_maj_s: None,
                 licence_active: false,
                 version: "1",
                 alerte: None,
@@ -1801,6 +1906,8 @@ mod tests {
             editeur_construit: true,
             demarrage: EtatDemarrage::DesactiveParWindows,
             impr_ecran: None,
+            win_maj_s_disponible: false,
+            refus_win_maj_s: None,
             licence_active: false,
             version: "9.9.9",
             alerte: None,
@@ -1927,6 +2034,8 @@ mod tests {
                 editeur_construit: true,
                 demarrage: EtatDemarrage::Inactif,
                 impr_ecran: None,
+                win_maj_s_disponible: false,
+                refus_win_maj_s: None,
                 licence_active,
                 version: "1",
                 alerte: None,
@@ -2006,6 +2115,8 @@ mod tests {
             editeur_construit: true,
             demarrage: EtatDemarrage::Inactif,
             impr_ecran: None,
+            win_maj_s_disponible: false,
+            refus_win_maj_s: None,
             licence_active: true,
             version: "1",
             alerte: None,
@@ -2121,6 +2232,8 @@ mod essai_de_page {
             editeur_construit: true,
             demarrage: EtatDemarrage::Inactif,
             impr_ecran: Some(false),
+            win_maj_s_disponible: true,
+            refus_win_maj_s: None,
             licence_active: false,
             // Jamais la vraie version : l'essai ne la suppose pas.
             version: "7.8.9-essai",

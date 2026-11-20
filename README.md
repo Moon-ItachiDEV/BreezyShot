@@ -36,7 +36,7 @@ Propulsé par **Tauri 2** : un cœur en **Rust**, une interface web pure **sans 
 - **Épingler à l'écran** : ouvrez une capture depuis la vignette, l'éditeur ou l'historique dans une fenêtre flottante toujours au premier plan — sans bordure, déplaçable, redimensionnable à la molette, opacité réglable (`Alt + molette`), copie (`Ctrl + C`) et fermeture au double-clic ou à `Échap` *(jusqu'à 12 captures simultanées)*.
 - **Barre de capture « Galet »** : accès rapide en haut de l'écran au lancement manuel, avec pipette et retardateur intégré (`3`, `5` ou `10 s`).
 - **Vignette interactive** : aperçu flottant configurable, copie, enregistrement, annotation, épinglage à l'écran, suppression annulable et **glisser-déposer direct** vers n'importe quelle application.
-- **Personnalisation complète** : formats **PNG, JPG et WebP**, modèle de nommage, capture du pointeur, **masquage automatique des icônes du bureau** pendant le plein écran et l'enregistrement vidéo/GIF, son de capture (« Goutte »), ouverture directe dans l'éditeur, raccourcis configurables (y compris la touche `Impr. écran`), thème clair / sombre / système et lancement avec Windows.
+- **Personnalisation complète** : formats **PNG, JPG et WebP**, modèle de nommage, capture du pointeur, **masquage automatique des icônes du bureau** pendant le plein écran et l'enregistrement vidéo/GIF, son de capture (« Goutte »), ouverture directe dans l'éditeur, raccourcis configurables (y compris la touche `Impr. écran` et le raccourci par défaut de Windows 11 `Win + Maj + S`), thème clair / sombre / système et lancement avec Windows.
 
 ### Éditeur d'annotation
 
@@ -74,11 +74,11 @@ Un guide complet de prise en main est disponible dans [`docs/ESSAI.md`](docs/ESS
 
 ### Raccourcis globaux par défaut (Windows)
 
-Tous les raccourcis sont modifiables à chaud dans **Réglages › Raccourcis**.
+Tous les raccourcis sont modifiables à chaud dans **Réglages › Raccourcis**. Sous Windows 11, vous pouvez également y choisir si la touche **`Impr. écran`** et le raccourci système **`Win + Maj + S`** ouvrent **l'Outil Capture de Windows** ou **BreezyShot** (Zone, Barre de capture, Plein écran, Fenêtre, Pipette, etc.) — sans redémarrage ni modification permanente de l'Explorateur.
 
 | Action | Raccourci par défaut | Portée |
 | --- | --- | --- |
-| Capturer une zone | `Ctrl + Maj + 1` *(ou `Impr. écran`)* | Gratuit |
+| Capturer une zone | `Ctrl + Maj + 1` *(ou `Impr. écran` / `Win + Maj + S` au choix)* | Gratuit |
 | Capturer le plein écran | `Ctrl + Maj + 2` | Gratuit |
 | Capturer une fenêtre | `Ctrl + Maj + 3` | Gratuit |
 | Refaire la dernière zone | `Ctrl + Maj + 4` | Gratuit |

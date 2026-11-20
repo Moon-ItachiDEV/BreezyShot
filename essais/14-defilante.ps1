@@ -1643,8 +1643,8 @@ public static int[] ClasserResumes(int[] ra, int[] rb, int h, int minRecouvremen
                 Verifier '(L0) --capturer defilante → « mode non construit », aucune capture' ((Compter-Motif 'DemandeCapture defilante' $d0) -eq 0) | Out-Null
                 $f = Lire-Reglages $d0
                 $def = if ($f.raccourcis.PSObject.Properties.Name -contains 'defilante') { @($f.raccourcis.defilante) -join ',' } else { '<absent>' }
-                $mises = Compter-Motif 'reglages mis a niveau de la version 4 a la version 11$' $d0
-                Verifier '(L0) réglages passés en v11 : defilante = Ctrl+Maj+5, une ligne « de la version 4 a la version 11 »' (($f.version -eq 11) -and ($def -eq 'Ctrl+Maj+5') -and ($mises -eq 1)) "version $($f.version), defilante $def, lignes $mises" | Out-Null
+                $mises = Compter-Motif 'reglages mis a niveau de la version 4 a la version 12$' $d0
+                Verifier '(L0) réglages passés en v12 : defilante = Ctrl+Maj+5, une ligne « de la version 4 a la version 12 »' (($f.version -eq 12) -and ($def -eq 'Ctrl+Maj+5') -and ($mises -eq 1)) "version $($f.version), defilante $def, lignes $mises" | Out-Null
                 Verifier '(L0) aucune fenêtre « defilante »' ((Compter-Motif $MOTIFS['Fenetre'] $d0) -eq 0) | Out-Null
             }
             Start-Sleep -Seconds 2   # la mémoire se pose (aucune ligne ne le dit)
