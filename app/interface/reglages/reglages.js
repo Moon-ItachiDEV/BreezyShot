@@ -37,6 +37,7 @@ const PICTO_ACTION = {
   plein_ecran: "capturer_plein_ecran",
   fenetre: "capturer_fenetre",
   derniere_zone: "capturer_derniere_zone",
+  pipette: "capturer_pipette",
   defilante: "capturer_defilante",
   texte: "capturer_texte",
   video: "capturer_video",
@@ -783,6 +784,13 @@ if (tauri?.event?.listen) {
         modifie: false,
         refus: null,
       },
+      {
+        action: "pipette",
+        libelle: "Pipette de couleur",
+        touches: ["Ctrl", "Maj", "C"],
+        modifie: false,
+        refus: null,
+      },
     ],
     impr_ecran: {
       choix: [
@@ -792,6 +800,7 @@ if (tauri?.event?.listen) {
         { id: "plein_ecran", libelle: "Plein écran", groupe: 1 },
         { id: "fenetre", libelle: "Fenêtre", groupe: 1 },
         { id: "derniere_zone", libelle: "Refaire la dernière zone", groupe: 1 },
+        { id: "pipette", libelle: "Pipette de couleur", groupe: 1 },
       ],
       valeur: "zone",
       refus: null,

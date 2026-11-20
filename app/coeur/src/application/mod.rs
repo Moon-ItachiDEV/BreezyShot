@@ -132,8 +132,9 @@ pub const VIGNETTE_CONSTRUITE: bool = true;
 /// montre Annoter qu'à partir de là (seulement ce qui marche).
 pub const EDITEUR_CONSTRUIT: bool = true;
 
-/// Les actions de capture de la 0.4, toujours construites.
-pub const ACTIONS_DE_CAPTURE: [&str; 4] = ["zone", "plein_ecran", "fenetre", "derniere_zone"];
+/// Les actions de capture gratuites, toujours construites.
+pub const ACTIONS_DE_CAPTURE: [&str; 5] =
+    ["zone", "plein_ecran", "fenetre", "derniere_zone", "pipette"];
 
 /// Nom d'action du raccourci de l'historique, et identifiant de son entrée de menu.
 pub const ACTION_HISTORIQUE: &str = "historique";
@@ -195,13 +196,14 @@ pub fn actions_selon(
 }
 
 /// L'ordre des entrées de capture dans le menu de l'icône (celui des raccourcis 1 à 4,
-/// la capture défilante, Copier le texte, puis la vidéo et le GIF). Seuls les modes
-/// construits y paraissent.
-pub const ORDRE_MENU: [Mode; 8] = [
+/// la pipette, la capture défilante, Copier le texte, puis la vidéo et le GIF). Seuls les
+/// modes construits y paraissent.
+pub const ORDRE_MENU: [Mode; 9] = [
     Mode::Zone,
     Mode::PleinEcran,
     Mode::Fenetre,
     Mode::DerniereZone,
+    Mode::Pipette,
     Mode::Defilante,
     Mode::Texte,
     Mode::Video,
@@ -605,7 +607,9 @@ fn lancer_app(contexte: tauri::Context, commande: Commande, inconnus: Vec<String
             fenetres::selection::selection_prete,
             fenetres::selection::selection_terminee,
             fenetres::selection::selection_cliquee,
+            fenetres::selection::selection_pipette,
             fenetres::selection::selection_annulee,
+            selection_echantillon,
             fenetre_reglages::reglages_lire,
             fenetre_reglages::reglages_changer,
             fenetre_reglages::reglages_apercu_nom,
@@ -1594,6 +1598,7 @@ pub fn libelle_menu(mode: Mode) -> &'static str {
         Mode::PleinEcran => "Capturer l'écran",
         Mode::Fenetre => "Capturer une fenêtre",
         Mode::DerniereZone => "Refaire la dernière zone",
+        Mode::Pipette => "Pipette de couleur",
         Mode::Texte => "Copier le texte",
         Mode::Defilante => "Capture défilante",
         Mode::Video => "Vidéo",
@@ -1615,12 +1620,12 @@ fn avec_raccourci(libelle: &str, raccourci: Option<&str>) -> String {
     }
 }
 
-/// Le groupe du menu d'un mode : 1, les captures ; 2, refaire la dernière zone, la capture
-/// défilante, Copier le texte ; 3, la vidéo et le GIF (contrat 0.7, §7.3).
+/// Le groupe du menu d'un mode : 1, les captures ; 2, refaire la dernière zone, la pipette,
+/// la capture défilante, Copier le texte ; 3, la vidéo et le GIF (contrat 0.7, §7.3).
 pub fn groupe_du_menu(mode: Mode) -> u8 {
     match mode {
         Mode::Zone | Mode::PleinEcran | Mode::Fenetre => 1,
-        Mode::DerniereZone | Mode::Defilante | Mode::Texte => 2,
+        Mode::DerniereZone | Mode::Pipette | Mode::Defilante | Mode::Texte => 2,
         Mode::Video | Mode::Gif => 3,
     }
 }
@@ -2092,6 +2097,7 @@ fn apres_gel(app: &AppHandle, mode: Mode, recu_a: Instant, bandeau_cache: bool) 
         Mode::Fenetre => capturer_avec_selection(app, recu_a, Mode::Fenetre, bandeau_cache),
         Mode::PleinEcran => capturer_plein_ecran(app, recu_a, bandeau_cache),
         Mode::DerniereZone => capturer_derniere_zone(app, recu_a, bandeau_cache),
+        Mode::Pipette => capturer_avec_selection(app, recu_a, Mode::Pipette, bandeau_cache),
         Mode::Texte => capturer_avec_selection(app, recu_a, Mode::Texte, bandeau_cache),
         Mode::Defilante => geste_defilante::capturer(app, recu_a, bandeau_cache),
         Mode::Video | Mode::Gif => geste_film::capturer(app, mode, recu_a, bandeau_cache),
@@ -2284,10 +2290,11 @@ fn annuler_decompte(app: &AppHandle, cause: Cause) {
 /// `GelImpossible` (Repos) et bandeau d'erreur ; rend `None`.
 pub(super) fn photographier(app: &AppHandle, deja_cache: bool, mode: Mode) -> Option<capture::Gel> {
     // Lu avant l'attente du compositeur : rien entre l'attente et la photo. Copier le
-    // texte, la capture défilante (D1) et le film (F1 : l'écran figé ne sert qu'à viser)
-    // ne prennent jamais le pointeur.
+    // texte, la pipette, la capture défilante (D1) et le film (F1 : l'écran figé ne sert
+    // qu'à viser) ne prennent jamais le pointeur.
     let avec_pointeur = reglages_lus(app).capture.pointeur
         && mode != Mode::Texte
+        && mode != Mode::Pipette
         && mode != Mode::Defilante
         && !mode.film();
     let vignette_cachee = fermer_vignette(app, "capture");
@@ -2489,6 +2496,8 @@ fn montrer_selection(app: &AppHandle, recu_a: Instant, mode: Mode, gel_pris: cap
         )
     } else if mode == Mode::Texte {
         (selection::Mode::Texte, Vec::new())
+    } else if mode == Mode::Pipette {
+        (selection::Mode::Pipette, Vec::new())
     } else if mode == Mode::Defilante {
         // Les pages sont proposées après, sans être attendues (D2, `proposer_pages`).
         (selection::Mode::Defilante, Vec::new())
@@ -2750,6 +2759,100 @@ fn traiter_zone(app: &AppHandle, arrivee: Arrivee<'_>) {
         Geste::Decouper(zone) if film => geste_film::zone_choisie(app, zone),
         Geste::Decouper(zone) => decouper(app, zone, None),
         Geste::DecouperFenetre { zone, rayon, coins } => decouper(app, zone, Some((rayon, coins))),
+        Geste::Couleur { point, format } => copier_couleur(app, point, format),
+    }
+}
+
+/// Échantillon carré RGBA autour du curseur en mode pipette (loupe temps réel).
+#[tauri::command]
+fn selection_echantillon(
+    app: AppHandle,
+    id: u64,
+    numero: u64,
+    x: f64,
+    y: f64,
+    rayon: Option<u32>,
+) -> Result<tauri::ipc::Response, String> {
+    let Some(sel) = app.try_state::<Selection>() else {
+        return Err("selection absente".into());
+    };
+    let Some((bx, by)) = sel.point_bureau(id, numero, x, y) else {
+        return Err("hors pipette".into());
+    };
+    let r = rayon.unwrap_or(capture::couleur::RAYON_DEFAUT);
+    let capture = capture_en_cours(&app);
+    let Some(en_cours) = capture
+        .as_ref()
+        .filter(|c| c.mode == selection::Mode::Pipette)
+    else {
+        return Err("capture absente".into());
+    };
+    let octets =
+        capture::couleur::lire_patch(&en_cours.gel, bx, by, r).map_err(|e| e.to_string())?;
+    Ok(tauri::ipc::Response::new(octets))
+}
+
+/// Pipette de couleur : libère l'écran figé, lit le pixel exact, revient au Repos, copie
+/// le code formaté hors du fil principal et confirme dans le bandeau.
+fn copier_couleur(app: &AppHandle, point: (i32, i32), format: String) {
+    let Some(mut capture) = ranger_capture(app, None) else {
+        return;
+    };
+    capture.garde.cacher_tout();
+    let pixel = capture::couleur::lire_pixel(&capture.gel, point.0, point.1);
+    drop(capture);
+    appliquer(app, Declencheur::CouleurChoisie);
+    let (r, g, b) = match pixel {
+        Ok(rgb) => rgb,
+        Err(e) => {
+            log::warn!("pipette: lecture impossible ({e})");
+            afficher_probleme(app, Probleme::Lecture);
+            return;
+        }
+    };
+    let fmt = capture::couleur::FormatCouleur::depuis_nom(&format).unwrap_or_default();
+    let texte = capture::couleur::formater(r, g, b, fmt);
+    log::info!(
+        "pipette: {} en {},{} ({})",
+        texte,
+        point.0,
+        point.1,
+        fmt.nom()
+    );
+    let message_fin = |etape: sortie::Etape, texte: String| match etape {
+        sortie::Etape::Faite => Message {
+            genre: Genre::Reussite,
+            titre: format!("{texte} copié"),
+            detail: String::new(),
+            actions: Vec::new(),
+            duree_ms: None,
+        },
+        _ => Message {
+            genre: Genre::Erreur,
+            titre: "Copie impossible".into(),
+            detail: String::new(),
+            actions: Vec::new(),
+            duree_ms: None,
+        },
+    };
+    let pour_fil = app.clone();
+    let texte_fil = texte.clone();
+    let lance = std::thread::Builder::new()
+        .name("pipette-copie".into())
+        .spawn(move || {
+            let etape = sortie::copier_texte(&texte_fil);
+            let msg = message_fin(etape, texte_fil);
+            let pour = pour_fil.clone();
+            if let Err(e) = pour_fil.run_on_main_thread(move || {
+                afficher(&pour, msg);
+            }) {
+                log::warn!("pipette bandeau: poste impossible ({e})");
+            }
+        });
+    if let Err(e) = lance {
+        log::warn!("pipette fil copie impossible: {e}");
+        let etape = sortie::copier_texte(&texte);
+        afficher(app, message_fin(etape, texte));
     }
 }
 
@@ -3934,6 +4037,7 @@ mod tests {
             "plein_ecran" => Some("Ctrl + Maj + 2".into()),
             "fenetre" => Some("Ctrl + Maj + 3".into()),
             "derniere_zone" => Some("Ctrl + Maj + 4".into()),
+            "pipette" => Some("Ctrl + Maj + C".into()),
             _ => None,
         });
         assert_eq!(
@@ -3947,6 +4051,7 @@ mod tests {
                     "capturer_derniere_zone",
                     "Refaire la dernière zone\tCtrl + Maj + 4"
                 ),
+                action("capturer_pipette", "Pipette de couleur\tCtrl + Maj + C"),
                 EntreeMenu::Separateur,
                 action(MENU_REGLAGES, "Réglages"),
                 EntreeMenu::Separateur,
@@ -3966,6 +4071,7 @@ mod tests {
                 action("capturer_fenetre", "Capturer une fenêtre"),
                 EntreeMenu::Separateur,
                 action("capturer_derniere_zone", "Refaire la dernière zone"),
+                action("capturer_pipette", "Pipette de couleur"),
                 EntreeMenu::Separateur,
                 action(MENU_REGLAGES, "Réglages"),
                 EntreeMenu::Separateur,
@@ -3986,6 +4092,7 @@ mod tests {
             m[4],
             action("capturer_derniere_zone", "Refaire la dernière zone")
         );
+        assert_eq!(m[5], action("capturer_pipette", "Pipette de couleur"));
     }
 
     #[test]
@@ -4001,7 +4108,8 @@ mod tests {
                 Mode::Zone,
                 Mode::PleinEcran,
                 Mode::Fenetre,
-                Mode::DerniereZone
+                Mode::DerniereZone,
+                Mode::Pipette,
             ]
         );
         assert_eq!(
@@ -4010,12 +4118,14 @@ mod tests {
         );
         assert_eq!(id_menu(Mode::Texte), "capturer_texte");
         assert_eq!(id_menu(Mode::DerniereZone), "capturer_derniere_zone");
+        assert_eq!(id_menu(Mode::Pipette), "capturer_pipette");
         assert_eq!(texte_capturer(Mode::Fenetre, None), "Capturer une fenêtre");
+        assert_eq!(texte_capturer(Mode::Pipette, None), "Pipette de couleur");
     }
 
     #[test]
     fn liste_des_actions_construites() {
-        let base = ["zone", "plein_ecran", "fenetre", "derniere_zone"];
+        let base = ["zone", "plein_ecran", "fenetre", "derniere_zone", "pipette"];
         assert_eq!(ACTIONS_DE_CAPTURE, base);
         assert_eq!(actions_selon(true, false, false, false, false, false), base);
         assert_eq!(
@@ -4025,12 +4135,20 @@ mod tests {
                 "plein_ecran",
                 "fenetre",
                 "derniere_zone",
+                "pipette",
                 "historique"
             ]
         );
         assert_eq!(
             actions_selon(true, false, true, false, false, false),
-            ["zone", "plein_ecran", "fenetre", "derniere_zone", "texte"]
+            [
+                "zone",
+                "plein_ecran",
+                "fenetre",
+                "derniere_zone",
+                "pipette",
+                "texte"
+            ]
         );
         assert_eq!(
             actions_selon(true, true, true, false, false, false),
@@ -4039,6 +4157,7 @@ mod tests {
                 "plein_ecran",
                 "fenetre",
                 "derniere_zone",
+                "pipette",
                 "historique",
                 "texte"
             ]
@@ -4053,7 +4172,7 @@ mod tests {
             actions_construites(true, true, false).contains(&"texte"),
             texte::CONSTRUIT
         );
-        // Sans licence : les quatre captures seulement, quoi qu'il soit construit.
+        // Sans licence : les cinq captures gratuites seulement, quoi qu'il soit construit.
         assert_eq!(actions_selon(false, true, true, false, false, false), base);
         assert_eq!(actions_construites(false, true, false), base);
         assert_eq!(
@@ -4066,8 +4185,9 @@ mod tests {
                 "{a}"
             );
         }
-        // `--capturer derniere_zone` est accepté sans code de plus.
+        // `--capturer derniere_zone` et `--capturer pipette` sont acceptés sans code de plus.
         assert_eq!(mode_journal("derniere_zone"), "derniere_zone");
+        assert_eq!(mode_journal("pipette"), "pipette");
         assert_eq!(mode_journal("derniere"), "<inconnu>");
     }
 
@@ -4075,12 +4195,13 @@ mod tests {
     fn seules_les_actions_construites_sont_proposees() {
         let r = Reglages::par_defaut(Plateforme::Windows);
         let t = table_candidats(&r, &ACTIONS_DE_CAPTURE, false);
-        assert_eq!(t.len(), 4);
+        assert_eq!(t.len(), 5);
         // Impr. écran n'est dans la liste d'aucune action (0.8.0).
         assert_eq!(t["zone"], ["Ctrl+Maj+1"]);
         assert_eq!(t["plein_ecran"], ["Ctrl+Maj+2"]);
         assert_eq!(t["fenetre"], ["Ctrl+Maj+3"]);
         assert_eq!(t["derniere_zone"], ["Ctrl+Maj+4"]);
+        assert_eq!(t["pipette"], ["Ctrl+Maj+C"]);
     }
 
     /// La pseudo-action d'Impr. écran s'ajoute à la table, seule candidate `ImprEcran`, sauf
@@ -4190,8 +4311,8 @@ mod tests {
         );
     }
 
-    /// Menu de la piste A « Liste » : les captures ; la dernière zone et Copier le texte ;
-    /// l'historique et les Réglages ; Quitter. Sans langue, pas de Copier le texte.
+    /// Menu de la piste A « Liste » : les captures ; la dernière zone, la pipette et Copier
+    /// le texte ; l'historique et les Réglages ; Quitter. Sans langue, pas de Copier le texte.
     #[test]
     fn menu_avec_historique_et_texte() {
         let raccourci = |a: &str| match a {
@@ -4211,6 +4332,7 @@ mod tests {
                 action("capturer_fenetre", "Capturer une fenêtre"),
                 EntreeMenu::Separateur,
                 action("capturer_derniere_zone", "Refaire la dernière zone"),
+                action("capturer_pipette", "Pipette de couleur"),
                 action("capturer_texte", "Copier le texte\tCtrl + Maj + T"),
                 EntreeMenu::Separateur,
                 action(MENU_HISTORIQUE, "Historique\tCtrl + Maj + H"),
@@ -4226,10 +4348,10 @@ mod tests {
         assert_eq!(sans_texte.len(), m.len() - 1);
         assert!(!sans_texte.contains(&action("capturer_texte", "Copier le texte\tCtrl + Maj + T")));
         assert_eq!(
-            sans_texte[6],
+            sans_texte[7],
             action(MENU_HISTORIQUE, "Historique\tCtrl + Maj + H")
         );
-        // Sans historique ni texte : le menu de la 0.4.
+        // Sans historique ni texte : les actions gratuites seulement.
         assert_eq!(
             entrees_menu(
                 &actions_selon(true, false, false, false, false, false),
@@ -4240,8 +4362,8 @@ mod tests {
         assert_eq!(mode_du_menu(MENU_HISTORIQUE), None);
     }
 
-    /// Menu de la 0.6 (§7.3) : « Capture défilante » en cinquième, avant « Copier le
-    /// texte » ; six modes au plus ; sans licence, le menu de la 0.5 sans licence.
+    /// Menu avec la capture défilante : après la pipette, avant « Copier le texte » ;
+    /// sept modes au plus (avant vidéo et GIF) ; sans licence, les actions gratuites.
     #[test]
     fn menu_avec_la_defilante() {
         let raccourci = |a: &str| match a {
@@ -4257,39 +4379,41 @@ mod tests {
                 "plein_ecran",
                 "fenetre",
                 "derniere_zone",
+                "pipette",
                 "historique",
                 "texte",
                 "defilante"
             ]
         );
-        assert_eq!(modes_au_menu(&tout).len(), 6);
+        assert_eq!(modes_au_menu(&tout).len(), 7);
         // Groupes du menu web : les trois captures, un séparateur, puis la dernière zone,
-        // la défilante (cinquième action, choix U1) et le texte.
+        // la pipette, la défilante et le texte.
         let m = entrees_menu(&tout, raccourci);
         assert_eq!(m[3], EntreeMenu::Separateur);
         assert_eq!(
             m[4],
             action("capturer_derniere_zone", "Refaire la dernière zone")
         );
+        assert_eq!(m[5], action("capturer_pipette", "Pipette de couleur"));
         assert_eq!(
-            m[5],
+            m[6],
             action("capturer_defilante", "Capture défilante\tCtrl + Maj + 5")
         );
         assert_eq!(
-            m[6],
+            m[7],
             action("capturer_texte", "Copier le texte\tCtrl + Maj + T")
         );
-        assert_eq!(m[7], EntreeMenu::Separateur);
-        // Sans langue de lecture : la défilante reste cinquième, suivie du séparateur.
+        assert_eq!(m[8], EntreeMenu::Separateur);
+        // Sans langue de lecture : la défilante reste avant le séparateur.
         let sans_texte = entrees_menu(
             &actions_selon(true, true, false, true, false, false),
             raccourci,
         );
         assert_eq!(
-            sans_texte[5],
+            sans_texte[6],
             action("capturer_defilante", "Capture défilante\tCtrl + Maj + 5")
         );
-        assert_eq!(sans_texte[6], EntreeMenu::Separateur);
+        assert_eq!(sans_texte[7], EntreeMenu::Separateur);
         // Sans licence : ni la défilante, ni rien de Pro, quoi qu'il soit construit.
         assert_eq!(
             actions_selon(false, true, true, true, false, false),
@@ -4333,20 +4457,20 @@ mod tests {
             _ => None,
         };
         let tout = actions_selon(true, true, true, true, true, true);
-        assert_eq!(&tout[7..], ["video", "gif"]);
+        assert_eq!(&tout[8..], ["video", "gif"]);
         assert_eq!(modes_au_menu(&tout), ORDRE_MENU);
         let m = entrees_menu(&tout, raccourci);
-        assert_eq!(m[7], EntreeMenu::Separateur);
-        assert_eq!(m[8], action("capturer_video", "Vidéo\tCtrl + Maj + 6"));
-        assert_eq!(m[9], action("capturer_gif", "GIF\tCtrl + Maj + 7"));
-        assert_eq!(m[10], EntreeMenu::Separateur);
-        assert_eq!(m[11], action(MENU_HISTORIQUE, "Historique"));
+        assert_eq!(m[8], EntreeMenu::Separateur);
+        assert_eq!(m[9], action("capturer_video", "Vidéo\tCtrl + Maj + 6"));
+        assert_eq!(m[10], action("capturer_gif", "GIF\tCtrl + Maj + 7"));
+        assert_eq!(m[11], EntreeMenu::Separateur);
+        assert_eq!(m[12], action(MENU_HISTORIQUE, "Historique"));
         // Sans codeur : « GIF » seul dans son groupe.
         let sans_codeur = actions_selon(true, true, true, true, false, true);
         assert!(!sans_codeur.contains(&"video"));
         let m = entrees_menu(&sans_codeur, raccourci);
-        assert_eq!(m[8], action("capturer_gif", "GIF\tCtrl + Maj + 7"));
-        assert_eq!(m[9], EntreeMenu::Separateur);
+        assert_eq!(m[9], action("capturer_gif", "GIF\tCtrl + Maj + 7"));
+        assert_eq!(m[10], EntreeMenu::Separateur);
         // Le seul troisième groupe, sans le deuxième : un séparateur, pas deux.
         let seul = ["zone", "plein_ecran", "fenetre", "video"];
         let m = entrees_menu(&seul, raccourci);
@@ -4363,6 +4487,7 @@ mod tests {
             (Mode::PleinEcran, 1),
             (Mode::Fenetre, 1),
             (Mode::DerniereZone, 2),
+            (Mode::Pipette, 2),
             (Mode::Defilante, 2),
             (Mode::Texte, 2),
             (Mode::Video, 3),

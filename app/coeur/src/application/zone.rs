@@ -84,6 +84,8 @@ pub enum Geste {
         rayon: i32,
         coins: [bool; 4],
     },
+    /// Mode pipette : lire le pixel `point`, formater selon `format` et copier.
+    Couleur { point: (i32, i32), format: String },
 }
 
 /// Ce que l'Application sait de la capture en cours, pour décider.
@@ -125,13 +127,16 @@ pub fn decider(capture: Option<Vue<'_>>, arrivee: Arrivee<'_>) -> Geste {
                 SignalSelection::Prete { .. } => Geste::Rien,
                 // Un signal de l'autre mode ne doit pas arriver (la Sélection le refuse
                 // déjà) : abandon avec le bandeau d'erreur.
-                SignalSelection::Zone { .. } | SignalSelection::Fenetre { .. }
+                SignalSelection::Zone { .. }
+                | SignalSelection::Fenetre { .. }
+                | SignalSelection::Couleur { .. }
                     if !signal_du_mode(signal, vue.mode) =>
                 {
-                    let choix = if matches!(signal, SignalSelection::Zone { .. }) {
-                        "zone"
-                    } else {
-                        "fenetre"
+                    let choix = match signal {
+                        SignalSelection::Zone { .. } => "zone",
+                        SignalSelection::Fenetre { .. } => "fenetre",
+                        SignalSelection::Couleur { .. } => "couleur",
+                        _ => "inconnu",
                     };
                     log::warn!("selection: {choix} hors du mode {}", vue.mode.nom());
                     abandon(Declencheur::SelectionImpossible, Some(Probleme::Selection))
@@ -153,6 +158,10 @@ pub fn decider(capture: Option<Vue<'_>>, arrivee: Arrivee<'_>) -> Geste {
                         }
                     }
                 }
+                SignalSelection::Couleur { point, format, .. } => Geste::Couleur {
+                    point: *point,
+                    format: format.clone(),
+                },
                 SignalSelection::Annulee { .. } => abandon(Declencheur::SelectionAnnulee, None),
                 SignalSelection::Muette { .. } => {
                     abandon(Declencheur::SelectionMuette, Some(Probleme::Muette))
@@ -188,6 +197,7 @@ fn signal_du_mode(signal: &SignalSelection, mode: ModeSelection) -> bool {
         SignalSelection::Fenetre { .. } => {
             matches!(mode, ModeSelection::Fenetre | ModeSelection::Defilante)
         }
+        SignalSelection::Couleur { .. } => mode == ModeSelection::Pipette,
         _ => true,
     }
 }

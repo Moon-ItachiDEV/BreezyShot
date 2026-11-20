@@ -459,12 +459,12 @@ const SANS_VIGNETTE = { ...VUE, lignes: ['copier', 'dossier', 'modele_nom', 'the
     await p.context().close();
   }
   {
-    // Les raccourcis réels du cœur : quatre lignes, la dernière zone comprise.
+    // Les raccourcis réels du cœur : cinq lignes, la dernière zone et la pipette comprises.
     const p = await page({ vue: REEL.vue });
     await onglet(p, 'Raccourcis');
     const lignes = await p.$$eval('[data-reglage="raccourci"]', ls => ls.map(l => [l.dataset.action, l.querySelector('[data-valeur="libelle"]').textContent, [...l.querySelectorAll('kbd')].map(k => k.textContent).join('+')]));
-    verifier(lignes.length === 4 && JSON.stringify(lignes[3]) === JSON.stringify(['derniere_zone', 'Refaire la dernière zone', 'Ctrl+Maj+4']),
-      '10 quatre raccourcis, « Refaire la dernière zone » en Ctrl + Maj + 4', JSON.stringify(lignes));
+    verifier(lignes.length === 5 && JSON.stringify(lignes[3]) === JSON.stringify(['derniere_zone', 'Refaire la dernière zone', 'Ctrl+Maj+4']) && JSON.stringify(lignes[4]) === JSON.stringify(['pipette', 'Pipette de couleur', 'Ctrl+Maj+C']),
+      '10 cinq raccourcis, « Refaire la dernière zone » en Ctrl + Maj + 4 et « Pipette de couleur » en Ctrl + Maj + C', JSON.stringify(lignes));
     await p.context().close();
   }
   // 11. Licence (avenant 0.5 « Licence », §1) : dernière ligne de Général.
@@ -494,8 +494,9 @@ const SANS_VIGNETTE = { ...VUE, lignes: ['copier', 'dossier', 'modele_nom', 'the
     ['plein_ecran', 'Plein écran', 'Ctrl+Maj+2', true],
     ['fenetre', 'Fenêtre', 'Ctrl+Maj+3', true],
     ['derniere_zone', 'Refaire la dernière zone', 'Ctrl+Maj+4', true],
+    ['pipette', 'Pipette de couleur', 'Ctrl+Maj+C', true],
   ]);
-  // Dans l'ordre du menu de l'icône : la défilante, Copier le texte, puis Historique.
+  // Dans l'ordre du menu de l'icône : la pipette, la défilante, Copier le texte, puis Historique.
   const sept = JSON.stringify(JSON.parse(quatre).concat([
     ['defilante', 'Capture défilante', 'Ctrl+Maj+5', true],
     ['texte', 'Copier le texte', 'Ctrl+Maj+T', true],
@@ -662,8 +663,8 @@ const SANS_VIGNETTE = { ...VUE, lignes: ['copier', 'dossier', 'modele_nom', 'the
       !l.querySelector('[data-controle="retablir"]').hidden,
       [...l.parentElement.children].indexOf(l),
     ]);
-    verifier(json(ligneD) === json([0, false, 'Aucun raccourci', true, 4]),
-      '12 « Capture défilante » sans raccourci : « Aucun raccourci », Rétablir, cinquième', json(ligneD));
+    verifier(json(ligneD) === json([0, false, 'Aucun raccourci', true, 5]),
+      '12 « Capture défilante » sans raccourci : « Aucun raccourci », Rétablir, sixième', json(ligneD));
     await vider(p);
     await p.getByRole('button', { name: 'Rétablir' }).click(); await p.waitForTimeout(30);
     verifier(json((await dernier(p, 'reglages_retablir'))?.[1]) === json({ action: 'defilante' }),
@@ -756,9 +757,9 @@ const SANS_VIGNETTE = { ...VUE, lignes: ['copier', 'dossier', 'modele_nom', 'the
     const noms = await optionsImpr(p);
     const traits = await p.$$eval('[role="listbox"] .trait', ts => ts.length);
     const ouvert = await bouton.getAttribute('aria-expanded');
-    verifier(json(noms) === json(REEL.vue.impr_ecran.choix.map(c => c.libelle)) && noms.length === 6 && traits === 1
+    verifier(json(noms) === json(REEL.vue.impr_ecran.choix.map(c => c.libelle)) && noms.length === 7 && traits === 1
       && ouvert === 'true' && json(await choisiImpr(p)) === json(['Outil Capture de Windows']) && await enFocus(p) === 'windows',
-    `14 ${theme} liste ouverte : six choix dans l’ordre, un trait avant « Barre de capture » (aucun entre elle et Zone), « Outil Capture de Windows » coché et au focus`, json([noms, traits, ouvert]));
+    `14 ${theme} liste ouverte : sept choix dans l’ordre, un trait avant « Barre de capture » (aucun entre elle et Zone), « Outil Capture de Windows » coché et au focus`, json([noms, traits, ouvert]));
     const contenu = await p.evaluate(() => {
       const m = document.querySelector('[role="listbox"]').getBoundingClientRect();
       const b = document.querySelector('[data-controle="impr_ecran"]').getBoundingClientRect();
@@ -820,15 +821,15 @@ const SANS_VIGNETTE = { ...VUE, lignes: ['copier', 'dossier', 'modele_nom', 'the
     await p.keyboard.press('Home'); const debut = await enFocus(p);
     await p.keyboard.press('ArrowUp'); const bouclee = await enFocus(p);
     await p.keyboard.press('End'); const fin = await enFocus(p);
-    verifier(json(ouverte) === json(['true', 'windows']) && trois === 'zone' && retour === 'barre' && debut === 'windows' && bouclee === 'derniere_zone' && fin === 'derniere_zone'
+    verifier(json(ouverte) === json(['true', 'windows']) && trois === 'zone' && retour === 'barre' && debut === 'windows' && bouclee === 'pipette' && fin === 'pipette'
       && json(await appels(p)) === '[]',
     '14 clavier : ↓ ouvre au choix en vigueur, ↓ ↑ Début Fin déplacent le focus (en boucle), rien n’est demandé au cœur', json([ouverte, trois, retour, debut, bouclee, fin]));
     // Entrée choisit l'option au focus.
     await p.keyboard.press('ArrowUp');
     await p.keyboard.press('Enter'); await p.waitForTimeout(50);
-    verifier(json(await appels(p)) === json([['reglages_changer', { changement: { cle: 'impr_ecran', valeur: 'fenetre' } }]])
+    verifier(json(await appels(p)) === json([['reglages_changer', { changement: { cle: 'impr_ecran', valeur: 'derniere_zone' } }]])
       && await p.getByRole('listbox').count() === 0 && await enFocus(p) === 'impr_ecran',
-    '14 clavier : Entrée choisit « Fenêtre », la liste se ferme, le focus revient au bouton', json(await appels(p)));
+    '14 clavier : Entrée choisit « Refaire la dernière zone », la liste se ferme, le focus revient au bouton', json(await appels(p)));
     // Échap ferme sans rien demander, et ne ferme rien d'autre.
     await vider(p);
     await bouton.press('ArrowUp'); await p.keyboard.press('ArrowDown'); await p.keyboard.press('Escape'); await p.waitForTimeout(30);
@@ -857,11 +858,11 @@ const SANS_VIGNETTE = { ...VUE, lignes: ['copier', 'dossier', 'modele_nom', 'the
     await bouton.click();
     const noms = await optionsImpr(p);
     const traits = await p.$$eval('[role="listbox"] .trait', ts => ts.length);
-    verifier(json(noms.slice(2)) === json(['Zone', 'Plein écran', 'Fenêtre', 'Refaire la dernière zone', 'Capture défilante', 'Copier le texte', 'Historique'])
+    verifier(json(noms.slice(2)) === json(['Zone', 'Plein écran', 'Fenêtre', 'Refaire la dernière zone', 'Pipette de couleur', 'Capture défilante', 'Copier le texte', 'Historique'])
       && traits === 2, '14 avec la licence : un second trait avant « Capture défilante » ; un choix fermé (Vidéo) est absent', json([noms, traits]));
     await p.evaluate((v) => __emettre('reglages:etat', v), REEL.vue); await p.waitForTimeout(30);
     const apres = await optionsImpr(p);
-    verifier(apres.length === 6 && await p.$$eval('[role="listbox"] .trait', ts => ts.length) === 1,
+    verifier(apres.length === 7 && await p.$$eval('[role="listbox"] .trait', ts => ts.length) === 1,
       '14 licence retirée : les choix Pro disparaissent de la liste', json(apres));
     verifier(p.erreurs.length === 0, '14 licence : aucune erreur de console', json(p.erreurs));
     await p.context().close();
@@ -911,13 +912,13 @@ const SANS_VIGNETTE = { ...VUE, lignes: ['copier', 'dossier', 'modele_nom', 'the
   for (const theme of ['light', 'dark']) {
     const p = await page({ theme, vue: VUE_FILM, largeur: 780, hauteur: 520, echelle: 2 });
     await onglet(p, 'Raccourcis'); await p.waitForTimeout(450);
-    const neuf = json(JSON.parse(sept).slice(0, 6).concat([
+    const neuf = json(JSON.parse(sept).slice(0, 7).concat([
       ['video', 'Vidéo', 'Ctrl+Maj+6', true], ['gif', 'GIF', 'Ctrl+Maj+7', true],
-    ], JSON.parse(sept).slice(6)));
+    ], JSON.parse(sept).slice(7)));
     let montres = await raccourcisMontres(p);
-    verifier(json(montres) === neuf, `15 ${theme} neuf lignes : « Vidéo » et « GIF » entre « Copier le texte » et « Historique »`, json(montres));
+    verifier(json(montres) === neuf, `15 ${theme} dix lignes : « Vidéo » et « GIF » entre « Copier le texte » et « Historique »`, json(montres));
     const pictos = await p.$$eval('[data-reglage="raccourci"]', ls => ls.map(l => [l.dataset.action, [...l.querySelectorAll('[data-picto] svg > *')].map(e => e.tagName).join(',')]));
-    verifier(pictos.length === 9 && pictos.every(x => x[1] !== '') && json(pictos.slice(6, 8)) === json([['video', 'rect,path'], ['gif', 'rect,path']]),
+    verifier(pictos.length === 10 && pictos.every(x => x[1] !== '') && json(pictos.slice(7, 9)) === json([['video', 'rect,path'], ['gif', 'rect,path']]),
       `15 ${theme} un pictogramme sur chaque ligne, ceux du menu pour la vidéo et le GIF`, json(pictos));
     await p.screenshot({ path: `${SORTIE}/reglages-raccourcis-film-${theme}.png` });
     await vider(p);
@@ -936,7 +937,7 @@ const SANS_VIGNETTE = { ...VUE, lignes: ['copier', 'dossier', 'modele_nom', 'the
     const ligneG = await p.$eval('[data-reglage="raccourci"][data-action="gif"]', l => [
       l.querySelectorAll('kbd').length, l.querySelector('[data-refus]').textContent,
       !l.querySelector('[data-controle="retablir"]').hidden, [...l.parentElement.children].indexOf(l)]);
-    verifier(json(ligneG) === json([0, 'Aucun raccourci', true, 7]), `15 ${theme} « GIF » sans raccourci : « Aucun raccourci », Rétablir, huitième`, json(ligneG));
+    verifier(json(ligneG) === json([0, 'Aucun raccourci', true, 8]), `15 ${theme} « GIF » sans raccourci : « Aucun raccourci », Rétablir, neuvième`, json(ligneG));
     await vider(p);
     await p.getByRole('button', { name: 'Rétablir' }).click(); await p.waitForTimeout(30);
     verifier(json((await dernier(p, 'reglages_retablir'))?.[1]) === json({ action: 'gif' }), `15 ${theme} Rétablir de « GIF » → reglages_retablir gif`);
@@ -1016,13 +1017,13 @@ const SANS_VIGNETTE = { ...VUE, lignes: ['copier', 'dossier', 'modele_nom', 'the
       `13 ${theme} rond éteint et pastille du sélecteur se détachent de la carte`, json(lisible));
     await poser('Raccourcis');
     const pictos = await p.$$eval('[data-reglage="raccourci"]', ls => ls.map(l => l.querySelectorAll('[data-picto] svg > *').length));
-    verifier(pictos.length === 7 && pictos.every(n => n > 0), `13 ${theme} un pictogramme sur chaque raccourci`, json(pictos));
-    // La défilante, en cinquième : le pictogramme du menu web, bas en pointillé.
+    verifier(pictos.length === 8 && pictos.every(n => n > 0), `13 ${theme} un pictogramme sur chaque raccourci`, json(pictos));
+    // La défilante, en sixième (après la pipette) : le pictogramme du menu web, bas en pointillé.
     const defil = await p.$$eval('[data-reglage="raccourci"]', ls => {
-      const l = ls[4];
+      const l = ls[5];
       return [l.dataset.action, [...l.querySelectorAll('[data-picto] svg > *')].some(e => e.getAttribute('stroke-dasharray') === '2 2')];
     });
-    verifier(defil[0] === 'defilante' && defil[1], `13 ${theme} la défilante en cinquième, bas en pointillé`, json(defil));
+    verifier(defil[0] === 'defilante' && defil[1], `13 ${theme} la défilante en sixième, bas en pointillé`, json(defil));
     await p.screenshot({ path: `${SORTIE}/reglages-volet-raccourcis-${theme}.png` });
     await poser('Général');
     await p.screenshot({ path: `${SORTIE}/reglages-volet-general-${theme}.png` });

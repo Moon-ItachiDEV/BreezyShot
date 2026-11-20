@@ -432,6 +432,7 @@ pub fn libelle_action(action: &str) -> &'static str {
         "plein_ecran" => "Plein écran",
         "fenetre" => "Fenêtre",
         "derniere_zone" => "Refaire la dernière zone",
+        "pipette" => "Pipette de couleur",
         "historique" => "Historique",
         "texte" => "Copier le texte",
         "defilante" => "Capture défilante",
@@ -442,15 +443,16 @@ pub fn libelle_action(action: &str) -> &'static str {
 }
 
 /// L'ordre des lignes de Réglages › Raccourcis : celui du menu de l'icône (`ORDRE_MENU`),
-/// la capture défilante en cinquième, « Copier le texte », « Vidéo » et « GIF » (0.7),
-/// puis l'historique (0.5.3).
+/// la pipette après la dernière zone, puis la capture défilante, « Copier le texte »,
+/// « Vidéo » et « GIF » (0.7), puis l'historique (0.5.3).
 /// Affichage seulement : l'ordre de réservation des raccourcis ne change pas
 /// (`ACTIONS_PRIORITAIRES`, `actions_selon`). Une action absente suit, dans l'ordre reçu.
-pub const ORDRE_RACCOURCIS: [&str; 9] = [
+pub const ORDRE_RACCOURCIS: [&str; 10] = [
     "zone",
     "plein_ecran",
     "fenetre",
     "derniere_zone",
+    "pipette",
     "defilante",
     "texte",
     "video",
@@ -625,6 +627,7 @@ pub fn fixer_candidats(r: &mut Raccourcis, action: &str, candidats: Vec<String>)
         "plein_ecran" => &mut r.plein_ecran,
         "fenetre" => &mut r.fenetre,
         "derniere_zone" => &mut r.derniere_zone,
+        "pipette" => &mut r.pipette,
         "historique" => &mut r.historique,
         "texte" => &mut r.texte,
         "defilante" => &mut r.defilante,
@@ -716,6 +719,7 @@ pub fn choix_impr_ecran(actions: &[&str]) -> Vec<VueChoixImprEcran> {
         ("plein_ecran", 1),
         ("fenetre", 1),
         ("derniere_zone", 1),
+        ("pipette", 1),
         ("defilante", 2),
         ("texte", 2),
         ("video", 2),
@@ -1075,6 +1079,7 @@ mod tests {
             "plein_ecran",
             "fenetre",
             "derniere_zone",
+            "pipette",
             "rien",
         ] {
             assert!(!pro(libre), "{libre}");
@@ -1101,7 +1106,7 @@ mod tests {
                 .collect::<Vec<_>>()
         };
         assert_eq!(
-            ids(&["zone", "plein_ecran", "fenetre", "derniere_zone"]),
+            ids(&["zone", "plein_ecran", "fenetre", "derniere_zone", "pipette"]),
             [
                 ("windows", 0),
                 ("barre", 1),
@@ -1109,6 +1114,7 @@ mod tests {
                 ("plein_ecran", 1),
                 ("fenetre", 1),
                 ("derniere_zone", 1),
+                ("pipette", 1),
             ]
         );
         let tout = [
@@ -1116,6 +1122,7 @@ mod tests {
             "plein_ecran",
             "fenetre",
             "derniere_zone",
+            "pipette",
             "historique",
             "texte",
             "defilante",
@@ -1132,6 +1139,7 @@ mod tests {
                 "Plein écran",
                 "Fenêtre",
                 "Refaire la dernière zone",
+                "Pipette de couleur",
                 "Capture défilante",
                 "Copier le texte",
                 "Vidéo",
@@ -1157,12 +1165,13 @@ mod tests {
     /// elle-même, ou une cible fermée par la licence, le codeur ou la langue).
     #[test]
     fn l_appui_traduit_la_cible_ou_ouvre_la_barre() {
-        let base = ["zone", "plein_ecran", "fenetre", "derniere_zone"];
+        let base = ["zone", "plein_ecran", "fenetre", "derniere_zone", "pipette"];
         let pro = [
             "zone",
             "plein_ecran",
             "fenetre",
             "derniere_zone",
+            "pipette",
             "historique",
             "texte",
             "defilante",
@@ -1943,6 +1952,7 @@ mod tests {
                 ("Plein écran", "Ctrl+Maj+2".to_string()),
                 ("Fenêtre", "Ctrl+Maj+3".to_string()),
                 ("Refaire la dernière zone", "Ctrl+Maj+4".to_string()),
+                ("Pipette de couleur", "Ctrl+Maj+C".to_string()),
                 ("Capture défilante", "Ctrl+Maj+5".to_string()),
                 ("Copier le texte", "Ctrl+Maj+T".to_string()),
                 ("Historique", "Ctrl+Maj+H".to_string()),
@@ -1950,10 +1960,10 @@ mod tests {
         );
         assert_eq!(
             avec.raccourcis.len(),
-            7,
-            "sept lignes avec licence et langue"
+            8,
+            "huit lignes avec licence et langue"
         );
-        assert_eq!(avec.raccourcis[4].action, "defilante");
+        assert_eq!(avec.raccourcis[5].action, "defilante");
         assert!(avec.licence_active);
         assert!(avec
             .raccourcis
@@ -1967,17 +1977,17 @@ mod tests {
         let mut sans_texte = lignes(&avec);
         sans_texte.retain(|(l, _)| *l != "Copier le texte");
         assert_eq!(lignes(&sans_langue), sans_texte);
-        // Sans défilante construite (ou hors Windows) : les six lignes de la 0.5.
+        // Sans défilante construite (ou hors Windows) : sept lignes.
         let sans_defilante = vue_pour(
             &crate::application::actions_selon(true, true, true, false, false, false),
             true,
         );
-        assert_eq!(sans_defilante.raccourcis.len(), 6);
+        assert_eq!(sans_defilante.raccourcis.len(), 7);
         assert!(sans_defilante
             .raccourcis
             .iter()
             .all(|x| x.action != "defilante"));
-        assert_eq!(sans_defilante.raccourcis[4].action, "texte");
+        assert_eq!(sans_defilante.raccourcis[5].action, "texte");
         // Une défilante sans raccourci (Ctrl + Maj + 5 pris ailleurs) : « Aucun raccourci ».
         let mut table = BTreeMap::new();
         for a in ["zone", "defilante"] {
@@ -2006,12 +2016,12 @@ mod tests {
         assert_eq!(v.raccourcis[1].libelle, "Capture défilante");
         assert!(v.raccourcis[1].touches.is_empty());
         assert_eq!(v.raccourcis[1].refus.as_deref(), Some(AUCUN_RACCOURCI));
-        // Sans licence : les quatre lignes de la 0.4, même si tout est construit.
+        // Sans licence : les cinq actions gratuites seulement, même si tout est construit.
         let sans = vue_pour(
             &crate::application::actions_selon(false, true, true, true, false, false),
             false,
         );
-        assert_eq!(lignes(&sans), lignes(&avec)[..4]);
+        assert_eq!(lignes(&sans), lignes(&avec)[..5]);
         assert!(!sans.licence_active);
         for v in [&avec, &sans] {
             let n = v.lignes.len();
@@ -2026,14 +2036,14 @@ mod tests {
             true,
         );
         let mut attendu = lignes(&avec);
-        attendu.insert(6, ("Vidéo", "Ctrl+Maj+6".to_string()));
-        attendu.insert(7, ("GIF", "Ctrl+Maj+7".to_string()));
+        attendu.insert(7, ("Vidéo", "Ctrl+Maj+6".to_string()));
+        attendu.insert(8, ("GIF", "Ctrl+Maj+7".to_string()));
         assert_eq!(lignes(&film), attendu);
         let sans_codeur = vue_pour(
             &crate::application::actions_selon(true, true, true, true, false, true),
             true,
         );
-        attendu.remove(6);
+        attendu.remove(7);
         assert_eq!(lignes(&sans_codeur), attendu);
         let sans_licence = vue_pour(
             &crate::application::actions_selon(false, true, true, true, true, true),

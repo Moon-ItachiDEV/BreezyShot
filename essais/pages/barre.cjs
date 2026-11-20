@@ -26,7 +26,7 @@ const serveur = http.createServer((q, r) => {
   if (q.url.includes('csp=1')) entetes['content-security-policy'] = CSP;
   r.writeHead(200, entetes); fs.createReadStream(p).pipe(r);
 });
-const CAPTURES = ['capturer_zone', 'capturer_plein_ecran', 'capturer_fenetre'];
+const CAPTURES = ['capturer_zone', 'capturer_plein_ecran', 'capturer_fenetre', 'capturer_pipette'];
 const FILMS = ['capturer_defilante', 'capturer_video', 'capturer_gif'];
 const TOUT = [...CAPTURES, ...FILMS, 'reglages'];
 const charge = (boutons, retardateur_s = 0, verrouilles = []) => ({ boutons, verrouilles, retardateur_s, retardateurs: [0, 3, 5, 10] });
@@ -79,8 +79,8 @@ const CURSEURS = ['M3 6.5h5.5M13.5 6.5H17M3 13.5h2.5M10.5 13.5H17', 'circle 11 6
   // ---- Avec licence --------------------------------------------------------------
   const p = await page();
   verifier((await appels(p, 'barre_pret')).length === 1, 'barre_pret une fois');
-  verifier(json(await ordre(p)) === json(['capturer_zone', 'capturer_plein_ecran', 'capturer_fenetre', 'retardateur', '|', 'capturer_defilante', 'capturer_video', 'capturer_gif', '|', 'reglages']),
-    'avec licence : Zone, Plein écran, Fenêtre, Retardateur | Défilante, Vidéo, GIF | Réglages, sans logo ni puce', json(await ordre(p)));
+  verifier(json(await ordre(p)) === json(['capturer_zone', 'capturer_plein_ecran', 'capturer_fenetre', 'capturer_pipette', 'retardateur', '|', 'capturer_defilante', 'capturer_video', 'capturer_gif', '|', 'reglages']),
+    'avec licence : Zone, Plein écran, Fenêtre, Pipette, Retardateur | Défilante, Vidéo, GIF | Réglages, sans logo ni puce', json(await ordre(p)));
   const vu = await p.evaluate(() => {
     const b = document.getElementById('barre');
     const r = b.getBoundingClientRect();
@@ -104,7 +104,7 @@ const CURSEURS = ['M3 6.5h5.5M13.5 6.5H17M3 13.5h2.5M10.5 13.5H17', 'circle 11 6
   verifier(vu.rayon === '20px', 'carte au rayon 20', vu.rayon);
   verifier(json(vu.tailles) === json(['44x44']) && json(vu.pictoTaille) === json(['22']), 'boutons de 44 px, pictogrammes de 22 px', json([vu.tailles, vu.pictoTaille]));
   verifier(vu.pictos && !vu.logo && vu.volets === 0, 'un pictogramme sur chaque bouton ; ni logo ni menu volant');
-  verifier(json(vu.noms.map(x => [x[1], x[2], x[3]])) === json([['Zone', '', ''], ['Plein écran', '', ''], ['Fenêtre', '', ''], ['Retardateur', '', ''],
+  verifier(json(vu.noms.map(x => [x[1], x[2], x[3]])) === json([['Zone', '', ''], ['Plein écran', '', ''], ['Fenêtre', '', ''], ['Pipette de couleur', '', ''], ['Retardateur', '', ''],
     ['Capture défilante', '', ''], ['Vidéo', '', ''], ['GIF', '', ''], ['Réglages', '', '']]),
     'pictogrammes seuls : le nom en aria-label, sans mot ni info-bulle (title)', json(vu.noms));
   verifier(vu.fond === 'rgba(0, 0, 0, 0)', 'fond de la page transparent', vu.fond);
@@ -277,8 +277,8 @@ const CURSEURS = ['M3 6.5h5.5M13.5 6.5H17M3 13.5h2.5M10.5 13.5H17', 'circle 11 6
   verifier(await focus(p) === 'reglages', 'Maj + Tab depuis le premier : le dernier', await focus(p));
   await p.keyboard.press('Home');
   verifier(await focus(p) === 'capturer_zone', 'Début : le premier');
-  await p.keyboard.press('ArrowRight'); await p.keyboard.press('ArrowRight'); await p.keyboard.press('ArrowRight');
-  verifier(await focus(p) === 'retardateur', 'flèches : d\'un bouton à l\'autre, Retardateur au quatrième', await focus(p));
+  await p.keyboard.press('ArrowRight'); await p.keyboard.press('ArrowRight'); await p.keyboard.press('ArrowRight'); await p.keyboard.press('ArrowRight');
+  verifier(await focus(p) === 'retardateur', 'flèches : d\'un bouton à l\'autre, Retardateur au cinquième', await focus(p));
   await p.keyboard.press('ArrowDown');
   await p.waitForTimeout(500);
   verifier(await focus(p) === '3' && await p.evaluate(() => document.getElementById('etage-retardateur').classList.contains('ouvert')), 'Flèche bas : l\'étage du retardateur, 3 s au focus', await focus(p));
@@ -294,7 +294,7 @@ const CURSEURS = ['M3 6.5h5.5M13.5 6.5H17M3 13.5h2.5M10.5 13.5H17', 'circle 11 6
   await p.keyboard.press('Enter');
   await p.waitForTimeout(300);
   verifier(json(await derniere(p, 'barre_retardateur')) === json({ secondes: 10 }) && await focus(p) === 'retardateur', 'Entrée sur 10 s : barre_retardateur { secondes: 10 }, focus au bouton', await focus(p));
-  await p.keyboard.press('ArrowLeft'); await p.keyboard.press('ArrowLeft');
+  await p.keyboard.press('ArrowLeft'); await p.keyboard.press('ArrowLeft'); await p.keyboard.press('ArrowLeft');
   verifier(await focus(p) === 'capturer_plein_ecran', 'flèche gauche : Plein écran', await focus(p));
   await p.keyboard.press('Enter');
   await p.waitForTimeout(50);
@@ -392,7 +392,7 @@ const CURSEURS = ['M3 6.5h5.5M13.5 6.5H17M3 13.5h2.5M10.5 13.5H17', 'circle 11 6
   // ---- Sans licence ---------------------------------------------------------------
   {
     const q = await page({ charge: SANS });
-    verifier(json(await ordre(q)) === json(['capturer_zone', 'capturer_plein_ecran', 'capturer_fenetre', 'retardateur', '|', 'capturer_defilante', 'capturer_video', 'capturer_gif', 'puce', '|', 'reglages']),
+    verifier(json(await ordre(q)) === json(['capturer_zone', 'capturer_plein_ecran', 'capturer_fenetre', 'capturer_pipette', 'retardateur', '|', 'capturer_defilante', 'capturer_video', 'capturer_gif', 'puce', '|', 'reglages']),
       'sans licence : Défilante, Vidéo, GIF restent, une seule puce « Pro » après GIF', json(await ordre(q)));
     const e = await q.evaluate(() => {
       const pros = [...document.querySelectorAll('.b.pro')];
@@ -417,11 +417,11 @@ const CURSEURS = ['M3 6.5h5.5M13.5 6.5H17M3 13.5h2.5M10.5 13.5H17', 'circle 11 6
     await q.context().close();
     // Sans Media Foundation : GIF seul (Vidéo absente), éteint, avec la puce.
     const r = await page({ charge: charge(TOUT.filter(b => b !== 'capturer_video'), 0, ['capturer_defilante', 'capturer_gif']) });
-    verifier(json(await ordre(r)) === json(['capturer_zone', 'capturer_plein_ecran', 'capturer_fenetre', 'retardateur', '|', 'capturer_defilante', 'capturer_gif', 'puce', '|', 'reglages']), 'sans codeur vidéo : GIF sans Vidéo', json(await ordre(r)));
+    verifier(json(await ordre(r)) === json(['capturer_zone', 'capturer_plein_ecran', 'capturer_fenetre', 'capturer_pipette', 'retardateur', '|', 'capturer_defilante', 'capturer_gif', 'puce', '|', 'reglages']), 'sans codeur vidéo : GIF sans Vidéo', json(await ordre(r)));
     await r.context().close();
     // Sans retardateur (capture indisponible) et sans Pro (le système ne le permet pas).
     const s = await page({ charge: charge([...CAPTURES, 'reglages'], null) });
-    verifier(json(await ordre(s)) === json(['capturer_zone', 'capturer_plein_ecran', 'capturer_fenetre', '|', 'reglages']), 'sans retardateur ni Pro : Réglages après un filet', json(await ordre(s)));
+    verifier(json(await ordre(s)) === json(['capturer_zone', 'capturer_plein_ecran', 'capturer_fenetre', 'capturer_pipette', '|', 'reglages']), 'sans retardateur ni Pro : Réglages après un filet', json(await ordre(s)));
     await s.context().close();
     // Aucun choix de retardateur à proposer : pas de bouton qui ouvre du vide.
     const t = await page({ charge: { boutons: TOUT, verrouilles: [], retardateur_s: 0, retardateurs: [] } });
@@ -448,7 +448,7 @@ const CURSEURS = ['M3 6.5h5.5M13.5 6.5H17M3 13.5h2.5M10.5 13.5H17', 'circle 11 6
     await q.waitForTimeout(400);
     const n = (await appels(q, 'barre_pret')).length;
     const b = await q.evaluate(() => document.querySelectorAll('.b').length);
-    verifier(n === 3 && b === 8, 'barre_pret rejeté deux fois : retenté, boutons au troisième', `${n} appel(s), ${b} bouton(s)`);
+    verifier(n === 3 && b === 9, 'barre_pret rejeté deux fois : retenté, boutons au troisième', `${n} appel(s), ${b} bouton(s)`);
     await q.context().close();
   }
 

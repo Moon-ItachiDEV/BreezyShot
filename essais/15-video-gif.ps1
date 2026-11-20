@@ -1190,7 +1190,7 @@ try {
                 Verifier '(L0) mémoire (app et WebView2) : au plus celle de l''essai 13 sans licence + 8 Mo' ($script:ReposL0 -le $ref + 8) "$($script:ReposL0) Mo ; référence $ref Mo ($refDe)" | Out-Null
                 $m = Ouvrir-Menu '(L0)'
                 $films = @($m.Textes | Where-Object { $_.StartsWith('Vidéo', [StringComparison]::Ordinal) -or $_.StartsWith('GIF', [StringComparison]::Ordinal) })
-                Verifier '(L0) menu de la 0.6.1 sans licence : 9 positions, ni « Vidéo » ni « GIF »' (($films.Count -eq 0) -and ($m.Textes.Count -eq 9)) $m.Lus | Out-Null
+                Verifier '(L0) menu sans licence : 10 positions, ni « Vidéo » ni « GIF »' (($films.Count -eq 0) -and ($m.Textes.Count -eq 10)) $m.Lus | Out-Null
                 Fermer-Menu-Icone $m '(L0)'
                 Verifier '(L0) Ctrl+Maj+6 libre (l''essai le tient puis le rend)' ((Tenir-Ailleurs 0x36 'six') -eq 'tenu') | Out-Null
                 Verifier '(L0) Ctrl+Maj+7 libre' ((Tenir-Ailleurs 0x37 'sept') -eq 'tenu') | Out-Null
@@ -1206,8 +1206,8 @@ try {
                 $f = Lire-Reglages $d0
                 $video = if ($f.raccourcis.PSObject.Properties.Name -contains 'video') { @($f.raccourcis.video) -join ',' } else { '<absent>' }
                 $gif = if ($f.raccourcis.PSObject.Properties.Name -contains 'gif') { @($f.raccourcis.gif) -join ',' } else { '<absent>' }
-                $mises = Compter-Motif 'reglages mis a niveau de la version 5 a la version 10$' $d0
-                Verifier '(L0) réglages réécrits en v10 : video = Ctrl+Maj+6, gif = Ctrl+Maj+7, une ligne « de la version 5 a la version 10 »' (($f.version -eq 10) -and ($video -eq 'Ctrl+Maj+6') -and ($gif -eq 'Ctrl+Maj+7') -and ($mises -eq 1)) "version $($f.version), video $video, gif $gif, lignes $mises" | Out-Null
+                $mises = Compter-Motif 'reglages mis a niveau de la version 5 a la version 11$' $d0
+                Verifier '(L0) réglages réécrits en v11 : video = Ctrl+Maj+6, gif = Ctrl+Maj+7, une ligne « de la version 5 a la version 11 »' (($f.version -eq 11) -and ($video -eq 'Ctrl+Maj+6') -and ($gif -eq 'Ctrl+Maj+7') -and ($mises -eq 1)) "version $($f.version), video $video, gif $gif, lignes $mises" | Out-Null
                 Verifier '(L0) aucune fenêtre « film »' ((Compter-Motif 'film fenetre \d+' $d0) -eq 0) | Out-Null
                 Fermer-Cas $script:proc $d0 '(L0)'
             }

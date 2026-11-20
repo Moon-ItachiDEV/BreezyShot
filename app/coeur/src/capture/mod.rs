@@ -7,6 +7,7 @@
 //! (`figer(true)`) ; l'Application écrit les durées (`chrono gel photo <ms> total <ms>`).
 
 pub mod clics;
+pub mod couleur;
 pub mod decoupe;
 pub mod fenetre;
 pub mod geometrie;

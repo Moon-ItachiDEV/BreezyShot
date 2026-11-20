@@ -39,12 +39,13 @@ use crate::fenetres::barre::{self, Ouverture};
 use crate::fenetres::{menu, theme};
 use crate::systeme::gel;
 
-/// Les modes que la barre peut montrer, dans son ordre : Zone, Plein écran, Fenêtre |
-/// Capture défilante, Vidéo et GIF (un bouton et son menu).
-pub const MODES_BARRE: [Mode; 6] = [
+/// Les modes que la barre peut montrer, dans son ordre : Zone, Plein écran, Fenêtre,
+/// Pipette de couleur | Capture défilante, Vidéo et GIF (un bouton et son menu).
+pub const MODES_BARRE: [Mode; 7] = [
     Mode::Zone,
     Mode::PleinEcran,
     Mode::Fenetre,
+    Mode::Pipette,
     Mode::Defilante,
     Mode::Video,
     Mode::Gif,
@@ -226,10 +227,11 @@ mod tests {
         ouverture(&menu(pro, video, vivant), &avec, retardateur)
     }
 
-    const TOUT: [&str; 7] = [
+    const TOUT: [&str; 8] = [
         "capturer_zone",
         "capturer_plein_ecran",
         "capturer_fenetre",
+        "capturer_pipette",
         "capturer_defilante",
         "capturer_video",
         "capturer_gif",
@@ -262,6 +264,7 @@ mod tests {
                 "capturer_zone",
                 "capturer_plein_ecran",
                 "capturer_fenetre",
+                "capturer_pipette",
                 "reglages"
             ]
         );
@@ -306,7 +309,7 @@ mod tests {
         // Le système ne prend pas d'images vivantes : ni bouton, ni bouton éteint.
         for pro in [true, false] {
             let o = charge(pro, true, false, None);
-            assert_eq!(o.boutons.len(), 4, "{:?}", o.boutons);
+            assert_eq!(o.boutons.len(), 5, "{:?}", o.boutons);
             assert!(o.verrouilles.is_empty());
         }
     }

@@ -48,13 +48,16 @@ try {
     $lu = Get-Content -LiteralPath $fichier -Raw | ConvertFrom-Json
     $attenduZone = if ($IsMacOS) { 'Cmd+Maj+1' } else { 'Ctrl+Maj+1' }
     $attenduDerniere = if ($IsMacOS) { 'Cmd+Maj+7' } else { 'Ctrl+Maj+4' }
-    Verifier 'valeurs par défaut : version 10' ($lu.version -eq 10) "version $($lu.version)" | Out-Null
+    Verifier 'valeurs par défaut : version 11' ($lu.version -eq 11) "version $($lu.version)" | Out-Null
     # 0.8.0 : Impr. écran n'est plus dans la liste de la zone, la cible est un champ à part.
     Verifier 'valeurs par défaut : Impr. écran ouvre la zone (0.8.0)' ($lu.impr_ecran_ouvre -eq 'zone') "impr_ecran_ouvre $($lu.impr_ecran_ouvre)" | Out-Null
     # 0.7.7 : format PNG, éditeur non, film à 30 i/s sans son ni clics, 50 captures gardées.
     Verifier 'valeurs par défaut : format, éditeur, film et historique (0.7.7)' (($lu.format_image -eq 'png') -and ($lu.editeur_apres_capture -eq $false) -and ($lu.film.fluidite -eq 30) -and ($lu.film.son_systeme -eq $false) -and ($lu.film.clics_visibles -eq $false) -and ($null -eq $lu.film.dossier) -and ($lu.historique.gardes -eq 50)) "format $($lu.format_image), editeur $($lu.editeur_apres_capture), film $($lu.film | ConvertTo-Json -Compress), historique $($lu.historique.gardes)" | Out-Null
     Verifier 'valeurs par défaut : raccourcis de zone' (($lu.raccourcis.zone -join ',') -eq $attenduZone) ($lu.raccourcis.zone -join ',') | Out-Null
     Verifier 'valeurs par défaut : raccourci de la dernière zone' (($lu.raccourcis.derniere_zone -join ',') -eq $attenduDerniere) ($lu.raccourcis.derniere_zone -join ',') | Out-Null
+    $attenduPipette = if ($IsMacOS) { 'Cmd+Maj+C' } else { 'Ctrl+Maj+C' }
+    $pipette = if ($lu.raccourcis.PSObject.Properties.Name -contains 'pipette') { @($lu.raccourcis.pipette) -join ',' } else { '<absent>' }
+    Verifier 'valeurs par défaut : raccourci de la pipette' ($pipette -eq $attenduPipette) $pipette | Out-Null
     $attenduHistorique = if ($IsMacOS) { 'Cmd+Maj+8' } else { 'Ctrl+Maj+H' }
     $attenduTexte = if ($IsMacOS) { 'Cmd+Maj+9' } else { 'Ctrl+Maj+T' }
     Verifier 'valeurs par défaut : raccourcis de l''historique et du texte' ((($lu.raccourcis.historique -join ',') -eq $attenduHistorique) -and (($lu.raccourcis.texte -join ',') -eq $attenduTexte)) "$($lu.raccourcis.historique -join ',') ; $($lu.raccourcis.texte -join ',')" | Out-Null
@@ -111,7 +114,7 @@ try {
     $avant = Empreinte $fichier
     Cycle 'version plus récente'
     Verifier 'version plus récente : identique octet pour octet' ((Empreinte $fichier) -eq $avant) | Out-Null
-    Verifier 'ligne « plus recente que la version 10 connue »' ((Compter-Lignes -Texte 'plus recente que la version 10 connue') -eq 1) | Out-Null
+    Verifier 'ligne « plus recente que la version 11 connue »' ((Compter-Lignes -Texte 'plus recente que la version 11 connue') -eq 1) | Out-Null
 
     Verifier 'cinq démarrages complets' ($script:Demarrages -eq 5) | Out-Null
 }

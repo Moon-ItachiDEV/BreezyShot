@@ -2128,7 +2128,11 @@ mod tests {
                 D::DemandeCapture(Mode::Video | Mode::Gif) | D::PhotoPrise(Mode::Video | Mode::Gif)
             ) || matches!(depart, E::Enregistrement | E::Finalisation)
                 || matches!(arrivee, E::Enregistrement | E::Finalisation);
-            assert!(texte || defilante || film, "{depart:?} {d:?}");
+            let pipette = matches!(
+                d,
+                D::DemandeCapture(Mode::Pipette) | D::PhotoPrise(Mode::Pipette) | D::CouleurChoisie
+            );
+            assert!(texte || defilante || film || pipette, "{depart:?} {d:?}");
         }
         // Tous les déclencheurs, sans exception (un nouveau ne compile pas sans être vu
         // ici) : aucun ne concerne l'éditeur.
@@ -2168,7 +2172,8 @@ mod tests {
                 | D::EnregistrementArrete
                 | D::EnregistrementAnnule
                 | D::EnregistrementImpossible
-                | D::FinalisationImpossible => false,
+                | D::FinalisationImpossible
+                | D::CouleurChoisie => false,
             };
             assert!(!editeur);
         }

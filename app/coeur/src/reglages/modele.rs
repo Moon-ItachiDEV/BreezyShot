@@ -74,6 +74,7 @@ pub enum CibleImprEcran {
     PleinEcran,
     Fenetre,
     DerniereZone,
+    Pipette,
     Defilante,
     Texte,
     Video,
@@ -83,12 +84,13 @@ pub enum CibleImprEcran {
 
 impl CibleImprEcran {
     /// Les cibles dans l'ordre de la liste de la page.
-    pub const TOUTES: [CibleImprEcran; 10] = [
+    pub const TOUTES: [CibleImprEcran; 11] = [
         CibleImprEcran::Barre,
         CibleImprEcran::Zone,
         CibleImprEcran::PleinEcran,
         CibleImprEcran::Fenetre,
         CibleImprEcran::DerniereZone,
+        CibleImprEcran::Pipette,
         CibleImprEcran::Defilante,
         CibleImprEcran::Texte,
         CibleImprEcran::Video,
@@ -104,6 +106,7 @@ impl CibleImprEcran {
             CibleImprEcran::PleinEcran => Some("plein_ecran"),
             CibleImprEcran::Fenetre => Some("fenetre"),
             CibleImprEcran::DerniereZone => Some("derniere_zone"),
+            CibleImprEcran::Pipette => Some("pipette"),
             CibleImprEcran::Defilante => Some("defilante"),
             CibleImprEcran::Texte => Some("texte"),
             CibleImprEcran::Video => Some("video"),
@@ -150,6 +153,7 @@ texte_enum!(CibleImprEcran {
     PleinEcran => "plein_ecran",
     Fenetre => "fenetre",
     DerniereZone => "derniere_zone",
+    Pipette => "pipette",
     Defilante => "defilante",
     Texte => "texte",
     Video => "video",
@@ -177,13 +181,15 @@ pub struct Raccourcis {
     pub video: Vec<String>,
     /// Le GIF (version 6).
     pub gif: Vec<String>,
+    /// La pipette de couleur (version 11).
+    pub pipette: Vec<String>,
     /// Actions que cette version ne connaît pas, gardées telles quelles pour la réécriture.
     pub(in crate::reglages) autres: Map<String, Value>,
 }
 
 impl Raccourcis {
     /// Les noms d'action connus, dans l'ordre où ils sont écrits.
-    pub const ACTIONS: [&'static str; 9] = [
+    pub const ACTIONS: [&'static str; 10] = [
         "zone",
         "plein_ecran",
         "fenetre",
@@ -193,6 +199,7 @@ impl Raccourcis {
         "defilante",
         "video",
         "gif",
+        "pipette",
     ];
 
     /// Les candidats d'une action connue, `None` pour une action inconnue.
@@ -207,6 +214,7 @@ impl Raccourcis {
             "defilante" => Some(&self.defilante),
             "video" => Some(&self.video),
             "gif" => Some(&self.gif),
+            "pipette" => Some(&self.pipette),
             _ => None,
         }
     }
@@ -222,6 +230,7 @@ impl Raccourcis {
             "defilante" => Some(&mut self.defilante),
             "video" => Some(&mut self.video),
             "gif" => Some(&mut self.gif),
+            "pipette" => Some(&mut self.pipette),
             _ => None,
         }
     }
@@ -241,6 +250,7 @@ impl Raccourcis {
                 defilante: liste(&["Ctrl+Maj+5"]),
                 video: liste(&["Ctrl+Maj+6"]),
                 gif: liste(&["Ctrl+Maj+7"]),
+                pipette: liste(&["Ctrl+Maj+C"]),
                 autres: Map::new(),
             },
             // Provisoire : les raccourcis du Mac restent à choisir (Cmd+Maj+3, 4 et 5 sont
@@ -257,6 +267,7 @@ impl Raccourcis {
                 defilante: liste(&["Cmd+Maj+0"]),
                 video: Vec::new(),
                 gif: Vec::new(),
+                pipette: liste(&["Cmd+Maj+C"]),
                 autres: Map::new(),
             },
         }

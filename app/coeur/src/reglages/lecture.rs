@@ -15,8 +15,8 @@ use super::modele::{
 /// le numéro de version est tenu par `interpreter`, pas par elle.
 pub(super) type MiseANiveau = fn(&mut Map<String, Value>, Plateforme);
 
-/// `MISES_A_NIVEAU[n]` fait passer de la version `n` à `n + 1`. Pour une version 11 un jour :
-/// ajouter `v10_vers_v11` à la fin, et `VERSION_ACTUELLE` passe à 11 tout seul.
+/// `MISES_A_NIVEAU[n]` fait passer de la version `n` à `n + 1`. Pour une version 12 un jour :
+/// ajouter `v11_vers_v12` à la fin, et `VERSION_ACTUELLE` passe à 12 tout seul.
 pub(super) const MISES_A_NIVEAU: &[MiseANiveau] = &[
     v0_vers_v1,
     v1_vers_v2,
@@ -28,6 +28,7 @@ pub(super) const MISES_A_NIVEAU: &[MiseANiveau] = &[
     v7_vers_v8,
     v8_vers_v9,
     v9_vers_v10,
+    v10_vers_v11,
 ];
 
 /// Version 0 (aucun champ `version`) vers 1 : ajoute les champs de la version 1 qui manquent,
@@ -176,6 +177,17 @@ fn v9_vers_v10(objet: &mut Map<String, Value>, _plateforme: Plateforme) {
     if let Value::Object(modele) = modele {
         completer(objet, &modele);
     }
+}
+
+/// Version 10 vers 11 (pipette de couleur) : le raccourci `pipette`, avec la même règle
+/// que `v3_vers_v4` (défaut de la plateforme seulement s'il n'est pas déjà donné à une autre
+/// action, action déjà là gardée, objet `raccourcis` absent non créé).
+fn v10_vers_v11(objet: &mut Map<String, Value>, plateforme: Plateforme) {
+    let Some(Value::Object(raccourcis)) = objet.get_mut("raccourcis") else {
+        return;
+    };
+    let r = Raccourcis::par_defaut(plateforme);
+    ajouter_action(raccourcis, "pipette", &r.pipette);
 }
 
 /// L'ordre dans lequel les actions se partageaient les raccourcis avant la version 8

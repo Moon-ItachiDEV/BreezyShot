@@ -38,6 +38,8 @@ fn main() {
         "selection_prete",
         "selection_terminee",
         "selection_cliquee",
+        "selection_pipette",
+        "selection_echantillon",
         "selection_annulee",
         "reglages_lire",
         "reglages_changer",

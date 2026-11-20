@@ -189,7 +189,16 @@ function valider(m) {
   }
   if (!entier(m.cote_min) || m.cote_min < 0) return rejeter("cote_min invalide");
   const md = m.mode === undefined ? "zone" : m.mode;
-  if (md !== "zone" && md !== "fenetre" && md !== "texte" && md !== "defilante" && md !== "film") return rejeter("mode inconnu");
+  if (
+    md !== "zone" &&
+    md !== "fenetre" &&
+    md !== "texte" &&
+    md !== "defilante" &&
+    md !== "film" &&
+    md !== "pipette"
+  ) {
+    return rejeter("mode inconnu");
+  }
   if (m.suite !== undefined && typeof m.suite !== "boolean") return rejeter("suite invalide");
   const brutes = m.fenetres === undefined ? [] : m.fenetres;
   if (!Array.isArray(brutes)) return rejeter("fenetres invalides");
@@ -250,6 +259,13 @@ function mesurer() {
     }
     scene_reelle();
     prete = !redimensionnee;
+    if (mode === "pipette" && prete) {
+      const depart = survol ? pixel(survol.cx, survol.cy) : souris;
+      if (depart) {
+        const p = { x: borne(depart.x, 0, largeur - 1), y: borne(depart.y, 0, hauteur - 1) };
+        mettreAJourPipette(p, survol ? survol.cx : p.x / kx, survol ? survol.cy : p.y / ky);
+      }
+    }
     planifier(); // mode fenêtre : entourer la fenêtre sous la souris
     appeler("selection_prete", { id, numero, largeur: css.l, hauteur: css.h, echelle: dpr, kx, ky, attente: redimensionnee });
   };
@@ -286,6 +302,9 @@ export function montrer(brut) {
   souris = m.souris;
   survol = null;
   document.documentElement.classList.toggle("mode-fenetre", mode === "fenetre");
+  document.documentElement.classList.toggle("mode-pipette", mode === "pipette");
+  if (mode === "pipette") preparerPipette();
+  else retirerPipette();
   nommer();
   attente = false;
   espace = false;
@@ -295,6 +314,8 @@ export function montrer(brut) {
 
 export function cachee() {
   repos();
+  retirerPipette();
+  document.documentElement.classList.remove("mode-pipette");
   clearTimeout(filet);
   envoi++;
   mesure++;
@@ -464,12 +485,13 @@ function poserZone(x0, y0, x1, y1) {
   corps.classList.add("glisse");
 }
 
-/** Le nom de la page : ceux des modes texte, défilante et film (les autres modes n'en ont
- *  pas). */
+/** Le nom de la page : ceux des modes texte, défilante, film et pipette (les autres modes
+ *  n'en ont pas). */
 const NOMS = {
   texte: "Copier le texte : sélectionnez une zone",
   defilante: "Capture défilante : sélectionnez une zone ou une page",
   film: "Enregistrer l'écran : sélectionnez une zone",
+  pipette: "Pipette de couleur : choisissez un pixel",
 };
 function nommer() {
   if (NOMS[mode]) {
@@ -479,6 +501,234 @@ function nommer() {
     corps.removeAttribute("role");
     corps.removeAttribute("aria-label");
   }
+}
+
+// Mode pipette : loupe circulaire 15 × 15 pixels réels et carte de valeur HEX / RGB / HSL.
+// Créés dans le DOM seulement pendant ce mode : les autres modes gardent un body sans texte.
+const PIPETTE_RAYON = 7;
+const PIPETTE_COTE = PIPETTE_RAYON * 2 + 1;
+const PIPETTE_PAS = 9; // 15 × 9 = 135 px dans le canvas
+const PIPETTE_FORMATS = ["hex", "rgb", "hsl"];
+let pipetteUi = null;
+let pipetteFormat = "hex";
+let pipetteCouleur = [0, 0, 0];
+let pipettePoint = null;
+let echantillonEnCours = false;
+let echantillonSuivant = null;
+
+function rgbVersHsl(r, g, b) {
+  const rf = r / 255;
+  const gf = g / 255;
+  const bf = b / 255;
+  const max = Math.max(rf, gf, bf);
+  const min = Math.min(rf, gf, bf);
+  const delta = max - min;
+  const l = (max + min) / 2;
+  let h = 0;
+  let s = 0;
+  if (delta !== 0) {
+    s = delta / (1 - Math.abs(2 * l - 1));
+    if (max === rf) h = ((gf - bf) / delta) % 6;
+    else if (max === gf) h = (bf - rf) / delta + 2;
+    else h = (rf - gf) / delta + 4;
+    h *= 60;
+    if (h < 0) h += 360;
+  }
+  return [((Math.round(h) % 360) + 360) % 360, Math.round(s * 100), Math.round(l * 100)];
+}
+
+function formaterCouleur(r, g, b, format) {
+  if (format === "rgb") return `rgb(${r}, ${g}, ${b})`;
+  if (format === "hsl") {
+    const [h, s, l] = rgbVersHsl(r, g, b);
+    return `hsl(${h}, ${s}%, ${l}%)`;
+  }
+  const hex = (n) => n.toString(16).toUpperCase().padStart(2, "0");
+  return `#${hex(r)}${hex(g)}${hex(b)}`;
+}
+
+function preparerPipette() {
+  pipetteFormat = "hex";
+  pipetteCouleur = [0, 0, 0];
+  pipettePoint = null;
+  echantillonEnCours = false;
+  echantillonSuivant = null;
+  if (pipetteUi) {
+    pipetteUi.bloc.hidden = true;
+    actualiserTextePipette();
+    return;
+  }
+  const bloc = document.createElement("div");
+  bloc.id = "pipette";
+  bloc.hidden = true;
+
+  const loupe = document.createElement("div");
+  loupe.className = "pipette-loupe";
+  const canvas = document.createElement("canvas");
+  canvas.className = "pipette-grille";
+  canvas.width = PIPETTE_COTE * PIPETTE_PAS;
+  canvas.height = PIPETTE_COTE * PIPETTE_PAS;
+  loupe.append(canvas);
+
+  const carte = document.createElement("div");
+  carte.className = "pipette-carte";
+  const pastille = document.createElement("span");
+  pastille.className = "pipette-pastille";
+  const infos = document.createElement("div");
+  infos.className = "pipette-infos";
+  const valeur = document.createElement("span");
+  valeur.className = "pipette-valeur";
+  const formats = document.createElement("div");
+  formats.className = "pipette-formats";
+  const badges = {};
+  for (const f of PIPETTE_FORMATS) {
+    const badge = document.createElement("span");
+    badge.className = "pipette-format";
+    badge.dataset.format = f;
+    badge.textContent = f.toUpperCase();
+    formats.append(badge);
+    badges[f] = badge;
+  }
+  infos.append(valeur, formats);
+  carte.append(pastille, infos);
+  bloc.append(loupe, carte);
+  corps.append(bloc);
+
+  pipetteUi = {
+    bloc,
+    ctx: canvas.getContext("2d"),
+    pastille,
+    valeur,
+    badges,
+  };
+  actualiserTextePipette();
+}
+
+function retirerPipette() {
+  echantillonEnCours = false;
+  echantillonSuivant = null;
+  pipettePoint = null;
+  if (pipetteUi) {
+    pipetteUi.bloc.remove();
+    pipetteUi = null;
+  }
+}
+
+function actualiserTextePipette() {
+  if (!pipetteUi) return;
+  const [r, g, b] = pipetteCouleur;
+  pipetteUi.pastille.style.background = `rgb(${r}, ${g}, ${b})`;
+  pipetteUi.valeur.textContent = formaterCouleur(r, g, b, pipetteFormat);
+  for (const f of PIPETTE_FORMATS) {
+    pipetteUi.badges[f].classList.toggle("actif", f === pipetteFormat);
+  }
+}
+
+function changerFormatPipette(pas) {
+  const i = PIPETTE_FORMATS.indexOf(pipetteFormat);
+  pipetteFormat = PIPETTE_FORMATS[(i + pas + PIPETTE_FORMATS.length) % PIPETTE_FORMATS.length];
+  actualiserTextePipette();
+}
+
+function placerPipette(cx, cy) {
+  if (!pipetteUi) return;
+  pipetteUi.bloc.hidden = false;
+  const rect = pipetteUi.bloc.getBoundingClientRect();
+  const l = rect.width || 168;
+  const h = rect.height || 192;
+  const decalage = 24;
+  let x = cx + decalage;
+  let y = cy + decalage;
+  if (x + l + 8 > innerWidth) x = cx - l - decalage;
+  if (y + h + 8 > innerHeight) y = cy - h - decalage;
+  x = borne(x, 8, Math.max(8, innerWidth - l - 8));
+  y = borne(y, 8, Math.max(8, innerHeight - h - 8));
+  pipetteUi.bloc.style.transform = `translate3d(${Math.round(x)}px, ${Math.round(y)}px, 0)`;
+}
+
+function dessinerLoupe(octets) {
+  if (!pipetteUi?.ctx) return;
+  const ctx = pipetteUi.ctx;
+  const attendu = PIPETTE_COTE * PIPETTE_COTE * 4;
+  if (octets.length < attendu) return;
+  ctx.clearRect(0, 0, PIPETTE_COTE * PIPETTE_PAS, PIPETTE_COTE * PIPETTE_PAS);
+  for (let py = 0; py < PIPETTE_COTE; py++) {
+    for (let px = 0; px < PIPETTE_COTE; px++) {
+      const o = (py * PIPETTE_COTE + px) * 4;
+      const a = octets[o + 3];
+      ctx.fillStyle = a === 0 ? "#181818" : `rgb(${octets[o]}, ${octets[o + 1]}, ${octets[o + 2]})`;
+      ctx.fillRect(px * PIPETTE_PAS, py * PIPETTE_PAS, PIPETTE_PAS, PIPETTE_PAS);
+    }
+  }
+  ctx.strokeStyle = "rgba(128, 128, 128, 0.25)";
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  for (let i = 1; i < PIPETTE_COTE; i++) {
+    const pos = i * PIPETTE_PAS + 0.5;
+    ctx.moveTo(pos, 0);
+    ctx.lineTo(pos, PIPETTE_COTE * PIPETTE_PAS);
+    ctx.moveTo(0, pos);
+    ctx.lineTo(PIPETTE_COTE * PIPETTE_PAS, pos);
+  }
+  ctx.stroke();
+  const c = PIPETTE_RAYON * PIPETTE_PAS;
+  ctx.strokeStyle = "#000000";
+  ctx.lineWidth = 2;
+  ctx.strokeRect(c - 0.5, c - 0.5, PIPETTE_PAS + 1, PIPETTE_PAS + 1);
+  ctx.strokeStyle = "#FFFFFF";
+  ctx.lineWidth = 1.5;
+  ctx.strokeRect(c + 0.5, c + 0.5, PIPETTE_PAS - 1, PIPETTE_PAS - 1);
+
+  const centre = (PIPETTE_RAYON * PIPETTE_COTE + PIPETTE_RAYON) * 4;
+  pipetteCouleur = [octets[centre], octets[centre + 1], octets[centre + 2]];
+  actualiserTextePipette();
+}
+
+function versOctets(brut) {
+  if (brut instanceof Uint8Array) return brut;
+  if (brut instanceof ArrayBuffer) return new Uint8Array(brut);
+  if (ArrayBuffer.isView(brut)) return new Uint8Array(brut.buffer, brut.byteOffset, brut.byteLength);
+  if (Array.isArray(brut)) return Uint8Array.from(brut);
+  return null;
+}
+
+function demanderEchantillon(p) {
+  if (!tauri?.core?.invoke || mode !== "pipette" || id === null || attente || !prete) return;
+  if (echantillonEnCours) {
+    echantillonSuivant = p;
+    return;
+  }
+  echantillonEnCours = true;
+  const tour = envoi;
+  Promise.resolve(
+    tauri.core.invoke("selection_echantillon", {
+      id,
+      numero,
+      x: p.x,
+      y: p.y,
+      rayon: PIPETTE_RAYON,
+    }),
+  )
+    .then((brut) => {
+      if (tour !== envoi || mode !== "pipette" || id === null) return;
+      const octets = versOctets(brut);
+      if (octets) dessinerLoupe(octets);
+    })
+    .catch(() => {})
+    .finally(() => {
+      echantillonEnCours = false;
+      const suivant = echantillonSuivant;
+      echantillonSuivant = null;
+      if (suivant && tour === envoi && mode === "pipette" && id !== null && !attente) {
+        demanderEchantillon(suivant);
+      }
+    });
+}
+
+function mettreAJourPipette(p, cx, cy) {
+  pipettePoint = p;
+  placerPipette(cx, cy);
+  demanderEchantillon(p);
 }
 
 // Le mode texte : la zone lue (coin, pixels réels de la scène) et les lignes copiées,
@@ -596,6 +846,14 @@ addEventListener(
       annuler("clic_droit");
       return;
     }
+    if (mode === "pipette") {
+      if (e.button === 0 && prete) {
+        const p = point(e);
+        pipettePoint = p;
+        envoyer("selection_pipette", { id, numero, x: p.x, y: p.y, format: pipetteFormat });
+      }
+      return;
+    }
     if (mode === "fenetre") {
       // Chaque appui gauche remplace le précédent : un relâchement perdu ne laisse rien.
       if (e.button === 0) appui = prete ? { pointeur: e.pointerId, p: point(e) } : null;
@@ -620,6 +878,17 @@ addEventListener(
 addEventListener(
   "pointermove",
   (e) => {
+    if (mode === "pipette") {
+      if (id === null || attente) return;
+      if (e.button === 2) {
+        annuler("clic_droit");
+        return;
+      }
+      survol = { cx: e.clientX, cy: e.clientY };
+      if (!prete) return;
+      mettreAJourPipette(point(e), e.clientX, e.clientY);
+      return;
+    }
     if (mode === "fenetre") {
       if (id === null || attente) return;
       if (e.button === 2) {
@@ -659,6 +928,7 @@ addEventListener(
 addEventListener(
   "pointerup",
   (e) => {
+    if (mode === "pipette") return;
     if (mode === "fenetre") {
       const a = appui;
       if (!a || attente || id === null || e.pointerId !== a.pointeur || e.button !== 0) return;
@@ -723,6 +993,17 @@ addEventListener(
   true,
 );
 
+addEventListener(
+  "wheel",
+  (e) => {
+    if (mode !== "pipette" || id === null || attente || !prete) return;
+    e.preventDefault();
+    const pas = e.deltaY < 0 ? -1 : 1;
+    changerFormatPipette(pas);
+  },
+  { passive: false, capture: true },
+);
+
 const perdu = (e) => {
   if (appui && e.pointerId === appui.pointeur) appui = null;
   if (glisser && !attente && e.pointerId === glisser.pointeur) {
@@ -740,6 +1021,37 @@ addEventListener(
     e.preventDefault();
     if (e.key === "Escape") {
       annuler("echap");
+    } else if (mode === "pipette") {
+      if (id === null || attente || !prete) return;
+      if (e.key === "Tab") {
+        changerFormatPipette(e.shiftKey ? -1 : 1);
+      } else if (e.key === "c" || e.key === "C" || e.key === "f" || e.key === "F") {
+        changerFormatPipette(1);
+      } else if (e.key === "Enter" || e.code === "Space" || e.key === " ") {
+        if (pipettePoint) {
+          envoyer("selection_pipette", {
+            id,
+            numero,
+            x: pipettePoint.x,
+            y: pipettePoint.y,
+            format: pipetteFormat,
+          });
+        }
+      } else if (
+        e.key === "ArrowLeft" ||
+        e.key === "ArrowRight" ||
+        e.key === "ArrowUp" ||
+        e.key === "ArrowDown"
+      ) {
+        const base = pipettePoint || { x: Math.floor(largeur / 2), y: Math.floor(hauteur / 2) };
+        const dx = e.key === "ArrowLeft" ? -1 : e.key === "ArrowRight" ? 1 : 0;
+        const dy = e.key === "ArrowUp" ? -1 : e.key === "ArrowDown" ? 1 : 0;
+        const suivant = {
+          x: borne(base.x + dx, 0, largeur - 1),
+          y: borne(base.y + dy, 0, hauteur - 1),
+        };
+        mettreAJourPipette(suivant, suivant.x / kx, suivant.y / ky);
+      }
     } else if (mode === "fenetre") {
       // Maj et Espace ne font rien dans ce mode.
     } else if (e.code === "Space" || e.key === " ") {
@@ -758,7 +1070,7 @@ addEventListener(
     if (e.code === "Space" || e.key === " ") {
       e.preventDefault();
       espace = false;
-    } else if (mode === "fenetre") {
+    } else if (mode === "fenetre" || mode === "pipette") {
       // Rien.
     } else if (e.key === "Shift") {
       maj = false;
