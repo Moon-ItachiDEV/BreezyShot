@@ -1610,7 +1610,7 @@ mod tests {
                 "copier"
             ]
         );
-        assert_eq!(tout.len(), 18);
+        assert_eq!(tout.len(), 19);
         // Rien de ce qui n'a pas d'effet en 0.4.
         for absent in ["barre", "format", "mise_a_jour"] {
             assert!(!tout.contains(&absent));

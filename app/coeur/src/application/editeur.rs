@@ -1165,12 +1165,22 @@ mod tests {
             ),
             Some(Refus::Id)
         );
+        assert_eq!(
+            lire_en_tete(Some("7"), Some("0"), Some("epingler"), Some("4"), Some("3")),
+            Ok(EnTete {
+                id: 7,
+                version: 0,
+                but: But::Epingler,
+                largeur: 4,
+                hauteur: 3
+            })
+        );
         // But inconnu, en majuscules, absent.
         for b in [
             None,
             Some("COPIER"),
             Some("Copier"),
-            Some("epingler"),
+            Some("partager"),
             Some(""),
         ] {
             assert_eq!(
