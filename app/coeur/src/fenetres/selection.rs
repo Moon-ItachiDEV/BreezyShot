@@ -114,10 +114,12 @@ pub enum Mode {
     /// Vidéo et GIF (0.7) : une zone, comme `Zone`, avec le nom « Enregistrer l'écran :
     /// sélectionnez une zone » ; la zone choisie reste montrée jusqu'à `cacher`.
     Film,
+    /// Pipette de couleur : clic sur un pixel pour copier sa couleur, sans voile.
+    Pipette,
 }
 
 impl Mode {
-    /// Nom écrit au journal et envoyé à la page : `zone`, `fenetre`.
+    /// Nom écrit au journal et envoyé à la page : `zone`, `fenetre`, `pipette`…
     pub fn nom(self) -> &'static str {
         match self {
             Mode::Zone => "zone",
@@ -125,6 +127,7 @@ impl Mode {
             Mode::Texte => "texte",
             Mode::Defilante => "defilante",
             Mode::Film => "film",
+            Mode::Pipette => "pipette",
         }
     }
 }
@@ -162,7 +165,7 @@ pub struct Demande {
 fn fenetres_de(demande: &Demande) -> Vec<FenetreProposee> {
     match demande.mode {
         // Défilante : les pages arrivent après, par `Selection::proposer`.
-        Mode::Zone | Mode::Texte | Mode::Defilante | Mode::Film => Vec::new(),
+        Mode::Zone | Mode::Texte | Mode::Pipette | Mode::Defilante | Mode::Film => Vec::new(),
         Mode::Fenetre => demande
             .fenetres
             .iter()
@@ -216,6 +219,13 @@ pub enum Signal {
         indice: usize,
         point: (i32, i32),
     },
+    /// Couleur choisie (mode pipette) : pixel cliqué en pixels réels du bureau et format
+    /// demandé (`"hex"`, `"rgb"` ou `"hsl"`).
+    Couleur {
+        id: u64,
+        point: (i32, i32),
+        format: String,
+    },
     Annulee {
         id: u64,
         cause: Cause,
@@ -238,6 +248,7 @@ impl Signal {
             Signal::Prete { id, .. }
             | Signal::Zone { id, .. }
             | Signal::Fenetre { id, .. }
+            | Signal::Couleur { id, .. }
             | Signal::Annulee { id, .. }
             | Signal::Muette { id }
             | Signal::Impossible { id, .. } => *id,
@@ -245,13 +256,14 @@ impl Signal {
     }
 }
 
-/// Fin d'un affichage telle qu'écrite au journal : `zone`, `fenetre`, `annulee echap`, `muette`,
-/// `impossible <cause>`. `None` pour `Prete`, qui n'est pas une fin.
+/// Fin d'un affichage telle qu'écrite au journal : `zone`, `fenetre`, `couleur`,
+/// `annulee echap`, `muette`, `impossible <cause>`. `None` pour `Prete`, qui n'est pas une fin.
 pub fn decrire_fin(signal: &Signal) -> Option<String> {
     match signal {
         Signal::Prete { .. } => None,
         Signal::Zone { .. } => Some("zone".into()),
         Signal::Fenetre { .. } => Some("fenetre".into()),
+        Signal::Couleur { .. } => Some("couleur".into()),
         Signal::Annulee { cause, .. } => Some(format!("annulee {}", cause.nom())),
         Signal::Muette { .. } => Some("muette".into()),
         Signal::Impossible { cause, .. } => Some(format!("impossible {cause}")),
@@ -468,6 +480,11 @@ fn garde_mode(mode: Mode, attendu: Mode) -> Result<(), String> {
         (Mode::Fenetre, Mode::Zone) => Err("zone en mode fenetre".into()),
         (Mode::Texte, Mode::Fenetre) => Err("clic en mode texte".into()),
         (Mode::Film, Mode::Fenetre) => Err("clic en mode film".into()),
+        (Mode::Pipette, Mode::Zone) => Err("zone en mode pipette".into()),
+        (Mode::Pipette, Mode::Fenetre) => Err("clic en mode pipette".into()),
+        (autre, Mode::Pipette) if autre != Mode::Pipette => {
+            Err(format!("pipette en mode {}", autre.nom()))
+        }
         _ => Ok(()),
     }
 }
@@ -1132,6 +1149,17 @@ impl Selection {
         self.interne.etat().en_cours.is_some()
     }
 
+    /// Convertit un point relatif à la fenêtre `(x, y)` en pixel réel du bureau si la
+    /// sélection active est en mode pipette pour `(id, numero)`.
+    pub fn point_bureau(&self, id: u64, numero: u64, x: f64, y: f64) -> Option<(i32, i32)> {
+        let etat = self.interne.etat();
+        let a = etat.courant(id)?;
+        if a.mode != Mode::Pipette || !etat.charge_courante(id, numero) {
+            return None;
+        }
+        vers_bureau((x, y), a.fenetre)
+    }
+
     /// À l'arrêt de l'app : cache puis détruit la fenêtre. Aucun signal.
     pub fn fermer(&self) {
         self.interne.vivante.store(false, Ordering::SeqCst);
@@ -1658,6 +1686,45 @@ impl Interne {
         }
     }
 
+    /// Clic en mode pipette : valide le point et le format (`hex` | `rgb` | `hsl`), puis
+    /// termine l'affichage avec `Signal::Couleur`.
+    fn pipette(self: &Arc<Self>, id: u64, numero: u64, point: (f64, f64), format: &str) {
+        let Some((a, courante)) = ({
+            let etat = self.etat();
+            etat.courant(id)
+                .map(|a| (a.clone(), etat.charge_courante(id, numero)))
+        }) else {
+            return;
+        };
+        if let Err(cause) = garde_mode(a.mode, Mode::Pipette) {
+            self.finir(Signal::Impossible { id, cause });
+            return;
+        }
+        if !courante {
+            log::info!("selection {id}: pipette d'une ancienne charge {numero} ignoree");
+            return;
+        }
+        if !matches!(format, "hex" | "rgb" | "hsl") {
+            self.finir(Signal::Impossible {
+                id,
+                cause: "format de couleur inconnu".into(),
+            });
+            return;
+        }
+        let Some(p) = vers_bureau(point, a.fenetre) else {
+            self.finir(Signal::Impossible {
+                id,
+                cause: "point invalide".into(),
+            });
+            return;
+        };
+        self.finir(Signal::Couleur {
+            id,
+            point: p,
+            format: format.into(),
+        });
+    }
+
     /// Une annulation d'un ancien numéro de charge reste une annulation : l'utilisateur veut
     /// sortir.
     fn annulee(self: &Arc<Self>, id: u64, numero: u64, nom: &str) {
@@ -1776,6 +1843,21 @@ pub fn selection_cliquee(
     selection
         .interne
         .cliquee(id, numero, (nombre_ou_rien(x), nombre_ou_rien(y)));
+}
+
+/// Clic en mode pipette : pixel réel relatif à la fenêtre et format (`"hex"`, `"rgb"` ou `"hsl"`).
+#[tauri::command]
+pub fn selection_pipette(
+    selection: State<'_, Selection>,
+    id: u64,
+    numero: u64,
+    x: Option<serde_json::Value>,
+    y: Option<serde_json::Value>,
+    format: String,
+) {
+    selection
+        .interne
+        .pipette(id, numero, (nombre_ou_rien(x), nombre_ou_rien(y)), &format);
 }
 
 /// Un argument de commande lu comme un nombre ; `NaN` s'il est absent ou n'en est pas un.

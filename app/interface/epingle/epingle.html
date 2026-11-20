@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Capture épinglée</title>
+<link rel="stylesheet" href="../commun/jetons.css">
+<link rel="stylesheet" href="epingle.css">
+<script type="module" src="epingle.js"></script>
+</head>
+<body>
+<svg width="0" height="0" class="defs" aria-hidden="true">
+  <defs>
+    <symbol id="i-copy" viewBox="0 0 20 20">
+      <rect x="6.5" y="6.5" width="10" height="10" rx="1.5"/>
+      <path d="M13.5 6.5V4.5A1.5 1.5 0 0 0 12 3H4.5A1.5 1.5 0 0 0 3 4.5V12a1.5 1.5 0 0 0 1.5 1.5h2"/>
+    </symbol>
+    <symbol id="i-check" viewBox="0 0 20 20">
+      <path d="M5 10.4l3.2 3.2 6.8-7.2"/>
+    </symbol>
+    <symbol id="i-x" viewBox="0 0 20 20">
+      <path d="M5.5 5.5l9 9M14.5 5.5l-9 9"/>
+    </symbol>
+  </defs>
+</svg>
+
+<main class="epingle" id="epingle" aria-label="Capture épinglée">
+  <div class="carte" id="carte">
+    <div class="cadre" id="cadre">
+      <canvas class="toile" id="toile"></canvas>
+    </div>
+    <div class="outils" role="toolbar" aria-label="Actions de la capture épinglée">
+      <button type="button" class="rond" id="copier" aria-label="Copier" title="Copier">
+        <svg class="ico ic-defaut" aria-hidden="true"><use href="#i-copy"/></svg>
+        <svg class="ico ic-ok" aria-hidden="true"><use href="#i-check"/></svg>
+      </button>
+      <button type="button" class="rond fermer" id="fermer" aria-label="Fermer" title="Fermer">
+        <svg class="ico" aria-hidden="true"><use href="#i-x"/></svg>
+      </button>
+    </div>
+    <div class="pilule" id="pilule" role="status" aria-live="polite" hidden></div>
+  </div>
+</main>
+</body>
+</html>

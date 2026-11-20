@@ -56,7 +56,7 @@ pub const LARGEUR_BOUTON: f64 = 46.0;
 pub const LARGEUR_FILET: f64 = 17.0;
 pub const LARGEUR_PUCE: f64 = 44.0;
 /// Largeur de la carte à la création de la fenêtre, avant que `ouvrir` la pose à sa mesure.
-pub const LARGEUR_INITIALE: f64 = 460.0;
+pub const LARGEUR_INITIALE: f64 = 520.0;
 /// Bornes d'une taille rendue par la page (une valeur absurde est refusée).
 pub const TAILLE_MAX: f64 = 4000.0;
 
@@ -614,6 +614,7 @@ mod tests {
             "capturer_zone",
             "capturer_plein_ecran",
             "capturer_fenetre",
+            "capturer_pipette",
             "capturer_defilante",
             "capturer_video",
             "capturer_gif",
@@ -621,7 +622,7 @@ mod tests {
         ];
         let mut o = ouverture(&pro, true);
         o.verrouilles = vec!["capturer_defilante".into()];
-        // La barre la plus large (tout, avec la puce) : environ 460 px, la fenêtre créée.
+        // La barre la plus large (tout, avec la puce) : environ 506 px, la fenêtre créée.
         assert!((largeur_estimee(&o) - LARGEUR_INITIALE).abs() < 20.0);
     }
 

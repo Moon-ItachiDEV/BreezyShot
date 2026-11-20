@@ -62,13 +62,13 @@ try {
         Verifier 'la seconde instance ouvre la barre de capture' ($M::IsWindowVisible($barre.Fenetre)) "boutons : $($barre.Noms -join ', ')" | Out-Null
         # Barre « Galet » (0.7.4) : sans licence, la défilante, la vidéo et le GIF restent, nommés
         # « …, Pro » (sans licence, le codeur H.264 n'est pas cherché : la vidéo est là aussi).
-        $debut = @('Zone', 'Plein écran', 'Fenêtre', 'Retardateur')
+        $debut = @('Zone', 'Plein écran', 'Fenêtre', 'Pipette de couleur', 'Retardateur')
         $noms = @($barre.Noms)
-        $milieu = @($noms[4..($noms.Count - 2)])
-        $ok = ($noms.Count -ge 7) -and ((($noms[0..3]) -join '|') -eq ($debut -join '|')) -and ($noms[-1] -eq 'Réglages') -and
+        $milieu = @($noms[5..($noms.Count - 2)])
+        $ok = ($noms.Count -ge 8) -and ((($noms[0..4]) -join '|') -eq ($debut -join '|')) -and ($noms[-1] -eq 'Réglages') -and
             ($milieu -contains 'Capture défilante, Pro') -and ($milieu -contains 'Vidéo, Pro') -and ($milieu -contains 'GIF, Pro') -and
             (@($milieu | Where-Object { $_ -notmatch ', Pro$' }).Count -eq 0)
-        Verifier 'barre : Zone, Plein écran, Fenêtre, Retardateur, Capture défilante, Pro, Vidéo, Pro, GIF, Pro, Réglages (sans licence)' $ok ($barre.Noms -join ', ') | Out-Null
+        Verifier 'barre : Zone, Plein écran, Fenêtre, Pipette de couleur, Retardateur, Capture défilante, Pro, Vidéo, Pro, GIF, Pro, Réglages (sans licence)' $ok ($barre.Noms -join ', ') | Out-Null
         # Un clic sur « Zone » : la barre se ferme, la sélection s'ouvre (après ATTENTE_MENU).
         Cliquer-Bouton-Barre $barre 'Zone' 'seconde instance'
         Verifier 'clic sur Zone : « barre choisi capturer_zone »' (Attendre-Ligne -Texte 'barre choisi capturer_zone' -DelaiS 5) | Out-Null

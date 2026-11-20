@@ -125,16 +125,19 @@ pub enum But {
     CopierFermer,
     /// Lire le texte de l'image composée (0.5, R7) : rien n'est exporté.
     Texte,
+    /// Épingler l'image composée à l'écran : rien n'est exporté ni enregistré.
+    Epingler,
 }
 
 impl But {
-    pub const TOUS: [But; 6] = [
+    pub const TOUS: [But; 7] = [
         But::Copier,
         But::Enregistrer,
         But::EnregistrerSous,
         But::Glisser,
         But::CopierFermer,
         But::Texte,
+        But::Epingler,
     ];
 
     /// Le nom de l'en-tête, du journal et de `editeur:resultat`.
@@ -146,6 +149,7 @@ impl But {
             But::Glisser => "glisser",
             But::CopierFermer => "copier_fermer",
             But::Texte => "texte",
+            But::Epingler => "epingler",
         }
     }
 
@@ -636,8 +640,8 @@ pub fn sortie_pour(etat: &EtatEditeur, but: But, version: u64) -> Sortie {
             enregistrer: false,
             ranger_recents,
         },
-        // Lire n'exporte pas : rien n'est copié, écrit ni rangé.
-        But::Texte => Sortie::Faire {
+        // Lire et Épingler n'exportent pas : rien n'est copié, écrit ni rangé.
+        But::Texte | But::Epingler => Sortie::Faire {
             copier: false,
             enregistrer: false,
             ranger_recents: false,
@@ -692,7 +696,7 @@ pub fn message_echec(but: But, bilan: &Bilan) -> Option<&'static str> {
             matches!(bilan.enregistrement, EtapeFichier::Echec { .. })
                 .then_some(TITRE_ENREGISTREMENT_IMPOSSIBLE)
         }
-        But::Glisser | But::Texte => None,
+        But::Glisser | But::Texte | But::Epingler => None,
     }
 }
 
@@ -706,7 +710,7 @@ pub fn message_sans_bilan(but: But) -> Option<&'static str> {
     match but {
         But::Copier | But::CopierFermer => Some(TITRE_COPIE_IMPOSSIBLE),
         But::Enregistrer | But::EnregistrerSous => Some(TITRE_ENREGISTREMENT_IMPOSSIBLE),
-        But::Glisser | But::Texte => None,
+        But::Glisser | But::Texte | But::Epingler => None,
     }
 }
 
@@ -719,7 +723,7 @@ pub fn reussie(but: But, bilan: &Bilan) -> bool {
             matches!(bilan.enregistrement, EtapeFichier::Fait(_))
         }
         But::Glisser => !matches!(bilan.recent, Some(Err(_))),
-        But::Texte => false,
+        But::Texte | But::Epingler => false,
     }
 }
 
@@ -1360,6 +1364,21 @@ mod tests {
         assert_eq!(e.export, Some(x(6, But::Copier)));
         assert_eq!((e.exportee, e.enregistree, e.rangee), (Some(1), None, None));
         assert_eq!(e.texte, None);
+    }
+
+    #[test]
+    fn epingler_n_exporte_rien() {
+        assert_eq!(But::depuis_nom("epingler"), Some(But::Epingler));
+        let e = etat();
+        let rien = Sortie::Faire {
+            copier: false,
+            enregistrer: false,
+            ranger_recents: false,
+        };
+        assert_eq!(sortie_pour(&e, But::Epingler, 1), rien);
+        let plan = plan_export(But::Epingler, rien).expect("plan");
+        assert!(!plan.copier && !plan.enregistrer && !plan.ranger_recents && !plan.dialogue);
+        assert_eq!(message_sans_bilan(But::Epingler), None);
     }
 
     #[test]
@@ -2128,7 +2147,11 @@ mod tests {
                 D::DemandeCapture(Mode::Video | Mode::Gif) | D::PhotoPrise(Mode::Video | Mode::Gif)
             ) || matches!(depart, E::Enregistrement | E::Finalisation)
                 || matches!(arrivee, E::Enregistrement | E::Finalisation);
-            assert!(texte || defilante || film, "{depart:?} {d:?}");
+            let pipette = matches!(
+                d,
+                D::DemandeCapture(Mode::Pipette) | D::PhotoPrise(Mode::Pipette) | D::CouleurChoisie
+            );
+            assert!(texte || defilante || film || pipette, "{depart:?} {d:?}");
         }
         // Tous les déclencheurs, sans exception (un nouveau ne compile pas sans être vu
         // ici) : aucun ne concerne l'éditeur.
@@ -2168,7 +2191,8 @@ mod tests {
                 | D::EnregistrementArrete
                 | D::EnregistrementAnnule
                 | D::EnregistrementImpossible
-                | D::FinalisationImpossible => false,
+                | D::FinalisationImpossible
+                | D::CouleurChoisie => false,
             };
             assert!(!editeur);
         }

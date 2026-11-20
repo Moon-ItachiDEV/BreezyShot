@@ -24,7 +24,7 @@ Propulsé par **Tauri 2** : un cœur en **Rust**, une interface web pure **sans 
 - **Instantané & natif** — Capture par gel d'écran natif, gestion multi-écran **Per-Monitor DPI V2** au pixel physique près, chargement différé des DLL Windows (`winmm`, Media Foundation) et zéro surcharge inutile au repos.
 - **100 % hors ligne & respectueux de la vie privée** — Aucun accès réseau, aucune télémétrie, aucun compte requis. Ni images, ni contenu du presse-papiers, ni texte OCR/QR ne sont jamais écrits dans le journal.
 - **Éditeur complet prêt à partager** — Annotations vectorielles non destructives, gomme au pixel, flèches courbées, masquage de secrets, projecteur et **fond d'éditeur** (dégradés, couleur unie, marges, coins arrondis, ombre portée).
-- **Conception stricte & vérifiée** — Interface web ES modules pure sans bundler, frontières de modules contrôlées automatiquement par test d'architecture ([`tests/architecture.rs`](app/coeur/tests/architecture.rs)), plus de 1 300 tests Rust, 16 suites Playwright/Node et 15 essais Windows de bout en bout.
+- **Conception stricte & vérifiée** — Interface web ES modules pure sans bundler, frontières de modules contrôlées automatiquement par test d'architecture ([`tests/architecture.rs`](app/coeur/tests/architecture.rs)), plus de 1 300 tests Rust, 17 suites Playwright/Node et 15 essais Windows de bout en bout.
 
 ---
 
@@ -32,17 +32,18 @@ Propulsé par **Tauri 2** : un cœur en **Rust**, une interface web pure **sans 
 
 ### Captures & flux quotidien
 
-- **Quatre modes de capture** : Zone (avec loupe de précision), Plein écran, Fenêtre (coins arrondis Windows 11 préservés) et Refaire la dernière zone.
-- **Barre de capture « Galet »** : accès rapide en haut de l'écran au lancement manuel, avec retardateur intégré (`3`, `5` ou `10 s`).
-- **Vignette interactive** : aperçu flottant configurable, copie, enregistrement, annotation, suppression annulable et **glisser-déposer direct** vers n'importe quelle application.
-- **Personnalisation complète** : formats **PNG, JPG et WebP**, modèle de nommage, capture du pointeur, son de capture (« Goutte »), ouverture directe dans l'éditeur, raccourcis configurables (y compris la touche `Impr. écran`), thème clair / sombre / système et lancement avec Windows.
+- **Modes de capture** : Zone (avec loupe de précision), Plein écran, Fenêtre (coins arrondis Windows 11 préservés), Refaire la dernière zone et **Pipette de couleur** (loupe 15 × 15 au pixel exact, copie en `#RRGGBB`, `rgb()` ou `hsl()` en un clic).
+- **Épingler à l'écran** : ouvrez une capture depuis la vignette, l'éditeur ou l'historique dans une fenêtre flottante toujours au premier plan — sans bordure, déplaçable, redimensionnable à la molette, opacité réglable (`Alt + molette`), copie (`Ctrl + C`) et fermeture au double-clic ou à `Échap` *(jusqu'à 12 captures simultanées)*.
+- **Barre de capture « Galet »** : accès rapide en haut de l'écran au lancement manuel, avec pipette et retardateur intégré (`3`, `5` ou `10 s`).
+- **Vignette interactive** : aperçu flottant configurable, copie, enregistrement, annotation, épinglage à l'écran, suppression annulable et **glisser-déposer direct** vers n'importe quelle application.
+- **Personnalisation complète** : formats **PNG, JPG et WebP**, modèle de nommage, capture du pointeur, **masquage automatique des icônes du bureau** pendant le plein écran et l'enregistrement vidéo/GIF, son de capture (« Goutte »), ouverture directe dans l'éditeur, raccourcis configurables (y compris la touche `Impr. écran` et le raccourci par défaut de Windows 11 `Win + Maj + S`), thème clair / sombre / système et lancement avec Windows.
 
 ### Éditeur d'annotation
 
 - **Outils d'annotation** : Flèche (droite ou courbée à la poignée centrale), Formes (Rectangle, Ellipse, Ligne), Texte, Numéros auto-incrémentés, Stylo, Surligneur.
 - **Confidentialité & mise en valeur** : Masques **Pixeliser**, **Flouter** et **Bloc noir** (opaque sans fuite), **Projecteur** (rectangle ou ovale) et **Gomme** au pixel sur les encres.
 - **Fond d'éditeur (`F`)** : habillage instantané avec 6 dégradés ou couleur unie libre, 3 tailles de marge (`32`, `56`, `88 px`), coins arrondis (`0`, `12`, `20 px`) et ombre portée, identique à l'aperçu comme à l'export.
-- **Productivité** : recadrage par équerres, historique Annuler / Rétablir sur 200 pas, copie directe (`Ctrl + C`), enregistrement rapide (`Ctrl + S`), Enregistrer sous… (`Ctrl + Maj + S`) et glisser-déposer de l'image annotée.
+- **Productivité** : recadrage par équerres, historique Annuler / Rétablir sur 200 pas, copie directe (`Ctrl + C`), enregistrement rapide (`Ctrl + S`), Enregistrer sous… (`Ctrl + Maj + S`), épinglage à l'écran et glisser-déposer de l'image annotée.
 
 ### Fonctions Pro *(licence hors ligne)*
 
@@ -50,7 +51,7 @@ Toutes les fonctionnalités Pro vivent dans le même exécutable et se débloque
 
 | Fonction | Description |
 | --- | --- |
-| **Historique** | Les 50 dernières captures consultables instantanément : copier, enregistrer, annoter, glisser-déposer et annuler une suppression (`Ctrl + Z`). |
+| **Historique** | Les 50 dernières captures consultables instantanément : copier, enregistrer, annoter, épingler à l'écran, glisser-déposer et annuler une suppression (`Ctrl + Z`). |
 | **Copier le texte (OCR & QR)** | Extraction de texte par `Windows.Media.Ocr` (sur l'écran ou dans l'éditeur) et décodage automatique des QR codes (liens sûrs, Wi-Fi, texte). |
 | **Capture défilante** | Défilement automatique (UI Automation) avec reprise à la molette et assemblage continu jusqu'à `16 384 px` de haut. |
 | **Vidéo MP4 & GIF** | Enregistrement H.264 (Media Foundation) ou GIF optimisé, avec micro, son système (WASAPI loopback) et anneaux de clics visibles. |
@@ -73,29 +74,34 @@ Un guide complet de prise en main est disponible dans [`docs/ESSAI.md`](docs/ESS
 
 ### Raccourcis globaux par défaut (Windows)
 
-Tous les raccourcis sont modifiables à chaud dans **Réglages › Raccourcis**.
+Tous les raccourcis sont modifiables à chaud dans **Réglages › Raccourcis**. Sous Windows 11, vous pouvez également y choisir si la touche **`Impr. écran`** et le raccourci système **`Win + Maj + S`** ouvrent **l'Outil Capture de Windows** ou **BreezyShot** (Zone, Barre de capture, Plein écran, Fenêtre, Pipette, etc.) — sans redémarrage ni modification permanente de l'Explorateur.
 
 | Action | Raccourci par défaut | Portée |
 | --- | --- | --- |
-| Capturer une zone | `Ctrl + Maj + 1` *(ou `Impr. écran`)* | Gratuit |
+| Capturer une zone | `Ctrl + Maj + 1` *(ou `Impr. écran` / `Win + Maj + S` au choix)* | Gratuit |
 | Capturer le plein écran | `Ctrl + Maj + 2` | Gratuit |
 | Capturer une fenêtre | `Ctrl + Maj + 3` | Gratuit |
 | Refaire la dernière zone | `Ctrl + Maj + 4` | Gratuit |
+| Pipette de couleur | `Ctrl + Maj + C` | Gratuit |
 | Capture défilante | `Ctrl + Maj + 5` | Pro |
 | Enregistrer une vidéo (MP4) | `Ctrl + Maj + 6` | Pro |
 | Enregistrer un GIF | `Ctrl + Maj + 7` | Pro |
 | Copier le texte (OCR / QR) | `Ctrl + Maj + T` | Pro |
 | Ouvrir l'historique | `Ctrl + Maj + H` | Pro |
 
-### Dans l'éditeur
+### Dans l'éditeur & les fenêtres flottantes
 
-| Raccourci | Action |
+| Raccourci / Geste | Action |
 | --- | --- |
-| `F` | Ouvrir / fermer le panneau **Fond** |
-| `Ctrl + Z` / `Ctrl + Y` | Annuler / Rétablir |
-| `Ctrl + C` | Copier dans le presse-papiers sans fermer |
-| `Ctrl + S` / `Ctrl + Maj + S` | Enregistrer / Enregistrer sous… |
-| `Échap` | Fermer le panneau actif ou quitter l'éditeur |
+| `F` *(éditeur)* | Ouvrir / fermer le panneau **Fond** |
+| `Ctrl + Z` / `Ctrl + Y` *(éditeur)* | Annuler / Rétablir |
+| `Ctrl + C` *(éditeur / épinglé)* | Copier dans le presse-papiers sans fermer |
+| `Ctrl + S` / `Ctrl + Maj + S` *(éditeur)* | Enregistrer / Enregistrer sous… |
+| `Molette` / `Tab` / `C` / `F` *(pipette)* | Changer le format (`#RRGGBB`, `rgb()`, `hsl()`) |
+| `Flèches` *(pipette)* | Ajuster le prélèvement au pixel près |
+| `Molette` / `Alt + molette` *(épinglé)* | Redimensionner / régler l'opacité (`25 %–100 %`) |
+| `0` *(épinglé)* | Réinitialiser la taille et l'opacité à `100 %` |
+| `Double-clic` ou `Échap` *(épinglé)* | Fermer la capture épinglée |
 
 ---
 
@@ -107,7 +113,7 @@ L'exécutable fonctionne en **instance unique** : une seconde invocation relaie 
 | --- | --- |
 | `breezyshot.exe` | Lance l'application et ouvre la barre de capture (ou l'ouvre dans l'instance active). |
 | `breezyshot.exe --discret` | Démarre silencieusement dans la zone de notification (utilisé au démarrage de Windows). |
-| `breezyshot.exe --capturer <mode>` | Lance une capture (`zone`, `plein_ecran`, `fenetre`, `derniere_zone`, `texte`, `defilante`, `video`, `gif`). |
+| `breezyshot.exe --capturer <mode>` | Lance une capture (`zone`, `plein_ecran`, `fenetre`, `derniere_zone`, `pipette`, `texte`, `defilante`, `video`, `gif`). |
 | `breezyshot.exe <fichier>.breezy` | Rouvre un fichier `.breezy` dans l'éditeur. |
 | `breezyshot.exe --quitter` | Ferme proprement l'instance en cours. |
 | `breezyshot.exe --desinstaller` | Lance la désinstallation. |
@@ -140,12 +146,12 @@ app/
   coeur/                       Crate Rust `breezyshot` & configuration Tauri
     src/
       application/             Automate d'états, journal, arguments, icône/menu, gestes
-                               (dont editeur.rs, geste_editeur.rs, fenetre_editeur.rs)
-      capture/                 Géométrie, découpe, fenêtres arrondies, pointeur, anneaux de clics
+                               (éditeur, historique, défilante, film, captures épinglées)
+      capture/                 Géométrie, découpe, fenêtres arrondies, couleur/pipette, pointeur
       sortie/                  Presse-papiers, PNG/JPG/WebP, historique, glisser, archives .breezy
       reglages/                Modèle, validation, lecture/écriture atomique
       raccourcis/              Raccourcis globaux et touches d'annulation
-      fenetres/                Placement et cycle de vie des fenêtres Tauri
+      fenetres/                Placement et cycle de vie des fenêtres Tauri (dont epingle.rs)
       texte/                   Préparation OCR et décodage QR (rqrr)
       defilement/              Recalage et assemblage de la capture défilante
       film/                    Horloge, diff d'images, encodage GIF et mixage audio
@@ -155,11 +161,11 @@ app/
     tests/architecture.rs      Vérification statique des dépendances et frontières OS
   interface/                   Pages web natives sans bundler
     commun/                    Jetons CSS générés (`jetons.css`), thème, pictogrammes
-    barre/  menu/  selection/  vignette/  editeur/  historique/  reglages/
+    barre/  menu/  selection/  vignette/  epingle/  editeur/  historique/  reglages/
     defilante/  film/  installateur/
 design/                        Jetons du design system (`jetons*.json`) et icônes Moulinet
 outils/generer-jetons.mjs      Générateur et vérificateur de `app/interface/commun/jetons.css`
-essais/                        15 scénarios PowerShell Windows + 16 suites Playwright/Node (`pages/`)
+essais/                        15 scénarios PowerShell Windows + 17 suites Playwright/Node (`pages/`)
 docs/                          Contrat technique (`ARCHITECTURE.md`), suivi (`TRAVAIL-VALIDE.md`), guide (`ESSAI.md`)
 ```
 
@@ -207,7 +213,7 @@ node outils/generer-jetons.mjs --verifier
 ### Essais automatisés
 
 ```bash
-# 16 suites d'interface & modèle d'éditeur (Chromium / Node)
+# 17 suites d'interface & modèle d'éditeur (Chromium / Node)
 cd app && npx playwright install chromium && cd ..
 for f in essais/pages/*.cjs; do NODE_PATH=app/node_modules node "$f"; done
 ```

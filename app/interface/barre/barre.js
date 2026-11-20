@@ -35,12 +35,13 @@ const NOMS = {
   capturer_zone: "Zone",
   capturer_plein_ecran: "Plein écran",
   capturer_fenetre: "Fenêtre",
+  capturer_pipette: "Pipette de couleur",
   capturer_defilante: "Capture défilante",
   capturer_video: "Vidéo",
   capturer_gif: "GIF",
   reglages: "Réglages",
 };
-const CAPTURES = ["capturer_zone", "capturer_plein_ecran", "capturer_fenetre"];
+const CAPTURES = ["capturer_zone", "capturer_plein_ecran", "capturer_fenetre", "capturer_pipette"];
 const FILMS = ["capturer_defilante", "capturer_video", "capturer_gif"];
 const NOM_RETARDATEUR = "Retardateur";
 // Fermeture de l'étage après un choix : le temps de voir la pastille se poser.
@@ -499,6 +500,7 @@ const DEMO = {
     "capturer_zone",
     "capturer_plein_ecran",
     "capturer_fenetre",
+    "capturer_pipette",
     "capturer_defilante",
     "capturer_video",
     "capturer_gif",

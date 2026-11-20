@@ -1,0 +1,16 @@
+{
+  "identifier": "epingle",
+  "description": "Fenêtres flottantes de captures épinglées à l'écran",
+  "windows": ["epingle-*"],
+  "permissions": [
+    "core:event:allow-listen",
+    "core:event:allow-unlisten",
+    "core:window:allow-start-dragging",
+    "allow-epingle-pret",
+    "allow-epingle-image",
+    "allow-epingle-redimensionner",
+    "allow-epingle-opacite",
+    "allow-epingle-copier",
+    "allow-epingle-fermer"
+  ]
+}

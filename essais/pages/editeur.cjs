@@ -327,7 +327,7 @@ const CHARGE = {
     const haut = p.locator('#barre-haut');
     let ok = true;
     const manque = [];
-    for (const n of ['Fermer', 'Glisser vers une appli', 'Enregistrer', 'Enregistrer sous…', 'Copier']) {
+    for (const n of ['Fermer', 'Épingler', 'Glisser vers une appli', 'Enregistrer', 'Enregistrer sous…', 'Copier']) {
       if ((await haut.getByRole('button', { name: n, exact: true }).count()) !== 1) manque.push(n);
     }
     const socle = p.getByRole('toolbar', { name: 'Annotation', exact: true });
@@ -381,10 +381,10 @@ const CHARGE = {
         barre.reglagesAuDessus &&
         barre.deplie === 'fleche' &&
         JSON.stringify(barre.haut) ===
-          '["Fermer","Glisser vers une appli","Enregistrer","Enregistrer sous…","Copier"]' &&
-        JSON.stringify(barre.mots) === '["Glisser","Enregistrer","Copier"]' &&
+          '["Fermer","Épingler","Glisser vers une appli","Enregistrer","Enregistrer sous…","Copier"]' &&
+        JSON.stringify(barre.mots) === '["Épingler","Glisser","Enregistrer","Copier"]' &&
         barre.anciens.length === 0,
-      '2 socle « Annotation » : Annuler, Rétablir, neuf outils et Fond dans l’ordre, les réglages de la Flèche au-dessus ; en haut Fermer, Glisser, Enregistrer et sa flèche, Copier',
+      '2 socle « Annotation » : Annuler, Rétablir, neuf outils et Fond dans l’ordre, les réglages de la Flèche au-dessus ; en haut Fermer, Épingler, Glisser, Enregistrer et sa flèche, Copier',
       JSON.stringify([manque, barre]),
     );
     const c = await contenuPli(p);
@@ -426,7 +426,6 @@ const CHARGE = {
       const textes = document.body.innerText;
       const interdits = [
         'Copier le texte',
-        'Épingler',
         'Pipette',
         'Zoom',
         'Tout copier',
@@ -455,7 +454,7 @@ const CHARGE = {
     });
     verifier(
       r.trouves.length === 0 && !r.ocr,
-      '2 absents : Copier le texte, Épingler, Pipette, Zoom, Sélection, Recadrer…',
+      '2 absents : Copier le texte, Pipette, Zoom, Sélection, Recadrer…',
       JSON.stringify(r),
     );
     verifier(
@@ -2370,7 +2369,7 @@ const CHARGE = {
       verifier(
         largeur === 1096 &&
           tiennent.every(([, ok]) => ok) &&
-          mots.length === 2 &&
+          mots.length === 3 &&
           mots.every((v) => v === l >= 940),
         `17 ${l} × ${h} : le socle et les réglages de chaque outil tiennent sans défiler ; mots des sorties ${l >= 940 ? 'montrés' : 'cachés'}`,
         JSON.stringify([tiennent, mots]),
@@ -2590,10 +2589,28 @@ const CHARGE = {
     );
     verifier(
       JSON.stringify(haut) ===
-        '[["Fermer","Fermer",""],["Copier le texte","Copier le texte","Texte"],["Glisser vers une appli","Glisser vers une appli","Glisser"],["Enregistrer","Enregistrer","Enregistrer"],["Enregistrer sous…","Enregistrer sous…",""],["Copier","Copier","Copier"]]' &&
+        '[["Fermer","Fermer",""],["Copier le texte","Copier le texte","Texte"],["Épingler","Épingler","Épingler"],["Glisser vers une appli","Glisser vers une appli","Glisser"],["Enregistrer","Enregistrer","Enregistrer"],["Enregistrer sous…","Enregistrer sous…",""],["Copier","Copier","Copier"]]' &&
         (await texteHaut(p).count()) === 1,
-      '21 « Texte » (nom et infobulle « Copier le texte ») entre Fermer et Glisser',
+      '21 « Texte » et « Épingler » entre Fermer et Glisser',
       JSON.stringify(haut),
+    );
+    await vider(p);
+    await bouton(p, 'Épingler').click();
+    await p.waitForFunction(() => __exports.length === 1, null, { timeout: 3000 }).catch(() => {});
+    const expPin = await p.evaluate(() => __exports[0]?.entetes['x-editeur-but']);
+    await p.evaluate(() =>
+      __emettre('editeur:resultat', { id: 7, numero: 1, but: 'epingler', etat: 'fait' }),
+    );
+    await uneImage(p);
+    const msgPin = await p.evaluate(() => ({
+      on: document.querySelector('#message').classList.contains('on'),
+      texte: document.querySelector('#message span').textContent,
+      exportee: __ed.exportee,
+    }));
+    verifier(
+      expPin === 'epingler' && msgPin.on && msgPin.texte === 'Épinglé' && msgPin.exportee == null,
+      '21 clic Épingler → export « epingler », message « Épinglé », document reste non exporté',
+      JSON.stringify([expPin, msgPin]),
     );
     // R7 : un Bloc noir posé ; l'image lue est l'image composée, la vue du document.
     await outil(p, 'Flou');
@@ -3303,8 +3320,8 @@ const CHARGE = {
       };
     });
     verifier(
-      r.n === 6 && r.rangee && r.ordre && r.dedans && r.mots === 0 && !r.deborde,
-      '21 barre du haut à 640 px : six boutons sur une rangée, pictogrammes seuls, rien ne déborde',
+      r.n === 7 && r.rangee && r.ordre && r.dedans && r.mots === 0 && !r.deborde,
+      '21 barre du haut à 640 px : sept boutons sur une rangée, pictogrammes seuls, rien ne déborde',
       JSON.stringify(r),
     );
     const t0 = await p.evaluate(() => performance.now());

@@ -1128,6 +1128,20 @@ Module pur : il reçoit le dossier où écrire, ne connaît ni Tauri ni les autr
   mémoire et en asynchrone sous Windows, rien ailleurs) ; `winmm.dll` reste à la demande
   (`build.rs`), chargée au premier son seulement. Joué aussi à la fin d'une capture
   défilante (même sortie) ; ni la vidéo ni le GIF.
+- `capture.masquer_icones_bureau` (version 10) : masque les icônes du bureau Windows
+  (`systeme::bureau::GardeIcones`, `SHELLDLL_DefView` / `ShowWindow`, jamais de
+  modification du registre) pendant une capture plein écran ou un enregistrement vidéo/GIF,
+  puis les restaure automatiquement dès la fin (ou à l'arrêt). Éteint par défaut ; mise à
+  niveau `v9_vers_v10`.
+- `raccourcis.pipette` et `CibleImprEcran::Pipette` (version 11) : raccourci gratuit de la
+  pipette de couleur (`Ctrl+Maj+C` sous Windows, `Cmd+Maj+C` sur macOS), cible possible de
+  la touche `Impr. écran`. Mise à niveau `v10_vers_v11`.
+- `win_maj_s_ouvre` (version 12) : `null` par défaut (« Outil Capture de Windows », aucun
+  crochet clavier posé), ou une cible `CibleImprEcran` lancée par `Win + Maj + S` sous
+  Windows via `systeme::raccourci_win` (`WH_KEYBOARD_LL` dans un fil dédié
+  `raccourci-win` de priorité temps critique ; touche virtuelle `0xE8` envoyée hors crochet
+  pour masquer le menu Démarrer au relâchement de `Win` ; sans droits administrateur, les
+  fenêtres élevées restent hors portée par UIPI). Mise à niveau `v11_vers_v12`.
 - `duree_s` : 1 à 60 s, ou `0` = toujours (`DUREE_TOUJOURS`, version 2 ; la page propose
   3, 6, 10 et Toujours).
 - `capture` (version 3) : `retardateur_s` vaut 0 (aucun) ou 1 à 10 s entières
@@ -1565,6 +1579,14 @@ sans rien remplacer, les défauts qui reproduisent l'app d'avant :
   autre application). Si la touche n'est pas tenue après coup, la ligne dit où Windows la garde (`REFUS_IMPR_ECRAN`) ou
   qu'une autre application la tient. Journal : `impr ecran: breezyshot oui|non, touche
   tenue|non tenue`, à l'appui `impr ecran: <action>|barre`.
+- **« Raccourci Win + Maj + S »**, juste sous « Touche Impr. écran » dans la même carte, sous
+  Windows seulement (`systeme::raccourci_win::disponible`) : même liste déroulante
+  (`choix_impr_ecran`), valeur `windows` par défaut (`win_maj_s_ouvre: null`, aucun crochet
+  clavier installé). Choisir une cible BreezyShot écrit `win_maj_s_ouvre` et active
+  `systeme::raccourci_win::ecouter` (crochet `WH_KEYBOARD_LL` posé dans un fil dédié, suspendu
+  pendant la saisie d'un raccourci et retiré proprement à l'arrêt ou au retour sur « Outil
+  Capture de Windows »). Journal : `raccourci win maj s: actif|arrete|echec`, à l'appui
+  `raccourci presse: win_maj_s` puis `win maj s: <action>|barre`.
 - **La page ne décide rien.** Elle appelle `reglages_lire` (à l'ouverture et à chaque retour
   du focus), `reglages_changer { changement: { cle, valeur } }`, `reglages_apercu_nom`,
   `reglages_parcourir`, `reglages_saisie`, `reglages_raccourci`, `reglages_retablir`. Chaque
@@ -2271,6 +2293,29 @@ Journal : jamais de chemin, de nom de fichier ni de contenu (`editeur breezy <id
 <l>x<h>`, `editeur breezy <id> version <v> fait|annule|echec en <ms> ms`, `breezy ouverture
 demandee`, `breezy ouvert <id>`, `breezy ouverture refusee (<code>)`).
 
+### 6.6 Captures épinglées à l'écran
+
+Une capture image peut être ouverte dans une fenêtre flottante sans cadre, transparente, hors
+barre des tâches et toujours au premier plan (`epingle-{id}`, jusqu'à `MAX_EPINGLES = 12`), depuis
+la vignette (`vignette::EPINGLER`), l'éditeur (`editeur::But::Epingler`, image composée) ou
+l'historique (`historique::ActionCase::Epingler`).
+
+- **Décisions pures** (`application/epingle.rs`) : bornes d'ouverture (`taille_initiale`, 75 %
+  de la zone utile au plus), redimensionnement (`redimensionner`, échelle `0.2..=4.0`, côté
+  minimal `80 px`, plafond à 95 % de la zone utile), opacité (`ajuster_opacite`, `0.25..=1.0`,
+  pas `0.08`).
+- **Fenêtre & gestes** (`fenetres/epingle.rs`, `application/geste_epingle.rs`,
+  `application/fenetre_epingle.rs`, `capabilities/epingle.json`, `interface/epingle/`) : création
+  WebView2 toujours différée hors rappel (`plus_tard_nomme`), placement centré en cascade avec
+  marge d'ombre (`16 px`), 6 commandes IPC strictement bornées à la fenêtre appelante
+  (`epingle_pret`, `epingle_image`, `epingle_redimensionner`, `epingle_opacite`, `epingle_copier`,
+  `epingle_fermer`). Déplacement par `startDragging()` au-delà de 4 px (ne bloque pas le
+  double-clic de fermeture), zoom à la molette, opacité par `Alt + molette` (appliquée à `.cadre`
+  pour garder les boutons au survol et la pilule lisibles), réinitialisation par `0`, copie par
+  `Ctrl + C` ou bouton, fermeture au double-clic, `Échap` ou croix au survol. Toutes les fenêtres
+  épinglées figurent dans `nos_fenetres` et sont fermées dans `arreter`. Essai :
+  `essais/pages/epingle.cjs`.
+
 ## 7. Vérification
 
 - `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `cargo test` : sur Windows (machine
@@ -2818,6 +2863,18 @@ page tire chaque ligne de gauche à droite puis efface toute la sélection ; san
 `selection surlignage sans ligne`, rien n'est envoyé) ; la garde de la
 capture la cache ensuite (§6.4). Un nouvel affichage oublie l'affichage gardé.
 
+### Mode pipette
+
+`selection::Mode::Pipette` réutilise le gel d'écran existant sans voile sombre : la page monte
+dynamiquement la loupe circulaire 15 × 15 pixels (`#pipette`) avec pastille couleur et sélecteur
+de format (`#RRGGBB`, `rgb()`, `hsl()` par molette, `Tab`, `C` ou `F` ; décalage au pixel près aux
+flèches ; clic ou `Entrée` pour valider ; `Échap` ou clic droit pour annuler). À chaque
+déplacement, la page appelle `selection_echantillon(x, y)` qui lit directement le patch 15 × 15
+dans l'image figée (`capture::couleur::lire_patch`) ; au clic, `selection_pipette(id, numero, x,
+y, format)` lit le pixel exact (`capture::couleur::lire_pixel`), formate le code
+(`capture::couleur::formater`), copie le texte dans le presse-papiers et confirme dans le bandeau
+sans écrire la couleur dans le journal.
+
 ## 10. Sortie (`sortie/`, étape 6)
 
 Tout ce qui quitte l'app passe par une seule fonction, `sortir(&Pixels, &Demande) -> Bilan`.
@@ -2939,15 +2996,14 @@ premier plan ni le clavier ; les clics hors de la carte passent à travers. Une 
 fois ; une nouvelle capture la retire d'un coup.
 
 **Boutons** : la liste vient de l'Application (`vignette::actions(annoter)`) : Copier et
-Enregistrer (pilules, « Copié », « Enregistré » 1,8 s), Supprimer (rond), la croix
-(Fermer), Annuler (seulement sur la carte « supprimée »). Épingler n'existe pas (rien qui
-ne marche pas). Annoter (0.4, §6.2) : rond, premier des secondaires, avant Supprimer,
-seulement si l'éditeur est construit et la capture annotable. Décisions pures
-(`vignette::decider`) : pendant l'état « supprimée », seul Annuler compte ; une action
-qui tourne encore (moins de `DELAI_SORTIE`) est ignorée ; Enregistrer déjà fait (réglage
-ou clic précédent) : « Enregistré » sans rien écrire. Copier et Enregistrer passent par `sortie::sortir` sur les pixels gardés, dans
-un fil, sans « Récents », à l'heure de la capture (`demande_action`). Échec : bandeau
-d'erreur, la vignette reste.
+Enregistrer (pilules, « Copié », « Enregistré » 1,8 s), Annoter (rond, si l'éditeur est construit
+et la capture annotable), Épingler (rond, ouvre une fenêtre flottante toujours au premier plan,
+§6.6 ; absent pour les films), Supprimer (rond), la croix (Fermer), Annuler (seulement sur la
+carte « supprimée »). Décisions pures (`vignette::decider`) : pendant l'état « supprimée », seul
+Annuler compte ; une action qui tourne encore (moins de `DELAI_SORTIE`) est ignorée ; Enregistrer
+déjà fait (réglage ou clic précédent) : « Enregistré » sans rien écrire. Copier et Enregistrer
+passent par `sortie::sortir` sur les pixels gardés, dans un fil, sans « Récents », à l'heure de
+la capture (`demande_action`). Échec : bandeau d'erreur, la vignette reste.
 
 **Supprimer** : la carte passe à l'état « supprimée » ; la minuterie repart sur 4 s
 (`DELAI_ANNULATION`). Rien n'est effacé avant la fin de ces 4 s. Au bout : `CaptureSupprimee`,

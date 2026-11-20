@@ -17,10 +17,10 @@ use tauri::{AppHandle, Manager};
 use super::editeur;
 use super::etats::Declencheur;
 use super::{
-    afficher, appliquer, breezy_ouvert, demande_sortie, dossiers_lus, geste_historique,
-    geste_texte, montree, nos_fenetres, plus_tard, poster_plus_tard, reglages_lus, sortir_ou_echec,
-    souris_bureau, texte_construit, traiter, vignette, zone, Application, CaptureMontree,
-    Evenement,
+    afficher, appliquer, breezy_ouvert, demande_sortie, dossiers_lus, geste_epingle,
+    geste_historique, geste_texte, montree, nos_fenetres, plus_tard, plus_tard_nomme,
+    poster_plus_tard, reglages_lus, sortir_ou_echec, souris_bureau, texte_construit, traiter,
+    vignette, zone, Application, CaptureMontree, Evenement,
 };
 use crate::fenetres::vignette::Vignette;
 use crate::fenetres::{self};
@@ -587,6 +587,26 @@ pub(super) fn exporter_editeur(
     // « Texte » (0.5) : l'image composée est lue, rien n'est exporté (`exportee` reste).
     if e.but == editeur::But::Texte {
         geste_texte::lire_export(app, numero, e, pixels);
+        return Ok(numero);
+    }
+    // « Épingler » : l'image composée s'ouvre dans une fenêtre flottante, rien n'est exporté.
+    if e.but == editeur::But::Epingler {
+        avec_editeur(app, Some(e.id), |x| {
+            if x.export.is_some_and(|ex| ex.numero == numero) {
+                x.export = None;
+            }
+        });
+        let ok = geste_epingle::ouvrir(app, Arc::new(pixels), transparence);
+        let charge = editeur::ChargeResultat {
+            id: e.id,
+            numero,
+            but: e.but.nom(),
+            etat: if ok { "fait" } else { "echec" },
+            message: None,
+        };
+        plus_tard_nomme(app, "editeur-epingle", Duration::ZERO, move |a| {
+            fenetres::editeur::emettre(a, fenetres::editeur::EVENEMENT_RESULTAT, charge);
+        });
         return Ok(numero);
     }
     let base = demande_sortie(app, transparence);

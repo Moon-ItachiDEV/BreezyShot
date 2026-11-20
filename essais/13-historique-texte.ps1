@@ -1127,7 +1127,7 @@ public static uint Crc32(byte[] o) {
                 Verifier '(L1) sans licence, la sonde des langues ne tourne pas (aucune ligne texte langues)' ((Compter-Motif -Motif 'texte (langues|non pris en charge)' -Dossier $da) -eq 0) (Derniere-Ligne -Motif 'texte (langues|non pris)' -Dossier $da) | Out-Null
                 $m = Ouvrir-Menu '(L1)'
                 $pro = @($m.Textes | Where-Object { $_.StartsWith('Historique', [StringComparison]::Ordinal) -or $_.StartsWith('Copier le texte', [StringComparison]::Ordinal) })
-                Verifier '(L1) menu sans « Historique » ni « Copier le texte » (9 positions)' (($pro.Count -eq 0) -and ($m.Textes.Count -eq 9)) $m.Lus | Out-Null
+                Verifier '(L1) menu sans « Historique » ni « Copier le texte » (10 positions)' (($pro.Count -eq 0) -and ($m.Textes.Count -eq 10)) $m.Lus | Out-Null
                 Fermer-Menu $m '(L1)'
                 $h = Tenir-Ailleurs $VK_H 'h-sans'
                 $t = Tenir-Ailleurs $VK_T 't-sans'
@@ -1185,16 +1185,14 @@ public static uint Crc32(byte[] o) {
                 $video = Attendre-Motif -Motif 'video disponible: (oui|non)$' -Dossier $da -DelaiS 20 -Quoi '(2) recherche du codeur'
                 $m = Ouvrir-Menu '(2)'
                 $t = $m.Textes
-                # Piste A « Liste » : … séparateur, dernière zone, Capture défilante (0.6, avec
-                # la licence ; les réglages v3 du cas reçoivent son défaut Ctrl+Maj+5 à la mise
-                # à niveau), Copier le texte, séparateur, [Vidéo,] GIF (0.7, défauts Ctrl+Maj+6
-                # et 7 reçus à la mise à niveau), séparateur, Historique, Réglages.
+                # Piste A « Liste » : … séparateur, dernière zone, Pipette de couleur, Capture
+                # défilante, Copier le texte, séparateur, [Vidéo,] GIF, séparateur, Historique, Réglages.
                 $films = if ($video -match 'oui$') { @("Vidéo`tCtrl + Maj + 6", "GIF`tCtrl + Maj + 7") } else { @("GIF`tCtrl + Maj + 7") }
-                $h = 8 + $films.Count
-                $ok = ($t.Count -ge ($h + 2)) -and ($t[5] -ceq "Capture défilante`tCtrl + Maj + 5") -and ($t[6] -ceq "Copier le texte`tCtrl + Maj + T") -and ($t[7] -eq '')
-                for ($i = 0; $i -lt $films.Count; $i++) { $ok = $ok -and ($t[8 + $i] -ceq $films[$i]) }
+                $h = 9 + $films.Count
+                $ok = ($t.Count -ge ($h + 2)) -and ($t[5] -ceq "Pipette de couleur`tCtrl + Maj + C") -and ($t[6] -ceq "Capture défilante`tCtrl + Maj + 5") -and ($t[7] -ceq "Copier le texte`tCtrl + Maj + T") -and ($t[8] -eq '')
+                for ($i = 0; $i -lt $films.Count; $i++) { $ok = $ok -and ($t[9 + $i] -ceq $films[$i]) }
                 $ok = $ok -and ($t[$h] -eq '') -and ($t[$h + 1] -ceq "Historique`tCtrl + Maj + H") -and ($t[$h + 2] -ceq 'Réglages')
-                Verifier '(2) « Capture défilante<tab>Ctrl + Maj + 5 » puis « Copier le texte<tab>Ctrl + Maj + T » après la dernière zone, séparateur, le groupe des films, séparateur, « Historique<tab>Ctrl + Maj + H » puis « Réglages »' $ok "$($video -replace '^\S+\s+\S+\s+\S+\s+', '') ; $($m.Lus)" | Out-Null
+                Verifier '(2) « Pipette de couleur », « Capture défilante » puis « Copier le texte » après la dernière zone, séparateur, le groupe des films, séparateur, « Historique » puis « Réglages »' $ok "$($video -replace '^\S+\s+\S+\s+\S+\s+', '') ; $($m.Lus)" | Out-Null
                 $menus = Compter-Motif -Motif 'menu: ' -Dossier $da
                 Fermer-Menu $m '(2)'
                 Verifier '(2) Échap ferme le menu, aucune entrée choisie' ($script:FermeParEchap -and ((Compter-Motif -Motif 'menu: ' -Dossier $da) -eq $menus)) | Out-Null
@@ -1756,7 +1754,7 @@ public static uint Crc32(byte[] o) {
                 Fermer-Reglages $fen $db '(L4)'
                 $m = Ouvrir-Menu '(L4)'
                 $pro = @($m.Textes | Where-Object { $_.StartsWith('Historique', [StringComparison]::Ordinal) -or $_.StartsWith('Copier le texte', [StringComparison]::Ordinal) })
-                Verifier '(L4) entrées « Historique » et « Copier le texte » parties du menu' (($pro.Count -eq 0) -and ($m.Textes.Count -eq 9)) $m.Lus | Out-Null
+                Verifier '(L4) entrées « Historique » et « Copier le texte » parties du menu' (($pro.Count -eq 0) -and ($m.Textes.Count -eq 10)) $m.Lus | Out-Null
                 Fermer-Menu $m '(L4)'
                 Verifier '(L4) Ctrl+Maj+H rendu à Windows' ((Tenir-Ailleurs $VK_H 'h-retiree') -eq 'tenu') | Out-Null
                 Fermer-Cas $script:proc $db '(L4)'
@@ -1789,7 +1787,7 @@ public static uint Crc32(byte[] o) {
                 $f = Lire-Reglages $dc
                 $texte = @($f.raccourcis.texte)
                 $histo = @($f.raccourcis.historique)
-                Verifier '(C) fichier passé en v9 : historique Ctrl+Maj+H, texte vide (Ctrl+Maj+T déjà donné)' (($f.version -eq 9) -and ($texte.Count -eq 0) -and ($histo.Count -eq 1) -and ($histo[0] -eq 'Ctrl+Maj+H') -and ((Compter-Motif -Motif 'reglages mis a niveau de la version 3 a la version 9$' -Dossier $dc) -eq 1)) "version $($f.version), texte [$($texte -join ',')], historique [$($histo -join ',')]" | Out-Null
+                Verifier '(C) fichier passé en v12 : historique Ctrl+Maj+H, texte vide (Ctrl+Maj+T déjà donné)' (($f.version -eq 12) -and ($texte.Count -eq 0) -and ($histo.Count -eq 1) -and ($histo[0] -eq 'Ctrl+Maj+H') -and ((Compter-Motif -Motif 'reglages mis a niveau de la version 3 a la version 12$' -Dossier $dc) -eq 1)) "version $($f.version), texte [$($texte -join ',')], historique [$($histo -join ',')]" | Out-Null
                 Verifier '(C) raccourci texte: aucun' ($lt -match 'raccourci texte: aucun$') $lt | Out-Null
                 $o = Ouvrir-Historique $dc '(C)'
                 $c = Attendre-Cases $o.H 3 '(C)'

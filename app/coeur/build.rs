@@ -38,6 +38,8 @@ fn main() {
         "selection_prete",
         "selection_terminee",
         "selection_cliquee",
+        "selection_pipette",
+        "selection_echantillon",
         "selection_annulee",
         "reglages_lire",
         "reglages_changer",
@@ -96,6 +98,12 @@ fn main() {
         "barre_choisi",
         "barre_retardateur",
         "barre_fermer",
+        "epingle_pret",
+        "epingle_image",
+        "epingle_redimensionner",
+        "epingle_opacite",
+        "epingle_copier",
+        "epingle_fermer",
     ]);
     tauri_build::try_build(
         tauri_build::Attributes::new()

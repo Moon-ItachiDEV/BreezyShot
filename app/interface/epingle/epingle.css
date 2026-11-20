@@ -1,0 +1,187 @@
+/* Fenêtre flottante d'une capture épinglée à l'écran.
+   Sans cadre, transparente, toujours au premier plan. Toutes les valeurs viennent de
+   ../commun/jetons.css. */
+
+html,
+body {
+  height: 100%;
+  margin: 0;
+  background: transparent;
+  overflow: hidden;
+}
+
+body {
+  font-family: var(--police-ui);
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.defs {
+  position: absolute;
+  width: 0;
+  height: 0;
+  overflow: hidden;
+}
+
+button {
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: 0;
+  padding: 0;
+  margin: 0;
+  cursor: pointer;
+}
+
+.epingle {
+  box-sizing: border-box;
+  width: 100vw;
+  height: 100vh;
+  /* Même marge que fenetres::epingle::MARGE_OMBRE (16 px) pour laisser respirer l'ombre. */
+  padding: var(--space-4);
+}
+
+.carte {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  border-radius: var(--radius-md);
+  cursor: grab;
+}
+
+.carte.glisse {
+  cursor: grabbing;
+}
+
+/* L'opacité réglée par Alt + molette s'applique à la carte et son ombre ; les boutons au
+   survol et la pilule d'état restent lisibles même à 25 %. */
+.cadre {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  box-sizing: border-box;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--acrylic-stroke);
+  box-shadow: var(--shadow-28);
+  overflow: hidden;
+  opacity: var(--opacite, 1);
+  transition: opacity var(--duree-survol) var(--courbe-douce);
+}
+
+.toile {
+  display: block;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+/* Boutons flottants en haut à droite, révélés au survol ou au clavier. */
+.outils {
+  position: absolute;
+  top: var(--vignette-coin-ecart);
+  right: var(--vignette-coin-ecart);
+  display: flex;
+  gap: var(--space-1);
+  opacity: 0;
+  transform: translateY(var(--vignette-revele-decalage)) scale(0.94);
+  pointer-events: none;
+  transition: opacity var(--duree-vignette-bouton) var(--courbe-douce),
+    transform var(--duree-vent) var(--courbe-ressort);
+}
+
+.carte:hover .outils,
+.carte:focus-within .outils,
+.carte.survol .outils {
+  opacity: 1;
+  transform: none;
+  pointer-events: auto;
+}
+
+.rond {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: var(--vignette-rond);
+  height: var(--vignette-rond);
+  border-radius: 50%;
+  box-sizing: border-box;
+  background: var(--vignette-rond-fond);
+  border: 1px solid var(--vignette-rond-bord);
+  color: var(--vignette-rond-texte);
+  transition: background var(--duree-survol) var(--courbe-douce),
+    color var(--duree-survol) var(--courbe-douce);
+}
+
+.rond:hover {
+  background: var(--vignette-rond-fond-survol);
+}
+
+.rond:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.rond.fermer:hover {
+  background: var(--fermer-survol);
+  border-color: transparent;
+  color: var(--on-accent);
+}
+
+.rond .ico {
+  width: var(--vignette-picto);
+  height: var(--vignette-picto);
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.rond .ic-ok {
+  position: absolute;
+  opacity: 0;
+  transform: scale(0.75);
+  transition: opacity var(--duree-survol) var(--courbe-douce),
+    transform var(--duree-survol) var(--courbe-douce);
+}
+
+.rond.fait .ic-defaut {
+  opacity: 0;
+}
+
+.rond.fait .ic-ok {
+  opacity: 1;
+  transform: none;
+  color: var(--success);
+}
+
+/* Pilule brève : zoom (« 125 % »), opacité (« Opacité 76 % »), copie (« Copié »). */
+.pilule {
+  position: absolute;
+  left: 50%;
+  bottom: var(--space-3);
+  transform: translateX(-50%);
+  padding: var(--space-1) var(--space-3);
+  border-radius: var(--radius-pill);
+  background: var(--hud);
+  color: var(--hud-text);
+  box-shadow: var(--shadow-16);
+  font-size: var(--texte-caption-taille);
+  font-weight: 600;
+  line-height: var(--texte-caption-interligne);
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.pilule[hidden] {
+  display: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cadre,
+  .outils,
+  .rond,
+  .rond .ic-ok {
+    transition: none;
+  }
+}

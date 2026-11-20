@@ -16,12 +16,13 @@ pub const ACTION_IMPR_ECRAN: &str = "impr_ecran";
 /// Les actions dont l'ordre de traitement est fixé. Les autres suivent, par ordre
 /// alphabétique. La pseudo-action d'Impr. écran passe la première : la touche ne dépend
 /// d'aucune autre.
-pub const ACTIONS_PRIORITAIRES: [&str; 10] = [
+pub const ACTIONS_PRIORITAIRES: [&str; 11] = [
     ACTION_IMPR_ECRAN,
     "zone",
     "plein_ecran",
     "fenetre",
     "derniere_zone",
+    "pipette",
     "historique",
     "texte",
     "defilante",

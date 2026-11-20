@@ -44,10 +44,12 @@ pub enum Mode {
     Video,
     /// GIF (0.7) : une zone enregistrée en GIF.
     Gif,
+    /// Pipette de couleur : prélève un pixel de l'écran et copie son code couleur.
+    Pipette,
 }
 
 impl Mode {
-    pub const TOUS: [Mode; 8] = [
+    pub const TOUS: [Mode; 9] = [
         Mode::Zone,
         Mode::PleinEcran,
         Mode::Fenetre,
@@ -56,10 +58,11 @@ impl Mode {
         Mode::Defilante,
         Mode::Video,
         Mode::Gif,
+        Mode::Pipette,
     ];
 
     /// Nom d'action (`zone`, `plein_ecran`, `fenetre`, `derniere_zone`, `texte`,
-    /// `defilante`, `video`, `gif`).
+    /// `defilante`, `video`, `gif`, `pipette`).
     pub fn nom(self) -> &'static str {
         match self {
             Mode::Zone => "zone",
@@ -70,6 +73,7 @@ impl Mode {
             Mode::Defilante => "defilante",
             Mode::Video => "video",
             Mode::Gif => "gif",
+            Mode::Pipette => "pipette",
         }
     }
 
@@ -158,6 +162,8 @@ pub enum Declencheur {
     EnregistrementImpossible,
     /// Le fichier n'a pas pu être fermé dans son délai.
     FinalisationImpossible,
+    /// Pipette de couleur : un pixel a été cliqué, retour au Repos.
+    CouleurChoisie,
 }
 
 impl Declencheur {
@@ -281,6 +287,12 @@ pub const PASSAGES: &[(Etat, Declencheur, Etat)] = &[
     (E::Finalisation, D::ImagePrete, E::Souffle),
     (E::Finalisation, D::ImagePreteSansVignette, E::Repos),
     (E::Finalisation, D::FinalisationImpossible, E::Repos),
+    // Pipette de couleur : sans retardateur (aucune ligne `DemandeDecompte`). Les sorties
+    // de la Sélection servent telles quelles ; un clic sort directement vers `Repos`.
+    (E::Repos, D::DemandeCapture(Mode::Pipette), E::Gel),
+    (E::Vignette, D::DemandeCapture(Mode::Pipette), E::Gel),
+    (E::Gel, D::PhotoPrise(Mode::Pipette), E::Selection),
+    (E::Selection, D::CouleurChoisie, E::Repos),
 ];
 
 /// Fonction pure : l'état suivant, ou `None` si le déclencheur est ignoré dans cet état.
@@ -809,15 +821,25 @@ mod tests {
         }
     }
 
-    /// La 0.7 n'ajoute que ses treize lignes : aucune retirée, aucune changée.
+    /// La 0.7 a ajouté ses treize lignes et la pipette ses quatre lignes : aucune retirée,
+    /// aucune changée.
     #[test]
     fn seulement_des_lignes_nouvelles() {
+        const LIGNES_PIPETTE: &[(Etat, Declencheur, Etat)] = &[
+            (E::Repos, D::DemandeCapture(Mode::Pipette), E::Gel),
+            (E::Vignette, D::DemandeCapture(Mode::Pipette), E::Gel),
+            (E::Gel, D::PhotoPrise(Mode::Pipette), E::Selection),
+            (E::Selection, D::CouleurChoisie, E::Repos),
+        ];
         let t = passages_0_6();
         assert_eq!(LIGNES_0_7.len(), 13);
-        assert_eq!(PASSAGES.len(), t.len() + LIGNES_0_7.len());
+        assert_eq!(
+            PASSAGES.len(),
+            t.len() + LIGNES_0_7.len() + LIGNES_PIPETTE.len()
+        );
         for ligne in PASSAGES {
             assert!(
-                t.contains(ligne) || LIGNES_0_7.contains(ligne),
+                t.contains(ligne) || LIGNES_0_7.contains(ligne) || LIGNES_PIPETTE.contains(ligne),
                 "ligne inattendue : {ligne:?}"
             );
         }
@@ -825,6 +847,12 @@ mod tests {
             assert!(
                 PASSAGES.contains(ligne),
                 "ligne de la 0.7 absente : {ligne:?}"
+            );
+        }
+        for ligne in LIGNES_PIPETTE {
+            assert!(
+                PASSAGES.contains(ligne),
+                "ligne de la pipette absente : {ligne:?}"
             );
         }
         // Les neuf états de la 0.6 font ce qu'ils faisaient pour chaque déclencheur de la
@@ -847,6 +875,11 @@ mod tests {
                     .map(|(_, _, a)| *a);
                 assert_eq!(suivant(etat, d), attendu, "{etat:?} {d:?}");
             }
+        }
+        // La pipette n'a jamais de retardateur.
+        for etat in TOUS_LES_ETATS {
+            assert_eq!(suivant(etat, D::DemandeDecompte(Mode::Pipette)), None);
+            assert_eq!(suivant(etat, D::DecompteFini(Mode::Pipette)), None);
         }
     }
 
@@ -1002,17 +1035,17 @@ mod tests {
         assert!(TOUS_LES_ETATS.contains(&E::Finalisation));
     }
 
-    /// Huit modes, chacun nommé une fois.
+    /// Neuf modes, chacun nommé une fois.
     #[test]
-    fn huit_modes() {
-        assert_eq!(Mode::TOUS.len(), 8);
+    fn neuf_modes() {
+        assert_eq!(Mode::TOUS.len(), 9);
         for (i, a) in Mode::TOUS.iter().enumerate() {
             for b in &Mode::TOUS[i + 1..] {
                 assert_ne!(a, b);
                 assert_ne!(a.nom(), b.nom());
             }
         }
-        assert_eq!(&Mode::TOUS[6..], &[Mode::Video, Mode::Gif]);
+        assert_eq!(&Mode::TOUS[6..], &[Mode::Video, Mode::Gif, Mode::Pipette]);
     }
 
     /// Pendant le défilement, toute demande de capture (et de décompte) est ignorée ;
@@ -1218,8 +1251,10 @@ mod tests {
                     Mode::PleinEcran | Mode::DerniereZone => {
                         assert_eq!(a.traiter(D::PhotoPrise(m)), Some(E::Decoupe));
                     }
-                    Mode::Texte | Mode::Defilante | Mode::Video | Mode::Gif => {
-                        unreachable!("pas de retardateur pour le texte, la defilante ni un film")
+                    Mode::Texte | Mode::Pipette | Mode::Defilante | Mode::Video | Mode::Gif => {
+                        unreachable!(
+                            "pas de retardateur pour le texte, la pipette, la defilante ni un film"
+                        )
                     }
                 }
                 assert_eq!(a.traiter(D::ImagePreteSansVignette), Some(E::Repos));

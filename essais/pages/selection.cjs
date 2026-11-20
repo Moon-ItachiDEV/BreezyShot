@@ -1677,6 +1677,113 @@ const L = 1280, H = 400;
     await p.screenshot({ path: `${SORTIE}/selection-film-150.png` });
     await p.context().close();
   }
+
+  // 16. Mode pipette : sans voile, loupe 15 × 15 + valeur HEX / RGB / HSL, molette & Tab
+  // changent le format, flèches déplacent au pixel près, clic gauche ou Entrée envoie
+  // `selection_pipette`, Échap / clic droit annule, retour en mode zone enlève tout texte.
+  {
+    p = await page({ csp: true });
+    await p.evaluate(() => {
+      const ancien = window.__TAURI__.core.invoke;
+      window.__TAURI__.core.invoke = (c, a) => {
+        if (c === 'selection_echantillon') {
+          window.__appels.push([c, JSON.parse(JSON.stringify(a))]);
+          const cote = (a.rayon || 7) * 2 + 1;
+          const buf = new Uint8Array(cote * cote * 4);
+          for (let i = 0; i < cote * cote; i++) {
+            buf[i * 4] = 255;
+            buf[i * 4 + 1] = 126;
+            buf[i * 4 + 2] = 107;
+            buf[i * 4 + 3] = 255;
+          }
+          return Promise.resolve(buf.buffer);
+        }
+        return ancien(c, a);
+      };
+    });
+    const montrerPipette = async (pg, souris = { x: 240, y: 180 }) => {
+      const i = prochain++;
+      await pg.evaluate(([i, k, s]) => {
+        const l = Math.round(innerWidth * k), h = Math.round(innerHeight * k);
+        __emettre('selection:montrer', {
+          id: i, numero: i, largeur: l, hauteur: h,
+          ecrans: [{ x: 0, y: 0, largeur: l, hauteur: h }],
+          cote_min: 3, mode: 'pipette', souris: s,
+        });
+      }, [i, pg.echelle, souris]);
+      await attendrePrete(pg, i);
+      await pg.waitForTimeout(80);
+      await vider(pg);
+      return i;
+    };
+    id = await montrerPipette(p);
+    const infoP = await p.evaluate(() => ({
+      classe: document.documentElement.classList.contains('mode-pipette'),
+      voile: getComputedStyle(document.getElementById('plein')).display,
+      nom: document.body.getAttribute('aria-label'),
+      valeur: document.querySelector('#pipette .pipette-valeur')?.textContent,
+      actif: document.querySelector('#pipette .pipette-format.actif')?.dataset.format,
+      canvas: !!document.querySelector('#pipette canvas.pipette-grille'),
+    }));
+    verifier(
+      infoP.classe && infoP.voile === 'none' && infoP.nom === 'Pipette de couleur : choisissez un pixel'
+        && infoP.valeur === '#FF7E6B' && infoP.actif === 'hex' && infoP.canvas,
+      '16 a mode pipette : sans voile, loupe visible, #FF7E6B en HEX',
+      JSON.stringify(infoP),
+    );
+    // Molette / Tab changent de format HEX → RGB → HSL → HEX.
+    await p.mouse.move(320, 200); await p.waitForTimeout(50);
+    await p.mouse.wheel(0, 120); await p.waitForTimeout(30);
+    const valRgb = await p.$eval('#pipette .pipette-valeur', e => e.textContent);
+    await p.keyboard.press('Tab'); await p.waitForTimeout(30);
+    const valHsl = await p.$eval('#pipette .pipette-valeur', e => e.textContent);
+    await p.keyboard.press('c'); await p.waitForTimeout(30);
+    const valHex = await p.$eval('#pipette .pipette-valeur', e => e.textContent);
+    verifier(
+      valRgb === 'rgb(255, 126, 107)' && valHsl === 'hsl(8, 100%, 71%)' && valHex === '#FF7E6B',
+      '16 b molette / Tab / C : HEX → RGB → HSL → HEX',
+      JSON.stringify([valRgb, valHsl, valHex]),
+    );
+    await p.screenshot({ path: `${SORTIE}/selection-pipette.png` });
+    // Flèche droite puis Entrée : décale de +1 px et envoie selection_pipette en RGB.
+    await p.keyboard.press('Tab'); // -> rgb
+    await vider(p);
+    await p.keyboard.press('ArrowRight'); await p.waitForTimeout(40);
+    await p.keyboard.press('Enter'); await p.waitForTimeout(40);
+    const apresEntree = (await appels(p)).filter(x => x[0] === 'selection_pipette');
+    verifier(
+      apresEntree.length === 1 && JSON.stringify(apresEntree[0][1]) === JSON.stringify({ id, numero: id, x: 321, y: 200, format: 'rgb' }),
+      '16 c flèche + Entrée : selection_pipette au pixel décalé (321, 200) en rgb',
+      JSON.stringify(apresEntree),
+    );
+    // Clic gauche : envoie selection_pipette au pixel cliqué.
+    id = await montrerPipette(p);
+    await p.mouse.move(410, 150); await p.waitForTimeout(40);
+    await p.mouse.wheel(0, 120); // rgb
+    await p.mouse.wheel(0, 120); // hsl
+    await vider(p);
+    await p.mouse.click(410, 150); await p.waitForTimeout(40);
+    const apresClic = (await appels(p)).filter(x => x[0] === 'selection_pipette');
+    verifier(
+      apresClic.length === 1 && JSON.stringify(apresClic[0][1]) === JSON.stringify({ id, numero: id, x: 410, y: 150, format: 'hsl' }),
+      '16 d clic gauche : selection_pipette (410, 150) en hsl',
+      JSON.stringify(apresClic),
+    );
+    // Échap annule ; retour en mode zone retire complètement #pipette (aucun texte dans body).
+    id = await montrerPipette(p);
+    await p.keyboard.press('Escape'); await p.waitForTimeout(40);
+    const annulee = (await appels(p)).filter(x => x[0] === 'selection_annulee');
+    await p.evaluate(() => __emettre('selection:cachee', null));
+    const apresCachee = await p.evaluate(() => [!!document.getElementById('pipette'), document.body.textContent.trim()]);
+    const refusP = await p.evaluate(() => window.__refus);
+    verifier(
+      annulee.length === 1 && annulee[0][1].cause === 'echap'
+        && !apresCachee[0] && apresCachee[1] === '' && refusP.length === 0,
+      '16 e Échap annule, selection:cachee retire #pipette et body sans texte, CSP respectée',
+      JSON.stringify({ annulee, apresCachee, refusP }),
+    );
+    await p.context().close();
+  }
   console.log('ECHECS :', echecs);
   console.log('ERREURS PAGE :', JSON.stringify(erreurs));
   if (erreurs.length) echecs++;

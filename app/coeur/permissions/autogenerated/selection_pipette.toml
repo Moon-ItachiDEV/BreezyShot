@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-selection-pipette"
+description = "Enables the selection_pipette command without any pre-configured scope."
+commands.allow = ["selection_pipette"]
+
+[[permission]]
+identifier = "deny-selection-pipette"
+description = "Denies the selection_pipette command without any pre-configured scope."
+commands.deny = ["selection_pipette"]

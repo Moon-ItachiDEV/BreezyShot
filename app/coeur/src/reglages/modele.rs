@@ -74,6 +74,7 @@ pub enum CibleImprEcran {
     PleinEcran,
     Fenetre,
     DerniereZone,
+    Pipette,
     Defilante,
     Texte,
     Video,
@@ -83,12 +84,13 @@ pub enum CibleImprEcran {
 
 impl CibleImprEcran {
     /// Les cibles dans l'ordre de la liste de la page.
-    pub const TOUTES: [CibleImprEcran; 10] = [
+    pub const TOUTES: [CibleImprEcran; 11] = [
         CibleImprEcran::Barre,
         CibleImprEcran::Zone,
         CibleImprEcran::PleinEcran,
         CibleImprEcran::Fenetre,
         CibleImprEcran::DerniereZone,
+        CibleImprEcran::Pipette,
         CibleImprEcran::Defilante,
         CibleImprEcran::Texte,
         CibleImprEcran::Video,
@@ -104,6 +106,7 @@ impl CibleImprEcran {
             CibleImprEcran::PleinEcran => Some("plein_ecran"),
             CibleImprEcran::Fenetre => Some("fenetre"),
             CibleImprEcran::DerniereZone => Some("derniere_zone"),
+            CibleImprEcran::Pipette => Some("pipette"),
             CibleImprEcran::Defilante => Some("defilante"),
             CibleImprEcran::Texte => Some("texte"),
             CibleImprEcran::Video => Some("video"),
@@ -150,6 +153,7 @@ texte_enum!(CibleImprEcran {
     PleinEcran => "plein_ecran",
     Fenetre => "fenetre",
     DerniereZone => "derniere_zone",
+    Pipette => "pipette",
     Defilante => "defilante",
     Texte => "texte",
     Video => "video",
@@ -177,13 +181,15 @@ pub struct Raccourcis {
     pub video: Vec<String>,
     /// Le GIF (version 6).
     pub gif: Vec<String>,
+    /// La pipette de couleur (version 11).
+    pub pipette: Vec<String>,
     /// Actions que cette version ne connaît pas, gardées telles quelles pour la réécriture.
     pub(in crate::reglages) autres: Map<String, Value>,
 }
 
 impl Raccourcis {
     /// Les noms d'action connus, dans l'ordre où ils sont écrits.
-    pub const ACTIONS: [&'static str; 9] = [
+    pub const ACTIONS: [&'static str; 10] = [
         "zone",
         "plein_ecran",
         "fenetre",
@@ -193,6 +199,7 @@ impl Raccourcis {
         "defilante",
         "video",
         "gif",
+        "pipette",
     ];
 
     /// Les candidats d'une action connue, `None` pour une action inconnue.
@@ -207,6 +214,7 @@ impl Raccourcis {
             "defilante" => Some(&self.defilante),
             "video" => Some(&self.video),
             "gif" => Some(&self.gif),
+            "pipette" => Some(&self.pipette),
             _ => None,
         }
     }
@@ -222,6 +230,7 @@ impl Raccourcis {
             "defilante" => Some(&mut self.defilante),
             "video" => Some(&mut self.video),
             "gif" => Some(&mut self.gif),
+            "pipette" => Some(&mut self.pipette),
             _ => None,
         }
     }
@@ -241,6 +250,7 @@ impl Raccourcis {
                 defilante: liste(&["Ctrl+Maj+5"]),
                 video: liste(&["Ctrl+Maj+6"]),
                 gif: liste(&["Ctrl+Maj+7"]),
+                pipette: liste(&["Ctrl+Maj+C"]),
                 autres: Map::new(),
             },
             // Provisoire : les raccourcis du Mac restent à choisir (Cmd+Maj+3, 4 et 5 sont
@@ -257,6 +267,7 @@ impl Raccourcis {
                 defilante: liste(&["Cmd+Maj+0"]),
                 video: Vec::new(),
                 gif: Vec::new(),
+                pipette: liste(&["Cmd+Maj+C"]),
                 autres: Map::new(),
             },
         }
@@ -299,13 +310,15 @@ impl Selection {
     }
 }
 
-/// Réglages de la capture (version 3) : retardateur et pointeur dans l'image.
+/// Réglages de la capture (version 3) : retardateur, pointeur et icônes du bureau.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Capture {
     /// 0 (aucun) ou 1 à `RETARDATEUR_MAX_S` secondes entières.
     pub retardateur_s: u32,
     /// Le pointeur est dessiné dans l'image.
     pub pointeur: bool,
+    /// Masquer temporairement les icônes du bureau pendant un plein écran ou un film.
+    pub masquer_icones_bureau: bool,
     pub(in crate::reglages) inconnus: Map<String, Value>,
 }
 
@@ -314,6 +327,7 @@ impl Capture {
         Capture {
             retardateur_s: 0,
             pointeur: false,
+            masquer_icones_bureau: false,
             inconnus: Map::new(),
         }
     }
@@ -368,6 +382,9 @@ pub struct Reglages {
     /// Ce que lance Impr. écran quand BreezyShot la tient (version 8). Sans effet tant que
     /// Windows garde la touche pour l'Outil Capture (le registre, pas ce fichier).
     pub impr_ecran_ouvre: CibleImprEcran,
+    /// Ce que lance `Win + Maj + S` sous Windows (version 12). `None` : laisser le raccourci à
+    /// l'Outil Capture de Windows (aucun crochet clavier posé).
+    pub win_maj_s_ouvre: Option<CibleImprEcran>,
     pub copier_apres_capture: bool,
     pub enregistrer_apres_capture: bool,
     /// Le format du fichier enregistré (version 7) ; « Récents » reste en PNG.
@@ -401,6 +418,7 @@ impl Reglages {
         Reglages {
             raccourcis: Raccourcis::par_defaut(plateforme),
             impr_ecran_ouvre: CibleImprEcran::Zone,
+            win_maj_s_ouvre: None,
             copier_apres_capture: true,
             enregistrer_apres_capture: false,
             format_image: FormatImage::Png,
@@ -487,6 +505,10 @@ pub(in crate::reglages) fn vers_json(r: &Reglages) -> Result<Value, &'static str
     let mut capture = Map::new();
     capture.insert("retardateur_s".into(), Value::from(r.capture.retardateur_s));
     capture.insert("pointeur".into(), Value::Bool(r.capture.pointeur));
+    capture.insert(
+        "masquer_icones_bureau".into(),
+        Value::Bool(r.capture.masquer_icones_bureau),
+    );
     for (cle, valeur) in &r.capture.inconnus {
         capture.insert(cle.clone(), valeur.clone());
     }
@@ -529,6 +551,13 @@ pub(in crate::reglages) fn vers_json(r: &Reglages) -> Result<Value, &'static str
     m.insert(
         "impr_ecran_ouvre".into(),
         Value::from(r.impr_ecran_ouvre.texte()),
+    );
+    m.insert(
+        "win_maj_s_ouvre".into(),
+        match r.win_maj_s_ouvre {
+            None => Value::Null,
+            Some(c) => Value::from(c.texte()),
+        },
     );
     m.insert(
         "copier_apres_capture".into(),

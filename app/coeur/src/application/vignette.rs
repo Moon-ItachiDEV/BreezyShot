@@ -35,6 +35,7 @@ pub const SOUS_DOSSIER_GLISSER: &str = "Glisser";
 pub const COPIER: &str = "copier";
 pub const ENREGISTRER: &str = "enregistrer";
 pub const ANNOTER: &str = "annoter";
+pub const EPINGLER: &str = "epingler";
 pub const SUPPRIMER: &str = "supprimer";
 pub const FERMER: &str = "fermer";
 pub const ANNULER: &str = "annuler";
@@ -103,8 +104,7 @@ fn action(id: &str, libelle: &str, fait: Option<&str>, place: Place) -> ActionVi
 }
 
 /// Les boutons de la carte, dans l'ordre de la page : seulement ce qui marche. Annoter
-/// (`annoter` : éditeur construit et capture annotable), rond, avant Supprimer ; jamais
-/// Épingler.
+/// (`annoter` : éditeur construit et capture annotable), puis Épingler, puis Supprimer.
 pub fn actions(annoter: bool) -> Vec<ActionVignette> {
     let mut a = vec![
         action(COPIER, "Copier", Some("Copié"), Place::Principale),
@@ -119,6 +119,7 @@ pub fn actions(annoter: bool) -> Vec<ActionVignette> {
         a.push(action(ANNOTER, "Annoter", None, Place::Secondaire));
     }
     a.extend([
+        action(EPINGLER, "Épingler", None, Place::Secondaire),
         action(SUPPRIMER, "Supprimer", None, Place::Secondaire),
         action(FERMER, "Fermer", None, Place::Fermer),
         action(ANNULER, "Annuler", None, Place::Annulation),
@@ -261,6 +262,8 @@ pub enum Geste {
     AttendreEnregistrement,
     /// Ouvrir l'éditeur sur cette capture (contrat 0.4 « Éditeur », §4.2).
     Annoter,
+    /// Épingler cette capture à l'écran dans une fenêtre flottante.
+    Epingler,
     /// Ouvrir le film dans le lecteur de Windows (0.7, rond de lecture, choix B2).
     Lire,
     Supprimer,
@@ -287,9 +290,9 @@ fn action_en_cours(capture: &CaptureMontree, depuis: Option<Instant>, maintenant
 /// Ce que fait l'action `action` sur `capture` : pendant l'état « supprimée », seul
 /// Annuler compte ; une action qui tourne encore (moins de `DELAI_SORTIE`, ou pour un film
 /// jusqu'à son bilan) est ignorée ; Enregistrer d'un film dont l'enregistrement tourne
-/// encore attend son bilan, sans seconde copie (F25) ; Annoter est ignoré pendant une copie, un
-/// enregistrement, un glisser, pour un film, ou si la capture n'est pas annotable (R14,
-/// R11) ; Lire (le rond d'un film, choix B2) n'existe que pour un film, hors glisser.
+/// encore attend son bilan, sans seconde copie (F25) ; Annoter et Épingler sont ignorés
+/// pendant une copie, un enregistrement, un glisser, pour un film, ou si la capture n'est
+/// pas valide ; Lire (le rond d'un film, choix B2) n'existe que pour un film, hors glisser.
 pub fn decider(capture: &CaptureMontree, action: &str, maintenant: Instant) -> Geste {
     if capture.suppression != EtatSuppression::Aucune {
         return match (action, capture.suppression) {
@@ -319,6 +322,17 @@ pub fn decider(capture: &CaptureMontree, action: &str, maintenant: Instant) -> G
             Geste::Ignorer
         }
         ANNOTER => Geste::Annoter,
+        EPINGLER
+            if en_cours(capture.copie, maintenant)
+                || en_cours(capture.enregistrement, maintenant)
+                || capture.glisser
+                || capture.contenu.film().is_some()
+                || capture.contenu.pixels().largeur == 0
+                || capture.contenu.pixels().hauteur == 0 =>
+        {
+            Geste::Ignorer
+        }
+        EPINGLER => Geste::Epingler,
         SUPPRIMER if capture.glisser => Geste::Ignorer,
         SUPPRIMER => Geste::Supprimer,
         FERMER => Geste::Fermer,
@@ -813,10 +827,14 @@ mod tests {
     fn actions_construites_seulement() {
         let a = actions(false);
         let ids: Vec<&str> = a.iter().map(|a| a.id.as_str()).collect();
-        assert_eq!(ids, [COPIER, ENREGISTRER, SUPPRIMER, FERMER, ANNULER]);
+        assert_eq!(
+            ids,
+            [COPIER, ENREGISTRER, EPINGLER, SUPPRIMER, FERMER, ANNULER]
+        );
         assert_eq!(a[0].libelle_fait.as_deref(), Some("Copié"));
         assert_eq!(a[1].libelle_fait.as_deref(), Some("Enregistré"));
-        assert!(!ids.contains(&ANNOTER) && !ids.contains(&"epingler"));
+        assert!(!ids.contains(&ANNOTER));
+        assert!(ids.contains(&EPINGLER));
     }
 
     #[test]
@@ -825,21 +843,33 @@ mod tests {
         let ids: Vec<&str> = a.iter().map(|a| a.id.as_str()).collect();
         assert_eq!(
             ids,
-            [COPIER, ENREGISTRER, ANNOTER, SUPPRIMER, FERMER, ANNULER]
+            [
+                COPIER,
+                ENREGISTRER,
+                ANNOTER,
+                EPINGLER,
+                SUPPRIMER,
+                FERMER,
+                ANNULER
+            ]
         );
         let annoter = &a[2];
         assert_eq!(annoter.libelle, "Annoter");
         assert_eq!(annoter.libelle_fait, None);
         assert_eq!(annoter.place, Place::Secondaire);
         assert_eq!(annoter.picto, "annoter");
-        // Premier des boutons secondaires (ronds).
+        let epingler = &a[3];
+        assert_eq!(epingler.libelle, "Épingler");
+        assert_eq!(epingler.libelle_fait, None);
+        assert_eq!(epingler.place, Place::Secondaire);
+        assert_eq!(epingler.picto, "epingler");
+        // Boutons secondaires (ronds) : Annoter, Épingler, Supprimer.
         let ronds: Vec<&str> = a
             .iter()
             .filter(|a| a.place == Place::Secondaire)
             .map(|a| a.id.as_str())
             .collect();
-        assert_eq!(ronds, [ANNOTER, SUPPRIMER]);
-        assert!(!ids.contains(&"epingler"));
+        assert_eq!(ronds, [ANNOTER, EPINGLER, SUPPRIMER]);
     }
 
     #[test]
@@ -890,6 +920,30 @@ mod tests {
     }
 
     #[test]
+    fn epingler_ignore_sur_film_ou_pendant_action() {
+        let t = Instant::now();
+        let mut c = capture();
+        assert_eq!(decider(&c, EPINGLER, t), Geste::Epingler);
+        c.copie = Some(t);
+        assert_eq!(decider(&c, EPINGLER, t), Geste::Ignorer);
+        assert_eq!(decider(&c, EPINGLER, t + DELAI_SORTIE), Geste::Epingler);
+        c.copie = None;
+        c.enregistrement = Some(t);
+        assert_eq!(decider(&c, EPINGLER, t), Geste::Ignorer);
+        c.enregistrement = None;
+        c.glisser = true;
+        assert_eq!(decider(&c, EPINGLER, t), Geste::Ignorer);
+        c.glisser = false;
+        let f = film(Sorte::Video);
+        assert_eq!(decider(&f, EPINGLER, t), Geste::Ignorer);
+        let ids_film: Vec<String> = actions_film(Sorte::Video)
+            .into_iter()
+            .map(|a| a.id)
+            .collect();
+        assert!(!ids_film.iter().any(|id| id == EPINGLER));
+    }
+
+    #[test]
     fn bandeau_ne_dit_que_les_erreurs_avec_la_vignette() {
         let r = Annonce::Reussite {
             titre: "Copié dans le presse-papiers".into(),
@@ -919,7 +973,8 @@ mod tests {
         assert_eq!(decider(&c, FERMER, t), Geste::Fermer);
         assert_eq!(decider(&c, ANNULER, t), Geste::Ignorer);
         assert_eq!(decider(&c, ANNOTER, t), Geste::Annoter);
-        assert_eq!(decider(&c, "epingler", t), Geste::Ignorer);
+        assert_eq!(decider(&c, EPINGLER, t), Geste::Epingler);
+        assert_eq!(decider(&c, "inconnue", t), Geste::Ignorer);
         // En cours : ignoré, puis plus « en cours » après DELAI_SORTIE.
         c.copie = Some(t);
         assert_eq!(decider(&c, COPIER, t), Geste::Ignorer);

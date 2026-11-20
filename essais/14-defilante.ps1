@@ -1631,7 +1631,7 @@ public static int[] ClasserResumes(int[] ra, int[] rb, int h, int minRecouvremen
                 Verifier '(L0) aucune ligne « raccourci defilante »' ((Compter-Motif 'raccourci defilante[: ]' $d0) -eq 0) (Message (Derniere-Ligne 'raccourci defilante' $d0)) | Out-Null
                 $m = Ouvrir-Menu '(L0)'
                 $sans = @($m.Textes | Where-Object { $_.StartsWith('Capture défilante', [StringComparison]::Ordinal) }).Count -eq 0
-                Verifier '(L0) menu de 9 positions (séparateurs comptés) sans « Capture défilante »' ($sans -and ($m.Textes.Count -eq 9)) $m.Lus | Out-Null
+                Verifier '(L0) menu de 10 positions (séparateurs comptés) sans « Capture défilante »' ($sans -and ($m.Textes.Count -eq 10)) $m.Lus | Out-Null
                 Fermer-Menu $m '(L0)'
                 Verifier '(L0) Ctrl+Maj+5 libre (l''essai le tient)' ((Tenir-Ailleurs ([int]$VK_5) 'cinq-l0') -eq 'tenu') | Out-Null
                 $recus = Compter-Motif '--capturer recu: defilante$' $d0
@@ -1643,8 +1643,8 @@ public static int[] ClasserResumes(int[] ra, int[] rb, int h, int minRecouvremen
                 Verifier '(L0) --capturer defilante → « mode non construit », aucune capture' ((Compter-Motif 'DemandeCapture defilante' $d0) -eq 0) | Out-Null
                 $f = Lire-Reglages $d0
                 $def = if ($f.raccourcis.PSObject.Properties.Name -contains 'defilante') { @($f.raccourcis.defilante) -join ',' } else { '<absent>' }
-                $mises = Compter-Motif 'reglages mis a niveau de la version 4 a la version 9$' $d0
-                Verifier '(L0) réglages passés en v9 (0.8.5) : defilante = Ctrl+Maj+5, une ligne « de la version 4 a la version 9 »' (($f.version -eq 9) -and ($def -eq 'Ctrl+Maj+5') -and ($mises -eq 1)) "version $($f.version), defilante $def, lignes $mises" | Out-Null
+                $mises = Compter-Motif 'reglages mis a niveau de la version 4 a la version 12$' $d0
+                Verifier '(L0) réglages passés en v12 : defilante = Ctrl+Maj+5, une ligne « de la version 4 a la version 12 »' (($f.version -eq 12) -and ($def -eq 'Ctrl+Maj+5') -and ($mises -eq 1)) "version $($f.version), defilante $def, lignes $mises" | Out-Null
                 Verifier '(L0) aucune fenêtre « defilante »' ((Compter-Motif $MOTIFS['Fenetre'] $d0) -eq 0) | Out-Null
             }
             Start-Sleep -Seconds 2   # la mémoire se pose (aucune ligne ne le dit)
@@ -1676,8 +1676,8 @@ public static int[] ClasserResumes(int[] ra, int[] rb, int h, int minRecouvremen
             Point '(L1) licence' {
                 Verifier '(L1) raccourci defilante: Ctrl+Maj+5' ((Compter-Motif 'raccourci defilante: Ctrl\+Maj\+5$' $da) -eq 1) (Message (Derniere-Ligne 'raccourci defilante' $da)) | Out-Null
                 $m = Ouvrir-Menu '(L1)'
-                $ok = ($m.Textes.Count -ge 6) -and ($m.Textes[5] -ceq "Capture défilante`tCtrl + Maj + 5")
-                Verifier '(L1) menu : « Capture défilante<tab>Ctrl + Maj + 5 » à l''indice 5 (séparateur compté)' $ok $m.Lus | Out-Null
+                $ok = ($m.Textes.Count -ge 7) -and ($m.Textes[6] -ceq "Capture défilante`tCtrl + Maj + 5")
+                Verifier '(L1) menu : « Capture défilante<tab>Ctrl + Maj + 5 » à l''indice 6 (séparateur compté)' $ok $m.Lus | Out-Null
                 Fermer-Menu $m '(L1)'
                 Verifier '(L1) aucune fenêtre « defilante » au repos' ((Compter-Motif $MOTIFS['Fenetre'] $da) -eq 0) | Out-Null
             }

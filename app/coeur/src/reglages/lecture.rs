@@ -15,11 +15,21 @@ use super::modele::{
 /// le numéro de version est tenu par `interpreter`, pas par elle.
 pub(super) type MiseANiveau = fn(&mut Map<String, Value>, Plateforme);
 
-/// `MISES_A_NIVEAU[n]` fait passer de la version `n` à `n + 1`. Pour une version 10 un jour :
-/// ajouter `v9_vers_v10` à la fin, et `VERSION_ACTUELLE` passe à 10 tout seul.
+/// `MISES_A_NIVEAU[n]` fait passer de la version `n` à `n + 1`. Pour une version 13 un jour :
+/// ajouter `v12_vers_v13` à la fin, et `VERSION_ACTUELLE` passe à 13 tout seul.
 pub(super) const MISES_A_NIVEAU: &[MiseANiveau] = &[
-    v0_vers_v1, v1_vers_v2, v2_vers_v3, v3_vers_v4, v4_vers_v5, v5_vers_v6, v6_vers_v7, v7_vers_v8,
+    v0_vers_v1,
+    v1_vers_v2,
+    v2_vers_v3,
+    v3_vers_v4,
+    v4_vers_v5,
+    v5_vers_v6,
+    v6_vers_v7,
+    v7_vers_v8,
     v8_vers_v9,
+    v9_vers_v10,
+    v10_vers_v11,
+    v11_vers_v12,
 ];
 
 /// Version 0 (aucun champ `version`) vers 1 : ajoute les champs de la version 1 qui manquent,
@@ -156,6 +166,36 @@ fn v7_vers_v8(objet: &mut Map<String, Value>, _plateforme: Plateforme) {
 /// copie. Un `son_capture` déjà là est gardé (même invalide : la validation s'en charge).
 fn v8_vers_v9(objet: &mut Map<String, Value>, _plateforme: Plateforme) {
     let modele = json!({ "son_capture": true });
+    if let Value::Object(modele) = modele {
+        completer(objet, &modele);
+    }
+}
+
+/// Version 9 vers 10 (icônes du bureau) : `capture.masquer_icones_bureau` arrive éteint.
+/// Une valeur déjà présente est gardée ; un `capture` qui n'est pas un objet reste tel quel.
+fn v9_vers_v10(objet: &mut Map<String, Value>, _plateforme: Plateforme) {
+    let modele = json!({ "capture": { "masquer_icones_bureau": false } });
+    if let Value::Object(modele) = modele {
+        completer(objet, &modele);
+    }
+}
+
+/// Version 10 vers 11 (pipette de couleur) : le raccourci `pipette`, avec la même règle
+/// que `v3_vers_v4` (défaut de la plateforme seulement s'il n'est pas déjà donné à une autre
+/// action, action déjà là gardée, objet `raccourcis` absent non créé).
+fn v10_vers_v11(objet: &mut Map<String, Value>, plateforme: Plateforme) {
+    let Some(Value::Object(raccourcis)) = objet.get_mut("raccourcis") else {
+        return;
+    };
+    let r = Raccourcis::par_defaut(plateforme);
+    ajouter_action(raccourcis, "pipette", &r.pipette);
+}
+
+/// Version 11 vers 12 (`Win + Maj + S` au choix) : `win_maj_s_ouvre` arrive à `null`
+/// (l'Outil Capture de Windows reste actif tant que l'utilisateur ne choisit pas BreezyShot).
+/// Une valeur déjà présente est gardée (même invalide : la validation s'en charge).
+fn v11_vers_v12(objet: &mut Map<String, Value>, _plateforme: Plateforme) {
+    let modele = json!({ "win_maj_s_ouvre": null });
     if let Value::Object(modele) = modele {
         completer(objet, &modele);
     }
@@ -327,6 +367,14 @@ pub(super) fn interpreter(objet: Map<String, Value>, plateforme: Plateforme) -> 
         |v| v.as_str().and_then(CibleImprEcran::depuis_texte),
         c,
     );
+    let win_maj_s_ouvre = lire(
+        &mut m,
+        "",
+        "win_maj_s_ouvre",
+        d.win_maj_s_ouvre,
+        lire_cible_optionnelle,
+        c,
+    );
     let son_capture = lire(&mut m, "", "son_capture", true, Value::as_bool, c);
     let copier_apres_capture = lire(&mut m, "", "copier_apres_capture", true, Value::as_bool, c);
     let enregistrer_apres_capture = lire(
@@ -388,6 +436,7 @@ pub(super) fn interpreter(objet: Map<String, Value>, plateforme: Plateforme) -> 
     let mut reglages = Reglages {
         raccourcis,
         impr_ecran_ouvre,
+        win_maj_s_ouvre,
         copier_apres_capture,
         enregistrer_apres_capture,
         format_image,
@@ -477,6 +526,14 @@ fn lire_dossier(v: &Value) -> Option<Option<PathBuf>> {
     match v {
         Value::Null => Some(None),
         _ => texte_non_vide(v).map(|s| Some(PathBuf::from(s))),
+    }
+}
+
+/// `null` = laisser `Win + Maj + S` à l'Outil Capture de Windows ; sinon une cible valide.
+fn lire_cible_optionnelle(v: &Value) -> Option<Option<CibleImprEcran>> {
+    match v {
+        Value::Null => Some(None),
+        _ => v.as_str().and_then(CibleImprEcran::depuis_texte).map(Some),
     }
 }
 
@@ -583,9 +640,18 @@ fn lire_capture(m: &mut Map<String, Value>, constats: &mut Vec<Constat>) -> Capt
         Value::as_bool,
         constats,
     );
+    let masquer_icones_bureau = lire(
+        &mut objet,
+        p,
+        "masquer_icones_bureau",
+        d.masquer_icones_bureau,
+        Value::as_bool,
+        constats,
+    );
     Capture {
         retardateur_s,
         pointeur,
+        masquer_icones_bureau,
         inconnus: objet,
     }
 }

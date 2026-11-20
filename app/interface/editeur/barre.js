@@ -722,7 +722,7 @@ export function installerBarre(ed) {
     b.setAttribute("aria-expanded", "false");
     return b;
   };
-  // Les sorties, à droite de la barre du haut : Texte, Glisser,
+  // Les sorties, à droite de la barre du haut : Texte, Épingler, Glisser,
   // Enregistrer (sa flèche ouvre « Enregistrer sous… »), Copier.
   function sorties() {
     const g = el("div", "sorties");
@@ -737,7 +737,13 @@ export function installerBarre(ed) {
       else ouvrir(menuEnregistrer, plus);
     });
     duo.append(boutonAct("enregistrer", "save", "Enregistrer", "s-b", true), plus);
-    g.append(boutonTexte("s-b", "Texte"), boutonGlisser("s-b", true), duo, boutonCopier("copier"));
+    g.append(
+      boutonTexte("s-b", "Texte"),
+      boutonAct("epingler", "pin", "Épingler", "s-b", true),
+      boutonGlisser("s-b", true),
+      duo,
+      boutonCopier("copier"),
+    );
     return g;
   }
   function rangeeOutils(conteneur, classe) {
@@ -859,6 +865,7 @@ export function installerBarre(ed) {
   function fait(but) {
     if (but === "copier") message("Copié");
     else if (but === "enregistrer" || but === "enregistrer_sous") message("Enregistré");
+    else if (but === "epingler") message("Épinglé");
   }
   // « Copier » réussi (copier puis fermer) : la coche ; le cœur ferme la fenêtre ou charge la
   // capture en attente (la page ne rappelle pas editeur_fermer).
@@ -878,6 +885,7 @@ export function installerBarre(ed) {
   ed.actions = {
     copier: () => exporter("copier"),
     copierFermer: () => exporter("copier_fermer"),
+    epingler: () => exporter("epingler"),
     enregistrer: () => exporter("enregistrer"),
     enregistrerSous: () => {
       fermerMenus();
@@ -906,6 +914,9 @@ export function installerBarre(ed) {
     } else if (a === "copier") {
       fermerMenus();
       ed.actions.copierFermer();
+    } else if (a === "epingler") {
+      fermerMenus();
+      ed.actions.epingler();
     } else if (a === "enregistrer") {
       fermerMenus();
       ed.actions.enregistrer();
@@ -1157,7 +1168,7 @@ export function installerBarre(ed) {
     bTexte.hidden = !ed.texte?.disponible();
     bTexte.disabled = ed.exportEnCours();
     const grises =
-      '[data-act="enregistrer"], [data-act="copier"], [data-glisser], [data-menu="enregistrer"]';
+      '[data-act="enregistrer"], [data-act="copier"], [data-act="epingler"], [data-glisser], [data-menu="enregistrer"]';
     for (const b of $$(grises, haut)) b.disabled = calque;
     $('[data-act="enregistrer_breezy"]', menuEnregistrer).disabled = calque;
   }

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-epingle-pret"
+description = "Enables the epingle_pret command without any pre-configured scope."
+commands.allow = ["epingle_pret"]
+
+[[permission]]
+identifier = "deny-epingle-pret"
+description = "Denies the epingle_pret command without any pre-configured scope."
+commands.deny = ["epingle_pret"]

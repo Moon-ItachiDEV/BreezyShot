@@ -310,25 +310,30 @@ const charge = (o = {}) => ({ id: 5, coin: 'bas_gauche', retrait: { haut: 0, bas
     '12 CSP respectée, aperçu chargé (blob:), fond uni sombre', JSON.stringify(refus) + ' ' + fond);
   await p.context().close();
 
-  // 13. Annoter (0.4, quand le cœur le met dans la liste) : rond, avant Supprimer, nom
-  // « Annoter », clic → vignette_action annoter.
+  // 13. Annoter et Épingler (quand le cœur les met dans la liste) : ronds, avant Supprimer,
+  // clics → vignette_action annoter / epingler.
   p = await page();
   const AVEC_ANNOTER = [...ACTIONS.slice(0, 2),
-    { id: 'annoter', libelle: 'Annoter', libelle_fait: null, place: 'secondaire', picto: 'annoter' }, ...ACTIONS.slice(2)];
+    { id: 'annoter', libelle: 'Annoter', libelle_fait: null, place: 'secondaire', picto: 'annoter' },
+    { id: 'epingler', libelle: 'Épingler', libelle_fait: null, place: 'secondaire', picto: 'epingler' }, ...ACTIONS.slice(2)];
   await prete(p, charge({ actions: AVEC_ANNOTER }));
   await emettre(p, 'vignette:entrer', { id: 5 });
   await emettre(p, 'vignette:survol', { id: 5, dedans: true });
   await p.waitForTimeout(450);
-  verifier(JSON.stringify(await visibles(p)) === JSON.stringify(['copier', 'enregistrer', 'annoter', 'supprimer', 'fermer']),
-    '13 Annoter avant Supprimer', JSON.stringify(await visibles(p)));
+  verifier(JSON.stringify(await visibles(p)) === JSON.stringify(['copier', 'enregistrer', 'annoter', 'epingler', 'supprimer', 'fermer']),
+    '13 Annoter et Épingler avant Supprimer', JSON.stringify(await visibles(p)));
   const ronds = await p.$$eval('.secondaires button', bs => bs.map(b => b.dataset.action));
   const nom = await p.evaluate(() => { const b = document.querySelector('[data-action=annoter]'); return b.getAttribute('aria-label') || b.title || b.textContent.trim(); });
-  verifier(JSON.stringify(ronds) === JSON.stringify(['annoter', 'supprimer']) && nom === 'Annoter' && await p.evaluate(() => !!document.querySelector('[data-action=annoter] svg')),
-    '13 premier rond, nom « Annoter », picto crayon', JSON.stringify(ronds) + ' ' + nom);
+  const nomPin = await p.evaluate(() => { const b = document.querySelector('[data-action=epingler]'); return b.getAttribute('aria-label') || b.title || b.textContent.trim(); });
+  verifier(JSON.stringify(ronds) === JSON.stringify(['annoter', 'epingler', 'supprimer']) && nom === 'Annoter' && nomPin === 'Épingler'
+    && await p.evaluate(() => !!document.querySelector('[data-action=annoter] svg') && !!document.querySelector('[data-action=epingler] svg')),
+    '13 ronds Annoter, Épingler, Supprimer avec pictos', JSON.stringify(ronds) + ' ' + nom + ' ' + nomPin);
   const an = await rect(p, '[data-action=annoter]');
   await p.mouse.click(an.x + an.l / 2, an.y + an.h / 2);
-  verifier(JSON.stringify((await appels(p, 'vignette_action')).map(a => a[1])) === JSON.stringify([{ id: 5, action: 'annoter' }]), '13 clic Annoter → vignette_action annoter');
-  verifier(await p.evaluate(() => !document.querySelector('[data-action=epingler]')), '13 jamais Épingler');
+  const ep = await rect(p, '[data-action=epingler]');
+  await p.mouse.click(ep.x + ep.l / 2, ep.y + ep.h / 2);
+  verifier(JSON.stringify((await appels(p, 'vignette_action')).map(a => a[1])) === JSON.stringify([{ id: 5, action: 'annoter' }, { id: 5, action: 'epingler' }]),
+    '13 clics Annoter et Épingler → vignette_action');
   await p.context().close();
 
   // 14. La carte d'un film (0.7, F25, §12) : nom « Enregistrement terminé », rond de

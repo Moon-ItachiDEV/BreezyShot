@@ -43,6 +43,7 @@ pub fn lignes_montrees(
         l.push("retardateur");
         l.push("pointeur");
         l.push("son_capture");
+        l.push("masquer_icones_bureau");
     }
     l.push("copier");
     if vignette_construite {
@@ -63,6 +64,7 @@ pub fn lignes_montrees(
     l.extend([
         "modele_nom",
         "impr_ecran",
+        "win_maj_s",
         "theme",
         "demarrage",
         "version",
@@ -104,9 +106,14 @@ pub enum Changement {
     Demarrage(bool),
     Retardateur(u32),
     Pointeur(bool),
+    /// Masquer temporairement les icônes du bureau pendant un plein écran ou un film.
+    MasquerIconesBureau(bool),
     /// « Touche Impr. écran » : `windows` (l'Outil Capture, la touche lui est rendue) ou ce
     /// que lance BreezyShot (`CibleImprEcran`, la touche est prise à Windows).
     ImprEcran(String),
+    /// « Raccourci Win + Maj + S » : `windows` (Outil Capture de Windows, crochet retiré) ou
+    /// une cible BreezyShot (`CibleImprEcran`, crochet `WH_KEYBOARD_LL` actif).
+    WinMajS(String),
     /// « Format » de l'image enregistrée : `png` ou `jpg`.
     FormatImage(String),
     /// « Ouvrir dans l'éditeur après la capture ».
@@ -134,7 +141,7 @@ impl Changement {
                 | Changement::ClicsVisibles(_)
                 | Changement::FilmDossier(_)
                 | Changement::HistoriqueGardes(_)
-        ) || matches!(self, Changement::ImprEcran(t) if cible_pro(t))
+        ) || matches!(self, Changement::ImprEcran(t) | Changement::WinMajS(t) if cible_pro(t))
     }
 
     /// L'identifiant de la ligne de la page.
@@ -150,7 +157,9 @@ impl Changement {
             Changement::Demarrage(_) => "demarrage",
             Changement::Retardateur(_) => "retardateur",
             Changement::Pointeur(_) => "pointeur",
+            Changement::MasquerIconesBureau(_) => "masquer_icones_bureau",
             Changement::ImprEcran(_) => "impr_ecran",
+            Changement::WinMajS(_) => "win_maj_s",
             Changement::FormatImage(_) => "format_image",
             Changement::EditeurApres(_) => "editeur_apres",
             Changement::SonCapture(_) => "son_capture",
@@ -201,6 +210,7 @@ pub fn ligne_changement(c: &Changement) -> String {
         | Changement::VignetteAfficher(b)
         | Changement::Demarrage(b)
         | Changement::Pointeur(b)
+        | Changement::MasquerIconesBureau(b)
         | Changement::EditeurApres(b)
         | Changement::SonCapture(b)
         | Changement::SonSysteme(b)
@@ -212,6 +222,7 @@ pub fn ligne_changement(c: &Changement) -> String {
         Changement::VignetteCoin(t)
         | Changement::Theme(t)
         | Changement::ImprEcran(t)
+        | Changement::WinMajS(t)
         | Changement::FormatImage(t)
         | Changement::FilmDossier(t) => code_pour_journal(t),
         Changement::ModeleNom(_) => return "reglage change: modele_nom".into(),
@@ -384,11 +395,16 @@ pub fn appliquer(r: &Reglages, c: &Changement) -> Result<Reglages, Refus> {
         Changement::Retardateur(s) if *s > reglages::RETARDATEUR_MAX_S => return Err(invalide()),
         Changement::Retardateur(s) => n.capture.retardateur_s = *s,
         Changement::Pointeur(b) => n.capture.pointeur = *b,
+        Changement::MasquerIconesBureau(b) => n.capture.masquer_icones_bureau = *b,
         // `windows` : la touche revient à Windows (le registre), le fichier garde sa cible
         // pour le jour où elle est reprise. Sinon la cible change, rien d'autre.
         Changement::ImprEcran(t) if t == CHOIX_WINDOWS => {}
         Changement::ImprEcran(t) => {
             n.impr_ecran_ouvre = CibleImprEcran::depuis_texte(t).ok_or_else(invalide)?
+        }
+        Changement::WinMajS(t) if t == CHOIX_WINDOWS => n.win_maj_s_ouvre = None,
+        Changement::WinMajS(t) => {
+            n.win_maj_s_ouvre = Some(CibleImprEcran::depuis_texte(t).ok_or_else(invalide)?)
         }
         Changement::FormatImage(t) => {
             n.format_image = FormatImage::depuis_texte(t).ok_or_else(invalide)?
@@ -426,6 +442,7 @@ pub fn libelle_action(action: &str) -> &'static str {
         "plein_ecran" => "Plein écran",
         "fenetre" => "Fenêtre",
         "derniere_zone" => "Refaire la dernière zone",
+        "pipette" => "Pipette de couleur",
         "historique" => "Historique",
         "texte" => "Copier le texte",
         "defilante" => "Capture défilante",
@@ -436,15 +453,16 @@ pub fn libelle_action(action: &str) -> &'static str {
 }
 
 /// L'ordre des lignes de Réglages › Raccourcis : celui du menu de l'icône (`ORDRE_MENU`),
-/// la capture défilante en cinquième, « Copier le texte », « Vidéo » et « GIF » (0.7),
-/// puis l'historique (0.5.3).
+/// la pipette après la dernière zone, puis la capture défilante, « Copier le texte »,
+/// « Vidéo » et « GIF » (0.7), puis l'historique (0.5.3).
 /// Affichage seulement : l'ordre de réservation des raccourcis ne change pas
 /// (`ACTIONS_PRIORITAIRES`, `actions_selon`). Une action absente suit, dans l'ordre reçu.
-pub const ORDRE_RACCOURCIS: [&str; 9] = [
+pub const ORDRE_RACCOURCIS: [&str; 10] = [
     "zone",
     "plein_ecran",
     "fenetre",
     "derniere_zone",
+    "pipette",
     "defilante",
     "texte",
     "video",
@@ -619,6 +637,7 @@ pub fn fixer_candidats(r: &mut Raccourcis, action: &str, candidats: Vec<String>)
         "plein_ecran" => &mut r.plein_ecran,
         "fenetre" => &mut r.fenetre,
         "derniere_zone" => &mut r.derniere_zone,
+        "pipette" => &mut r.pipette,
         "historique" => &mut r.historique,
         "texte" => &mut r.texte,
         "defilante" => &mut r.defilante,
@@ -644,6 +663,7 @@ pub struct VueCapture {
     /// Une valeur du fichier hors de `retardateurs` (7) s'affiche sans segment coché.
     pub retardateur_s: u32,
     pub pointeur: bool,
+    pub masquer_icones_bureau: bool,
 }
 
 /// La rubrique Enregistrement (Pro) vue par la page.
@@ -709,6 +729,7 @@ pub fn choix_impr_ecran(actions: &[&str]) -> Vec<VueChoixImprEcran> {
         ("plein_ecran", 1),
         ("fenetre", 1),
         ("derniere_zone", 1),
+        ("pipette", 1),
         ("defilante", 2),
         ("texte", 2),
         ("video", 2),
@@ -764,6 +785,7 @@ pub struct VueReglages {
     pub theme: &'static str,
     pub demarrage: &'static str,
     pub impr_ecran: VueImprEcran,
+    pub win_maj_s: VueImprEcran,
     /// Une ligne par action en vigueur (`Contexte.actions`), dans l'ordre de
     /// `ORDRE_RACCOURCIS` : « Capture défilante », « Copier le texte », « Vidéo », « GIF »
     /// et « Historique » seulement avec une licence (et, pour le texte, une langue de
@@ -797,6 +819,10 @@ pub struct Contexte<'a> {
     /// BreezyShot tient Impr. écran (Windows ne la garde pas pour l'Outil Capture) ;
     /// `None` hors Windows : la ligne n'est pas montrée.
     pub impr_ecran: Option<bool>,
+    /// Vrai sous Windows : la ligne « Raccourci Win + Maj + S » est montrée.
+    pub win_maj_s_disponible: bool,
+    /// Refus à dire sous « Raccourci Win + Maj + S » (échec de pose du crochet), ou rien.
+    pub refus_win_maj_s: Option<String>,
     pub licence_active: bool,
     pub version: &'static str,
     pub alerte: Option<String>,
@@ -841,6 +867,23 @@ fn vue_impr_ecran(r: &Reglages, c: &Contexte<'_>) -> VueImprEcran {
     }
 }
 
+/// La ligne « Raccourci Win + Maj + S » : même liste qu'Impr. écran, valeur `windows` par
+/// défaut (`None`), ou la cible choisie (repliée sur la barre si l'action est fermée).
+fn vue_win_maj_s(r: &Reglages, c: &Contexte<'_>) -> VueImprEcran {
+    let valeur = match r.win_maj_s_ouvre {
+        None => CHOIX_WINDOWS,
+        Some(cible) => match action_de_l_appui(cible, c.actions) {
+            Some(_) => cible.texte(),
+            None => CibleImprEcran::Barre.texte(),
+        },
+    };
+    VueImprEcran {
+        choix: choix_impr_ecran(c.actions),
+        valeur,
+        refus: r.win_maj_s_ouvre.and_then(|_| c.refus_win_maj_s.clone()),
+    }
+}
+
 /// La vue complète. Fonction pure.
 pub fn vue(r: &Reglages, c: &Contexte<'_>) -> VueReglages {
     let mut lignes = lignes_montrees(
@@ -861,7 +904,11 @@ pub fn vue(r: &Reglages, c: &Contexte<'_>) -> VueReglages {
     if c.impr_ecran.is_none() {
         lignes.retain(|l| *l != "impr_ecran");
     }
+    if !c.win_maj_s_disponible {
+        lignes.retain(|l| *l != "win_maj_s");
+    }
     let impr_ecran = vue_impr_ecran(r, c);
+    let win_maj_s = vue_win_maj_s(r, c);
     let raccourcis = actions_dans_l_ordre(c.actions)
         .iter()
         .map(|a| {
@@ -888,6 +935,7 @@ pub fn vue(r: &Reglages, c: &Contexte<'_>) -> VueReglages {
         capture: VueCapture {
             retardateur_s: r.capture.retardateur_s,
             pointeur: r.capture.pointeur,
+            masquer_icones_bureau: r.capture.masquer_icones_bureau,
         },
         retardateurs: RETARDATEURS_PROPOSES,
         copier: r.copier_apres_capture,
@@ -918,6 +966,7 @@ pub fn vue(r: &Reglages, c: &Contexte<'_>) -> VueReglages {
         theme: r.theme.texte(),
         demarrage: nom_demarrage(c.demarrage),
         impr_ecran,
+        win_maj_s,
         raccourcis,
         licence_active: c.licence_active,
         version: c.version,
@@ -961,6 +1010,7 @@ mod tests {
                 "editeur_apres",
                 "modele_nom",
                 "impr_ecran",
+                "win_maj_s",
                 "theme",
                 "demarrage",
                 "version",
@@ -983,6 +1033,7 @@ mod tests {
                 "enregistrer",
                 "modele_nom",
                 "impr_ecran",
+                "win_maj_s",
                 "theme",
                 "demarrage",
                 "version",
@@ -990,9 +1041,76 @@ mod tests {
             ]
         );
         // Sans Gel, la rubrique Capture n'a aucun effet : aucune de ses lignes.
-        for absent in ["retardateur", "pointeur", "son_capture"] {
+        for absent in [
+            "retardateur",
+            "pointeur",
+            "son_capture",
+            "masquer_icones_bureau",
+        ] {
             assert!(!avec.contains(&absent));
         }
+    }
+
+    #[test]
+    fn win_maj_s_au_choix_et_vue() {
+        let r = Reglages::par_defaut(Plateforme::Windows);
+        assert_eq!(r.win_maj_s_ouvre, None);
+        let c: Changement = serde_json::from_str(r#"{"cle":"win_maj_s","valeur":"zone"}"#).unwrap();
+        assert_eq!(c, Changement::WinMajS("zone".into()));
+        assert_eq!(c.ligne(), "win_maj_s");
+        assert!(!c.exige_pro());
+        assert_eq!(ligne_changement(&c), "reglage change: win_maj_s zone");
+        assert!(Changement::WinMajS("video".into()).exige_pro());
+        assert!(!Changement::WinMajS(CHOIX_WINDOWS.into()).exige_pro());
+
+        let n = appliquer(&r, &Changement::WinMajS("barre".into())).unwrap();
+        assert_eq!(n.win_maj_s_ouvre, Some(CibleImprEcran::Barre));
+        let n2 = appliquer(&n, &Changement::WinMajS("pipette".into())).unwrap();
+        assert_eq!(n2.win_maj_s_ouvre, Some(CibleImprEcran::Pipette));
+        let retour = appliquer(&n2, &Changement::WinMajS(CHOIX_WINDOWS.into())).unwrap();
+        assert_eq!(retour.win_maj_s_ouvre, None);
+        let err = appliquer(&r, &Changement::WinMajS("inconnu".into())).unwrap_err();
+        assert_eq!((err.ligne.as_str(), err.code), ("win_maj_s", "invalide"));
+
+        let defaut_r = Raccourcis::par_defaut(Plateforme::Windows);
+        let refus = BTreeMap::new();
+        let bilan = raccourcis::Bilan::default();
+        let base = ["zone", "plein_ecran", "fenetre", "derniere_zone", "pipette"];
+        let ctx = |dispo: bool, refus_win: Option<String>| Contexte {
+            vignette_construite: true,
+            capture_disponible: true,
+            actions: &base,
+            bilan: &bilan,
+            defaut: &defaut_r,
+            refus_raccourcis: &refus,
+            dossier_affiche: "Images › BreezyShot".into(),
+            dossier_films_affiche: None,
+            editeur_construit: true,
+            demarrage: EtatDemarrage::Inactif,
+            impr_ecran: Some(false),
+            win_maj_s_disponible: dispo,
+            refus_win_maj_s: refus_win,
+            licence_active: false,
+            version: "9.9.9",
+            alerte: None,
+            maintenant: Local.with_ymd_and_hms(2026, 11, 12, 10, 42, 8).unwrap(),
+            saisie_en_cours: false,
+        };
+        // Par défaut : Outil Capture de Windows, sans refus même si un texte traîne.
+        let v = vue(&r, &ctx(true, Some("erreur".into())));
+        assert!(v.lignes.contains(&"win_maj_s"));
+        assert_eq!(v.win_maj_s.valeur, CHOIX_WINDOWS);
+        assert_eq!(v.win_maj_s.refus, None);
+        // Cible active : valeur montrée et refus transmis si présent.
+        let v = vue(&n2, &ctx(true, Some("refus crochet".into())));
+        assert_eq!(v.win_maj_s.valeur, "pipette");
+        assert_eq!(v.win_maj_s.refus.as_deref(), Some("refus crochet"));
+        // Cible Pro fermée : repli visuel sur `barre`.
+        let mut r_pro = r.clone();
+        r_pro.win_maj_s_ouvre = Some(CibleImprEcran::Video);
+        assert_eq!(vue(&r_pro, &ctx(true, None)).win_maj_s.valeur, "barre");
+        // Hors Windows : ligne absente.
+        assert!(!vue(&r, &ctx(false, None)).lignes.contains(&"win_maj_s"));
     }
 
     /// « Touche Impr. écran » : le changement porte un choix de la liste ; `windows` ne
@@ -1062,6 +1180,7 @@ mod tests {
             "plein_ecran",
             "fenetre",
             "derniere_zone",
+            "pipette",
             "rien",
         ] {
             assert!(!pro(libre), "{libre}");
@@ -1088,7 +1207,7 @@ mod tests {
                 .collect::<Vec<_>>()
         };
         assert_eq!(
-            ids(&["zone", "plein_ecran", "fenetre", "derniere_zone"]),
+            ids(&["zone", "plein_ecran", "fenetre", "derniere_zone", "pipette"]),
             [
                 ("windows", 0),
                 ("barre", 1),
@@ -1096,6 +1215,7 @@ mod tests {
                 ("plein_ecran", 1),
                 ("fenetre", 1),
                 ("derniere_zone", 1),
+                ("pipette", 1),
             ]
         );
         let tout = [
@@ -1103,6 +1223,7 @@ mod tests {
             "plein_ecran",
             "fenetre",
             "derniere_zone",
+            "pipette",
             "historique",
             "texte",
             "defilante",
@@ -1119,6 +1240,7 @@ mod tests {
                 "Plein écran",
                 "Fenêtre",
                 "Refaire la dernière zone",
+                "Pipette de couleur",
                 "Capture défilante",
                 "Copier le texte",
                 "Vidéo",
@@ -1144,12 +1266,13 @@ mod tests {
     /// elle-même, ou une cible fermée par la licence, le codeur ou la langue).
     #[test]
     fn l_appui_traduit_la_cible_ou_ouvre_la_barre() {
-        let base = ["zone", "plein_ecran", "fenetre", "derniere_zone"];
+        let base = ["zone", "plein_ecran", "fenetre", "derniere_zone", "pipette"];
         let pro = [
             "zone",
             "plein_ecran",
             "fenetre",
             "derniere_zone",
+            "pipette",
             "historique",
             "texte",
             "defilante",
@@ -1204,6 +1327,8 @@ mod tests {
                     editeur_construit: true,
                     demarrage: EtatDemarrage::Inactif,
                     impr_ecran: impr,
+                    win_maj_s_disponible: impr.is_some(),
+                    refus_win_maj_s: None,
                     licence_active: false,
                     version: "9.9.9",
                     alerte: None,
@@ -1319,6 +1444,8 @@ mod tests {
                 editeur_construit: true,
                 demarrage: EtatDemarrage::Inactif,
                 impr_ecran: registre,
+                win_maj_s_disponible: registre.is_some(),
+                refus_win_maj_s: None,
                 licence_active: false,
                 version: "1",
                 alerte: None,
@@ -1474,10 +1601,16 @@ mod tests {
         // En tête, dans l'ordre de la page.
         let tout = lignes_montrees(true, true, true);
         assert_eq!(
-            tout[..4],
-            ["retardateur", "pointeur", "son_capture", "copier"]
+            tout[..5],
+            [
+                "retardateur",
+                "pointeur",
+                "son_capture",
+                "masquer_icones_bureau",
+                "copier"
+            ]
         );
-        assert_eq!(tout.len(), 17);
+        assert_eq!(tout.len(), 18);
         // Rien de ce qui n'a pas d'effet en 0.4.
         for absent in ["barre", "format", "mise_a_jour"] {
             assert!(!tout.contains(&absent));
@@ -1494,6 +1627,9 @@ mod tests {
         assert_eq!(c, Changement::Retardateur(5));
         let c: Changement = serde_json::from_str(r#"{"cle":"pointeur","valeur":true}"#).unwrap();
         assert_eq!(c, Changement::Pointeur(true));
+        let c: Changement =
+            serde_json::from_str(r#"{"cle":"masquer_icones_bureau","valeur":true}"#).unwrap();
+        assert_eq!(c, Changement::MasquerIconesBureau(true));
         for faux in [
             r#"{"cle":"barre","valeur":true}"#,
             r#"{"cle":"loupe","valeur":true}"#,
@@ -1770,6 +1906,8 @@ mod tests {
             editeur_construit: true,
             demarrage: EtatDemarrage::DesactiveParWindows,
             impr_ecran: None,
+            win_maj_s_disponible: false,
+            refus_win_maj_s: None,
             licence_active: false,
             version: "9.9.9",
             alerte: None,
@@ -1803,12 +1941,14 @@ mod tests {
         let mut r3 = r.clone();
         r3.capture.retardateur_s = 7;
         r3.capture.pointeur = true;
+        r3.capture.masquer_icones_bureau = true;
         let v3 = vue(&r3, &ailleurs);
         assert_eq!(
             v3.capture,
             VueCapture {
                 retardateur_s: 7,
-                pointeur: true
+                pointeur: true,
+                masquer_icones_bureau: true,
             }
         );
         let sans_gel = Contexte {
@@ -1816,7 +1956,9 @@ mod tests {
             ..ailleurs
         };
         let l = vue(&r, &sans_gel).lignes;
-        assert!(!l.iter().any(|x| ["retardateur", "pointeur"].contains(x)));
+        assert!(!l
+            .iter()
+            .any(|x| ["retardateur", "pointeur", "masquer_icones_bureau"].contains(x)));
     }
 
     #[test]
@@ -1892,6 +2034,8 @@ mod tests {
                 editeur_construit: true,
                 demarrage: EtatDemarrage::Inactif,
                 impr_ecran: None,
+                win_maj_s_disponible: false,
+                refus_win_maj_s: None,
                 licence_active,
                 version: "1",
                 alerte: None,
@@ -1917,6 +2061,7 @@ mod tests {
                 ("Plein écran", "Ctrl+Maj+2".to_string()),
                 ("Fenêtre", "Ctrl+Maj+3".to_string()),
                 ("Refaire la dernière zone", "Ctrl+Maj+4".to_string()),
+                ("Pipette de couleur", "Ctrl+Maj+C".to_string()),
                 ("Capture défilante", "Ctrl+Maj+5".to_string()),
                 ("Copier le texte", "Ctrl+Maj+T".to_string()),
                 ("Historique", "Ctrl+Maj+H".to_string()),
@@ -1924,10 +2069,10 @@ mod tests {
         );
         assert_eq!(
             avec.raccourcis.len(),
-            7,
-            "sept lignes avec licence et langue"
+            8,
+            "huit lignes avec licence et langue"
         );
-        assert_eq!(avec.raccourcis[4].action, "defilante");
+        assert_eq!(avec.raccourcis[5].action, "defilante");
         assert!(avec.licence_active);
         assert!(avec
             .raccourcis
@@ -1941,17 +2086,17 @@ mod tests {
         let mut sans_texte = lignes(&avec);
         sans_texte.retain(|(l, _)| *l != "Copier le texte");
         assert_eq!(lignes(&sans_langue), sans_texte);
-        // Sans défilante construite (ou hors Windows) : les six lignes de la 0.5.
+        // Sans défilante construite (ou hors Windows) : sept lignes.
         let sans_defilante = vue_pour(
             &crate::application::actions_selon(true, true, true, false, false, false),
             true,
         );
-        assert_eq!(sans_defilante.raccourcis.len(), 6);
+        assert_eq!(sans_defilante.raccourcis.len(), 7);
         assert!(sans_defilante
             .raccourcis
             .iter()
             .all(|x| x.action != "defilante"));
-        assert_eq!(sans_defilante.raccourcis[4].action, "texte");
+        assert_eq!(sans_defilante.raccourcis[5].action, "texte");
         // Une défilante sans raccourci (Ctrl + Maj + 5 pris ailleurs) : « Aucun raccourci ».
         let mut table = BTreeMap::new();
         for a in ["zone", "defilante"] {
@@ -1970,6 +2115,8 @@ mod tests {
             editeur_construit: true,
             demarrage: EtatDemarrage::Inactif,
             impr_ecran: None,
+            win_maj_s_disponible: false,
+            refus_win_maj_s: None,
             licence_active: true,
             version: "1",
             alerte: None,
@@ -1980,12 +2127,12 @@ mod tests {
         assert_eq!(v.raccourcis[1].libelle, "Capture défilante");
         assert!(v.raccourcis[1].touches.is_empty());
         assert_eq!(v.raccourcis[1].refus.as_deref(), Some(AUCUN_RACCOURCI));
-        // Sans licence : les quatre lignes de la 0.4, même si tout est construit.
+        // Sans licence : les cinq actions gratuites seulement, même si tout est construit.
         let sans = vue_pour(
             &crate::application::actions_selon(false, true, true, true, false, false),
             false,
         );
-        assert_eq!(lignes(&sans), lignes(&avec)[..4]);
+        assert_eq!(lignes(&sans), lignes(&avec)[..5]);
         assert!(!sans.licence_active);
         for v in [&avec, &sans] {
             let n = v.lignes.len();
@@ -2000,14 +2147,14 @@ mod tests {
             true,
         );
         let mut attendu = lignes(&avec);
-        attendu.insert(6, ("Vidéo", "Ctrl+Maj+6".to_string()));
-        attendu.insert(7, ("GIF", "Ctrl+Maj+7".to_string()));
+        attendu.insert(7, ("Vidéo", "Ctrl+Maj+6".to_string()));
+        attendu.insert(8, ("GIF", "Ctrl+Maj+7".to_string()));
         assert_eq!(lignes(&film), attendu);
         let sans_codeur = vue_pour(
             &crate::application::actions_selon(true, true, true, true, false, true),
             true,
         );
-        attendu.remove(6);
+        attendu.remove(7);
         assert_eq!(lignes(&sans_codeur), attendu);
         let sans_licence = vue_pour(
             &crate::application::actions_selon(false, true, true, true, true, true),
@@ -2085,6 +2232,8 @@ mod essai_de_page {
             editeur_construit: true,
             demarrage: EtatDemarrage::Inactif,
             impr_ecran: Some(false),
+            win_maj_s_disponible: true,
+            refus_win_maj_s: None,
             licence_active: false,
             // Jamais la vraie version : l'essai ne la suppose pas.
             version: "7.8.9-essai",

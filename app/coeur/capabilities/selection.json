@@ -10,6 +10,8 @@
     "allow-selection-prete",
     "allow-selection-terminee",
     "allow-selection-cliquee",
+    "allow-selection-pipette",
+    "allow-selection-echantillon",
     "allow-selection-annulee"
   ]
 }

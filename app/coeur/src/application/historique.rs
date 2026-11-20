@@ -36,14 +36,16 @@ pub enum ActionCase {
     Copier,
     Enregistrer,
     Annoter,
+    Epingler,
     Supprimer,
 }
 
 impl ActionCase {
-    pub const TOUTES: [ActionCase; 4] = [
+    pub const TOUTES: [ActionCase; 5] = [
         ActionCase::Copier,
         ActionCase::Enregistrer,
         ActionCase::Annoter,
+        ActionCase::Epingler,
         ActionCase::Supprimer,
     ];
 
@@ -53,6 +55,7 @@ impl ActionCase {
             ActionCase::Copier => "copier",
             ActionCase::Enregistrer => "enregistrer",
             ActionCase::Annoter => "annoter",
+            ActionCase::Epingler => "epingler",
             ActionCase::Supprimer => "supprimer",
         }
     }
@@ -159,6 +162,7 @@ pub enum Geste {
     Copier,
     Enregistrer { deja_fait: bool },
     Annoter,
+    Epingler,
     Supprimer,
 }
 
@@ -204,8 +208,8 @@ pub fn cle_action(nom: &str, action: ActionCase) -> String {
 
 /// Ce que fait `action` sur la case `nom` : ignorée pour un nom qui n'est pas montré (en
 /// attente de suppression, en effacement, inconnu), une image que l'éditeur refuse, ou une
-/// copie (un enregistrement, une ouverture dans l'éditeur) de la même case encore en cours
-/// depuis moins de `DELAI_SORTIE`.
+/// copie (un enregistrement, une ouverture dans l'éditeur, un épinglage) de la même case
+/// encore en cours depuis moins de `DELAI_SORTIE`.
 pub fn decider(etat: &EtatHistorique, nom: &str, action: ActionCase, maintenant: Instant) -> Geste {
     let Some(entree) = etat.vues().into_iter().find(|e| e.nom == nom) else {
         return Geste::Ignore;
@@ -222,6 +226,7 @@ pub fn decider(etat: &EtatHistorique, nom: &str, action: ActionCase, maintenant:
         },
         ActionCase::Annoter if !entree.annotable => Geste::Ignore,
         ActionCase::Annoter => Geste::Annoter,
+        ActionCase::Epingler => Geste::Epingler,
         ActionCase::Supprimer => Geste::Supprimer,
     }
 }
@@ -321,7 +326,7 @@ pub fn message_echec(action: ActionCase, bilan: &Bilan) -> Option<&'static str> 
         ActionCase::Enregistrer => {
             (!matches!(bilan.enregistrement, EtapeFichier::Fait(_))).then_some(MESSAGE_ENREGISTRER)
         }
-        ActionCase::Annoter | ActionCase::Supprimer => None,
+        ActionCase::Annoter | ActionCase::Epingler | ActionCase::Supprimer => None,
     }
 }
 
@@ -330,7 +335,7 @@ pub fn message_illisible(action: ActionCase) -> Option<&'static str> {
     match action {
         ActionCase::Copier => Some(MESSAGE_COPIER),
         ActionCase::Enregistrer => Some(MESSAGE_ENREGISTRER),
-        ActionCase::Annoter | ActionCase::Supprimer => None,
+        ActionCase::Annoter | ActionCase::Epingler | ActionCase::Supprimer => None,
     }
 }
 
@@ -349,7 +354,7 @@ pub fn ligne_action(nom_court: &str, action: ActionCase) -> String {
 pub fn ligne_resultat(nom_court: &str, action: ActionCase, etat: EtatResultat) -> String {
     let issue = match (action, etat) {
         (ActionCase::Copier, EtatResultat::Fait) => "faite",
-        (ActionCase::Enregistrer, EtatResultat::Fait) => "fait",
+        (ActionCase::Enregistrer | ActionCase::Epingler, EtatResultat::Fait) => "fait",
         (_, EtatResultat::DejaFait) => "deja fait",
         (_, _) => "echec",
     };
@@ -357,6 +362,7 @@ pub fn ligne_resultat(nom_court: &str, action: ActionCase, etat: EtatResultat) -
         ActionCase::Copier => "copie",
         ActionCase::Enregistrer => "enregistrement",
         ActionCase::Annoter => "annoter",
+        ActionCase::Epingler => "epingler",
         ActionCase::Supprimer => "suppression",
     };
     format!("historique {quoi} {nom_court} {issue}")
@@ -476,7 +482,11 @@ mod tests {
             assert_eq!(ActionCase::depuis_nom(a.nom()), Some(a));
         }
         assert_eq!(ActionCase::depuis_nom("Copier"), None);
-        assert_eq!(ActionCase::depuis_nom("epingler"), None);
+        assert_eq!(
+            ActionCase::depuis_nom("epingler"),
+            Some(ActionCase::Epingler)
+        );
+        assert_eq!(ActionCase::depuis_nom("inconnue"), None);
     }
 
     #[test]
@@ -514,6 +524,7 @@ mod tests {
             Geste::Enregistrer { deja_fait: false }
         );
         assert_eq!(decider(&e, A, ActionCase::Annoter, t), Geste::Annoter);
+        assert_eq!(decider(&e, A, ActionCase::Epingler, t), Geste::Epingler);
         assert_eq!(decider(&e, A, ActionCase::Supprimer, t), Geste::Supprimer);
         // Inconnu, ou au format mais absent de la liste.
         assert_eq!(decider(&e, "x.png", ActionCase::Copier, t), Geste::Ignore);

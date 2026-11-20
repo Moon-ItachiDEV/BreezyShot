@@ -660,7 +660,7 @@ function resultat(r) {
   const e = ed.exports.get(r.numero);
   ed.exports.delete(r.numero);
   const reussi = r.etat === "fait" || r.etat === "deja_fait";
-  if (reussi && e) ed.exportee = e.version;
+  if (reussi && e && r.but !== "epingler") ed.exportee = e.version;
   if (reussi) ed.barre?.fait(r.but);
   else if (r.etat === "echec" && r.message) ed.barre?.message(r.message);
   // « Copier » (copier puis fermer) : la coche, puis la fenêtre se ferme ; en échec elle reste.
