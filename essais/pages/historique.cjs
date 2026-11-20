@@ -383,14 +383,18 @@ function simulerCoeur({ ages, pngs, charge, manquants, n, sansAnnoter, retenus }
       .evaluateAll((b) => b.map((x) => [x.getAttribute('aria-label'), x.title]));
     verifier(
       JSON.stringify(boutons.map((b) => b[0])) ===
-        '["Copier","Enregistrer","Annoter","Supprimer"]' && boutons.every((b) => b[0] === b[1]),
-      'quatre boutons dans l’ordre, infobulle = nom',
+        '["Copier","Enregistrer","Annoter","Épingler","Supprimer"]' &&
+        boutons.every((b) => b[0] === b[1]),
+      'cinq boutons dans l’ordre, infobulle = nom',
       JSON.stringify(boutons),
     );
+    await vider(p);
+    await deuxieme.locator('.qa [data-action="epingler"]').click();
+    const appelsPin = await appels(p, 'historique_action');
     verifier(
-      (await p.getByRole('button', { name: 'Épingler' }).count()) === 0 &&
-        (await p.locator('[href="#i-pin"], #i-pin').count()) === 0,
-      'aucun Épingler (U1)',
+      appelsPin.length === 1 && appelsPin[0][1].action === 'epingler',
+      'clic Épingler → historique_action epingler',
+      JSON.stringify(appelsPin),
     );
     for (const theme of ['light', 'dark']) {
       await p.emulateMedia({ colorScheme: theme });
@@ -871,7 +875,7 @@ function simulerCoeur({ ages, pngs, charge, manquants, n, sansAnnoter, retenus }
           .locator('.qa')
           .getByRole('button')
           .evaluateAll((b) => b.map((x) => x.getAttribute('aria-label'))),
-      ) === '["Copier","Enregistrer","Supprimer"]',
+      ) === '["Copier","Enregistrer","Épingler","Supprimer"]',
       'case non annotable : pas d’Annoter',
     );
     await t1.locator('.pv').click();

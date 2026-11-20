@@ -11,11 +11,12 @@ const style = () => getComputedStyle(document.documentElement);
 const jetonNombre = (nom) => parseFloat(style().getPropertyValue(`--${nom}`)) || 0;
 const jeton = (nom) => style().getPropertyValue(`--${nom}`).trim();
 
-// Les boutons de la pilule, dans l'ordre (écart U1 : pas d'Épingler).
+// Les boutons de la pilule, dans l'ordre.
 const BOUTONS = [
   ["copier", "Copier", "i-copy", true],
   ["enregistrer", "Enregistrer", "i-save", true],
   ["annoter", "Annoter", "i-pen", false],
+  ["epingler", "Épingler", "i-pin", false],
   ["supprimer", "Supprimer", "i-trash", false],
 ];
 

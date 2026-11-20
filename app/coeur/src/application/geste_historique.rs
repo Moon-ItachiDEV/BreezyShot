@@ -25,7 +25,7 @@ use super::etats::Declencheur;
 use super::historique::{
     self, ActionCase, EntreePage, EtatResultat, Geste, RaisonFermeture, SOUS_DOSSIER_APERCUS,
 };
-use super::{editeur, vignette, Application, Evenement};
+use super::{editeur, epingle, geste_epingle, vignette, Application, Evenement};
 use crate::capture;
 use crate::fenetres::historique as fenetre;
 use crate::sortie::{self, EntreeRecente};
@@ -456,7 +456,7 @@ pub(super) fn action(app: &AppHandle, nom: String, action: ActionCase) {
             log::info!("{}", historique::ligne_resultat(&court, action, etat));
             emettre_resultat(app, nom, action, etat, None);
         }
-        Geste::Copier | Geste::Enregistrer { .. } | Geste::Annoter => {
+        Geste::Copier | Geste::Enregistrer { .. } | Geste::Annoter | Geste::Epingler => {
             lancer_lecture(app, nom, court, action, numero, heure)
         }
         Geste::Supprimer => supprimer(app, nom, numero),
@@ -464,9 +464,9 @@ pub(super) fn action(app: &AppHandle, nom: String, action: ActionCase) {
     }
 }
 
-/// Copier, Enregistrer ou Annoter : les pixels sont relus dans un fil (jamais sur le fil
-/// principal), puis `sortir` (Copier, Enregistrer) ou l'éditeur (Annoter, par le chemin de
-/// la vignette : `recevoir_document` à un tour suivant de la boucle).
+/// Copier, Enregistrer, Annoter ou Épingler : les pixels sont relus dans un fil (jamais
+/// sur le fil principal), puis `sortir` (Copier, Enregistrer), l'éditeur (Annoter) ou une
+/// fenêtre flottante (Épingler).
 fn lancer_lecture(
     app: &AppHandle,
     nom: String,
@@ -479,8 +479,8 @@ fn lancer_lecture(
     let Some(chemin) = sortie::chemin_recent(&dossiers(app).recents, &nom) else {
         return;
     };
-    // Toute action lancée est en cours jusqu'à son résultat (Annoter : jusqu'au document
-    // posté ou à l'échec de la lecture) : Entrée tenue ne relit pas la capture.
+    // Toute action lancée est en cours jusqu'à son résultat (Annoter, Épingler : jusqu'à
+    // l'ouverture postée ou l'échec de la lecture) : Entrée tenue ne relit pas la capture.
     if let Some(e) = super::historique_ouvert(app).as_mut() {
         e.actions
             .insert(historique::cle_action(&nom, action), debut);
@@ -494,6 +494,11 @@ fn lancer_lecture(
         if action == ActionCase::Annoter {
             retirer_action(&app, numero, &nom, action);
             annoter_lu(&app, &court, lu, heure, debut);
+            return;
+        }
+        if action == ActionCase::Epingler {
+            retirer_action(&app, numero, &nom, action);
+            epingler_lu(&app, &court, lu);
             return;
         }
         let (etat, message) = match lu {
@@ -531,6 +536,11 @@ fn lancer_lecture(
     if action == ActionCase::Annoter {
         log::warn!("historique annoter {court} impossible");
         super::afficher(app, editeur::message_impossible());
+        return;
+    }
+    if action == ActionCase::Epingler {
+        log::warn!("historique epingler {court} impossible");
+        super::afficher(app, epingle::message_impossible());
         return;
     }
     let etat = EtatResultat::Echec;
@@ -584,6 +594,24 @@ fn annoter_lu(
     };
     if let Err(e) = rendu {
         log::warn!("historique annoter {court} impossible: poste ({e})");
+    }
+}
+
+/// Épingler : les pixels lus s'ouvrent dans une fenêtre flottante (fil de lecture).
+fn epingler_lu(app: &AppHandle, court: &str, lu: Result<(Pixels, bool), String>) {
+    match lu {
+        Ok((pixels, transparence)) => {
+            geste_epingle::ouvrir(app, Arc::new(pixels), transparence);
+        }
+        Err(_) => {
+            log::warn!("historique epingler {court} impossible");
+            let pour = app.clone();
+            if let Err(e) = app.run_on_main_thread(move || {
+                super::afficher(&pour, epingle::message_impossible());
+            }) {
+                log::warn!("historique epingler {court} impossible: poste ({e})");
+            }
+        }
     }
 }
 

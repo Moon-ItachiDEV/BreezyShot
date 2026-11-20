@@ -11,6 +11,7 @@ pub mod barre;
 pub mod decompte;
 pub mod defilante;
 pub mod editeur;
+pub mod epingle;
 pub mod film;
 pub mod historique;
 pub mod installateur;

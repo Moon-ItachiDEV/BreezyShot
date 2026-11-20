@@ -693,7 +693,7 @@ public static int Pixel(byte[] a, int l, int x, int y) {
             $c1 = Capturer $da '(2)'
             try { $temoin.Kill() } catch { }   # il est toujours au-dessus : il couvrirait l'éditeur
             $prep = Derniere-Ligne -Motif "vignette preparee $($c1.Id) " -Dossier $da
-            Verifier '(2) vignette préparée avec Annoter avant Supprimer' ($prep -match 'actions copier,enregistrer,annoter,supprimer,fermer,annuler ') $prep | Out-Null
+            Verifier '(2) vignette préparée avec Annoter et Épingler avant Supprimer' ($prep -match 'actions copier,enregistrer,annoter,epingler,supprimer,fermer,annuler ') $prep | Out-Null
             Point '(2) Annoter ouvre l''éditeur' {
                 $script:h1 = Ouvrir-Editeur $da $c1 '(2)'
                 $lf = Derniere-Ligne -Motif 'editeur fenetre (\d+)$' -Dossier $da

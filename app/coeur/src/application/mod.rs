@@ -43,11 +43,13 @@ pub mod breezy;
 pub mod decompte;
 pub mod defilante;
 pub mod editeur;
+pub mod epingle;
 pub mod etat;
 pub mod etats;
 pub mod fenetre_barre;
 pub mod fenetre_defilante;
 pub mod fenetre_editeur;
+pub mod fenetre_epingle;
 pub mod fenetre_film;
 pub mod fenetre_historique;
 pub mod fenetre_menu;
@@ -56,6 +58,7 @@ pub mod film;
 pub mod geste_breezy;
 pub mod geste_defilante;
 pub mod geste_editeur;
+pub mod geste_epingle;
 pub mod geste_film;
 pub mod geste_historique;
 pub mod geste_texte;
@@ -528,6 +531,9 @@ pub struct Application {
     video_disponible: AtomicBool,
     /// Le film en cours (0.7, `geste_film`), de la visée à la fin de la Finalisation.
     film: Mutex<Option<geste_film::EnCours>>,
+    /// Les captures épinglées à l'écran (`geste_epingle`), indexées par identifiant.
+    epingles: Mutex<std::collections::HashMap<u64, geste_epingle::EpingleOuverte>>,
+    prochaine_epingle: AtomicU64,
 }
 
 /// Une annonce envoyée au bandeau, dont la situation attend d'être retenue.
@@ -664,7 +670,13 @@ fn lancer_app(contexte: tauri::Context, commande: Commande, inconnus: Vec<String
             fenetre_barre::barre_taille,
             fenetre_barre::barre_choisi,
             fenetre_barre::barre_retardateur,
-            fenetre_barre::barre_fermer
+            fenetre_barre::barre_fermer,
+            fenetre_epingle::epingle_pret,
+            fenetre_epingle::epingle_image,
+            fenetre_epingle::epingle_redimensionner,
+            fenetre_epingle::epingle_opacite,
+            fenetre_epingle::epingle_copier,
+            fenetre_epingle::epingle_fermer
         ])
         .setup(move |app| {
             demarrer(app.handle(), commande, &inconnus);
@@ -3489,9 +3501,24 @@ fn action_vignette(app: &AppHandle, v: &Vignette, id: u64, action: &str) {
             v.partir(id, true);
         }
         vignette::Geste::Annoter => annoter(app, id),
+        vignette::Geste::Epingler => epingler_vignette(app, v, id),
         vignette::Geste::Lire => geste_film::lire(app, id),
         vignette::Geste::Ignorer => {}
     }
+}
+
+/// Épingler depuis la vignette : la capture s'ouvre dans une fenêtre flottante (mêmes
+/// pixels, aucune copie), la vignette se ferme sans animation et sans rien effacer.
+fn epingler_vignette(app: &AppHandle, v: &Vignette, id: u64) {
+    let Some(c) = montree(app).take_if(|c| c.id == id && c.contenu.film().is_none()) else {
+        return;
+    };
+    let pixels = Arc::clone(c.contenu.pixels());
+    let transparence = c.transparence;
+    appliquer(app, Declencheur::VignetteFermee);
+    v.cacher();
+    log::info!("vignette fermee {id} epingler");
+    geste_epingle::ouvrir(app, pixels, transparence);
 }
 
 /// Copier (`copier`) ou Enregistrer depuis la vignette : `sortir` dans un fil, sur les
@@ -3791,6 +3818,7 @@ pub(super) fn nos_fenetres(app: &AppHandle) -> Vec<isize> {
     liste.extend(fenetres::reglages::identifiant(app));
     liste.extend(fenetres::barre::identifiant(app));
     liste.extend(fenetres::menu::identifiant(app));
+    liste.extend(geste_epingle::identifiants(app));
     liste
 }
 
@@ -3924,6 +3952,8 @@ fn arreter(app: &AppHandle) {
     }
     // Historique : suppressions en attente faites, fenêtre détruite.
     geste_historique::arreter(app);
+    // Captures épinglées : toutes fermées à l'arrêt.
+    geste_epingle::fermer_tout(app);
     // Réglages fermés d'abord : la fin d'une saisie ne doit pas reprendre des raccourcis
     // après leur libération. Puis libérer les raccourcis, fermer les autres fenêtres.
     fenetres::reglages::fermer(app);
