@@ -131,7 +131,12 @@ fn echelle_sure(echelle: f64) -> f64 {
 /// Largeur estimée de la carte (pixels logiques) pour ces boutons, avant la mesure de la
 /// page. Fonction pure.
 pub fn largeur_estimee(o: &Ouverture) -> f64 {
-    let a_libelle = ["capturer_zone", "capturer_plein_ecran", "capturer_fenetre"];
+    let a_libelle = [
+        "capturer_zone",
+        "capturer_plein_ecran",
+        "capturer_fenetre",
+        "capturer_pipette",
+    ];
     let films = ["capturer_defilante", "capturer_video", "capturer_gif"];
     let n_captures = o
         .boutons

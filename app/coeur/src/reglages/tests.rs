@@ -82,7 +82,7 @@ fn assert_stable(d: &TempDir) {
 fn par_defaut_windows_suit_le_contrat() {
     let texte = texte_du_fichier(&Reglages::par_defaut(W)).unwrap();
     let attendu = json!({
-        "version": 11,
+        "version": 12,
         "raccourcis": {
             "zone": ["Ctrl+Maj+1"],
             "plein_ecran": ["Ctrl+Maj+2"],
@@ -96,6 +96,7 @@ fn par_defaut_windows_suit_le_contrat() {
             "pipette": ["Ctrl+Maj+C"]
         },
         "impr_ecran_ouvre": "zone",
+        "win_maj_s_ouvre": null,
         "copier_apres_capture": true,
         "enregistrer_apres_capture": false,
         "format_image": "png",
@@ -175,7 +176,7 @@ fn absent_cree_par_defaut_puis_stable() {
     assert_eq!(constats, vec![Constat::Cree { chemin: chemin(&d) }]);
     let texte = String::from_utf8(octets(&d)).unwrap();
     assert!(texte.ends_with("}\n"));
-    assert!(texte.contains("\n  \"version\": 11,"), "indenté");
+    assert!(texte.contains("\n  \"version\": 12,"), "indenté");
     assert!(
         texte.contains("BreezyShot {date} à {heure}"),
         "UTF-8 brut, pas \\u00e0"
@@ -1494,7 +1495,7 @@ fn version_2_mise_a_niveau_vers_4() {
     assert_eq!(f["raccourcis"]["derniere_zone"], json!(["Ctrl+Maj+4"]));
     assert_eq!(
         f["capture"],
-        json!({ "retardateur_s": 0, "pointeur": false })
+        json!({ "retardateur_s": 0, "pointeur": false, "masquer_icones_bureau": false })
     );
     assert_stable(&d);
 }
@@ -1583,7 +1584,7 @@ fn capture_d_un_autre_type() {
         assert_eq!(r.capture, Capture::par_defaut());
         assert_eq!(
             json_du_fichier(&d)["capture"],
-            json!({ "retardateur_s": 0, "pointeur": false })
+            json!({ "retardateur_s": 0, "pointeur": false, "masquer_icones_bureau": false })
         );
         assert_stable(&d);
     }
@@ -1613,7 +1614,7 @@ fn capture_champ_inconnu_garde() {
     let f: Value = serde_json::from_str(&texte).unwrap();
     assert_eq!(
         f["capture"],
-        json!({ "retardateur_s": 0, "pointeur": true, "format": "jpg" })
+        json!({ "retardateur_s": 0, "pointeur": true, "masquer_icones_bureau": false, "format": "jpg" })
     );
     // `capture` vient après `selection`, avant `demarrer_avec_systeme`.
     let pos = |s: &str| texte.find(s).unwrap();
@@ -2061,7 +2062,7 @@ fn defauts_de_la_version_6() {
     assert_eq!(w.gif, ["Ctrl+Maj+7"]);
     assert_eq!(w.candidats("video"), Some(&w.video[..]));
     assert_eq!(w.candidats("gif"), Some(&w.gif[..]));
-    assert_eq!(&Raccourcis::ACTIONS[7..], ["video", "gif"]);
+    assert_eq!(&Raccourcis::ACTIONS[7..9], ["video", "gif"]);
     // Mac : deux listes vides (fonction absente, chiffres libres déjà pris).
     let m = Raccourcis::par_defaut(Plateforme::Mac);
     assert!(m.video.is_empty() && m.gif.is_empty());
